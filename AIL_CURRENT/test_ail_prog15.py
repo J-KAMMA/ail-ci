@@ -60,6 +60,12 @@ def zipped_str(a: list[str], b: list[int]) -> list[int]:
 def zipped_str_value(a: list[str], b: list[str]) -> list[str]:
     return [y.upper() for x, y in zip(a, b)]
 
+def enum_nonempty(xs: list[str]) -> list[str]:
+    return [v.upper() for i, v in enumerate(xs) if v != ""]
+
+def zip_nonempty(a: list[str], b: list[str]) -> list[str]:
+    return [y.upper() for x, y in zip(a, b) if y != ""]
+
 def items_untyped() -> list[str]:
     d = {"a": 1, "bb": 2, "ccc": 3}
     return [k for k, v in d.items() if v > 1]
@@ -88,6 +94,8 @@ def main() -> None:
     for x in zipped_float([1.5, 2.5], [10, 20]): print(x)
     for x in zipped_str(["a", "bb"], [10, 20]): print(x)
     for x in zipped_str_value(["a", "bb"], ["c", "dd"]): print(x)
+    for x in enum_nonempty(["q", "", "r"]): print(x)
+    for x in zip_nonempty(["a", "bb", "ccc"], ["x", "", "z"]): print(x)
     for x in items_untyped(): print(x)
     for x in items_untyped_values(): print(x)
     b = Box([7, 8, 9])

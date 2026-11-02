@@ -19465,9 +19465,11 @@ def _listcomp_pair_into_temp(node, ctx):
         ctx.len1_names.discard(nm)
     ctx.types[key] = key_kind
     ctx.types[value] = value_kind
-    if elem_is_str:
-        ctx.onecp.add(value)
-        ctx.len1_names.add(value)
+    # A pair element is never a ONE-CODE-POINT view: `_iter_plan` refuses a str as an iterable,
+    # so an `enumerate`/`zip`/`.items()` element is a full `ail_str` out of a list of str (or a
+    # dict value), not a character.  Registering it in `onecp`/`len1_names` made `_one_cp` claim
+    # a length of 1, so `if v != "":` on an empty string was folded to "true" and the element was
+    # kept -- a silent difference from CPython.
     try:
         head = 'for (int64_t _i = %s; _i < %s; _i++) {' % (lo, n)
         if pre:

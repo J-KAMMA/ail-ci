@@ -34,6 +34,13 @@ may be a list of int, float or str.  A bytes-keyed unannotated dict is refused b
 `dict[...]`'s `.items()` still falls back with `a pair target over Call` (both match CPython on the
 general path).  `g08_018` becomes fully typed and its output matches CPython.
 
+A later probe found a silent difference in that new path: the pair value was registered in
+`ctx.onecp`/`ctx.len1_names` whenever it was a str, so `_one_cp` claimed a length of 1 and
+`if v != "":` kept every empty string.  Pair elements are full `ail_str` values (a str used as an
+iterable is refused by `_iter_plan`), so the names are no longer registered there; string
+inequality uses `ail_str_eq`.  String keys were never registered and are unchanged.  Regression
+cases `enum_nonempty` / `zip_nonempty` are in `test_ail_prog15.py`.
+
 ## Follow-ups (big new features, exact current messages)
 
 * `g14_030`: enum/dataclass expansion on the typed path.  First whole-program message:

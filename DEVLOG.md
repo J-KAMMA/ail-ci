@@ -1,3 +1,19 @@
+## 2026-11-02 -- prog15 review 2: a pair target is not a one-code-point view (job prog15)
+
+`_listcomp_pair_into_temp` registered the second name of every `enumerate` / `zip` / `.items()`
+target in `ctx.onecp`/`ctx.len1_names` whenever its source element was a str.  A pair element is a
+full `ail_str` out of a list of str (or a dict value), never a character: `_iter_plan` refuses a
+str used as an iterable, so the one-code-point claim was always false here.  `_one_cp` then
+reported a length of 1, and `if v != "":` folded to true, so an empty string stayed in the result
+(`['A', 'BB', 'CCC']` where CPython gives `['A', 'CCC']`).  The names are now left out of that
+optimisation; inequality goes through `ail_str_eq`.  String keys never had the flag and were
+already correct.  Added `enum_nonempty` / `zip_nonempty` to `test_ail_prog15.py`.  Probes
+`/tmp/probes/p8_cond.py` (value conditions on enumerate/zip, both builds) and `p9_keycond.py` (key
+conditions for str/float/int keys and `.items()`), `p10_nonzero.py` (enumerate from a nonzero
+range/slice) and `p2_zip_items.py` match CPython on both `cmp.sh` builds and take the typed path
+under `--strict`; the new pair path is not used by any `lab/compare` source (AST scan), so their C
+is unchanged.
+
 ## 2026-11-02 -- prog15 review fixes: zip key kinds and str-keyed `.items()` (job prog15)
 
 Review follow-up on `756476d`.  The pair-target list-comprehension lowering had forced the FIRST
