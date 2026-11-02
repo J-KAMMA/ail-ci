@@ -2403,6 +2403,19 @@ static ail_obj ail2n_cls;
 static inline int ail2n_is(ail_obj x) {
     return x.tag == AIL_T_INST && ail2n_cls.tag == AIL_T_CLASS && ((ail_instobj *)x.o)->cls.o == ail2n_cls.o;
 }
+static int ail2n_dec_frac(ail_obj x) {
+    if (x.tag != AIL_T_INST || ((ail_instobj *)x.o)->cls.tag != AIL_T_CLASS) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);
+        static const char *names[2] = {"Decimal", "Fraction"};
+        for (int n = 0; n < 2; n++) {
+            int64_t len = n ? 8 : 7; if (s.n != len) continue; int64_t i = 0;
+            while (i < len && ail_chr(s, i) == (uint8_t)names[n][i]) i++;
+            if (i == len) return 1;
+        }
+    }
+    return 0;
+}
 static void ail2n_tname(char *buf, size_t n, ail_obj x) {
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
         ail_str s = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
@@ -2433,11 +2446,51 @@ def patch_notimplemented(c_text):
                          'static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) {') if m in c_text]
     first = min(marks, key=c_text.index)
     c_text = c_text.replace(first, NI_DECLS + first, 1)
-    c_text = one(c_text, 'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;',
-                 'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;\n'
-                 '            if (ail2n_is(r)) return ail2n_cmp_error(cx, a, b, op);')
-    c_text = one(c_text, 'if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }',
-                 'if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (!ail2n_is(r) && ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }')
+    old_cmp = (
+        '    if (a.tag == AIL_T_INST) {   /* a user __lt__ (found through the base classes) orders instances, as CPython does */\n'
+        '        for (ail_obj k = ((ail_instobj *)a.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {\n'
+        '            ail_classobj *kc = (ail_classobj *)k.o;\n'
+        '            if (!kc->lt_fn) continue;\n'
+        '            ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;\n'
+        '            if (ail_obj_truthy(r)) { *out = -1; return AIL_OK; }\n'
+        '            if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }\n'
+        '            else { ail_st gst; if (ail_dun_cmp_gt(cx, out, a, b, &gst)) return gst; }\n'
+        '            *out = 0; return AIL_OK;\n'
+        '        }\n'
+        '    }\n')
+    new_cmp = (
+        '    if (a.tag == AIL_T_INST) {   /* a user __lt__ (found through the base classes) orders instances, as CPython does */\n'
+        '        for (ail_obj k = ((ail_instobj *)a.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {\n'
+        '            ail_classobj *kc = (ail_classobj *)k.o;\n'
+        '            if (!kc->lt_fn) continue;\n'
+        '            ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;\n'
+        '            if (ail2n_is(r)) {\n'
+        '                if (b.tag == AIL_T_INST && ail2n_dec_frac(b)) { ail_st rst; if (ail_dun_cmp_rev(cx, out, a, b, op, &rst)) return rst; }\n'
+        '                return ail2n_cmp_error(cx, a, b, op);\n'
+        '            }\n'
+        '            if (ail_obj_truthy(r)) { *out = -1; return AIL_OK; }\n'
+        '            if (b.tag == AIL_T_INST) {\n'
+        '                ail_d2_fn af = ail_dun2(a, AIL_D2_GT);\n'
+        '                if (af) { st = af(cx, &r, a, b); if (st != AIL_OK) return st;\n'
+        '                    if (!ail2n_is(r)) { *out = ail_obj_truthy(r) ? 1 : 0; return AIL_OK; } }\n'
+        '                for (ail_obj k2 = ((ail_instobj *)b.o)->cls; k2.tag == AIL_T_CLASS; k2 = ((ail_classobj *)k2.o)->base) {\n'
+        '                    ail_classobj *kc2 = (ail_classobj *)k2.o;\n'
+        '                    if (!kc2->lt_fn) continue;\n'
+        '                    st = kc2->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st;\n'
+        '                    if (ail2n_is(r)) return ail2n_cmp_error(cx, a, b, op);\n'
+        '                    if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; }\n'
+        '                    *out = 0; return AIL_OK;\n'
+        '                }\n'
+        '            }\n'
+        '            else { ail_st gst; if (ail_dun_cmp_gt(cx, out, a, b, &gst)) return gst; }\n'
+        '            *out = 0; return AIL_OK;\n'
+        '        }\n'
+        '    }\n')
+    n_cmp = c_text.count(old_cmp)
+    if n_cmp == 1:
+        c_text = c_text.replace(old_cmp, new_cmp)
+    elif n_cmp != 0:
+        raise AssertionError('safetyrt: %d places for the instance ordering branch' % n_cmp)
     c_text = one(c_text, '    ail_d2_fn f = ail_dun2(a, fwd);\n    if (f) return f(cx, out, a, b);\n    f = ail_dun2(b, rev);\n    if (f) return f(cx, out, b, a);\n',
                  '    ail_d2_fn f = ail_dun2(a, fwd); ail_st nst;\n'
                  '    if (f) { nst = f(cx, out, a, b); if (nst != AIL_OK || !ail2n_is(*out)) return nst; }\n'

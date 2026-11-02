@@ -878,6 +878,11 @@ def _ail_dec_conv_cmp(x):
         return Decimal(x)
     if isinstance(x, float):
         return Decimal(x)
+    try:
+        if hasattr(x, "_ail_intenum"):
+            return Decimal(x.value)
+    except NotImplementedError:
+        pass
     return None
 
 

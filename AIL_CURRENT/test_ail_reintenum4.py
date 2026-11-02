@@ -177,7 +177,9 @@ t("strenum_probe", lambda: S.A == Probe("r3"))
 t("plain_custom", lambda: E.A == Plain())
 ''',
     'ordering': '''
-from enum import Enum, IntEnum, StrEnum
+from decimal import Decimal
+from fractions import Fraction
+from enum import Enum, IntEnum, IntFlag, StrEnum
 
 class E(Enum):
     A = 1
@@ -194,6 +196,10 @@ class S(StrEnum):
 class T(StrEnum):
     A = "x"
     B = "y"
+
+class G(IntFlag):
+    A = 1
+    B = 3
 
 
 def t(label, thunk):
@@ -229,6 +235,19 @@ t("c_lt_s", lambda: C.A < S.A)
 t("s_lt_c", lambda: S.A < C.A)
 t("s_le_e", lambda: S.A <= E.A)
 t("s_ge_e", lambda: S.A >= E.A)
+t("dec_gt", lambda: C.A > Decimal("0.5"))
+t("dec_le", lambda: C.A <= Decimal("1"))
+t("dec_ge", lambda: C.A >= Decimal("1"))
+t("dec_lt", lambda: C.A < Decimal("1.5"))
+t("dec_dunder", lambda: (C.A.__gt__(Decimal("0.5")), C.A.__le__(Decimal("1")),
+                         C.A.__ge__(Decimal("1"))))
+t("dec_rev", lambda: (Decimal("0.5") < C.A, Decimal("1") >= C.A, Decimal("1.5") > C.A))
+t("frac_gt", lambda: G.B > Fraction(5, 2))
+t("frac_le", lambda: G.B <= Fraction(3, 1))
+t("frac_ge", lambda: G.B >= Fraction(3, 1))
+t("frac_lt", lambda: G.B < Fraction(7, 2))
+t("frac_dunder", lambda: (G.B.__gt__(Fraction(5, 2)), G.B.__le__(Fraction(3, 1))))
+t("frac_rev", lambda: (Fraction(5, 2) < G.B, Fraction(3, 1) >= G.B))
 ''',
     'divmod': '''
 from enum import Enum, IntEnum, IntFlag

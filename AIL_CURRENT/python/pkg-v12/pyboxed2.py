@@ -12957,7 +12957,11 @@ def _build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
+        # the MUL guard before the big-int slow path is only needed when an enum member repeats a sequence;
+        # a program with a class but no enum keeps the C it had before that guard
+        uses_enum = any(name in compiler.classes for name in
+                        ('_AilEnum', '_AilIntEnum', '_AilStrEnum', '_AilFlag', '_AilIntFlag'))
+        body = dunderrt.patch(body, inplace=compiler.dunder_inplace, enum=uses_enum)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)

@@ -35,6 +35,8 @@ class _AilEnum:
 
 
 class _AilIntEnum(_AilEnum):
+    _ail_intenum = True
+
     def __str__(self) -> str:
         return str(self.value)
 
@@ -58,6 +60,18 @@ class _AilIntEnum(_AilEnum):
                 return other
         except NotImplementedError:
             pass
+        return NotImplemented
+
+    def _ail_en_cmp(self, other):
+        # ordering: unlike the arithmetic path, Decimal and Fraction are not consumed here.  An int subclass's
+        # comparison with them returns NotImplemented, so the runtime asks their reflected method, whose text
+        # and NaN handling must be the Decimal/Fraction one.
+        if isinstance(other, _AilIntEnum):
+            return other.value
+        if isinstance(other, _AilEnum):
+            return NotImplemented
+        if isinstance(other, (int, float)):
+            return other
         return NotImplemented
 
     def _ail_en_mul(self, other):
@@ -93,25 +107,25 @@ class _AilIntEnum(_AilEnum):
         return self.value == v
 
     def __lt__(self, other):
-        v = self._ail_en_num(other)
+        v = self._ail_en_cmp(other)
         if v is NotImplemented:
             return NotImplemented
         return self.value < v
 
     def __gt__(self, other):
-        v = self._ail_en_num(other)
+        v = self._ail_en_cmp(other)
         if v is NotImplemented:
             return NotImplemented
         return self.value > v
 
     def __le__(self, other):
-        v = self._ail_en_num(other)
+        v = self._ail_en_cmp(other)
         if v is NotImplemented:
             return NotImplemented
         return self.value <= v
 
     def __ge__(self, other):
-        v = self._ail_en_num(other)
+        v = self._ail_en_cmp(other)
         if v is NotImplemented:
             return NotImplemented
         return self.value >= v

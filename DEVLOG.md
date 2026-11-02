@@ -1,3 +1,24 @@
+## 2026-11-02 -- reintenum4 fix round 3: Decimal/Fraction ordering and enum-gated MUL guard
+
+The reintenum4 review (FIX) named two defects left by the previous round.
+
+* Ordering against Decimal/Fraction crashed or changed silently.  An IntEnum/IntFlag ordering dunder
+  now returns NotImplemented for them (`_ail_en_cmp`; arithmetic keeps the `_ail_en_num` dispatch), so
+  `C.B.__gt__(Decimal("2.5"))` is NotImplemented as for int.  The reflected comparison then runs
+  through the old `ail_dun_cmp_rev` path, which is reached only for a Decimal/Fraction right operand,
+  so the error text for `C.B < b"3"` / `C.B < E.A` keeps its operand order.  `prelude_decimal._ail_dec_conv_cmp`
+  and `prelude_fraction._ail_fr_cmp`/`__eq__` recognise the `_ail_intenum` marker and compare the
+  member's value, so both directions and all four operators match CPython.
+* The MUL guard added in front of the big-int `ail__mul_slow` was emitted for every class program.
+  `dunderrt.patch` now takes `enum=` and adds that guard only when the compiler registered an enum
+  base class; a program with a class but no enum gets the C it had before the guard.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `rev_gt`, `rev_order2`, `bytes_order` and
+`rev_unrel` match CPython; the generated C of `rev_unrel` has no guard before `ail__mul_slow`, while
+the enum program keeps it.  Final-state tests: `test_ail_reintenum4`, `test_ail_stdtop1`,
+`test_ail_stdlib5`, `test_ail_dunders`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-11-02 -- reintenum4 fix round 2: sequences only repeat, never compare or add
 
 The reintenum4 review (FIX) found that the previous round widened `_ail_en_num` to `str`, `bytes`,
