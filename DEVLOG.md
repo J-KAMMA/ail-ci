@@ -1,3 +1,49 @@
+## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
+
+The review found that `abs(<bool parameter>)` was newly accepted as an int/bool-result call even
+though `abs` preserves boolness (and a unary `+`/`-` of a bool keeps the bool kind in the typed
+clone).  An int-returning accelerated clone therefore printed `True`/`False` where CPython prints
+`1`/`0`.  `_provably_int` now takes the bool parameter set and an `allow_bool` flag; the `abs`
+proof refuses a bool operand (including under unary `+`/`-`), while `int(...)` resets the flag
+because `int()` converts the bool, so `abs(int(x))` still accelerates.
+`AIL_CURRENT/test_ail_prog21.py` gained a regression for the direct, assigned, `+x`, `-x` and
+`abs(int(x))` forms.  Hybrid probes (`abs` direct/assign/`+x`/`-x`/`int(abs(x))`/
+`abs(int(x))`, `int(bool)`, `str(bool)`, `str(+bool)`) all equal CPython; the bool `abs` functions are refused by name
+(`a call can raise or have side effects`).  General and default builds are unchanged; no
+generated code changed.
+
+## 2026-11-02 -- prog21 review fix: unary int negation in str-returning hybrid clones
+
+The review found that `str(-x)` on an int parameter was newly accepted in a str-returning hybrid
+clone even though only int/bool results have the overflow wrapper; `INT64_MIN` then hit the typed
+`ail_die` instead of falling back to CPython.  `_provably_number`/`_provably_int` now accept a
+unary `-` of an int only when the clone returns `int`/`bool`; `str(-x)` and `int(-x)` in a
+str-returning clone are refused again (`a call can raise or have side effects`) and fall back.
+`str(-x)` of a float stays accelerated (float negation cannot overflow).  Added the regression
+case to `AIL_CURRENT/test_ail_prog21.py` and corrected its docstring: `g21_038` still stops at
+pymix's `unresolved-return`, not at a `json.dumps` proof.  Hybrid probes `p21_str_neg_min`,
+`p21_str_neg_int`, `p21_int_neg_str`, `p21_str_neg_float`, `p21_str_pos_int`, `p21_abs_int`,
+`p21_abs_bool`, `p21_plain_str_int` and `p21_str_neg_intret2` all equal CPython; general/default
+builds still stop loudly on `INT64_MIN` as declared.  No generated code changed.
+
+## 2026-11-02 -- prog21 typed reach: abs/str safe calls in the hybrid (job-prog21-11021237)
+
+Profiled the eight prog21 programs with CPython 3.12 `cProfile` (hot shares and the first refusal
+of every hot function are in `lab/progfix/prog21.md`).  Six compile as typed modules already;
+`g25_016` (enum member tables) and `t419` (Decimal) stay general as named follow-ups.  On the
+hybrid, `g22_022.shift_and_add_multiply` is now accelerated: `_safe_call` accepts `abs` of a
+numeric argument (an int result's `INT64_MIN` overflow still falls back through the existing
+wrapper), plus `str(<number>)` and `int(<int/bool>)`, which cannot raise.  `int(<float>)` stays
+refused, so `t139.fmt` remains in CPython.
+
+`g21_038.encode_rounded_floats` still stops at pymix's `unresolved-return` (`json.dumps` is not
+proved a str), and even with that proof its `round(v, places)`/`json.dumps` calls would stay in
+CPython; it is recorded as a follow-up.  No new semantic difference; the generated C of the ten
+`lab/compare` tasks is byte-identical.  All eight programs'
+hybrid stdout/exit equal CPython; probes `p21_*` in `/tmp/probes` cover abs/str boundaries,
+argument/list/attribute/dict sources, NaN/inf, and `INT64_MIN`.  `AIL_CURRENT/test_ail_prog21.py`
+is registered through `AIL_CURRENT/tests.d/`.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.
