@@ -2571,6 +2571,9 @@ class Ctx:
         self.numeric_allowed_names = None
         self.params = params                    # [(name, 'array'|'int')]
         self.bool_names = frozenset()           # locals holding a bool (boolkind.py)
+        self.bool_names_static = frozenset()    # the subset boolkind.py proved bool everywhere
+        self.srow_bool_names = frozenset()      # bool row fields, valid until the name is rebound
+        self.cond_depth = 0                     # nesting of bodies that may not run
         self.bool_lists = frozenset()           # locals holding a list of bools
         self.kind = dict(params)
         self.need = need                        # arithmetic helpers, or None outside strict mode
@@ -6558,9 +6561,9 @@ def _emit_stdin_while_int_loop(w, m, ctx, ind):
         for code, stmts in ((1, m['eof']), (2, m['lenf']),
                             (3, m['nodig']), (4, m['nondig'])):
             out.append('%sif (%s == %d) {\n%s%s}\n'
-                       % (pad2, st, code, _stmts(stmts, ctx, ind + 2), pad2))
+                       % (pad2, st, code, _stmts(stmts, ctx, ind + 2, conditional=True), pad2))
         out.append('%s%s = %s;\n' % (pad2, ctx.declare(m['value']), lv))
-        out.append(_stmts(m['rest'], ctx, ind + 1))
+        out.append(_stmts(m['rest'], ctx, ind + 1, conditional=True))
     finally:
         ctx.loopdepth -= 1
     # The fused reader lives in the STR fragment: the un-fused shape would have
@@ -7029,7 +7032,9 @@ def _is_slist_expr(node, ctx):
                 and node.func.id not in ctx.funcs and node.func.id not in ctx.classes
                 and len(node.args) == 1):
             return (_is_slist_expr(node.args[0], ctx)
-                    or node.func.id == 'sorted' and _map_kind(node.args[0], ctx) == SSET)
+                    or node.func.id == 'sorted' and _map_kind(node.args[0], ctx) == SSET
+                    or node.func.id == 'sorted' and isinstance(node.args[0], ast.Name)
+                    and ctx.type_of(node.args[0].id) == SDICT)
         if isinstance(node.func, ast.Attribute):
             method = _class_method_name(node, ctx)
             if method:
@@ -8739,6 +8744,18 @@ def _list_text(val, kind, ctx):
     return 'ail_list_text_%s(&%s, %s, %s)' % (suffix, ctx.sarena(), p, n)
 
 
+def _dict_text(val, ctx):
+    """The C str for str(d) / repr(d) of a typed dict[str, int]: CPython's dict repr, in
+    insertion order, keys quoted by `_repr_conv`'s own str repr and values decimal
+    (cruntime.py's DICTTEXT)."""
+    ctx.parts.update(('STR', 'FMT', 'STRREPR', 'SDICT', 'DICTTEXT'))
+    ctx.needs_sarena = True
+    if _map_kind(val, ctx) == SDICT:
+        return 'ail_sdict_text(&%s, %s)' % (ctx.sarena(), _map_pointer(val, ctx, SDICT))
+    # an unannotated dict keyed by str: its representation is a bare ail_stab (see _mark_str_containers)
+    return 'ail_stab_text(&%s, &%s)' % (ctx.sarena(), ctx.cname(val.id))
+
+
 def _repr_conv(val, kind, ctx):
     """The C str for `{val!r}`: repr() of a str (quotes, escapes), and for an int or float, which
     repr and str spell the same, the default conversion."""
@@ -8769,6 +8786,11 @@ def _fstring_field(fv, ctx):
         return '(%s = %s, ail__bytes_repr(&%s, %s.p, %s.n))' % (cell, _bytes_value(val, ctx), ctx.sarena(), cell, cell)
     if fv.format_spec is None and _list_text_ok(val, kind, ctx):
         return _list_text(val, kind, ctx)
+    if fv.format_spec is None and fv.conversion in (-1, 114, 115) and (
+            _map_kind(val, ctx) == SDICT
+            or isinstance(val, ast.Name) and val.id in ctx.skeys
+            and ctx.type_of(val.id) == DICT):
+        return _dict_text(val, ctx)
     if kind not in (INT, FLT, STR):
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
                           'is built inside {}' % kind)
@@ -9487,6 +9509,28 @@ def _class_method_name(node, ctx):
             if node.func.attr in cls.methods:
                 return cls.method_cname(node.func.attr)
     return None
+
+
+def _srow_return_bool_positions(call, ctx):
+    """Which fields of a method's small tuple return are annotated `bool` (SROW itself has only
+    int64/double/ail_str slots, so the annotation is the only place that fact survives). Used to
+    keep `a, b = p.pair()` printing True/False for a bool field."""
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+        return frozenset()
+    try:
+        kind = _etype(call.func.value, ctx)
+    except Unsupported:
+        return frozenset()
+    if not (_is_obj_kind(kind) and kind[1] in ctx.classes):
+        return frozenset()
+    method = ctx.classes[kind[1]].methods.get(call.func.attr)
+    ann = method.returns if method is not None else None
+    if not (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+            and ann.value.id == 'tuple'):
+        return frozenset()
+    elts = ann.slice.elts if isinstance(ann.slice, ast.Tuple) else [ann.slice]
+    return frozenset(i for i, e in enumerate(elts)
+                     if isinstance(e, ast.Name) and e.id == 'bool')
 
 
 def _owned_method_name(node, ctx, ownership):
@@ -12057,6 +12101,31 @@ def _sorted_into_temp(node, ctx):
         ctx.pre.append('ail_slist_clear(&%s);' % c)
         ctx.pre.append('for (int64_t _i = 0; _i < %s.n; _i++) ail_slist_push(&%s, %s.p[_i]);'
                        % (src, c, src))
+        ctx.pre.append('ail_slist_sort(&%s);' % c)
+        if reverse:
+            ctx.pre.append('for (int64_t _i = 0, _j = %s.n - 1; _i < _j; _i++, _j--) '
+                           '{ ail_str _t = %s.p[_i]; %s.p[_i] = %s.p[_j]; %s.p[_j] = _t; }'
+                           % (c, c, c, c, c))
+        return c, None
+    if (isinstance(node.args[0], ast.Name)
+            and ctx.type_of(node.args[0].id) == SDICT):
+        # `sorted(counts)` where counts is a str-keyed dict (a Counter, a dict[str, int]): Python
+        # sorts the KEYS, into a NEW list that owns its text. The str table's `.order` array only
+        # holds VIEWS: deleting or clearing the dict frees those key buffers, so a shallow copy
+        # would leave the result list dangling (use-after-free) -- exactly the bug
+        # `ail_sdict_keys_snapshot` avoids by copying every key into an arena. Do the same here,
+        # into this function's str arena, then qsort by `ail_str_cmp`.
+        if key is not None:
+            raise Unsupported('key= is not supported for sorted() of a dict with str keys')
+        src = '(%s)->table' % _map_pointer(node.args[0], ctx, SDICT)
+        ctx.parts.add('SLIST')
+        c, _ = ctx.temp(SLIST)
+        ctx.pre.append('ail_slist_clear(&%s);' % c)
+        ctx.pre.append('ail_stab_dense(&%s);' % src)
+        ctx.pre.append('for (int64_t _i = 0; _i < %s.n; _i++) { ail_str _k = %s.order[_i]; '
+                       'uint8_t *_q = ail_sarena_alloc(&%s, _k.n); ail_str_put(_q, _k); '
+                       'ail_slist_push(&%s, (ail_str){_q, _k.n, _k.bytes}); }'
+                       % (src, src, ctx.sarena(), c))
         ctx.pre.append('ail_slist_sort(&%s);' % c)
         if reverse:
             ctx.pre.append('for (int64_t _i = 0, _j = %s.n - 1; _i < _j; _i++, _j--) '
@@ -16531,7 +16600,7 @@ def _map_upsert(node, ctx, ind):
             '%s    if (ail_sdict_upsert(%s, _key, &_slot)) {\n%s%s%s = %s;\n%s    } else {\n'
             '%s%s%s = %s;\n%s%s    }\n%s}\n'
             % (pre, pad, key_c, pad, pointer, add_pre, inner, slot, total, pad,
-               value_pre, inner, slot, value_c, _stmts(miss[1:], ctx, ind + 2), pad, pad))
+               value_pre, inner, slot, value_c, _stmts(miss[1:], ctx, ind + 2, conditional=True), pad, pad))
 
 
 def _idict_get_fusion(node, ctx):
@@ -19700,7 +19769,10 @@ def _return_srowtup(value, ctx, fkinds, pad):
             if not _is_str_expr(e, ctx):
                 raise Unsupported('row field %d is a str here but not on another return path'
                                   % i)
-            field_c.append('.s = %s' % _str_value(e, ctx))
+            # The callee's arena is freed at return: hand the caller an owned copy of the str
+            # field (the same `ail_str_return_owned` a plain str return uses), which the caller
+            # adopts into its own arena when it unpacks the row.
+            field_c.append('.s = ail_str_return_owned(%s)' % _str_value(e, ctx))
         else:
             et = _etype(e, ctx)
             if et not in NUM:
@@ -19712,7 +19784,7 @@ def _return_srowtup(value, ctx, fkinds, pad):
             field_c.append('.d = (double)(%s)' % _expr(e, ctx) if fk == FLT else
                            '.i = (int64_t)(%s)' % _expr(e, ctx))
     pre = _flush(ctx, pad)
-    ctx.parts.add('SROW')
+    ctx.parts.update(('SROW', 'STR', 'STRRET'))
     lit = '(ail_srow){.v = {%s}}' % ', '.join('{%s}' % v for v in field_c)
     return pre + '%sreturn %s;\n' % (pad, lit)
 
@@ -20426,7 +20498,23 @@ def _append_loop_reserve(previous, node, ctx, ind):
                    for name in names if name in appended)
 
 
-def _stmts(body, ctx, ind):
+def _stmts(body, ctx, ind, conditional=False):
+    """`_stmts` for a body that may not run (an if/else arm, a handler, a loop body).
+
+    `conditional` only affects the codegen-time bool-row-field bookkeeping in
+    `_bool_flow_after`: a rebind in a body that may not execute must not clear the name's
+    bool-ness for the code that follows.
+    """
+    if conditional:
+        ctx.cond_depth = getattr(ctx, 'cond_depth', 0) + 1
+    try:
+        return _stmts_flat(body, ctx, ind)
+    finally:
+        if conditional:
+            ctx.cond_depth -= 1
+
+
+def _stmts_flat(body, ctx, ind):
     emitted, index = [], 0
     while index < len(body):
         site = _debug_site(body[index], ind)
@@ -20504,7 +20592,7 @@ def _loop_stmts(body, ctx, ind):
             checkpoint = byte_reset[4] if len(byte_reset) > 4 else 'ail_barena_keep_roots'
             pro += ('    ' * ind + '%s(&%s, %s, %s, %d);\n'
                     % (checkpoint, arena, mark, arr, n))
-        out = pro + _stmts(body, ctx, ind)
+        out = pro + _stmts(body, ctx, ind, conditional=True)
         if labelled:
             pad = '    ' * ind
             out = '%sail_cleanup_frame *%s = ail_cleanup_top;\n' % (pad, labels[3]) + out
@@ -20518,7 +20606,84 @@ def _loop_stmts(body, ctx, ind):
         ctx.loopdepth -= 1
 
 
+def _stmt_bound_names(node):
+    """The local names a statement binds (or rebinds) in the function's own scope."""
+    names = set()
+
+    def add(target):
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                add(element)
+        elif isinstance(target, ast.Starred):
+            add(target.value)
+
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+            add(target)
+    elif isinstance(node, ast.AugAssign):
+        add(node.target)
+    elif isinstance(node, (ast.For, ast.AsyncFor)):
+        add(node.target)
+    elif isinstance(node, (ast.With, ast.AsyncWith)):
+        for item in node.items:
+            if item.optional_vars is not None:
+                add(item.optional_vars)
+    elif isinstance(node, ast.ExceptHandler):
+        if node.name:
+            names.add(node.name)
+    elif isinstance(node, ast.NamedExpr):
+        add(node.target)
+    return names
+
+
+def _srow_unpack_bool_names(node, ctx):
+    """Names bound from the bool fields of `a, b = p.method()` (the SROW unpack branch)."""
+    if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+        return frozenset()
+    target = node.targets[0]
+    if not (isinstance(target, (ast.Tuple, ast.List))
+            and all(isinstance(e, ast.Name) for e in target.elts)):
+        return frozenset()
+    call = node.value
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+        return frozenset()
+    try:
+        mangled = _class_method_name(call, ctx)
+    except Unsupported:
+        return frozenset()
+    if mangled is None or not _is_srowtup_ret(ctx.funcs[mangled][1]):
+        return frozenset()
+    return frozenset(target.elts[j].id for j in _srow_return_bool_positions(call, ctx)
+                     if j < len(target.elts))
+
+
+def _bool_flow_after(node, ctx):
+    """Keep a bool row field's `True`/`False` text only until the name is rebound.
+
+    The field is an int64 0/1, so the annotation is the only place its bool-ness survives; a
+    function-wide set would make `a = 7` after `a, b = p.pair()` still print `True`.
+    """
+    if not hasattr(ctx, 'srow_bool_names'):
+        return
+    bound = frozenset()
+    if (getattr(ctx, 'cond_depth', 0) == 0
+            and isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))):
+        bound = _stmt_bound_names(node)
+    dynamic = set(ctx.srow_bool_names) - bound
+    dynamic |= _srow_unpack_bool_names(node, ctx)
+    ctx.srow_bool_names = frozenset(dynamic)
+    ctx.bool_names = frozenset(set(ctx.bool_names_static) | dynamic)
+
+
 def _stmt(node, ctx, ind):
+    out = _stmt_core(node, ctx, ind)
+    _bool_flow_after(node, ctx)
+    return out
+
+
+def _stmt_core(node, ctx, ind):
     if getattr(node, '_ail_member_check', None) and not getattr(node, '_ail_member_done', False):
         node._ail_member_done = True
         try:
@@ -20599,7 +20764,7 @@ def _finally_exit(ctx, ind, returning):
             ctx.finally_returns = [(frame, min(boundary, depth))
                                    for frame, boundary in saved[4]]
             out += _finally_unwind(ctx, pad, marker)
-            out += _stmts(body, ctx, ind)
+            out += _stmts(body, ctx, ind, conditional=True)
         crossed = len(active) if returning else active.count(saved[2])
         if crossed:
             out += '%sail_exc_top -= %d;\n' % (pad, crossed)
@@ -20881,9 +21046,42 @@ def _stmt_inner(node, ctx, ind):
                 out = '%s%s = %s;\n' % (pad, tmp, call_c)
                 names = [ctx.declare(e.id, fk) for e, fk in zip(t.elts, fkinds)]
                 for j, (nm, fk) in enumerate(zip(names, fkinds)):
-                    field = 's' if fk == STR else 'd' if fk == FLT else 'i'
-                    out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
-                ctx.parts.add('SROW')
+                    if fk == STR:
+                        ctx.needs_sarena = True
+                        out += '%s%s = ail_str_adopt(&%s, %s.v[%d].s);\n' % (
+                            pad, nm, ctx.sarena(), tmp, j)
+                    else:
+                        field = 'd' if fk == FLT else 'i'
+                        out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
+                ctx.parts.update(('SROW', 'STR', 'STRRET'))
+                return pre + out
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                    and (mangled := _class_method_name(node.value, ctx)) is not None
+                    and _is_srowtup_ret(ctx.funcs[mangled][1])):
+                # `a, b = p.pair()` -- the method counterpart of the `name, n = parse(line)` branch
+                # just above. A method returning a small per-field row is one `ail_srow` value, so
+                # it is called into the same short-lived temp and unpacked field by field.
+                fkinds = ctx.funcs[mangled][1][1]
+                if len(t.elts) != len(fkinds):
+                    raise Unsupported('%s() returns a %d-field row; unpacking it into %d names '
+                                      'would not match'
+                                      % (node.value.func.attr, len(fkinds), len(t.elts)))
+                call_c = _call_user_func(mangled,
+                                         _bind_method_args(mangled, node.value.func.attr,
+                                                           node.value.func.value, node.value, ctx), ctx)
+                pre = _flush(ctx, pad)
+                tmp, _ = ctx.temp(SROW)
+                out = '%s%s = %s;\n' % (pad, tmp, call_c)
+                names = [ctx.declare(e.id, fk) for e, fk in zip(t.elts, fkinds)]
+                for j, (nm, fk) in enumerate(zip(names, fkinds)):
+                    if fk == STR:
+                        ctx.needs_sarena = True
+                        out += '%s%s = ail_str_adopt(&%s, %s.v[%d].s);\n' % (
+                            pad, nm, ctx.sarena(), tmp, j)
+                    else:
+                        field = 'd' if fk == FLT else 'i'
+                        out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
+                ctx.parts.update(('SROW', 'STR', 'STRRET'))
                 return pre + out
             if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                     and node.value.func.id == 'map' and len(node.value.args) == 2
@@ -22225,15 +22423,15 @@ def _stmt_inner(node, ctx, ind):
             known = _static_truth(node.test, ctx)
             if known is not None:
                 taken = node.body if known else node.orelse
-                return '%s{\n%s%s}\n' % (pad, _stmts(taken, ctx, ind + 1), pad) if taken else ''
+                return '%s{\n%s%s}\n' % (pad, _stmts(taken, ctx, ind + 1, conditional=True), pad) if taken else ''
             folded = _fold_static_test(node.test, ctx)
             if folded is not None:
                 node = ast.copy_location(ast.If(test=folded, body=node.body, orelse=node.orelse), node)
         c = _cond(node.test, ctx)
         pre = _flush(ctx, pad)
-        out = '%s%sif (%s) {\n%s%s}\n' % (pre, pad, c, _stmts(node.body, ctx, ind + 1), pad)
+        out = '%s%sif (%s) {\n%s%s}\n' % (pre, pad, c, _stmts(node.body, ctx, ind + 1, conditional=True), pad)
         if node.orelse:
-            out = out[:-1] + ' else {\n%s%s}\n' % (_stmts(node.orelse, ctx, ind + 1), pad)
+            out = out[:-1] + ' else {\n%s%s}\n' % (_stmts(node.orelse, ctx, ind + 1, conditional=True), pad)
         return out
     if isinstance(node, ast.While):
         return _while(node, ctx, ind)
@@ -22775,7 +22973,7 @@ def _try_stmt(node, ctx, ind):
     out += '%s/*@AILTRY%d*/\n' % (pad1, region)
     ctx.active_try_depths.append(ctx.loopdepth)
     try:
-        out += _stmts(node.body, ctx, ind + 1)
+        out += _stmts(node.body, ctx, ind + 1, conditional=True)
     finally:
         ctx.active_try_depths.pop()
     if else_flag is not None:
@@ -22804,7 +23002,7 @@ def _try_stmt(node, ctx, ind):
             ctx.exception_oserr.setdefault(h.name, []).append(all(c in _OS_FAMILY for c in hc))
             out += '%s%s;\n' % (pad2, _obj_store(bound, 'ail_handled_value', EXCEPTION, ctx))
         try:
-            out += _stmts(h.body, ctx, ind + 2)
+            out += _stmts(h.body, ctx, ind + 2, conditional=True)
         finally:
             ctx.handled_scopes.pop()
             if h.name:
@@ -22822,7 +23020,7 @@ def _try_stmt(node, ctx, ind):
     out += '%s}\n' % pad
     if else_flag is not None:
         out += '%sif (%s) {\n' % (pad, else_flag)
-        out += _stmts(node.orelse, ctx, ind + 1)
+        out += _stmts(node.orelse, ctx, ind + 1, conditional=True)
         out += '%s}\n' % pad
     return out
 
@@ -22861,19 +23059,19 @@ def _try_finally_stmt(node, ctx, ind):
                 ctx._try_scan[1].add(id(inner))
             out += _try_stmt(inner, ctx, ind + 1)
         else:
-            out += _stmts(node.body, ctx, ind + 1)
+            out += _stmts(node.body, ctx, ind + 1, conditional=True)
     finally:
         ctx.finally_stack.pop()
         ctx.active_try_depths.pop()
     out += '%sail_exc_top--;\n' % p
-    out += _stmts(node.finalbody, ctx, ind + 1)
+    out += _stmts(node.finalbody, ctx, ind + 1, conditional=True)
     out += '%s/*@AILEND%d*/\n' % (p, region)
     out += '%s} else {\n%sail_depth = ail_exc_depth[ail_exc_top];\n%sail_exc_top--;\n%s%s;\n' % (pad, p, p, p, _obj_store(error, 'ail_exception_current()', EXCEPTION, ctx))
     scope = _handled_name(ctx, marker + '_handled')
     out += '%sail_handled_scope %s; ail_handled_enter(&%s, %s);\n' % (p, scope, scope, error + '->code')
     ctx.handled_scopes.append((scope, ctx.loopdepth))
     try:
-        out += _stmts(node.finalbody, ctx, ind + 1)
+        out += _stmts(node.finalbody, ctx, ind + 1, conditional=True)
     finally:
         ctx.handled_scopes.pop()
     out += '%sail_handled_leave(&%s);\n' % (p, scope)
@@ -22995,6 +23193,9 @@ def _print_stmt(node, ctx, pad):
             writers.append(('str', stage(STR, 'ail_exc_text(%s, &%s)' % (_exception_value(a0, ctx), ctx.sarena()))))
         elif _list_text_ok(a0, t, ctx):
             writers.append(('str', stage(STR, _list_text(a0, t, ctx))))
+        elif (_map_kind(a0, ctx) == SDICT
+              or isinstance(a0, ast.Name) and a0.id in ctx.skeys and ctx.type_of(a0.id) == DICT):
+            writers.append(('str', stage(STR, _dict_text(a0, ctx))))
         else:
             raise Unsupported('print() given a %s, not a number or a str.\n'
                                '  write instead: print an element or a measurement (`print(xs[0])`, '
@@ -23495,6 +23696,15 @@ def _setitem(target, value, ctx, ind):
             rendered = _dict_handle_expr(expr, ctx) if temp == htemp else _expr(expr, ctx)
             out += _flush(ctx, pad) + '%s%s = %s;\n' % (pad, temp, rendered)
         return out + '%sail_tab_put(&%s, %s, %s);\n' % (pad, c, ktemp, htemp)
+    if (t == DICT and name not in ctx.ndict and name not in ctx.ddict
+            and _is_container_value(value)):
+        # A plain `dict` holds int values (cruntime's ail_tab/ail_stab/ail_btab); a list, set or
+        # dict value has no slot in one. Refuse by name so the general path builds the whole
+        # program, instead of emitting an `ail_stab_put` whose value argument is a container
+        # struct and leaving gcc to reject the C (a dict literal's pairs go through here too).
+        raise Unsupported('a dict cannot hold list, set or dict values; keep the groups in a '
+                          'list of structs and map each key to its index with a `dict[str, int]` '
+                          '(or keep parallel lists indexed through the int dict)')
     if t == DICT and name in ctx.bkeys:
         # `d[<bytes-ish>] = <int>` on a dict keyed by bytes (see `_mark_bytes_containers`) --
         # content hashing (cruntime.BTAB): the key is a bytes VALUE, not a number, so it is built
@@ -28059,6 +28269,11 @@ def _promote_floats(fn, ctx):
                                      # str one) to INT, fighting `_stmt`'s own, later, correct
                                      # per-field `ctx.declare` the identical way every other skip
                                      # in this loop already guards against.
+            if (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute)
+                    and (mangled := _class_method_name(n.value, ctx)) is not None
+                    and _is_srowtup_ret(ctx.funcs[mangled][1])):
+                continue            # `a, b = p.pair()` -- the method counterpart of the row-return
+                                     # skip just above: per-field `ctx.declare` settles the names.
             if (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
                     and (n.value.func.id in ctx.classes
                          or (n.value.func.id in ctx.funcs
@@ -31203,6 +31418,17 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
     # `_caller_ctx_memo`): the rounds below ask the same question of most functions again and again.
     _CALLER_CTX_MEMO.clear()
     classes = classes if classes is not None else _TDict()   # tracked: an untracked {} shared with every ctx made them all bypass the query cache
+    for f in fns:
+        ann = f.returns
+        if (isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr)
+                and {getattr(x, 'id', None) for x in (ann.left, ann.right)} == {INT, FLT}):
+            # A union of int and float has no single C representation here: treating it as float
+            # would print 3.0 where CPython prints 3. Refuse by name rather than answer differently
+            # (the general path keeps both kinds).
+            raise Unsupported('%s() returns `int | float`; a union of int and float is not built '
+                              '(its two C representations differ). Split it into an int function '
+                              'and a float function, or return float and convert the int result '
+                              'caller-side' % f.name)
     owned_str_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                      and f.returns.id == '__ail_checked_str__'}
     external = external or {}
@@ -31512,6 +31738,8 @@ def _compile_init(init_fn, info, classes):
     ctx.classes[info.name] = info
     ctx.funcs = {}
     ctx.bool_names = _BOOLS.locals.get(info.name + '.__init__', frozenset())
+    ctx.bool_names_static = ctx.bool_names
+    ctx.srow_bool_names = frozenset()
     ctx.bool_lists = _BOOLS.lists.get(info.name + '.__init__', frozenset())
     for stmt in init_fn.body:
         if (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)
@@ -37672,6 +37900,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         ctx.gdecl = frozenset(name for g in ast.walk(fn) if isinstance(g, ast.Global)
                               for name in g.names if name in ctx.modconsts.vars)
     ctx.bool_names = _BOOLS.locals.get(fn.name, frozenset())
+    ctx.bool_names_static = ctx.bool_names
+    ctx.srow_bool_names = frozenset()
     ctx.bool_lists = _BOOLS.lists.get(fn.name, frozenset())
     float_params = {name for name, kind in ctx.params if kind == FLIST}
     if float_params:

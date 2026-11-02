@@ -1,3 +1,31 @@
+## 2026-11-02 -- prog9 suite fix: a dict literal with container values stays off the typed path (job-prog9-11021016)
+
+A `dict` keyed by str is emitted as an `ail_stab` of int64 values, but a literal pair such as
+`d = {"k": [1, 2, 3]}` routed the list through `_setitem` and emitted `ail_stab_put(..., <ail_list>)`,
+which gcc then rejected. `_setitem` now refuses a list/set/dict value by name for a plain dict (a
+dict-of-lists local, `ctx.ndict`, and a dict-of-inner-dicts local, `ctx.ddict`, keep their own
+branches), so `pyc` takes the general path for the program instead of handing invalid C to the
+compiler. The shared fixtures in `test_ail_bugs7`, `test_ail_debug_flush`, `test_ail_flush_exit`
+and `test_ail_mixed_bounds` build again; `test_ail_prog9` and `test_ail_safetynet` stay green.
+
+## 2026-11-02 -- prog9 review fix 2: conditional bool row rebinds keep their bool text (job-prog9-11021016)
+
+Made the bool row-field bookkeeping execution-aware. `_bool_flow_after` now drops a name only for a
+straight-line assign/augassign/annassign; bodies that may not run (if/else arms, loop bodies, try
+bodies, handlers) are compiled with `ctx.cond_depth > 0` and leave the marking alone, and a `for`
+target is never treated as an unconditional rebind. Probes `p_bool_if_false_rebind`,
+`p_bool_loop_rebind` and `p_bool_for_target_zero` now print `False` / `False` like CPython, while
+`p_bool_reuse` still prints `5` / `False z` / `7`. `test_ail_prog9` gained the conditional cases.
+
+## 2026-11-02 -- prog9 review fix: bool row fields stop leaking past a rebind (job-prog9-11021016)
+
+Fixed the review defect in the method row-unpack lowering. A bool field from `a, b = p.pair()` no
+longer marks `a` as bool for the rest of the function: the generated code keeps a per-statement set
+of bool row fields and drops a name as soon as it is rebound, so `a = 7` after the unpack prints `7`
+(CPython's value) instead of `True`. The fresh bool field still prints `True`/`False`;
+`test_ail_prog9` gained a rebinding case. Probes `p_bool_reuse`, `p_srow_bool_rebind`,
+`p_srow_bool_branch` and `p_srow_bool_loop` match CPython on the strict typed build.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
