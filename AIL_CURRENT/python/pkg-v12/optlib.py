@@ -165,6 +165,8 @@ class Lowerer:
         self.tree = tree
         self.funcs = {}
         self.methods = {}
+        self.classes = set()
+        self.receiver_classes = {}
         self.owner = None
         self.counter = 0
         self.names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
@@ -232,6 +234,7 @@ class Lowerer:
             if isinstance(node, ast.FunctionDef):
                 self.funcs[node.name] = FuncInfo(node)
         method_nodes = set()
+        self.classes = {cls.name for cls in self.tree.body if isinstance(cls, ast.ClassDef)}
         for cls in self.tree.body:
             if not isinstance(cls, ast.ClassDef):
                 continue
@@ -280,8 +283,34 @@ class Lowerer:
         return self.tree
 
     # ---- one function ----
+    def receiver_classes_of(self, node):
+        """{local name: class} for the receivers this function makes plain: a parameter annotated
+        with a class, an annotated local, or a name whose every assignment is `Cls(...)`."""
+        out = {}
+        for a in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
+            if isinstance(a.annotation, ast.Name) and a.annotation.id in self.classes:
+                out[a.arg] = a.annotation.id
+        values = {}
+        for n in ast.walk(node):
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name):
+                        values.setdefault(t.id, []).append(n.value)
+            elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+                if isinstance(n.annotation, ast.Name) and n.annotation.id in self.classes:
+                    out[n.target.id] = n.annotation.id
+                if n.value is not None:
+                    values.setdefault(n.target.id, []).append(n.value)
+        for name, made in values.items():
+            classes = {v.func.id if isinstance(v, ast.Call) and isinstance(v.func, ast.Name)
+                       and v.func.id in self.classes else None for v in made}
+            if len(classes) == 1 and None not in classes:
+                out[name] = classes.pop()
+        return out
+
     def function(self, node, owner=None):
         self.owner = owner
+        self.receiver_classes = self.receiver_classes_of(node)
         info = (self.methods.get((owner, node.name)) if owner is not None
                 else self.funcs.get(node.name) if node in self.tree.body else None)
         opt = {}
@@ -477,11 +506,33 @@ class Lowerer:
 
     # ---- kinds ----
     def method_info(self, e):
-        """FuncInfo of `self.name(...)` when that method returns an Optional scalar, else None."""
-        if (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute)
-                and isinstance(e.func.value, ast.Name) and e.func.value.id == 'self'
-                and self.owner is not None):
-            return self.methods.get((self.owner, e.func.attr))
+        """FuncInfo of `receiver.name(...)` when that method returns an Optional scalar, else None.
+
+        `self.name()` uses the class being lowered.  Another receiver is resolved from the
+        function's plain local classes (a parameter annotation or `p = P()`); when that is not
+        possible but exactly one class in the program has an Optional-returning method of this
+        name, that one is used.  An ambiguous receiver is refused by name instead of leaving a
+        `(flag, value)` pair in the caller.
+        """
+        if not (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute)):
+            return None
+        receiver, attr = e.func.value, e.func.attr
+        owner = None
+        if isinstance(receiver, ast.Name):
+            owner = self.owner if receiver.id == 'self' and self.owner is not None \
+                else self.receiver_classes.get(receiver.id)
+        if owner is not None:
+            return self.methods.get((owner, attr))
+        found = []
+        for (cls, name), info in self.methods.items():
+            if name == attr and info not in found:
+                found.append(info)
+        if len(found) == 1:
+            return found[0]
+        if len(found) > 1:
+            raise Refused(e, 'cannot tell which class the %s() call uses; bind the receiver to a '
+                          'name whose class is plain (a parameter annotation or `p = P()`)'
+                          % attr)
         return None
 
     def expr_kind(self, e, opt):

@@ -2573,6 +2573,7 @@ class Ctx:
         self.bool_names = frozenset()           # locals holding a bool (boolkind.py)
         self.bool_names_static = frozenset()    # the subset boolkind.py proved bool everywhere
         self.srow_bool_names = frozenset()      # bool row fields, valid until the name is rebound
+        self.dyn_bool_names = {}                # bool row field name -> its run-time is-bool flag
         self.cond_depth = 0                     # nesting of bodies that may not run
         self.bool_lists = frozenset()           # locals holding a list of bools
         self.kind = dict(params)
@@ -6767,6 +6768,28 @@ def _bool_str_value(node, ctx):
     return '((%s) ? %s : %s)' % (_expr(node, ctx), _str_literal('True'), _str_literal('False'))
 
 
+def _dyn_bool_flag(node, ctx):
+    """The run-time is-bool flag of a name bound from a bool row field, or None.
+
+    The field itself is only an int64 0/1.  A name that may later be rebound to an int needs a
+    companion flag so `print(a)` can still choose True/False on the paths where it was not.
+    """
+    if isinstance(node, ast.Name):
+        return getattr(ctx, 'dyn_bool_names', {}).get(node.id)
+    return None
+
+
+def _dyn_bool_str_value(node, ctx):
+    """The C str for str()/repr()/f-string of a dynamic bool row field, or None."""
+    flag = _dyn_bool_flag(node, ctx)
+    if flag is None:
+        return None
+    ctx.parts.add('STR')
+    value = _expr(node, ctx)
+    return '((%s) ? ((%s) ? %s : %s) : ail_str_from_int(&%s, %s))' % (
+        flag, value, _str_literal('True'), _str_literal('False'), ctx.sarena(), value)
+
+
 def _is_slist_index(node, ctx):
     """`words[i]` -- indexing a list of str (AIL_TASK_strops_20260915.md Part B). Deliberately a
     SEPARATE check from the generic `ast.Subscript` case just below `_is_str_expr` gives str[i]:
@@ -8102,6 +8125,9 @@ def _str_value(node, ctx, *, owned_join_return=False):
             raise Unsupported('str() of %s is not built; only str(<int>) and str(<float>) are. '
                               'For a list, join its elements: `",".join([str(v) for v in xs])`'
                               % _a(at))
+        dyn = _dyn_bool_str_value(arg, ctx)
+        if dyn is not None:
+            return dyn
         if _is_bool_expr(arg, ctx):
             return _bool_str_value(arg, ctx)
         v = _expr(arg, ctx)
@@ -8416,6 +8442,9 @@ def _fmt_default_conv(node, kind, ctx):
     if kind == STR:
         return _str_value(node, ctx)
     if kind == INT:
+        dyn = _dyn_bool_str_value(node, ctx)
+        if dyn is not None:
+            return dyn
         if _is_bool_expr(node, ctx):
             return _bool_str_value(node, ctx)
         v = _expr(node, ctx)
@@ -20574,7 +20603,13 @@ def _loop_stmts(body, ctx, ind):
                        for kind in ('break', 'continue', 'end', 'cleanup'))
         ctx.loop_exit_labels.append(labels)
     try:
+        dyn_targets = getattr(ctx, 'loop_dyn_targets', None)
+        ctx.loop_dyn_targets = None
         pro = ''
+        if dyn_targets:
+            flags = getattr(ctx, 'dyn_bool_names', {})
+            pro += ''.join('%s%s = 0;\n' % ('    ' * ind, flags[name])
+                           for name in sorted(dyn_targets) if name in flags)
         if ctx.loop_reset is not None:
             # A compacted `for` emits its mark/roots block outside the loop head
             # (see `_for`); the keep_roots call itself belongs at the TOP of the
@@ -20659,28 +20694,60 @@ def _srow_unpack_bool_names(node, ctx):
                      if j < len(target.elts))
 
 
-def _bool_flow_after(node, ctx):
-    """Keep a bool row field's `True`/`False` text only until the name is rebound.
+def _srow_bool_flag(name, ctx):
+    """The C local holding `name`'s run-time is-bool flag, declaring it on first use."""
+    flags = getattr(ctx, 'dyn_bool_names', None)
+    if flags is None:
+        return None
+    flag = flags.get(name)
+    if flag is None:
+        flag, _ = ctx.temp(INT)
+        flags[name] = flag
+    return flag
 
-    The field is an int64 0/1, so the annotation is the only place its bool-ness survives; a
-    function-wide set would make `a = 7` after `a, b = p.pair()` still print `True`.
+
+def _bool_flow_after(node, ctx, ind):
+    """Keep a bool row field's `True`/`False` text only while the name still holds that bool.
+
+    The field is an int64 0/1, so a companion flag records whether the last binding was the bool
+    field or an int.  The update is emitted where the statement runs, so a rebind in a taken
+    branch clears it while the same rebind in an untaken branch leaves it set (a zero-iteration
+    loop included).  Writes that may not run are never allowed to clear the flag at build time.
     """
-    if not hasattr(ctx, 'srow_bool_names'):
-        return
-    bound = frozenset()
-    if (getattr(ctx, 'cond_depth', 0) == 0
-            and isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))):
-        bound = _stmt_bound_names(node)
-    dynamic = set(ctx.srow_bool_names) - bound
-    dynamic |= _srow_unpack_bool_names(node, ctx)
-    ctx.srow_bool_names = frozenset(dynamic)
-    ctx.bool_names = frozenset(set(ctx.bool_names_static) | dynamic)
+    if not getattr(ctx, 'dyn_bool_names', None):
+        fresh = _srow_unpack_bool_names(node, ctx)
+        if not fresh:
+            return ''
+    pad = '    ' * ind
+    out = []
+    fresh = _srow_unpack_bool_names(node, ctx)
+    for name in sorted(fresh):
+        flag = _srow_bool_flag(name, ctx)
+        if flag is not None:
+            out.append('%s%s = 1;\n' % (pad, flag))
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        for name in sorted(_stmt_bound_names(node) - fresh):
+            flag = ctx.dyn_bool_names.get(name)
+            if flag is None:
+                continue
+            value = getattr(node, 'value', None)
+            target = (node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1
+                      else node.target if isinstance(node, ast.AnnAssign) else None)
+            if (value is not None and isinstance(target, ast.Name) and target.id == name
+                    and isinstance(node, (ast.Assign, ast.AnnAssign))):
+                source = _dyn_bool_flag(value, ctx)
+                if source is not None:
+                    out.append('%s%s = %s;\n' % (pad, flag, source))
+                else:
+                    out.append('%s%s = %d;\n' % (pad, flag, 1 if _is_bool_expr(value, ctx) else 0))
+            elif value is not None:
+                out.append('%s%s = 0;\n' % (pad, flag))
+    return ''.join(out)
 
 
 def _stmt(node, ctx, ind):
     out = _stmt_core(node, ctx, ind)
-    _bool_flow_after(node, ctx)
-    return out
+    return out + _bool_flow_after(node, ctx, ind)
 
 
 def _stmt_core(node, ctx, ind):
@@ -22436,11 +22503,18 @@ def _stmt_inner(node, ctx, ind):
     if isinstance(node, ast.While):
         return _while(node, ctx, ind)
     if isinstance(node, ast.For):
-        if getattr(node, 'par', None) is not None:
-            return _par_for(node, ctx, ind)
-        if getattr(node, 'gpu', None) is not None:
-            return gpu.region(ctx, node.gpu, _for(node, ctx, ind)) + '\n'
-        return _for(node, ctx, ind)
+        previous_targets = getattr(ctx, 'loop_dyn_targets', None)
+        ctx.loop_dyn_targets = frozenset(
+            name for name in _stmt_bound_names(node)
+            if name in getattr(ctx, 'dyn_bool_names', {}))
+        try:
+            if getattr(node, 'par', None) is not None:
+                return _par_for(node, ctx, ind)
+            if getattr(node, 'gpu', None) is not None:
+                return gpu.region(ctx, node.gpu, _for(node, ctx, ind)) + '\n'
+            return _for(node, ctx, ind)
+        finally:
+            ctx.loop_dyn_targets = previous_targets
     if isinstance(node, ast.Return):
         if ctx.ret in (EXCEPTION, BYTEARRAY, BINARYFILE, TCPSOCKET):
             if _etype(node.value, ctx) != ctx.ret:
@@ -23141,6 +23215,10 @@ def _print_stmt(node, ctx, pad):
 
     writers = []              # [(kind, staged value)], one per positional argument, in order
     for a0 in node.args:
+        flag = _dyn_bool_flag(a0, ctx)
+        if flag is not None:
+            writers.append(('dynbool', (stage(INT, _expr(a0, ctx)), flag)))
+            continue
         if _is_bool_expr(a0, ctx):
             # A bool prints as True/False (boolkind.py); the note below is about the first case.
             # `print(s.isdigit())` -- AIL_TASK_strops_20260915.md stage 4. `.isdigit()` returns a
@@ -23237,6 +23315,13 @@ def _print_stmt(node, ctx, pad):
             out += ('%sail_fputs_stdout((%s) ? "True" : "False");\n' % (pad, val)
                     if stream == 'stdout' else
                     '%sfputs((%s) ? "True" : "False", stderr);\n' % (pad, val))
+        elif kind == 'dynbool':
+            value, flag = val
+            out += ('%sif (%s) ail_fputs_stdout((%s) ? "True" : "False"); '
+                    'else ail_write_int((int64_t)(%s));\n' % (pad, flag, value, value)
+                    if stream == 'stdout' else
+                    '%sif (%s) fputs((%s) ? "True" : "False", stderr); '
+                    'else ail_write_int_to((int64_t)(%s), stderr);\n' % (pad, flag, value, value))
         elif kind == 'str':
             out += '%sail_str_write(%s, %s);\n' % (pad, val, stream)
         elif kind == 'flt':

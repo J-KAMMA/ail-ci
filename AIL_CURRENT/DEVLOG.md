@@ -1,3 +1,17 @@
+## 2026-11-02 -- prog9 review fix 3: taken conditional row rebinds and external Optional methods (job-rbprog9-11021624)
+
+Two follow-up defects from the re-application review. A bool row field now carries a run-time
+is-bool flag instead of build-time liveness: the flag is set by the row unpack and cleared where a
+rebinding statement actually runs, so a taken `if`/`while` body or a `for` target prints the new int
+while the same store in an untaken branch or zero-iteration loop keeps `True`/`False` (including the
+ambiguous value `0`). `print`, `str`, `repr` and f-string fields consult that flag. Separately,
+optlib now resolves an Optional-returning method call on a receiver other than `self` (a local
+`p = P()`, an annotated parameter, a list item, an attribute or a dict value), so
+`print(p.peek())` and `p.peek() in (...)` use the pair ABI instead of exposing `(flag, value)`; an
+ambiguous receiver is refused by name. `test_ail_prog9` gained taken/untaken rebinding and external
+receiver cases; probes `p_bool_runtime_flow` and `p_opt_external_receivers` match CPython on both
+builds.
+
 ## 2026-11-02 -- prog9 suite fix: a dict literal with container values stays off the typed path (job-prog9-11021016)
 
 A `dict` keyed by str is emitted as an `ail_stab` of int64 values, but a literal pair such as

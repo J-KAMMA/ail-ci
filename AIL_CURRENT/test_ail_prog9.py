@@ -332,6 +332,117 @@ main()
         # clear the field's bool text; a straight-line rebind still must.
         self.same(self.METHOD_ROW_CONDITIONAL_REBIND, 'method_row_conditional_rebind', [''])
 
+    METHOD_ROW_TAKEN_REBIND = '''class P:
+    def __init__(self) -> None:
+        self.s = "z"
+
+    def pair(self) -> tuple[bool, str]:
+        return (False, self.s)
+
+
+def main() -> None:
+    p = P()
+    a, b = p.pair()
+    flag = 1
+    if flag == 1:
+        a = 7
+    print(a)
+    a, b = p.pair()
+    if flag == 0:
+        a = 7
+    print(a)
+    a, b = p.pair()
+    n = 0
+    while n < 1:
+        a = 7
+        n += 1
+    print(a)
+    a, b = p.pair()
+    for a in range(1):
+        pass
+    print(a)
+    a, b = p.pair()
+    for a in range(0):
+        pass
+    print(a)
+    a, b = p.pair()
+    if flag == 1:
+        a = 0
+    print(a, str(a), f"{a}", repr(a))
+    a, b = p.pair()
+    print(a, str(a), f"{a}", repr(a))
+
+
+main()
+'''
+
+    def test_method_row_bool_taken_rebinding_typed(self):
+        # A rebind in a branch/loop that DOES run is an int, while the same rebind in an untaken
+        # branch or zero-iteration loop leaves True/False; zero itself is not ambiguous.
+        self.same(self.METHOD_ROW_TAKEN_REBIND, 'method_row_taken_rebind', [''])
+
+    EXTERNAL_OPTIONAL_METHOD = '''class P:
+    def __init__(self) -> None:
+        self.s = "ab"
+        self.i = 0
+
+    def peek(self) -> str | None:
+        if self.i < len(self.s):
+            return self.s[self.i]
+        return None
+
+
+class H:
+    def __init__(self) -> None:
+        self.p = P()
+
+    def show(self) -> None:
+        print(self.p.peek(), self.p.peek() in ("a", "z"))
+
+
+def takes(s: str | None) -> int:
+    if s is None:
+        return -1
+    return len(s)
+
+
+def via_param(p: P) -> None:
+    print(p.peek(), p.peek() in ("a", "z"), takes(p.peek()))
+
+
+def scan(p: P) -> int:
+    n = 0
+    while p.peek() in ("a", "b"):
+        p.i += 1
+        n += 1
+    return n
+
+
+def main() -> None:
+    p = P()
+    print(p.peek())
+    print(p.peek() in ("a", "z"))
+    print(p.peek() not in ("a", "z"))
+    print(str(p.peek()), f"{p.peek()}")
+    print(takes(p.peek()))
+    via_param(p)
+    print(scan(p))
+    ps = [P()]
+    print(ps[0].peek(), ps[0].peek() in ("a", "z"))
+    h = H()
+    h.show()
+    d = {"k": P()}
+    print(d["k"].peek())
+
+
+main()
+'''
+
+    def test_external_optional_method_call_typed(self):
+        # `p.peek()` on a receiver other than `self` uses the same pair ABI: a direct print, `in`,
+        # str/f-string, an Optional argument and a while test all see the value, not the pair.
+        self.same(self.EXTERNAL_OPTIONAL_METHOD, 'external_optional_method', [''])
+
     def test_dict_keys_and_text_typed(self):
         self.same(self.DICT_TEXT, 'dict_text', [''])
 
