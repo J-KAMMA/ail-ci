@@ -1,3 +1,63 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 0
+[model opencode-go/deepseek-v4.1-flash]
+## Review
+
+**What the change really does.** `pyfunc._listcomp_kind`/`_listcomp_into_temp` now accept a two-name target over `enumerate(...)` and lower it through the existing `_pair_plan`; `modtables._scalar` now accepts unary `-`/`+` on float literals. No program files or runtime code changed.
+
+**Claims checked**
+- `prog16.md` exists with the 8-program table; target programs `t268`/`g25_038` were refused on base and compile typed on HEAD; `t068`/`t003`/`g09_028` were typed on base and stay typed. Verified.
+- `g21_034`, `g20_038`, `g14_040` still refused typed, on the same feature gaps. Verified (exact first-message wording not re-derived).
+- New test module registered via `tests.d`; `update_manifest.py --check` clean. Verified.
+- `test_ail_prog16`, `test_ail_modcount`, `test_ail_safetynet` pass on HEAD (`3 modules, 0 failed`).
+- Pair/negative-float behaviour matches CPython on both builds through arguments, list items, attributes, slices (negative bounds), `range` with non-zero start, `sorted`, nested comprehensions, `-0.0` sign, and dict/table values. Verified with own probes.
+- Non-feature program's `program.c` is identical to base; no compare-task source contains either new construct, so the 10-task C claim is consistent (I did not recompile all ten).
+
+**Probes run** (`/tmp/rprobes/`): `pair_basic`, `pair_forms`, `pair_edge`, `pair_slice_mut`, `pair_subscript`, `pair_negslices`, `pair_sorted`, `pair_nestedcomp`, `pair_contexts`, `pair_float`, `pair_str`, `pair_struct`, `pair_blist`, `pair_dictkeys`, `pair_dictvalue`, `pair_listitem`, `pair_reverse`, `pair_reversed`, `pair_set*`, `negtable`, `negtable_edge`, `table_dict_negfloat`, `table_negfloat`, `pair_enumerate_empty`, `nonfeature`. All matched CPython or were refused by name, except the defect below.
+
+**Pre-existing (does not block)**
+- Pair comprehension over a local `set[int]` uses insertion order in the typed build: `[v for i,v in enumerate({8,1,9,16,17,2,24,25})]` differs from CPython. Base general/default show the identical wrong order (documented set-order difference); base typed refused.
+- `enumerate((4,5,6))` is refused with a different message than base but still a named refusal.
+
+**Unverified**
+- Full 10-task `lab/compare` byte comparison and the worker's other 6 test modules (not re-run; targeted modules only).
+- Speed: change is compile-time only, no runtime hot-code probe run.
+
+**Defect**
+
+VERDICT: FIX
+1. Zero-argument `enumerate()` in a pair-target comprehension crashes the compiler instead of refusing by name, on both general and default builds. `_listcomp_kind` does `g.iter.args[0]` without checking arity (`AIL_CURRENT/python/pkg-v12/pyfunc.py:19122`).
+   Probe:
+   ```python
+   def f() -> list[int]:
+       return [i for i, v in enumerate()]
+
+   def main() -> None:
+       print(f())
+   main()
+   ```
+   Expected: named compile-time refusal `enumerate() with other than (iterable[, start])`, rc=3 (this is what base does). Actual: `Traceback ... IndexError: list index out of range`, rc=1, on both builds. A guard on `len(g.iter.args) == 1` (letting `_pair_plan` produce the named refusal) fixes it.
+[cost $0.0561, opencode tokens {"total": 4497518, "input": 106370, "output": 19071, "reasoning": 26093, "cache.write": 0, "cache.read": 4345984}]
+    tool time: bash 6.7 min
+        178s bash   date; cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && python3 ../tools/par_check.py -j 2 test_ail_prog16 tes
+         26s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/rprobes/*.py; do echo "######## $(basename $p)"; bash ~/to
+         17s bash   cat > /tmp/rprobes/pair_blist.py <<'EOF' def f(bs: list[bytes]) -> list[bytes]:     return [v for i, v in enum
+         17s bash   cat > /tmp/rprobes/pair_blist2.py <<'EOF' def g(bs: list[bytes]) -> list[int]:     return [i for i, v in enume
+         16s bash   cd /home/runner/work/ail-ci/ail-ci && for p in lab/census/programs/dev/t268.py lab/census/programs/gdev/g25_03
+         13s bash   cat > /tmp/typedcheck.sh <<'EOF' #!/bin/bash # typedcheck.sh SRC WORKTREE src=$1; wt=$2; d=$(mktemp -d /tmp/tc
+         11s bash   cat > /tmp/rprobes/pair_reverse.py <<'EOF' def f(xs: list[int]) -> list[int]:     return [v for i, v in enumer
+          9s bash   cd /home/runner/work/ail-ci/ail-ci && for p in lab/census/programs/dev/t268.py lab/census/programs/dev/t068.py
+
+## fix round skipped: only 44 minutes left
+
+
+--- ORIGINAL TASK ---
 **Typed reach: make the hot functions of these 8 real programs compile on the typed path.** With the CPython hybrid (docs/design/CPYTHON_HYBRID.md) only typed functions are accelerated; the rest runs in CPython. So what matters is that the functions where time is spent compile typed.
 
 Read `git log --oneline -40` first so you do not redo what another task just did.
