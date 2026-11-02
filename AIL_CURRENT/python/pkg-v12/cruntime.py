@@ -27181,6 +27181,90 @@ ORDER.insert(ORDER.index('BYTES') + 1, 'BYTEARRAY')
 SOURCE['BYTEARRAY'] = BYTEARRAY
 REQUIRES['BYTEARRAY'] = ['BYTES', 'DIE']
 
+BAREPEAT = r'''
+static ail_bytearray *ail_bytearray_repeat(const ail_bytearray *B, int64_t count) {
+    ail_bytearray_meta(B);
+    if (count <= 0 || !B->n) return ail_bytearray_new(0);
+    if (count > INT64_MAX / B->n) ail_die("bytearray too long");
+    int64_t n = B->n * count;
+    ail_bytearray *result = ail_bytearray_new(n);
+    for (int64_t i = 0; i < count; ++i)
+        memcpy(result->p + i * B->n, B->p, (size_t)B->n);
+    return result;
+}
+'''
+ORDER.insert(ORDER.index('BYTEARRAY') + 1, 'BAREPEAT')
+SOURCE['BAREPEAT'] = BAREPEAT
+REQUIRES['BAREPEAT'] = ['BYTEARRAY']
+
+BASLICEASSIGN = r'''
+static void ail_bytearray_set_slice(ail_bytearray *B,
+        int has_lo, int64_t lo, int has_hi, int64_t hi, int has_step, int64_t step,
+        ail_bytes value) {
+    ail_bytearray_meta(B);
+    ail_bytearray_bytes(value);
+    if ((has_lo != 0 && has_lo != 1) || (has_hi != 0 && has_hi != 1) ||
+            (has_step != 0 && has_step != 1)) ail_die("invalid bytearray slice flags");
+    if (!has_step) step = 1;
+    if (!step) ail_raise_value(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)"slice step cannot be zero", (int64_t)strlen("slice step cannot be zero"), 1));
+    int overlap = value.n && B->n && B->p && value.p >= B->p && value.p < B->p + B->n;
+    if (step == 1) {
+        int64_t start = has_lo ? ail_bytearray_bound(B->n, lo, 0) : 0;
+        int64_t stop = has_hi ? ail_bytearray_bound(B->n, hi, 0) : B->n;
+        if (stop < start) stop = start;
+        int64_t removed = stop - start;
+        if (value.n > INT64_MAX - (B->n - removed)) ail_die("bytearray too long");
+        int64_t n = B->n - removed + value.n;
+        unsigned char *copy = NULL;
+        if (overlap) {
+            copy = (unsigned char *)ail_alloc_raw((size_t)value.n);
+            memcpy(copy, value.p, (size_t)value.n);
+            value.p = copy;
+        }
+        ail_bytearray_reserve(B, n);
+        if (B->n > stop) {
+            memmove(B->p + start + value.n, B->p + stop, (size_t)(B->n - stop));
+        }
+        if (value.n) memcpy(B->p + start, value.p, (size_t)value.n);
+        B->n = n;
+        free(copy);
+        return;
+    }
+    int negative = step < 0;
+    int64_t start = has_lo ? ail_bytearray_bound(B->n, lo, negative) : (negative ? B->n - 1 : 0);
+    int64_t stop = has_hi ? ail_bytearray_bound(B->n, hi, negative) : (negative ? -1 : B->n);
+    uint64_t stride = negative ? UINT64_C(0) - (uint64_t)step : (uint64_t)step;
+    int64_t count = 0;
+    if (negative ? start > stop : start < stop) {
+        uint64_t distance = negative ? (uint64_t)start - (uint64_t)stop : (uint64_t)stop - (uint64_t)start;
+        count = (int64_t)(1 + (distance - 1) / stride);
+    }
+    if (value.n != count) {
+        char message[192];
+        snprintf(message, sizeof message,
+                 "attempt to assign bytes of size %lld to extended slice of size %lld",
+                 (long long)value.n, (long long)count);
+        ail_raise_value(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)message,
+                                          (int64_t)strlen(message), 1));
+    }
+    unsigned char *copy = NULL;
+    if (overlap) {
+        copy = (unsigned char *)ail_alloc_raw((size_t)value.n);
+        memcpy(copy, value.p, (size_t)value.n);
+        value.p = copy;
+    }
+    int64_t index = start;
+    for (int64_t i = 0; i < count; ++i) {
+        B->p[index] = value.p[i];
+        if (i + 1 < count) index = negative ? index - (int64_t)stride : index + (int64_t)stride;
+    }
+    free(copy);
+}
+'''
+ORDER.insert(ORDER.index('BAREPEAT') + 1, 'BASLICEASSIGN')
+SOURCE['BASLICEASSIGN'] = BASLICEASSIGN
+REQUIRES['BASLICEASSIGN'] = ['BYTEARRAY']
+
 BANUMERICSLICE = r'''
 static ail_bytes ail_bytearray_numeric_slice_span(const ail_bytearray *B,
         int has_lo, int64_t lo, int has_hi, int64_t hi) {

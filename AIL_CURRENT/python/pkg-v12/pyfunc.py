@@ -1730,6 +1730,10 @@ def _etype(node, ctx):
     if isinstance(node, ast.UnaryOp):
         return INT if isinstance(node.op, ast.Not) else _etype(node.operand, ctx)
     if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Mult):
+            _lk, _rk = _etype(node.left, ctx), _etype(node.right, ctx)
+            if (_lk, _rk) in ((BYTEARRAY, INT), (INT, BYTEARRAY)):
+                return BYTEARRAY
         if isinstance(node.op, ast.Mult) and _is_bytes_expr(node, ctx):
             return BYTES
         if isinstance(node.op, ast.Add) and _is_bytes_expr(node.left, ctx) \
@@ -9788,6 +9792,24 @@ def _bytearray_value(node, ctx):
         if _etype(node.body, ctx) != BYTEARRAY or _etype(node.orelse, ctx) != BYTEARRAY:
             raise Unsupported('conditional bytearray values require matching types')
         return '(%s ? %s : %s)' % (_map_inline(lambda: _cond(node.test, ctx), ctx), _bytearray_value(node.body, ctx), _bytearray_value(node.orelse, ctx))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        kinds = [BYTEARRAY if _is_bytearray_expr(arg, ctx) else _etype(arg, ctx)
+                 for arg in (node.left, node.right)]
+        if tuple(kinds) not in ((BYTEARRAY, INT), (INT, BYTEARRAY)):
+            raise Unsupported('bytearray repetition requires one bytearray and one integer operand')
+        receiver, _ = ctx.temp(BYTEARRAY)
+        count, _ = ctx.temp(INT)
+        steps = []
+        for arg, kind in zip((node.left, node.right), kinds):
+            if kind == BYTEARRAY:
+                steps.append(_obj_store(receiver, _bytearray_value(arg, ctx), BYTEARRAY, ctx) + ';')
+            else:
+                if _is_handle_producing(arg, ctx):
+                    raise Unsupported('bytearray repetition count must be an integer')
+                steps.append('%s = %s;' % (count, _bytearray_int(arg, ctx)))
+        ctx.parts.add('BAREPEAT')
+        return _obj_temp('({ %s ail_bytearray_repeat(%s, %s); })' % (
+            ' '.join(steps), receiver, count), BYTEARRAY, ctx)
     if _is_bytearray_call(node, ctx):
         if node.keywords or len(node.args) > 1:
             raise Unsupported('bytearray requires zero or one positional argument')
@@ -9903,7 +9925,29 @@ def _bytearray_method(node, ctx, *, as_stmt=False):
 
 def _bytearray_index_mutation(target, value, ctx, ind):
     if isinstance(target.slice, ast.Slice):
-        raise Unsupported('bytearray slice assignment and deletion are unsupported')
+        if value is None:
+            raise Unsupported('bytearray slice deletion is unsupported')
+        ctx.parts.add('BASLICEASSIGN')
+        ctx.has_try = True
+        kind = _etype(value, ctx)
+        if kind == BYTES:
+            val = _map_inline(lambda: _bytes_value(value, ctx), ctx)
+        elif kind == BYTEARRAY:
+            val = 'ail_bytearray_span(%s)' % _map_inline(lambda: _bytearray_value(value, ctx), ctx)
+        else:
+            raise Unsupported('bytearray slice assignment requires bytes or bytearray')
+        receiver, _ = ctx.temp(BYTEARRAY)
+        steps = ['ail_bytes _value = %s;' % val,
+                 _obj_store(receiver, _bytearray_value(target.value, ctx), BYTEARRAY, ctx) + ';']
+        bounds = []
+        for name, bound in zip(('_lo', '_hi', '_step'),
+                               (target.slice.lower, target.slice.upper, target.slice.step)):
+            steps.append('int64_t %s = %s;'
+                         % (name, '0' if bound is None else _bytearray_int(bound, ctx)))
+            bounds.extend((str(int(bound is not None)), name))
+        steps.append('ail_bytearray_set_slice(%s, %s, _value);' % (receiver, ', '.join(bounds)))
+        pad = '    ' * ind
+        return _flush(ctx, pad) + '%s{ %s }\n' % (pad, ' '.join(steps))
     ctx.parts.add('BYTEARRAY')
     ctx.has_try = True
     steps = [] if value is None else ['int64_t _value = %s;' % _bytearray_int(value, ctx)]
@@ -18086,15 +18130,27 @@ def _pair_plan(src, ctx):
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute) \
             and isinstance(src.func.value, ast.Name) and src.func.attr == 'items' \
             and ctx.type_of(src.func.value.id) == DICT:
-        if src.func.value.id in ctx.ddict:
+        holder = src.func.value.id
+        if holder in ctx.ddict:
             raise Unsupported('%r.items() yields inner dicts, not numbers'
-                              % src.func.value.id)
-        if src.func.value.id in ctx.tdict:
+                              % holder)
+        if holder in ctx.tdict:
             raise Unsupported('%r.items() yields (key, %d-tuple) pairs; walk keys and read '
-                              'each column instead' % (src.func.value.id,
-                                                       ctx.tdict[src.func.value.id]))
+                              'each column instead' % (holder,
+                                                       ctx.tdict[holder]))
+        if holder in ctx.bkeys:
+            # Bytes keys live in an ail_btab; its `.order` array holds ail_bytes values, so the
+            # key is not the int64 this loop binds. The str-keyed branch below is the same shape
+            # with ail_str keys; a bytes-keyed one is left to the general path by name rather
+            # than read through the int table.
+            raise Unsupported('%r.items() is keyed by bytes; the typed pair path does not read '
+                              'an ail_btab key -- the general path handles it' % holder)
+        c = ctx.cname(holder)
+        if holder in ctx.skeys:
+            ctx.parts.add('STAB')
+            return ('0', '(ail_stab_dense(&%s), %s.n)' % (c, c), '%s.order[@]' % c,
+                    'ail_stab_need(&%s, %s.order[@])' % (c, c), [])
         ctx.parts.add('TAB')
-        c = ctx.cname(src.func.value.id)
         return ('0', '%s.n' % c, 'ail_tab_order(&%s)[@]' % c,
                 'ail_tab_need(&%s, ail_tab_order(&%s)[@])' % (c, c), [])
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id == 'zip':
@@ -18107,6 +18163,61 @@ def _pair_plan(src, ctx):
             raise Unsupported('zip() over a range that does not start at zero')
         return '0', '((%s) < (%s) ? (%s) : (%s))' % (na, nb, na, nb), ea, eb, pa + pb
     raise Unsupported('a pair target over %s' % type(src).__name__)
+
+
+def _iter_elem_kind(node, ctx):
+    """The scalar kind `_iter_plan`/`_pair_plan` reads for one iterable expression.
+
+    A slice hands back the same element kind as the sequence it slices, and a float list
+    (including a float-values() snapshot) must stay `double` rather than be truncated to int64.
+    """
+    base = node
+    while isinstance(base, ast.Subscript) and isinstance(base.slice, ast.Slice):
+        base = base.value
+    if _iter_elem_is_str(base, ctx):
+        return STR
+    if isinstance(base, ast.Name) and ctx.type_of(base.id) == BLIST:
+        return BYTES
+    if _is_flist_name(base, ctx):
+        return FLT
+    return INT
+
+
+def _pair_key_kind(src, ctx):
+    """The kind of the FIRST name of an `enumerate` / `zip` / `.items()` pair target.
+
+    The key of `zip(a, b)` is an element of `a`, not always an int -- forcing it to int64
+    truncates a `list[float]` and fails to compile a `list[str]`.
+    """
+    if isinstance(src, ast.Call) and isinstance(src.func, ast.Name):
+        if src.func.id == 'enumerate':
+            return INT
+        if src.func.id == 'zip' and len(src.args) == 2:
+            return _iter_elem_kind(src.args[0], ctx)
+    if (isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute)
+            and isinstance(src.func.value, ast.Name) and src.func.attr == 'items'):
+        holder = src.func.value.id
+        kind = ctx.type_of(holder)
+        if kind == DICT:
+            return BYTES if holder in ctx.bkeys else STR if holder in ctx.skeys else INT
+        if kind in MAPS and kind not in SETS:
+            return _map_key_kind(kind)
+    return INT
+
+
+def _pair_value_kind(src, ctx):
+    """The kind of the SECOND name of an `enumerate` / `zip` / `.items()` pair target."""
+    if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id in ('enumerate', 'zip'):
+        base = src.args[0] if src.func.id == 'enumerate' else src.args[1]
+        return _iter_elem_kind(base, ctx)
+    if (isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute)
+            and isinstance(src.func.value, ast.Name) and src.func.attr == 'items'):
+        holder = src.func.value.id
+        kind = ctx.type_of(holder)
+        if kind == DICT:
+            return INT
+        return _mvk(kind) if kind in MAPS and kind not in SETS else INT
+    return INT
 
 
 def _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager=None):
@@ -19279,23 +19390,41 @@ def _listcomp_kind(node, ctx):
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
-    if not isinstance(g.target, ast.Name):
+    pair = None
+    if isinstance(g.target, ast.Tuple):
+        if len(g.target.elts) != 2 or not all(isinstance(e, ast.Name) for e in g.target.elts):
+            raise Unsupported('a comprehension target that is not a pair of names')
+        pair = [e.id for e in g.target.elts]
+        _pair_plan(g.iter, ctx)
+    elif not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     source = g.iter
     while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
         source = source.value
-    source_kind = _etype(g.iter, ctx)
-    if _is_hlist_kind(source_kind):
-        raise Unsupported('handle list comprehension folds are unsupported')
-    struct_source = _is_olist_kind(source_kind)
-    element = (OBJ, source_kind[1]) if struct_source else STR if _iter_elem_is_str(source, ctx) else FLT if _etype(source, ctx) == FLIST else INT
-    name = g.target.id
+    if pair is not None:
+        struct_source = False
+        element = _pair_value_kind(g.iter, ctx)
+        name = None
+    else:
+        source_kind = _etype(g.iter, ctx)
+        if _is_hlist_kind(source_kind):
+            raise Unsupported('handle list comprehension folds are unsupported')
+        struct_source = _is_olist_kind(source_kind)
+        element = (OBJ, source_kind[1]) if struct_source else STR if _iter_elem_is_str(source, ctx) else FLT if _etype(source, ctx) == FLIST else INT
+        name = g.target.id
     types, kinds = dict(ctx.types), dict(ctx.kind)
     try:
-        ctx.kind.pop(name, None)
-        ctx.types[name] = element
-        if struct_source:
-            ctx.kind[name] = element
+        if pair is not None:
+            for nm in pair:
+                ctx.kind.pop(nm, None)
+                ctx.types.pop(nm, None)
+            ctx.types[pair[0]] = _pair_key_kind(g.iter, ctx)
+            ctx.types[pair[1]] = element
+        else:
+            ctx.kind.pop(name, None)
+            ctx.types[name] = element
+            if struct_source:
+                ctx.kind[name] = element
         kind = _etype(node.elt, ctx)
         if isinstance(node.elt, ast.List):
             raise Unsupported('nested list comprehension elements are unsupported')
@@ -19343,6 +19472,8 @@ def _listcomp_into_temp(node, ctx):
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
+    if isinstance(g.target, ast.Tuple):
+        return _listcomp_pair_into_temp(node, ctx)
     if not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     kind = _listcomp_kind(node, ctx)
@@ -19484,6 +19615,82 @@ def _listcomp_into_temp(node, ctx):
     if getattr(node, 'gpu', None) is not None and kind in (FLIST, LIST) and not string_source and not struct_source:
         block = gpu.region(ctx, node.gpu, block, dest=c)
     ctx.pre.append(block)
+    return c
+
+
+def _listcomp_pair_into_temp(node, ctx):
+    """`[e for i, v in enumerate(xs) if c]` as a value.
+
+    `_pair_plan` already walks the two shapes a pair target has (`enumerate` and `zip`, plus an
+    unannotated dict's `.items()`), and the fold path has bound both names for a long time; a list
+    comprehension over the same shapes is the same loop with a push instead of an accumulator.
+    """
+    if len(node.generators) != 1 or node.generators[0].is_async:
+        raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
+    g = node.generators[0]
+    if not (isinstance(g.target, ast.Tuple) and len(g.target.elts) == 2
+            and all(isinstance(e, ast.Name) for e in g.target.elts)):
+        raise Unsupported('a comprehension target that is not a pair of names')
+    key, value = (e.id for e in g.target.elts)
+    kind = _listcomp_kind(node, ctx)
+    ctx.parts.add(kind.upper())
+    c, _ = ctx.temp(kind)
+    lo, n, kexpr, vexpr, pre = _pair_plan(g.iter, ctx)
+    key_kind = _pair_key_kind(g.iter, ctx)
+    value_kind = _pair_value_kind(g.iter, ctx)
+    elem_is_str, elem_is_float = value_kind == STR, value_kind == FLT
+    old_type, old_kind = ctx.types.get(key), ctx.kind.get(key)
+    old_vtype, old_vkind = ctx.types.get(value), ctx.kind.get(value)
+    old_cnames = getattr(ctx, 'comprehension_cnames', {})
+    old_onecp, old_len1 = set(ctx.onecp), set(ctx.len1_names)
+    ctx.tmp += 1
+    ck, cv = '_comp_key%d' % ctx.tmp, '_comp_value%d' % ctx.tmp
+    ctx.comprehension_cnames = {**old_cnames, key: ck, value: cv}
+    for nm in (key, value):
+        ctx.kind.pop(nm, None)
+        ctx.onecp.discard(nm)
+        ctx.len1_names.discard(nm)
+    ctx.types[key] = key_kind
+    ctx.types[value] = value_kind
+    # A pair element is never a ONE-CODE-POINT view: `_iter_plan` refuses a str as an iterable,
+    # so an `enumerate`/`zip`/`.items()` element is a full `ail_str` out of a list of str (or a
+    # dict value), not a character.  Registering it in `onecp`/`len1_names` made `_one_cp` claim
+    # a length of 1, so `if v != "":` on an empty string was folded to "true" and the element was
+    # kept -- a silent difference from CPython.
+    try:
+        head = 'for (int64_t _i = %s; _i < %s; _i++) {' % (lo, n)
+        if pre:
+            head = '%s %s' % (' '.join(pre), head)
+        ctype = 'ail_str' if elem_is_str else 'double' if elem_is_float else 'int64_t'
+        key_ctype = ('ail_str' if key_kind == STR else 'double' if key_kind == FLT
+                     else 'ail_bytes' if key_kind == BYTES else 'int64_t')
+        lines = [head,
+                 '%s %s = %s;' % (key_ctype, ck, kexpr.replace('@', '_i')),
+                 '%s %s = %s;' % (ctype, cv, vexpr.replace('@', '_i'))]
+        for cond in g.ifs:
+            cc = _cond(cond, ctx)
+            lines.extend(ctx.pre); ctx.pre = []
+            lines.append('if (!(%s)) continue;' % cc)
+        val = _str_value(node.elt, ctx) if kind == SLIST else _expr(node.elt, ctx)
+    finally:
+        ctx.comprehension_cnames = old_cnames
+        ctx.onecp, ctx.len1_names = old_onecp, old_len1
+        ctx.types.pop(key, None); ctx.kind.pop(key, None)
+        ctx.types.pop(value, None); ctx.kind.pop(value, None)
+        if old_type is not None:
+            ctx.types[key] = old_type
+        if old_kind is not None:
+            ctx.kind[key] = old_kind
+        if old_vtype is not None:
+            ctx.types[value] = old_vtype
+        if old_vkind is not None:
+            ctx.kind[value] = old_vkind
+    lines.extend(ctx.pre); ctx.pre = []
+    helper = 'ail_slist' if kind == SLIST else 'ail_flist' if kind == FLIST else 'ail_list'
+    lines.append('%s_push(&%s, %s);' % (helper, c, val))
+    lines.append('}')
+    ctx.pre.append('%s_clear(&%s);' % (helper, c))
+    ctx.pre.append('{ %s }' % ' '.join(lines))
     return c
 
 
@@ -22079,6 +22286,14 @@ def _stmt_inner(node, ctx, ind):
             # (LIST,) + TAB` guard, or `ctx.declare` below still raises on the kind mismatch) and
             # is refused exactly as before, by the same `ctx.declare` check, with the same message.
             src_kind = ctx.types[node.value.id]
+            if src_kind in TAB and node.value.id in (ctx.skeys | ctx.bkeys):
+                # A str/bytes-keyed table is an ail_stab/ail_btab, and there is no int-table
+                # `ail_tab_copy` for it: copying one would pass the wrong struct type to C. The
+                # general path copies these correctly, so refuse by name here instead.
+                element = 'str' if node.value.id in ctx.skeys else 'bytes'
+                raise Unsupported('%r is keyed by %s; copying it into another name is not built '
+                                  'on the typed path -- the general path handles it'
+                                  % (node.value.id, element))
             c = ctx.declare(t.id, src_kind)
             ctx.parts.add('LIST' if src_kind == LIST else 'TAB')
             pre = _flush(ctx, pad)
@@ -30511,6 +30726,9 @@ def _caller_ctx(f, sigs, arity_seed=None, classes=None, owned_str_fns=None, owne
         _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
         _bind_object_types(f, ctx)
+        # A pair comprehension over an unannotated dict's `.items()` reads the key kind from
+        # `ctx.skeys`; inference has to settle it here too, before `_comprehension_claims` asks.
+        ctx.skeys = _mark_str_containers(f, ctx)
         ctx.comp_claims = _comprehension_claims(f, ctx)
     except Unsupported:
         pass
@@ -31043,6 +31261,7 @@ def _settle_return_kinds_pass(fns, sigs, grid_fns, classes, arity_seeds,
             _settle_module_vars(f, ctx)
             _bind_container_types(f, ctx)
             _bind_object_types(f, ctx)
+            ctx.skeys = _mark_str_containers(f, ctx)
             ctx.trowsf = _propagate_row_float(
                 f, ctx.trowsf | (set(ctx.tstride) & ctx.flist), set(ctx.tstride))
             returns = [n.value for n in ast.walk(f) if isinstance(n, ast.Return) and n.value]
@@ -31086,6 +31305,7 @@ def _clone_return_kind(f, params, sigs, generic_ret, grid_fns, classes=None,
         _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
         _bind_object_types(f, ctx)
+        ctx.skeys = _mark_str_containers(f, ctx)
         ctx.numeric_return_kinds = _numeric_loop_return_evidence(f, ctx)
         kinds = {_return_kind(n.value, ctx) for n in ast.walk(f)
                  if isinstance(n, ast.Return) and n.value}

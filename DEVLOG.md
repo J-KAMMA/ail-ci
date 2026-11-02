@@ -236,6 +236,78 @@ refused by name on both builds.  Tests: test_ail_prog12, test_ail_tuples, test_a
 test_ail_files and test_ail_corpus_findings3.  The generated C of the ten `lab/compare` tasks is
 byte-identical.
 
+## 2026-11-02 -- prog15 review 2 follow-up: keep the alias refusal for unannotated str-keyed dicts (job prog15)
+
+The typed assignment now refuses `e = d` for an unannotated str/bytes-keyed dict by name ("keyed by
+str; copying it into another name is not built on the typed path").  That refusal is a symptom when
+the same function also aliases the dict, so `aliasrefuse.refuse_instead` -- which already promoted
+"used where a number is needed" to the real aliasing site -- now recognises this message too and
+reports `DICT_ALIAS_UNTYPED`'s actual "makes a second name for the same container" reason again.
+Without an aliasing site the original str-keyed copy refusal is unchanged.  Pins refreshed; the
+typed/general outputs of the fuzz-findings refusal and alias cases are unchanged.
+
+## 2026-11-02 -- prog15 review 2: a pair target is not a one-code-point view (job prog15)
+
+`_listcomp_pair_into_temp` registered the second name of every `enumerate` / `zip` / `.items()`
+target in `ctx.onecp`/`ctx.len1_names` whenever its source element was a str.  A pair element is a
+full `ail_str` out of a list of str (or a dict value), never a character: `_iter_plan` refuses a
+str used as an iterable, so the one-code-point claim was always false here.  `_one_cp` then
+reported a length of 1, and `if v != "":` folded to true, so an empty string stayed in the result
+(`['A', 'BB', 'CCC']` where CPython gives `['A', 'CCC']`).  The names are now left out of that
+optimisation; inequality goes through `ail_str_eq`.  String keys never had the flag and were
+already correct.  Added `enum_nonempty` / `zip_nonempty` to `test_ail_prog15.py`.  Probes
+`/tmp/probes/p8_cond.py` (value conditions on enumerate/zip, both builds) and `p9_keycond.py` (key
+conditions for str/float/int keys and `.items()`), `p10_nonzero.py` (enumerate from a nonzero
+range/slice) and `p2_zip_items.py` match CPython on both `cmp.sh` builds and take the typed path
+under `--strict`; the new pair path is not used by any `lab/compare` source (AST scan), so their C
+is unchanged.
+
+## 2026-11-02 -- prog15 review fixes: zip key kinds and str-keyed `.items()` (job prog15)
+
+Review follow-up on `756476d`.  The pair-target list-comprehension lowering had forced the FIRST
+name to int64, which truncated a `zip` whose first iterable was `list[float]` and generated invalid
+C for `list[str]`; it also read every unannotated `dict.items()` through `ail_tab`, so a str-keyed
+dict's keys hit the wrong struct.  `_pair_key_kind` now takes the key kind from the first `zip`
+iterable, from `enumerate` (int) or from the dict's key table (int/str; a bytes-keyed table is
+refused by name and left to the general path).  `_listcomp_kind` and `_listcomp_pair_into_temp`
+declare key and value with their real C types, so `zip` over float/str keeps its values and
+`[k for k, v in d.items()]` over an unannotated str-keyed dict is typed and matches CPython.
+Inference contexts seed `ctx.skeys` before asking the same questions.
+
+This also exposed an unrelated latent bug: aliasing a str/bytes-keyed unannotated dict (`e = d`)
+on the typed path called `ail_tab_copy` on an `ail_stab`/`ail_btab` and was rejected by C.  The
+typed assignment now refuses that copy by name, so the program falls back to the general path and
+matches CPython (the identical refusal for a str/bytes keyed set).  The test program gained
+float-first and str-first `zip` cases plus unannotated str-keyed `.items()` key/value cases; the
+docstring's "other six" count is corrected to five.  Probes `/tmp/probes/prog15r_{zip_kinds,
+items,sources,bytes_items,bounds}.py` and the reviewer's `/tmp/rprobes/iso2/{h,i,j,k,l,m}.py`,
+`p4e`/`p4f` match CPython on both `cmp.sh` builds; the C of all 17 buildable `lab/compare` ail/py
+pairs stays byte-identical (the three `main.py` tasks fail identically on base and current).
+
+## 2026-11-02 -- prog15: pair targets in list comprehensions type the hot functions of g08 (job prog15)
+
+The typed list-comprehension path refused a pair target (`for j, value in enumerate(r)`) even
+though the fold path had walked the same shape for a long time.  `_listcomp_kind` now accepts a
+two-name target and the new `_listcomp_pair_into_temp` builds the loop from `_pair_plan`
+(`enumerate`, `zip`, and a typed dict's `.items()`), binding the key as int and the value as the
+source element kind (int/float/str).  The nested-list pass already lowered the outer row
+comprehension of `lab/census/programs/gdev/g08_018.py`; only the inner row comprehension was left,
+so the whole program (`determinant`, `minor`, `main`) is now typed and matches CPython.  Programs
+that already compiled keep their C; `lab/compare` generated C is byte-identical for all 17
+buildable ail/ail-py pairs (the three failing `main.py` tasks fail identically on the base).
+
+`lab/progfix/prog15.md` records the cProfile hot functions, their before/after status and the
+first reason for the six programs that stay general: enum/dataclass expansion (g14), `tuple(...)` /
+variadic tuples (g17), dynamic `json.loads` (t186), union annotations + `match` (g25), and set
+comprehensions + `frozenset` constants (g16).  `g02` and `t012` were already typed.
+
+`AIL_CURRENT/test_ail_prog15.py` (registered by `tests.d/test_ail_prog15.txt`) compiles the eight
+programs and compares them with CPython, checks their typed/general status, exercises pair-target
+comprehensions over int, float, str, `zip`, an attribute and a list item, and keeps a typed check.
+Probes `/tmp/probes/prog15_g08.py`, `prog15_pair.py`, `prog15_pair_alias.py` and
+`prog15_pair_edge.py` match CPython on both `cmp.sh` builds.  The commit also includes the pending bytearray repeat / slice-assignment changes in `pyfunc.py`
+and the matching `cruntime.py` `BAREPEAT`/`BASLICEASSIGN` fragments, which were already in the
+working tree and are exercised by the bytearray test modules.
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
