@@ -22227,6 +22227,11 @@ def _stmt_inner(node, ctx, ind):
         else:
             v = (_olist_value(node.value, ctx.ret, ctx) if _is_olist_kind(ctx.ret)
                  and isinstance(node.value, ast.List) else _expr(node.value, ctx))
+        if ctx.ret == NSUM and _etype(node.value, ctx) == FLT:
+            # A return path beside `return sum(xs)` that gives a definite float: the C return type
+            # is the NSUM struct, so wrap it with the int0 flag cleared (never the empty-sum int 0).
+            ctx.parts.add('FSUM')
+            v = 'ail_nsum_from_float((double)(%s))' % v
         if _managed_obj(ctx.ret, ctx) and v in getattr(ctx, 'fresh_obj', {}):
             v = '({ %s *_m = %s; %s = 0; _m; })' % (_ref_ctype(ctx.ret, ctx), v, ctx.fresh_obj[v])
         elif _managed_obj(ctx.ret, ctx):

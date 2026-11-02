@@ -1,3 +1,20 @@
+## 2026-11-02 -- prog8 review fix 3: float returns beside NSUM (job-prog8-11021515)
+
+Fixed the remaining review defect: a function whose return kind is `NSUM` (because one path is
+`return sum(xs)` over a `list[float]`) and whose other path returns a definite float emitted a raw
+`double` where C expected `ail_nsum`, so the default build failed to compile (`incompatible types
+when returning type 'double' but 'ail_nsum' was expected`). The `ast.Return` path now wraps a
+float value with `ail_nsum_from_float`, clearing the int-0 flag exactly as assignments and `+=`
+already did. The docs now describe `NSUM` as `ail_nsum { double v; int64_t is_int0; }` instead of
+the obsolete `-0.0` sentinel (`SEMANTICS.md`, the C1 row of `docs/spec/DIFFERENCES.md`).
+
+Probes `/tmp/probes/mixed_return_all.py` (parameter, computed expression, list item, attribute,
+dict value, `-0.0`; empty and non-empty sums) and `/tmp/p14c.py` match CPython on both `cmp.sh`
+builds, and all their functions stay on the typed path under `--strict`. `test_ail_prog8` gained
+`MIXED_RETURN` for this shape. `test_ail_prog8`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_nested_lists`, `test_ail_float_argument_widening` and
+`test_ail_spec_fixes` pass; `tools/update_manifest.py --check` is 0.
+
 ## 2026-11-02 -- prog8 review fix 2: exact NSUM through control flow (job-prog8-11021227)
 
 Fixed both defects the review found in the empty-float-`sum` change. `NSUM` is no longer a bare

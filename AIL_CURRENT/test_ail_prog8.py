@@ -214,6 +214,68 @@ NSUM_FLOW = '''def main() -> None:
 main()
 '''
 
+MIXED_RETURN = '''class Box:
+    def __init__(self, v: float):
+        self.v = v
+
+
+def make() -> dict[str, float]:
+    d: dict[str, float] = {}
+    d["v"] = 3.25
+    return d
+
+
+def from_arg(x: float, xs: list[float], n: int) -> float:
+    if n > 0:
+        return sum(xs)
+    return x
+
+
+def from_expr(x: float, xs: list[float], n: int) -> float:
+    if n > 0:
+        return sum(xs)
+    return x * 2.0 + 1.0
+
+
+def from_item(flat: list[float], xs: list[float], n: int) -> float:
+    if n > 0:
+        return sum(xs)
+    return flat[1]
+
+
+def from_attr(b: Box, xs: list[float], n: int) -> float:
+    if n > 0:
+        return sum(xs)
+    return b.v
+
+
+def from_dict(d: dict[str, float], xs: list[float], n: int) -> float:
+    if n > 0:
+        return sum(xs)
+    return d["v"]
+
+
+def negzero(xs: list[float], n: int) -> float:
+    if n > 0:
+        return sum(xs)
+    return -0.0
+
+
+def main() -> None:
+    xs = [1.5, 2.5]
+    empty: list[float] = []
+    flat = [7.5, 8.5]
+    print(from_arg(4.5, xs, 1), from_arg(4.5, xs, 0), from_arg(4.5, empty, 1))
+    print(from_expr(2.0, xs, 1), from_expr(2.0, xs, 0), from_expr(2.0, empty, 1))
+    print(from_item(flat, xs, 1), from_item(flat, xs, 0), from_item(flat, empty, 1))
+    print(from_attr(Box(9.5), xs, 1), from_attr(Box(9.5), xs, 0), from_attr(Box(9.5), empty, 1))
+    print(from_dict(make(), xs, 1), from_dict(make(), xs, 0), from_dict(make(), empty, 1))
+    print(negzero(xs, 1), negzero(xs, 0), negzero(empty, 1))
+
+
+main()
+'''
+
 ENUM_STR = '''from dataclasses import dataclass
 
 
@@ -371,6 +433,11 @@ class ProgramEight(unittest.TestCase):
         # represented exactly, so it is refused by name and the general path answers; every
         # other merge stays typed.
         self.compare(NSUM_FLOW, 'nsumflow')
+
+    def test_mixed_nsum_and_float_returns_are_typed(self):
+        res, c_text = self.compare(MIXED_RETURN, 'mixedreturn')
+        self.assertTrue(typed(res), 'fell back to the general path: ' + res.stderr[-1000:])
+        self.assertIn('ail_nsum_from_float', c_text)
 
     def test_first_non_repeating_enumerate_str_is_typed(self):
         res, c_text = self.compare_tree_program(

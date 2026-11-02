@@ -9522,8 +9522,10 @@ answer, checked against CPython 3.12 by `test_ail_spec_fixes`.
   `ail_sum_step`). An int item inside the float run is added plainly; a non-number ends the run and drops the
   compensation. `sum(xs[:k])` over a slice of a `list[float]` is built on the typed path. CPython starts that sum
   from the int `0`, so an empty sequence gives the int `0` and a non-empty one a float; the typed value kind `NSUM`
-  carries both (a `double` with `-0.0` as the empty-sum sentinel, which a non-empty Neumaier run never produces).
-  `print` writes the sentinel as `0` and every other value as the float it is. A fold counts the elements it
+  carries both as the C struct `ail_nsum { double v; int64_t is_int0; }`, whose explicit flag marks CPython's
+  empty-sum int `0` without confusing it with a genuine `-0.0` (a non-empty Neumaier run never produces the int 0).
+  `print` writes a value with `is_int0` set as `0` and every other value as the float it is. A fold counts the
+  elements it
   actually adds, so a filter that removes every element still gives the int `0`. Uses that cannot keep the two
   cases exact are refused by name: arithmetic with an int (other than true division), `**`, unary numeric
   operators, `abs`, two-argument `min`/`max`, `round`, default or int-type formatting, storage in a
