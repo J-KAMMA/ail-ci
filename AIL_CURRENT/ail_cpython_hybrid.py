@@ -158,16 +158,10 @@ def _unsafe_body(fn, module_names=frozenset()):
     return None
 
 
-def _list_param_mutated(fn, list_params):
-    """A list argument is copied into the typed call, so a function that mutates it must stay in
-    CPython (mutation would otherwise not be visible to the caller).  This also refuses passing a
-    list parameter on to another user function, which may mutate it one step away."""
-    if not list_params:
-        return False
-    # A local assigned straight from a list parameter is another name for the caller's list in
-    # CPython; the typed clone got a copy, so a store through the alias is just as invisible to
-    # the caller as a store through the parameter itself.  Follow simple aliases to a fixed point
-    # (a rebinding away from the alias later only makes this answer more conservative).
+def _list_aliases(fn, list_params):
+    """List parameter names plus locals assigned straight from one, to a fixed point.  In CPython
+    such a local is another name for the caller's list; the typed clone got a copy.  A rebinding
+    away from the alias later only makes this answer more conservative."""
     aliases = set(list_params)
     while True:
         grown = False
@@ -181,6 +175,16 @@ def _list_param_mutated(fn, list_params):
                         grown = True
         if not grown:
             break
+    return aliases
+
+
+def _list_param_mutated(fn, list_params):
+    """A list argument is copied into the typed call, so a function that mutates it must stay in
+    CPython (mutation would otherwise not be visible to the caller).  This also refuses passing a
+    list parameter on to another user function, which may mutate it one step away."""
+    if not list_params:
+        return False
+    aliases = _list_aliases(fn, list_params)
     for node in _own_nodes(fn):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
@@ -202,6 +206,23 @@ def _list_param_mutated(fn, list_params):
         if isinstance(node, ast.Call):
             for arg in list(node.args) + [kw.value for kw in node.keywords]:
                 if isinstance(arg, ast.Name) and arg.id in aliases:
+                    return True
+    return False
+
+
+def _list_param_returned(fn, list_params):
+    """A list result is boxed into a fresh Python list, so returning a list parameter or a local
+    alias of one would lose CPython's identity and later aliasing between caller and result.  A
+    return that mentions such a name anywhere is refused conservatively (a fresh list expression
+    containing the name is not accelerated either)."""
+    if not list_params:
+        return False
+    aliases = _list_aliases(fn, list_params)
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Return) and node.value is not None:
+            for sub in ast.walk(node.value):
+                if (isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load)
+                        and sub.id in aliases):
                     return True
     return False
 
@@ -426,6 +447,9 @@ def _select(src, tree, report, facts):
         list_params = {p for p, k in params if k in _LIST}
         if _list_param_mutated(funcs[pyname], list_params):
             rejected[pyname] = 'the list parameter is mutated'
+            continue
+        if ret in _LIST_RET and _list_param_returned(funcs[pyname], list_params):
+            rejected[pyname] = 'the result can be a list parameter (identity would be lost)'
             continue
         chosen[pyname] = {
             'name': pyname, 'mangled': mangled, 'params': params,

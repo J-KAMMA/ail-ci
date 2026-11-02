@@ -38,10 +38,14 @@ first selection refusal for the hot function.
    status match CPython (stderr is the typed one-line message, declared in DIFFERENCES).  Only
    `range` and `int` are allowed among pure builtin calls; `float`/`ord`/`chr`/... raise exception
    types pymix does not track and stay boxed.  `assert`, an untracked raise expression, arbitrary
-   calls, attribute stores and `try`/`with`/import also stay boxed.
+   calls, attribute stores and `try`/`with`/import also stay boxed.  A `range(start, stop, step)`
+   call with a non-literal or zero step is also a tracked `ValueError` site, so a boxed caller's
+   `except ValueError` cannot be bypassed.
 5. A local assigned straight from a list parameter is followed as an alias, so a store through it
    cannot silently mutate only the clone's copy; the function stays in CPython.  A local list the
-   function owns is still a valid clone target.
+   function owns is still a valid clone target.  Returning a list parameter or such an alias from a
+   list-returning function is refused too: the wrapper boxes the result into a fresh list, which
+   would break CPython's object identity and later aliasing.
 6. `pyboxed2` emits length-then-fill units for `list[int]`/`list[float]` returns; the hybrid boxes
    them, and an int64 overflow inside the clone returns `-1` so the wrapper runs the original
    CPython function.  These units are linked into a plain general build only when the hybrid capture
@@ -51,5 +55,6 @@ first selection refusal for the hot function.
 The four newly typed hot functions are `fibonacci_mod`, `card_value`, `catalan_numbers` and
 `count_no_adjacent_ones`.  `AIL_CURRENT/test_ail_prog6.py` builds each program and compares it with
 CPython, including overflow/negative/invalid-input fallbacks, an uncaught trap after earlier output,
-list aliasing, an untracked pure call and a fall-through return.  Probes in `/tmp/probes` cover the
-boundaries on both standalone builds and the hybrid.
+list aliasing, a boxed `except ValueError` around a zero-step `range`, a list-parameter result, an
+untracked pure call and a fall-through return.  Probes in `/tmp/probes` cover the boundaries on
+both standalone builds and the hybrid.

@@ -1,3 +1,22 @@
+## 2026-11-02 -- prog6 review fixes: range step ValueError and list-return identity (job-prog6-11020729)
+
+Fixed the two defects the reviewer found in the prog6 hybrid work. `pymix._raise_site_exc` now treats
+`range(start, stop, step)` with a non-literal step (or a zero literal) as a `ValueError` site, so a
+boxed caller's `except ValueError` is not bypassed when the step turns out to be zero. The hybrid
+selection also refuses a list-returning clone whose return value can be a list parameter or a local
+alias of one, because the wrapper boxes the result into a fresh list and CPython's identity/aliasing
+would be lost. Functions that own their result list (for example `catalan_numbers`) still compile.
+
+Probes `prog6_range_step.py`, `prog6_range_step_sources.py` (step through an argument, a list item, an
+attribute and a dict value), `prog6_list_ident.py` (parameter, alias, local list, negative and empty)
+and `prog6_list_ident_global.py` match CPython on both standalone builds via `~/tools/cmp.sh` and on
+the hybrid build; the hybrid accelerated only `local` in the identity probe and left the parameter
+returns boxed. Added the corresponding regression cases to `test_ail_prog6.py`. Targeted modules
+`test_ail_prog6`, `test_ail_cpython_hybrid`, `test_ail_mixed_bounds`, `test_ail_stdout_mixed`,
+`test_ail_stdout_mixed_resources`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (8 modules, 0 failed). Generated C is byte-identical to `/tmp/base`
+for all ten `lab/compare` tasks and all eight target programs, and `update_manifest.py --check` is clean.
+
 ## 2026-11-01 -- typed reach on eight real programs: four hot functions now compile on the hybrid path (job-prog6-11020729)
 
 Profiled the eight programs with CPython 3.12 and `cProfile` (all self times round to 0.000 s because

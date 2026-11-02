@@ -244,6 +244,17 @@ def _raise_site_exc(node):
         return 'IndexError'
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'int':
         return 'ValueError'
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'range':
+        # `range(start, stop, 0)` raises ValueError in CPython, so a dynamic step is a trap site
+        # even though the typed emitter has no exception of its own for it.  A literal nonzero
+        # step cannot raise here (the arguments are already the call's int operands).
+        step = node.args[2] if len(node.args) >= 3 else None
+        for kw in node.keywords:
+            if kw.arg == 'step':
+                step = kw.value
+        if step is not None and not _provably_nonzero(step):
+            return 'ValueError'
+        return None
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'input':
         return 'EOFError'
     return None

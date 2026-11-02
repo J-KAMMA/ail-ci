@@ -33,7 +33,8 @@ The unit is one top-level function. Selection reuses the existing mixed-mode mac
   raise expression, `try`/`with`/import, `global`/`nonlocal`, deletes, attribute stores and a
   subscript store through a list parameter or a local alias of one. Only `range` and `int` among
   the pure builtins are allowed (`int` is tracked by the exception rule and its infinity case goes
-  through the boxed fallback). A missed speed-up is safe.
+  through the boxed fallback; `range(start, stop, step)` is a tracked ValueError site unless the
+  step is a nonzero literal). A missed speed-up is safe.
 
 The analysis runs the real CLI general path in a temporary subprocess and captures the mixed-mode
 units it already emits. If the CLI refuses the program, a direct `pyboxed2.build` on the original
@@ -46,6 +47,8 @@ A candidate is wrapped only when all of these hold:
 * the result is `int`, `bool`, `float`, `str`, `list[int]` or `list[float]`;
 * no list parameter is mutated (directly, through a local alias, by augmented assignment, or by being
   passed on to another program function that could mutate it);
+* a list result does not return a list parameter or a local alias of one (the wrapper boxes the
+  result into a fresh list, so CPython's object identity and later aliasing would be lost);
 * the function does not print (`print`/`assert` I/O is excluded by `_setup_mix`);
 * a function marked as possibly needing a big int is either an int result (the overflow wrapper can
   fall back) or stays in CPython;
@@ -131,7 +134,8 @@ parameter (item/store/delete, `append`/`extend`/`pop`/..., or passing the list t
 function that may mutate it) is therefore not accelerated; it remains the original Python function,
 so the mutation is visible to the caller. Direct-mutation syntax is refused at selection time, not
 silently copied back, and a local assigned straight from a list parameter is followed as an alias so
-a later store through it is refused too.
+a later store through it is refused too. For the same reason a list result is never allowed to return
+a list parameter or one of its aliases: the fresh boxed list would break identity.
 
 ## 4. Parallelism
 

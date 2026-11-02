@@ -86,6 +86,51 @@ def card_value(rank: str) -> int:
 print(card_value(%r))
 '''
 
+RANGE_STEP = '''
+def loop(n: int, step: int) -> int:
+    total = 0
+    for i in range(0, n, step):
+        total += i
+    return total
+
+def use(n: int, step: int) -> int:
+    try:
+        return loop(n, step)
+    except ValueError:
+        return -1
+
+print(use(5, 1))
+print(use(5, 0))
+print(use(5, -1))
+print(loop(10, 2))
+'''
+
+LIST_IDENT = '''
+def ident(xs: list[int]) -> list[int]:
+    return xs
+
+def ident_alias(xs: list[int]) -> list[int]:
+    ys = xs
+    return ys
+
+def local(n: int) -> list[int]:
+    ys: list[int] = [0] * n
+    for i in range(n):
+        ys[i] = i + 1
+    return ys
+
+a = [1, 2]
+b = ident(a)
+print(ident(a) is a)
+b[0] = 9
+print(a, b)
+print(ident_alias(a) is a)
+c = ident_alias(a)
+c[1] = 7
+print(a, c)
+print(local(3))
+'''
+
 TRAP_FLUSH = '''
 def pick(xs: list[int], i: int) -> int:
     return xs[i]
@@ -219,6 +264,20 @@ class Prog6Typed(unittest.TestCase):
             for func in ('pick', 'divide', 'check'):
                 self.assertIn(func, report['accelerated'], report)
             self.compare(tmp, src, out, 'flush')
+
+    def test_range_zero_step_caught_by_boxed_caller(self):
+        with tempfile.TemporaryDirectory(prefix='ail-prog6-') as tmp:
+            src, out, report = self.build(tmp, 'range_step', RANGE_STEP)
+            self.assertNotIn('loop', report['accelerated'], report)
+            self.compare(tmp, src, out, 'range_step')
+
+    def test_list_parameter_return_stays_boxed(self):
+        with tempfile.TemporaryDirectory(prefix='ail-prog6-') as tmp:
+            src, out, report = self.build(tmp, 'list_ident', LIST_IDENT)
+            self.assertNotIn('ident', report['accelerated'], report)
+            self.assertNotIn('ident_alias', report['accelerated'], report)
+            self.assertIn('local', report['accelerated'], report)
+            self.compare(tmp, src, out, 'list_ident')
 
     def test_list_parameter_alias_mutation_stays_boxed(self):
         with tempfile.TemporaryDirectory(prefix='ail-prog6-') as tmp:
