@@ -6,62 +6,62 @@
 
 --- LAST REVIEW ---
 ## review 1
-[model opencode-go/deepseek-v4.1-flash]
-## Review — `work..HEAD` (`53a8bf0`, `d8ae83d`)
+[model opencode/deepseek-v4.1-flash-free]
+## Review — `work..HEAD` (`f5da488`, `8e626c0`, `11fbf00`)
 
-**What the change really does.** Re-applies the accepted `std_typing` lowering (`TypedDict`, `NewType`, `cast` in `typinglib.py`, `typing` added to the stdlib-5 gate) and then adds scope-aware `cast` shadowing and a helper-based TypedDict constructor for scopes where `dict` is shadowed. It also brings the lab programs, `test_ail_std_typing`, `DIFFERENCES`/`DEVLOG` and manifest updates. This matches the task; the report's summary omits the re-apply itself but the commits contain it.
+**What the change really does.** It replaces the TypedDict `dict(...)`/shadowed-`dict` paths with one generated helper (`td_base`/`td_add`/`td_splash`/`td_done`) that records positional and keyword sources, checks mapping, duplicate keys, string keys and arity, and keeps the functional declaration's declared typename. It also refuses module-level rebinding of handled typing names/aliases. The helper now materialises `*args` as a list, which changes evaluation order.
 
-**Claims checked**
-- `cast` respects lexical shadowing: **partially verified**. Parameter, local, nested closure and local module-alias shadowing match CPython; module-level rebinding does not (defect 1).
-- `TypedDict(...)` no longer captures local/parameter `dict`: **verified** (`p_td_dict_param`, `p_td_dict_local`, `p_td_nested_close`, `p_td_dict_module2`, `p_td_helper_errors` all match both builds, including positional/`**`/keyword/error-text cases).
-- Four named probes match: **unverified** for `p_cast_param`/`p_td_dict_param` (files absent); `p_review_cast_shadow.py` and `p_review_td_dict_shadow.py` both match.
-- Tests: **verified** — `test_ail_std_typing test_ail_safetynet test_ail_files test_ail_corpus_findings3`, 4 modules, 0 failed (362s).
-- `tools/diff_ids.py` absent: **verified**. `update_manifest.py --check`: **verified** (rc 0).
-- Non-typing C unchanged: **verified** (`program.c` and binary identical to base for a `List[int]` program and for a program containing a `typing_count` identifier).
+**Review defects from last round**
+- Module-level `cast` shadowing: **verified fixed** — `p_cast_module`, `p_cast_alias_module` match CPython via the general path.
+- TypedDict `**` non-string keys: **verified fixed** — `p_td_kw_unshadow`, `p_td_kw_param`, `r1_td_kw_edge`, `p_errtext` all match CPython on both builds.
 
-**Tests run:** 4 modules, 0 failed (above).
+**Other claims**
+- Functional declared name, duplicate/precedence order, `len` shadow, non-mapping (`list/int/str/iterable`) for `**`: **verified** (`p_rev2_functional_name`, `p_rev2_len_shadow`, `p_rev2_dict_shadow`, `p_rev2_dict_shadow_len`, `p_rev2_nonmap`, `p_errtext`, `r14`).
+- `p_rev2_precedence.py` "matches": **false** — it differs on the pre-existing positional-update message (`element #0` vs `element`); same diff on base. Not blocking.
+- `p_rev2_nonmap.py` "only keys()-only difference": **false** — `KeysGet` also differs; both custom-mapping cases are documented/pre-existing AIL `dict` limits.
+- Tests: **verified** — `test_ail_std_typing test_ail_safetynet test_ail_files test_ail_corpus_findings3`, 4 modules, 0 failed (291s). `update_manifest.py --check` rc 0.
+- Non-typing C: **verified** identical `program.c` to `/tmp/base` (only `native_report.json` temp paths differ).
 
-**Pre-existing (identical on `/tmp/base`):** `cast` used as a value (`f = cast`), local `NewType(...)`, local `TypedDict` class — all refused identically on base, so not blocking.
+**Defects**
 
-**Speed:** not measured; the change only lowers code for programs importing `typing`, so no hot-path effect.
+1. Starred positional arguments are unpacked before earlier keyword arguments.
+```python
+from typing import TypedDict
+class Movie(TypedDict):
+    title: str
+def boom():
+    print("boom")
+    raise ValueError("boom")
+try:
+    Movie(title=boom(), *5)
+except Exception as exc:
+    print(type(exc).__name__, exc)
+```
+Expected/CPython: `boom` then `ValueError boom`. Actual HEAD (both builds): `TypeError 'int' object is not iterable` (no `boom`). `_typed_dict_expr` puts `node.args` into a list before applying keywords, so `Movie(title=f(), *g())` evaluates `g` before `f`; base refused starred TypedDict calls by name.
 
----
+2. Non-iterable `*` reports a different error.
+`p_star_bad.py` (`Movie(*5)`, `Movie(*None)`): expected `TypeError __main__.Movie() argument after * must be an iterable, not int`; actual `TypeError 'int' object is not iterable`.
+
+**Pre-existing (identical on `/tmp/base`):** positional-update message missing `#0` (`Movie([1])`, `Movie([1], **{...})`); `keys()`/`__getitem__` custom mappings still rejected (base also failed, documented in `DIFFERENCES.md`); rebinding through `global cast` inside a function still lowers to the value (`MY:5` vs `5`); TypedDict values/aliases (`M = Movie`) still fail to compile.
+
+**Observation (not counted — named refusal):** module-level `dict = 5` (and `isinstance = 5`) with a TypedDict call now refuses to compile because the generated helper mentions `dict`; base compiled that program and matched CPython. The refusal is named, so per the rules I do not count it as a blocking defect.
+
+**Speed:** not measured; the change only affects programs that import `typing` and construct a TypedDict.
 
 VERDICT: FIX
 
-1. Module-level `cast` shadowing is silently lowered to the value (regression: base and CPython call the rebound name).
-   `p_cast_module_shadow.py`:
-   ```python
-   from typing import cast
-   def mycast(ty, v): return "MY:" + str(v)
-   cast = mycast
-   print(cast(0, 5))
-   ```
-   Expected/CPython/base: `MY:5`; actual HEAD (both builds): `5`.
-   Same with a rebound module alias (`import typing as t; t = Mod()`, `p_cast_alias_module.py`): expected `M:5`, actual `5`.
-
-2. TypedDict construction via `**` accepts non-string keys instead of raising.
-   `p_td_kw_unshadow.py` (and the same with a parameter named `dict`):
-   ```python
-   from typing import TypedDict
-   class Movie(TypedDict):
-       title: str
-   def a():
-       return Movie(**{1: 2})
-   try: print("unshadow", a())
-   except Exception as exc: print("unshadow", type(exc).__name__, exc)
-   ```
-   Expected/CPython: `unshadow TypeError keywords must be strings`; actual HEAD (both builds): `unshadow {1: 2}`. The `dict(data)` special case and `_ail_typed_dict_new` both drop CPython's string-key requirement for `**`.
-[cost $0.0341, opencode tokens {"total": 1356788, "input": 76864, "output": 6943, "reasoning": 24469, "cache.write": 0, "cache.read": 1248512}]
-    tool time: bash 7.7 min
-        364s bash   date; cd /home/runner/work/_temp/w2/AIL_CURRENT && timeout 1200 python3 ../tools/par_check.py -j 2 test_ail_st
-         30s bash   cd /tmp/rprobes2 && cat > p_cast_local_shadow.py <<'EOF' from typing import cast  def fake(ty, v):     return 
-         18s bash   date; cd /tmp/rprobes2 && for p in *.py; do echo "===== $p"; timeout 300 bash ~/tools/cmp.sh /tmp/rprobes2/$p 
-         13s bash   date; cd /tmp/probes && for p in p_review_cast_shadow.py p_review_td_dict_shadow.py; do echo "=== $p"; timeout
-         13s bash   cd /tmp/rprobes2 && cat > p_td_dict_module2.py <<'EOF' from typing import TypedDict  class Movie(TypedDict):  
-          8s bash   date; cd /tmp/rprobes2 && for p in p_cast_module_shadow.py p_cast_alias_module.py; do echo "===== BASE $p"; ti
-          7s bash   cd /tmp/rprobes2 && cat > p_td_kw_unshadow.py <<'EOF' from typing import TypedDict  class Movie(TypedDict):   
-          4s bash   date; cd /tmp/rprobes2 && for p in p_cast_local_shadow.py p_td_dict_param.py p_td_dict_local.py p_cast_value.p
+1. `p_order_error.py` — expected `boom` / `ValueError boom`; actual `TypeError 'int' object is not iterable`, because `*args` is evaluated before a preceding keyword argument.
+2. `p_star_bad.py` — expected `TypeError __main__.Movie() argument after * must be an iterable, not int`; actual `TypeError 'int' object is not iterable`.
+[cost $0.0000, opencode tokens {"total": 1886158, "input": 239497, "output": 8515, "reasoning": 38914, "cache.write": 0, "cache.read": 1599232}]
+    tool time: bash 10.6 min
+        292s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && date && timeout 1800 python3 ../tools/par_check.py -j 2 test
+         57s bash   cd /tmp/rprobes && date && for p in r1_td_kw_edge r2_td_kw_mapping r3_td_alias r3a_td_alias r3b_td_container r
+         56s bash   cd /tmp/rprobes && date && for p in p_dict_global p_len_global p_str_global p_isinstance_global p_mapping_cust
+         51s bash   cd /tmp/probes && date && for p in p_rev2_precedence p_rev2_functional_name p_rev2_len_shadow p_rev2_eval_orde
+         46s bash   cd /tmp/probes && date && for p in p_td_kw_unshadow p_td_kw_param p_td_kw_places p_td_kw_mixed p_td_kw_dup p_t
+         24s bash   cd /tmp/rprobes && cat > p_errtext.py <<'EOF' from typing import TypedDict class Movie(TypedDict):     title: 
+         16s bash   cd /tmp/rprobes && date && for p in p_mapping_custom p_len_global p_str_global p_dict_global p_isinstance_glob
+         14s bash   cd /tmp/rprobes && date && for p in r2_td_kw_mapping r3_td_alias r3a_td_alias r3b_td_container r6_td_reassign 
 
 
 --- ORIGINAL TASK ---
