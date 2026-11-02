@@ -20668,14 +20668,21 @@ def _last_use_free_points(fn):
 
 
 def _loop_local_release_points(fn):
-    """{id(statement): [names]}: struct locals a loop body creates afresh every iteration.
+    """{id(statement): [names]}: locals a block inside a loop creates afresh every iteration.
 
-    `name` qualifies when the first statement of some loop body to mention it is `name = ...` (and
-    mentions it nowhere else), every mention in the function lies inside that body, and no lambda or
-    nested function sees it. Each iteration then starts with no value of its own and ends, at the
-    last top-level statement of the body that mentions it, with nothing left to read it: the slot's
-    reference can go there rather than when the next iteration overwrites it (or the loop ends),
-    which is what keeps a tree built per iteration from being held while the next one is built."""
+    `name` qualifies when its first mention is a plain fresh `name = ...` in a statement block
+    (an `if`/`elif`/`else` body or a loop body) that lies anywhere inside a loop, every mention in
+    the function lies inside that same block, and no lambda or nested function sees it. Each pass
+    through the block then starts with no value of its own and ends, at the last top-level
+    statement of the block that mentions it, with nothing left to read it: the slot's reference
+    (or list buffer) can go there rather than when the next pass overwrites it (or the function
+    ends), which is what keeps a tree built per iteration from being held while the next one is
+    built.
+
+    A value that can be observed after the block keeps today's lifetime: a read after the block,
+    a return from inside it, a store into an attribute, an append into another container, or a
+    `break`/`continue` that leaves the block. A lambda or nested function capture, an `_ail_synth`
+    name, and `t = f(t)` (which reads the previous pass's value) always disqualify as well."""
     parents = {}
     for node in ast.walk(fn):
         for child in ast.iter_child_nodes(node):
@@ -20693,6 +20700,42 @@ def _loop_local_release_points(fn):
                 captured.add(node.id)
                 break
             up = parents.get(up)
+
+    def block_of(stmt):
+        owner = parents.get(stmt)
+        if isinstance(owner, ast.If):
+            if stmt in owner.body:
+                return owner.body, owner
+            if stmt in owner.orelse:
+                return owner.orelse, owner
+        elif isinstance(owner, (ast.For, ast.AsyncFor, ast.While)):
+            if stmt in owner.body:
+                return owner.body, owner
+        return None, None
+
+    def escapes(name, block):
+        if any(isinstance(n, (ast.Break, ast.Continue)) for stmt in block for n in ast.walk(stmt)):
+            return True
+        for stmt in block:
+            for node in ast.walk(stmt):
+                if not (isinstance(node, ast.Name) and node.id == name):
+                    continue
+                child, parent = node, parents.get(node)
+                while parent is not None and not isinstance(parent, ast.stmt):
+                    if isinstance(parent, ast.Call):
+                        func = parent.func
+                        if (isinstance(func, ast.Attribute) and func.attr in ('append', 'extend', 'insert')
+                                and not (isinstance(func.value, ast.Name) and func.value.id == name)):
+                            return True
+                    child, parent = parent, parents.get(parent)
+                if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is child:
+                    targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+                    if any(isinstance(target, ast.Attribute) for target in targets):
+                        return True
+                elif isinstance(parent, ast.Return):
+                    return True
+        return False
+
     points = {}
     for name, nodes in mentions.items():
         if name in captured:
@@ -20702,18 +20745,31 @@ def _loop_local_release_points(fn):
         stmt = first
         while stmt is not None and not isinstance(stmt, ast.stmt):
             stmt = parents.get(stmt)
-        loop = parents.get(stmt)
-        if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and stmt.targets[0] is first
-                and isinstance(loop, (ast.For, ast.While)) and stmt in loop.body):
+        if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                and stmt.targets[0] is first):
             continue
-        inside = {n for st in loop.body for n in ast.walk(st)}
+        block, owner = block_of(stmt)
+        if block is None:
+            continue
+        up, in_loop = owner, False
+        while up is not None and up is not fn:
+            if isinstance(up, (ast.For, ast.AsyncFor, ast.While)):
+                in_loop = True
+                break
+            up = parents.get(up)
+        if not in_loop:
+            continue
+        inside = {n for st in block for n in ast.walk(st)}
         if any(n not in inside for n in nodes):
             continue
         if sum(1 for n in ast.walk(stmt) if isinstance(n, ast.Name) and n.id == name) != 1:
             continue                      # `t = f(t)` reads the previous iteration's value
-        top = nodes[-1]
-        while top is not None and top not in loop.body:
-            top = parents.get(top)
+        if escapes(name, block):
+            continue
+        top = None
+        for candidate in block:
+            if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(candidate)):
+                top = candidate
         if top is not None:
             points.setdefault(id(top), []).append(name)
     return points
@@ -20723,10 +20779,15 @@ def _loop_local_releases(statement, ctx, ind):
     out = []
     for name in getattr(ctx, 'loop_local_points', {}).get(id(statement), ()):
         kind = ctx.types.get(name)
-        if name in ctx.locals and name not in ctx.kind and kind is not None and _is_obj_kind(kind) \
-                and _managed_obj(kind, ctx) and name not in ctx.borrowed_aliases:
+        if not (name in ctx.locals and name not in ctx.kind and kind is not None
+                and name not in ctx.borrowed_aliases):
+            continue
+        if _is_obj_kind(kind) and _managed_obj(kind, ctx):
             out.append('%s%s(%s); %s = 0;\n' % ('    ' * ind, _ref_helper(kind, 'release'),
                                                 ctx.cname(name), ctx.cname(name)))
+        elif kind in (LIST, FLIST, SLIST):
+            # these free helpers zero the struct, so a later last-use/return free is harmless
+            out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, kind, ctx.cname(name)))
     return ''.join(out)
 
 
@@ -27030,8 +27091,13 @@ def _for_inner_impl(node, ctx, ind):
         index, _ = ctx.temp(INT)
         start, condition, update = (('%s.n - 1' % source, '%s >= 0' % index, index + '--') if reverse_numeric
                                     else ('0', '%s < %s.n' % (index, source), index + '++'))
+        tail = pad + '}\n'
+        if isinstance(numeric_source, ast.Attribute) and _numeric_field_kind(numeric_source, ctx) == numeric_kind:
+            # `for x in o.f`: `_numeric_field_value` materialised a private snapshot of the field
+            # for the walk; nothing can read it once the loop is over.
+            tail += '%sail_%s_free(&%s);\n' % (pad, numeric_kind, source)
         return (_flush(ctx, pad) + '%s(void)%s;\n%sfor (%s = %s; %s; %s) {\n%s    %s = %s.p[%s];\n' % (pad, expression, pad, index, start, condition, update, pad, element, source, index)
-                + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n')
+                + _loop_stmts(node.body, ctx, ind + 1) + tail)
     items = (isinstance(it, ast.Call) and isinstance(it.func, ast.Attribute)
              and it.func.attr == 'items' and not it.args and not it.keywords
              and _is_map_expr(it.func.value, ctx))
@@ -27902,12 +27968,24 @@ def _for_inner_impl(node, ctx, ind):
         # s.split()` first). Builds the same one-door SLIST temp `_slist_call_temp` gives `len()`
         # and indexing their own inline forms, then reads it exactly the way the Name branch does.
         ctx.parts.add('SLIST')
-        c = _slist_arg_c(it, ctx)
+        field_snapshot = None
+        if isinstance(it, ast.Attribute) and _field_kind(it, ctx) == SLIST:
+            # `for x in o.f`: the field snapshot is copied into the list the walk reads; both
+            # spines are private to this loop and are released after its closing brace.
+            field_snapshot, expression = _slist_snapshot(_attr_read(it, ctx), ctx)
+            ctx.pre.append('(void)%s;' % expression)
+            c, copy_expression = _slist_copy_c(field_snapshot, ctx)
+            ctx.pre.append('(void)%s;' % copy_expression)
+        else:
+            c = _slist_arg_c(it, ctx)
         v = ctx.declare(node.target.id, STR)
         pre = _flush(ctx, pad)
         head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
             pad, idx, idx, c, idx, pad, v, c, idx)
-        return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+        tail = pad + '}\n'
+        if field_snapshot is not None:
+            tail += '%sail_slist_free(&%s);\n%sail_slist_free(&%s);\n' % (pad, field_snapshot, pad, c)
+        return pre + head + _loop_stmts(node.body, ctx, ind + 1) + tail
     if isinstance(it, ast.Name) and ctx.type_of(it.id) == SLIST:
         # `for line in words:` -- AIL_TASK_strops_20260915.md Part B. Each element is materialised
         # into an ordinary STR local right in the loop header, one `ail_slist_get`-shaped read per
