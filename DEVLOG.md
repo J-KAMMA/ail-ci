@@ -1,3 +1,17 @@
+## 2026-11-02 -- typing review: cast and TypedDict shadowing (job-rbstd_typing-11021401)
+
+Review follow-up on `53a8bf0`. `typinglib` now checks the scope stack before lowering `cast`: a parameter, local,
+nested binding, comprehension target or a name reached through a shadowed module alias is left as the program's
+own callable, while the imported `cast` still lowers to its value. `TypedDict` construction no longer mentions the
+shadowable name `dict` when a local or parameter binds it: `Movie(**data)`, `Movie(field=...)`, `Movie()`,
+`Movie(data)` and a construction inside a nested function that closes over a local `dict` go through a generated
+module-level helper that copies into a fresh dict, so `build(dict, data)` returns the caller's data instead of
+calling the shadow. The ordinary unshadowed path keeps the accepted lowering (`dict(data)` for `Movie(**data)`).
+Probes `/tmp/rprobes/p_cast_param.py`, `/tmp/probes/p_review_cast_shadow.py`,
+`/tmp/rprobes/p_td_dict_param.py` and `/tmp/probes/p_review_td_dict_shadow.py` match CPython on both `cmp.sh`
+builds; the last covers empty, direct-keyword, functional, positional, argument, list-item, attribute, dict-value
+and nested-closure constructions.
+
 ## 2026-11-02 -- re-apply typing runtime names on the current tree (job-rbstd_typing-11021401)
 
 Re-applied the accepted `std_typing` change (job-std_typing-11020445) onto the current tree. The two

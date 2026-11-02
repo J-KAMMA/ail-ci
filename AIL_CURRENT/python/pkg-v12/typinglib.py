@@ -1,16 +1,19 @@
 """typing runtime names that are lowered to ordinary Python (called from stdlib5).
 
 * `TypedDict` class and functional declarations become plain dicts: every use of the declared name that resolves to
-  the module-level declaration is read as `dict`, the declaration itself is dropped.  A TypedDict is a dict at run
-  time in CPython, and the fields are not checked, so a literal, `Movie(title=...)`, `Movie(**data)`, item access
-  and `len` keep CPython's behaviour.  A local variable, parameter or other binding with the same name shadows the
-  declaration, exactly as it does in CPython.
+  the module-level declaration is read as the builtin `dict`, the declaration itself is dropped.  A TypedDict is a
+  dict at run time in CPython, and the fields are not checked, so a literal, `Movie(title=...)`, `Movie(**data)`,
+  item access and `len` keep CPython's behaviour.  A local variable, parameter or other binding with the same name
+  shadows the declaration, exactly as it does in CPython; a local or parameter named `dict` does not capture
+  `Movie(...)`, which is built through a module-level helper with no such name.
 * `NewType("Name", Base)` keeps CPython's call behaviour: `Name(v)` is `v` itself (not `Base(v)`), and a call
   with another arity or with any keyword raises CPython's `TypeError` text.  A use of the name that is not a
   direct call reads as an identity function of one argument (so an alias keeps working); the base, including
   a chain whose base is another NewType, is checked but not evaluated, and the declaration itself is dropped.
   A shadowing local/parameter is left alone, as for TypedDict.
 * `cast(T, value)` returns `value`; the type expression is not evaluated (it has no run-time effect in CPython).
+  A local, parameter or other binding named `cast` (or the module alias it came through) shadows the import, as
+  it does in CPython.
 
 Only the names in HANDLED are taken out of `from typing import ...`; the other typing names stay for the ordinary
 annotation handling.  `import typing` is left in place (an unused one is harmless).
@@ -122,14 +125,17 @@ def _scope_locals(nodes):
 
 
 class _Fix(ast.NodeTransformer):
-    def __init__(self, binder, typed_dicts, new_types, ident, bad):
+    def __init__(self, binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound):
         self.binder = binder
         self.typed_dicts = typed_dicts
         self.new_types = new_types
         self.ident = ident
         self.bad = bad
+        self.dict_name = dict_name
+        self.dict_bound = dict_bound
         self.ident_used = False
         self.bad_used = False
+        self.dict_used = False
         self.scopes = []
 
     def _declared(self, name):
@@ -147,6 +153,9 @@ class _Fix(ast.NodeTransformer):
             if name in names:
                 return True
         return False
+
+    def _dict_shadowed(self):
+        return self.dict_bound or self._shadowed('dict')
 
     def _visit_scope(self, kind, locals_, nodes):
         self.scopes.append((kind, locals_))
@@ -217,6 +226,12 @@ class _Fix(ast.NodeTransformer):
         name = node.func.id if isinstance(node.func, ast.Name) else None
         is_new_type = name in self.new_types and not self._shadowed(name)
         is_cast = self.binder.attr(node.func) == 'cast'
+        if is_cast and name is not None and self._shadowed(name):
+            is_cast = False
+        if (is_cast and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and self._shadowed(node.func.value.id)):
+            is_cast = False
         is_typed_dict = name in self.typed_dicts and not self._shadowed(name)
         if is_new_type:
             node.args = [self.visit(a) for a in node.args]
@@ -236,10 +251,19 @@ class _Fix(ast.NodeTransformer):
             if len(node.args) == 2 and not node.keywords:
                 return ast.copy_location(node.args[1], node)
             refuse(node, 'cast(T, value) takes two positional arguments here')
-        if (is_typed_dict and not node.args and len(node.keywords) == 1
-                and node.keywords[0].arg is None):
+        if (is_typed_dict and not self._dict_shadowed() and not node.args
+                and len(node.keywords) == 1 and node.keywords[0].arg is None):
             return ast.copy_location(ast.Call(func=ast.Name(id='dict', ctx=ast.Load()),
                                               args=[node.keywords[0].value], keywords=[]), node)
+        if is_typed_dict and self._dict_shadowed():
+            self.dict_used = True
+            keys = [ast.Constant(value=k.arg) if k.arg is not None else None
+                    for k in node.keywords]
+            values = [k.value for k in node.keywords]
+            return ast.copy_location(ast.Call(
+                func=ast.Name(id=self.dict_name, ctx=ast.Load()),
+                args=[ast.List(elts=list(node.args), ctx=ast.Load()),
+                      ast.Dict(keys=keys, values=values)], keywords=[]), node)
         return node
 
     def visit_Name(self, node):
@@ -275,8 +299,19 @@ def _fresh(tree, stem):
     return name
 
 
-def _defs(ident, bad, ident_used, bad_used):
+def _defs(ident, bad, ident_used, bad_used, dict_name, dict_used):
     out = []
+    if dict_used:
+        out.append(ast.parse(
+            'def %s(positional, keywords):\n'
+            '    if len(positional) > 1:\n'
+            '        raise TypeError("dict expected at most 1 argument, got %%d" %% len(positional))\n'
+            '    result = {}\n'
+            '    if positional:\n'
+            '        result.update(positional[0])\n'
+            '    result.update(keywords)\n'
+            '    return result\n'
+            % dict_name, mode='exec').body[0])
     if ident_used:
         out.append(ast.parse('def %s(obj):\n    return obj\n' % ident, mode='exec').body[0])
     if bad_used:
@@ -342,6 +377,9 @@ def run(tree, text):
     new_types = _resolve(new_types)
     ident = _fresh(tree, '_ail_newtype_identity')
     bad = _fresh(tree, '_ail_newtype_bad_call')
-    fix = _Fix(binder, typed_dicts, new_types, ident, bad)
+    dict_name = _fresh(tree, '_ail_typed_dict_new')
+    dict_bound = 'dict' in _scope_locals(body)
+    fix = _Fix(binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound)
     tree.body = [fix.visit(stmt) for stmt in tree.body]
-    _insert_helpers(tree, _defs(ident, bad, fix.ident_used, fix.bad_used))
+    _insert_helpers(tree, _defs(ident, bad, fix.ident_used, fix.bad_used,
+                                dict_name, fix.dict_used))
