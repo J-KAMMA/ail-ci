@@ -200,7 +200,8 @@ STRHASH = '''def _ail_strhash(s: str) -> int:
         h = wrapping_add(wrapping_mul(h, 33), ord(ch))
     return h
 '''
-SREPR = r'''def _ail_srepr(s: str) -> str:
+SREPR = r'''@UNPRINTABLE_ROWS@
+def _ail_srepr(s: str) -> str:
     if not isinstance(s, str):
         return "%r" % (s,)
     q = "'"
@@ -240,24 +241,37 @@ def _ail_escape(o: int) -> str:
 
 
 def _ail_unprintable(o: int) -> bool:
-    if o <= 160 or o == 173:
-        return True
-    if o >= 1536 and o <= 1541:
-        return True
-    if o == 1564 or o == 1757 or o == 1807 or o == 2274 or o == 5760 or o == 6158 or o == 12288:
-        return True
-    if o >= 8192 and o <= 8207:
-        return True
-    if o >= 8232 and o <= 8239:
-        return True
-    if o >= 8287 and o <= 8303:
-        return True
-    if o >= 55296 and o <= 63743:
-        return True
-    if o == 65279 or (o >= 65529 and o <= 65531):
-        return True
+    if o < 128:
+        return False
+    lo = 0
+    hi = len(_ail_unprintable_rows) // 2
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if o < _ail_unprintable_rows[2 * mid]:
+            hi = mid
+        elif o > _ail_unprintable_rows[2 * mid + 1]:
+            lo = mid + 1
+        else:
+            return True
     return False
 '''
+
+
+_UNPRINTABLE_ROWS = None
+
+
+def unprintable_rows_source():
+    """`_ail_unprintable_rows = [...]` for the running CPython's str.isprintable() table.
+
+    The table is generated from the interpreter that compiles the program, exactly as
+    cruntime._host_unprintable_rows() does for the C runtimes, so repr() spells the same
+    code points as the oracle even when its Unicode database differs from the shipped one."""
+    global _UNPRINTABLE_ROWS
+    if _UNPRINTABLE_ROWS is None:
+        import cruntime
+        text = cruntime._host_unprintable_rows()
+        _UNPRINTABLE_ROWS = ', '.join(re.findall(r'\d+', text))
+    return '_ail_unprintable_rows = [%s]\n' % _UNPRINTABLE_ROWS
 DIVMOD_I = '''def _ail_divmod_i(a: int, b: int) -> _AilT_i_i:
     return _AilT_i_i(a // b, a % b)
 '''
@@ -335,7 +349,7 @@ class Gen:
         return self.add('_ail_strhash', STRHASH)
 
     def srepr(self):
-        self.add('_ail_srepr', SREPR)
+        self.add('_ail_srepr', SREPR.replace('@UNPRINTABLE_ROWS@', unprintable_rows_source(), 1))
         return '_ail_srepr'
 
     def divmod(self, floats):
