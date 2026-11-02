@@ -195,7 +195,7 @@ class NestedLists:
     def ty(self, e, env):
         if isinstance(e, ast.Constant):
             v = e.value
-            return ('int' if isinstance(v, (bool, int)) else 'float' if isinstance(v, float)
+            return ('bool' if isinstance(v, bool) else 'int' if isinstance(v, int) else 'float' if isinstance(v, float)
                     else 'str' if isinstance(v, str) else 'bytes' if isinstance(v, bytes) else None)
         if isinstance(e, ast.JoinedStr):
             return 'str'
