@@ -1,3 +1,12 @@
+## 2026-11-02 -- prog19 fix: record t030 as not typed (job-prog19-11021530)
+
+Corrected the `dev/t030.py` row in `lab/progfix/prog19.md`: its hot `main` and `<genexpr>` are not
+typed. The default build takes the general path with `(int(x) for x in data[1:1 + n]) cannot be
+walked inline here; bind it to a name first...`, and `AIL_NO_GENERAL=1` refuses with the same named
+reason. The inline generator expression passed straight to `sorted()` is recorded as a follow-up; no
+compiler change was made. Probes: the real program on `in2` matches CPython on the default build and
+is refused by name on the strict build; the `random.choice` typed-path probes still match CPython.
+
 ## 2026-11-02 -- prog19 typed reach: random.choice of a tuple list unpacks on the typed path
 
 The hot function of `lab/census/programs/gdev/g11_018.py` is `simulate_random_walk`; it was on the
@@ -11,9 +20,10 @@ the typed path under both IR settings and prints CPython's output; list paramete
 probed against CPython on the typed and general builds.
 
 `lab/progfix/prog19.md` records the cProfile hot functions of the eight programs and their typed
-status. The other general-path programs stay recorded as follow-ups: g10's module-level dict of
-`list[int]` (and its optional list result), t078's `ord` on a non-proven one-code-point str plus
-`next(generator, default)`, and g14's typed `json.loads` with a declared result type.
+status. The other general-path programs stay recorded as follow-ups: t030's inline generator
+expression passed to `sorted()`, g10's module-level dict of `list[int]` (and its optional list
+result), t078's `ord` on a non-proven one-code-point str plus `next(generator, default)`, and
+g14's typed `json.loads` with a declared result type.
 
 Files: `python/pkg-v12/tuplib.py`, `python/pkg-v12/tupcalls.py`, `test_ail_prog19.py`.
 Tests: `test_ail_prog19`, `test_ail_tuples`, `test_ail_genlib`, `test_ail_safetynet`,
