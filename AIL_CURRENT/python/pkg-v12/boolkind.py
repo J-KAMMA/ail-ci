@@ -713,12 +713,56 @@ def _infer(info, tree, units, classes, methods, functions, declared, slots, clas
             out.pop(name, None)
         return out
 
+    def receiver_elements(key, f):
+        """{name: class} for a list name whose annotation names a class element (`x: list[Row]`):
+        `x[i]` is then a Row, so a field store through it has a known receiver class instead of
+        reaching every class that happens to use the same field name."""
+        out = {}
+        def take(name, ann):
+            if not (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+                    and ann.value.id in ('list', '__ail_checked_list')):
+                return
+            item = ann.slice
+            if isinstance(item, ast.Name) and item.id in classes:
+                out[name] = item.id
+        for a in (*f.args.posonlyargs, *f.args.args, *f.args.kwonlyargs):
+            take(a.arg, a.annotation)
+        for node in _own_nodes(f):
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                take(node.target.id, node.annotation)
+        # A list literal of rows (`x = [Row(...), Row(...)]`) says the same thing without an
+        # annotation.  Only a literal whose every element is a constructor of one class counts.
+        values = facts[key][0]
+        for name, vs in values.items():
+            if name in out or not vs:
+                continue
+            made = set()
+            for v in vs:
+                if not isinstance(v, ast.List):
+                    made = set()
+                    break
+                for e in v.elts:
+                    if (isinstance(e, ast.Call) and isinstance(e.func, ast.Name)
+                            and e.func.id in classes):
+                        made.add(e.func.id)
+                    else:
+                        made = set()
+                        break
+                if not made:
+                    break
+            if len(made) == 1:
+                out[name] = made.pop()
+        for name in facts[key][2]:
+            out.pop(name, None)
+        return out
+
     owned = set()
     raw = []                           # (unit key, class of the receiver or None, attr, kind, value, on_self)
     for key, f, owner in units:
         nodes = list(_own_nodes(f))
         owned.update(id(n) for n in nodes)
         known = receiver_classes(key, f, owner)
+        known_elem = receiver_elements(key, f)
         for a, k, v, recv in _field_events(nodes):
             if a not in field_names:
                 continue
@@ -726,6 +770,9 @@ def _infer(info, tree, units, classes, methods, functions, declared, slots, clas
                 raw.append((key, owner, a, k, v, True))
             elif isinstance(recv, ast.Name) and recv.id in known:
                 raw.append((key, known[recv.id], a, k, v, True))
+            elif (isinstance(recv, ast.Subscript) and isinstance(recv.value, ast.Name)
+                  and recv.value.id in known_elem):
+                raw.append((key, known_elem[recv.value.id], a, k, v, True))
             else:
                 raw.append((key, None, a, k, v, False))
     raw += [(None, None, a, k, v, False)

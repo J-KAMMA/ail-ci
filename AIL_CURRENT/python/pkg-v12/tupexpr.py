@@ -877,6 +877,7 @@ class Exprs:
         t = R(t)
         if isinstance(pat, ast.Name):
             if pat.id != '_':
+                self.tuple_literals.pop(pat.id, None)
                 self.env[pat.id] = t
             return
         if isinstance(pat, (ast.Tuple, ast.List)):
@@ -922,6 +923,41 @@ class Exprs:
         pre = []
         if isinstance(target, ast.List):
             target = ast.Tuple(elts=target.elts, ctx=ast.Store())
+        # -- a tuple of constant displays, walked as a list of the same items ------------------------
+        elems = None
+        if isinstance(it, ast.Tuple):
+            if all(const_display(e) for e in it.elts):
+                elems = it.elts
+        elif (isinstance(it, ast.Name) and it.id in self.tuple_literals
+              and it.id in self.iterable_only and is_tuple(R(self.env.get(it.id)))):
+            candidate = self.tuple_literals[it.id]
+            if all(const_display(e) for e in candidate):
+                elems = candidate
+        if elems is not None and not in_comp:
+            if not elems:
+                self.refuse(it, 'iterating over an empty tuple')
+            # This transform alone must not force the whole tuple pass: a program that only
+            # iterates a constant tuple (and has no other tuple use) keeps the source as written,
+            # so its general-path C is unchanged.
+            saved_quiet, self.quiet = self.quiet, self.quiet + 1
+            try:
+                lowered = [self.exv(e) for e in elems]
+                kinds = [deep(t) for _n, t in lowered]
+                if any(not known(t) for t in kinds) or len({code(t) for t in kinds}) != 1:
+                    self.refuse(it, 'iterating over a tuple whose items have different or unknown types')
+                lt = ('list', kinds[0])
+                self.use_type(lt)
+            finally:
+                self.quiet = saved_quiet
+            tmp = self.fresh()
+            self.env[tmp] = lt
+            pre.append(ast.AnnAssign(
+                target=ast.Name(id=tmp, ctx=ast.Store()),
+                annotation=ast.parse(ann_text(lt), mode='eval').body,
+                value=ast.List(elts=[n for n, _t in lowered], ctx=ast.Load()), simple=1, lineno=0))
+            old = it
+            it = name(tmp)
+            ast.copy_location(it, old)
         # -- enumerate(x[, start]) ------------------------------------------------------------------
         if self.is_call(it, 'enumerate') and isinstance(target, ast.Tuple) and len(target.elts) == 2 \
                 and 1 <= len(it.args) <= 2 and not it.keywords:
@@ -1092,11 +1128,11 @@ class Exprs:
                 fresh = self.fresh()
                 self.env[fresh] = et
                 unpacks = self.plan(target, name(fresh), et)
-                return Header(src, ast.Name(id=fresh, ctx=ast.Store()), unpacks)
+                return Header(src, ast.Name(id=fresh, ctx=ast.Store()), unpacks, pre)
             self.bind_pattern(target, et)
-            return Header(src, target)
+            return Header(src, target, pre=pre)
         if isinstance(target, ast.Name):
             self.env[target.id] = et
             if is_tuple(et):
                 pass
-        return Header(src, target)
+        return Header(src, target, pre=pre)

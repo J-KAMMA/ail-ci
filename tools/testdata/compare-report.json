@@ -1,0 +1,256 @@
+{
+ "head": "4f1245b",
+ "date": "2026-11-02",
+ "run": "41393616319",
+ "ranges": {
+  "binary_bytes": {
+   "ail": [34816, 104448],
+   "rust": [4556800, 4626432]
+  },
+  "compile_s": {
+   "ail": [1.87, 11.17],
+   "rust": [0.19, 0.56]
+  }
+ },
+ "tasks": [
+  {
+   "task": "berth_sim",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 2472,
+     "rss_kib": 244941
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1470,
+     "rss_kib": 192205
+    }
+   }
+  },
+  {
+   "task": "chain_relax",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1256
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1037
+    }
+   }
+  },
+  {
+   "task": "echo_pack",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 934,
+     "rss_kib": 354406
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1895,
+     "rss_kib": 352870
+    }
+   }
+  },
+  {
+   "task": "ledger_bin",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 840,
+     "rss_kib": 345088
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 2833,
+     "rss_kib": 280371
+    }
+   }
+  },
+  {
+   "task": "rail_transfer",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 862
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 48
+    }
+   }
+  },
+  {
+   "task": "scar_life",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 16696
+    },
+    "ail-py": {
+     "build_ok": false,
+     "correct": false,
+     "status": "build failed",
+     "path": "refused",
+     "build_error": "refused: import of 're' with a use that is not built"
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 29534
+    }
+   }
+  },
+  {
+   "task": "tally_lang",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1548
+    },
+    "ail-py": {
+     "build_ok": false,
+     "correct": false,
+     "status": "build failed",
+     "path": "refused",
+     "build_error": "refused: locals()/vars()/eval/exec in a function with a possibly-unassigned local"
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1640
+    }
+   }
+  },
+  {
+   "task": "term_rank",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 2260
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 2925
+    }
+   }
+  },
+  {
+   "task": "ticket_audit",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1887
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 4248
+    }
+   }
+  },
+  {
+   "task": "tree_fold",
+   "case": "perf",
+   "smoke": false,
+   "head": "4f1245b",
+   "date": "2026-11-02",
+   "results": {
+    "ail": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1866,
+     "rss_kib": 475750
+    },
+    "ail-py": {
+     "build_ok": false,
+     "correct": false,
+     "status": "build failed",
+     "path": "refused",
+     "build_error": "refused: import of 're' with a use that is not built"
+    },
+    "rust": {
+     "build_ok": true,
+     "correct": true,
+     "status": "ok",
+     "wall_ms": 1783,
+     "rss_kib": 322458
+    }
+   }
+  }
+ ]
+}

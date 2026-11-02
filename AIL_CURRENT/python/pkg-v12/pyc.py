@@ -275,16 +275,36 @@ def _is_docstring_stmt(node):
     return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
 
 
+def _frozenset_literal(value):
+    """Whether `value` is `frozenset("...")` / `frozenset([<str literals>])` -- the one call form
+    `pyfunc._module_frozenset` accepts as a module constant.  Kept here so `_rewrite_script` leaves
+    exactly that assignment at module scope instead of moving it into the synthesised function."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+            and value.func.id == 'frozenset' and len(value.args) == 1 and not value.keywords):
+        return False
+    arg = value.args[0]
+    if isinstance(arg, ast.Constant) and type(arg.value) is str:
+        return True
+    return (isinstance(arg, (ast.List, ast.Tuple)) and bool(arg.elts)
+            and all(isinstance(e, ast.Constant) and type(e.value) is str for e in arg.elts))
+
+
 def _is_module_const_assign(node, written=frozenset()):
     """Mirrors `pyfunc._scan_module_consts`'s own acceptance test exactly -- a single-target
-    `Name` assignment whose value is an int/float/str literal, or a non-empty numeric list/tuple
-    -- so `_rewrite_script` below leaves at module scope PRECISELY the assignments
-    `_scan_module_consts` would itself accept as a constant, and moves every other top-level
-    assignment into the synthesised function body as an ordinary local. Reusing
+    `Name` assignment whose value is an int/float/str literal, a non-empty numeric list/tuple, or
+    `frozenset(<str literal>)` -- so `_rewrite_script` below leaves at module scope PRECISELY the
+    assignments `_scan_module_consts` would itself accept as a constant, and moves every other
+    top-level assignment into the synthesised function body as an ordinary local. Reusing
     `_module_const_scalar` rather than a second copy of its literal test keeps the two rules from
     ever silently diverging (SEMANTICS section 33)."""
+    if isinstance(node, ast.AnnAssign):
+        if not (isinstance(node.target, ast.Name) and node.value is not None):
+            return False
+        return _frozenset_literal(node.value)
     if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
         return False
+    if _frozenset_literal(node.value):
+        return True
     if _module_const_scalar(node.value) is not None:
         return True
     if (isinstance(node.value, ast.Constant) and type(node.value.value) is bool
@@ -308,10 +328,10 @@ def _assign_target_names(t):
 
 
 def _count_assign_targets(nodes):
-    """How many times each name is ASSIGNED anywhere across `nodes` -- `Assign`, `AugAssign`, a
-    `for` loop's own target, `with ... as` -- at any nesting depth (inside a `for`/`if`/`while`/
-    `try` block, not just a bare top-level statement), skipping only nested `FunctionDef`/
-    `ClassDef` bodies, which are a different scope entirely. Deliberately over-, never under-,
+    """How many times each name is ASSIGNED anywhere across `nodes` -- `Assign`, `AnnAssign`,
+    `AugAssign`, a `for` loop's own target, `with ... as` -- at any nesting depth (inside a
+    `for`/`if`/`while`/`try` block, not just a bare top-level statement), skipping only nested
+    `FunctionDef`/`ClassDef` bodies, which are a different scope entirely. Deliberately over-, never under-,
     counting: a name merely referenced inside a comprehension or a lambda that this compiler will
     refuse anyway does no harm counted as an extra "assignment" (worst case a genuine constant is
     compiled as an ordinary local instead, costing nothing for a script with no other function to
@@ -341,6 +361,8 @@ def _count_assign_targets(nodes):
             if isinstance(n, ast.Assign):
                 for t in n.targets:
                     add(t)
+            elif isinstance(n, ast.AnnAssign):
+                add(n.target)
             elif isinstance(n, ast.AugAssign):
                 add(n.target)
             elif isinstance(n, ast.For):
@@ -381,6 +403,25 @@ def _reads_global(fn, name):
             else:
                 bound.add(name)
     return loads and name not in bound
+
+
+def _reads_or_calls(node, name, functions, classes, seen=None):
+    """Whether executing `node` can read the module name `name`, directly or by calling any
+    function or class of this program that (transitively) reads it.  Used for the one hoisting
+    that could hide a read-before-assignment: a module frozenset kept at module scope."""
+    if seen is None:
+        seen = set()
+    for n in ast.walk(node):
+        if not (isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)):
+            continue
+        if n.id == name:
+            return True
+        target = functions.get(n.id) or classes.get(n.id)
+        if target is not None and id(target) not in seen:
+            seen.add(id(target))
+            if _reads_or_calls(target, name, functions, classes, seen):
+                return True
+    return False
 
 
 def _entry_name(taken):
@@ -464,11 +505,42 @@ def _rewrite_script(source, force):
             continue
         if _is_docstring_stmt(n) or isinstance(n, ast.Pass):
             continue
-        if (isinstance(n, ast.Assign) and _is_module_const_assign(n, written)
-                and assign_counts[n.targets[0].id] == 1):
+        if ((isinstance(n, ast.Assign)
+             or (isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)))
+                and _is_module_const_assign(n, written)
+                and assign_counts.get(n.targets[0].id if isinstance(n, ast.Assign) else n.target.id, 0) == 1):
             kept.append(n)
             continue
         other.append(n)
+
+    # A module frozenset kept at module scope exists before every statement of the synthesised
+    # body, so a main statement that CPython would run before the source assignment must not read
+    # it: that would turn the NameError into a value.  Refuse rather than silently reorder.
+    order = {id(n): index for index, n in enumerate(expanded)}
+    other_ids = {id(n) for n in other}
+    functions = {}
+    for fn in _all_functions(expanded):
+        functions.setdefault(fn.name, fn)
+    classes = {n.name: n for n in expanded if isinstance(n, ast.ClassDef)}
+    for n in kept:
+        if isinstance(n, ast.AnnAssign):
+            target, value = n.target, n.value
+        elif isinstance(n, ast.Assign):
+            target = n.targets[0] if len(n.targets) == 1 else None
+            value = n.value
+        else:
+            continue
+        if not isinstance(target, ast.Name) or not _frozenset_literal(value):
+            continue
+        for earlier in expanded[:order[id(n)]]:
+            if id(earlier) in other_ids and _reads_or_calls(earlier, target.id, functions, classes):
+                refusal = Unsupported(
+                    "%r is a module-level frozenset read before its assignment; this compiler "
+                    "treats module constants as existing for the whole program, which would lose "
+                    "CPython's NameError. Move the frozenset assignment above the code that reads it"
+                    % target.id)
+                refusal.source_line = earlier.lineno
+                raise refusal
 
     # A module-level set / dict / list of strings that a function reads cannot become a local of the
     # synthesised body (the reader would then say "read before it is assigned"). A literal set or dict

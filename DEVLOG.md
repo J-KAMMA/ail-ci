@@ -1,3 +1,76 @@
+## 2026-11-02 -- prog29 review fixes: shadowed `len` and frozenset reads before assignment
+
+Two review defects, both in the module-`frozenset` support, are fixed without touching a program.
+
+* `pyfunc._frozenset_read_reason` now checks that the `len(V)` it lowers is the builtin.  A local,
+  parameter, nested `def`, class-body or module binding named `len` makes the read a refusal by
+  name instead of passing the ordered `list[str]` constant to user code.  A `len` shadowed only in
+  an unrelated inner scope still leaves the outer builtin call typed.
+* `pyc._rewrite_script` refuses a module frozenset read that CPython would run before its source
+  assignment (directly, through an argument/list item/class method, or through a program function
+  that reads it).  Previously the constant was hoisted ahead of the synthesised body, so
+  `print(f())` before `V = frozenset(...)` printed `True` instead of raising `NameError`.
+  `_count_assign_targets` now counts `AnnAssign`, so the kept annotated-frozenset branch is live
+  for direct `pyc` callers as well (the Python surface still strips the annotation to `Assign`).
+
+`AIL_CURRENT/test_ail_prog29.py` covers both refusals, the legal inner-only `len` shadow, and the
+legal read-after-assignment form.  Probes `prog29_z_shadowlen{,_param,_local,_module,_module_var,
+_inner_only}` and `prog29_r_order{,_call,_arg,_class,_list,_ok}` plus `prog29_order_unrelated` all
+match CPython on both `cmp.sh` builds or are refused by name under `--strict`.
+
+## 2026-11-02 -- prog29 typed reach: frozenset module constants and `len(set comprehension)` (job-prog29-11021624)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time).  `t161`, `g08_004`
+and `t188` were already wholly typed, and `g17_010`'s three arithmetic helpers were; the one
+program moved here is `g17_026`, whose four project functions (`distinct_vowel_count`, `main`,
+the key lambda and `sort_by_distinct_vowels`) now all reach the typed path.  Two blockers were
+fixed in `python/pkg-v12/pyfunc.py` and `pyc.py`:
+
+* `VOWELS: Final[frozenset[str]] = frozenset("aeiou")` (also the unannotated form and
+  `frozenset([...])` of str literals) is stored as an ordered, duplicate-free `list[str]` module
+  constant.  Because CPython's frozenset is unordered, every read must be `x in VOWELS` /
+  `x not in VOWELS` or `len(VOWELS)`; iteration and every other read are refused by name.  The
+  module rewrite keeps exactly that assignment at module scope.
+* `len({e for v in xs if c})` lowers to the existing eager list comprehension plus a private
+  int/str set table, so duplicates collapse as in CPython.  A float set comprehension is still
+  refused by name.
+
+`AIL_CURRENT/test_ail_prog29.py` (registered in `tests.d/`) builds `g17_026` and the three already
+typed programs under `--strict`, compares all eight under `ail build --cpython`, and covers the new
+set-comprehension and frozenset shapes plus both by-name refusals.  Probes
+`/tmp/probes/prog29_{setcomp_len,setcomp_routes,frozenset,frozenset_edges,frozenset_iter,setcomp_float}.py`
+match CPython on both `cmp.sh` builds or are refused by name.  `frozenset_iter` is refused under
+`--strict`; without `--strict` it takes the general path, whose frozenset order is the documented
+A2 insertion order (the base commit does the same).  The generated C of the ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit (10/10).  Follow-ups left
+by name: `t475` (`struct`, `str(<list>)`), `g16_006` (generators), `g14_020` (instance
+`__hash__`/`__eq__` keys) and `g17_010` (`range` as a value, the `map`/`filter`/`reduce` chain).
+## 2026-11-02 -- rel-diag: beginner mistakes get file:line:col and a hint (job-reldiag-11022310)
+
+Beginner refusals now name their source position. The general path attaches the enclosing
+statement's line and column to an `Unsupported` that has none, so an undefined name at module
+level (probe A), a missing required argument (C) and a self-less method call (D) print
+`file:line:col:` instead of a bare message. The unknown-called-name refusal appends CPython's
+`did you mean 'greet'?` hint when `difflib` finds a close module function/class/global/builtin.
+A method declared without `self` is refused by name (`C.hi() takes 0 positional arguments but 1
+was given`) before the generated C reaches gcc, including the `*args`/`**kwargs`/keyword-only
+forms; the typed path already refuses that method by name. Python's `IndentationError`/`TabError`
+now use the same `NAME.py:LINE:COL:` format as other syntax errors instead of the `AIL source`
+prefix. `--strict` also keeps a construct's inner comma (`print() given a dict[str, int]`) instead
+of truncating it.
+
+Added `AIL_CURRENT/test_ail_beginner_errors.py` (registered through
+`tests.d/test_ail_beginner_errors.txt`) for probes A-F on both the default and
+`AIL_UNIFIED_FORCE=1` builds, plus a method-with-`self` control. Probes in `/tmp/probes` cover
+close-name hints (class and builtin), no-hint, arity 1 and 2, `*args`/`**kwargs`/keyword-only
+methods without `self`, subclass dispatch, indentation/`expected ':'` errors, undefined names via
+a list item and a dict value, and positive methods with defaults, `*args`, staticmethod,
+classmethod, inheritance and `super()`; every positive matches CPython on both builds and every
+refusal is named with a position. Generated C of the ten `lab/compare` programs is byte-identical
+to `HEAD`. Gate modules, `test_ail_pre197`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is clean. No push (job
+instruction).
+
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 
 Re-applied the accepted job-prog8 change (NSUM for CPython's int-0 empty float `sum`, float
@@ -43,6 +116,42 @@ earlier operand stays on the typed path and that the unsafe order is named with
 `fz216_safe` in `/tmp/probes` matched CPython on both builds; the full `fz216` matched through
 line 5 and then hit the pre-existing int64 overflow.  Modules run:
 `test_ail_fz216`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+## 2026-11-02 -- docs review fix: no invented per-task values in the comparison (job-reltable-11022358)
+
+The fixture now contains only what run 41393616319 actually supplied for binary size and compile
+time: the ranges `AIL 34–102 / Rust 4450–4518 KiB` and `AIL 1.87–11.17 / Rust 0.19–0.56 s`, held
+in a top-level `ranges` object.  The invented per-task binary/compile values and their ratios and
+geomean rows are gone; those metric tables show n/a per task and a `Supplied range (no per-task
+values)` line that states the one count the ranges prove (binary 10/10, compile 0/10).  The same
+counts drive the README lines.  The fixture also no longer carries per-task AIL path/`why_not_typed`
+or the toolchain versions and pins, which the task did not supply; the document shows the AIL path
+as absent and says `No tool versions in the report.`  The AIL (py src) refusals stay because the
+review verified them at HEAD.  `test_compare_publish` now checks the per-task n/a values, the range
+counts, the absent paths and tool versions, the fresh fixture render and the README counts.
+
+## 2026-11-02 -- docs review fix: the comparison fixture only carries supplied numbers (job-reltable-11022136)
+
+The fixture `tools/testdata/compare-report.json` now keeps only the values supplied for run
+41393616319: the ten AIL/Rust wall pairs, the binary and compile ranges, and the four RSS pairs
+where AIL loses.  Instructions, build disk, C/Go/Nim/Python rows and toolchain sizes are absent, so
+the document shows not run/n-a and the scorecards state 0/0 for those columns instead of inventing
+wins.  The AIL (py src) column no longer copies AIL; it lists only the three refusals (`scar_life`,
+`tally_lang`, `tree_fold`) and not run for the rest.  `run_task.py` records the run date and
+`merge.py` writes `head`, `date` and the GitHub run id into its JSON, so the header gets a date from
+the real report shape.  The README section now claims only the AIL/Rust numbers that exist.
+
+## 2026-11-02 -- docs: publish the compare-lab language comparison (job-reltable-11022136)
+
+Added `tools/compare_publish.py`, which turns the compare-lab report JSON into `docs/COMPARISON.md`:
+the AIL commit and date, the per-task scorecards for AIL and AIL (py src) against Rust and the best
+other language, all six metric columns (instructions, RSS, binary size, compile time, build disk and
+wall time), the geomean rows, the toolchain versions, the AIL paths and refusals, and the method
+section from `merge.METHOD_LINES`. No number is hand-edited: the committed document is a fresh render
+of `tools/testdata/compare-report.json` (run 41393616319, commit 4f1245b), and the fixture is named in
+the header. `README.md` links the document and states the win counts against Rust. The new
+`test_compare_publish` module checks the fixture render against the committed file, every metric
+heading, both AIL scorecards, the refusals, the method lines and the CLI; it is registered through
+`AIL_CURRENT/tests.d/test_compare_publish.txt`.
 
 ## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
 
@@ -307,6 +416,77 @@ typed path and `p_tuplekey_edges` falls back to the general path.  The required 
 `test_ail_prog20`, `test_ail_tuples`, `test_ail_bugs7`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass (64 tests, 1 skipped for a missing zig).  The accepted job's
 generated-C byte-identity check was not re-run on this merged tree.
+## 2026-11-02 -- prog7 re-apply verified after a skipped review (job-rbprog7-11022237)
+
+Review 1 was skipped and named no defects. Checked the accepted prog7 change against this tree: the
+bool-row typing in `nested_lists.py`, the element-class resolution in `boolkind.py`, the constant-tuple
+loop lowering with the domination and rebinding fixes in `tuplib.py`/`tupexpr.py`/`tupstmt.py`, the
+host-printability repr table in `tuplegen.py`, `test_ail_prog7`, and the DEVLOG/prog7 record are all
+present. No source change was needed.
+
+Probes in `/tmp/probes/` match CPython on both `cmp.sh` builds: `p_tuple_loop_basic`,
+`p_tuple_constexpr`, `p_tuple_value`, `p_tuple_conditional`, `p_tuple_rebound`,
+`p_tuple_empty_mixed`, `p_tuple_sources`, `p_bool_rows`, `p_bool_rows_param`,
+`p_srepr_unprintable` and `p_srepr_bmp` (all non-surrogate BMP code points). Surrogate literals and
+non-BMP string literals are refused by name; `chr()` of a surrogate differs identically on base
+`8b1e28a8` (pre-existing). `test_ail_prog7`, `test_ail_tuples`, `test_ail_nested_lists`,
+`test_ail_boolfield`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` passes.
+
+
+## 2026-11-02 -- prog7 review fix: also forget a tuple name that another binding rebinds (job-rbprog7-11021443)
+
+The domination fix restored the tuple-literal bookkeeping around control-flow bodies, but a name whose
+one store is a tuple literal can also be rebound without an `ast.Name` store: an `except ... as t`
+handler name, or a nested `def` / `class` name. The transform then reused the old literal inside the
+handler or after the rebinding. `tupstmt.py` now drops those names (and import aliases, `del` targets,
+and any name assigned in a branch once that branch ends) from the tuple-literal map, so only a
+straight-line assignment that still holds the tuple is lowered. `test_ail_prog7` gained
+TUPLE_EXCEPT_REBOUND and TUPLE_DEF_REBOUND.
+
+
+## 2026-11-02 -- prog7 review fix: constant-tuple loops only lower a dominating assignment (job-rbprog7-11021443)
+
+The reviewer found that the constant-tuple loop lowering trusted the last tuple literal assigned to a
+name even when that assignment was conditional or inside a loop that may run zero times, replacing
+CPython's `UnboundLocalError` with a pre-built list. `tupstmt.py` now restores the tuple-literal
+bookkeeping around the bodies of `if`, `while`, `for`, `with` and `try` (and around loop `else`), so a
+recorded assignment is used only when it dominates the loop in the same straight-line block. The
+legitimate cases (assignment before an `if`, inside the same branch, or earlier in a loop body) keep
+the lowering.
+
+Probes `/tmp/probes/p_dom_*.py` (conditional, zero-iteration for / while, try before and after the
+raise, nested unpack, scalar and tuple displays, both branches, and the legitimate dominating cases)
+match CPython on both `cmp.sh` builds. `test_ail_prog7` gained TUPLE_CONDITIONAL.
+
+
+## 2026-11-02 -- prog7: the hot function of g10_032 reaches the typed path (job-rbprog7-11021443)
+
+Profiled the eight task programs under CPython 3.12 and kept the functions holding 80% of the own
+time (`lab/progfix/prog7.md`). Four of them were already wholly typed (`t018`, `g15_018`, `t474`,
+`g23_038`). `g12_034`, `g14_038` and `t184` stay general for features that need a new subsystem
+(`random.Random` method defaults, `object`/`sys.getsizeof`, an unannotated `json.loads` result and
+`Any`); the exact messages are in `lab/progfix/prog7.md` as follow-ups.
+
+`g10_032`'s hot `largest_region` is typed now. Three compiler changes together:
+
+* `nested_lists.py` types a bool row as `_AilRow_bool` (bool is a scalar element) instead of putting
+  it in the same `_AilRow_int` as the grid's number rows;
+* `boolkind.py` resolves a field store through `row[i]` to the row class named by the list's
+  annotation or by a literal list of its constructors, so `_AilRow_bool.v` and `_AilRow_int.v` no
+  longer reach each other (they share the field name `v`);
+* `tuplib.py`/`tupexpr.py`/`tupstmt.py`/`tupcommon.py` lower `for dr, dc in directions:` over a
+  tuple of constant displays to an annotated list built before the loop. It does not force the
+  tuple pass when that is the program's only tuple use, so general-path C is unchanged.
+
+Tests: `AIL_CURRENT/test_ail_prog7.py` (registered in `tests.d/`) compiles the exact `g10_032`
+program, its empty/single/line/all-ones/diagonal boundaries, constant tuple loops (break, continue,
+nested unpacking), tuple-as-value/name/empty/mixed cases and bool+int rows in one function, each
+compared with CPython. `test_ail_tuples`, `test_ail_nested_lists` and `test_ail_boolfield` pass. All
+ten `lab/compare` tasks keep byte-identical `program.c` on the builds that built before (both
+`main.ail` and the `main.py` builds; `berth_sim/main.py` was the sensitive one). Probes in
+`/tmp/probes/p_g10_*`, `p_tuple_*`, `p_nested_bool.py`, `p_bool_rows.py` match CPython on both
+`cmp.sh` builds.
 
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 

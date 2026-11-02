@@ -70,6 +70,24 @@ def enabled(environ):
     return str(environ.get('AIL_STRICT', '')).strip().lower() not in ('', '0', 'off', 'no', 'false')
 
 
+def _construct_cut(body):
+    """The text before the first separator that is not inside brackets: a comma in
+    `print() given a dict[str, int]` is part of the construct, not the start of the next clause."""
+    depth = 0
+    for index, char in enumerate(body):
+        if char in '([{':
+            if depth == 0 and char == '(' and body[index + 1:index + 2] == ' ':
+                return body[:index]
+            depth += 1
+            continue
+        if char in ')]}':
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and any(body.startswith(sep, index) for sep in ('; ', ' -- ', '. ', ', ')):
+            return body[:index]
+    return body
+
+
 def split_message(message, statement=None, kind=None):
     """(construct, reason, write_instead) from a refusal text; write_instead is None when it has none."""
     text = str(message or '').strip()
@@ -100,7 +118,7 @@ def split_message(message, statement=None, kind=None):
         construct = head
         body = tail.strip() or body
     else:
-        cut = re.split(r'; | -- |\. | \(|, ', body, maxsplit=1)[0]
+        cut = _construct_cut(body)
         if len(cut) <= 70:
             construct = cut
     if not construct:
