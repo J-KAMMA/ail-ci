@@ -2112,6 +2112,55 @@ def module_table_refusal(name, value):
                        % (name, what, name.lower(), declared, '[...]'))
 
 
+def _module_frozenset(tree, node):
+    """A module-level `frozenset(<str literal>)` / `frozenset([<str literals>])` as the ordered
+    unique `list[str]` a read-only module constant can hold.  CPython's frozenset is unordered,
+    so this spelling is only accepted when every read of the name is a membership test or
+    `len(name)` -- the two operations whose answer does not depend on order -- and the caller
+    refuses it by name otherwise.  The element order is first occurrence; duplicates collapse,
+    which keeps `len()` equal to CPython's frozenset length."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'frozenset' and not node.keywords):
+        return None
+    if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+           and n.name == 'frozenset' for n in tree.body):
+        return None
+    if len(node.args) != 1 or isinstance(node.args[0], ast.Starred):
+        return None
+    arg = node.args[0]
+    if isinstance(arg, ast.Constant) and type(arg.value) is str:
+        values = list(arg.value)
+    elif isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
+        values = []
+        for element in arg.elts:
+            if not (isinstance(element, ast.Constant) and type(element.value) is str):
+                return None
+            values.append(element.value)
+    else:
+        return None
+    return list(dict.fromkeys(values))
+
+
+def _frozenset_reads_ordered(tree, name):
+    """True when every read of `name` is `x in name` / `x not in name` or `len(name)`."""
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load)):
+            continue
+        parent = parents.get(node)
+        if (isinstance(parent, ast.Compare) and any(isinstance(op, (ast.In, ast.NotIn)) for op in parent.ops)
+                and (node is parent.left or any(node is c for c in parent.comparators))):
+            continue
+        if (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id == 'len'
+                and len(parent.args) == 1 and parent.args[0] is node and not parent.keywords):
+            continue
+        return False
+    return True
+
+
 def _scan_module_consts(tree):
     """Module-level constant bindings, section 29's whole feature: a name bound EXACTLY ONCE at
     module scope to an int/float/str literal, or a literal numeric list/tuple, read by any function
@@ -2209,6 +2258,22 @@ def _scan_module_consts(tree):
                                     "with plain lists, dicts and loops" % (unavailable or mod))
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
+        if isinstance(node, ast.AnnAssign):
+            if not isinstance(node.target, ast.Name):
+                continue
+            name = node.target.id
+            frozen = _module_frozenset(tree, node.value)
+            if frozen is not None:
+                if name in consts:
+                    raise Unsupported("%r is a module-level name assigned more than once; this "
+                                      "compiler treats module scope as a fixed set of one-time "
+                                      "constants, not a mutable global" % name)
+                if not _frozenset_reads_ordered(tree, name):
+                    raise Unsupported("%r is a module-level frozenset; only `x in %s` and "
+                                      "`len(%s)` are built on the typed path (iteration order of "
+                                      "a frozenset is not preserved)" % (name, name, name))
+                consts[name] = (SLIST, frozen)
+            continue
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
@@ -2243,6 +2308,14 @@ def _scan_module_consts(tree):
             is_float = any(k == FLT for k, _ in vals)
             values = [float(v) for _, v in vals] if is_float else [v for _, v in vals]
             consts[name] = (FLIST if is_float else LIST, values)
+            continue
+        frozen = _module_frozenset(tree, node.value)
+        if frozen is not None:
+            if not _frozenset_reads_ordered(tree, name):
+                raise Unsupported("%r is a module-level frozenset; only `x in %s` and "
+                                  "`len(%s)` are built on the typed path (iteration order of a "
+                                  "frozenset is not preserved)" % (name, name, name))
+            consts[name] = (SLIST, frozen)
             continue
         if isinstance(node.value, (ast.Set, ast.Dict)):
             raise module_table_refusal(name, node.value)
@@ -17238,6 +17311,8 @@ def _call(node, ctx):
             # `len(g[0])`, `len(g[i])` -- the width, for every row
             ctx.parts.update(('TYPES', 'DIE', 'GRID'))
             return ctx.acols(a[0].value.id)
+        if isinstance(a[0], ast.SetComp):
+            return _setcomp_len(a[0], ctx)
         lo, n, _, pre = _iter_plan(a[0], ctx)          # len(set(xs)), len(sorted(xs)), ...
         ctx.pre.extend(pre)
         return '(%s - %s)' % (n, lo) if lo != '0' else n
@@ -19485,6 +19560,31 @@ def _listcomp_into_temp(node, ctx):
         block = gpu.region(ctx, node.gpu, block, dest=c)
     ctx.pre.append(block)
     return c
+
+
+def _setcomp_len(node, ctx):
+    """`len({e for v in seq if c})`: build the eager list comprehension, add its elements to a
+    private set, and take that set's length.  This is the one use of a set comprehension as a
+    value built here; duplicates collapse exactly as CPython's set does, and the list and set
+    are temporaries registered with this statement.  Iteration order is never observed."""
+    kind = _listcomp_kind(node, ctx)
+    if kind == FLIST:
+        raise Unsupported('len() of a set comprehension with float elements is not built')
+    setkind = SSET if kind == SLIST else ISET
+    saved, ctx.pre = ctx.pre, []
+    try:
+        listing = _listcomp_into_temp(node, ctx)
+        steps = list(ctx.pre)
+        ctx.pre = []
+        table, _ = ctx.temp(setkind)
+        ctx.parts.add(setkind.upper())
+        add = 'ail_sset_add' if setkind == SSET else 'ail_iset_add'
+        steps.append('ail_%s_clear(&%s);' % (setkind, table))
+        steps.append('for (int64_t _i = 0; _i < %s.n; _i++) %s(&%s, %s.p[_i]);'
+                     % (listing, add, table, listing))
+        return '({ %s ail_%s_len(&%s); })' % (' '.join(steps), setkind, table)
+    finally:
+        ctx.pre = saved
 
 
 def _strcomp_stdin_fill(node, ctx, pad, dst):

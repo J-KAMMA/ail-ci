@@ -1,3 +1,31 @@
+## 2026-11-02 -- prog29 typed reach: frozenset module constants and `len(set comprehension)` (job-prog29-11021624)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time).  `t161`, `g08_004`
+and `t188` were already wholly typed, and `g17_010`'s three arithmetic helpers were; the one
+program moved here is `g17_026`, whose four project functions (`distinct_vowel_count`, `main`,
+the key lambda and `sort_by_distinct_vowels`) now all reach the typed path.  Two blockers were
+fixed in `python/pkg-v12/pyfunc.py` and `pyc.py`:
+
+* `VOWELS: Final[frozenset[str]] = frozenset("aeiou")` (also the unannotated form and
+  `frozenset([...])` of str literals) is stored as an ordered, duplicate-free `list[str]` module
+  constant.  Because CPython's frozenset is unordered, every read must be `x in VOWELS` /
+  `x not in VOWELS` or `len(VOWELS)`; iteration and every other read are refused by name.  The
+  module rewrite keeps exactly that assignment at module scope.
+* `len({e for v in xs if c})` lowers to the existing eager list comprehension plus a private
+  int/str set table, so duplicates collapse as in CPython.  A float set comprehension is still
+  refused by name.
+
+`AIL_CURRENT/test_ail_prog29.py` (registered in `tests.d/`) builds `g17_026` and the three already
+typed programs under `--strict`, compares all eight under `ail build --cpython`, and covers the new
+set-comprehension and frozenset shapes plus both by-name refusals.  Probes
+`/tmp/probes/prog29_{setcomp_len,setcomp_routes,frozenset,frozenset_edges,frozenset_iter,setcomp_float}.py`
+match CPython on both `cmp.sh` builds or are refused by name.  `frozenset_iter` is refused under
+`--strict`; without `--strict` it takes the general path, whose frozenset order is the documented
+A2 insertion order (the base commit does the same).  The generated C of the ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit (10/10).  Follow-ups left
+by name: `t475` (`struct`, `str(<list>)`), `g16_006` (generators), `g14_020` (instance
+`__hash__`/`__eq__` keys) and `g17_010` (`range` as a value, the `map`/`filter`/`reduce` chain).
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.

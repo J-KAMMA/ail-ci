@@ -273,16 +273,36 @@ def _is_docstring_stmt(node):
     return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
 
 
+def _frozenset_literal(value):
+    """Whether `value` is `frozenset("...")` / `frozenset([<str literals>])` -- the one call form
+    `pyfunc._module_frozenset` accepts as a module constant.  Kept here so `_rewrite_script` leaves
+    exactly that assignment at module scope instead of moving it into the synthesised function."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+            and value.func.id == 'frozenset' and len(value.args) == 1 and not value.keywords):
+        return False
+    arg = value.args[0]
+    if isinstance(arg, ast.Constant) and type(arg.value) is str:
+        return True
+    return (isinstance(arg, (ast.List, ast.Tuple)) and bool(arg.elts)
+            and all(isinstance(e, ast.Constant) and type(e.value) is str for e in arg.elts))
+
+
 def _is_module_const_assign(node, written=frozenset()):
     """Mirrors `pyfunc._scan_module_consts`'s own acceptance test exactly -- a single-target
-    `Name` assignment whose value is an int/float/str literal, or a non-empty numeric list/tuple
-    -- so `_rewrite_script` below leaves at module scope PRECISELY the assignments
-    `_scan_module_consts` would itself accept as a constant, and moves every other top-level
-    assignment into the synthesised function body as an ordinary local. Reusing
+    `Name` assignment whose value is an int/float/str literal, a non-empty numeric list/tuple, or
+    `frozenset(<str literal>)` -- so `_rewrite_script` below leaves at module scope PRECISELY the
+    assignments `_scan_module_consts` would itself accept as a constant, and moves every other
+    top-level assignment into the synthesised function body as an ordinary local. Reusing
     `_module_const_scalar` rather than a second copy of its literal test keeps the two rules from
     ever silently diverging (SEMANTICS section 33)."""
+    if isinstance(node, ast.AnnAssign):
+        if not (isinstance(node.target, ast.Name) and node.value is not None):
+            return False
+        return _frozenset_literal(node.value)
     if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
         return False
+    if _frozenset_literal(node.value):
+        return True
     if _module_const_scalar(node.value) is not None:
         return True
     if (isinstance(node.value, ast.Constant) and type(node.value.value) is bool
@@ -462,8 +482,10 @@ def _rewrite_script(source, force):
             continue
         if _is_docstring_stmt(n) or isinstance(n, ast.Pass):
             continue
-        if (isinstance(n, ast.Assign) and _is_module_const_assign(n, written)
-                and assign_counts[n.targets[0].id] == 1):
+        if ((isinstance(n, ast.Assign)
+             or (isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)))
+                and _is_module_const_assign(n, written)
+                and assign_counts.get(n.targets[0].id if isinstance(n, ast.Assign) else n.target.id, 0) == 1):
             kept.append(n)
             continue
         other.append(n)
