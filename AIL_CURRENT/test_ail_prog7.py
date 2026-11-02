@@ -225,6 +225,43 @@ def main() -> None:
 main()
 '''
 
+TUPLE_EXCEPT_REBOUND = '''def f() -> int:
+    t = ((1, 2), (3, 4))
+    try:
+        raise ValueError("x")
+    except ValueError as t:
+        total = 0
+        for a, b in t:
+            total += a * b
+        return total
+    return 0
+
+
+def main() -> None:
+    print(f())
+
+
+main()
+'''
+
+TUPLE_DEF_REBOUND = '''def f() -> int:
+    t = ((1, 2), (3, 4))
+    def t() -> int:
+        return 0
+    total = 0
+    for a, b in t:
+        total += a * b
+    return total
+
+
+def main() -> None:
+    print(f())
+
+
+main()
+'''
+
+
 BOOL_ROWS = '''from collections import deque
 
 
@@ -317,6 +354,10 @@ class Prog7(unittest.TestCase):
 
     def test_conditional_tuple_assignment_keeps_unbound(self):
         self.check(TUPLE_CONDITIONAL, 'tuple_conditional', None)
+
+    def test_rebound_tuple_name_is_not_lowered(self):
+        self.check(TUPLE_EXCEPT_REBOUND, 'tuple_except_rebound', None)
+        self.check(TUPLE_DEF_REBOUND, 'tuple_def_rebound', None)
 
     def test_bool_row_and_int_row_in_one_function(self):
         self.check(BOOL_ROWS, 'bool_rows', True)

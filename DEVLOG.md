@@ -1,3 +1,14 @@
+## 2026-11-02 -- prog7 review fix: also forget a tuple name that another binding rebinds (job-rbprog7-11021443)
+
+The domination fix restored the tuple-literal bookkeeping around control-flow bodies, but a name whose
+one store is a tuple literal can also be rebound without an `ast.Name` store: an `except ... as t`
+handler name, or a nested `def` / `class` name. The transform then reused the old literal inside the
+handler or after the rebinding. `tupstmt.py` now drops those names (and import aliases, `del` targets,
+and any name assigned in a branch once that branch ends) from the tuple-literal map, so only a
+straight-line assignment that still holds the tuple is lowered. `test_ail_prog7` gained
+TUPLE_EXCEPT_REBOUND and TUPLE_DEF_REBOUND.
+
+
 ## 2026-11-02 -- prog7 review fix: constant-tuple loops only lower a dominating assignment (job-rbprog7-11021443)
 
 The reviewer found that the constant-tuple loop lowering trusted the last tuple literal assigned to a

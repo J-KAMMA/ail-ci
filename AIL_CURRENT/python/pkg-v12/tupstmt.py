@@ -29,6 +29,30 @@ def store(node):
     return node
 
 
+def _assigned_names(node):
+    out = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name):
+            if isinstance(sub.ctx, (ast.Store, ast.Del)):
+                out.add(sub.id)
+        elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(sub.name)
+        elif isinstance(sub, ast.ExceptHandler):
+            if sub.name:
+                out.add(sub.name)
+        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+            for alias in sub.names:
+                if alias.name != '*':
+                    out.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(sub, (ast.MatchAs, ast.MatchStar)):
+            if sub.name:
+                out.add(sub.name)
+        elif isinstance(sub, ast.MatchMapping):
+            if sub.rest:
+                out.add(sub.rest)
+    return out
+
+
 class Stmts:
     # ------------------------------------------------------------------------------------------
     def stmts(self, body):
@@ -76,7 +100,15 @@ class Stmts:
             self.forced = forced
             del self.errors[errors:]
 
+    def forget(self, *nodes):
+        names = set()
+        for node in nodes:
+            names |= _assigned_names(node)
+        for name in names:
+            self.tuple_literals.pop(name, None)
+
     def stmt_FunctionDef(self, st):
+        self.tuple_literals.pop(st.name, None)
         return [st]
 
     stmt_AsyncFunctionDef = stmt_FunctionDef
@@ -85,7 +117,12 @@ class Stmts:
     def stmt_Pass(self, st):
         return [st]
 
-    stmt_Break = stmt_Continue = stmt_Global = stmt_Nonlocal = stmt_Import = stmt_ImportFrom = stmt_Pass
+    def stmt_Import(self, st):
+        self.forget(st)
+        return [st]
+
+    stmt_ImportFrom = stmt_Import
+    stmt_Break = stmt_Continue = stmt_Global = stmt_Nonlocal = stmt_Pass
 
     def stmt_Return(self, st):
         if st.value is None:
@@ -164,6 +201,7 @@ class Stmts:
         self.tuple_literals = dict(saved)
         st.orelse = self.stmts(st.orelse)
         self.tuple_literals = saved
+        self.forget(st)
         return [st]
 
     def stmt_While(self, st):
@@ -177,6 +215,7 @@ class Stmts:
         self.tuple_literals = dict(saved)
         st.orelse = self.stmts(st.orelse)
         self.tuple_literals = saved
+        self.forget(st)
         return [st]
 
     def stmt_For(self, st):
@@ -198,14 +237,18 @@ class Stmts:
         self.tuple_literals = dict(saved)
         new = ast.For(target=h.target, iter=h.iter, body=body, orelse=self.stmts(st.orelse))
         self.tuple_literals = saved
+        self.forget(st)
         return [*h.pre, new]
 
     def stmt_With(self, st):
         for item in st.items:
             item.context_expr = self.exv(item.context_expr)[0]
+            if item.optional_vars is not None:
+                self.forget(item.optional_vars)
         saved = dict(self.tuple_literals)
         st.body = self.stmts(st.body)
         self.tuple_literals = saved
+        self.forget(st)
         return [st]
 
     def stmt_Try(self, st):
@@ -213,12 +256,15 @@ class Stmts:
         st.body = self.stmts(st.body)
         self.tuple_literals = dict(saved)
         for h in st.handlers:
+            if h.name:
+                self.tuple_literals.pop(h.name, None)
             h.body = self.stmts(h.body)
             self.tuple_literals = dict(saved)
         st.orelse = self.stmts(st.orelse)
         self.tuple_literals = dict(saved)
         st.finalbody = self.stmts(st.finalbody)
         self.tuple_literals = saved
+        self.forget(st)
         return [st]
 
     stmt_TryStar = stmt_Try
@@ -235,6 +281,7 @@ class Stmts:
         return [st]
 
     def stmt_Delete(self, st):
+        self.forget(st)
         out = []
         for tgt in st.targets:
             if isinstance(tgt, ast.Subscript):
