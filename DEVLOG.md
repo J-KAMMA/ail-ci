@@ -1,3 +1,28 @@
+## 2026-11-02 -- prog15: pair targets in list comprehensions type the hot functions of g08 (job prog15)
+
+The typed list-comprehension path refused a pair target (`for j, value in enumerate(r)`) even
+though the fold path had walked the same shape for a long time.  `_listcomp_kind` now accepts a
+two-name target and the new `_listcomp_pair_into_temp` builds the loop from `_pair_plan`
+(`enumerate`, `zip`, and a typed dict's `.items()`), binding the key as int and the value as the
+source element kind (int/float/str).  The nested-list pass already lowered the outer row
+comprehension of `lab/census/programs/gdev/g08_018.py`; only the inner row comprehension was left,
+so the whole program (`determinant`, `minor`, `main`) is now typed and matches CPython.  Programs
+that already compiled keep their C; `lab/compare` generated C is byte-identical for all 17
+buildable ail/ail-py pairs (the three failing `main.py` tasks fail identically on the base).
+
+`lab/progfix/prog15.md` records the cProfile hot functions, their before/after status and the
+first reason for the six programs that stay general: enum/dataclass expansion (g14), `tuple(...)` /
+variadic tuples (g17), dynamic `json.loads` (t186), union annotations + `match` (g25), and set
+comprehensions + `frozenset` constants (g16).  `g02` and `t012` were already typed.
+
+`AIL_CURRENT/test_ail_prog15.py` (registered by `tests.d/test_ail_prog15.txt`) compiles the eight
+programs and compares them with CPython, checks their typed/general status, exercises pair-target
+comprehensions over int, float, str, `zip`, an attribute and a list item, and keeps a typed check.
+Probes `/tmp/probes/prog15_g08.py`, `prog15_pair.py`, `prog15_pair_alias.py` and
+`prog15_pair_edge.py` match CPython on both `cmp.sh` builds.  The commit also includes the pending bytearray repeat / slice-assignment changes in `pyfunc.py`
+and the matching `cruntime.py` `BAREPEAT`/`BASLICEASSIGN` fragments, which were already in the
+working tree and are exercised by the bytearray test modules.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten

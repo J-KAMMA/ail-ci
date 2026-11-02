@@ -1720,6 +1720,10 @@ def _etype(node, ctx):
     if isinstance(node, ast.UnaryOp):
         return INT if isinstance(node.op, ast.Not) else _etype(node.operand, ctx)
     if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Mult):
+            _lk, _rk = _etype(node.left, ctx), _etype(node.right, ctx)
+            if (_lk, _rk) in ((BYTEARRAY, INT), (INT, BYTEARRAY)):
+                return BYTEARRAY
         if isinstance(node.op, ast.Mult) and _is_bytes_expr(node, ctx):
             return BYTES
         if isinstance(node.op, ast.Add) and _is_bytes_expr(node.left, ctx) \
@@ -9773,6 +9777,24 @@ def _bytearray_value(node, ctx):
         if _etype(node.body, ctx) != BYTEARRAY or _etype(node.orelse, ctx) != BYTEARRAY:
             raise Unsupported('conditional bytearray values require matching types')
         return '(%s ? %s : %s)' % (_map_inline(lambda: _cond(node.test, ctx), ctx), _bytearray_value(node.body, ctx), _bytearray_value(node.orelse, ctx))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        kinds = [BYTEARRAY if _is_bytearray_expr(arg, ctx) else _etype(arg, ctx)
+                 for arg in (node.left, node.right)]
+        if tuple(kinds) not in ((BYTEARRAY, INT), (INT, BYTEARRAY)):
+            raise Unsupported('bytearray repetition requires one bytearray and one integer operand')
+        receiver, _ = ctx.temp(BYTEARRAY)
+        count, _ = ctx.temp(INT)
+        steps = []
+        for arg, kind in zip((node.left, node.right), kinds):
+            if kind == BYTEARRAY:
+                steps.append(_obj_store(receiver, _bytearray_value(arg, ctx), BYTEARRAY, ctx) + ';')
+            else:
+                if _is_handle_producing(arg, ctx):
+                    raise Unsupported('bytearray repetition count must be an integer')
+                steps.append('%s = %s;' % (count, _bytearray_int(arg, ctx)))
+        ctx.parts.add('BAREPEAT')
+        return _obj_temp('({ %s ail_bytearray_repeat(%s, %s); })' % (
+            ' '.join(steps), receiver, count), BYTEARRAY, ctx)
     if _is_bytearray_call(node, ctx):
         if node.keywords or len(node.args) > 1:
             raise Unsupported('bytearray requires zero or one positional argument')
@@ -9888,7 +9910,29 @@ def _bytearray_method(node, ctx, *, as_stmt=False):
 
 def _bytearray_index_mutation(target, value, ctx, ind):
     if isinstance(target.slice, ast.Slice):
-        raise Unsupported('bytearray slice assignment and deletion are unsupported')
+        if value is None:
+            raise Unsupported('bytearray slice deletion is unsupported')
+        ctx.parts.add('BASLICEASSIGN')
+        ctx.has_try = True
+        kind = _etype(value, ctx)
+        if kind == BYTES:
+            val = _map_inline(lambda: _bytes_value(value, ctx), ctx)
+        elif kind == BYTEARRAY:
+            val = 'ail_bytearray_span(%s)' % _map_inline(lambda: _bytearray_value(value, ctx), ctx)
+        else:
+            raise Unsupported('bytearray slice assignment requires bytes or bytearray')
+        receiver, _ = ctx.temp(BYTEARRAY)
+        steps = ['ail_bytes _value = %s;' % val,
+                 _obj_store(receiver, _bytearray_value(target.value, ctx), BYTEARRAY, ctx) + ';']
+        bounds = []
+        for name, bound in zip(('_lo', '_hi', '_step'),
+                               (target.slice.lower, target.slice.upper, target.slice.step)):
+            steps.append('int64_t %s = %s;'
+                         % (name, '0' if bound is None else _bytearray_int(bound, ctx)))
+            bounds.extend((str(int(bound is not None)), name))
+        steps.append('ail_bytearray_set_slice(%s, %s, _value);' % (receiver, ', '.join(bounds)))
+        pad = '    ' * ind
+        return _flush(ctx, pad) + '%s{ %s }\n' % (pad, ' '.join(steps))
     ctx.parts.add('BYTEARRAY')
     ctx.has_try = True
     steps = [] if value is None else ['int64_t _value = %s;' % _bytearray_int(value, ctx)]
@@ -17933,6 +17977,20 @@ def _pair_plan(src, ctx):
     raise Unsupported('a pair target over %s' % type(src).__name__)
 
 
+def _pair_value_kind(src, ctx):
+    """The kind of the SECOND name of an `enumerate` / `zip` / `.items()` pair target."""
+    if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id in ('enumerate', 'zip'):
+        base = src.args[0] if src.func.id == 'enumerate' else src.args[1]
+        while isinstance(base, ast.Subscript) and isinstance(base.slice, ast.Slice):
+            base = base.value
+        return STR if _iter_elem_is_str(base, ctx) else FLT if _etype(base, ctx) == FLIST else INT
+    if (isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute)
+            and isinstance(src.func.value, ast.Name) and src.func.attr == 'items'):
+        kind = _map_kind(src.func.value, ctx)
+        return _mvk(kind) if kind in MAPS and kind not in SETS else INT
+    return INT
+
+
 def _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager=None):
     """The same statement expression, with two names bound per step instead of one."""
     if (isinstance(src, ast.Call) and isinstance(src.func, ast.Name)
@@ -19103,23 +19161,41 @@ def _listcomp_kind(node, ctx):
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
-    if not isinstance(g.target, ast.Name):
+    pair = None
+    if isinstance(g.target, ast.Tuple):
+        if len(g.target.elts) != 2 or not all(isinstance(e, ast.Name) for e in g.target.elts):
+            raise Unsupported('a comprehension target that is not a pair of names')
+        pair = [e.id for e in g.target.elts]
+        _pair_plan(g.iter, ctx)
+    elif not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     source = g.iter
     while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
         source = source.value
-    source_kind = _etype(g.iter, ctx)
-    if _is_hlist_kind(source_kind):
-        raise Unsupported('handle list comprehension folds are unsupported')
-    struct_source = _is_olist_kind(source_kind)
-    element = (OBJ, source_kind[1]) if struct_source else STR if _iter_elem_is_str(source, ctx) else FLT if _etype(source, ctx) == FLIST else INT
-    name = g.target.id
+    if pair is not None:
+        struct_source = False
+        element = _pair_value_kind(g.iter, ctx)
+        name = None
+    else:
+        source_kind = _etype(g.iter, ctx)
+        if _is_hlist_kind(source_kind):
+            raise Unsupported('handle list comprehension folds are unsupported')
+        struct_source = _is_olist_kind(source_kind)
+        element = (OBJ, source_kind[1]) if struct_source else STR if _iter_elem_is_str(source, ctx) else FLT if _etype(source, ctx) == FLIST else INT
+        name = g.target.id
     types, kinds = dict(ctx.types), dict(ctx.kind)
     try:
-        ctx.kind.pop(name, None)
-        ctx.types[name] = element
-        if struct_source:
-            ctx.kind[name] = element
+        if pair is not None:
+            for nm in pair:
+                ctx.kind.pop(nm, None)
+                ctx.types.pop(nm, None)
+            ctx.types[pair[0]] = INT
+            ctx.types[pair[1]] = element
+        else:
+            ctx.kind.pop(name, None)
+            ctx.types[name] = element
+            if struct_source:
+                ctx.kind[name] = element
         kind = _etype(node.elt, ctx)
         if isinstance(node.elt, ast.List):
             raise Unsupported('nested list comprehension elements are unsupported')
@@ -19164,6 +19240,8 @@ def _listcomp_into_temp(node, ctx):
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
+    if isinstance(g.target, ast.Tuple):
+        return _listcomp_pair_into_temp(node, ctx)
     if not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     kind = _listcomp_kind(node, ctx)
@@ -19297,6 +19375,77 @@ def _listcomp_into_temp(node, ctx):
     if getattr(node, 'gpu', None) is not None and kind in (FLIST, LIST) and not string_source and not struct_source:
         block = gpu.region(ctx, node.gpu, block, dest=c)
     ctx.pre.append(block)
+    return c
+
+
+def _listcomp_pair_into_temp(node, ctx):
+    """`[e for i, v in enumerate(xs) if c]` as a value.
+
+    `_pair_plan` already walks the two shapes a pair target has (`enumerate` and `zip`, plus a
+    typed dict's `.items()`), and the fold path has bound both names for a long time; a list
+    comprehension over the same shapes is the same loop with a push instead of an accumulator.
+    """
+    if len(node.generators) != 1 or node.generators[0].is_async:
+        raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
+    g = node.generators[0]
+    if not (isinstance(g.target, ast.Tuple) and len(g.target.elts) == 2
+            and all(isinstance(e, ast.Name) for e in g.target.elts)):
+        raise Unsupported('a comprehension target that is not a pair of names')
+    key, value = (e.id for e in g.target.elts)
+    kind = _listcomp_kind(node, ctx)
+    ctx.parts.add(kind.upper())
+    c, _ = ctx.temp(kind)
+    lo, n, kexpr, vexpr, pre = _pair_plan(g.iter, ctx)
+    value_kind = _pair_value_kind(g.iter, ctx)
+    elem_is_str, elem_is_float = value_kind == STR, value_kind == FLT
+    old_type, old_kind = ctx.types.get(key), ctx.kind.get(key)
+    old_vtype, old_vkind = ctx.types.get(value), ctx.kind.get(value)
+    old_cnames = getattr(ctx, 'comprehension_cnames', {})
+    old_onecp, old_len1 = set(ctx.onecp), set(ctx.len1_names)
+    ctx.tmp += 1
+    ck, cv = '_comp_key%d' % ctx.tmp, '_comp_value%d' % ctx.tmp
+    ctx.comprehension_cnames = {**old_cnames, key: ck, value: cv}
+    for nm in (key, value):
+        ctx.kind.pop(nm, None)
+        ctx.onecp.discard(nm)
+        ctx.len1_names.discard(nm)
+    ctx.types[key] = INT
+    ctx.types[value] = value_kind
+    if elem_is_str:
+        ctx.onecp.add(value)
+        ctx.len1_names.add(value)
+    try:
+        head = 'for (int64_t _i = %s; _i < %s; _i++) {' % (lo, n)
+        if pre:
+            head = '%s %s' % (' '.join(pre), head)
+        ctype = 'ail_str' if elem_is_str else 'double' if elem_is_float else 'int64_t'
+        lines = [head,
+                 'int64_t %s = %s;' % (ck, kexpr.replace('@', '_i')),
+                 '%s %s = %s;' % (ctype, cv, vexpr.replace('@', '_i'))]
+        for cond in g.ifs:
+            cc = _cond(cond, ctx)
+            lines.extend(ctx.pre); ctx.pre = []
+            lines.append('if (!(%s)) continue;' % cc)
+        val = _str_value(node.elt, ctx) if kind == SLIST else _expr(node.elt, ctx)
+    finally:
+        ctx.comprehension_cnames = old_cnames
+        ctx.onecp, ctx.len1_names = old_onecp, old_len1
+        ctx.types.pop(key, None); ctx.kind.pop(key, None)
+        ctx.types.pop(value, None); ctx.kind.pop(value, None)
+        if old_type is not None:
+            ctx.types[key] = old_type
+        if old_kind is not None:
+            ctx.kind[key] = old_kind
+        if old_vtype is not None:
+            ctx.types[value] = old_vtype
+        if old_vkind is not None:
+            ctx.kind[value] = old_vkind
+    lines.extend(ctx.pre); ctx.pre = []
+    helper = 'ail_slist' if kind == SLIST else 'ail_flist' if kind == FLIST else 'ail_list'
+    lines.append('%s_push(&%s, %s);' % (helper, c, val))
+    lines.append('}')
+    ctx.pre.append('%s_clear(&%s);' % (helper, c))
+    ctx.pre.append('{ %s }' % ' '.join(lines))
     return c
 
 
