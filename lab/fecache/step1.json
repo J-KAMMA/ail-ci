@@ -1,0 +1,332 @@
+{
+ "date": "2026-11-02",
+ "runs": 3,
+ "tasks": [
+  "berth_sim",
+  "rail_transfer",
+  "tally_lang"
+ ],
+ "work": "/tmp/ail-fe-measure-r_jikvut",
+ "phase": "step1",
+ "step1": {
+  "tasks": [
+   {
+    "task": "berth_sim",
+    "runs": 3,
+    "cases": {
+     "a_unchanged": {
+      "wall": {
+       "median": 15.0112,
+       "min": 14.6976,
+       "max": 15.1372,
+       "mean": 14.9487,
+       "stdev": 0.1848,
+       "n": 3
+      },
+      "front": {
+       "median": 12.7161,
+       "min": 12.3929,
+       "max": 12.8,
+       "mean": 12.6363,
+       "stdev": 0.1755,
+       "n": 3
+      },
+      "compile": {
+       "median": 2.2808,
+       "min": 2.2746,
+       "max": 2.3129,
+       "mean": 2.2894,
+       "stdev": 0.0168,
+       "n": 3
+      },
+      "link": {
+       "median": 0.0239,
+       "min": 0.0205,
+       "max": 0.0243,
+       "mean": 0.0229,
+       "stdev": 0.0017,
+       "n": 3
+      },
+      "ok": true
+     },
+     "b_body_edited": {
+      "wall": {
+       "median": 12.8208,
+       "min": 11.7587,
+       "max": 15.1158,
+       "mean": 13.2318,
+       "stdev": 1.401,
+       "n": 3
+      },
+      "front": {
+       "median": 10.4515,
+       "min": 10.2297,
+       "max": 12.7605,
+       "mean": 11.1472,
+       "stdev": 1.1443,
+       "n": 3
+      },
+      "compile": {
+       "median": 2.3316,
+       "min": 1.5119,
+       "max": 2.3451,
+       "mean": 2.0629,
+       "stdev": 0.3896,
+       "n": 3
+      },
+      "link": {
+       "median": 0.0237,
+       "min": 0.0171,
+       "max": 0.0243,
+       "mean": 0.0217,
+       "stdev": 0.0033,
+       "n": 3
+      },
+      "ok": true
+     },
+     "c_module_edited": {
+      "applicable": false,
+      "note": "single-file task; no imported module"
+     }
+    }
+   },
+   {
+    "task": "rail_transfer",
+    "runs": 3,
+    "cases": {
+     "a_unchanged": {
+      "wall": {
+       "median": 4.255,
+       "min": 4.2527,
+       "max": 4.28,
+       "mean": 4.2626,
+       "stdev": 0.0124,
+       "n": 3
+      },
+      "front": {
+       "median": 2.5156,
+       "min": 2.512,
+       "max": 2.5472,
+       "mean": 2.5249,
+       "stdev": 0.0158,
+       "n": 3
+      },
+      "compile": {
+       "median": 1.714,
+       "min": 1.7082,
+       "max": 1.718,
+       "mean": 1.7134,
+       "stdev": 0.004,
+       "n": 3
+      },
+      "link": {
+       "median": 0.0245,
+       "min": 0.0231,
+       "max": 0.0249,
+       "mean": 0.0242,
+       "stdev": 0.0008,
+       "n": 3
+      },
+      "ok": true
+     },
+     "b_body_edited": {
+      "wall": {
+       "median": 4.3059,
+       "min": 4.2929,
+       "max": 4.3515,
+       "mean": 4.3168,
+       "stdev": 0.0251,
+       "n": 3
+      },
+      "front": {
+       "median": 2.5537,
+       "min": 2.5414,
+       "max": 2.5846,
+       "mean": 2.5599,
+       "stdev": 0.0182,
+       "n": 3
+      },
+      "compile": {
+       "median": 1.7425,
+       "min": 1.7149,
+       "max": 1.7439,
+       "mean": 1.7338,
+       "stdev": 0.0134,
+       "n": 3
+      },
+      "link": {
+       "median": 0.0243,
+       "min": 0.0206,
+       "max": 0.0244,
+       "mean": 0.0231,
+       "stdev": 0.0018,
+       "n": 3
+      },
+      "ok": true
+     },
+     "c_module_edited": {
+      "applicable": false,
+      "note": "single-file task; no imported module"
+     }
+    }
+   },
+   {
+    "task": "tally_lang",
+    "runs": 3,
+    "cases": {
+     "a_unchanged": {
+      "wall": {
+       "median": 5.7671,
+       "min": 4.1118,
+       "max": 6.0101,
+       "mean": 5.2963,
+       "stdev": 0.8434,
+       "n": 3
+      },
+      "front": {
+       "median": 3.8111,
+       "min": 2.8171,
+       "max": 4.065,
+       "mean": 3.5644,
+       "stdev": 0.5385,
+       "n": 3
+      },
+      "compile": {
+       "median": 1.9207,
+       "min": 1.2774,
+       "max": 1.9309,
+       "mean": 1.7097,
+       "stdev": 0.3057,
+       "n": 3
+      },
+      "link": {
+       "median": 0.0244,
+       "min": 0.0173,
+       "max": 0.025,
+       "mean": 0.0222,
+       "stdev": 0.0035,
+       "n": 3
+      },
+      "ok": true
+     },
+     "b_body_edited": {
+      "wall": {
+       "median": 5.2051,
+       "min": 4.0692,
+       "max": 5.4332,
+       "mean": 4.9025,
+       "stdev": 0.5965,
+       "n": 3
+      },
+      "front": {
+       "median": 3.9264,
+       "min": 2.7224,
+       "max": 4.0937,
+       "mean": 3.5808,
+       "stdev": 0.6108,
+       "n": 3
+      },
+      "compile": {
+       "median": 1.3218,
+       "min": 1.2605,
+       "max": 1.3218,
+       "mean": 1.3014,
+       "stdev": 0.0289,
+       "n": 3
+      },
+      "link": {
+       "median": 0.0181,
+       "min": 0.0176,
+       "max": 0.0251,
+       "mean": 0.0203,
+       "stdev": 0.0034,
+       "n": 3
+      },
+      "ok": true
+     },
+     "c_module_edited": {
+      "applicable": false,
+      "note": "single-file task; no imported module"
+     }
+    }
+   }
+  ],
+  "synthetic_import": {
+   "task": "synthetic_import",
+   "runs": 3,
+   "cases": {
+    "a_unchanged": {
+     "wall": {
+      "median": 0.8274,
+      "min": 0.8235,
+      "max": 0.8357,
+      "mean": 0.8289,
+      "stdev": 0.0051,
+      "n": 3
+     },
+     "front": {
+      "median": 0.748,
+      "min": 0.7438,
+      "max": 0.7563,
+      "mean": 0.7494,
+      "stdev": 0.0052,
+      "n": 3
+     },
+     "compile": {
+      "median": 0.056,
+      "min": 0.056,
+      "max": 0.0561,
+      "mean": 0.056,
+      "stdev": 0.0,
+      "n": 3
+     },
+     "link": {
+      "median": 0.0235,
+      "min": 0.0234,
+      "max": 0.0236,
+      "mean": 0.0235,
+      "stdev": 0.0001,
+      "n": 3
+     },
+     "ok": true
+    },
+    "c_module_edited": {
+     "wall": {
+      "median": 0.8286,
+      "min": 0.8245,
+      "max": 0.8439,
+      "mean": 0.8323,
+      "stdev": 0.0083,
+      "n": 3
+     },
+     "front": {
+      "median": 0.748,
+      "min": 0.7446,
+      "max": 0.7648,
+      "mean": 0.7525,
+      "stdev": 0.0088,
+      "n": 3
+     },
+     "compile": {
+      "median": 0.0556,
+      "min": 0.0554,
+      "max": 0.0562,
+      "mean": 0.0557,
+      "stdev": 0.0003,
+      "n": 3
+     },
+     "link": {
+      "median": 0.0244,
+      "min": 0.0235,
+      "max": 0.0245,
+      "mean": 0.0241,
+      "stdev": 0.0004,
+      "n": 3
+     },
+     "ok": true
+    }
+   }
+  }
+ },
+ "elapsed_s": 145.9
+}
