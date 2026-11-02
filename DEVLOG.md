@@ -1,3 +1,16 @@
+## 2026-11-02 -- docs: publish the compare-lab language comparison (job-reltable-11022136)
+
+Added `tools/compare_publish.py`, which turns the compare-lab report JSON into `docs/COMPARISON.md`:
+the AIL commit and date, the per-task scorecards for AIL and AIL (py src) against Rust and the best
+other language, all six metric columns (instructions, RSS, binary size, compile time, build disk and
+wall time), the geomean rows, the toolchain versions, the AIL paths and refusals, and the method
+section from `merge.METHOD_LINES`. No number is hand-edited: the committed document is a fresh render
+of `tools/testdata/compare-report.json` (run 41393616319, commit 4f1245b), and the fixture is named in
+the header. `README.md` links the document and states the win counts against Rust. The new
+`test_compare_publish` module checks the fixture render against the committed file, every metric
+heading, both AIL scorecards, the refusals, the method lines and the CLI; it is registered through
+`AIL_CURRENT/tests.d/test_compare_publish.txt`.
+
 ## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
 
 The review found that `abs(<bool parameter>)` was newly accepted as an int/bool-result call even
