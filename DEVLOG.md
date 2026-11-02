@@ -1,3 +1,21 @@
+## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
+
+Two remaining comment-placement defects in `tools/ail2py.py` are fixed; no compiler file changed.
+
+* An end-of-line comment on a block-closing `}` now belongs to the block it closes. A token scan
+  maps each closing-brace line to its opening line, and the comment is placed at the opening
+  statement (`class`, `if`, `def`, ...) instead of before the last statement in the body.
+* Comments are now targeted in source order rather than output order. A field comment before a
+  later `use` no longer lands on the generated import, because the import's source line is later
+  than the field's even though the import is printed first.
+
+`test_ail_ail2py` gained closing-brace and use-after-struct regressions. The ten compare-lab tasks
+are still 10/10 `identical` under `--strict`; all 275 brace files convert (except the intentionally
+invalid `lab/syntax/runs/_sample/ts-like/collatz_steps/attempt1.ail`) and keep every comment once;
+`test_ail_ail2py`, `test_ail_files` and `test_ail_corpus_findings3` pass, and `test_ail_safetynet`
+passes without a virtual-memory cap (its `S4_generators_gc` case needs more than 4 GB of address
+space under this runner).
+
 ## 2026-11-02 -- onelang s1 review fixes: comment placement in `tools/ail2py.py`
 
 Two comment-placement defects are fixed without touching the compiler.

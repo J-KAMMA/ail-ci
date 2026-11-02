@@ -132,6 +132,33 @@ impl Box {
 }
 '''
 
+CLOSE_COMMENT = '''
+struct Box {
+    value: int;
+} # after struct
+fn main() -> int {
+    if true {
+        print(1);
+    } # after if
+    print(2);
+    return 0;
+} # after main
+'''
+
+USE_AFTER_STRUCT = '''
+# top
+struct A {
+    # field note
+    a: int;
+}
+use block_math;
+# before main
+fn main() -> int {
+    print(1);
+    return 0;
+}
+'''
+
 PROGRAMS = {
     'struct_impl': STRUCT_IMPL,
     'float_list': FLOAT_LIST,
@@ -179,6 +206,20 @@ class ConversionTests(unittest.TestCase):
         self.assertLess(converted.index('# field note: value'), converted.index('self.value = value'))
         self.assertIn('    # method note: bump\n    def bump', converted)
         self.assertIn('        # end: inline note\n        self.value += n', converted)
+
+    def test_closing_brace_comment_belongs_to_its_block(self):
+        _, _, converted = self.convert('close_comment', CLOSE_COMMENT)
+        self.assertIn('# after struct\nclass Box:', converted)
+        self.assertIn('    # after if\n    if True:', converted)
+        self.assertIn('# after main\ndef main', converted)
+        self.assertNotIn('        # after struct', converted)
+        self.assertNotIn('        # after if', converted)
+        self.assertNotIn('    # after main', converted)
+
+    def test_field_comment_before_a_later_use_stays_on_the_field(self):
+        _, _, converted = self.convert('use_after_struct', USE_AFTER_STRUCT)
+        self.assertIn('        # field note\n        self.a = a', converted)
+        self.assertLess(converted.index('# field note'), converted.index('# before main'))
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_two_check_identical(self):

@@ -111,6 +111,32 @@ def _declarations(source):
     return structs, uses
 
 
+def _brace_open_lines(source):
+    """Map each block-closing ``}`` line to the line that opened that block."""
+    opened = []
+    parts = []
+    result = {}
+    for part in tokenize.generate_tokens(io.StringIO(source).readline):
+        if part.type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
+                         tokenize.COMMENT, tokenize.ENDMARKER):
+            continue
+        if part.type == tokenize.ERRORTOKEN and part.string.isspace():
+            continue
+        value = part.string
+        if value == '{':
+            opened.append(parts[0].start[0] if parts else part.start[0])
+            parts = []
+        elif value == '}':
+            if opened:
+                result.setdefault(part.start[0], opened.pop())
+            parts = []
+        elif value == ';':
+            parts = []
+        else:
+            parts.append(part)
+    return result
+
+
 def _struct_meta(lines, meta, structs):
     """Give the generated ``class``/``__init__``/field lines the source lines they came from."""
     current = None
@@ -191,12 +217,29 @@ def _render(text, source_map):
     return lines, meta
 
 
-def _place_comments(lines, meta, comments, source_lines):
+def _target_at_or_after(meta, line):
+    """The first statement at or after ``line`` in source order, not in output order."""
+    best = None
+    for index, item in enumerate(meta):
+        if item is None or item[0] < line:
+            continue
+        key = (item[0], index)
+        if best is None or key < best[0]:
+            best = (key, index, item[1])
+    return None if best is None else (best[1], best[2])
+
+
+def _place_comments(lines, meta, comments, source_lines, brace_open_lines):
     for line, column, text in sorted(comments):
         prefix = source_lines[line - 1][:column] if line - 1 < len(source_lines) else ''
         end_of_line = bool(prefix.strip())
+        code = prefix.strip()
         target = None
-        if end_of_line:
+        if end_of_line and code in ('}', '};') and line in brace_open_lines:
+            # A comment on a block-closing brace belongs to the block it closes: place it at the
+            # opening statement, not at the last statement inside the body.
+            target = _target_at_or_after(meta, brace_open_lines[line])
+        elif end_of_line:
             # An end-of-line comment belongs to the statement that line closes, even when that
             # statement began on an earlier line.
             for index in range(len(meta) - 1, -1, -1):
@@ -205,10 +248,7 @@ def _place_comments(lines, meta, comments, source_lines):
                     target = (index, item[1])
                     break
         else:
-            for index, item in enumerate(meta):
-                if item is not None and item[0] >= line:
-                    target = (index, item[1])
-                    break
+            target = _target_at_or_after(meta, line)
         if target is None:
             lines.append('')
             meta.append(None)
@@ -245,7 +285,8 @@ def convert(source):
                  for index in range(len(imports))]
     lines = head + lines
     meta = head_meta + meta
-    lines = _place_comments(lines, meta, _comments(source), source.splitlines())
+    lines = _place_comments(lines, meta, _comments(source), source.splitlines(),
+                            _brace_open_lines(source))
     if entry:
         lines = _entry_block(lines)
     result = '\n'.join(lines).rstrip('\n') + '\n'
