@@ -47,6 +47,29 @@ build.  The struct
 list-comprehension rule in `python/pkg-v12/pyfunc.py` now also produces `list[str]` when the element
 is a str (`[p.name for p in ps]`), not only an int/float list.
 
+### Review follow-up: receiver names
+
+The bare-name convention needed two guards, both added after review.  When the method name is also a
+builtin container method (`get`, `pop`, `add`, ...), every `.name(...)` call must have a receiver that
+is provably a user class or instance; a dict/list receiver (or an unknown one) refuses the program by
+name instead of rewriting it.  Exact message:
+`get() is an Optional method whose name is also a builtin method; this call may be on a builtin object, so the method is not rewritten by name`
+(and the same with the actual name).  A call on a name bound to the defining class still lowers, so
+`OPT_INT.add` and the `g12_026` methods stay typed.  The receiver is classified from literals,
+constructors, annotations and local/module assignments; unknown receivers are never assumed.
+
+The inserted `self` parameter is no longer assumed at every call.  `C.value(3, 4)` (a class-scope
+function with no receiver) and `S.add(obj, 4)` (an unbound access) use `skip=0`, while `obj.method(...)`
+and `self.method(...)` use `skip=1`; an unknown receiver falls back to the first parameter's name
+(`self` / `cls`).  An Optional method call at module scope is refused with the existing
+`... takes or returns an Optional and is used outside a function; call it from inside a function`
+because its result pair cannot be hoisted there.  These two forms still cannot finish on the typed
+path: the class-shape pass says `C.value must take self as its first parameter`, and `boolkind` maps
+the first call argument to the first parameter after `self`, so the lowered `k__p` gets the receiver
+(`parameter k__p of S.add() is declared bool, but s is not a bool`).  Both fall back whole to the
+general path and now print CPython's `7`; making them typed needs receiver-aware class-shape and bool
+checks, which is a separate feature.
+
 `g12_026.py` therefore builds on the typed path; the programs that already built typed stay typed.
 No int is wrapped: the Optional lowering only adds a present flag and an int64 value, and the
 existing overflow rules are unchanged.

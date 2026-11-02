@@ -15,6 +15,13 @@ P4  a duplicate method name, a decorated Optional method, and an Optional method
     method that returns a pair must never reach the general build.
 P5  `[p.name for p in ps]` over a dataclass list builds typed and matches CPython.
 P6  the programs that already built typed at the base still do.
+P7  an Optional method named like a builtin container method (`get`, `pop`) does not capture a dict /
+    list call: such a program stays on the general path, and a call whose receiver is provably the user
+    class still lowers.
+P8  a class-scope function without a `self` parameter and an unbound `S.add(obj, k)` call both pass
+    their Optional argument in the right position.  Another compiler pass still requires a receiver
+    for a class-scope function, and the bool argument check assumes a bound method, so these two
+    programs stay on the general path (correct output) rather than typing the affected method.
 """
 import os
 import shutil
@@ -130,6 +137,78 @@ DECORATED_METHOD = '''class C:
 
 def main() -> None:
     print(C.value())
+
+
+main()
+'''
+
+COLLIDE_GET = '''class Cache:
+    def get(self, k: int | None) -> int | None:
+        if k is None:
+            return None
+        return k
+
+
+def main() -> None:
+    c = Cache()
+    d = {1: 10, 2: 20}
+    print(c.get(3))
+    print(d.get(1))
+    print(d.get(9))
+
+
+main()
+'''
+
+COLLIDE_POP = '''class Stack:
+    def pop(self, k: int | None) -> int | None:
+        if k is None:
+            return None
+        return k
+
+
+def main() -> None:
+    s = Stack()
+    values = [1, 2, 3]
+    print(s.pop(1))
+    print(values.pop())
+    print(values)
+
+
+main()
+'''
+
+NO_SELF = '''class C:
+    def value(x: int, k: int | None) -> int | None:
+        if k is None:
+            return x
+        return x + k
+
+
+def main() -> None:
+    print(C.value(3, 4))
+    none: int | None = None
+    print(C.value(5, none))
+
+
+main()
+'''
+
+UNBOUND = '''class S:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def add(self, k: int | None) -> int:
+        if k is None:
+            return self.n
+        self.n += k
+        return self.n
+
+
+def main() -> None:
+    s = S(3)
+    print(S.add(s, 4))
+    print(s.n)
 
 
 main()
@@ -261,6 +340,24 @@ class Prog13(unittest.TestCase):
 
     def test_struct_list_comprehension_of_str_typed(self):
         self.check(STRUCT_STR, 'struct_str')
+
+    def test_optional_method_name_does_not_capture_builtin_get(self):
+        _, want = self.check(COLLIDE_GET, 'collide_get', expect_typed=False)
+        self.assertEqual(want.stdout, b'3\n10\nNone\n')
+        self.assertTrue(any('builtin method' in n for n in optlib_notes(COLLIDE_GET)))
+
+    def test_optional_method_name_does_not_capture_builtin_pop(self):
+        _, want = self.check(COLLIDE_POP, 'collide_pop', expect_typed=False)
+        self.assertEqual(want.stdout, b'1\n3\n[1, 2]\n')
+        self.assertTrue(any('builtin method' in n for n in optlib_notes(COLLIDE_POP)))
+
+    def test_optional_method_without_a_self_parameter_matches_python(self):
+        _, want = self.check(NO_SELF, 'no_self', expect_typed=False)
+        self.assertEqual(want.stdout, b'7\n5\n')
+
+    def test_unbound_optional_method_call_matches_python(self):
+        _, want = self.check(UNBOUND, 'unbound', expect_typed=False)
+        self.assertEqual(want.stdout, b'7\n7\n')
 
     def test_newly_typed_functions_on_both_builds(self):
         for env in ({'AIL_IR': '0'}, {'AIL_IR': '1'}):

@@ -21,7 +21,8 @@ value. Where it does not know, CPython would raise TypeError / AttributeError (o
 program is refused by name instead of guessing: "'x' may be None here".
 
 Not built, refused by name (the source is left as written and the reason goes to `notes`): Optional scalar fields,
-methods, list / dict elements, `int | float | None`, an Optional call inside `and` / `or` / `x if c else y` /
+a duplicate or decorated method, a method call whose receiver could be a builtin object, a call at module scope,
+list / dict elements, `int | float | None`, an Optional call inside `and` / `or` / `x if c else y` /
 a comprehension / a `while` test, ordering comparisons and `in` of a value not known to be present.
 """
 import ast
@@ -32,6 +33,28 @@ ZERO = {'int': 0, 'float': 0.0, 'bool': False, 'str': '', 'bytes': b''}
 # calls whose evaluation may be reordered with an Optional call hoisted ahead of the statement
 SAFE_CALLS = frozenset(('print', 'str', 'repr', 'len', 'abs', 'min', 'max', 'bool', 'int', 'float', 'round', 'sum'))
 PURE_BIN = (ast.Add, ast.Sub, ast.Mult, ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift)
+CONTAINER_ANN = ('list', 'dict', 'set', 'tuple', 'frozenset', 'str', 'bytes', 'bytearray')
+CONTAINER_CALLS = frozenset(('list', 'dict', 'set', 'tuple', 'frozenset', 'str', 'bytes', 'bytearray', 'sorted'))
+_BUILTIN_METHOD_NAMES = None
+
+
+def builtin_method_names():
+    """Method names of the builtin containers and other common standard types.  An Optional method with
+    one of these names must not be rewritten at a call whose receiver could be such an object."""
+    global _BUILTIN_METHOD_NAMES
+    if _BUILTIN_METHOD_NAMES is None:
+        import collections
+        import re
+        types_ = (str, bytes, bytearray, list, dict, set, frozenset, tuple, int, float, complex, bool,
+                  range, slice, memoryview, collections.deque, collections.Counter, collections.OrderedDict,
+                  collections.defaultdict, type(re.compile('')), type(re.match('', '')))
+        names = set()
+        for t in types_:
+            for n in dir(t):
+                if callable(getattr(t, n, None)):
+                    names.add(n)
+        _BUILTIN_METHOD_NAMES = frozenset(names)
+    return _BUILTIN_METHOD_NAMES
 
 
 class Refused(Exception):
@@ -159,6 +182,136 @@ class FuncInfo:
         self.optional = self.ret is not None or any(k for _, k, _ in self.params)
 
 
+class _ScopeData:
+    """Bindings of one scope (module or function), enough to say whether a name may be a builtin object."""
+
+    def __init__(self, node, class_names):
+        self.class_names = class_names
+        self.values = {}
+        self.loops = {}
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                if a.annotation is not None:
+                    self.values.setdefault(a.arg, []).append(('ann', a.annotation))
+        for n in _own_nodes(node):
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name):
+                        self.values.setdefault(t.id, []).append(('val', n.value))
+                    else:
+                        for e in ast.walk(t):
+                            if isinstance(e, ast.Name) and isinstance(e.ctx, ast.Store):
+                                self.values.setdefault(e.id, []).append(('val', None))
+            elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+                self.values.setdefault(n.target.id, []).append(('ann', n.annotation))
+                if n.value is not None:
+                    self.values.setdefault(n.target.id, []).append(('val', n.value))
+            elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+                self.values.setdefault(n.target.id, []).append(('val', None))
+            elif isinstance(n, (ast.For, ast.comprehension)) and isinstance(n.target, ast.Name):
+                self.loops.setdefault(n.target.id, []).append(n.iter)
+            elif isinstance(n, (ast.With, ast.ExceptHandler, ast.NamedExpr, ast.Import, ast.ImportFrom,
+                                ast.Global, ast.Nonlocal)):
+                for e in ast.walk(n):
+                    if isinstance(e, ast.Name) and isinstance(e.ctx, ast.Store):
+                        self.values.setdefault(e.id, []).append(('val', None))
+
+
+def _ann_tags(ann, class_names):
+    if isinstance(ann, ast.Constant) and isinstance(ann.value, str):
+        head = ann.value.split('[', 1)[0].split('.')[-1]
+    elif isinstance(ann, ast.Name):
+        head = ann.id
+    elif isinstance(ann, ast.Attribute):
+        head = ann.attr
+    elif isinstance(ann, ast.Subscript):
+        base = ann.value
+        head = base.id if isinstance(base, ast.Name) else base.attr if isinstance(base, ast.Attribute) else None
+    else:
+        return frozenset(('unknown',))
+    if head in class_names:
+        return frozenset(('instance',))
+    if head in CONTAINER_ANN:
+        return frozenset(('container',))
+    if head in KINDS:
+        return frozenset(('nonuser',))
+    return frozenset(('unknown',))
+
+
+def _elem_tags(e, scope, module, class_names):
+    if isinstance(e, (ast.List, ast.Tuple, ast.Set)):
+        tags = set()
+        for x in e.elts:
+            tags |= _expr_tags(x, scope, module, class_names)
+        return frozenset(tags or ('unknown',))
+    if isinstance(e, (ast.ListComp, ast.SetComp)):
+        return _expr_tags(e.elt, scope, module, class_names)
+    return frozenset(('unknown',))
+
+
+def _name_tags(name, scope, module, class_names, seen):
+    if name in class_names:
+        return frozenset(('class',))
+    if name == 'self':
+        return frozenset(('instance',))
+    if name == 'cls':
+        return frozenset(('class',))
+    if name in seen:
+        return frozenset(('unknown',))
+    data = scope if (name in scope.values or name in scope.loops) else module
+    bindings = list(data.values.get(name, ()))
+    loops = list(data.loops.get(name, ()))
+    if not bindings and not loops:
+        return frozenset(('unknown',))
+    seen = seen | {name}
+    tags = set()
+    for how, node in bindings:
+        if node is None:
+            tags.add('unknown')
+        elif how == 'ann':
+            tags |= _ann_tags(node, class_names)
+        else:
+            tags |= _expr_tags(node, scope, module, class_names, seen)
+    for it in loops:
+        tags |= _elem_tags(it, scope, module, class_names)
+    return frozenset(tags or ('unknown',))
+
+
+def _expr_tags(e, scope, module, class_names, seen=frozenset()):
+    if isinstance(e, ast.Constant):
+        return frozenset(('nonuser',))
+    if isinstance(e, ast.Name):
+        return _name_tags(e.id, scope, module, class_names, seen)
+    if isinstance(e, (ast.List, ast.Tuple, ast.Set, ast.Dict, ast.ListComp, ast.SetComp, ast.DictComp,
+                      ast.GeneratorExp)):
+        return frozenset(('container',))
+    if isinstance(e, ast.Call):
+        f = e.func
+        if isinstance(f, ast.Name):
+            if f.id in class_names:
+                return frozenset(('instance',))
+            if f.id in CONTAINER_CALLS:
+                return frozenset(('container',))
+            if f.id in KINDS or f.id in ('len', 'range', 'ord', 'chr', 'round', 'abs'):
+                return frozenset(('nonuser',))
+        return frozenset(('unknown',))
+    if isinstance(e, ast.IfExp):
+        return _expr_tags(e.body, scope, module, class_names, seen) | _expr_tags(e.orelse, scope, module,
+                                                                                  class_names, seen)
+    if isinstance(e, ast.BoolOp):
+        tags = set()
+        for v in e.values:
+            tags |= _expr_tags(v, scope, module, class_names, seen)
+        return frozenset(tags or ('unknown',))
+    if isinstance(e, (ast.BinOp, ast.UnaryOp, ast.Compare, ast.JoinedStr, ast.FormattedValue)):
+        return frozenset(('nonuser',))
+    return frozenset(('unknown',))
+
+
+def _user_receiver(tags):
+    return bool(tags) and tags <= frozenset(('class', 'instance'))
+
+
 class Lowerer:
     def __init__(self, tree):
         self.tree = tree
@@ -195,6 +348,8 @@ class Lowerer:
         self.check_none_flow()
         """Optional scalars may only be annotations of a top-level function's parameters / return and of
         locals in function bodies; anywhere else the program is refused by name."""
+        self.class_names = {c.name for c in self.tree.body if isinstance(c, ast.ClassDef)}
+        self.module_scope = _ScopeData(self.tree, self.class_names)
         allowed = set()
         methods = [m for c in self.tree.body if isinstance(c, ast.ClassDef)
                    for m in c.body if isinstance(m, ast.FunctionDef)]
@@ -249,6 +404,7 @@ class Lowerer:
             info.method = True
             self.methods[m.name] = info
             self.method_info[id(m)] = info
+        self.check_method_collisions(methods)
         for node in ast.walk(self.tree):
             if isinstance(node, ast.FunctionDef) and node not in self.tree.body \
                     and id(node) not in method_nodes:
@@ -258,6 +414,28 @@ class Lowerer:
                 if node.returns is not None and scalar_optional(node.returns) is not None:
                     raise Refused(node, 'a nested function returning an Optional scalar is not built')
         self.opt_funcs = {n for n, f in self.funcs.items() if f.optional}
+
+    def check_method_collisions(self, methods):
+        """A method is rewritten at `obj.name(...)` by its bare name.  When that name is also a builtin
+        container method (`get`, `pop`, `add`, ...), every such call must be on an object that is provably a
+        user class or instance; otherwise a dict/list call would be rewritten as the Optional method."""
+        names = {m.name for m in methods if m.name in builtin_method_names()}
+        if not names:
+            return
+
+        def scan(node, scope):
+            for n in _own_nodes(node):
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in names:
+                    tags = _expr_tags(n.func.value, scope, self.module_scope, self.class_names)
+                    if not _user_receiver(tags):
+                        raise Refused(n, '%s() is an Optional method whose name is also a builtin method; this '
+                                      'call may be on a builtin object, so the method is not rewritten by name'
+                                      % n.func.attr)
+
+        scan(self.tree, self.module_scope)
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scan(node, _ScopeData(node, self.class_names))
 
     def run(self):
         self.check_placement()
@@ -269,6 +447,9 @@ class Lowerer:
                 if isinstance(n, ast.Name) and n.id in self.opt_funcs and n.id != 'main':
                     raise Refused(node, '%s() takes or returns an Optional and is used outside a function; '
                                   'call it from inside a function' % n.id)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in self.methods:
+                    raise Refused(node, '%s() takes or returns an Optional and is used outside a function; '
+                                  'call it from inside a function' % n.func.attr)
         body = []
         for node in self.tree.body:
             if isinstance(node, ast.FunctionDef):
@@ -335,6 +516,7 @@ class Lowerer:
                              if a.arg in opt and a.arg in stored}
         self.scan_function(node)
         self.fn = node
+        self.scope = _ScopeData(node, self.class_names)
         self.info = info
         self.all_names = frozenset(opt)
         self.hoist_ok = True
@@ -1183,10 +1365,20 @@ class Lowerer:
         self.wrapped(a)
         return _const(True), self.ex(a, facts)
 
+    def call_skip(self, receiver, info):
+        """1 when this call is bound (the receiver supplies the first parameter), 0 for `C.name(obj, ...)`."""
+        tags = _expr_tags(receiver, self.scope, self.module_scope, self.class_names)
+        if 'class' in tags and 'instance' not in tags:
+            return 0
+        if 'instance' in tags and 'class' not in tags:
+            return 1
+        first = info.params[0][0] if info.params else None
+        return 1 if first in ('self', 'cls') else 0
+
     def user_call(self, e, info, facts):
         new = copy.copy(e)
         args = []
-        skip = 1 if getattr(info, 'method', False) else 0
+        skip = self.call_skip(e.func.value, info) if getattr(info, 'method', False) else 0
         params = info.params[skip:]
         for i, a in enumerate(e.args):
             if isinstance(a, ast.Starred):

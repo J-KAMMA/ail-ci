@@ -1,3 +1,16 @@
+## 2026-11-02 -- prog13 review fix: receiver-aware Optional method calls
+
+Review found two defects in the Optional method lowering.  A method named like a builtin container
+method (`get`, `pop`, ...) captured every `<obj>.get(...)` call, and every call assumed a receiver
+parameter, shifting the Optional argument of a class-scope function with no `self` (`C.value(3, 4)`
+returned 5).  `optlib.py` now classifies each receiver from literals, constructors, annotations and
+local/module assignments.  A builtin-colliding method is refused by name unless every call receiver
+is provably a user class/instance (so `Cache.get` plus `dict.get` falls back whole), and the
+bound/unbound skip is per call: 0 for `C.value(3, 4)` and `S.add(obj, 4)`, 1 for an instance call,
+with the first parameter's name as the fallback.  Module-scope Optional method calls are refused
+with the existing outside-a-function message.  Added P7/P8 to `test_ail_prog13.py`; all 13 review
+probes and the new tests match CPython on both builds.  No int64 rule or generated C changed.
+
 ## 2026-11-02 -- prog13: Optional scalar methods reach the typed path (job-prog13-11020843)
 
 Profile pass over the eight assigned programs (`lab/progfix/prog13.md`): five already built on the
