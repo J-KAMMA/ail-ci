@@ -1,3 +1,22 @@
+## 2026-11-02 -- prog22 follow-up: module-level class lists fall back, not a C build failure (job-prog22-11021439)
+
+Fixed the review's blocking regression.  A module-level `gxs: list[Item] = []` that a function
+appends to (and then folds with `max(key=)`/`min(key=)`) was bound as a local `olist` by
+`_bind_object_types`; codegen emitted `v_gxs` in `py_main` while the module body declared it in a
+later init function, so the default build died in gcc with `v_gxs undeclared`.  `bind` now refuses
+a name the function does not bind itself, and the function takes the general path as it does on
+the base: `` `gxs` is a module-level value that this function changes; the typed path builds no
+mutable module-level container (the general path does) ``.  This covers both the append/extend
+path and the fold, not just the fold's source.
+
+`test_ail_prog22` gains module-level append-only and append-plus-`max(key=)` cases (general path,
+stdout/exit equal to CPython).  The records in `lab/progfix/prog22.md` are corrected: g21_002's
+default first reason is `json.dumps of data`, and the wide-row/general-path claims now state what
+the re-run probes actually show.  Probes in `/tmp/rprobes` (`global_maxkey.py`,
+`global_maxkey_int.py`, `global_min_each.py`, `global_append_only.py`) and `/tmp/probes`
+(`p22_five_str.py`, `p22_five_str_lit.py`, `p22_six_str.py`, `p22_five_param.py`,
+`p22_five_index.py`, `p22_five_global.py`) all match CPython on both builds.
+
 ## 2026-11-02 -- prog22 review fixes: wide str rows and catchable empty max/min (job-prog22-11021237)
 
 Fixed the two defects a reviewer found in `d4ef0ad`.  A local `list[tuple[...]]` with a str

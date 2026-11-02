@@ -154,6 +154,48 @@ if __name__ == "__main__":
     main()
 '''
 
+GLOBAL_APPEND = '''from dataclasses import dataclass
+
+
+@dataclass
+class Item:
+    x: float
+
+
+gxs: list[Item] = []
+
+
+def main() -> None:
+    gxs.append(Item(1.0))
+    gxs.append(Item(2.0))
+    print(gxs[0].x)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+GLOBAL_MAXKEY = '''from dataclasses import dataclass
+
+
+@dataclass
+class Item:
+    x: float
+
+
+gxs: list[Item] = []
+
+
+def main() -> None:
+    gxs.append(Item(1.0))
+    gxs.append(Item(2.0))
+    print(max(gxs, key=lambda s: s.x).x)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
 SROWS = '''import sys
 
 
@@ -281,6 +323,15 @@ class Prog22(unittest.TestCase):
         res, exe, source = compile_default(self.tmp, FIVEFIELD, 'srows_five')
         self.assertEqual(res.returncode, 0, res.stderr[-1500:])
         self.same(exe, source)
+
+    def test_module_level_class_list_uses_general_path(self):
+        for text, name in ((GLOBAL_APPEND, 'global_append'),
+                           (GLOBAL_MAXKEY, 'global_maxkey')):
+            res, exe, source = compile_default(self.tmp, text, name)
+            self.assertEqual(res.returncode, 0, res.stderr[-1500:])
+            self.assertFalse(typed(res), 'typed path bound a module-level list: '
+                             + res.stderr[-800:])
+            self.same(exe, source)
 
     def test_str_field_records_typed(self):
         exe, source = self.build(SROWS, 'srows')

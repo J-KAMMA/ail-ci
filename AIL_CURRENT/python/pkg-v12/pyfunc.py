@@ -28822,7 +28822,17 @@ def _bind_object_types(fn, ctx, nodes=None, assigned_names=None):
             return _etype(value, ctx)
         except Unsupported:
             return None
+    local_names = _local_binding_names(fn)
     def bind(name, kind, action=None, actual=None):
+        if (name not in ctx.kind and name not in local_names
+                and name not in ctx.modconsts):
+            # A name this function only reads and mutates is a module-level global. The typed path
+            # has no mutable module-level container (the general path keeps it in the module
+            # object); binding it here would make codegen read a local `v_<name>` that the module
+            # body initialises somewhere else, which used to fail only at C compile time.
+            raise Unsupported('%r is a module-level value that this function changes; the typed '
+                              'path builds no mutable module-level container (the general path '
+                              'does)' % name)
         if kind in MAPS and name not in ctx.kind:
             old = ctx.types.get(name)
             ctx.types[name] = kind
