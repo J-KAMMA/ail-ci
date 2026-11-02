@@ -1,3 +1,69 @@
+## 2026-11-02 -- prog14: annotated module constants and a pass before them (job-prog14-11021358)
+
+The skipped review left no named defect.  Re-checking the eight programs against this tree showed
+g25_012's first reason was no longer `a match statement` (the earlier pass lowers it) but a constant
+that the candidacy slice dropped: the Python surface turns its `typing` import into a top-level
+`pass`, and `_runs_user_code` treated that pass as code that can call user code, so the annotated
+`SMALL_POSITIVE_LIMIT: int = 100` after it fell outside the slice and `categorize` said
+`'SMALL_POSITIVE_LIMIT' is read before it is assigned`.  A top-level annotated literal is now a
+one-time module constant in `pymix`/`pyboxed2`'s slice and in the hybrid divisor proof, and a
+top-level `pass` is a no-op for the constant-order limit.  `categorize` now reaches its real next
+blocker, `raise requires a built-in exception value` (`TypeError` is not a supported exception
+name), recorded as the g25 follow-up; the other six programs keep the reasons in
+`lab/progfix/prog14.md`.
+
+`test_ail_prog14` gained an annotated-constant-after-`pass` case that asserts `classify` is
+accelerated and matches CPython.  Probes `/tmp/probes/p14_ann*.py` and `p14_passorder.py` cover an
+annotated int/list constant, a surface-removed import, a duplicate annotated binding, an unused
+annotated bool, a late annotated constant, and a pass/constant order; all match CPython on the
+general path (the late-constant default-build difference is pre-existing for a plain assignment on
+HEAD too).  The ten `lab/compare` generated C files are byte-identical to HEAD.  Required tests
+pass: test_ail_prog14, test_ail_cpython_hybrid, test_ail_match, test_ail_unbound,
+test_ail_range_checks, test_ail_python_syntax, test_ail_typed_tuples, test_ail_typed_locals,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (0 failed).
+
+## 2026-11-02 -- prog14 review fixes: constant order, range step and range length (job-prog14-11020844)
+
+Fixed all four review defects.  A literal module constant is now kept in the candidacy slice only
+when it is bound before the first top-level statement that can call user code; `def f(...): ...;
+print(f(10)); MOD = 7` therefore stays in CPython and raises CPython's `NameError` instead of
+printing 3.  The hybrid body gate refuses a 3-argument `range` whose step is not provably nonzero,
+so `range(0, n, 0)` runs in CPython and raises the `ValueError` the caller catches.  `len(range(...))`
+uses `ail_range_count` instead of subtracting the bounds, fixing `len(range(5, 0))` (0, not -3) and
+`len(range(-3))` (0, not -3) on both builds.  `tools/update_manifest.py` was run after adding the
+test module, so `--check` passes.
+
+Profile numbers in `lab/progfix/prog14.md` are now the measured values for the saved inputs
+(g02_002 `proper_divisor_sum` 0.056 s of 0.059 s; t341 `count_valid` 0.019 s of 0.019 s).
+`test_ail_prog14` gained late-constant, zero-step and range-length boundary cases.  Required tests
+pass: test_ail_prog14, test_ail_cpython_hybrid, test_ail_range_checks, test_ail_bugs7,
+test_ail_fuzz48, test_ail_pre199, test_ail_python_syntax, test_ail_typed_tuples,
+test_ail_typed_locals, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (80 tests, 1
+skipped).  Probes `/tmp/probes/p14_*.py` match CPython on both `cmp.sh` builds and the hybrid;
+the ten `lab/compare` generated C files are byte-identical to `HEAD`.
+
+## 2026-11-02 -- prog14: typed reach for eight real programs (job-prog14-11020844)
+
+Profiled the eight task programs with CPython 3.12; the hot functions are g02_002's
+`proper_divisor_sum` (0.056 s of 0.059 s, 95%) and t341's `count_valid` (0.019 s of 0.019 s).  Both
+now become hybrid typed clones.  `pymix` infers `a, b = b, (a + b) % MOD` element by element and
+keeps literal module constants in the candidacy slice, and the hybrid body gate accepts a
+`%`/`//`/`/` whose divisor is a positive literal, a local bound once to a positive literal and only
+increased, or a one-time nonzero literal module constant; `range`/`len` are accepted while they are
+the builtins.  The proofs are conservative: a name rebound at module scope (second assignment,
+`+=`, `for`, `global`) is not a constant, a set/dict literal is not kept, and a parameter,
+tuple/`for` target, branch-only binding, boolean or read before the binding is not a positive
+local.  The other six programs stay in CPython for the reasons in `lab/progfix/prog14.md` (`match`,
+generators/`Optional[Tuple]`, nested closures, csv/None mains, `getattr`).
+
+Tests: the new `test_ail_prog14` (registered in `tests.d`) plus `test_ail_cpython_hybrid`,
+`test_ail_flush_exit`, `test_ail_mixed_bounds`, `test_ail_walkmemo`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.  Probes in `/tmp/probes/prog14_*.py`
+cover literal/local/module/parameter/list/attribute/dict divisors, `% 0`, negatives, booleans,
+rebinding (`+=`, `for`, `global`), read-before-binding, int64 edges and big ints; every probe
+matches CPython or is refused by name, and the hybrid build matches CPython on each one.  The
+generated C of the ten `lab/compare` tasks is byte-identical to `HEAD`.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow

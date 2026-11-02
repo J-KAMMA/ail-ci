@@ -2209,11 +2209,26 @@ def _scan_module_consts(tree):
                                     "with plain lists, dicts and loops" % (unavailable or mod))
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
-        if not isinstance(node, ast.Assign):
+        annotated = isinstance(node, ast.AnnAssign)
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        name = node.targets[0].id
+        if annotated:
+            if not isinstance(node.target, ast.Name) or node.value is None:
+                continue
+            target = node.target
+            # An annotated binding was never a module constant before; keep every shape this
+            # scan cannot prove exactly as it was (read outside the typed clone) instead of
+            # refusing a whole program that used to build.
+            if isinstance(node.value, ast.Constant) and type(node.value.value) is bool:
+                continue
+            if _module_const_scalar(node.value) is None \
+                    and not isinstance(node.value, (ast.List, ast.Tuple)):
+                continue
+        else:
+            if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+                continue
+            target = node.targets[0]
+        name = target.id
         if name in consts:
             raise Unsupported("%r is a module-level name assigned more than once; this compiler "
                               "treats module scope as a fixed set of one-time constants, not a "
@@ -17240,6 +17255,17 @@ def _call(node, ctx):
             return ctx.acols(a[0].value.id)
         lo, n, _, pre = _iter_plan(a[0], ctx)          # len(set(xs)), len(sorted(xs)), ...
         ctx.pre.extend(pre)
+        is_range = ((isinstance(a[0], ast.Call) and isinstance(a[0].func, ast.Name)
+                     and a[0].func.id == 'range'
+                     and 'range' not in ctx.funcs and 'range' not in ctx.classes)
+                    or (isinstance(a[0], ast.Name) and ctx.types.get(a[0].id) == RANGE))
+        if is_range:
+            # `range` is (start, stop, step), but `_iter_plan` answers (first, limit) for a 1/2
+            # argument range and (0, count) for a 3-argument one.  Range length is never negative
+            # (`len(range(5, 0))`, `len(range(-3))` are 0), so let the shared counter apply the
+            # clamp/overflow rule instead of subtracting the bounds by hand.
+            ctx.parts.add('RANGEITER')
+            return 'ail_range_count(%s, %s, 1)' % (lo, n)
         return '(%s - %s)' % (n, lo) if lo != '0' else n
     if f in ('sum', 'max', 'min', 'any', 'all') and f not in ctx.funcs and len(a) == 1:
         return _inline_fold(f, a[0], ctx)

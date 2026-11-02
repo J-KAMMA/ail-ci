@@ -593,12 +593,37 @@ def _one_pass(fn_facts, module_calls):
             if isinstance(n, ast.FunctionDef) and n is not f.node:
                 continue
             if isinstance(n, ast.Assign):
-                k = _expr_kind(n.value, f, rets)
-                if k is not UNKNOWN:
-                    for t in n.targets:
+                # `a, b = 1, 2` / `a, b = b, (a + b) % MOD`: infer each element from the RHS
+                # tuple BEFORE binding any target (Python evaluates the whole RHS first), so a
+                # later element reading an earlier target sees the old value.  Without this the
+                # hot counter helper of t341 (`a, b = b, ...`) had no kind for `b` and was not
+                # selected even though the typed emitter accepts it.
+                targets = n.targets
+                if (len(targets) == 1 and isinstance(targets[0], (ast.Tuple, ast.List))
+                        and isinstance(n.value, (ast.Tuple, ast.List))
+                        and len(targets[0].elts) == len(n.value.elts)
+                        and not any(isinstance(e, ast.Starred)
+                                    for e in targets[0].elts + n.value.elts)):
+                    pairs = []
+                    for t, v in zip(targets[0].elts, n.value.elts):
                         nm = _assigned_name(t)
                         if nm:
-                            set_local(f, nm, k)
+                            k = _expr_kind(v, f, rets)
+                            if k is not UNKNOWN:
+                                pairs.append((nm, k))
+                    for nm, k in pairs:
+                        set_local(f, nm, k)
+                else:
+                    k = _expr_kind(n.value, f, rets)
+                    if k is not UNKNOWN:
+                        for t in targets:
+                            nm = _assigned_name(t)
+                            if nm:
+                                set_local(f, nm, k)
+            elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+                k = _expr_kind(n.value, f, rets)
+                if k is not UNKNOWN:
+                    set_local(f, n.target.id, k)
             elif isinstance(n, ast.AugAssign):
                 nm = _assigned_name(n.target)
                 if nm:
@@ -781,18 +806,172 @@ def _scalar_sig(params):
     return sig
 
 
+def _scalar_literal_kind(node):
+    """`str`, `bytes` or `num` for a scalar `to_c`'s module-constant scan accepts, else None.
+    Booleans are excluded (`type(value) is int`, not `isinstance`), as pyfunc excludes them."""
+    if isinstance(node, ast.Constant):
+        if type(node.value) is str:
+            return 'str'
+        if type(node.value) is bytes:
+            return 'bytes'
+        if type(node.value) is int or type(node.value) is float:
+            return 'num'
+        return None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        operand = node.operand
+        if isinstance(operand, ast.Constant) and (type(operand.value) is int
+                                                  or type(operand.value) is float):
+            return 'num'
+    return None
+
+
+def _literal_constant(node):
+    """True for a value `to_c`'s module-constant scan accepts as a one-time literal: an int / float /
+    str / bytes scalar, a non-empty numeric list or tuple, or a non-empty list/tuple of str.  A
+    set/dict is NOT accepted (`to_c` refuses it), so keeping one in the slice would make an
+    unrelated helper uncompilable.  Anything computed or called stays out too."""
+    if _scalar_literal_kind(node) is not None:
+        return True
+    if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
+        kinds = [_scalar_literal_kind(element) for element in node.elts]
+        if all(kind == 'str' for kind in kinds):
+            return True
+        return all(kind == 'num' for kind in kinds)
+    return False
+
+
+def _module_binding_counts(tree):
+    """How many times each name is bound at module scope, counting every shape that binds one
+    (assignment/augmented assignment/annotation, `for`/`with ... as` target, import alias,
+    `def`/`class` name, delete) and never looking inside a function or class body.  A literal
+    assignment is a one-time constant only when its name is bound exactly once."""
+    counts = {}
+
+    def add(name):
+        counts[name] = counts.get(name, 0) + 1
+
+    def scan(node):
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                add(node.id)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                add(alias.asname or alias.name.split('.')[0])
+            return
+        if isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name)
+        for child in ast.iter_child_nodes(node):
+            scan(child)
+
+    for statement in tree.body:
+        scan(statement)
+    return counts
+
+
+def _written_globals(tree):
+    """Names a function both declares `global` and rebinds; such a name is a mutable module
+    variable, not a one-time constant, even when its top-level binding is a literal."""
+    written = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Global):
+                names.update(node.names)
+        if not names:
+            continue
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name) and node.id in names \
+                    and isinstance(node.ctx, (ast.Store, ast.Del)):
+                written.add(node.id)
+            elif isinstance(node, ast.alias) and (node.asname or node.name.split('.')[0]) in names:
+                written.add(node.asname or node.name.split('.')[0])
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
+                    and node is not fn and node.name in names:
+                written.add(node.name)
+    return written
+
+
+def _runs_user_code(node):
+    """Whether a top-level statement can call a function (or otherwise run code that might read a
+    module name) while the module is being imported.  Plain assignments/arithmetic and imports do
+    not; a call in an expression or in a definition's decorators/defaults does."""
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return False
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return bool(node.decorator_list
+                    or any(d is not None for d in node.args.defaults)
+                    or any(d is not None for d in node.args.kw_defaults))
+    if isinstance(node, ast.ClassDef):
+        return bool(node.decorator_list or node.bases or node.keywords)
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+        return False                            # a docstring or other no-op constant
+    if isinstance(node, ast.Pass):
+        return False                            # a no-op placeholder (the Python surface writes one
+                                                # for an import it lowers away)
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        return any(isinstance(child, (ast.Call, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom))
+                   for child in ast.walk(node))
+    return True
+
+
+def _module_order_limit(tree):
+    """Index of the first top-level statement that may call user code.  A literal constant bound
+    before that point is already bound when any function can run; a constant bound after it may be
+    read before its assignment (CPython's `NameError`), so keeping it in the slice would compile a
+    value CPython never had."""
+    for index, node in enumerate(tree.body):
+        if _runs_user_code(node):
+            return index
+    return len(tree.body)
+
+
+def _literal_module_assignments(tree):
+    """The top-level literal assignments that are safe to keep in a candidacy slice: the name is
+    bound exactly once at module scope, before any statement that can run user code, and no
+    function rebinds it under `global`.  A rebound or late name stays out, so `to_c` refuses a
+    function that reads it instead of compiling a stale value."""
+    counts = _module_binding_counts(tree)
+    written = _written_globals(tree)
+    limit = _module_order_limit(tree)
+    keep = set()
+    for index, node in enumerate(tree.body):
+        if index >= limit:
+            continue
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                and node.value is not None:
+            name = node.target.id
+        else:
+            continue
+        if counts.get(name) == 1 and name not in written and _literal_constant(node.value):
+            keep.add(id(node))
+    return keep
+
+
 def _defs_only_source(tree):
     """`to_c`'s module-constant scan (`_MODCONSTS`) walks EVERY top-level statement in the source
     it is given, not just the functions reachable from `entry` -- a general-path program's
     top-level code (the reason it is on the general path at all: a dict, an `input()` call, a
     `for` loop over stdin) makes that scan refuse the whole source before `entry=`'s own call-graph
-    trim ever gets a say. Candidacy per-function therefore compiles a SLICE containing only the
-    module's own `def`s (no top-level statements, no classes -- both out of this pass's scope
-    already, see the module docstring) -- exactly the self-contained C `to_c` is asked to emit
-    "alongside" in the brief, never the whole boxed program."""
-    only_defs = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-    return ast.unparse(ast.Module(body=only_defs, type_ignores=[]))
-
+    trim ever gets a say.  Candidacy per-function therefore compiles a SLICE containing the
+    module's own `def`s (no classes -- out of this pass's scope already, see the module
+    docstring) and its literal constants.  The constants must be kept: a helper such as t341's
+    `count_valid` reads `MOD = 1_000_000_007`, and dropping that assignment made `to_c` refuse
+    it with "'MOD' is read before it is assigned" even though the typed emitter compiles it."""
+    constants = _literal_module_assignments(tree)
+    keep = [n for n in tree.body
+            if isinstance(n, ast.FunctionDef) or id(n) in constants]
+    return ast.unparse(ast.Module(body=keep, type_ignores=[]))
 
 def analyze(source, classes=()):
     """The module's one entry point. `classes` mirrors `pyfunc._scan_classes`'s output, for

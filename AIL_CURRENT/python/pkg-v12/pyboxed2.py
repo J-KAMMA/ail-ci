@@ -155,16 +155,34 @@ def _mix_call_h_text():
 
 
 def _mix_defs_only_source(tree):
-    """Exactly `pymix.py`'s own private `_defs_only_source` (module `def`s only, no top-level
-    statements, no classes) -- duplicated here in 3 lines rather than importing a private name
-    across the module boundary, since `pymix.py` is not being edited this session."""
-    only_defs = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-    only = ast.Module(body=only_defs, type_ignores=[])
+    """Exactly `pymix.py`'s own private `_defs_only_source`: the module `def`s plus its literal
+    constants (no other top-level statements, no classes).  The constants are part of the slice
+    because a selected helper may read one (`MOD = 1_000_000_007` in t341's `count_valid`);
+    dropping it made `to_c` refuse that otherwise-compilable clone.  Only a constant bound once
+    and never rebound (including by `for`/`+=`/`global` at module scope) is kept: a rebound name
+    must make `to_c` refuse the clone, never compile its first literal as if it were final."""
+    def literal_constant(node):
+        try:
+            ast.literal_eval(node)
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+            return False
+        return True
+
+    if pymix is not None:
+        constants = pymix._literal_module_assignments(tree)
+    else:
+        constants = {id(n) for n in tree.body
+                     if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                         and isinstance(n.targets[0], ast.Name) and literal_constant(n.value))
+                     or (isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+                         and n.value is not None and literal_constant(n.value))}
+    keep = [n for n in tree.body
+            if isinstance(n, ast.FunctionDef) or id(n) in constants]
+    only = ast.Module(body=keep, type_ignores=[])
     snapshot = pyfunc.debug_snapshot_lines(only)      # --debug: the unparse renumbers the lines
     text = ast.unparse(only)
     pyfunc.debug_remember_lines(snapshot, text)
     return text
-
 
 def _mix_identity_unsafe(tree):
     """C102: the functions a typed clone must not stand in for. The clone takes a float as a C double
