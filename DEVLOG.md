@@ -32,7 +32,7 @@ typed path and `p_tuplekey_edges` falls back to the general path.  The required 
 `test_ail_prog20`, `test_ail_tuples`, `test_ail_bugs7`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass (64 tests, 1 skipped for a missing zig).  The accepted job's
 generated-C byte-identity check was not re-run on this merged tree.
-## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.
