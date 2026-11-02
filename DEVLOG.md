@@ -103,6 +103,15 @@ together), while removing the bounds and recursion checks reached 1.305x but is 
 still 4% slower than C. Per the task's stop rule (below 1.2x, do not land), no compiler or runtime
 change was made. `echo_pack` was also profiled (int-key hash table, 46% of line samples; AIL/C is
 1.76x) for the record. Numbers, Amdahl bounds and cost are in `docs/design/SPEC1.md`.
+## 2026-11-02 -- re-apply accepted prog23 change on staging-integ (job-rbprog23-11022330)
+
+Re-applied the accepted job-prog23 change (typed reach for `t115` tuple/list target bindings and
+`t143` conditional numeric lists plus unannotated set operators, with the str/bytes-keyed set
+construction/rebind exclusion) on top of the current tree. The conflict in `_promote_floats` kept
+both sides: the existing `nsum_names` NSUM settling and the incoming str/bytes and unannotated-set
+fixed points. The manifest was regenerated. Probes and the touched modules plus the required
+safety modules pass. `tools/diff_ids.py` is not present in this tree (nor in the fetched job), so
+only `tools/update_manifest.py` was run.
 
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 
