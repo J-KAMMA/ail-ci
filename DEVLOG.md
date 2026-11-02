@@ -1,3 +1,49 @@
+## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
+
+Re-applied the accepted job-prog8 change (NSUM for CPython's int-0 empty float `sum`, float
+list slices, nested bool rows and `enumerate(str)`) on top of the current tree. Conflicts kept
+both sides: the newer `enumerate(str)` walk already present here was retained, and the new
+two-argument `min`/`max` NSUM refusal was combined with the existing `key=` path. The manifest was
+regenerated. Probes and the touched modules plus the required safety modules pass.
+## 2026-11-02 -- prog16 re-apply: module tuple tables with negative floats and enumerate pair guard (job-rbprog16-11021900)
+
+Re-applied the accepted prog16 change on the current tree.  The wider pair-comprehension lowering
+already present here (prog15) covers the two-name `enumerate` target, including `list[float]` and
+`list[str]` elements, so that part needed no code change; `test_ail_prog16` now asserts the float
+form stays typed and matches CPython instead of expecting the older refusal.  Two pieces were still
+missing and are now applied: `pyfunc._pair_plan` refuses a malformed `enumerate()` by name
+(`enumerate() with other than (iterable[, start])`) before indexing its argument list -- reached by
+a zero-argument pair comprehension on both IR builds and both typed/default builds -- and
+`modtables._scalar` accepts unary `-`/`+` over a float literal (sign of `-0.0` preserved), so a
+module-level list of tuples with negative floats (`READINGS: Final[list[tuple[float, str]]]`) is
+lowered like any other tuple table and `g25_038` becomes fully typed.  `_listcomp_kind` no longer
+calls `_pair_plan` during kind inference, so the malformed-`enumerate` refusal comes from the actual
+lowering instead of being swallowed by the preliminary shape scan.  `t268` stays fully typed.
+`AIL_CURRENT/test_ail_prog16.py` is registered by `tests.d/test_ail_prog16.txt` and the prog16 lab
+record is `lab/progfix/prog16.md`.  No program file changed.
+## 2026-11-02 -- fz216: list.count()/list.index() were hoisted before earlier operands (job-fz216-11021859)
+
+The daily fuzzer's seed `2075907166` printed `False`/`Zed` before CPython's `-34`: the list
+lowering rewrites `xs.count(v)` / `xs.index(v)` into prelude statements placed at the start of
+the enclosing statement, so the argument (and its side effects) ran before an earlier operand
+that Python evaluates first.  `print(62, v[99], v.count(side(99)))` therefore called `side` and
+only then raised `IndexError`, where CPython raises before `side`.  `_ListLowering.index_or_count`
+now checks the operands already evaluated in the statement (with `tryhoist._expr`, so names,
+constants and `len` stay safe); if any can raise or run code, the typed path refuses by name
+("list.count() after a part of this statement that Python evaluates first may raise or run code")
+and the default build takes the general path, which keeps source order.  Safe statements still
+build typed.  The full fuzz program still ends with the documented int64 overflow (CPython makes
+a big integer), which is unrelated to this line: the first five lines now match CPython.
+
+`AIL_CURRENT/test_ail_fz216.py` compares the minimized count/index cases, a side-effect order
+case, and int/float/str lists reached through an item, an attribute, a dict value and an argument
+against CPython on the default, `AIL_IR=0` and `AIL_IR=1` builds; it also checks that a safe
+earlier operand stays on the typed path and that the unsafe order is named with
+`AIL_NO_GENERAL=1`.  Probes `fz216_min`, `fz216_index`, `fz216_calls`, `fz216_types`,
+`fz216_safe` in `/tmp/probes` matched CPython on both builds; the full `fz216` matched through
+line 5 and then hit the pre-existing int64 overflow.  Modules run:
+`test_ail_fz216`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
 
 The review found that `abs(<bool parameter>)` was newly accepted as an int/bool-result call even
@@ -158,6 +204,109 @@ Probes in `/tmp/probes` cover `as_tuple` over finite / NaN / infinity / negative
 through an argument, a list item, an attribute, a dict value and an alias, large coefficients,
 float construction, error paths and both `cmp.sh` builds; `dec_refusals` and `dec_traps` are refused
 by name.
+## 2026-11-02 -- Front-end cache review fixes: manifest, devlog, own-variable key (job-fecache1-11021924)
+
+Fixed the three review defects in the opt-in `AIL_FE_CACHE` front-end cache. The manifest pins are
+regenerated, so `tools/update_manifest.py --check` and the prescribed `par_check` run start cleanly.
+The cache key now drops every `AIL_FE_CACHE*` variable (not just the exact `AIL_FE_CACHE=`), matching
+`docs/design/FE_CACHE.md`: changing `AIL_FE_CACHE_LOG`, `AIL_FE_CACHE_DIR` or `AIL_FE_CACHE_MAX_MB`
+no longer fragments the cache or turns a hit into a miss. `test_ail_fe_cache` gained a case for the
+log variable; the default no-cache path is unchanged.
+## 2026-11-02 -- prog27 typed reach: str/bytes parameter defaults (job-prog27-11021551)
+
+Profiled the eight prog27 programs with CPython 3.12 `cProfile` over repeated `main()` calls and
+recorded every hot function in `lab/progfix/prog27.md`.  t110, g03_010 and t375 were already typed;
+g05_026's whole hot set stopped at `build_histogram(counts, symbol: str = "*")` because the typed
+path accepted only int/float/bool defaults.  `python/pkg-v12/pyfunc.py` now also accepts a
+compile-time `str` or `bytes` literal (both immutable constants the emitter already builds) and
+refuses a literal whose kind does not match the settled parameter, still by name; list/dict/None
+defaults keep their refusal.  g05_026 now builds typed as a whole, and `count_words_per_line`,
+`build_histogram` and `main` (52.2%, 30.7% and 17.0% of its own-function time) are all typed.
+
+The other hot functions need big features and stay follow-ups with exact messages in
+`lab/progfix/prog27.md`: g07_016 (full-slice assignment plus mutable list parameters), t223 (nested
+bool lists and a deque of tuples), t176 (`json.loads` into `list[dict]`) and g17_018
+(`singledispatch` repeated-name registrations).  The generated C of all ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit.  `test_ail_prog27`
+(registered in `tests.d/`) builds and compares all eight programs, requires `--strict` success for
+g05_026 and its extracted functions, and covers str/bytes defaults (empty, Unicode, bytes, omitted
+and keyword calls, values through a list item and a dict value) plus the kind-mismatch refusals.
+Probes `/tmp/probes/prog27_strdefault.py` and `/tmp/probes/prog27_refuse_*.py` match CPython on both
+`cmp.sh` builds or are refused by name as recorded.
+## 2026-11-02 -- prog30 review fix: do not lower `next`/`iter` when they are shadowed (job-prog30-11022134)
+
+The iterator cursor rewrite assumed `iter` and `next` were the builtins, so a local, parameter or
+nested def/class named `iter`/`next` was ignored and the user binding never ran (`def next(x): return
+42` printed `1`; `iter = 5` printed `1` instead of raising `TypeError`).  `iterlower.py` now collects
+the function's own-scope bindings (parameters, stores, nested def/class names, imports, `except ... as`,
+`with ... as`, `global`/`nonlocal`, deletion) and refuses the rewrite when either name is bound, so
+those programs stay on the general path and match CPython.  A shadow inside a nested function's own
+scope does not affect the outer function, which still lowers.  New `test_ail_prog30` cases cover all
+of these; probes `rv_*` in `/tmp/probes/rv` match CPython on both builds.  The `t266` typed path and
+the ten `lab/compare` generated C files are unchanged.
+
+## 2026-11-02 -- prog30 typed reach: t266 iterator lowering and a t244 list-extend fix (job-prog30-11021835)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time over repeated `main`
+calls); the table and every first refusal are in `lab/progfix/prog30.md`.  Five were already typed
+at the base (`g11_022`, `g09_034`, `g02_012`, `t244`, and `t266` after this change).  `t266` spent
+56% of its own time in `main`/`dfs`, both blocked by `it = iter(data)`/`next(it)`:
+`python/pkg-v12/iterlower.py` now lowers that shape to an index cursor over the same list/str/bytes
+when the binding, every use and the evaluation order are provably simple (no `try`, no rebind or
+delete, no effectful call before a `next`, all uses single-argument `next`).  `t266` is typed as a
+whole program on both `AIL_IR` modes and matches CPython on every `in*.txt`.
+
+Review fix: an augmented assignment evaluates its target before its value in CPython, so the cursor
+lowering is now refused when a `next` sits in an `AugAssign` value and the target is not a plain
+name (`a[items.pop(0) % 2] += next(it)` printed `[10, 0]` instead of `[20, 0]`).  Those programs
+stay on the general path and match CPython; `total += next(it)` is still lowered and typed.
+
+`t244` was already typed but its `lines += [" ".join(map(str, row)) for row in p]` printed only the
+transpose: `nested_lists.py` hoisted the comprehension into `__ail_itemsN`, and
+`_last_use_free_points` freed that temp after the prelude loop (the prelude and the consuming
+statement share the comprehension's source position) before the `extend` read it.  The hoisted temp
+load is now `_ail_synth`, so it is kept until return; all `t244` inputs match CPython.
+
+Still general (recorded follow-ups, exact messages in prog30.md): `g23_004` (comprehension tuple
+targets / multiple for-clauses), `g03_008` (function-valued parameter), `t172` (dict of dicts,
+generator unpacking, tuple iteration; the general path cannot build it either).  The generated C of
+the ten `lab/compare` tasks is byte-identical.  Probes `/tmp/probes/p30_*` match CPython on both
+`cmp.sh` builds; the only stderr-only difference, an exhausted cursor naming the typed runtime's
+`list index out of range` instead of `StopIteration`, is `C?-job-prog30-11021835-1`.
+## 2026-11-02 -- prog20: hot functions of eight real programs on the typed path (job-prog20-11021017)
+
+Profiled the eight programs with CPython 3.12.3 and cProfile (fresh `__main__` globals per
+repetition, imports outside the profile) and recorded the hot functions and their first refusals
+in `lab/progfix/prog20.md`.  Two compiler changes make the two remaining buildable programs
+whole-program typed, without editing any program:
+
+- `iterlower.py` now lowers `min`/`max` with a tuple-returning key
+  (`lambda city: (-pops[city], city)`) by comparing the fields lexicographically, for both a dict
+  walk and a sequence walk; fields evaluate once per element, comparison short-circuits on the
+  first unequal field, and the first element wins a tie (g05_006).
+- `pyfunc.py`'s `enumerate(source, start)` accepts a nested tuple target over a list of tuple
+  instances (`for rank, (word, count) in enumerate(top, start=1)`), materialising each field once
+  per iteration; the index is `start + position` with the start evaluated once and a private
+  position counter, so rebinding the index or the start variable in the body cannot move the next
+  step (g18_002).  The same shape over a named `ctx.srowtypes` row list is handled in
+  `_for_enumerate_start`.
+
+`g05_006`, `g18_002` and `t206` (already typed) now build whole-program typed; `g03_012`
+(statistics.geometric_mean, bool-return, `list(DATA)`), `g03_028` (Fraction dunders), `t284`
+(`iter()`, a generator in `sorted`, `join(map(...))`), `g25_002` (module-level enum list) and
+`g14_012` (dataclass `field(init=False)` / `InitVar`) stay named follow-ups in the report.
+
+Added `AIL_CURRENT/test_ail_prog20.py`, registered through `tests.d/test_ail_prog20.txt`.  Probes
+`/tmp/probes/p_tuplekey.py` (dict/list tuple keys, three fields, ties, negatives, attribute, empty,
+near-int64), `/tmp/probes/p_enum_tuple.py` (start 1/0/negative/empty, rebinding the index and the
+start variable, an argument, a dict value, an attribute and a list item),
+`/tmp/probes/p_enum_append.py` (rows built by append), `/tmp/probes/p_min_empty.py` (an empty
+list) and `/tmp/probes/p_tuplekey_edges.py` (default, slice, range and aliasing) all match CPython
+on both `cmp.sh` builds; `p_tuplekey`, `p_enum_tuple`, `p_enum_append` and `p_min_empty` take the
+typed path and `p_tuplekey_edges` falls back to the general path.  The required modules
+`test_ail_prog20`, `test_ail_tuples`, `test_ail_bugs7`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (64 tests, 1 skipped for a missing zig).  The accepted job's
+generated-C byte-identity check was not re-run on this merged tree.
 
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
@@ -469,6 +618,133 @@ Probes `/tmp/probes/prog15_g08.py`, `prog15_pair.py`, `prog15_pair_alias.py` and
 `prog15_pair_edge.py` match CPython on both `cmp.sh` builds.  The commit also includes the pending bytearray repeat / slice-assignment changes in `pyfunc.py`
 and the matching `cruntime.py` `BAREPEAT`/`BASLICEASSIGN` fragments, which were already in the
 working tree and are exercised by the bytearray test modules.
+## 2026-11-02 -- prog8 full-suite fix: annotated float local from sum (job-prog8-11021515)
+
+The full suite found `test_ail_builtin_api` compiling the published `sum(list[float]) -> float`
+overload as `let output: float = sum(v0); return output;`. Its probe is valid, but the NSUM work
+seeded `output` from its `float` annotation and then refused `sum()` as a float-local assignment.
+`_seed_local_annotations` now recognises an annotated local whose initializer is `NSUM` and seeds
+it as `NSUM`, so the local, the return kind and the C function signature all settle to `ail_nsum`
+and the generated code is exact (the explicit `float` annotation no longer forces a lossy `double`
+return). A float local that is assigned a float first still refuses a later `sum()` by name.
+
+`test_ail_builtin_api`, `test_ail_prog8`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_spec_fixes` pass; `tools/update_manifest.py --check` is 0.
+
+## 2026-11-02 -- prog8 review fix 3: float returns beside NSUM (job-prog8-11021515)
+
+Fixed the remaining review defect: a function whose return kind is `NSUM` (because one path is
+`return sum(xs)` over a `list[float]`) and whose other path returns a definite float emitted a raw
+`double` where C expected `ail_nsum`, so the default build failed to compile (`incompatible types
+when returning type 'double' but 'ail_nsum' was expected`). The `ast.Return` path now wraps a
+float value with `ail_nsum_from_float`, clearing the int-0 flag exactly as assignments and `+=`
+already did. The docs now describe `NSUM` as `ail_nsum { double v; int64_t is_int0; }` instead of
+the obsolete `-0.0` sentinel (`SEMANTICS.md`, the C1 row of `docs/spec/DIFFERENCES.md`).
+
+Probes `/tmp/probes/mixed_return_all.py` (parameter, computed expression, list item, attribute,
+dict value, `-0.0`; empty and non-empty sums) and `/tmp/p14c.py` match CPython on both `cmp.sh`
+builds, and all their functions stay on the typed path under `--strict`. `test_ail_prog8` gained
+`MIXED_RETURN` for this shape. `test_ail_prog8`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_nested_lists`, `test_ail_float_argument_widening` and
+`test_ail_spec_fixes` pass; `tools/update_manifest.py --check` is 0.
+
+## 2026-11-02 -- prog8 review fix 2: exact NSUM through control flow (job-prog8-11021227)
+
+Fixed both defects the review found in the empty-float-`sum` change. `NSUM` is no longer a bare
+`double` with a `-0.0` sentinel; it is a C struct `ail_nsum { double v; int64_t is_int0; }` (FSUM
+block) whose explicit flag is part of the value. A branch or a loop that does not run therefore
+leaves CPython's int `0` intact, while the branch that does run overwrites the value and clears the
+flag; a genuine `-0.0` that merely meets a conditional `sum()` now prints `-0.0` instead of being
+misread as the int `0`. Assignments, `+=`, returns (the C return type is the struct), `print`,
+formatting, comparisons/arithmetic, `int`/`float`/`bool` conversion and truthiness all read the
+flag. The reverse merge -- a local that starts as a definite float and only conditionally receives
+`sum()` -- cannot be made exact and is a named compile-time refusal; the general path then answers.
+
+Regression coverage: `test_ail_prog8`'s `FLOAT_SLICE` now includes a zero-iteration loop, a
+not-taken branch and a taken branch on an `NSUM` local, and a new `NSUM_FLOW` program covers a
+genuine `-0.0` merged with `sum()` in both directions. Probes `/tmp/probes/nsum_flow_typed.py`,
+`/tmp/probes/nsum_float_merge.py`, `/tmp/probes/nsum_convert.py`, plus `/tmp/rprobes/f4_emptyslice.py`,
+`p9_flow`, `p10_return`, `p15a_min`, `p15_loop_empty`, `p17_branch_min`, `p18_negzero_regress` and
+`p19_negzero_min` all match CPython on both `cmp.sh` builds. `test_ail_prog8`,
+`test_ail_nested_lists`, `test_ail_boolfield`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_float_argument_widening` pass;
+`tools/update_manifest.py --check` is 0. The generated C of all ten `lab/compare` tasks is
+byte-identical to the pre-change tree (the three pre-existing `main.py` failures still fail).
+
+## 2026-11-02 -- prog8 review fix: exact empty float `sum` via `NSUM` (job-prog8-11021227)
+
+Fixed the review's defect: after the float-slice change, `sum(xs[a:b])` on an empty slice printed
+`0.0` where CPython prints the int `0`; the base tree was correct only because it refused the slice.
+The typed float fold now carries both cases in a new scalar kind `NSUM`: it counts the elements it
+actually adds and returns the `-0.0` sentinel for the empty sum (a non-empty Neumaier run cannot
+produce it), `print` writes the sentinel as `0` and other values as floats, and a `-> float`
+annotation keeps `NSUM` at the call boundary. This also fixes bare `sum(empty_float_list)`, which
+was wrong on the base tree.
+
+Every use that cannot keep the int-or-float result exact is a named refusal: int arithmetic (true
+division and float arithmetic are built), `**`, unary numeric operators, `abs`, two-argument
+`min`/`max`, `round`, default/int-type formatting, storage in a list/tuple/dict/set or as an
+index/key/slice bound, and arguments to any call except `int`/`bool`/`float` (`float()` normalises
+the sentinel to `+0.0`). Found and closed by probing: unannotated dict/list storage, `append`,
+`insert`, `extend`, list/dict comprehensions, set `add`, filtered generator sums, and an explicit
+float format spec, which formats both cases identically and stays typed (this kept
+`test_ail_nested_lists`' `f"{sum(row):.3f}"` on the typed path).
+
+Probes `/tmp/rprobes/f4_emptyslice.py` and `n1`-`n5`, `q1a`-`q24` (empty/non-empty, bare and slice,
+generator filters, arithmetic/comparison/truthiness, annotated locals, functions, containers,
+indices/keys/slice bounds, formatting, calls) all match CPython on both `cmp.sh` builds; the
+valid NSUM forms build typed and the unsafe ones fall back by name. `test_ail_prog8`,
+`test_ail_spec_fixes`, `test_ail_nested_lists`, `test_ail_boolfield`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is 0.
+
+## 2026-11-01 -- typed reach review fix: pin prog8, cover the new float-slice and enumerate-str paths (job-prog8-11020731)
+
+Review fix on the same job. Pinned `test_ail_prog8.py` and `tests.d/test_ail_prog8.txt` through
+`tools/update_manifest.py` (the previous commit left them unpinned, so `--check` and `par_check`
+failed before running the module), and corrected `lab/progfix/prog8.md`, which wrongly said
+`g03_020` and `g05_014` were already typed. On the base commit both build on the general path:
+`sum() over a slice of a list of floats; not implemented` (g03_020) and `this use of a str as an
+iterable is not built ...` (g05_014); the float-slice and enumerate-str changes in `pyfunc.py` make
+them typed on HEAD.
+
+`test_ail_prog8.py` now also compiles the two real programs from `lab/` and checks them typed and
+equal to CPython, plus inline boundary programs for float-list slices (local, parameter, attribute,
+negative/past-the-end/empty slices and a generator fold) and `enumerate(str)` (empty, unicode,
+nested, break/continue, body rebind, list item, dict value, attribute, slice and concatenation).
+Probes `/tmp/probes/pfloat_test.py`, `/tmp/probes/penum_test.py`, `pfloat_slice.py`,
+`pfloat_slice2.py`, `penum_unicode.py` and the two real programs match CPython on both `cmp.sh`
+builds; `pfloat_test.py`, `penum_test.py`, `penum_unicode.py` and the two real programs build typed,
+while `pfloat_slice.py` (printing a slice) and `pfloat_slice2.py` (an annotation/caller kind clash)
+match on the general path only. `pfloat_empty.py` shows the pre-existing empty-float-`sum`
+difference (`0.0` vs CPython's int `0`, also on base for a bare `sum(empty_float_list)`) recorded
+in `prog8.md`. Only the new module was rerun here: `test_ail_prog8` (7 tests, OK).
+
+## 2026-11-01 -- typed reach: nested bool lists for the hot palindrome DP (job-prog8-11020731)
+
+Profiled the eight prog8 programs with CPython 3.12 `cProfile` (own time; `main()` repeated so the
+sub-millisecond runs have a stable profile) and recorded the functions covering 80% plus their
+first typed-path refusal in `lab/progfix/prog8.md`. Seven programs either already type their hot
+functions (`g03_020`, `g05_014`, `knuth_gaps` in `g04_010`) or are blocked by a big new feature
+(the `random.Random` method surface, exact-ratio `statistics.pstdev`, the `fractions.Fraction`
+dunder surface, mutating a list parameter, `json.loads` result typing). The hot
+`count_palindromic_substrings` of `g09_012` (81% of its own time) was blocked by
+`dp: list[list[bool]]`: `nested_lists.py` only knew int/float/str/struct rows, and without the
+annotation boolkind refused the bool/int mix.
+
+`nested_lists.py` now accepts a `bool` row element and emits a hidden `_AilRow_bool` whose field is
+`list[bool]`; boolkind rewrites that field to the int spelling and tracks it as a bool list, so an
+element read still prints `True`/`False`, a number stored into a bool row is still refused or keeps
+the general path, and indexing/aliasing/empty rows match CPython. Probes `/tmp/probes/b1.py`,
+`b2.py`, `b3.py`, `b6_empty.py` (local, argument, result, row alias, negative index, comprehension,
+empty grid, printing a row/element) matched CPython on both `cmp.sh` builds;
+`/tmp/probes/b4_bad.py` (an int stored in a bool row) and `b5_unannotated.py` keep the general path
+and still match CPython; the g09 source now builds typed and matches CPython. The generated C of
+all ten `lab/compare` tasks is byte-identical to the pre-change tree (`main.ail` and `main.py`).
+
+Added `test_ail_prog8.py` (registered in `tests.d/`), covering the g09 program, a nested-bool-row
+boundary program and the int-in-bool-row fallback. Passed: `test_ail_prog8`,
+`test_ail_nested_lists`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_boolfield`, `test_ail_spec_fixes`, `test_ail_tuples`, `test_ail_cpython_hybrid`.
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 

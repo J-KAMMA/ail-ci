@@ -55,6 +55,10 @@ def _relpath(path):
     return relative
 
 
+def _fe_cache_enabled():
+    return os.environ.get('AIL_FE_CACHE', '').strip().lower() in ('1', 'on', 'yes', 'true')
+
+
 def _build_cache(args=None):
     """The build cache module (python/pkg-v12/buildcache.py), or None when it is switched off
     (AIL_NO_CACHE, --no-cache) or cannot be loaded. Loaded by path so pkg-v12 stays off sys.path."""
@@ -6116,6 +6120,9 @@ def main(argv=None):
              'the exact path is the general path, about 20x slower)')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
+    compile_cmd.add_argument('--fe-cache', action='store_true',
+        help='cache the emitted C under $XDG_CACHE_HOME/ail/fe (also AIL_FE_CACHE=1); an unchanged source, '
+             'import, flag or environment then skips the Python lowering')
     compile_cmd.add_argument('--gpu', action='store_true',
         help="build the loops marked '# ail: gpu' as GPU kernels (docs/design/GPU.md; stage G1 runs the kernel on the "
              "CPU as an emulation, same output): a marked loop that is not provably eligible is refused by name "
@@ -6173,6 +6180,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if getattr(args, 'no_cache', False):
         os.environ['AIL_NO_CACHE'] = '1'
+    if getattr(args, 'fe_cache', False):
+        os.environ['AIL_FE_CACHE'] = '1'
     if getattr(args, 'gpu', False):
         os.environ['AIL_GPU_BUILD'] = '1'
     if getattr(args, 'exact_int', False):
@@ -6514,7 +6523,7 @@ def main(argv=None):
                 environment['AIL_PRELUDE_UNITS'] = '\n'.join(prelude_units)
             cache = None if separate or getattr(args, 'target', None) else _build_cache(args)
             frontend = None
-            if cache is not None and not native_build.enabled(args):
+            if cache is not None and not native_build.enabled(args) and not _fe_cache_enabled():
                 # A finished build is a function of the merged source, the objects it links, the
                 # compiler sources, the toolchain and the environment; nothing else is read.
                 frontend = cache.frontend_key(

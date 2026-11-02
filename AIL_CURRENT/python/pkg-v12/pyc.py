@@ -19,7 +19,7 @@ answers 6.
 Anything outside the subset is refused by name rather than mis-compiled. POSIX uses mmap for array
 input; Windows reads the same raw file into an owned buffer before calling the generated function.
 """
-import argparse, ast, json, os, pathlib, subprocess, sys
+import argparse, ast, json, os, pathlib, shutil, subprocess, sys, tempfile
 
 from pipeline import PipelineError, compiler, ffi_link_args, link_flags, sqlite_link_args, extra_libs, opt_flags, STRICT_DECL_FLAGS
 
@@ -46,6 +46,7 @@ import native_diagnostics
 import intmode
 import buildcache
 import cprune
+import fecache
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
@@ -825,6 +826,124 @@ _BOUNDARY_REFUSAL_MARKERS = (
 # or None when it did not. main() prints it as a compile-time note on stderr.
 last_fallback_reason = None
 last_fallback_line = None
+_FE_CAPTURE = None
+
+
+def _fe_key(source, strict, force_general):
+    package = pathlib.Path(__file__).resolve().parent
+    return fecache.key('pyc1', source.encode('utf8'), bool(strict), bool(force_general),
+                       fecache.sources_hash(package), sys.version, sys.platform,
+                       '\n'.join(fecache.build_env()))
+
+
+def _fe_capture(text, prefix, suffix):
+    global _FE_CAPTURE
+    _FE_CAPTURE = {'kind': 'single', 'text': text, 'prefix': list(prefix), 'suffix': list(suffix)}
+
+
+def _fe_capture_multi(texts, cflags, link_prefix, link_suffix, link_order=None):
+    global _FE_CAPTURE
+    blob = bytearray()
+    for text in texts:
+        data = text.encode('utf8')
+        blob += len(data).to_bytes(8, 'little') + data
+    _FE_CAPTURE = {'kind': 'multi', 'blob': bytes(blob),
+                   'meta': {'schema': 2, 'units': len(texts), 'cflags': list(cflags),
+                            'link_prefix': list(link_prefix), 'link_suffix': list(link_suffix),
+                            'link_order': list(link_order) if link_order is not None else list(range(len(texts)))}}
+
+
+def _fe_compile(text, out, prefix, suffix):
+    out = pathlib.Path(out)
+    c = out.with_suffix('.c')
+    c.write_text(cprune.prune(text), encoding='utf-8')     # the unit was captured whole; gcc gets it pruned
+    return _cc([compiler(), *prefix, '-o', str(out), str(c), *suffix],
+               capture_output=True, text=True, phase='compile_link')
+
+
+def _fe_units(blob, count):
+    units = []
+    offset = 0
+    for _ in range(count):
+        size = int.from_bytes(blob[offset:offset + 8], 'little')
+        offset += 8
+        units.append(blob[offset:offset + size].decode('utf8'))
+        offset += size
+    if offset != len(blob):
+        raise ValueError('front-end cache unit lengths do not match the payload')
+    return units
+
+
+def _fe_compile_multi(meta, blob, out):
+    out = pathlib.Path(out)
+    units = _fe_units(blob, int(meta['units']))
+    directory = pathlib.Path(tempfile.mkdtemp(prefix='.fe-', dir=str(out.parent)))
+    try:
+        objects = []
+        for index, text in enumerate(units):
+            source = directory / ('u%d.c' % index)
+            obj = directory / ('u%d.o' % index)
+            source.write_text(cprune.prune(text), encoding='utf-8')
+            result = _cc([compiler(), *meta['cflags'], '-c', '-o', str(obj), str(source)],
+                         capture_output=True, text=True, phase='compile')
+            if result.returncode:
+                return result
+            objects.append(str(obj))
+        order = [objects[index] for index in meta.get('link_order', range(len(objects)))]
+        return _cc([compiler(), *meta['link_prefix'], '-o', str(out), *order, *meta['link_suffix']],
+                   capture_output=True, text=True, phase='link')
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def build_cached(source, out, strict=True, report=None, force_general=False):
+    """build(), with the emitted C stored in the opt-in front-end cache."""
+    global _FE_CAPTURE, last_fallback_reason, last_fallback_line
+    if not fecache.enabled() or report is not None or native_diagnostics.enabled():
+        return build(source, out, strict=strict, report=report, force_general=force_general)
+    key = _fe_key(source, strict, force_general)
+    payload = fecache.get(key)
+    text = prefix = suffix = meta = blob = None
+    if payload is not None:
+        try:
+            meta, blob = fecache.unpack(payload)
+            schema = meta.get('schema')
+            if schema == 1:
+                text = blob.decode('utf8')
+                prefix, suffix = meta['prefix'], meta['suffix']
+            elif schema != 2:
+                raise ValueError
+        except (OSError, ValueError, KeyError, UnicodeError):
+            payload = text = meta = blob = None
+    if payload is not None:
+        result = _fe_compile_multi(meta, blob, out) if meta['schema'] == 2 else _fe_compile(text, out, prefix, suffix)
+        if result.returncode == 0:
+            last_fallback_reason = meta.get('fallback')
+            last_fallback_line = meta.get('fallback_line')
+            fecache.log('hit %s' % key)
+            return _finalize_output(out)
+        try:
+            pathlib.Path(out).unlink()
+        except OSError:
+            pass
+        fecache.log('miss-compile %s' % key)
+    _FE_CAPTURE = None
+    result = build(source, out, strict=strict, report=report, force_general=force_general)
+    if _FE_CAPTURE is not None:
+        if _FE_CAPTURE['kind'] == 'multi':
+            meta, blob = _FE_CAPTURE['meta'], _FE_CAPTURE['blob']
+            meta['fallback'] = last_fallback_reason
+            meta['fallback_line'] = last_fallback_line
+            fecache.put(key, fecache.pack(meta, blob))
+        else:
+            text, prefix, suffix = _FE_CAPTURE['text'], _FE_CAPTURE['prefix'], _FE_CAPTURE['suffix']
+            meta = {'schema': 1, 'prefix': prefix, 'suffix': suffix,
+                    'fallback': last_fallback_reason, 'fallback_line': last_fallback_line}
+            fecache.put(key, fecache.pack(meta, text.encode('utf8')))
+        fecache.log('miss %s' % key)
+    else:
+        fecache.log('uncached %s' % key)
+    return result
 
 
 def _refuse_round_at_int64_boundary(source):
@@ -914,8 +1033,9 @@ def fallback_note(reason, location=None):
 
 
 def build(source, out, strict=True, report=None, force_general=False):
-    global last_fallback_reason, last_fallback_line
+    global last_fallback_reason, last_fallback_line, _FE_CAPTURE
     last_fallback_reason = last_fallback_line = None
+    _FE_CAPTURE = None
     if os.environ.get('AIL_UNIFIED_FORCE') == '1':
         # measurement only (docs/design/UNIFIED_IR.md): every program through the general path (with
         # AIL_UNIFIED=1, through the unified inference too), typed-path programs included
@@ -1404,6 +1524,11 @@ def _split_build(info, body, main, out):
             except OSError:
                 pass
             return False
+        _fe_capture_multi(sources, flags + (['-pthread'] if info.get('pthread') else []), flags,
+                          (['-lm'] if info.get('libm') else [])
+                          + (['-pthread'] if info.get('pthread') else [])
+                          + (sqlite_link_args() if info.get('sqlite') else [])
+                          + extra_libs() + ffi_link_args())
         return True
     finally:
         for cp, o in paths:
@@ -1558,9 +1683,10 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             # A program without the big runtime keeps exactly the old command line and binary (the no-int guarantee).
             bigc = ['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []
             bigl = ['-Wl,--gc-sections'] if boxed_report.get('bigint') else []
-            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *bigc, *link_flags(), *bigl, '-o', str(out), str(c), '-lm']
-                    + (['-pthread'] if boxed_report.get('threads') else []),     # G12: threads (threadrt.py)
-                               capture_output=True, text=True, phase='compile_link')
+            prefix = [*opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *bigc, *link_flags(), *bigl]
+            suffix = ['-lm'] + (['-pthread'] if boxed_report.get('threads') else [])     # G12: threads (threadrt.py)
+            r = _cc([compiler(), *prefix, '-o', str(out), str(c), *suffix],
+                    capture_output=True, text=True, phase='compile_link')
             if r.returncode:
                 # The exact phrase 'the C compiler rejected this' (identical to the typed path's
                 # own message below) is load-bearing: run_whole40.py and vibe_run.py both
@@ -1572,6 +1698,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
                 # bugs as capability gaps.
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path):\n%s' %
                                     r.stderr[-800:]))
+            _fe_capture(boxed_c, prefix, suffix)
         else:
             # BRIEF_mixed_mode.md, the confirmed build-graph blocker mix_call.h's own header
             # comment names: the typed emitter's preamble (cruntime.py) and the v2 boxed
@@ -1633,6 +1760,10 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             if r.returncode:
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, link step):\n%s' %
                                     r.stderr[-800:]))
+            _fe_capture_multi([csrc for _, _, csrc in mix_units] + [boxed_c], cflags[1:],
+                              [*opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(),
+                               *(['-Wl,--gc-sections'] if boxed_report.get('bigint') else [])],
+                              ['-lm'], [len(mix_units)] + list(range(len(mix_units))))
         if report is not None:
             report['boxed'] = boxed_report['boxed']
             report['typed_inline'] = boxed_report.get('typed_inline', [])
@@ -1660,17 +1791,19 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         if report is not None:
             report['boxed'] = []
         return _finalize_output(out)
-    r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
-                       + (['-fno-strict-aliasing'] if info.get('inherit') else [])   # TYPED_INHERITANCE.md section 2
-                       + (['-lm'] if info.get('libm') else [])
-                       + (['-pthread'] if info.get('pthread') else [])
-                       + (sqlite_link_args() if info.get('sqlite') else [])
-                       + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(info.get('runtime_parts', [])) else [])
-                       + extra_libs()
-                       + ffi_link_args(),
-                       capture_output=True, text=True, phase='compile_link')
+    prefix = [*opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags()]
+    suffix = ((['-fno-strict-aliasing'] if info.get('inherit') else [])   # TYPED_INHERITANCE.md section 2
+              + (['-lm'] if info.get('libm') else [])
+              + (['-pthread'] if info.get('pthread') else [])
+              + (sqlite_link_args() if info.get('sqlite') else [])
+              + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(info.get('runtime_parts', [])) else [])
+              + extra_libs()
+              + ffi_link_args())
+    r = _cc([compiler(), *prefix, '-o', str(out), str(c), *suffix],
+            capture_output=True, text=True, phase='compile_link')
     if r.returncode:
         raise PipelineError('the C compiler rejected this:\n%s' % r.stderr[-800:])
+    _fe_capture(body + main, prefix, suffix)
     if report is not None:
         report['boxed'] = []
     return _finalize_output(out)
@@ -1797,7 +1930,7 @@ def main(argv=None):
         elif a.link_units:
             p = build_link_units(src, a.out, unit_map)
         else:
-            p = build(src, a.out, strict=a.strict, force_general=a.general_only)
+            p = build_cached(src, a.out, strict=a.strict, force_general=a.general_only)
     except Unsupported as e:
         native_diagnostics.failure(e)
         print('not in the subset: %s' % e, file=sys.stderr)
