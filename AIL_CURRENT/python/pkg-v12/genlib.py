@@ -71,6 +71,8 @@ TABLE = {
     'datetime.datetime.fromisoformat': '_ail_datetime_fromisoformat',
     'datetime.datetime.strptime': '_ail_datetime_strptime',
     'heapq.merge': '_ail_merge',
+    'graphlib.TopologicalSorter': 'TopologicalSorter',
+    'graphlib.CycleError': 'CycleError',
 }
 for _name in ('seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'normalvariate', 'choice',
               'shuffle', 'sample', 'getrandbits', 'choices', 'expovariate', 'triangular'):
@@ -111,6 +113,7 @@ KEYWORDS = {
     'datetime': {'year', 'month', 'day', 'hour', 'minute', 'second', 'microsecond'},
     'timedelta': {'days', 'seconds', 'microseconds', 'milliseconds', 'minutes', 'hours', 'weeks'},
     '_ail_merge': {'key', 'reverse'},
+    'TopologicalSorter': {'graph'},
 }
 # the pieces that take *args: a call may pass `*rows`
 VARARGS = {'_ail_product', '_ail_chain', '_ail_islice', '_ail_merge'}
