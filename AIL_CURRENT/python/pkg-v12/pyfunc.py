@@ -35077,6 +35077,13 @@ class _ListLowering:
 
     def index_or_count(self, node, prelude):
         args = node.args
+        start = self.eval_start[-1] if self.eval_start else len(self.evaluated)
+        for operand in self.evaluated[:start]:
+            if tryhoist._expr(operand, set()) != set():
+                raise Unsupported(
+                    'list.%s() after a part of this statement that Python evaluates first may '
+                    'raise or run code; bind the earlier part to a name first, or move the '
+                    'method call before it' % node.func.attr)
         bound_kinds = []
         if node.func.attr == 'index' and len(args) > 1:
             bound_kinds = [self.index_bound_kind(arg) for arg in args[1:]]
