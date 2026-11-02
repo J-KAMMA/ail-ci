@@ -71,7 +71,7 @@ def sources_hash(package):
 
 
 def build_env():
-    return [item for item in buildcache.build_env() if not item.startswith('AIL_FE_CACHE=')]
+    return [item for item in buildcache.build_env() if not item.startswith('AIL_FE_CACHE')]
 
 
 def _entry_path(key):

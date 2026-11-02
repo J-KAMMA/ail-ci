@@ -228,6 +228,14 @@ class FrontEndCacheTests(CacheBase):
         self.assertEqual(self.last_event()[0], 'hit')
         self.assertEqual(subprocess.run([str(third)], capture_output=True).stdout, b'5\n')
 
+    def test_cache_own_variables_do_not_fragment_the_key(self):
+        first_log = self.root / 'first.log'
+        second_log = self.root / 'second.log'
+        self.compile(SOURCE, env=dict(self.env, AIL_FE_CACHE_LOG=str(first_log)))
+        self.assertEqual(first_log.read_text().split()[0], 'miss')
+        self.compile(SOURCE, 'prog', env=dict(self.env, AIL_FE_CACHE_LOG=str(second_log)))
+        self.assertEqual(second_log.read_text().split()[0], 'hit')
+
     def test_cache_is_off_by_default(self):
         env = dict(self.env)
         env.pop('AIL_FE_CACHE')
