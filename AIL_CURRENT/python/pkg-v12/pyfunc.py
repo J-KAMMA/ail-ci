@@ -23388,6 +23388,15 @@ def _setitem(target, value, ctx, ind):
             rendered = _dict_handle_expr(expr, ctx) if temp == htemp else _expr(expr, ctx)
             out += _flush(ctx, pad) + '%s%s = %s;\n' % (pad, temp, rendered)
         return out + '%sail_tab_put(&%s, %s, %s);\n' % (pad, c, ktemp, htemp)
+    if (t == DICT and name not in ctx.ndict and name not in ctx.ddict
+            and _is_container_value(value)):
+        # A plain `dict` holds int values (cruntime's ail_tab/ail_stab/ail_btab); a list, set or
+        # dict value has no slot in one. Refuse by name so the general path builds the whole
+        # program, instead of emitting an `ail_stab_put` whose value argument is a container
+        # struct and leaving gcc to reject the C (a dict literal's pairs go through here too).
+        raise Unsupported('a dict cannot hold list, set or dict values; keep the groups in a '
+                          'list of structs and map each key to its index with a `dict[str, int]` '
+                          '(or keep parallel lists indexed through the int dict)')
     if t == DICT and name in ctx.bkeys:
         # `d[<bytes-ish>] = <int>` on a dict keyed by bytes (see `_mark_bytes_containers`) --
         # content hashing (cruntime.BTAB): the key is a bytes VALUE, not a number, so it is built

@@ -1,3 +1,13 @@
+## 2026-11-02 -- prog9 suite fix: a dict literal with container values stays off the typed path (job-prog9-11021016)
+
+A `dict` keyed by str is emitted as an `ail_stab` of int64 values, but a literal pair such as
+`d = {"k": [1, 2, 3]}` routed the list through `_setitem` and emitted `ail_stab_put(..., <ail_list>)`,
+which gcc then rejected. `_setitem` now refuses a list/set/dict value by name for a plain dict (a
+dict-of-lists local, `ctx.ndict`, and a dict-of-inner-dicts local, `ctx.ddict`, keep their own
+branches), so `pyc` takes the general path for the program instead of handing invalid C to the
+compiler. The shared fixtures in `test_ail_bugs7`, `test_ail_debug_flush`, `test_ail_flush_exit`
+and `test_ail_mixed_bounds` build again; `test_ail_prog9` and `test_ail_safetynet` stay green.
+
 ## 2026-11-02 -- prog9 review fix 2: conditional bool row rebinds keep their bool text (job-prog9-11021016)
 
 Made the bool row-field bookkeeping execution-aware. `_bool_flow_after` now drops a name only for a
