@@ -1,3 +1,21 @@
+## 2026-11-02 -- prog7 re-apply verified after a skipped review (job-rbprog7-11022237)
+
+Review 1 was skipped and named no defects. Checked the accepted prog7 change against this tree: the
+bool-row typing in `nested_lists.py`, the element-class resolution in `boolkind.py`, the constant-tuple
+loop lowering with the domination and rebinding fixes in `tuplib.py`/`tupexpr.py`/`tupstmt.py`, the
+host-printability repr table in `tuplegen.py`, `test_ail_prog7`, and the DEVLOG/prog7 record are all
+present. No source change was needed.
+
+Probes in `/tmp/probes/` match CPython on both `cmp.sh` builds: `p_tuple_loop_basic`,
+`p_tuple_constexpr`, `p_tuple_value`, `p_tuple_conditional`, `p_tuple_rebound`,
+`p_tuple_empty_mixed`, `p_tuple_sources`, `p_bool_rows`, `p_bool_rows_param`,
+`p_srepr_unprintable` and `p_srepr_bmp` (all non-surrogate BMP code points). Surrogate literals and
+non-BMP string literals are refused by name; `chr()` of a surrogate differs identically on base
+`8b1e28a8` (pre-existing). `test_ail_prog7`, `test_ail_tuples`, `test_ail_nested_lists`,
+`test_ail_boolfield`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` passes.
+
+
 ## 2026-11-02 -- prog7 review fix: also forget a tuple name that another binding rebinds (job-rbprog7-11021443)
 
 The domination fix restored the tuple-literal bookkeeping around control-flow bodies, but a name whose
