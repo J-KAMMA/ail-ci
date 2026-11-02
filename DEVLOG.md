@@ -43,6 +43,68 @@ CPython; it is recorded as a follow-up.  No new semantic difference; the generat
 hybrid stdout/exit equal CPython; probes `p21_*` in `/tmp/probes` cover abs/str boundaries,
 argument/list/attribute/dict sources, NaN/inf, and `INT64_MIN`.  `AIL_CURRENT/test_ail_prog21.py`
 is registered through `AIL_CURRENT/tests.d/`.
+## 2026-11-02 -- prog22 follow-up: module-level class lists fall back, not a C build failure (job-prog22-11021439)
+
+Fixed the review's blocking regression.  A module-level `gxs: list[Item] = []` that a function
+appends to (and then folds with `max(key=)`/`min(key=)`) was bound as a local `olist` by
+`_bind_object_types`; codegen emitted `v_gxs` in `py_main` while the module body declared it in a
+later init function, so the default build died in gcc with `v_gxs undeclared`.  `bind` now refuses
+a name the function does not bind itself, and the function takes the general path as it does on
+the base: `` `gxs` is a module-level value that this function changes; the typed path builds no
+mutable module-level container (the general path does) ``.  This covers both the append/extend
+path and the fold, not just the fold's source.
+
+`test_ail_prog22` gains module-level append-only and append-plus-`max(key=)` cases (general path,
+stdout/exit equal to CPython).  The records in `lab/progfix/prog22.md` are corrected: g21_002's
+default first reason is `json.dumps of data`, and the wide-row/general-path claims now state what
+the re-run probes actually show.  Probes in `/tmp/rprobes` (`global_maxkey.py`,
+`global_maxkey_int.py`, `global_min_each.py`, `global_append_only.py`) and `/tmp/probes`
+(`p22_five_str.py`, `p22_five_str_lit.py`, `p22_six_str.py`, `p22_five_param.py`,
+`p22_five_index.py`, `p22_five_global.py`) all match CPython on both builds.
+
+## 2026-11-02 -- prog22 review fixes: wide str rows and catchable empty max/min (job-prog22-11021237)
+
+Fixed the two defects a reviewer found in `d4ef0ad`.  A local `list[tuple[...]]` with a str
+field now checks `AIL_SROW_MAXK` before choosing the `ail_srows` layout: a wider annotation
+raises `a records annotation with N fields; a str-field row holds at most 4 fields`, so the
+program takes the general path instead of writing past the 4-slot struct and silently dropping
+fields.  `_struct_key_fold` now raises a catchable `ValueError` for `max`/`min` over an empty
+list of instances (`max()/min() iterable argument is empty`, CPython's text when the program reads
+it) rather than the uncatchable `ail_die`.
+
+Probes in `/tmp/probes`: five- and six-field str rows, five-field rows with int/str keys and a
+trailing str, and empty `max`/`min` through a local, an argument, an attribute, a list item and a
+dict value, plus a caught-without-message variant; all match CPython on both `cmp.sh` builds.
+`AIL_CURRENT/test_ail_prog22.py` gains the caught empty fold and the five-field row case; the
+manifest is regenerated.  No program was edited and no new DIFFERENCES row is needed.
+
+## 2026-11-02 -- prog22 typed reach: str-field records, max(key=) and 4/8 hot programs (job-prog22-11021237)
+
+Made two more of the eight prog22 programs take the typed path without touching the programs.
+`census/programs/dev/t366.py` was blocked by a local `list[tuple[str, float, str]]` annotation
+(`a records annotation whose field type is 'str'; a row holds int64 or float fields only`); such
+an annotation now names the `ail_srows` layout the compiler already inferred from
+`rows = []; rows.append((..., "..."))`, and `enumerate(rows, start)` over that kind binds the
+index and each typed field.  `ail_srows_sort_key` refuses a NaN key by name, as the float-list and
+KEYSORT sorts already did, so a NaN never returns a Timsort-incompatible order silently
+(DIFFERENCES C?-job-prog22-11021237-1).  `census/programs/gdev/g14_034.py` was blocked only by
+`max() does not accept a class; read a numeric field`; `max`/`min` with a numeric `key=` lambda
+over a list of class instances now folds in one retained source walk, keeps CPython's first-max
+tie rule and stops on an empty source with `max()/min() arg is an empty sequence`.
+
+Typed after this change: t366, t347, t318 and g14 (4/8).  Still general: g12_018
+(`Random.randrange must take plain positional arguments, no defaults, *args or **kwargs`),
+g21_002 (`[None, True, False]` mixes bools and numbers), g15_006 (`only a class type can be None:
+write Node | None) and g16_034 (`class list iteration needs one name` for a returned
+generator expression).  Hot-function shares, exact messages and follow-ups are in
+`lab/progfix/prog22.md`.
+
+`AIL_CURRENT/test_ail_prog22.py` (registered through `AIL_CURRENT/tests.d/test_ail_prog22.txt`)
+builds the four typed programs and compares stdout/exit with CPython, plus a str-field records
+program, a `max`/`min` key program (argument, list field, ties, negative and int64-edge keys),
+an empty `max` program and the NaN refusal.  Probes `/tmp/probes/p22_{srows,maxkey,maxkey_empty,
+maxkey_tuple}.py` match CPython on both `cmp.sh` builds, and the ten `lab/compare` tasks keep
+byte-identical generated C against the pre-change tree.
 
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 

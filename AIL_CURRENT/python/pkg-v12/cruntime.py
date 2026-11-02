@@ -3486,6 +3486,14 @@ static int64_t ail_srow_field_cmp(ail_sfield a, ail_sfield b, int64_t kind, int6
    required to be. */
 static void ail_srows_sort_key(ail_srows *L, const int64_t *spec, int64_t nk) {
     int64_t n = L->n;
+    /* A NaN key has no total order: CPython's Timsort leaves an input-dependent permutation that
+       this stable merge sort does not reproduce. Refuse it by name, like ail_flist_sort and the
+       KEYSORT float-column check already do (DIFFERENCES C?-job-refuzz95-10300605-1), instead of
+       differing silently. `v != v` is isnan() without needing <math.h> in this section. */
+    for (int64_t i = 0; i < n; i++)
+        for (int64_t j = 0; j < nk; j++)
+            if (spec[j * 3 + 1] == 1 && L->p[i].v[spec[j * 3]].d != L->p[i].v[spec[j * 3]].d)
+                ail_raise_named(AIL_EXC_VALUE);
     if (n < 2) return;
     ail_srow *buf = (ail_srow *)malloc((size_t)n * sizeof *buf);
     if (!buf) ail_die("out of memory");
