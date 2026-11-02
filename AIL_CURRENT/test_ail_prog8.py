@@ -163,6 +163,52 @@ def main() -> None:
     print(sum(v for v in xs if v > 100.0), sum(v for v in xs if v > 0.0))
     print(sum([v for v in xs if v > 100.0]), sum([v for v in xs if v > 0.0]))
     print(f"{sum(xs[3:3]):.2f}", f"{sum(xs[0:2]):.2f}")
+    # A branch or a loop that does not run must leave the empty-sum int 0 alone, not turn it
+    # into a float zero; a branch that does run clears the flag.
+    looped = sum(empty)
+    for v in empty:
+        looped += v
+    print(looped)
+    branched = sum(empty)
+    n = 0
+    if n > 0:
+        branched = 1.5
+    print(branched)
+    negzero_branch = sum(empty)
+    if False:
+        negzero_branch = -0.0
+    print(negzero_branch)
+    replaced = sum(empty)
+    if n == 0:
+        replaced = 2.5
+    print(replaced)
+
+
+main()
+'''
+
+NSUM_FLOW = '''def main() -> None:
+    empty: list[float] = []
+    # A genuine -0.0 merged with sum() across control flow: the branch that does not run must
+    # keep -0.0, while the one that does run takes CPython's int 0.
+    w = -0.0
+    if False:
+        w = sum(empty)
+    print(w)
+    x = -0.0
+    n = 0
+    if n > 0:
+        x = sum(empty)
+    print(x)
+    y = -0.0
+    if n == 0:
+        y = sum(empty)
+    print(y)
+    # And the reverse direction, where a float assignment truly replaces the empty sum.
+    z = sum(empty)
+    if n == 0:
+        z = -0.0
+    print(z)
 
 
 main()
@@ -319,6 +365,12 @@ class ProgramEight(unittest.TestCase):
         self.assertTrue(typed(res), 'fell back to the general path: ' + res.stderr[-1000:])
         self.assertIn('slice_total', c_text)
         self.assertIn('double', c_text)
+
+    def test_nsum_control_flow_merges_match_cpython(self):
+        # A local that starts as a definite float and only conditionally becomes sum() cannot be
+        # represented exactly, so it is refused by name and the general path answers; every
+        # other merge stays typed.
+        self.compare(NSUM_FLOW, 'nsumflow')
 
     def test_first_non_repeating_enumerate_str_is_typed(self):
         res, c_text = self.compare_tree_program(

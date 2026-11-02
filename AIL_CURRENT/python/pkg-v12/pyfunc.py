@@ -143,10 +143,11 @@ SROWS = 'srows'
 TAB = (SET, DICT)
 NUM = (INT, FLT)
 # The result of `sum()` over a float sequence is a float when the sequence has an element and the
-# INT 0 when it is empty (CPython's `sum` starts from the int 0). NSUM is carried as a C `double`
-# with the negative zero `-0.0` as the sentinel for that empty-sum int 0: a non-empty Neumaier
-# float sum (cruntime.py's FSUM) can never produce `-0.0`. It is deliberately NOT in NUM: every
-# operation that cannot preserve the int-or-float distinction is refused by name in `_etype`.
+# INT 0 when it is empty (CPython's `sum` starts from the int 0). NSUM is carried as a C struct
+# `ail_nsum { double v; int64_t is_int0; }` (cruntime.py's FSUM) whose explicit flag keeps the two
+# cases distinct even when a genuine `-0.0` float reaches the same local through a branch or a
+# loop. It is deliberately NOT in NUM: every operation that cannot preserve the int-or-float
+# distinction is refused by name in `_etype`.
 NSUM = 'nsum'
 
 # AIL_TASK_callconv_20260915.md: a function's return kind when NO `return` anywhere in its body
@@ -467,7 +468,7 @@ def _frame_ptr_kind(t):
     scalar `volatile` already answers). The volatile POINTER is defined after the landing,
     and the pointee lives on the heap, entirely outside that rule. Scalars stay plain
     `volatile` locals; class instances need only their own pointer qualified."""
-    return (isinstance(t, str) and t not in NUM and t != NSUM and t not in (RANGE, HANDLE)
+    return (isinstance(t, str) and t not in NUM and t not in (RANGE, HANDLE)
             and not _is_ref_kind(t) and not callable_types.valid(t))
 
 
@@ -2907,9 +2908,20 @@ class Ctx:
             if {old, t} <= set(NUM):
                 self.types[name] = t if self.numeric_allowed_names is None or name in self.numeric_allowed_names else FLT
             elif {old, t} <= {FLT, NSUM}:
-                # An empty float sum is the int 0, so an NSUM target stays NSUM; once a definitely
-                # float value is assigned, every later read is definitely a float.
-                self.types[name] = NSUM if t == NSUM else FLT
+                # An NSUM target keeps its explicit int0 flag through later float assignments (a
+                # float overwrites the value and clears the flag, in the branch that runs). The
+                # other direction -- a float local receiving sum() in a branch -- cannot be made
+                # exact: the untouched path would have to invent an int0 flag for a value that is
+                # definitely a float, so it is refused by name instead of guessing.
+                if old == FLT:
+                    raise Unsupported('%r is a float local being assigned sum() over a list of '
+                                      'floats: that sum is the int 0 when the list is empty and '
+                                      'a float otherwise, so the local would be both kinds across '
+                                      'control flow.\n'
+                                      '  write instead: bind the sum to its own name, or guard '
+                                      'the empty case and use `sum(xs) * 1.0` for a float'
+                                      % name)
+                self.types[name] = NSUM
             else:
                 raise Unsupported("%r is %s and is being assigned %s; a local's kind is settled "
                                   'by its FIRST assignment and never changes afterwards -- give '
@@ -2917,6 +2929,8 @@ class Ctx:
                                   'without binding it to one' % (name, _a(old), _a(t)))
         if name not in self.locals:
             self.locals.append(name)
+        if self.types.get(name) == NSUM:
+            self.parts.add('FSUM')
         if t in NUM and name in getattr(self, 'source_names', ()):
             if not hasattr(self, 'numeric_writes'):
                 self.numeric_writes = {}
@@ -12452,12 +12466,13 @@ def _ordered_numeric_pair(left, right, ctx, form):
     left_c = _expr(left, ctx)
     right_c = _expr(right, ctx)
     lkind, rkind = _etype(left, ctx), _etype(right, ctx)
-    ltmp, lname = ctx.temp(FLT if lkind in (FLT, NSUM) else INT)
-    rtmp, rname = ctx.temp(FLT if rkind in (FLT, NSUM) else INT)
-    # An NSUM `-0.0` sentinel means CPython's int 0; once an operation makes the result a float,
-    # that operand is numerically +0.0 (`0 + 1.5` is `1.5`, and `0 / 2` is `0.0`).
-    lval = '((%s) == 0.0 ? 0.0 : (%s))' % (ltmp, ltmp) if lkind == NSUM else ltmp
-    rval = '((%s) == 0.0 ? 0.0 : (%s))' % (rtmp, rtmp) if rkind == NSUM else rtmp
+    ltmp, lname = ctx.temp(NSUM if lkind == NSUM else FLT if lkind == FLT else INT)
+    rtmp, rname = ctx.temp(NSUM if rkind == NSUM else FLT if rkind == FLT else INT)
+    # An NSUM carries CPython's int 0 or a float; once an operation makes the result a float,
+    # that operand is numerically the int 0's value 0.0 (`0 + 1.5` is `1.5`, and `0 / 2` is
+    # `0.0`) while a genuine `-0.0` keeps its sign.
+    lval = 'ail_nsum_value(%s)' % ltmp if lkind == NSUM else ltmp
+    rval = 'ail_nsum_value(%s)' % rtmp if rkind == NSUM else rtmp
     if getattr(ctx, 'experimental_ephemeral_numeric_temps', False):
         # These values are assigned before their only reads in this comma expression.
         # A longjmp abandons the expression; source names must never share this exemption.
@@ -17403,6 +17418,12 @@ def _call(node, ctx):
             ctx.has_try = True
             return 'ail_bytes_to_int(%s)' % v
         # Python's int() truncates toward zero on a float, and so does C's cast
+        if _etype(a[0], ctx) == NSUM:
+            ctx.parts.add('FSUM')
+            ctx.tmp += 1
+            t = '_nsumi%d' % ctx.tmp
+            return '({ ail_nsum %s = %s; %s; })' % (
+                t, rec(a[0]), _numeric_to_int('ail_nsum_value(%s)' % t, ctx))
         return _numeric_to_int(rec(a[0]), ctx) if _etype(a[0], ctx) == FLT else rec(a[0])
     if f == 'float' and len(a) == 1:
         # AIL_TASK_p3shapes_20260916.md mechanism 3: `float(<str>)`, the str-crossing sibling
@@ -17417,12 +17438,10 @@ def _call(node, ctx):
             ctx.has_try = True
             return 'ail_str_to_float(%s)' % v
         if _etype(a[0], ctx) == NSUM:
-            # CPython's float() of the empty sum's int 0 is +0.0; the internal `-0.0` sentinel
-            # must not become a negative zero, which prints differently.
-            ctx.tmp += 1
-            t = '_nsumf%d' % ctx.tmp
-            v = rec(a[0])
-            return '({ double %s = (double)(%s); (%s) == 0.0 ? 0.0 : %s; })' % (t, v, t, t)
+            # CPython's float() of the empty sum's int 0 is +0.0; a genuine -0.0 float keeps its
+            # sign. `ail_nsum_value` is exactly that distinction.
+            ctx.parts.add('FSUM')
+            return 'ail_nsum_value(%s)' % rec(a[0])
         return '((double)(%s))' % rec(a[0])
     if f == STR and STR not in ctx.funcs and STR not in ctx.classes:
         raise Unsupported('str() used where a number is needed; str(<int>) builds a str VALUE, '
@@ -17753,12 +17772,12 @@ def _finish_fold(f, ctx, ct, acc, seen, tag, head, body, value, eager=None, afte
             nonempty = None
         if nonempty is not None:
             # CPython's sum() starts from the INT 0, so an empty float sum is the int 0 while any
-            # non-empty one is a float. `-0.0` is the sentinel for that int 0: ail_fsum_end can
-            # never produce it for a non-empty run (the accumulator starts at +0.0), so printing
-            # can tell the two apart without carrying a second value around.
-            acc_out = '((%s) ? ail_fsum_end(%s, %s) : (-0.0))' % (nonempty, acc, comp)
+            # non-empty one is a float. The struct's explicit flag keeps that distinction even
+            # after a genuine -0.0 float reaches the same local through a branch or a loop.
+            acc_out = '((ail_nsum){ (%s) ? ail_fsum_end(%s, %s) : 0.0, (%s) ? 0 : 1 })' % (
+                nonempty, acc, comp, nonempty)
         else:
-            acc_out = 'ail_fsum_end(%s, %s)' % (acc, comp)
+            acc_out = '((ail_nsum){ ail_fsum_end(%s, %s), 0 })' % (acc, comp)
     elif f in FOLD_INIT:
         step = FOLD_INIT[f][1]
         body.append(step % (acc, value) if f == 'sum' else step % (value, acc))
@@ -19021,6 +19040,11 @@ def _truthy(node, ctx):
     if _NULLABLE and _is_obj_kind(_etype(node, ctx)):
         # `if node:` / `while cur:` -- a struct value is true unless it is None.
         return '(%s != NULL)' % _null_test_pointer(node, ctx)
+    if _etype(node, ctx) == NSUM:
+        ctx.parts.add('FSUM')
+        ctx.tmp += 1
+        t = '_nsumt%d' % ctx.tmp
+        return '({ ail_nsum %s = %s; ail_nsum_truth(%s); })' % (t, _expr(node, ctx), t)
     if _etype(node, ctx) == BYTEARRAY:
         return 'ail_bytearray_len(%s)' % _bytearray_value(node, ctx)
     if isinstance(node, (ast.Call, ast.Subscript, ast.Attribute)) and _is_olist_kind(_etype(node, ctx)):
@@ -21973,6 +21997,9 @@ def _stmt_inner(node, ctx, ind):
         declared_t = vt if (vt in NUM or vt == NSUM or _is_ref_kind(vt)
                             or callable_types.valid(vt)) else INT
         c = ctx.declare(t.id, declared_t)
+        if ctx.type_of(t.id) == NSUM and vt == FLT:
+            ctx.parts.add('FSUM')
+            v = 'ail_nsum_from_float((double)(%s))' % v
         return pre + '%s%s;\n' % (pad, _obj_store(c, v, vt, ctx, adopt=adopt)
                                   if _managed_obj(vt, ctx) else '%s = %s' % (c, v))
 
@@ -22069,10 +22096,11 @@ def _stmt_inner(node, ctx, ind):
         fake = ast.BinOp(left=node.target, op=node.op, right=node.value)
         fake._ail_range_src = getattr(node, '_ail_range_src', node)   # the range proof is recorded on the AugAssign
         v = _expr(fake, ctx)
-        if _at == NSUM and _etype(fake, ctx) == FLT:
-            # An NSUM local updated by definitely-float arithmetic is definitely a float from here
-            # on; keeping NSUM would misread a legitimate `-0.0` result as the empty-sum int 0.
-            ctx.types[node.target.id] = FLT
+        if _at == NSUM:
+            # The arithmetic result is definitely a float; keep the NSUM struct so a branch or a
+            # loop that does not execute leaves the original int0 flag intact, and clear it here.
+            ctx.parts.add('FSUM')
+            v = 'ail_nsum_from_float((double)(%s))' % v
         return _flush(ctx, pad) + '%s%s = %s;\n' % (pad, ctx.cname(node.target.id), v)
     if isinstance(node, ast.If):
         fused = _map_upsert(node, ctx, ind)
@@ -22916,8 +22944,8 @@ def _print_stmt(node, ctx, pad):
             float_fn = 'ail_write_float' if stream == 'stdout' else 'ail_write_float_to'
             int_fn = 'ail_write_int' if stream == 'stdout' else 'ail_write_int_to'
             suffix = '' if stream == 'stdout' else ', stderr'
-            out += ('%sif ((%s) == 0.0 && signbit(%s)) %s(0%s); else %s((double)(%s)%s);\n'
-                    % (pad, val, val, int_fn, suffix, float_fn, val, suffix))
+            out += ('%sif ((%s).is_int0) %s(0%s); else %s((double)(%s).v%s);\n'
+                    % (pad, val, int_fn, suffix, float_fn, val, suffix))
         else:
             out += ('%sail_write_int((int64_t)(%s));\n' % (pad, val)
                     if stream == 'stdout' else
@@ -27379,11 +27407,13 @@ def signature(params, ctx, name, ret=INT):
         # rather than manufacturing a return value (0, always) nothing downstream ever reads.
         rtype = 'void'
     else:
-        rtype = ('double' if ret in (FLT, NSUM) else 'ail_str' if ret == STR and
+        rtype = ('ail_nsum' if ret == NSUM else 'double' if ret == FLT else 'ail_str' if ret == STR and
                  getattr(ctx, 'owned_str_return', False) else 'ail_bytes' if ret == BYTES and
                  getattr(ctx, 'owned_bytes_return', False) else 'ail_slist' if ret == SLIST
                 else 'ail_%s' % ret if ret in MAPS
                 else 'ail_srow' if _is_srowtup_ret(ret) else 'int64_t')
+        if ret == NSUM:
+            ctx.parts.add('FSUM')
     return '%s %s(%s)' % (rtype, name, ', '.join(out) or 'void')
 
 
@@ -27853,6 +27883,18 @@ def _promote_floats(fn, ctx):
     # STR/BYTES settling pass -- see that loop's own docstring comment for why the two have to be
     # mutually recursive rather than two independent single passes.
 
+    # Names whose own first binding is `sum()` over a float sequence: this pass must not
+    # pre-claim them INT or FLT from a later assignment (a branch, a loop body or `+=`), because
+    # their NSUM struct has to keep the int0 flag for the path that never reaches that assignment.
+    nsum_names = set()
+    for n in nodes:
+        if isinstance(n, ast.Assign):
+            try:
+                if _etype(n.value, ctx) == NSUM:
+                    nsum_names.update(t.id for t in n.targets if isinstance(t, ast.Name))
+            except Unsupported:
+                pass
+
     for n in nodes:
         if isinstance(n, ast.Assign):
             if (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
@@ -27956,6 +27998,8 @@ def _promote_floats(fn, ctx):
                                      # one's later, correct `ctx.declare(name, STR)`
             for t in n.targets:
                 if isinstance(t, ast.Name):
+                    if t.id in nsum_names:
+                        continue
                     ctx.bind(t.id, INT)
                 elif isinstance(t, ast.Tuple):
                     values = (n.value.elts if isinstance(n.value, ast.Tuple)
@@ -28101,6 +28145,8 @@ def _promote_floats(fn, ctx):
                 continue
             for t in targets:
                 if isinstance(t, ast.Name) and t.id in ctx.local_annotations:
+                    continue
+                if isinstance(t, ast.Name) and t.id in nsum_names:
                     continue
                 if isinstance(t, ast.Name) and ctx.types.get(t.id) != FLT:
                     ctx.types[t.id] = FLT
@@ -38049,7 +38095,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         # every return frees what the function built, so calling it in a loop leaks nothing
         _ct = ('%s *' % _ref_ctype(ret, ctx) if _is_ref_kind(ret)
               else callable_types.ctype(ret) if callable_types.valid(ret)
-              else 'double' if ret == FLT else 'ail_str' if ctx.owned_str_return
+              else 'ail_nsum' if ret == NSUM else 'double' if ret == FLT else 'ail_str' if ctx.owned_str_return
               else 'ail_bytes' if ctx.owned_bytes_return
               else 'ail_slist' if ret == SLIST else 'ail_%s' % ret if ret in MAPS
               else 'ail_srow' if _is_srowtup_ret(ret) else 'int64_t')
@@ -38106,6 +38152,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         tab_struct = 'ail_btab' if v in ctx.bkeys else 'ail_stab' if v in ctx.skeys else 'ail_tab'
         if ctx.exc_frame and _frame_ptr_kind(t) and v not in plain_cells:
             ct = ('ail_str' if t == STR else 'ail_bytes' if t == BYTES
+                  else 'ail_nsum' if t == NSUM
                   else 'ail_flist' if t == FLIST else 'ail_slist' if t == SLIST else 'ail_%s' % t if t in MAPS
                   else 'ail_srows' if t == SROWS else 'ail_srow' if t == SROW
                   else 'ail_list' if t == LIST else tab_struct)
@@ -38118,7 +38165,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
             decls += '    %s * volatile v_%s = 0;\n' % (_ref_ctype(t, ctx), v)
         else:
             decls += ('    %sint64_t %s = 0;\n' % (scalar_vol, ctx.cname(v)) if t == INT
-                  else '    %sdouble %s = 0;\n' % (scalar_vol, ctx.cname(v)) if t in (FLT, NSUM)
+                  else '    %sail_nsum %s = {0};\n' % (scalar_vol, ctx.cname(v)) if t == NSUM
+                  else '    %sdouble %s = 0;\n' % (scalar_vol, ctx.cname(v)) if t == FLT
                   else '    ail_str %s = {0};\n' % ctx.cname(v) if t == STR
                   else '    ail_bytes %s = {0};\n' % ctx.cname(v) if t == BYTES
                   # -1: never a valid pool index, so reading a handle before it is ever assigned
@@ -38202,6 +38250,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                         else 'return (ail_bytes){0};' if ctx.owned_bytes_return
                         else 'return (ail_slist){0};' if ret == SLIST
                         else 'return (ail_%s){0};' % ret if ret in MAPS
+                        else 'return (ail_nsum){0, 1};' if ret == NSUM
                         else 'return (ail_srow){0};' if _is_srowtup_ret(ret) else 'return 0;')
     tail = ('    %s\n' % _fallback_return
             if not (cleanup_steps or owned or owned_objs or ctx.needs_barena or ctx.needs_sarena or ctx.needs_pool

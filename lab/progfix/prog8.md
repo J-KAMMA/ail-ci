@@ -89,15 +89,17 @@ already reading the base list's `double` elements, so `sum`/`min`/`max` and a ge
 formatting work is there.)
 
 An empty float `sum` is CPython's int `0` and a non-empty one is a float. The typed value kind
-`NSUM` (`pyfunc.py`) carries both: the fold tracks whether it actually added an element and returns
-the `-0.0` sentinel for the empty case (a non-empty Neumaier run can never produce it). `print`
-writes the sentinel as `0` and every other value as the float it is, so both `sum(xs[:0])` and a
-bare `sum(empty_float_list)` now match CPython; this also fixes the bare-empty form the base tree
-got wrong. Uses that cannot keep the two cases exact are named refusals (arithmetic with an int
-other than true division, `**`, unary operators, `abs`, two-argument `min`/`max`, `round`, default
-formatting, container/index/key storage and arbitrary call arguments); an explicit float format
-spec (`f"{sum(xs):.2f}"`) is exact and stays typed. The empty-sum behaviour is covered by
-`test_ail_prog8`'s `FLOAT_SLICE`.
+`NSUM` (`pyfunc.py`) carries both as a C struct `{ double v; int64_t is_int0; }`: the fold records
+whether it actually added an element, so the int-0 case stays distinct from a genuine `-0.0` even
+when the two reach the same local through a branch or a loop. `print` writes the flag as `0` and
+every other value as the float it is, so both `sum(xs[:0])` and a bare `sum(empty_float_list)`
+match CPython; this also fixes the bare-empty form the base tree got wrong. A local that starts as
+a definite float and only conditionally receives `sum()` is refused by name (the untouched path
+cannot gain an int-0 flag); every other use that cannot keep the two cases exact is a named refusal
+too (arithmetic with an int other than true division, `**`, unary operators, `abs`, two-argument
+`min`/`max`, `round`, default formatting, container/index/key storage and arbitrary call
+arguments); an explicit float format spec (`f"{sum(xs):.2f}"`) is exact and stays typed. The
+empty-sum and control-flow cases are covered by `test_ail_prog8`'s `FLOAT_SLICE` and `NSUM_FLOW`.
 
 ## shell sort (`lab/census/programs/gdev/g04_010.py`)
 

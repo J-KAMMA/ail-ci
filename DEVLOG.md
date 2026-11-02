@@ -1,3 +1,26 @@
+## 2026-11-02 -- prog8 review fix 2: exact NSUM through control flow (job-prog8-11021227)
+
+Fixed both defects the review found in the empty-float-`sum` change. `NSUM` is no longer a bare
+`double` with a `-0.0` sentinel; it is a C struct `ail_nsum { double v; int64_t is_int0; }` (FSUM
+block) whose explicit flag is part of the value. A branch or a loop that does not run therefore
+leaves CPython's int `0` intact, while the branch that does run overwrites the value and clears the
+flag; a genuine `-0.0` that merely meets a conditional `sum()` now prints `-0.0` instead of being
+misread as the int `0`. Assignments, `+=`, returns (the C return type is the struct), `print`,
+formatting, comparisons/arithmetic, `int`/`float`/`bool` conversion and truthiness all read the
+flag. The reverse merge -- a local that starts as a definite float and only conditionally receives
+`sum()` -- cannot be made exact and is a named compile-time refusal; the general path then answers.
+
+Regression coverage: `test_ail_prog8`'s `FLOAT_SLICE` now includes a zero-iteration loop, a
+not-taken branch and a taken branch on an `NSUM` local, and a new `NSUM_FLOW` program covers a
+genuine `-0.0` merged with `sum()` in both directions. Probes `/tmp/probes/nsum_flow_typed.py`,
+`/tmp/probes/nsum_float_merge.py`, `/tmp/probes/nsum_convert.py`, plus `/tmp/rprobes/f4_emptyslice.py`,
+`p9_flow`, `p10_return`, `p15a_min`, `p15_loop_empty`, `p17_branch_min`, `p18_negzero_regress` and
+`p19_negzero_min` all match CPython on both `cmp.sh` builds. `test_ail_prog8`,
+`test_ail_nested_lists`, `test_ail_boolfield`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_float_argument_widening` pass;
+`tools/update_manifest.py --check` is 0. The generated C of all ten `lab/compare` tasks is
+byte-identical to the pre-change tree (the three pre-existing `main.py` failures still fail).
+
 ## 2026-11-02 -- prog8 review fix: exact empty float `sum` via `NSUM` (job-prog8-11021227)
 
 Fixed the review's defect: after the float-slice change, `sum(xs[a:b])` on an empty slice printed
