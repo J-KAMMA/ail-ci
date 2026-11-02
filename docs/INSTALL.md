@@ -8,8 +8,9 @@ compiler. You install it as the Python package `ail-lang`, which gives you the `
 
 Checked on 2026-10-31 on Ubuntu 24.04 under WSL 2 (Python 3.12.3, gcc 13.3.0): `pip wheel`, a
 fresh virtual environment, `pip install` of the wheel, then `ail run` of a hello world and of a
-typed program, and every sample of [the tutorial](tutorial.md). The macOS and native Windows
-steps below were not run by hand; CI covers a subset of the tests there (see "Platforms").
+typed program, and every sample of [the tutorial](tutorial.md). CI now does the same on Linux,
+macOS 14 and native Windows (see "Platforms"). The macOS and native Windows setup steps below were
+still not run by hand.
 
 ## Requirements
 
@@ -108,10 +109,16 @@ Two options:
 
 | Platform | State |
 |---|---|
-| Linux x86-64 (Ubuntu 24.04) | full test suite in CI; this guide was run here |
+| Linux x86-64 (Ubuntu 24.04) | full test suite in CI; wheel install + tutorial samples in CI; this guide was run here |
 | Linux arm64 | representative subset in CI |
-| macOS 14 arm64 | representative subset in CI |
-| Windows (MinGW-w64, `windows-latest`) | representative subset in CI |
+| macOS 14 arm64 | representative subset in CI; wheel install + tutorial samples in CI |
+| Windows (MinGW-w64, `windows-latest`) | representative subset in CI; wheel install + tutorial samples in CI |
+
+"Wheel install + tutorial samples" means a fresh virtual environment, `pip install` of the built
+wheel, `ail --version`, `ail doctor --check`, `ail run` of a hello world and a typed program, and
+every sample of [the tutorial](tutorial.md) through the installed `ail`; `tools/wheel_check.py`
+does this in CI. On Windows the C (FFI) tutorial sample is skipped because the CPython side of it
+loads `libm`, which Windows does not have; the skip is printed with its reason.
 
 ## Without installing (from the checkout)
 
