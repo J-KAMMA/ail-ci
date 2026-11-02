@@ -1,3 +1,18 @@
+## 2026-11-02 -- prog7 review fix: constant-tuple loops only lower a dominating assignment (job-rbprog7-11021443)
+
+The reviewer found that the constant-tuple loop lowering trusted the last tuple literal assigned to a
+name even when that assignment was conditional or inside a loop that may run zero times, replacing
+CPython's `UnboundLocalError` with a pre-built list. `tupstmt.py` now restores the tuple-literal
+bookkeeping around the bodies of `if`, `while`, `for`, `with` and `try` (and around loop `else`), so a
+recorded assignment is used only when it dominates the loop in the same straight-line block. The
+legitimate cases (assignment before an `if`, inside the same branch, or earlier in a loop body) keep
+the lowering.
+
+Probes `/tmp/probes/p_dom_*.py` (conditional, zero-iteration for / while, try before and after the
+raise, nested unpack, scalar and tuple displays, both branches, and the legitimate dominating cases)
+match CPython on both `cmp.sh` builds. `test_ail_prog7` gained TUPLE_CONDITIONAL.
+
+
 ## 2026-11-02 -- prog7: the hot function of g10_032 reaches the typed path (job-rbprog7-11021443)
 
 Profiled the eight task programs under CPython 3.12 and kept the functions holding 80% of the own

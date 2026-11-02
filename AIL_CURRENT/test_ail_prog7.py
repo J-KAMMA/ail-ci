@@ -198,6 +198,33 @@ TUPLE_MIXED = '''def main() -> None:
 main()
 '''
 
+TUPLE_CONDITIONAL = '''def from_if(flag: bool) -> int:
+    if flag:
+        t = ((1, 2), (3, 4))
+    total = 0
+    for a, b in t:
+        total += a * b
+    return total
+
+
+def from_loop(n: int) -> int:
+    for _k in range(n):
+        t = ((5, 6), (7, 8))
+    total = 0
+    for a, b in t:
+        total += a + b
+    return total
+
+
+def main() -> None:
+    print(from_if(True))
+    print(from_loop(2))
+    print(from_if(False))
+
+
+main()
+'''
+
 BOOL_ROWS = '''from collections import deque
 
 
@@ -287,6 +314,9 @@ class Prog7(unittest.TestCase):
     def test_empty_and_mixed_tuples_stay_correct(self):
         self.check(TUPLE_EMPTY, 'tuple_empty', None)
         self.check(TUPLE_MIXED, 'tuple_mixed', None)
+
+    def test_conditional_tuple_assignment_keeps_unbound(self):
+        self.check(TUPLE_CONDITIONAL, 'tuple_conditional', None)
 
     def test_bool_row_and_int_row_in_one_function(self):
         self.check(BOOL_ROWS, 'bool_rows', True)

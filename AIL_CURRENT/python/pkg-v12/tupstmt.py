@@ -159,8 +159,11 @@ class Stmts:
     # ------------------------------------------------------------------------------------------
     def stmt_If(self, st):
         st.test = self.test(st.test)
+        saved = dict(self.tuple_literals)
         st.body = self.stmts(st.body)
+        self.tuple_literals = dict(saved)
         st.orelse = self.stmts(st.orelse)
+        self.tuple_literals = saved
         return [st]
 
     def stmt_While(self, st):
@@ -169,8 +172,11 @@ class Stmts:
             st.test = self.test(st.test)
         finally:
             self.nohoist -= 1
+        saved = dict(self.tuple_literals)
         st.body = self.stmts(st.body)
+        self.tuple_literals = dict(saved)
         st.orelse = self.stmts(st.orelse)
+        self.tuple_literals = saved
         return [st]
 
     def stmt_For(self, st):
@@ -182,27 +188,37 @@ class Stmts:
             src = src.func.value
         if isinstance(src, ast.Name) and is_table(self.env.get(src.id)) and stores(st.body, src.id):
             self.refuse(st, 'a loop that changes the dict / set of tuples it walks (CPython raises RuntimeError)')
+        saved = dict(self.tuple_literals)
         body = []
         for cond in h.ifs:
             body.append(ast.If(test=ast.UnaryOp(op=ast.Not(), operand=cond), body=[ast.Continue()], orelse=[]))
         for target, access, t in h.unpacks:
             body.extend(self.assign_one(target, access, t, st))
         body.extend(self.stmts(st.body))
+        self.tuple_literals = dict(saved)
         new = ast.For(target=h.target, iter=h.iter, body=body, orelse=self.stmts(st.orelse))
+        self.tuple_literals = saved
         return [*h.pre, new]
 
     def stmt_With(self, st):
         for item in st.items:
             item.context_expr = self.exv(item.context_expr)[0]
+        saved = dict(self.tuple_literals)
         st.body = self.stmts(st.body)
+        self.tuple_literals = saved
         return [st]
 
     def stmt_Try(self, st):
+        saved = dict(self.tuple_literals)
         st.body = self.stmts(st.body)
+        self.tuple_literals = dict(saved)
         for h in st.handlers:
             h.body = self.stmts(h.body)
+            self.tuple_literals = dict(saved)
         st.orelse = self.stmts(st.orelse)
+        self.tuple_literals = dict(saved)
         st.finalbody = self.stmts(st.finalbody)
+        self.tuple_literals = saved
         return [st]
 
     stmt_TryStar = stmt_Try
