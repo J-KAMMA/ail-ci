@@ -4335,6 +4335,7 @@ class Compiler(boxclosure.ClosureMixin):
             if p not in globals_decl:
                 ctx.declare_local(p)
         locals_ = (_scan_assigned_names(node.body) - set(info['all_params']) - globals_decl)
+        ctx.local_bindings = set(info['all_params']) | locals_
         for name in sorted(locals_):
             ctx.declare_local(name)
         # nested defs (S043/S045): registered before compiling the body so a call to one appearing
@@ -8717,6 +8718,10 @@ class Compiler(boxclosure.ClosureMixin):
             if not isinstance(tnode, ast.Name):
                 raise Unsupported('isinstance() with a non-name type argument')
             tname = tnode.id
+            if tname in getattr(ctx, 'local_bindings', ()):
+                raise Unsupported('isinstance() target %s is a local or parameter that shadows a '
+                                  'class or builtin type name; CPython raises TypeError for a value '
+                                  'that is not a type' % tname)
             if tname in self.classes:
                 self._check_class_name_bound(tname, ctx)
             if tname == 'int':

@@ -1139,6 +1139,54 @@ through arguments, a list item, a dict value and an attribute.  Added
 `AIL_CURRENT/test_ail_std_string.py` (registered through `tests.d/test_ail_std_string.txt`) and
 updated `test_ail_stdlib1.py`'s old Template-refusal case to Formatter.  Final-state tests:
 test_ail_std_string, test_ail_stdlib1, test_ail_safetynet, test_ail_files and
+## 2026-11-01 -- cls1 review: `object` is unconditional and shadowed names are not folded (job-cls1-11020605)
+
+Two defects from the review of the typed class-test folding. First, `_isinstance_value` broke out
+of the target loop when a class matched before `object`, so `isinstance(x, (A, object))` with
+`x: A | None` printed `False` for `None` (CPython prints `True`). An `object` target now settles
+the tuple before any class test, wherever it appears, including self and ancestor targets. Second,
+`_static_issubclass` folded a class or builtin name that a parameter or local shadows
+(`def f(A: int): print(issubclass(B, A))`, a local `A = 7`, or a shadowed left operand). It now returns
+"unknown" for a shadowed call name or operand, so the typed path refuses `issubclass` by name as
+the general path does; CPython raises `TypeError` there, so this is a named refusal, not a silent
+answer. The same boundary in `isinstance` (a parameter or local target such as `(B, A)` or a
+shadowed `object`) was also printing the class answer on both paths; the typed predicates and the
+general emitters now refuse it by name too. Added
+`test_object_settles_the_tuple_before_a_matching_class`,
+`test_shadowed_issubclass_operands_are_not_folded` (4 cases) and
+`test_shadowed_isinstance_targets_are_not_folded` (3 cases, typed and general) to
+`AIL_CURRENT/test_ail_class_reach.py`, and noted both boundaries in
+`docs/design/CLASS_REACH.md`. Probes `/tmp/probes/objancestor.py`, `objorder.py`, `objpaths.py`,
+`objshadow_cls.py`, `objshadow_local.py`, `objshadow_left.py`, `objshadow_builtin.py`,
+`isinst_shadow_cls.py`, `isinst_shadow_local.py`, `isinst_shadow_obj.py`: default build matches
+CPython where the general path is refused by name, or is refused by name itself.
+
+## 2026-11-01 -- cls1 review: `None` is an instance of `object` (job-cls1-11011231)
+
+The review found that a nullable class value (`x: A | None`) tested with a tuple containing
+`object` (`isinstance(x, (B, object))`) printed `False` for `None`, where CPython prints `True`:
+`_isinstance_value` treated `object` like a class target and returned the non-null pointer test.
+An `object` target is now an unconditional true (after evaluating the pointer expression), so
+`None` matches too. Added the regression case `test_nullable_object_is_an_instance` to
+`AIL_CURRENT/test_ail_class_reach.py`; the general path still refuses the program by name. The
+thirty-program counts are unchanged (16 typed, 10 general, 4 refused).
+
+## 2026-11-01 -- cls1: static `issubclass` and mixed `isinstance` tuples on the typed path (job-cls1-11011231)
+
+Measured 30 class-hierarchy programs (`/tmp/probes/hier/h01.py`..`h30.py`): before the change
+13 were typed, 11 took the general path and 6 were refused; after it 16 are typed, 10 general and
+4 refused. The required class-test programs (`h05`, `h27`) refused because the typed path had no
+`issubclass` and rejected an `isinstance` tuple that mixed a program class with a builtin. A
+statically named `issubclass(C, A)` / `(C, B, object)` is now folded to a bool, and a mixed
+`isinstance(x, (C, int))` tuple uses the class-id test (builtin targets that cannot match are
+false, `object` is true); the receiver stays a name or attribute. `BOOL_BUILTINS` gained
+`issubclass`, so the typed path prints `True`/`False`, not `1`/`0`. The general path still refuses
+`issubclass` and `(C, object)` by name; the default build is typed for these programs and matches
+CPython. Multiple inheritance/library bases, a starred `super()` argument and class objects in a
+tuple stay named refusals. `h17` and `h26` keep their pre-existing general-path differences.
+Added `AIL_CURRENT/test_ail_class_reach.py` (5 cases) and
+`AIL_CURRENT/docs/design/CLASS_REACH.md`. Final-state tests: test_ail_class_reach,
+test_ail_typed_inherit, test_ail_virtual_dispatch, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)

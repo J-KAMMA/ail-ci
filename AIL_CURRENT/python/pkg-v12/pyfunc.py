@@ -1785,6 +1785,10 @@ def _etype(node, ctx):
             return FLT
         if f == '__ail_class_id' and _HIER or f == 'isinstance' and _is_class_isinstance(node, ctx):
             return INT
+        if f == 'isinstance' and _mixed_class_isinstance(node, ctx):
+            return INT
+        if f == 'issubclass' and _static_issubclass(node, ctx) is not None:
+            return INT
         if f == 'isinstance' and _static_isinstance(node, ctx) is not None:
             return INT
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
@@ -16596,6 +16600,94 @@ def _is_class_isinstance(node, ctx):
     return bool(names) and all(isinstance(n, ast.Name) and n.id in ctx.classes for n in names)
 
 
+_BUILTIN_TYPE_OBJECTS = {
+    'bool': bool, 'int': int, 'float': float, 'str': str, 'bytes': bytes, 'bytearray': bytearray,
+    'list': list, 'tuple': tuple, 'dict': dict, 'set': set, 'frozenset': frozenset, 'range': range,
+    'object': object,
+}
+
+
+def _builtin_type_name(name, ctx):
+    """A builtin type name that no function, class or local of the program shadows."""
+    return name in _BUILTIN_TYPE_OBJECTS and all(
+        name not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+
+
+def _mixed_class_isinstance(node, ctx):
+    """`isinstance(x, (C, int, ...))` in a hierarchy: a tuple that mixes classes of this program with
+    builtin types. `_isinstance_value` already knows how to ignore a builtin target for a class
+    instance; this predicate admits the mixed tuple to it. None for a value whose kind is not a class
+    instance, so the ordinary builtin lowering still sees (and refuses or builds) that shape."""
+    if not (_HIER and isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+            and isinstance(node.args[0], (ast.Name, ast.Attribute))):
+        return False
+    spec = node.args[1]
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    if not names or not all(isinstance(n, ast.Name) for n in names):
+        return False
+    if not any(n.id in ctx.classes for n in names):
+        return False
+    if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+        return False
+    try:
+        kind = _etype(node.args[0], ctx)
+    except Unsupported:
+        return False
+    return _is_obj_kind(kind)
+
+
+def _isinstance_targets_shadowed(node, ctx):
+    """True when a target name of `isinstance(x, (...))` is a local or parameter: it is that value,
+    not the class or builtin type name, so CPython raises TypeError instead of testing the type."""
+    local = getattr(ctx, 'local_bindings', ())
+    if not local or not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                         and len(node.args) == 2):
+        return False
+    spec = node.args[1]
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    return any(isinstance(n, ast.Name) and n.id in local for n in names)
+
+
+def _static_issubclass(node, ctx):
+    """True or False when `issubclass(C, D)` (or a tuple of Ds) is settled when the program is built:
+    C and every D a class of this program or a builtin type name. None otherwise. A local or
+    parameter that shadows one of those names is a value, not the class or builtin, so it is not
+    folded (CPython raises TypeError there)."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'issubclass' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
+        return None
+    local = getattr(ctx, 'local_bindings', ())
+    if node.func.id in local:
+        return None
+    left, spec = node.args
+    if not isinstance(left, ast.Name):
+        return None
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    if not names or not all(isinstance(n, ast.Name) for n in names):
+        return None
+    if left.id in local or any(n.id in local for n in names):
+        return None
+    if left.id in ctx.classes:
+        if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+            return None
+        chain = set(_class_chain(left.id))
+        return any((n.id in chain) if n.id in ctx.classes else n.id == 'object' for n in names)
+    if not _builtin_type_name(left.id, ctx):
+        return None
+    if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+        return None
+    left_type = _BUILTIN_TYPE_OBJECTS[left.id]
+    for n in names:
+        if n.id in ctx.classes:
+            continue
+        if issubclass(left_type, _BUILTIN_TYPE_OBJECTS[n.id]):
+            return True
+    return False
+
+
 def _bare_except_to_exception(tree):
     """A bare `except:` catches what `except Exception:` catches here: every exception the program can
     raise (CPython's bare except also takes SystemExit and KeyboardInterrupt; `sys.exit()` ends the
@@ -16634,6 +16726,8 @@ def _static_isinstance(node, ctx):
     if not names or not all(isinstance(n, ast.Name) for n in names):
         return None
     targets = {n.id for n in names}
+    if any(n.id in getattr(ctx, 'local_bindings', ()) for n in names):
+        return None
     user = targets & set(ctx.classes)
     if not targets <= (_STATIC_TYPES | user) or (user and _HIER):
         return None
@@ -16729,6 +16823,11 @@ def _isinstance_value(node, ctx):
         raise Unsupported('isinstance(%s, ...): bind the value to a name first' % ast.unparse(value))
     targets = [n.id for n in (spec.elts if isinstance(spec, ast.Tuple) else [spec])]
     static = kind[1]
+    pointer = _null_test_pointer(value, ctx)
+    if 'object' in targets:
+        # Every class instance, and None, is an object: an object target settles the whole tuple,
+        # wherever it appears in it.
+        return '((void)(%s), (int64_t)1)' % pointer
     tests = []
     for t in targets:
         if t in _class_chain(static) or t == static:
@@ -16738,7 +16837,6 @@ def _isinstance_value(node, ctx):
             lo, hi = ctx.classes[t].cid, ctx.classes[t].cid_hi
             tests.append('(uint64_t)(((ail_obj_header *)_ail_io)->drop - %dU) <= %dU' % (lo, hi - lo)
                          if hi > lo else '((ail_obj_header *)_ail_io)->drop == %d' % lo)
-    pointer = _null_test_pointer(value, ctx)
     nullable = static in _NULLABLE
     if tests is None:
         return '(int64_t)((%s) != 0)' % pointer if nullable else '((void)(%s), (int64_t)1)' % pointer
@@ -16758,8 +16856,19 @@ def _call(node, ctx):
         raise Unsupported('%s has no value; use a statement' % node.func.id)
     if _is_tcp_poll_call(node, ctx):
         return _tcp_poll_value(node, ctx)[0]
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+            and _isinstance_targets_shadowed(node, ctx)):
+        raise Unsupported('isinstance() target is a local or parameter that shadows a class or builtin '
+                          'type name; CPython raises TypeError for a value that is not a type')
     if _is_class_isinstance(node, ctx):
         return _isinstance_value(node, ctx)
+    if _mixed_class_isinstance(node, ctx):
+        return _isinstance_value(node, ctx)
+    known = _static_issubclass(node, ctx)
+    if known is not None:
+        return '1' if known else '0'
     known = _static_isinstance(node, ctx)
     if known is not None:
         return '1' if known else '0'

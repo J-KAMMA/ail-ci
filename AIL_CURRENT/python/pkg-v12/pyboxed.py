@@ -1135,6 +1135,7 @@ class Compiler:
                 globals_decl.update(n.names)
         ctx.global_decls = globals_decl
         locals_ = _scan_assigned_names(node.body) - set(info['params']) - globals_decl
+        ctx.local_bindings = set(info['params']) | locals_
         self.block(node.body, ctx)
         sig = ', '.join('volatile ail_obj %s' % cid(p) for p in info['params']) or 'void'
         pre = ''
@@ -1994,6 +1995,10 @@ class Compiler:
             if not isinstance(tnode, ast.Name):
                 raise Unsupported('isinstance() with a non-name type argument')
             tname = tnode.id
+            if tname in getattr(ctx, 'local_bindings', ()):
+                raise Unsupported('isinstance() target %s is a local or parameter that shadows a '
+                                  'class or builtin type name; CPython raises TypeError for a value '
+                                  'that is not a type' % tname)
             if tname == 'int':
                 checks.append('(%s.tag==AIL_INT||%s.tag==AIL_BOOL)' % (v, v))
             elif tname in TYPE_NAME_TAG:
