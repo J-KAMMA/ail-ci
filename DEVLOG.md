@@ -1,3 +1,50 @@
+## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
+
+Two remaining comment-placement defects in `tools/ail2py.py` are fixed; no compiler file changed.
+
+* An end-of-line comment on a block-closing `}` now belongs to the block it closes. A token scan
+  maps each closing-brace line to its opening line, and the comment is placed at the opening
+  statement (`class`, `if`, `def`, ...) instead of before the last statement in the body.
+* Comments are now targeted in source order rather than output order. A field comment before a
+  later `use` no longer lands on the generated import, because the import's source line is later
+  than the field's even though the import is printed first.
+
+`test_ail_ail2py` gained closing-brace and use-after-struct regressions. The ten compare-lab tasks
+are still 10/10 `identical` under `--strict`; all 275 brace files convert (except the intentionally
+invalid `lab/syntax/runs/_sample/ts-like/collatz_steps/attempt1.ail`) and keep every comment once;
+`test_ail_ail2py`, `test_ail_files` and `test_ail_corpus_findings3` pass, and `test_ail_safetynet`
+passes without a virtual-memory cap (its `S4_generators_gc` case needs more than 4 GB of address
+space under this runner).
+
+## 2026-11-02 -- onelang s1 review fixes: comment placement in `tools/ail2py.py`
+
+Two comment-placement defects are fixed without touching the compiler.
+
+* An end-of-line comment on a statement that spans several brace lines is now placed before that
+  statement, not after it. The converter distinguishes a comment that follows code on its line from
+  one on its own line and searches the output statements in the matching direction.
+* Comments before a `struct`, its fields, or a `use` import now stay with the generated
+  `class`/`__init__`/field/import lines. A small token scan records the source line of each struct
+  and field and each `use`, because `translate` gives those generated lines no `source_map` entry.
+
+`test_ail_ail2py` gained multiline-statement and struct/import comment-placement regressions. The
+ten compare-lab tasks are still 10/10 `identical` under `--strict`, all 260 brace examples convert
+and parse with every source comment kept, and `test_ail_ail2py`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
+## 2026-11-02 -- onelang s1: `tools/ail2py.py` converts brace syntax to annotated Python
+
+New converter over `ail_syntax.translate`: `python3 tools/ail2py.py SRC.ail [-o OUT.py]` writes
+readable Python (per-top-level `ast.unparse`, one blank line around defs/classes), rewrites the
+internal `__ail_checked_*` markers, emits `from m import *` for each `use m`, wraps the entry's
+final `sys.exit(main())` in `if __name__ == "__main__":`, and puts the brace source's `#` comments
+on their own lines at the following statement's indentation. `--check [--flags "..."]` builds the
+original and the converted file with `--debug-dir` and compares `program.c`.
+
+`AIL_CURRENT/test_ail_ail2py.py` covers five small programs (struct+impl, `list[float]`, `-> void`,
+`const`, try/except, start/end comments); two are `--check` identical and three run like the AOT
+binary. All ten `lab/compare/src/*/main.ail` tasks report `identical` under `--strict`.
+
 ## 2026-11-02 -- prog29 review fixes: shadowed `len` and frozenset reads before assignment
 
 Two review defects, both in the module-`frozenset` support, are fixed without touching a program.
