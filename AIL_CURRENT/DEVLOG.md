@@ -1,3 +1,13 @@
+## 2026-11-02 -- hostile-input test follows the declared int64 default (job decexact2)
+
+`test_ail_hostile_input.test_documented_differences` still expected CPython's exact big integer for `int("9" * 30)`
+on both builds, but every Python-syntax int is int64 by default since 2026-10-31 (the exact mode is opt-in). The
+test now checks the declared difference instead: both builds exit 1, print nothing, and report
+`OverflowError: integer overflow in int() ... --exact-int`; the non-BMP UTF-8 check is unchanged. No compiler
+behaviour changed. Required tests:
+`test_ail_hostile_input`, `test_ail_int64_default`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`; probes `/tmp/probes/hostile_int64_*.py` in the report.
+
 ## 2026-11-01 -- Decimal and Fraction compute exactly in every int mode; property stores stop by name (job decexact2)
 
 The Decimal/Fraction prelude now runs its internal arithmetic at exact depth in the default int64 mode too, using the existing
