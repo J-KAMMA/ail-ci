@@ -20679,10 +20679,13 @@ def _loop_local_release_points(fn):
     ends), which is what keeps a tree built per iteration from being held while the next one is
     built.
 
-    A value that can be observed after the block keeps today's lifetime: a read after the block,
-    a return from inside it, a store into an attribute, an append into another container, or a
-    `break`/`continue` that leaves the block. A lambda or nested function capture, an `_ail_synth`
-    name, and `t = f(t)` (which reads the previous pass's value) always disqualify as well."""
+    For a list-kind local (`list[int]`, `list[float]`, `list[str]`), a value that can be observed
+    after the block keeps today's lifetime: a read after the block, a return from inside it, a
+    store into an attribute, an append into another container, or a `break`/`continue` that leaves
+    the block. Those escapes do not disqualify the struct-kind locals this pass has always handled:
+    their references are retained by such operations, so their existing release points stay put. A
+    lambda or nested function capture, an `_ail_synth` name, and `t = f(t)` (which reads the
+    previous pass's value) always disqualify as well."""
     parents = {}
     for node in ast.walk(fn):
         for child in ast.iter_child_nodes(node):
@@ -20714,8 +20717,8 @@ def _loop_local_release_points(fn):
         return None, None
 
     def escapes(name, block):
-        if any(isinstance(n, (ast.Break, ast.Continue)) for stmt in block for n in ast.walk(stmt)):
-            return True
+        escaped = any(isinstance(n, (ast.Break, ast.Continue))
+                      for stmt in block for n in ast.walk(stmt))
         for stmt in block:
             for node in ast.walk(stmt):
                 if not (isinstance(node, ast.Name) and node.id == name):
@@ -20726,15 +20729,15 @@ def _loop_local_release_points(fn):
                         func = parent.func
                         if (isinstance(func, ast.Attribute) and func.attr in ('append', 'extend', 'insert')
                                 and not (isinstance(func.value, ast.Name) and func.value.id == name)):
-                            return True
+                            escaped = True
                     child, parent = parent, parents.get(parent)
                 if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is child:
                     targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
                     if any(isinstance(target, ast.Attribute) for target in targets):
-                        return True
+                        escaped = True
                 elif isinstance(parent, ast.Return):
-                    return True
-        return False
+                    escaped = True
+        return escaped
 
     points = {}
     for name, nodes in mentions.items():
@@ -20764,23 +20767,26 @@ def _loop_local_release_points(fn):
             continue
         if sum(1 for n in ast.walk(stmt) if isinstance(n, ast.Name) and n.id == name) != 1:
             continue                      # `t = f(t)` reads the previous iteration's value
-        if escapes(name, block):
-            continue
+        escaped = escapes(name, block)
         top = None
         for candidate in block:
             if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(candidate)):
                 top = candidate
         if top is not None:
-            points.setdefault(id(top), []).append(name)
+            points.setdefault(id(top), []).append((name, escaped))
     return points
 
 
 def _loop_local_releases(statement, ctx, ind):
     out = []
-    for name in getattr(ctx, 'loop_local_points', {}).get(id(statement), ()):
+    for name, escaped in getattr(ctx, 'loop_local_points', {}).get(id(statement), ()):
         kind = ctx.types.get(name)
         if not (name in ctx.locals and name not in ctx.kind and kind is not None
                 and name not in ctx.borrowed_aliases):
+            continue
+        # A list buffer moved into another container (or left by a jump) must stay alive; a
+        # struct reference is retained by those operations, so its established release stays.
+        if escaped and kind in (LIST, FLIST, SLIST):
             continue
         if _is_obj_kind(kind) and _managed_obj(kind, ctx):
             out.append('%s%s(%s); %s = 0;\n' % ('    ' * ind, _ref_helper(kind, 'release'),
