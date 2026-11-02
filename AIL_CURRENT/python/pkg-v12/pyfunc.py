@@ -1735,7 +1735,11 @@ def _etype(node, ctx):
         if isinstance(node.op, ast.Add) and _is_bytes_expr(node.left, ctx) \
                 and _is_bytes_expr(node.right, ctx):
             return BYTES
-        if any(_is_ref_kind(_etype(value, ctx)) for value in (node.left, node.right)):
+        l = _etype(node.left, ctx)
+        if _is_ref_kind(l):
+            raise Unsupported('arithmetic on a struct is unsupported; read a numeric field')
+        r = _etype(node.right, ctx)
+        if _is_ref_kind(r):
             raise Unsupported('arithmetic on a struct is unsupported; read a numeric field')
         if isinstance(node.op, ast.Div):
             return FLT
@@ -1763,7 +1767,6 @@ def _etype(node, ctx):
                         'time, where CPython returns a float (2 ** -1 is 0.5); the typed path '
                         'uses exact int64 integer power, so this program is built on the general path')
             return FLT
-        l, r = _etype(node.left, ctx), _etype(node.right, ctx)
         return FLT if FLT in (l, r) else INT
     if isinstance(node, (ast.Compare, ast.BoolOp)):
         return INT
