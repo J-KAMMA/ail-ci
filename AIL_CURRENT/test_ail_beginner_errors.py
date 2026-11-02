@@ -61,27 +61,21 @@ class BeginnerErrors(unittest.TestCase):
                 if extra:
                     self.assertIn(extra, built.stderr)
 
-    @unittest.expectedFailure
     def test_probe_a_name_at_module_level(self):
         self.check(*CASES[0])
 
-    @unittest.expectedFailure
     def test_probe_b_unknown_function_hint(self):
         self.check(*CASES[1])
 
-    @unittest.expectedFailure
     def test_probe_c_missing_argument(self):
         self.check(*CASES[2])
 
-    @unittest.expectedFailure
     def test_probe_d_method_without_self(self):
         self.check(*CASES[3])
 
-    @unittest.expectedFailure
     def test_probe_e_indentation_error(self):
         self.check(*CASES[4])
 
-    @unittest.expectedFailure
     def test_probe_f_keeps_location(self):
         self.check(*CASES[5])
 
