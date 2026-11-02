@@ -31,6 +31,7 @@ _SEQ_ANN = ('list', 'List', 'str', 'bytes')
 _SEQ_METHODS = ('split', 'rsplit', 'splitlines', 'encode', 'decode', 'strip', 'lstrip', 'rstrip',
                 'upper', 'lower', 'replace', 'join', 'format', 'read', 'readline')
 _SEQ_CALLS = ('list', 'sorted', 'str', 'bytes', 'input')
+_PURE_CALLS = ('int', 'float', 'str', 'len', 'abs', 'bool', 'ord', 'chr')
 _TYPE_METHODS = ('strip', 'lstrip', 'rstrip', 'upper', 'lower', 'title', 'capitalize', 'swapcase',
                  'isdigit', 'isalpha', 'isalnum', 'isspace', 'isupper', 'islower')
 
@@ -74,6 +75,24 @@ class _Rename(ast.NodeTransformer):
         return node
 
 
+class _NextIndex(ast.NodeTransformer):
+    def __init__(self, lower, iterators):
+        self.lower = lower
+        self.iterators = iterators
+        self.used = []
+
+    def visit_Call(self, node):
+        if (isinstance(node.func, ast.Name) and node.func.id == 'next' and len(node.args) == 1
+                and not node.keywords and isinstance(node.args[0], ast.Name)
+                and node.args[0].id in self.iterators):
+            name = node.args[0].id
+            source, index = self.iterators[name][1], self.iterators[name][2]
+            temp = self.lower.fresh('n')
+            self.used.append((temp, source, index))
+            return ast.copy_location(_name(temp), node)
+        return self.generic_visit(node)
+
+
 def _rebinds(node, name):
     """Whether `name` is bound again inside `node` (a lambda parameter, a comprehension variable...)."""
     for child in ast.walk(node):
@@ -82,6 +101,48 @@ def _rebinds(node, name):
         if isinstance(child, ast.arg) and child.arg == name:
             return True
     return False
+
+
+def _own_nodes(fn):
+    pending = list(fn.body)
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        pending.extend(ast.iter_child_nodes(node))
+
+
+def _scope_bindings(fn):
+    """Every name bound in `fn`'s own scope (parameters, assignments, nested def/class names,
+    imports, `except ... as`, `with ... as`, `global`/`nonlocal`, deletion).  Nested function and
+    class bodies are their own scope and are not descended into."""
+    names = set()
+    a = fn.args
+    for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs):
+        names.add(arg.arg)
+    if a.vararg:
+        names.add(a.vararg.arg)
+    if a.kwarg:
+        names.add(a.kwarg.arg)
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Import):
+            names.update(alias.asname or alias.name.split('.')[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names.update(node.names)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    names.update(n.id for n in ast.walk(item.optional_vars) if isinstance(n, ast.Name))
+    return names
 
 
 def _locate(statements, origin):
@@ -213,6 +274,213 @@ class _Lower:
             elif isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node is not fn:
                 bad.add(node.name)
         return good - bad
+
+    def iterator_bindings(self, fn):
+        if not getattr(self, 'allow_iter', False):
+            return {}
+        if _scope_bindings(fn) & {'iter', 'next'}:
+            # A local, parameter, nested def/class or import named `iter`/`next` replaces the
+            # builtin those calls would otherwise reach, so the cursor rewrite must not fire.
+            return {}
+        nodes = list(_own_nodes(fn))
+        parents = {}
+        for node in nodes:
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        names = [node for node in nodes if isinstance(node, ast.Name)]
+        nested = [node for node in nodes
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef))]
+        candidates = {}
+        for node in nodes:
+            if isinstance(node, ast.Assign):
+                target = node.targets[0] if len(node.targets) == 1 else None
+            elif isinstance(node, ast.AnnAssign):
+                target = node.target
+            else:
+                continue
+            if isinstance(target, ast.Name) and self.iter_call(node.value) is not None:
+                candidates.setdefault(target.id, []).append(node)
+        args = {arg.arg for arg in (*fn.args.args, *fn.args.kwonlyargs, *fn.args.posonlyargs)}
+        if fn.args.vararg:
+            args.add(fn.args.vararg.arg)
+        if fn.args.kwarg:
+            args.add(fn.args.kwarg.arg)
+        found = {}
+        for name, bindings in candidates.items():
+            if len(bindings) != 1 or name in args:
+                continue
+            binding = bindings[0]
+            if binding not in fn.body:
+                continue
+            if any(name in (child.id for child in ast.walk(each) if isinstance(child, ast.Name))
+                   for each in nested):
+                continue
+            stores = [n for n in names if n.id == name and isinstance(n.ctx, ast.Store)]
+            deletes = [n for n in names if n.id == name and isinstance(n.ctx, ast.Del)]
+            if len(stores) != 1 or deletes:
+                continue
+            here = (getattr(binding, 'lineno', 0), getattr(binding, 'col_offset', 0))
+            source = self.iter_call(binding.value)
+            source_name, setup = None, None
+            if isinstance(source, ast.Name) and source.id != name and source.id in self.sequences:
+                source_name = source.id
+                source_stores = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == source_name
+                                 and isinstance(n.ctx, ast.Store)]
+                source_deletes = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == source_name
+                                  and isinstance(n.ctx, ast.Del)]
+                if source_deletes:
+                    continue
+                if any((getattr(n, 'lineno', 0), getattr(n, 'col_offset', 0)) > here for n in source_stores):
+                    continue
+            elif (isinstance(source, (ast.List, ast.ListComp, ast.Constant, ast.JoinedStr))
+                  and self.seq_expr(source)):
+                source_name, setup = self.fresh('s'), copy.deepcopy(source)
+            else:
+                continue
+            calls, expected, ok = [], set(), True
+            for node in nodes:
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == 'next' and node.args
+                        and isinstance(node.args[0], ast.Name) and node.args[0].id == name):
+                    if ((getattr(node, 'lineno', 0), getattr(node, 'col_offset', 0)) <= here
+                            or len(node.args) != 1 or node.keywords
+                            or not self.next_chain(node, parents, {name})):
+                        ok = False
+                        break
+                    calls.append(node)
+                    expected.add(id(node.args[0]))
+            if not ok or not calls:
+                continue
+            loads = [n for n in names if n.id == name and isinstance(n.ctx, ast.Load)]
+            if any(id(n) not in expected for n in loads):
+                continue
+            found[name] = (binding, source_name, self.fresh('i'), setup)
+        return found
+
+    def iter_call(self, node):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'iter'
+                and len(node.args) == 1 and not node.keywords
+                and not isinstance(node.args[0], ast.Starred)):
+            return node.args[0]
+        return None
+
+    def next_chain(self, node, parents, names):
+        child = node
+        while True:
+            parent = parents.get(child)
+            if parent is None:
+                return False
+            if isinstance(parent, ast.stmt):
+                if isinstance(parent, ast.If) and parent.test is child:
+                    return True
+                if isinstance(parent, ast.AugAssign) and parent.value is child:
+                    # CPython evaluates an augmented assignment's target before its value, so a
+                    # target that runs code (a subscript / attribute, which may call __getitem__ /
+                    # __getattribute__) would move the hoisted `next` past that code.  Only a plain
+                    # name target is evaluated without running anything and may be reordered.
+                    return isinstance(parent.target, ast.Name)
+                if (isinstance(parent, (ast.Assign, ast.AnnAssign, ast.Return, ast.Expr))
+                        and getattr(parent, 'value', None) is child):
+                    return True
+                return False
+            if not self.before_safe(parent, child, names):
+                return False
+            child = parent
+
+    def order_safe(self, node, names):
+        if isinstance(node, (ast.Name, ast.Constant)):
+            return True
+        if isinstance(node, ast.UnaryOp):
+            return self.order_safe(node.operand, names)
+        if isinstance(node, ast.Attribute):
+            return self.order_safe(node.value, names)
+        if isinstance(node, ast.Subscript):
+            return self.order_safe(node.value, names) and self.order_safe(node.slice, names)
+        if isinstance(node, ast.Slice):
+            return all(part is None or self.order_safe(part, names)
+                       for part in (node.lower, node.upper, node.step))
+        if isinstance(node, ast.Call):
+            if (isinstance(node.func, ast.Name) and node.func.id == 'next' and len(node.args) == 1
+                    and not node.keywords and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id in names):
+                return True
+            if (isinstance(node.func, ast.Name) and node.func.id in _PURE_CALLS
+                    and not node.keywords and all(self.order_safe(arg, names) for arg in node.args)):
+                return True
+            return False
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            return all(self.order_safe(elt, names) for elt in node.elts)
+        if isinstance(node, ast.keyword):
+            return self.order_safe(node.value, names)
+        if isinstance(node, ast.Starred):
+            return self.order_safe(node.value, names)
+        return False
+
+    def before_safe(self, parent, child, names):
+        if isinstance(parent, ast.Call):
+            if child is parent.func:
+                return True
+            if child in parent.args:
+                index = parent.args.index(child)
+                return (self.order_safe(parent.func, names)
+                        and all(self.order_safe(arg, names) for arg in parent.args[:index]))
+            if child in parent.keywords:
+                index = parent.keywords.index(child)
+                return (self.order_safe(parent.func, names)
+                        and all(self.order_safe(arg, names) for arg in parent.args)
+                        and all(self.order_safe(k.value, names) for k in parent.keywords[:index]))
+            return False
+        if isinstance(parent, ast.keyword):
+            return child is parent.value
+        if isinstance(parent, ast.BinOp):
+            return child is parent.left or (child is parent.right and self.order_safe(parent.left, names))
+        if isinstance(parent, ast.UnaryOp):
+            return child is parent.operand
+        if isinstance(parent, ast.Compare):
+            if child is parent.left:
+                return True
+            if child in parent.comparators:
+                index = parent.comparators.index(child)
+                return (self.order_safe(parent.left, names)
+                        and all(self.order_safe(c, names) for c in parent.comparators[:index]))
+            return False
+        if isinstance(parent, ast.Attribute):
+            return child is parent.value
+        if isinstance(parent, ast.Subscript):
+            if child is parent.value:
+                return True
+            return child is parent.slice and self.order_safe(parent.value, names)
+        if isinstance(parent, ast.Slice):
+            order = [part for part in (parent.lower, parent.upper, parent.step) if part is not None]
+            if child not in order:
+                return False
+            index = order.index(child)
+            return all(self.order_safe(part, names) for part in order[:index])
+        if isinstance(parent, (ast.Tuple, ast.List, ast.Set)):
+            if child not in parent.elts:
+                return False
+            index = parent.elts.index(child)
+            return all(self.order_safe(elt, names) for elt in parent.elts[:index])
+        if isinstance(parent, ast.Dict):
+            order = []
+            for key, value in zip(parent.keys, parent.values):
+                if key is not None:
+                    order.append(key)
+                order.append(value)
+            if child not in order:
+                return False
+            index = order.index(child)
+            return all(self.order_safe(part, names) for part in order[:index])
+        if isinstance(parent, ast.FormattedValue):
+            return child is parent.value
+        if isinstance(parent, ast.JoinedStr):
+            if child not in parent.values:
+                return False
+            index = parent.values.index(child)
+            return all(self.order_safe(part, names) for part in parent.values[:index])
+        if isinstance(parent, ast.Starred):
+            return child is parent.value
+        return False
 
     # -- function reference applied to an element ---------------------------------------------------
     def apply(self, func, arg):
@@ -542,14 +810,52 @@ class _Lower:
     def stmt(self, node):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             saved, saved_dicts = getattr(self, 'sequences', set()), getattr(self, 'dicts', set())
+            saved_iterators = getattr(self, 'iterators', {})
             self.sequences = self.known_sequences(node)
             self.dicts = self.known_dicts(node)
+            self.iterators = self.iterator_bindings(node)
             node.body = self.block(node.body)
-            self.sequences, self.dicts = saved, saved_dicts
+            self.sequences, self.dicts, self.iterators = saved, saved_dicts, saved_iterators
             return [node]
         if isinstance(node, ast.ClassDef):
+            saved_iterators = getattr(self, 'iterators', {})
+            self.iterators = {}
             node.body = self.block(node.body)
+            self.iterators = saved_iterators
             return [node]
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            if isinstance(node, ast.Assign):
+                target = node.targets[0] if len(node.targets) == 1 else None
+            else:
+                target = node.target
+            if (isinstance(target, ast.Name) and target.id in getattr(self, 'iterators', {})
+                    and self.iterators[target.id][0] is node):
+                _, source, index, setup = self.iterators[target.id]
+                statements = []
+                if setup is not None:
+                    statements.append(ast.Assign(targets=[_name(source, True)], value=self.expr(setup)))
+                statements.append(ast.Assign(targets=[_name(index, True)], value=ast.Constant(value=0)))
+                _locate(statements, node)
+                return statements
+        if getattr(self, 'iterators', {}):
+            field = None
+            if isinstance(node, ast.If):
+                field = 'test'
+            elif (isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Return, ast.Expr))
+                  and getattr(node, 'value', None) is not None):
+                field = 'value'
+            if field is not None:
+                replacement = _NextIndex(self, self.iterators)
+                setattr(node, field, replacement.visit(getattr(node, field)))
+                if replacement.used:
+                    pre = []
+                    for temp, source, index in replacement.used:
+                        pre.append(ast.Assign(targets=[_name(temp, True)], value=ast.Subscript(
+                            value=_name(source), slice=_name(index), ctx=ast.Load())))
+                        pre.append(ast.AugAssign(target=_name(index, True), op=ast.Add(),
+                                                 value=ast.Constant(value=1)))
+                    _locate(pre, node)
+                    return self.block(pre) + self.stmt(node)
         if isinstance(node, ast.For):
             lowered = self.for_loop(node)
             if lowered is not None:
@@ -813,10 +1119,13 @@ def rewrite(tree):
     """Lower the iterator spellings in `tree` in place; returns whether anything changed."""
     source_text = ast.dump(tree)
     if not any(word in source_text for word in ("'map'", "'filter'", "'zip'", "'key'", "'base'", 'DictComp',
-                                                                "'open'")):
+                                                                "'open'", "'iter'", "'next'")):
         return False
     lower = _Lower()
     lower.sequences = set()
+    lower.iterators = {}
+    lower.allow_iter = not any(isinstance(n, (ast.Try, getattr(ast, 'TryStar', ast.Try)))
+                               for n in ast.walk(tree))
     tree.body = lower.block(tree.body)
     ast.fix_missing_locations(tree)
     return source_text != ast.dump(tree)
