@@ -17,6 +17,7 @@ The pass runs twice over a program: the first run (output discarded) settles wha
 about an earlier empty `[]` / `{}` and the return types of unannotated functions; the second run emits.
 """
 import ast
+import symtable
 import sys
 from pathlib import Path
 
@@ -325,11 +326,27 @@ class Lower(Stmts, Calls, Lams, Exprs):
             return [node]
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             return self.module_assign(node)
+        if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                and node.value is not None and self._module_holds_tuples(node.value)):
+            # `START: tuple[int, int] = (0, 0)` -- an annotated module constant used to fall through
+            # to the ordinary statement path, which lowered its tuple value to a constructor call
+            # and left the typed path with a module-level name assigned to a Call.  Treat the same
+            # literal shape exactly like the unannotated assignment below, so the columns stay
+            # plain numeric module constants (`START__c0`, `START__c1`).
+            return self.module_assign(ast.Assign(targets=[node.target], value=node.value,
+                                                 lineno=node.lineno))
         self.cur = None
         self.fnkey = '<module>'
         self.env = {}
         self.alias = {}
         return self.stmts([node])
+
+    @staticmethod
+    def _module_holds_tuples(value):
+        if isinstance(value, ast.Tuple):
+            return True
+        return (isinstance(value, ast.List) and bool(value.elts)
+                and all(isinstance(e, ast.Tuple) for e in value.elts))
 
     def module_assign(self, node):
         nm = node.targets[0].id
@@ -403,8 +420,89 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.consts[nm] = t
         return [node]
 
+    @staticmethod
+    def _module_tuple_constant(node):
+        if isinstance(node, ast.Assign):
+            return (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Tuple))
+        return (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                and node.value is not None and isinstance(node.value, ast.Tuple))
+
+    def _module_tuple_const_names(self):
+        defs = {}
+        for node in self.tree.body:
+            if self._module_tuple_constant(node):
+                if isinstance(node, ast.Assign):
+                    defs[id(node)] = node.targets[0].id
+                else:
+                    defs[id(node)] = node.target.id
+        return defs
+
+    def _tuple_const_rebound(self):
+        defs = self._module_tuple_const_names()
+        if not defs:
+            return None
+        names = set(defs.values())
+        walrus = _walrus_rebinds(self.tree, names)
+        soft = None
+        found = []
+        _module_bindings(self.tree.body, defs, found)
+        for node, bound in found:
+            hit = bound & names
+            if not hit:
+                continue
+            hard = hit & set(walrus)
+            if hard:
+                name = sorted(hard)[0]
+                return (getattr(node, 'lineno', 1), _walrus_rebind_message(name), True)
+            if soft is None:
+                soft = (getattr(node, 'lineno', 1), _rebind_message(sorted(hit)[0]))
+        # a function or class body may rebind the module name through `global NAME`
+        try:
+            table = symtable.symtable(self.source, '<tuple-constant>', 'exec')
+        except SyntaxError:
+            return None if soft is None else (soft[0], soft[1], False)
+
+        def walk(scope):
+            for sym in scope.get_symbols():
+                if (sym.get_name() in names and sym.is_declared_global()
+                        and sym.is_assigned()):
+                    return sym.get_name()
+            for child in scope.get_children():
+                hit = walk(child)
+                if hit is not None:
+                    return hit
+            return None
+
+        for child in table.get_children():
+            hit = walk(child)
+            if hit is not None:
+                if hit in walrus:
+                    return (getattr(walrus[hit], 'lineno', 1), _walrus_rebind_message(hit), True)
+                if soft is None:
+                    soft = (1, _rebind_message(hit))
+        return None if soft is None else (soft[0], soft[1], False)
+
     def process(self):
         self.collect()
+        rebound = self._tuple_const_rebound()
+        if rebound is not None:
+            line, message, hard = rebound
+            if hard:
+                raise HardRefused(line, message)
+            self.errors.append((line, message))
+            return
+        # Register tuple module constants before any function runs: a function written above the
+        # constant must already know that `X[0]` names the column `X__c0`, not a module name that no
+        # longer exists once the constant is split.
+        early = {}
+        for node in self.tree.body:
+            if self._module_tuple_constant(node):
+                try:
+                    early[id(node)] = self.module_stmt(node)
+                except Refused as exc:
+                    self.errors.append(exc.args[0])
+                    early[id(node)] = [node]
         body = []
         for node in self.tree.body:
             try:
@@ -414,6 +512,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 elif isinstance(node, ast.ClassDef):
                     self.class_(node)
                     body.append(node)
+                elif id(node) in early:
+                    body.extend(early.pop(id(node)))
                 else:
                     body.extend(self.module_stmt(node))
             except Refused as exc:
@@ -434,6 +534,219 @@ class Lower(Stmts, Calls, Lams, Exprs):
         out = ast.unparse(self.tree)
         helpers = self.gen.source()
         return out.rstrip('\n') + ('\n\n\n' + helpers if helpers else '') + '\n'
+
+
+def _target_names(target):
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        out = set()
+        for e in target.elts:
+            out |= _target_names(e)
+        return out
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return set()
+
+
+def _pattern_names(pattern):
+    if isinstance(pattern, ast.MatchAs):
+        out = {pattern.name} if pattern.name else set()
+        if pattern.pattern is not None:
+            out |= _pattern_names(pattern.pattern)
+        return out
+    if isinstance(pattern, ast.MatchStar):
+        return {pattern.name} if pattern.name else set()
+    if isinstance(pattern, ast.MatchMapping):
+        out = set()
+        for sub in pattern.patterns:
+            out |= _pattern_names(sub)
+        if pattern.rest:
+            out.add(pattern.rest)
+        return out
+    if isinstance(pattern, ast.MatchClass):
+        out = set()
+        for sub in pattern.patterns:
+            out |= _pattern_names(sub)
+        for sub in pattern.kwd_patterns:
+            out |= _pattern_names(sub)
+        return out
+    if isinstance(pattern, (ast.MatchSequence, ast.MatchOr)):
+        out = set()
+        for sub in pattern.patterns:
+            out |= _pattern_names(sub)
+        return out
+    return set()
+
+
+def _walrus_bindings(node, out):
+    if node is None:
+        return
+    if isinstance(node, ast.NamedExpr):
+        out.append((node, _target_names(node.target)))
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.Lambda):
+            continue
+        _walrus_bindings(child, out)
+
+
+def _global_decl_names(stmts):
+    """Names declared `global` in this scope, not in a nested function or class."""
+    out = set()
+
+    def visit(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return
+        if isinstance(node, ast.Global):
+            out.update(node.names)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for stmt in stmts:
+        visit(stmt)
+    return out
+
+
+def _walrus_rebinds(tree, names):
+    """Names bound by `:=` in the module scope or in a scope that declares them global.
+
+    A comprehension has its own scope for its for-targets, but an assignment expression binds in
+    the nearest enclosing function or module scope, so the walk keeps the enclosing scope.
+    """
+    hits = {}
+
+    def visit(node, module, globals_):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for d in node.decorator_list:
+                visit(d, module, globals_)
+            for d in node.args.defaults:
+                visit(d, module, globals_)
+            for d in node.args.kw_defaults:
+                if d is not None:
+                    visit(d, module, globals_)
+            inner = _global_decl_names(node.body) & names
+            for stmt in node.body:
+                visit(stmt, False, inner)
+            return
+        if isinstance(node, ast.ClassDef):
+            for d in node.decorator_list:
+                visit(d, module, globals_)
+            for b in node.bases:
+                visit(b, module, globals_)
+            for k in node.keywords:
+                visit(k.value, module, globals_)
+            inner = _global_decl_names(node.body) & names
+            for stmt in node.body:
+                visit(stmt, False, inner)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.NamedExpr):
+            if isinstance(node.target, ast.Name) and node.target.id in names:
+                if module or node.target.id in globals_:
+                    hits.setdefault(node.target.id, node)
+            visit(node.value, module, globals_)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for child in ast.iter_child_nodes(node):
+                visit(child, module, globals_)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, module, globals_)
+
+    for stmt in tree.body:
+        visit(stmt, True, set())
+    return hits
+
+
+def _module_bindings(stmts, defs, out):
+    """Names a module-level statement binds, without entering function/class scopes."""
+    for node in stmts:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.append((node, {node.name}))
+            continue
+        if isinstance(node, ast.Assign):
+            if id(node) not in defs:
+                names = set()
+                for t in node.targets:
+                    names |= _target_names(t)
+                out.append((node, names))
+            _walrus_bindings(node.value, out)
+        elif isinstance(node, ast.AnnAssign):
+            if id(node) not in defs and isinstance(node.target, ast.Name):
+                out.append((node, {node.target.id}))
+            _walrus_bindings(node.value, out)
+        elif isinstance(node, ast.AugAssign):
+            out.append((node, _target_names(node.target)))
+            _walrus_bindings(node.value, out)
+        elif isinstance(node, ast.Delete):
+            names = set()
+            for t in node.targets:
+                names |= _target_names(t)
+            out.append((node, names))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            out.append((node, _target_names(node.target)))
+            _walrus_bindings(node.iter, out)
+            _module_bindings(node.body, defs, out)
+            _module_bindings(node.orelse, defs, out)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    out.append((item, _target_names(item.optional_vars)))
+                _walrus_bindings(item.context_expr, out)
+            _module_bindings(node.body, defs, out)
+        elif isinstance(node, (ast.If, ast.While)):
+            _walrus_bindings(node.test, out)
+            _module_bindings(node.body, defs, out)
+            _module_bindings(node.orelse, defs, out)
+        elif isinstance(node, ast.Try):
+            _module_bindings(node.body, defs, out)
+            for handler in node.handlers:
+                if handler.name:
+                    out.append((handler, {handler.name}))
+                _module_bindings(handler.body, defs, out)
+            _module_bindings(node.orelse, defs, out)
+            _module_bindings(node.finalbody, defs, out)
+        elif isinstance(node, ast.Match):
+            _walrus_bindings(node.subject, out)
+            for case in node.cases:
+                out.append((case, _pattern_names(case.pattern)))
+                _walrus_bindings(case.guard, out)
+                _module_bindings(case.body, defs, out)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = set()
+            for alias in node.names:
+                if isinstance(node, ast.Import):
+                    names.add(alias.asname or alias.name.split('.')[0])
+                else:
+                    names.add(alias.asname or alias.name)
+            out.append((node, names))
+        elif isinstance(node, ast.Expr):
+            _walrus_bindings(node.value, out)
+        elif isinstance(node, ast.Return):
+            _walrus_bindings(node.value, out)
+
+
+def _rebind_message(name):
+    return ('the module-level tuple constant %s is assigned or deleted after it is defined; a tuple '
+            'constant is kept as columns, so it cannot follow that change -- keep it unchanged or '
+            'build the tuple inside a function' % name)
+
+
+def _walrus_rebind_message(name):
+    return ('the module-level tuple constant %s is rebound by an assignment expression (`:=`) after it '
+            'is defined; a tuple constant is kept as columns, so it cannot follow that change -- keep '
+            'it unchanged, use a plain `%s = ...` assignment, or build the tuple inside a function'
+            % (name, name))
+
+
+class HardRefused(Exception):
+    """A rebinding the general path cannot follow: refuse the program by name instead of lowering it."""
+    def __init__(self, line, message):
+        super().__init__(message)
+        self.line = line
+        self.message = message
 
 
 def rewrite(source, notes=None):
