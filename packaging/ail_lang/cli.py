@@ -66,7 +66,7 @@ Install one, then run `ail doctor` to confirm:
   Debian/Ubuntu   sudo apt install gcc
   Fedora          sudo dnf install gcc
   macOS           xcode-select --install
-  Any OS          pip install "ail-lang[zig]"   (brings a zig cc, about 50 MB)
+  Any OS          pip install "ailc[zig]"   (brings a zig cc, about 50 MB)
   Windows         or install Zig (https://ziglang.org/download/) or MinGW-w64 and put it on PATH
 You can also point AIL at a compiler explicitly: set PIPE_CC=/path/to/cc (or AIL_ZIG=/path/to/zig).
 `ail check` does not need a C compiler."""
@@ -81,7 +81,7 @@ def _zig():
     found = shutil.which("zig")
     if found:
         return found
-    # `pip install ail-lang[zig]` brings the ziglang wheel, which carries a zig binary
+    # `pip install ailc[zig]` brings the ziglang wheel, which carries a zig binary
     try:
         import importlib.util
         spec = importlib.util.find_spec("ziglang")
@@ -338,10 +338,10 @@ def main(argv=None):
         return 0 if argv else 2
     command, rest = argv[0], argv[1:]
     if command in ("--version", "-V", "version"):
-        print("ail-lang %s" % __version__)
+        print("ailc %s" % __version__)
         return 0
     if not (SDK / "ail_chatgpt.py").is_file():
-        print("ail: the bundled SDK is missing at %s (broken installation; reinstall ail-lang)" % SDK,
+        print("ail: the bundled SDK is missing at %s (broken installation; reinstall ailc)" % SDK,
               file=sys.stderr)
         return 2
     try:

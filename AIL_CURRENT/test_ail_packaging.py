@@ -1,4 +1,4 @@
-"""G14: the ail-lang wheel (pyproject.toml, packaging/).
+"""G14: the ailc wheel (pyproject.toml, packaging/).
 
 * The wheel's file list is exactly the SDK selection (MANIFEST.json sdk_files, the files ail_sdk.export_sdk
   writes) plus the `ail` command module and the dist-info; nothing private (experiments/, docs/design,
@@ -76,7 +76,7 @@ class WheelContents(unittest.TestCase):
         sdk |= {"ail_lang/sdk/MANIFEST.json", "ail_lang/sdk/SDK_README_JA.md"}
         sdk |= {"ail_lang/sdk/" + name for name in LICENSE_FILES}
         package = {"ail_lang/" + name for name in PACKAGE_FILES}
-        info = "ail_lang-%s.dist-info/" % source_version()
+        info = "ailc-%s.dist-info/" % source_version()
         dist = {info + name for name in ("METADATA", "WHEEL", "entry_points.txt", "RECORD")}
         dist |= {info + "licenses/" + name for name in LICENSE_FILES}
         self.assertEqual(self.names - sdk - package - dist, set(), "files outside the SDK selection")
@@ -116,7 +116,7 @@ class WheelContents(unittest.TestCase):
         self.assertEqual(sorted(sdk_manifest["sdk_files"]), sorted(self.manifest["sdk_files"] + list(LICENSE_FILES)))
 
     def test_record_matches(self):
-        info = "ail_lang-%s.dist-info/" % source_version()
+        info = "ailc-%s.dist-info/" % source_version()
         rows = list(csv.reader(io.StringIO(self.zip.read(info + "RECORD").decode("utf-8"))))
         self.assertEqual({row[0] for row in rows}, self.names)
         for name, digest, size in rows:
@@ -127,18 +127,18 @@ class WheelContents(unittest.TestCase):
             self.assertEqual((digest, size), (expected, str(len(data))), name)
 
     def test_one_version_source(self):
-        info = "ail_lang-%s.dist-info/" % source_version()
+        info = "ailc-%s.dist-info/" % source_version()
         metadata = self.zip.read(info + "METADATA").decode("utf-8")
-        self.assertIn("\nName: ail-lang\n", metadata)
+        self.assertIn("\nName: ailc\n", metadata)
         self.assertIn("\nVersion: %s\n" % source_version(), metadata)
         self.assertIn("ail = ail_lang.cli:main", self.zip.read(info + "entry_points.txt").decode("utf-8"))
         pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('dynamic = ["version"]', pyproject)
         self.assertNotIn("\nversion =", pyproject)
-        self.assertEqual(wheel_path.name, "ail_lang-%s-py3-none-any.whl" % source_version())
+        self.assertEqual(wheel_path.name, "ailc-%s-py3-none-any.whl" % source_version())
 
     def test_license_metadata_and_files(self):
-        info = "ail_lang-%s.dist-info/" % source_version()
+        info = "ailc-%s.dist-info/" % source_version()
         metadata = self.zip.read(info + "METADATA").decode("utf-8")
         header = metadata.split("\n\n", 1)[0].splitlines()
         self.assertIn("License-Expression: MIT OR Apache-2.0", header)
@@ -151,6 +151,25 @@ class WheelContents(unittest.TestCase):
         self.assertIn('license-files = ["LICENSE-APACHE", "LICENSE-MIT"]', pyproject)
         self.assertEqual(hashlib.sha256((REPO / "LICENSE-APACHE").read_bytes()).hexdigest(),
                          "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30")
+
+    def test_metadata_project_urls_and_classifiers(self):
+        info = "ailc-%s.dist-info/" % source_version()
+        header = self.zip.read(info + "METADATA").decode("utf-8").split("\n\n", 1)[0].splitlines()
+        for line in ("Project-URL: Homepage, https://github.com/J-KAMMA/ail-ci",
+                     "Project-URL: Documentation, https://github.com/J-KAMMA/ail-ci/blob/main/docs/INSTALL.md",
+                     "Project-URL: Issues, https://github.com/J-KAMMA/ail-ci/issues"):
+            self.assertIn(line, header)
+        for system in ("POSIX :: Linux", "MacOS", "Microsoft :: Windows"):
+            self.assertIn("Classifier: Operating System :: " + system, header)
+
+    def test_docs_and_packaging_do_not_install_the_old_name(self):
+        old = b"pip install ail-lang"
+        offenders = []
+        for root in (REPO / "docs", REPO / "packaging"):
+            for path in sorted(root.rglob("*")):
+                if path.is_file() and old in path.read_bytes():
+                    offenders.append(path.relative_to(REPO).as_posix())
+        self.assertEqual(offenders, [])
 
     def test_build_is_reproducible(self):
         with tempfile.TemporaryDirectory() as other:
@@ -247,7 +266,7 @@ class InstalledWheel(unittest.TestCase):
         if made.returncode or not cls.python.is_file():
             shutil.rmtree(cls.base, ignore_errors=True)
             raise unittest.SkipTest("cannot create a venv with pip offline: " + made.stderr[-200:])
-        # Build through pip (the PEP 517 path of `pip install ail-lang` from this tree), then install offline.
+        # Build through pip (the PEP 517 path of `pip install ailc` from this tree), then install offline.
         built = cls.base / "built"
         done = subprocess.run([str(cls.python), "-m", "pip", "wheel", "--no-deps", "--no-index", "-q",
                                "-w", str(built), str(REPO)], capture_output=True, text=True, timeout=600)
@@ -294,12 +313,12 @@ class InstalledWheel(unittest.TestCase):
 
     def test_version_and_integrity(self):
         done = self.ail_run("--version")
-        self.assertEqual(done.stdout.strip(), "ail-lang " + source_version())
+        self.assertEqual(done.stdout.strip(), "ailc " + source_version())
         done = self.ail_run("integrity")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(json.loads(done.stdout)["status"], "verified")
         done = subprocess.run([str(self.python), "-m", "ail_lang", "--version"], capture_output=True, text=True)
-        self.assertEqual(done.stdout.strip(), "ail-lang " + source_version())
+        self.assertEqual(done.stdout.strip(), "ailc " + source_version())
 
     def test_hello_run_build_check(self):
         self.write("hello.py", HELLO)
