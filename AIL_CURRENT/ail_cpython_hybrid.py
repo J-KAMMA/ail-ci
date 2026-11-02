@@ -183,7 +183,66 @@ def _provably_list(node, list_names):
     return False
 
 
-def _safe_call(node, str_names, list_names):
+def _provably_number(node, num_names, float_names=(), int_names=(), int_result=False):
+    """An int/float/bool parameter or literal, or a sign applied to one: `str` of these cannot
+    raise.  A unary `-` of an int can overflow on INT64_MIN, so it is safe only when the clone's
+    int/bool result routes that through the overflow wrapper; a float negation is always safe.
+    (Overflow of a bare int is not an arithmetic result and so is not relevant here.)"""
+    if isinstance(node, ast.Name):
+        return node.id in num_names
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        if _provably_float(node.operand, float_names):
+            return True
+        if isinstance(node.op, ast.UAdd):
+            return _provably_number(node.operand, num_names, float_names, int_names,
+                                    int_result)
+        return int_result and _provably_int(node.operand, int_names, int_result)
+    return False
+
+
+def _provably_int(node, int_names, int_result=False, bool_names=(), allow_bool=True):
+    """A value `int()` is the identity on: an int/bool parameter or literal (a float is not one;
+    `int(<float>)` can raise ValueError/OverflowError, which a clone cannot reproduce here).  A
+    unary `-` of an int needs the int/bool result's overflow wrapper, as in `_provably_number`.
+
+    `allow_bool=False` additionally rejects a bool value.  `abs` preserves boolness (and a unary
+    `+`/`-` of a bool stays bool in the typed clone), so `abs(<bool>)` returns a bool where CPython
+    returns an int; only `int(...)` converts it, so that call resets the flag."""
+    if isinstance(node, ast.Name):
+        return node.id in int_names and (allow_bool or node.id not in bool_names)
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, int) and not isinstance(node.value, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        if isinstance(node.op, ast.UAdd):
+            return _provably_int(node.operand, int_names, int_result, bool_names, allow_bool)
+        return int_result and _provably_int(node.operand, int_names, int_result, bool_names,
+                                            allow_bool)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in ('int', 'abs') and len(node.args) == 1 and not node.keywords:
+        if node.func.id == 'int':
+            return _provably_int(node.args[0], int_names, int_result, bool_names, True)
+        return _provably_int(node.args[0], int_names, int_result, bool_names, False)
+    return False
+
+
+def _provably_float(node, float_names):
+    if isinstance(node, ast.Name):
+        return node.id in float_names
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, float)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return _provably_float(node.operand, float_names)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id in ('int', 'float', 'abs') and len(node.args) == 1 \
+            and not node.keywords:
+        return _provably_float(node.args[0], float_names)
+    return False
+
+
+def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_names=(), ret=None,
+               bool_names=()):
     """A call this pass can prove cannot raise and has no side effect.  Everything else stays a
     refusal: the hybrid must return CPython's value or fall back, never a partial answer."""
     func = node.func
@@ -212,10 +271,27 @@ def _safe_call(node, str_names, list_names):
                 or isinstance(args[0], ast.List))
     if func.id == 'reversed' and len(args) == 1:
         return _provably_str_seq(args[0], str_names) or _provably_list(args[0], list_names)
+    if func.id == 'abs' and len(args) == 1:
+        # float abs is fabs; int abs can overflow only on INT64_MIN, which an int/bool result
+        # routes through the clone's overflow wrapper (and so back to CPython).  A str/list
+        # result has no such wrapper, so an int abs stays refused there.
+        return (_provably_float(args[0], float_names)
+                or (ret in ('int', 'bool')
+                    and _provably_int(args[0], int_names, True, bool_names, False)))
+    if func.id == 'int' and len(args) <= 1:
+        # int(<int/bool>) is the identity; int(<float>) can raise ValueError/OverflowError,
+        # which this clone cannot reproduce without an overflow wrapper for every result kind.
+        # A unary minus of an int is the same overflow question as in `str`.
+        return not args or _provably_int(args[0], int_names, ret in ('int', 'bool'))
+    if func.id == 'str' and len(args) <= 1:
+        # `str(-x)` overflows on INT64_MIN unless the int/bool result's wrapper can fall back.
+        return not args or _provably_number(args[0], num_names, float_names, int_names,
+                                             ret in ('int', 'bool')) \
+            or _provably_str(args[0], str_names)
     return False
 
 
-def _unsafe_body(fn, params=()):
+def _unsafe_body(fn, params=(), ret=None):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
     subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), an
@@ -225,6 +301,10 @@ def _unsafe_body(fn, params=()):
     both stay eligible.  This is deliberately conservative; a missed speed-up is safe."""
     str_names = {p for p, kind in params if kind == 'str'}
     list_names = {p for p, kind in params if kind in _LIST}
+    num_names = {p for p, kind in params if kind in ('int', 'float', 'bool')}
+    int_names = {p for p, kind in params if kind in ('int', 'bool')}
+    bool_names = {p for p, kind in params if kind == 'bool'}
+    float_names = {p for p, kind in params if kind == 'float'}
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript):
             return 'indexing can raise'
@@ -233,7 +313,8 @@ def _unsafe_body(fn, params=()):
                     and _nonzero_constant(node.right)):
                 continue
             return 'division or power can raise'
-        if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names):
+        if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names, num_names,
+                                                          int_names, float_names, ret, bool_names):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'
@@ -487,7 +568,7 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname], params)
+        unsafe = _unsafe_body(funcs[pyname], params, ret)
         if unsafe:
             rejected[pyname] = unsafe
             continue

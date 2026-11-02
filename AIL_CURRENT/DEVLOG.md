@@ -1,3 +1,70 @@
+## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
+
+Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an
+indexing read, so a `Store` or `Del` subscript (`last[0] = 9`, `del last[0]`) was accepted:
+the typed build mutated a tuple that CPython rejects.  Both `_local_tuple_uses_are_safe`
+(`pyfunc.py`) and `itlib.check_nonescaping` now require the subscript itself to be in `Load`
+context, so stores and deletes refuse by name and the general path matches CPython.  Probes:
+`last[0] = 9`, `del last[0]`, and `a = perm; a[0] = 9` (also through an alias) are refused
+typed and match CPython's `TypeError` on the default build; `test_ail_prog12` T5 covers all
+three.
+
+## 2026-11-02 -- typed reach 12: an empty tuple local from itertools is a list (job-prog12-11020843)
+
+`t338` was the one hot function of its eight-program batch that this pass could move onto the
+typed path: `last: tuple[int, ...] = ()`, assigned each `itertools.permutations` item, was refused
+by the tuple pass (and the assignment was treated as an escaping use of `perm`).  A local empty
+`tuple[int, ...]` whose uses are all list-compatible (index, loop, `join`, `len`, `sum`, `min`,
+`max`, `sorted`, `any`, `all`, `set`, `list`, `index`, `count`, `in`) is now rewritten to
+`list[int]`; a print, equality, slice, dict key, return or arbitrary call leaves the old named
+refusal.  `itlib.check_nonescaping` follows a plain alias (`last = perm`) and checks the alias
+target's uses with the same rules.
+
+`tuple[float, ...]` stays refused on purpose: CPython's `sum(())` is int `0` while the typed
+`list[float]` sum is `0.0`.  The other hot functions need the void-`main` hybrid ABI, dict values
+that are containers, record/tuple-list parameters and results, or list-valued class fields and
+methods; `lab/progfix/prog12.md` records each exact message.  `t338` now builds with
+`AIL_NO_GENERAL=1` and matches CPython on all three inputs.
+
+Added `AIL_CURRENT/test_ail_prog12.py`, registered via `tests.d/test_ail_prog12.txt`.  Probes in
+`/tmp/probes` cover empty/non-empty permutation tuples, indexing/iteration/len/sum/sorted/any/all/
+join, an itertools alias, reassignment from lists and tuple literals, float tuple locals (refused
+by name), empty-output cases and unsafe print/equality/slice uses; all match CPython or are
+refused by name on both builds.  Tests: test_ail_prog12, test_ail_tuples, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  The generated C of the ten `lab/compare` tasks is
+byte-identical.
+
+## 2026-11-02 -- prog19 fix: record t030 as not typed (job-prog19-11021530)
+
+Corrected the `dev/t030.py` row in `lab/progfix/prog19.md`: its hot `main` and `<genexpr>` are not
+typed. The default build takes the general path with `(int(x) for x in data[1:1 + n]) cannot be
+walked inline here; bind it to a name first...`, and `AIL_NO_GENERAL=1` refuses with the same named
+reason. The inline generator expression passed straight to `sorted()` is recorded as a follow-up; no
+compiler change was made. Probes: the real program on `in2` matches CPython on the default build and
+is refused by name on the strict build; the `random.choice` typed-path probes still match CPython.
+
+## 2026-11-02 -- prog19 typed reach: random.choice of a tuple list unpacks on the typed path
+
+The hot function of `lab/census/programs/gdev/g11_018.py` is `simulate_random_walk`; it was on the
+general path because `dx, dy = random.choice(moves)` reached the typed emitter as an opaque
+`moves[<index>]` subscript after the random lowering. The tuple pass runs before that lowering and
+had no element type for `random.choice`, so it could not turn the unpack into field reads. It now
+types `random.choice(seq)` as the element type of a list `seq` (the call itself is still lowered by
+stdlib3.py), for `import random` and `from random import choice`. The whole program now builds on
+the typed path under both IR settings and prints CPython's output; list parameters, aliases,
+`from` imports, empty lists (IndexError), negative coordinates, float tuples and scalar lists were
+probed against CPython on the typed and general builds.
+
+`lab/progfix/prog19.md` records the cProfile hot functions of the eight programs and their typed
+status. The other general-path programs stay recorded as follow-ups: t030's inline generator
+expression passed to `sorted()`, g10's module-level dict of `list[int]` (and its optional list
+result), t078's `ord` on a non-proven one-code-point str plus `next(generator, default)`, and
+g14's typed `json.loads` with a declared result type.
+
+Files: `python/pkg-v12/tuplib.py`, `python/pkg-v12/tupcalls.py`, `test_ail_prog19.py`.
+Tests: `test_ail_prog19`, `test_ail_tuples`, `test_ail_genlib`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow

@@ -110,9 +110,9 @@ class Lower(Stmts, Calls, Lams, Exprs):
         for node in tree.body:
             if isinstance(node, ast.Import):
                 for a in node.names:
-                    if a.name in ('heapq', 'math', 'sys', 'functools', 'bisect'):
+                    if a.name in ('heapq', 'math', 'sys', 'functools', 'bisect', 'random'):
                         self.modalias[a.asname or a.name] = a.name
-            elif isinstance(node, ast.ImportFrom) and node.module in ('heapq', 'math', 'functools', 'bisect'):
+            elif isinstance(node, ast.ImportFrom) and node.module in ('heapq', 'math', 'functools', 'bisect', 'random'):
                 for a in node.names:
                     self.fromnames[a.asname or a.name] = (node.module, a.name)
         for node in tree.body:

@@ -763,7 +763,11 @@ def refuse_instead(P, fn, refusal):
     """The legacy emitter refused `fn` for another reason. If `fn` also has an aliasing site, that is
     the reason worth naming (the other refusal can be a symptom, like a str key in a dict that was
     never annotated `dict[str, ...]`, which hides what CPython would have done differently)."""
-    if not _active() or 'used where a number is needed' not in str(refusal):
+    message = str(refusal)
+    symptoms = ('used where a number is needed',
+                'keyed by str; copying it into another name is not built',
+                'keyed by bytes; copying it into another name is not built')
+    if not _active() or not any(s in message for s in symptoms):
         return
     try:
         hit = find(P, fn, None)

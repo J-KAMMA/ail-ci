@@ -10,10 +10,10 @@ CPython, which is how the tests compare it with the real module) or refused here
 
 * decimal: `Decimal` (str, int, float, tuple, Decimal arguments; + - * / // % divmod ** with an integer exponent,
   unary operators, comparisons with int / float / Decimal, quantize, sqrt, normalize, to_integral*, max / min,
-  round / int / float / format / str / repr / hash, the is_* tests), `getcontext` / `setcontext` / `localcontext`
+  round / int / float / format / str / repr / hash, as_tuple, the is_* tests), `getcontext` / `setcontext` / `localcontext`
   with prec, rounding, Emin, Emax and capitals, `Context(...)`, the eight ROUND_* modes and the exceptions.
   Not built, refused by name: the traps and flags of a context, `clamp`, BasicContext / ExtendedContext /
-  DefaultContext, as_tuple, ln / exp / log10 / logb, fma, scaleb, rotate, shift, the logical_* and next_* methods,
+  DefaultContext, ln / exp / log10 / logb, fma, scaleb, rotate, shift, the logical_* and next_* methods,
   three-argument pow, a non-integer exponent (`Decimal ** Decimal("0.5")`).
 """
 import ast
@@ -37,7 +37,7 @@ DEC_NAMES = frozenset(('Decimal', 'Context', 'getcontext', 'setcontext', 'localc
 DEC_TOP = DEC_NAMES
 CTX_ATTRS = ('prec', 'rounding', 'Emin', 'Emax', 'capitals')
 # zero-argument method calls only Decimal has; attribute names only a context has
-DEC_METHODS0 = ('as_tuple', 'exp', 'ln', 'log10', 'logb', 'canonical', 'is_canonical', 'number_class')
+DEC_METHODS0 = ('exp', 'ln', 'log10', 'logb', 'canonical', 'is_canonical', 'number_class')
 DEC_METHODS = ('compare_signal', 'compare_total', 'compare_total_mag', 'fma', 'logical_and', 'logical_invert',
                'logical_or', 'logical_xor', 'max_mag', 'min_mag', 'next_minus', 'next_plus', 'next_toward',
                'remainder_near', 'rotate', 'scaleb', 'shift')
@@ -160,7 +160,7 @@ def run_decimal(tree, text):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             if node.func.attr in DEC_METHODS0 and not node.args and not node.keywords and node.func.attr not in attrs \
                     and not (isinstance(node.func.value, ast.Name) and node.func.value.id in ('math', 'np', 'numpy')):
-                refuse(node, 'decimal.Decimal.%s is not supported; write instead: sqrt() is built, ln / exp / log10 / as_tuple '
+                refuse(node, 'decimal.Decimal.%s is not supported; write instead: sqrt() is built, ln / exp / log10 '
                              'are not: use math.log / math.exp on float(d), or str(d) and split the digits' % node.func.attr)
         if isinstance(node, ast.keyword) and node.arg in ('traps', 'flags', 'clamp'):
             refuse(node.value, 'decimal.Context(%s=...) is not supported; write instead: %s' % (node.arg, DEC_WRITE[node.arg]))
@@ -250,7 +250,13 @@ def run_decimal(tree, text):
     roots = set(used)
     if not roots:
         roots.add('Decimal')
-    stdlib5.add_once(text, stdlib5.shake(prune_decimal(stdlib5.prelude('decimal'), tree, text), roots))
+    prelude = stdlib5.prelude('decimal')
+    import intmode
+    if not intmode.exact():
+        # the default int64 build: Decimal coefficients need more than 64 bits, so the prelude uses its own
+        # arbitrary-precision coefficient class; the program's own ints stay int64 and stop loudly on overflow
+        prelude = prelude.replace('_AIL_DEC_BIG = False', '_AIL_DEC_BIG = True', 1)
+    stdlib5.add_once(text, stdlib5.shake(prune_decimal(prelude, tree, text), roots))
     for chunk in extra:
         stdlib5.add_once(text, chunk)
     # Fraction(Decimal(...)) when the program also uses fractions: the Fraction class takes the exact ratio

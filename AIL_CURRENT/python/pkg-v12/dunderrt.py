@@ -25,6 +25,8 @@ counts as unequal). Instances without `__eq__` / `__hash__` compare and hash by 
 D1 = {'__neg__': 'NEG', '__pos__': 'POS', '__abs__': 'ABS', '__hash__': 'HASH', '__bool__': 'BOOL',
       '__int__': 'INT', '__float__': 'FLOAT', '__floor__': 'FLOOR', '__ceil__': 'CEIL', '__trunc__': 'TRUNC',
       '__len__': 'LEN', '__index__': 'INDEX', '__invert__': 'INVERT'}
+# reversed(instance) is only patched into a program whose classes define it, so every other program keeps its C
+D1_REVERSED = {'__reversed__': 'REVERSED'}
 D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB', '__mul__': 'MUL',
       '__rmul__': 'RMUL', '__truediv__': 'TRUEDIV', '__rtruediv__': 'RTRUEDIV', '__floordiv__': 'FLOORDIV',
       '__rfloordiv__': 'RFLOORDIV', '__mod__': 'MOD', '__rmod__': 'RMOD', '__pow__': 'POW', '__rpow__': 'RPOW',
@@ -64,6 +66,10 @@ ENUMS_INPLACE = ENUMS.replace(
     '       AIL_D2_IADD, AIL_D2_ISUB, AIL_D2_IMUL, AIL_D2_IAND, AIL_D2_IOR, AIL_D2_IXOR, AIL_ND2 };')
 if 'AIL_D2_IADD' not in ENUMS_INPLACE:
     raise RuntimeError('dunderrt: no place for the in-place operators in ENUMS')
+ENUMS_REVERSED = ENUMS.replace('AIL_D1_INVERT, AIL_ND1', 'AIL_D1_INVERT, AIL_D1_REVERSED, AIL_ND1')
+ENUMS_INPLACE_REVERSED = ENUMS_INPLACE.replace('AIL_D1_INVERT, AIL_ND1', 'AIL_D1_INVERT, AIL_D1_REVERSED, AIL_ND1')
+if 'AIL_D1_REVERSED' not in ENUMS_REVERSED or 'AIL_D1_REVERSED' not in ENUMS_INPLACE_REVERSED:
+    raise RuntimeError('dunderrt: no place for __reversed__ in ENUMS')
 
 # ail_dun_binop keeps 201 bytes per operand name: CPython caps "can only concatenate" and
 # "can't multiply" names at 200, and "unsupported operand" at 100 (binary_op_error) via
@@ -355,10 +361,13 @@ _VIEW_OP_NE = (
     '    *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
 
 
-def _edits(inplace=False, ordering=False):
+def _edits(inplace=False, ordering=False, reversed_=False):
     """(old, new) text replacements, each applied to exactly one place of the runtime."""
     e = []
-    enums = ENUMS_INPLACE if inplace else ENUMS
+    if inplace:
+        enums = ENUMS_INPLACE_REVERSED if reversed_ else ENUMS_INPLACE
+    else:
+        enums = ENUMS_REVERSED if reversed_ else ENUMS
     if ordering:
         enums = enums.replace('AIL_D2_EQ, AIL_D2_GT,', 'AIL_D2_EQ, AIL_D2_GT, AIL_D2_LE, AIL_D2_GE,')
     # tables in the class object
@@ -680,12 +689,18 @@ def _edits(inplace=False, ordering=False):
     e.append(('        default: { return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "\'%s\' object is not subscriptable", c); }',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "\'%s\' object is not subscriptable", c); }'))
+    # reversed(instance): __reversed__ (a class's own reverse iterator) before the builtin kinds
+    if reversed_:
+        e.append(('static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {\n    int64_t n;\n',
+                  'static inline ail_d1_fn ail_dun1(ail_obj x, int i);\n'
+                  'static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {\n    int64_t n;\n'
+                  '    if (seq.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(seq, AIL_D1_REVERSED); if (f) return f(cx, out, seq); }\n'))
     return e
 
 
-def patch(text, inplace=False, ordering=False, array_prelude=False):
+def patch(text, inplace=False, ordering=False, array_prelude=False, reversed_=False):
     """The generated C with the operator-method dispatch added to the general-path runtime."""
-    for old, new in _edits(inplace, ordering):
+    for old, new in _edits(inplace, ordering, reversed_):
         if old == new:
             continue
         count = text.count(old)
@@ -716,13 +731,16 @@ def patch(text, inplace=False, ordering=False, array_prelude=False):
     return text[:k] + text[k:].replace('ail_obj_truthy(', 'ail_truthy_u(')
 
 
-def install(cls_global, cls_methods, all_params_of, ordering=False):
+def install(cls_global, cls_methods, all_params_of, ordering=False, reversed_=False):
     """C statements for the program's setup code: the tables of one class."""
     lines = []
     table = dict(D2)
     if ordering:
         table.update(ORDER2)
-    for name, key in D1.items():
+    d1 = dict(D1)
+    if reversed_:
+        d1.update(D1_REVERSED)
+    for name, key in d1.items():
         info = cls_methods.get(name)
         if info and len(all_params_of(info)) == 1:
             lines.append('    ((ail_classobj *)%s.o)->d1[AIL_D1_%s] = %s;\n' % (cls_global, key, info['cname']))

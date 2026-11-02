@@ -547,6 +547,19 @@ class Calls:
         if mod == 'bisect' and fn in ('bisect_left', 'bisect_right', 'bisect'):
             args, ts, kws = self.args_ex(node)
             return self.done(node, args, kws, INT)        # an index
+        if mod == 'random' and fn == 'choice' and len(node.args) == 1 and not node.keywords:
+            # `dx, dy = random.choice(moves)` -- choice answers one element of the list, so its
+            # type is the list's element type.  Without this the unpack below could not see the
+            # tuple and left the whole statement for the later random lowering, which turns it
+            # into `moves[<index>]`; that subscript then reached the typed emitter as an opaque
+            # element instead of a row.  The call itself is left in place (stdlib3.py lowers the
+            # choice itself later); only its value's type is settled here.
+            args, ts, kws = self.args_ex(node)
+            st = deep(ts[0]) if ts else None
+            et = elem_of(st) if isinstance(st, tuple) and st[0] == 'list' else None
+            if is_tuple(deep(et)):
+                self.force()
+            return self.done(node, args, kws, et)
         if mod == 'math':
             args, ts, kws = self.args_ex(node)
             if fn in MATH_FLOAT:
