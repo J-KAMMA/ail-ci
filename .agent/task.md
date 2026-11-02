@@ -1,3 +1,62 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+**What the change does:** Only the CPython-hybrid safety analysis changes (`AIL_CURRENT/ail_cpython_hybrid.py`): it now accepts `abs` of provable float/int, `int(<int/bool>)`, `str(<number>)`, and int unary `-` only for int/bool-returning clones. Tests/docs were added; code generation is untouched.
+
+**Defect found (caused by this change)**
+
+Probe `/tmp/rprobes/rv21_abs_bool.py`:
+```python
+def f(x: bool) -> int:
+    return abs(x)
+
+def main() -> None:
+    print(f(True))
+    print(f(False))
+
+if __name__ == "__main__":
+    main()
+```
+- CPython: `1\n0\n`
+- HEAD hybrid (`build --cpython`): `True\nFalse\n` — `f` is reported accelerated.
+- Base hybrid: `f` is refused (`a call can raise or have side effects`) and output is correct.
+
+Same failure with `rv21_abs_bool_assign.py` (`y = abs(x); return y`). Cause: `_safe_call` accepts `abs` via `_provably_int(..., int_names, True)`, and `int_names` includes `bool` parameters (`ail_cpython_hybrid.py:296`); the accelerated clone returns the bool unchanged instead of `int`. The worker’s probes only call `abs` on an `int` parameter with a bool argument (`mag(True)`), which falls back at the wrapper, so the gap was missed.
+
+**Pre-existing (not caused by the change):** general/default builds stop loudly on `abs(INT64_MIN)` with `OverflowError: integer overflow in unary - or abs()`; identical on base (`rv21_abs_min.py`).
+
+**Claims checked**
+- `ba63377` exists; `str(-x)`/`int(-x)` on an int in a str-returning clone are refused again: verified (`rv21_strneg_strret.py`).
+- Float `str(-x)` remains accelerated and matches CPython: verified (`rv21_str_neg_float.py`).
+- `str(int/float/bool)`, `int(bool)`, `abs(int)` boundaries: verified except the bool-operand `abs` case above.
+- `g22_022.shift_and_add_multiply` accelerated; `t139.fmt` and `g21_038.encode_rounded_floats` not: verified.
+- All eight programs’ hybrid stdout/exit match CPython on the inputs I ran: verified (no-input runs; the added test covers more inputs).
+- `test_ail_prog21`, `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`: all pass (`-j 2`).
+- `update_manifest.py --check`: clean.
+- 10/10 `lab/compare` `program.c` byte-identical between HEAD and base via `--debug-dir`: verified.
+- Speed: not measured (unverified); the change only enables more hybrid acceleration.
+
+VERDICT: FIX
+1. `abs(<bool parameter>)` is accepted as an int/bool-result call but produces `True`/`False` instead of CPython’s `1`/`0` when returned as an int. Probe: `/tmp/rprobes/rv21_abs_bool.py` (above); expected `1\n0\n`, actual `True\nFalse\n`. Also `/tmp/rprobes/rv21_abs_bool_assign.py`. Exclude bool parameters from the `abs` int proof (or convert the result to int) and add a regression test.
+[cost $0.0282, opencode tokens {"total": 2234722, "input": 32714, "output": 9938, "reasoning": 17990, "cache.write": 0, "cache.read": 2174080}]
+    tool time: bash 13.1 min
+        239s bash   cd /home/runner/work/ail-ci/ail-ci && python3 tools/par_check.py -j 2 test_ail_files test_ail_corpus_findings3
+        181s bash   cd /home/runner/work/ail-ci/ail-ci && python3 tools/par_check.py -j 2 test_ail_prog21 test_ail_cpython_hybrid 
+         81s bash   find / -name 'pymix.py' 2>/dev/null | head; grep -n "sys.path" AIL_CURRENT/ail_chatgpt.py | head
+         80s bash   cd /tmp && rm -rf cmpcs; mkdir cmpcs; fail=0; for d in /home/runner/work/ail-ci/ail-ci/lab/compare/src/*/; do 
+         32s bash   cd /tmp/rprobes && python3 run_hy.py /home/runner/work/ail-ci/ail-ci /home/runner/work/ail-ci/ail-ci/lab/corpu
+         24s bash   cd /home/runner/work/ail-ci/ail-ci && ls lab/census/programs/gdev/g22_014.py lab/census/programs/gdev/g22_022.
+         22s bash   cat > /tmp/rprobes/run_hy.py <<'PY' import json, os, shutil, subprocess, sys, tempfile from pathlib import Pat
+         19s bash   cd /tmp/rprobes cat > rv21_abs_int_boolann.py <<'PY' def f(x: int) -> bool:     return abs(x)  def main() -> N
+
+
+--- ORIGINAL TASK ---
 **Typed reach: make the hot functions of these 8 real programs compile on the typed path.** With the CPython hybrid (docs/design/CPYTHON_HYBRID.md) only typed functions are accelerated; the rest runs in CPython. So what matters is that the functions where time is spent compile typed.
 
 Read `git log --oneline -40` first so you do not redo what another task just did.
