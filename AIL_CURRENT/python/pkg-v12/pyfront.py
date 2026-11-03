@@ -50,7 +50,7 @@ HELPERS = {
               '    int64_t r = a % b;\n'
               '    return (r != 0 && ((r < 0) != (b < 0))) ? r + b : r;\n}\n'),
     'pydiv': ('static int64_t pydiv(int64_t a, int64_t b) {\n'
-              '    if (b == 0) ail_die("integer division by zero");\n'
+              '    if (b == 0) ail_die("integer division or modulo by zero");\n'
               '    if (b == -1) { if (a == INT64_MIN) ail_die("OverflowError: integer overflow in // (ints are 64-bit; --exact-int gives exact ints)"); return -a; }\n'
               '    int64_t q = a / b, r = a % b;\n'
               '    return (r != 0 && ((r < 0) != (b < 0))) ? q - 1 : q;\n}\n'),

@@ -973,7 +973,7 @@ class Emitter(TextEmitter):
             if callee == 'ail_depth_enter':
                 self.parts.add('RECDEPTH')
                 return self.line(depth, 'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) '
-                                        'ail_die("recursion depth exceeded");')
+                                        'ail_die("maximum recursion depth exceeded");')
             if callee == 'ail_depth_leave':
                 return self.line(depth, 'ail_depth--;')
             return self.emit_rt(ins, depth, o)
