@@ -1,0 +1,102 @@
+test_ail_build_reports.py:27: brace compile-report fixture: --separate module split and source-line report
+test_ail_build_reports.py:58: brace compile-report fixture: --separate module split and source-line report
+test_ail_build_reports.py:61: brace compile-report fixture: --separate module split and source-line report
+test_ail_build_reports.py:66: brace compile-report fixture: --separate module split and source-line report
+test_ail_builtin_maps.py:136: brace source generated at run time; pyfunc.to_c pin
+test_ail_builtin_shadowing.py:67: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:174: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:207: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:208: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:209: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:210: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:211: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:212: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:213: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:214: refusal line numbers and messages keep brace spellings
+test_ail_builtin_shadowing.py:215: refusal line numbers and messages keep brace spellings
+test_ail_cargo.py:247: cargo fixture embeds a non-program brace fragment
+test_ail_csv_rewrite_stream.py:41: Python import cannot reach the brace language_examples module
+test_ail_csv_rewrite_stream.py:66: Python import cannot reach the brace language_examples module
+test_ail_csv_rewrite_stream.py:221: Python import cannot reach the brace language_examples module
+test_ail_field_store_cost.py:41: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
+test_ail_field_store_cost.py:176: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
+test_ail_field_store_cost.py:196: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
+test_ail_field_store_cost.py:235: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
+test_ail_frontend_speed.py:71: same source is both brace input and the translate() reference
+test_ail_frontend_speed.py:105: same source is both brace input and the translate() reference
+test_ail_ir_rulex.py:33: brace value-semantics IR subject
+test_ail_ir_rulex.py:48: brace value-semantics IR subject
+test_ail_ir_rulex.py:58: brace value-semantics IR subject
+test_ail_ir_rulex.py:69: brace value-semantics IR subject
+test_ail_ir_rulex.py:82: brace value-semantics IR subject
+test_ail_ir_rulex.py:96: brace value-semantics IR subject
+test_ail_ir_rulex.py:112: brace value-semantics IR subject
+test_ail_ir_rulex.py:124: brace value-semantics IR subject
+test_ail_ir_rulex.py:134: brace value-semantics IR subject
+test_ail_ir_rulex.py:161: brace value-semantics IR subject
+test_ail_ir_rulex.py:176: brace value-semantics IR subject
+test_ail_ir_rulex.py:186: brace value-semantics IR subject
+test_ail_ir_rulex.py:199: brace value-semantics IR subject
+test_ail_numeric_bindings.py:14: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:24: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:25: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:26: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:28: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:29: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:33: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:36: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:55: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:56: pin: C hash of the brace translation
+test_ail_numeric_bindings.py:86: pin: C hash of the brace translation
+test_ail_owned_type_details.py:45: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:47: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:57: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:59: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:62: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:67: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:70: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:73: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:79: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:82: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:85: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:87: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:101: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:102: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:108: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:110: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:114: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:115: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:116: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:117: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:123: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:128: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:131: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:137: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:142: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:143: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:144: diagnostics built from brace fragments; expectations quote brace text
+test_ail_owned_type_details.py:145: diagnostics built from brace fragments; expectations quote brace text
+test_ail_pool_iter_capture.py:16: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:38: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:48: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:60: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:64: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:76: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:82: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:89: dynamic brace fragments and --separate module split
+test_ail_pre171.py:161: brace vs Python build comparison subject
+test_ail_splitlines_utf8.py:20: invalid brace fragment (truncated unicode escape)
+test_ail_stdin_list_batch.py:262: refused brace fragments (list[list[bytes]], dict[bytes,int])
+test_ail_stdin_list_batch.py:293: refused brace fragments (list[list[bytes]], dict[bytes,int])
+test_ail_stdin_list_batch.py:295: refused brace fragments (list[list[bytes]], dict[bytes,int])
+test_ail_str_predicates.py:64: test appends generated brace fragments to the source
+test_ail_typed_locals.py:16: --separate module split with a brace module
+test_ail_typed_locals.py:156: --separate module split with a brace module
+test_ail_utf8_stream_fuzz.py:19: Python import cannot reach the brace utf8_stream module
+test_integer_row_stream.py:13: prefix `use` plus a brace language_examples module
+test_integer_row_stream.py:116: prefix `use` plus a brace language_examples module
+test_json_pointer_batch.py:18: Python import cannot reach the brace language_examples module
+test_ail_c_keyword_functions.py:30: dynamic brace keyword-name source built in the test
+test_ail_c_objects.py:333: source rewritten at run time from a brace example
+test_ail_filesystem_mutation.py:214: dynamic invalid-statement brace fragment
+test_ail_tcp_listener.py:321: dynamic invalid-statement brace fragment

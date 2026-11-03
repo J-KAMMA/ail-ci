@@ -129,27 +129,51 @@ int64_t n_add(int64_t x, int64_t y) { return x + y; }
             'state': signature('n_state', []),
             'add_c': signature('n_add', [['x', 'int'], ['y', 'int']])}
         obj = self.c_object(source, dict(version=1, functions=functions, libm=True))
-        helper = self.ail_build('wrapper', '''fn copied_int(x: int) -> int { return identity_i(x); }
-fn distance_from_origin(x: float, y: float) -> float { return distance(x, y); }
-fn equal_strings(a: str, b: str) -> int { return same_text(a, b); }
-''', obj, library=True)
+        helper = self.ail_build('wrapper', r"""def copied_int(x: int) -> int:
+    return identity_i(x)
+
+def distance_from_origin(x: float, y: float) -> float:
+    return distance(x, y)
+
+def equal_strings(a: str, b: str) -> int:
+    return same_text(a, b)
+""", obj, library=True)
         before = self.snapshot(obj, helper)
-        executable = self.ail_build('types', '''fn main() -> int {
-print(copied_int(-9223372036854775808)); print(identity_i(9223372036854775807));
-print(identity_f(-0.0)); print(distance_from_origin(3.0, 4.0));
-print(equal_strings("日本語\\x00😀", "日本語\\x00😀"));
-print(same_text("a\\x00b", "a\\x00c")); print(same_text("", ""));
-print(mixed(7, "😀", 0.5, "a\\x00"));
-print(add_c(step(1), step(2))); print(state());
-let i = 0; while i < 1000 {
-    if same_text("😀\\x00日本語", "😀\\x00日本語") != 1 { return 9; }
-    i += 1;
-}
-print("repeated"); return 0; }''', helper, obj)
+        executable = self.ail_build('types', r"""import sys
+
+def main() -> int:
+    print(copied_int(-9223372036854775808))
+    print(identity_i(9223372036854775807))
+    print(identity_f(-0.0))
+    print(distance_from_origin(3.0, 4.0))
+    print(equal_strings('日本語\x00😀', '日本語\x00😀'))
+    print(same_text('a\x00b', 'a\x00c'))
+    print(same_text('', ''))
+    print(mixed(7, '😀', 0.5, 'a\x00'))
+    print(add_c(step(1), step(2)))
+    print(state())
+    i = 0
+    while i < 1000:
+        if same_text('😀\x00日本語', '😀\x00日本語') != 1:
+            return 9
+        i += 1
+    print('repeated')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", helper, obj)
         self.check_run(executable, '-9223372036854775808\n9223372036854775807\n-0.0\n5.0\n'
                        + '1\n0\n1\n251.0\n3\n12\nrepeated\n')
         self.assertEqual(self.snapshot(obj, helper), before)
-        bad = self.write('wrong.ail', 'fn main() -> int { return identity_i("x"); }')
+        bad = self.write('wrong.ail', r"""import sys
+
+def main() -> int:
+    return identity_i('x')
+
+if __name__ == "__main__":
+    sys.exit(main())
+""")
         result = self.command('compile', bad, '--object', obj, '-o', self.root / 'wrong')
         self.assertNotEqual(result.returncode, 0)
 
@@ -213,7 +237,16 @@ print("repeated"); return 0; }''', helper, obj)
                                 dict(version=1, functions={name: signature('native', [['x', 'int']])}),
                                 name) for name, offset in (('native_native', 1), ('second', 2))]
         executable = self.ail_build('two_libraries',
-                                    'fn main() -> int { print(native_native(10)); print(second(10)); return 0; }',
+                                    r"""import sys
+
+def main() -> int:
+    print(native_native(10))
+    print(second(10))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
                                     *objects)
         self.check_run(executable, '11\n12\n')
 
@@ -236,18 +269,40 @@ print("repeated"); return 0; }''', helper, obj)
         example = ROOT / 'language_examples'
         obj = self.c_object((example / 'c_interop.c').read_text(),
                             json.loads((example / 'c_interop.json').read_text()))
-        executable = self.ail_build('surrogates', '''fn main() -> int {
-print(byte_count(jscharat("😀", 0))); print(weighted_checksum(jscharat("😀", 0)));
-print(byte_count(jscharat("😀", -1))); print(byte_count(jscharat("😀", 2)));
-print(byte_count(jscharat("😀", 9223372036854775807))); print(byte_count(jscharat("", 0)));
-try { print(byte_count(jscharat("😀", 1))); } except ValueError { print("ValueError"); }
-return 0; }''', obj)
+        executable = self.ail_build('surrogates', r"""from ail import jscharat
+import sys
+
+def main() -> int:
+    print(byte_count(jscharat('😀', 0)))
+    print(weighted_checksum(jscharat('😀', 0)))
+    print(byte_count(jscharat('😀', -1)))
+    print(byte_count(jscharat('😀', 2)))
+    print(byte_count(jscharat('😀', 9223372036854775807)))
+    print(byte_count(jscharat('', 0)))
+    try:
+        print(byte_count(jscharat('😀', 1)))
+    except ValueError:
+        print('ValueError')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", obj)
         encoded = '😀'.encode('utf8')
         checksum = sum((index + 1) * value for index, value in enumerate(encoded))
         self.check_run(executable, f'{len(encoded)}\n{checksum}\n' + '0\n0\n0\n0\nValueError\n')
-        slist = self.ail_build('with_string_list', '''fn main() -> int {
-let words = "a b".split(); print(len(words));
-print(byte_count(jscharat(words[0], 0))); return 0; }''', obj)
+        slist = self.ail_build('with_string_list', r"""from ail import jscharat
+import sys
+
+def main() -> int:
+    words = 'a b'.split()
+    print(len(words))
+    print(byte_count(jscharat(words[0], 0)))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", obj)
         self.check_run(slist, '2\n1\n')
 
     def test_ascii_copy_storage_and_pointer_boundaries(self):

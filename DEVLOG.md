@@ -39,6 +39,26 @@ same size, but the cold builds of `typed.py` are 5-19% slower than the base `mai
 | term_rank | 2.992 | 2.656 | 1.127 |
 | ticket_audit | 4.333 | 3.964 | 1.093 |
 | tree_fold | 4.897 | 4.406 | 1.111 |
+## 2026-11-03 -- onelang s7: embedded brace sources in test modules, batch 2
+
+Added `tools/ail2py_tests.py`, which finds complete brace literals in a test module, converts them
+with `tools/ail2py.convert`, rewrites `translate(...)` calls whose argument is already Python, and
+leaves partial or invalid fragments alone.  It converted 42 literals in 16 of the 33 batch modules:
+test_ail_ascii_char_compare, test_ail_c_keyword_functions, test_ail_c_objects, test_ail_chunk_loop_release,
+test_ail_ctime, test_ail_field_index_inplace, test_ail_filesystem_mutation, test_ail_float64_codec,
+test_ail_for_bytes_expr, test_ail_link_mode, test_ail_numeric_loops, test_ail_python_syntax,
+test_ail_str_cursor, test_ail_tcp_listener and the two `use`-free sources of the numeric loop group.
+The remaining 102 `fn main(` sources are listed in `AIL_CURRENT/onelang_brace_only.txt`; they are
+diagnostic/line-number fixtures, dynamic fragments, brace value-semantics subjects, codegen pins, or
+sources that import a brace language_examples module from Python.  `test_ail_field_store_cost` is a
+meaning difference: the converted buffer-swap program prints `1048 48 5` / `20 48` where the brace
+source prints `2000 1000 5` / `20 1000`, so its literals are reverted and listed.
+
+`tools/ail2py.convert` now omits `from ail import X` when the program itself defines `X` (a user
+function or class shadows the built-in), and `test_ail_map_fields.build` only runs `translate` when
+the text is brace syntax, so converted callers build as Python.  All 33 batch modules pass
+`tools/par_check.py -j 2`, and `test_ail_ail2py`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.
 
 ## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
 

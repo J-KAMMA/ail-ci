@@ -41,11 +41,25 @@ class CKeywordFunctionCodeTests(unittest.TestCase):
     def test_double_calls_callback_recursion_units_and_valid_collision(self):
         to_c,_,_=compiler()
         try:
-            source='''fn double(value:int)->int {if value<=0 {return 0;}return 2+double(value-1);}
-fn py_double(value:int)->int {return value+10;}
-fn main()->int {let cb:Callable[[int],int]=double;return cb(3)+py_double(1);}'''
+            source=r"""import sys
+
+def double(value: int) -> int:
+    if value <= 0:
+        return 0
+    return 2 + double(value - 1)
+
+def py_double(value: int) -> int:
+    return value + 10
+
+def main() -> int:
+    cb: Callable[[int], int] = double
+    return cb(3) + py_double(1)
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
             info={'_want_units':True}
-            generated=to_c(translate(source),name='run',strict=True,info=info)
+            generated=to_c(source,name='run',strict=True,info=info)
             self.assertRegex(generated,r'int64_t\s+py_py_double\s*\(')
             self.assertRegex(generated,r'int64_t\s+py_double\s*\(')
             self.assertNotRegex(generated,r'int64_t\s+double\s*\(')
@@ -60,14 +74,66 @@ fn main()->int {let cb:Callable[[int],int]=double;return cb(3)+py_double(1);}'''
         to_c,_,_=compiler()
         try:
             sources=[
-                'fn double(value:int)->int {return value*2;} fn main()->int {return double(3);}',
-                'fn scaled(value:int)->int {return value*3+1;} fn main()->int {return scaled(7);}',
-                'struct Box {values:list[str];} fn main()->int {let box=Box(["日本😀"]);box.values.append("tail");let old=box.values;box.values.clear();for text in old {print(text);}return 0;}',
-                'fn fail()->exception {return ValueError("owned");} fn main()->int {try {raise fail();} except ValueError as error {print(error.message);} return 0;}',
+                r"""import sys
+
+def double(value: int) -> int:
+    return value * 2
+
+def main() -> int:
+    return double(3)
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+                r"""import sys
+
+def scaled(value: int) -> int:
+    return value * 3 + 1
+
+def main() -> int:
+    return scaled(7)
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+                r"""import sys
+
+class Box:
+
+    def __init__(self, values: list[str]):
+        self.values = values
+
+def main() -> int:
+    box = Box(['日本😀'])
+    box.values.append('tail')
+    old = box.values
+    box.values.clear()
+    for text in old:
+        print(text)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+                r"""import sys
+
+def fail() -> exception:
+    return ValueError('owned')
+
+def main() -> int:
+    try:
+        raise fail()
+    except ValueError as error:
+        print(error.message)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
             ]
             for source in sources:
                 with self.subTest(source=source):
-                    text=translate(source)
+                    text=source
                     plain=to_c(text,name='run',strict=True)
                     info={'_want_source_regions':True}
                     reported=to_c(text,name='run',strict=True,info=info)
@@ -82,13 +148,25 @@ fn main()->int {let cb:Callable[[int],int]=double;return cb(3)+py_double(1);}'''
     def test_keyword_library_and_unrenamed_entry_are_safe(self):
         to_c,_,_=compiler()
         try:
-            source=translate('fn double(value:int)->int {return value*2;}',module=True)
+            source=r"""def double(value: int) -> int:
+    return value * 2
+"""
             for options in ({'library':True},{'entry':'double'},{'name':'double'}):
                 with self.subTest(options=options):
                     generated=to_c(source,strict=True,**options)
                     self.assertRegex(generated,r'int64_t\s+py_double\s*\(')
                     self.assertNotRegex(generated,r'int64_t\s+double\s*\(')
-            renamed=translate('fn py_double(value:int)->int {return value+1;} fn main()->int {return py_double(1);}')
+            renamed=r"""import sys
+
+def py_double(value: int) -> int:
+    return value + 1
+
+def main() -> int:
+    return py_double(1)
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
             generated=to_c(renamed,name='double',strict=True)
             self.assertRegex(generated,r'int64_t\s+py_py_double\s*\(')
             self.assertRegex(generated,r'int64_t\s+py_double\s*\(')
@@ -104,11 +182,37 @@ class CKeywordFunctionNativeTests(unittest.TestCase):
     check_run=support.CObjectTests.check_run
 
     def test_original_keyword_function_name_in_native_and_source_free_callback(self):
-        provider=self.ail_build('provider','''fn double(value:int)->int {if value<=0 {return 0;}return 2+double(value-1);}
-fn choose()->Callable[[int],int] {return double;}''',library=True)
-        consumer='''fn main()->int {let cb=choose();print(double(3),cb(4));return 0;}'''
+        provider=self.ail_build('provider',r"""def double(value: int) -> int:
+    if value <= 0:
+        return 0
+    return 2 + double(value - 1)
+
+def choose() -> Callable[[int], int]:
+    return double
+""",library=True)
+        consumer=r"""import sys
+
+def main() -> int:
+    cb = choose()
+    print(double(3), cb(4))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         self.check_run(self.ail_build('consumer',consumer,provider),'6 8\n')
-        whole='''fn double(value:int)->int {return value*2;} fn main()->int {print(double(3));return 0;}'''
+        whole=r"""import sys
+
+def double(value: int) -> int:
+    return value * 2
+
+def main() -> int:
+    print(double(3))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         self.check_run(self.ail_build('whole',whole),'6\n')
 
 

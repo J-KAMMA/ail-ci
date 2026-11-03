@@ -12,41 +12,59 @@ import test_ail_c_objects as support
 from test_ail_map_fields import build
 
 
-SOURCE = r'''fn walk(text: str, seed: int) -> str {
-    let out: list[str] = [];
-    let n: int = len(text);
-    let x: int = seed;
-    for k in range(3 * n + 3) {
-        x = (x * 1103515245 + 12345) % 2147483648;
-        let i: int = x % (2 * n + 3) - n - 1;
-        if i >= -n and i < n { out.append(text[i]); } else { out.append("|"); }
-        let a: int = (x // 7) % (2 * n + 5) - n - 2;
-        let b: int = (x // 11) % (2 * n + 5) - n - 2;
-        out.append("[" + text[a:b] + "]");
-    }
-    for i in range(n) { out.append(text[n - 1 - i]); }
-    for i in range(n) { out.append(text[i]); }
-    return "".join(out);
-}
-fn main() -> int {
-    let text: str = read_bytes(sys.argv[1]).decode("utf-8");
-    print(walk(text, int(sys.argv[2])));
-    print(len(text), text[0:0], text[2:], text[:-3]);
-    return 0;
-}'''
+SOURCE = r"""from ail import read_bytes
+import sys
 
-BIG = r'''fn count(text: str) -> int {
-    let n: int = 0;
-    for i in range(len(text)) { if text[i] == "a" { n += 1; } }
-    return n;
-}
-fn main() -> int {
-    let parts: list[str] = [];
-    for i in range(int(sys.argv[1])) { parts.append("aé"); }
-    let text: str = "".join(parts);
-    print(count(text));
-    return 0;
-}'''
+def walk(text: str, seed: int) -> str:
+    out: list[str] = []
+    n: int = len(text)
+    x: int = seed
+    for k in range(3 * n + 3):
+        x = (x * 1103515245 + 12345) % 2147483648
+        i: int = x % (2 * n + 3) - n - 1
+        if i >= -n and i < n:
+            out.append(text[i])
+        else:
+            out.append('|')
+        a: int = x // 7 % (2 * n + 5) - n - 2
+        b: int = x // 11 % (2 * n + 5) - n - 2
+        out.append('[' + text[a:b] + ']')
+    for i in range(n):
+        out.append(text[n - 1 - i])
+    for i in range(n):
+        out.append(text[i])
+    return ''.join(out)
+
+def main() -> int:
+    text: str = read_bytes(sys.argv[1]).decode('utf-8')
+    print(walk(text, int(sys.argv[2])))
+    print(len(text), text[0:0], text[2:], text[:-3])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+BIG = r"""import sys
+
+def count(text: str) -> int:
+    n: int = 0
+    for i in range(len(text)):
+        if text[i] == 'a':
+            n += 1
+    return n
+
+def main() -> int:
+    parts: list[str] = []
+    for i in range(int(sys.argv[1])):
+        parts.append('aé')
+    text: str = ''.join(parts)
+    print(count(text))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 ALPHABET = ['a', 'b', 'é', '日', '😀', '́', ',', '\n']
 

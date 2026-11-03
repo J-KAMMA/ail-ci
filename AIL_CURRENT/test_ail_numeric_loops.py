@@ -17,93 +17,103 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-NUMERIC = """
-struct Body { x: float; v: float; }
+NUMERIC = r"""import sys
 
-fn weight(i: int, j: int) -> float {
-    let s = i + j;
-    return 1.0 / float(s * (s + 1) // 2 + i + 1);
-}
+class Body:
 
-fn mat(v: list[float], n: int) -> list[float] {
-    let r: list[float] = [];
-    for i in range(0, n) {
-        let s = 0.0;
-        for j in range(0, n) { s = s + weight(i, j) * v[j]; }
-        r.append(s);
-    }
-    return r;
-}
+    def __init__(self, x: float, v: float):
+        self.x = x
+        self.v = v
 
-fn flips(n: int) -> int {
-    let p = [0] * 8;
-    let q = [0] * 8;
-    for i in range(0, 8) { p[i] = (i * 5 + n) % 8; }
-    let total = 0;
-    let rounds = 0;
-    while rounds < n {
-        for i in range(0, 8) { q[i] = p[i]; }
-        let lo = 0;
-        let hi = 7;
-        while lo < hi {
-            let t = q[lo];
-            q[lo] = q[hi];
-            q[hi] = t;
-            lo += 1;
-            hi -= 1;
-        }
-        total += q[0] * 3 + q[7];
-        p[rounds % 8] = (p[rounds % 8] + 1) % 8;
-        rounds += 1;
-    }
-    return total;
-}
+def weight(i: int, j: int) -> float:
+    s = i + j
+    return 1.0 / float(s * (s + 1) // 2 + i + 1)
 
-fn escape(cr: float, ci: float) -> int {
-    let zr = 0.0; let zi = 0.0; let tr = 0.0; let ti = 0.0;
-    let i = 0;
-    while i < 50 and tr + ti <= 4.0 {
-        zi = 2.0 * zr * zi + ci;
-        zr = tr - ti + cr;
-        tr = zr * zr;
-        ti = zi * zi;
-        i += 1;
-    }
-    return i;
-}
+def mat(v: list[float], n: int) -> list[float]:
+    r: list[float] = []
+    for i in range(0, n):
+        s = 0.0
+        for j in range(0, n):
+            s = s + weight(i, j) * v[j]
+        r.append(s)
+    return r
 
-fn step(b: list[Body], dt: float) -> void {
-    for i in range(0, 3) {
-        let bi = b[i];
-        for j in range(i + 1, 3) {
-            let bj = b[j];
-            let d = bj.x - bi.x;
-            bi.v = bi.v + d * dt;
-            bj.v = bj.v - d * dt;
-        }
-    }
-    for i in range(0, 3) { let p = b[i]; p.x = p.x + p.v * dt; }
-}
+def flips(n: int) -> int:
+    p = [0] * 8
+    q = [0] * 8
+    for i in range(0, 8):
+        p[i] = (i * 5 + n) % 8
+    total = 0
+    rounds = 0
+    while rounds < n:
+        for i in range(0, 8):
+            q[i] = p[i]
+        lo = 0
+        hi = 7
+        while lo < hi:
+            t = q[lo]
+            q[lo] = q[hi]
+            q[hi] = t
+            lo += 1
+            hi -= 1
+        total += q[0] * 3 + q[7]
+        p[rounds % 8] = (p[rounds % 8] + 1) % 8
+        rounds += 1
+    return total
 
-fn main() {
-    let n = 12;
-    let u: list[float] = [];
-    for i in range(0, n) { u.append(1.0 + i * 0.25); }
-    let w = mat(mat(u, n), n);
-    let s = 0.0;
-    for i in range(0, n) { s = s + w[i]; }
-    print("%.9f" % (s,));
-    print(flips(37));
-    let c = 0;
-    for y in range(0, 20) {
-        for x in range(0, 20) { c += escape(x * 0.1 - 1.5, y * 0.1 - 1.0); }
-    }
-    print(c);
-    let b: list[Body] = [];
-    b.append(Body(0.0, 0.5)); b.append(Body(1.0, -0.25)); b.append(Body(3.0, 0.0));
-    for k in range(0, 50) { step(b, 0.01); }
-    print("%.9f %.9f %.9f" % (b[0].x, b[1].x, b[2].x));
-}
+def escape(cr: float, ci: float) -> int:
+    zr = 0.0
+    zi = 0.0
+    tr = 0.0
+    ti = 0.0
+    i = 0
+    while i < 50 and tr + ti <= 4.0:
+        zi = 2.0 * zr * zi + ci
+        zr = tr - ti + cr
+        tr = zr * zr
+        ti = zi * zi
+        i += 1
+    return i
+
+def step(b: list[Body], dt: float) -> None:
+    for i in range(0, 3):
+        bi = b[i]
+        for j in range(i + 1, 3):
+            bj = b[j]
+            d = bj.x - bi.x
+            bi.v = bi.v + d * dt
+            bj.v = bj.v - d * dt
+    for i in range(0, 3):
+        p = b[i]
+        p.x = p.x + p.v * dt
+
+def main() -> int:
+    n = 12
+    u: list[float] = []
+    for i in range(0, n):
+        u.append(1.0 + i * 0.25)
+    w = mat(mat(u, n), n)
+    s = 0.0
+    for i in range(0, n):
+        s = s + w[i]
+    print('%.9f' % (s,))
+    print(flips(37))
+    c = 0
+    for y in range(0, 20):
+        for x in range(0, 20):
+            c += escape(x * 0.1 - 1.5, y * 0.1 - 1.0)
+    print(c)
+    b: list[Body] = []
+    b.append(Body(0.0, 0.5))
+    b.append(Body(1.0, -0.25))
+    b.append(Body(3.0, 0.0))
+    for k in range(0, 50):
+        step(b, 0.01)
+    print('%.9f %.9f %.9f' % (b[0].x, b[1].x, b[2].x))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 NUMERIC_PY = """
@@ -175,24 +185,32 @@ for k in range(50): step(b, 0.01)
 print("%.9f %.9f %.9f" % (b[0].x, b[1].x, b[2].x))
 """
 
-FIELD = """
-struct Big { d: list[int]; }
+FIELD = r"""import sys
 
-fn scale(a: Big, m: int) -> void {
-    let carry = 0;
-    for i in range(0, len(a.d)) {
-        let v = a.d[i] * m + carry;
-        carry = v // 1000;
-        a.d[i] = v - carry * 1000;
-    }
-    while carry > 0 { a.d.append(carry % 1000); carry = carry // 1000; }
-}
+class Big:
 
-fn main() {
-    let a = Big([1, 999, 500]);
-    for k in range(2, 9) { scale(a, k * 37); }
-    print(a.d[0], a.d[1], a.d[2], len(a.d));
-}
+    def __init__(self, d: list[int]):
+        self.d = d
+
+def scale(a: Big, m: int) -> None:
+    carry = 0
+    for i in range(0, len(a.d)):
+        v = a.d[i] * m + carry
+        carry = v // 1000
+        a.d[i] = v - carry * 1000
+    while carry > 0:
+        a.d.append(carry % 1000)
+        carry = carry // 1000
+
+def main() -> int:
+    a = Big([1, 999, 500])
+    for k in range(2, 9):
+        scale(a, k * 37)
+    print(a.d[0], a.d[1], a.d[2], len(a.d))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 FIELD_PY = """
@@ -209,18 +227,22 @@ for k in range(2, 9): scale(d, k * 37)
 print(d[0], d[1], d[2], len(d))
 """
 
-STRINGY = """
-fn main() {
-    let out = "";
-    let k = 0;
-    while k < 6 {
-        let line = "";
-        for j in range(0, k) { line = line + str(j); }
-        out = out + line + ";";
-        k += 1;
-    }
-    print(out);
-}
+STRINGY = r"""import sys
+
+def main() -> int:
+    out = ''
+    k = 0
+    while k < 6:
+        line = ''
+        for j in range(0, k):
+            line = line + str(j)
+        out = out + line + ';'
+        k += 1
+    print(out)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 STRINGY_PY = """

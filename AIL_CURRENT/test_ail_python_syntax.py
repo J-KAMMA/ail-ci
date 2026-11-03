@@ -294,14 +294,19 @@ def main() -> int:
 sys.exit(main())
 '''
 
-BRACE_CONSTANTS = '''const M = (1 << 40) - 1;
-const K = M * 2 + 1;
-fn main() {
-    let xs = [5, 1, 3, 1];
-    let o = sorted(range(4), key=lambda i: xs[i]);
-    print(M, K, o[0], o[3]);
-}
-'''
+BRACE_CONSTANTS = r"""import sys
+M = (1 << 40) - 1
+K = M * 2 + 1
+
+def main() -> int:
+    xs = [5, 1, 3, 1]
+    o = sorted(range(4), key=lambda i: xs[i])
+    print(M, K, o[0], o[3])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 # (source, text the refusal must contain, text it must not contain)
 REFUSED = [
@@ -395,7 +400,15 @@ class PythonSyntaxTests(unittest.TestCase):
     def test_block_syntax_main_is_still_called_for_you(self):
         with tempfile.TemporaryDirectory() as directory:
             source, exe = Path(directory, "auto.ail"), Path(directory, "auto")
-            source.write_text("fn main() -> int { print(7); return 0; }\n", encoding="utf-8")
+            source.write_text(r"""import sys
+
+def main() -> int:
+    print(7)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", encoding="utf-8")
             built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", str(source),
                                     "-o", str(exe)], capture_output=True, text=True, timeout=600)
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)

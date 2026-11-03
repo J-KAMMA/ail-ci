@@ -21,7 +21,18 @@ sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
 import ail_chatgpt  # noqa: E402
 import unprintable_data  # noqa: E402
 
-SOURCE = 'fn main() -> int {\n    let t: int = 0;\n    for i in range(0, 10) { t = t + i; }\n    print(t);\n    return 0;\n}\n'
+SOURCE = r"""import sys
+
+def main() -> int:
+    t: int = 0
+    for i in range(0, 10):
+        t = t + i
+    print(t)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 
 def scan_rows():

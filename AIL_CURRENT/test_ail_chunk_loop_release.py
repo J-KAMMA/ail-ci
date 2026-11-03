@@ -9,30 +9,39 @@ import test_ail_c_objects as support
 from test_ail_map_fields import build
 
 
-SOURCE = r'''fn doubled(b: bytes) -> bytes { return b + b; }
-fn weights(b: bytes) -> list[float] {
-    let out: list[float] = [];
-    for x in b { out.append(1.0 * x); }
-    return out;
-}
-fn total(xs: list[float]) -> float {
-    let s: float = 0.0;
-    for x in xs { s += x; }
-    return s;
-}
-fn main() -> int {
-    let kept: bytes = b"";
-    let sum: float = 0.0;
-    let chunks: int = 0;
-    for chunk in file_chunks(sys.argv[1], 7) {
-        let twice: bytes = doubled(chunk);
-        sum += total(weights(twice));
-        kept = twice;
-        chunks += 1;
-    }
-    print(chunks, sum, kept.decode());
-    return 0;
-}'''
+SOURCE = r"""from ail import file_chunks
+import sys
+
+def doubled(b: bytes) -> bytes:
+    return b + b
+
+def weights(b: bytes) -> list[float]:
+    out: list[float] = []
+    for x in b:
+        out.append(1.0 * x)
+    return out
+
+def total(xs: list[float]) -> float:
+    s: float = 0.0
+    for x in xs:
+        s += x
+    return s
+
+def main() -> int:
+    kept: bytes = b''
+    sum: float = 0.0
+    chunks: int = 0
+    for chunk in file_chunks(sys.argv[1], 7):
+        twice: bytes = doubled(chunk)
+        sum += total(weights(twice))
+        kept = twice
+        chunks += 1
+    print(chunks, sum, kept.decode())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 
 class ChunkLoopReleaseTests(unittest.TestCase):
@@ -50,25 +59,42 @@ class ChunkLoopReleaseTests(unittest.TestCase):
                          result.stderr.decode(errors='replace'))
 
     def test_value_struct_built_and_read_in_the_loop(self):
-        source = r'''struct Reader { data: bytes; position: int; }
-impl Reader {
-    fn remaining(self) -> int { return len(self.data) - self.position; }
-    fn next(self) -> int { let v = self.data[self.position]; self.position = self.position + 1; return v; }
-    fn rest(self) -> bytes { return self.data[self.position:]; }
-}
-fn main() -> int {
-    let total: int = 0;
-    let last = Reader(b"", 0);
-    let tail: bytes = b"";
-    for chunk in file_chunks(sys.argv[1], 5) {
-        let reader = Reader(chunk, 0);
-        while reader.remaining() > 2 { total += reader.next(); }
-        tail = reader.rest();
-        last = reader;
-    }
-    print(total, tail.decode(), last.remaining());
-    return 0;
-}'''
+        source = r"""from ail import file_chunks
+import sys
+
+class Reader:
+
+    def __init__(self, data: bytes, position: int):
+        self.data = data
+        self.position = position
+
+    def remaining(self) -> int:
+        return len(self.data) - self.position
+
+    def next(self) -> int:
+        v = self.data[self.position]
+        self.position = self.position + 1
+        return v
+
+    def rest(self) -> bytes:
+        return self.data[self.position:]
+
+def main() -> int:
+    total: int = 0
+    last = Reader(b'', 0)
+    tail: bytes = b''
+    for chunk in file_chunks(sys.argv[1], 5):
+        reader = Reader(chunk, 0)
+        while reader.remaining() > 2:
+            total += reader.next()
+        tail = reader.rest()
+        last = reader
+    print(total, tail.decode(), last.remaining())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         program = build(self, 'chunk_loop_struct', source)
         text = 'abcdefghijklmnopqrstuvwxyz'
         data = self.write('letters.txt', text)
