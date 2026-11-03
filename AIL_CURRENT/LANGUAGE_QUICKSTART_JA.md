@@ -137,6 +137,7 @@ if __name__ == "__main__":
 `exception`型のローカル・関数引数・戻り値は値を所有し、別コンパイルしたモジュール間でも渡せます。
 
 ```python
+# exit: 2
 import sys
 
 def fail(message: str) -> int:
@@ -156,7 +157,7 @@ if __name__ == "__main__":
 ```
 
 kind/messageは変更できないstrです。messageを取り出したstrは元の例外を解放しても使えます。
-`raise e;`は値を再送出し、`raise;`は現在処理している例外を呼出先からも再送出します。
+`raise e`は値を再送出し、`raise`は現在処理している例外を呼出先からも再送出します。
 handlerの束縛名はそのhandler内だけで使い、既存の変数名は上書きしません。
 UnicodeDecodeErrorはValueErrorとしても捕捉されるため、種類別の処理は具体的な種類を先に置きます。
 未捕捉の例外は、空messageなら旧来の種類名、非空なら`Kind: message`をstderrに出して終了1です。
@@ -176,9 +177,9 @@ Callable[[exception],exception]とCallable[[list[exception]],list[exception]]で
 
 ## 契約: requires と ensures（2026-10-11）
 
-関数本文の先頭に、入口の条件`requires 条件;`と出口の条件`ensures 条件;`を書けます。
-`requires`は呼び出し時に、`ensures`はすべての`return`の直前（戻り値なしの関数は本文の末尾でも）に検査します。
-`ensures`の中の`result`は戻り値です。同名のローカル変数があっても、契約の中では戻り値を指します。
+関数本文の先頭に、入口の条件を`assert 条件, 'requires failed in 関数名: 条件'`で、出口の条件を戻り値`_ail_result`への`assert`で書けます。
+入口の`assert`は呼び出し時に、出口の`assert`はすべての`return`の直前（戻り値なしの関数は本文の末尾でも）に検査します。
+`_ail_result`は戻り値です。同名のローカル変数があっても、契約の中では戻り値を指します。
 
 ```python
 def isqrt(n: int) -> int:
@@ -287,9 +288,24 @@ list[int] と list[float] の負の添字・範囲検査を保持しています
 ### TCPサーバーを作る（R601）
 
 ```python
-from tcp_echo_server import *
+# run: no
 from ail import flush_stdout, tcp_listen
 import sys
+
+def tcp_echo_connection(connection: tcpsocket, chunk_size: int) -> int:
+    if chunk_size <= 0 or chunk_size > 2147483647:
+        raise ValueError
+    buffer = bytearray(chunk_size)
+    total: int = 0
+    while True:
+        count = connection.recv_into(buffer)
+        if count != 0:
+            connection.send(buffer[:count])
+        if count == 0:
+            break
+        total += count
+    connection.shutdown_write()
+    return total
 
 def main() -> int:
     listener = tcp_listen('127.0.0.1', 0, 16)
@@ -329,6 +345,7 @@ tcp_echo_server 127.0.0.1 0 2 8192
 ### TCPでバイナリを送受信する（R600）
 
 ```python
+# run: no
 from ail import tcp_connect, write_stdout_bytes
 import sys
 
@@ -372,9 +389,22 @@ tcp_file_exchange 127.0.0.1 9000 input.bin output.bin 8192
 ### 環境変数と作業ディレクトリを使う（R599）
 
 ```python
-from environment_config import *
+# run: no
 from ail import current_dir, get_env
 import sys
+
+def env_int(name: str, default: int) -> int:
+    return int(get_env(name, str(default)))
+
+def env_bool(name: str, default: int) -> int:
+    if default != 0 and default != 1:
+        raise ValueError
+    value = get_env(name, str(default)).strip().lower()
+    if value == '1' or value == 'true':
+        return 1
+    if value == '0' or value == 'false':
+        return 0
+    raise ValueError
 
 def main() -> int:
     print(get_env('AIL_CONFIG_LABEL', 'default'))
@@ -405,8 +435,152 @@ environment_config
 ### UTF-8テキストを分割して読む（R598）
 
 ```python
-from utf8_reader import *
+# run: no
+from ail import open_binary
 import sys
+
+class Utf8Decoder:
+
+    def __init__(self, pending: bytes, closed: int):
+        self.pending = pending
+        self.closed = closed
+
+class Utf8Reader:
+
+    def __init__(self, file: binaryfile, decoder: Utf8Decoder, chunk_size: int, finished: int):
+        self.file = file
+        self.decoder = decoder
+        self.chunk_size = chunk_size
+        self.finished = finished
+
+def _utf8_complete_length(data: bytes) -> int:
+    position: int = 0
+    while position < len(data):
+        lead: int = data[position]
+        if lead <= 127:
+            position += 1
+        else:
+            width: int = 0
+            if lead >= 194 and lead <= 223:
+                width = 2
+            elif lead >= 224 and lead <= 239:
+                width = 3
+            elif lead >= 240 and lead <= 244:
+                width = 4
+            else:
+                raise ValueError
+            remaining: int = len(data) - position
+            checked: int = width
+            if remaining < checked:
+                checked = remaining
+            for i in range(1, checked):
+                byte: int = data[position + i]
+                if byte < 128 or byte > 191:
+                    raise ValueError
+                if i == 1:
+                    if lead == 224 and byte < 160 or (lead == 237 and byte > 159) or (lead == 240 and byte < 144) or (lead == 244 and byte > 143):
+                        raise ValueError
+            if remaining < width:
+                return position
+            position += width
+    return position
+
+def _utf8_tail_complete(data: bytes) -> int:
+    n: int = len(data)
+    if n == 0:
+        return 0
+    last: int = data[n - 1]
+    if last < 128:
+        return n
+    if last >= 192:
+        return -1
+    i: int = n - 1
+    while i > 0 and i > n - 4:
+        previous: int = data[i - 1]
+        if previous < 128 or previous > 191:
+            break
+        i -= 1
+    lead_index: int = i - 1
+    if lead_index < 0:
+        return -1
+    lead: int = data[lead_index]
+    width: int = 0
+    if lead >= 194 and lead <= 223:
+        width = 2
+    elif lead >= 224 and lead <= 239:
+        width = 3
+    elif lead >= 240 and lead <= 244:
+        width = 4
+    else:
+        return -1
+    if n - lead_index == width:
+        return n
+    return -1
+
+def _utf8_decoder_check(decoder: Utf8Decoder) -> None:
+    if decoder.closed != 0:
+        raise ValueError
+    pending: bytes = decoder.pending
+    if len(pending) > 3 or _utf8_complete_length(pending) != 0:
+        raise ValueError
+
+def utf8_decoder_new() -> Utf8Decoder:
+    return Utf8Decoder(b'', 0)
+
+def utf8_decode_feed(decoder: Utf8Decoder, data: bytes) -> str:
+    _utf8_decoder_check(decoder)
+    combined: bytes = decoder.pending + data
+    complete: int = _utf8_tail_complete(combined)
+    if complete < 0:
+        complete = _utf8_complete_length(combined)
+    text: str = combined[:complete].decode('utf-8')
+    pending: bytes = combined[complete:]
+    decoder.pending = pending
+    return text
+
+def utf8_decode_finish(decoder: Utf8Decoder) -> str:
+    _utf8_decoder_check(decoder)
+    if decoder.pending != b'':
+        raise ValueError
+    decoder.pending = b''
+    decoder.closed = 1
+    return ''
+
+def utf8_reader_from_file(file: binaryfile, chunk_size: int) -> Utf8Reader:
+    if chunk_size <= 0:
+        raise ValueError
+    if file.closed:
+        raise ValueError
+    return Utf8Reader(file, utf8_decoder_new(), chunk_size, 0)
+
+def utf8_reader_open(path: str, chunk_size: int) -> Utf8Reader:
+    if chunk_size <= 0:
+        raise ValueError
+    return utf8_reader_from_file(open_binary(path, 'r'), chunk_size)
+
+def utf8_reader_next(reader: Utf8Reader) -> str:
+    file: binaryfile = reader.file
+    if file.closed:
+        raise ValueError
+    if reader.finished:
+        return ''
+    chunk_size: int = reader.chunk_size
+    if chunk_size <= 0:
+        raise ValueError
+    while True:
+        raw: bytes = file.read(chunk_size)
+        if len(raw) == 0:
+            final: str = utf8_decode_finish(reader.decoder)
+            reader.finished = 1
+            return final
+        text: str = utf8_decode_feed(reader.decoder, raw)
+        if text != '':
+            return text
+    raise RuntimeError
+
+def utf8_reader_close(reader: Utf8Reader) -> None:
+    reader.file.close()
+    reader.finished = 1
 
 def main() -> int:
     reader = utf8_reader_open('input.txt', 8192)
@@ -671,7 +845,7 @@ def checked(value: str) -> int:
     return 0
 ```
 
-`raise;` は、現在処理中の例外を同じ種類で再送します。呼び出したhelper・callback・別objectでも使えます。
+`raise` は、現在処理中の例外を同じ種類で再送します。呼び出したhelper・callback・別objectでも使えます。
 処理中の例外がなければRuntimeErrorです。内側で別の例外を処理しても、終了後は外側の例外に戻ります。
 伝播中のfinallyは保留された例外を扱い、通常のfinallyは外側の現在の例外を引き継ぎます。
 例外のメッセージ・traceback・`raise ... from ...`・独自例外クラスは未対応です。
@@ -687,8 +861,26 @@ reraise_example
 ### 利用者定義型を共通の処理へ渡す（R587）
 
 ```python
-from record_queries import *
 import sys
+
+class QueryRecord:
+
+    def __init__(self, key: str, value: int):
+        self.key = key
+        self.value = value
+
+def query_select(rows: list[QueryRecord], predicate: Callable[[QueryRecord], int]) -> list[QueryRecord]:
+    selected: list[QueryRecord] = []
+    for row in rows:
+        if predicate(row):
+            selected.append(row)
+    return selected
+
+def query_total(rows: list[QueryRecord], measure: Callable[[QueryRecord], int]) -> int:
+    total: int = 0
+    for row in rows:
+        total += measure(row)
+    return total
 
 def positive(row: QueryRecord) -> int:
     return row.value > 0
@@ -939,9 +1131,16 @@ LFで連結します。元の文字列がLFで終わる場合だけ末尾LFを�
 不正modeはファイル操作前に拒否。終了コードは成功0、引数2、I/O3、UTF-8/変換エラー4です。
 
 ```python
-from callback_text_pipeline import *
+# run: no
 from ail import read_bytes, write_bytes
 import sys
+
+def rewrite_lines(text: str, operation: Callable[[str], str]) -> str:
+    lines: list[str] = [operation(line) for line in text.splitlines()]
+    result = '\n'.join(lines)
+    if text.endswith('\n'):
+        result = result + '\n'
+    return result
 
 def decorate(line: str) -> str:
     return '[' + line + ']'
@@ -1028,7 +1227,7 @@ R580では `read_bytes(...).decode()` や所有bytesを返す直接の関数呼�
 独立した文字列へdecodeした直後に一時bytesを解放します。不正UTF-8の例外でも解放します。
 名前で保持したbytes、literal、sliceなどの寿命は変えません。
 
-R569では `try { ... } finally { ... }` が使えます。正常終了、名前付き例外、
+R569では `try: ... finally: ...` が使えます。正常終了、名前付き例外、
 `return`・`break`・`continue` で抜ける場合に実行します。`except`・`else` とも組み合わせられます。
 戻り値はfinallyより先に一度評価し、文字列・bytes・整数/小数リストはその内容を保存します。
 finallyからのreturn・例外・break・continueは保留中の終了を上書きします。
@@ -1041,7 +1240,7 @@ R568では `range(start, stop, step)` の正負の動的stepを扱えます。
 3引数版の要素数はint64上限までで、それを超える範囲は反復前に停止します。
 
 R567では小数の内包表記・絞り込み・返却が使えます。たとえば
-`return [value * factor for value in values];` は `list[float]` を返します。
+`return [value * factor for value in values]` は `list[float]` を返します。
 小数列の走査では値を整数に切り捨てません。整数との混在・入れ子は拒否します。
 
 R566では整数リストの内包表記を代入する際の全件再コピーを除去しました。
@@ -1054,9 +1253,14 @@ R564では整数データの一括変換を追加しました。`from binary_int
 不正な幅・順序・範囲・端数長は `ValueError`。結果は独立した保存領域を持ちます。
 
 ```python
-from binary_integers import *
-from ail import write_stdout_bytes
+from ail import integer_decode, integer_encode, write_stdout_bytes
 import sys
+
+def unpack_integers(data: bytes, width: int, order: int) -> list[int]:
+    return integer_decode(data, width, order)
+
+def pack_integers(values: list[int], width: int, order: int) -> bytes:
+    return integer_encode(values, width, order)
 
 def main() -> int:
     values = [0, 1, 4294967295]
@@ -1100,9 +1304,13 @@ SDKは独立したスナップショットです。開発・更新の正本は�
 標準部品のソースをコピーせず、任意のプロジェクトの `.ail` から `from ... import *` できます。
 
 ```python
-from binary_numbers import *
 from ail import write_stdout_bytes
 import sys
+
+def pack_u16_le(value: int) -> bytes:
+    if value < 0 or value > 65535:
+        raise ValueError
+    return bytes([value % 256, value // 256])
 
 def main() -> int:
     write_stdout_bytes(pack_u16_le(513))
@@ -1283,7 +1491,7 @@ Defenderのフォルダーアクセス制御（event1123）がPythonのOneDrive�
 
 ## 出力の確定と書込み失敗を捕捉する（R522）
 
-共通API `flush_stdout();` を追加しました。引数なしの文で、値としては使えません。
+共通API `flush_stdout()` を追加しました。引数なしの文で、値としては使えません。
 stdoutのstdio bufferを出力し、flush失敗または既存のerror flagをOSErrorとして捕捉できます。
 空のflushも許可。成功時だけdirtyを解除し、text/bytesの出力モードを変更しません。
 Python構文の .ail ファイルをビルドできます。
@@ -2723,13 +2931,13 @@ import sys
 class Row:
 
     def __init__(self, fields: list[str]):
-        self.fields = fields
+        self.fields = fields.copy()
 
 def main() -> int:
     values: list[str] = ['日本語', '', '😀']
     row = Row(values)
     values.clear()
-    kept = row.fields
+    kept = row.fields.copy()
     row.fields = ['next']
     print('|'.join(kept))
     return 0
@@ -2783,6 +2991,7 @@ pathは文字列、sizeは正のint64で、2個の位置引数を左から1回�
 1回の読み取りは最大`min(size, 65536)`バイトです。NUL、CRLF、Ctrl-Z、UTF-8として不正なバイトも変換しません。
 
 ```python
+# run: no
 from ail import file_chunks, write_stdout_bytes
 import sys
 
@@ -3375,7 +3584,7 @@ Windows/Linux各20対象（新規10・関連既存10）が成功し、終了時�
 
 ## リストを持つ構造体とフィールド集約（R463）
 
-構造体フィールドにも`parts: list[bytes];`を宣言できます。
+構造体フィールドにも`parts: list[bytes]`を宣言できます。
 コンストラクタ・フィールド代入はリストを共有し、変更は別名からも見えます。
 別のリストへフィールドを置換しても、以前に取得したリストは保持できます。
 所有者の変数を再代入したり、関数の終了で解放されたりしても、取得済みのリストは使えます。
@@ -3446,9 +3655,47 @@ Windows/Linuxそれぞれで、新機能12項目と関連既存23項目が成功
 取得済みの結果は、その後の追加・初期化・変数の再代入後も保持できます。
 
 ```python
-from binary_writer import *
 from ail import write_stdout_bytes
 import sys
+
+class BinaryWriter:
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+    def write_u8(self, value: int) -> None:
+        if value < 0 or value > 255:
+            raise ValueError
+        self.data = self.data + bytes([value])
+
+    def write_u16_le(self, value: int) -> None:
+        if value < 0 or value > 65535:
+            raise ValueError
+        self.data = self.data + bytes([value % 256, value // 256])
+
+    def write_u16_be(self, value: int) -> None:
+        if value < 0 or value > 65535:
+            raise ValueError
+        self.data = self.data + bytes([value // 256, value % 256])
+
+    def write_u32_le(self, value: int) -> None:
+        if value < 0 or value > 4294967295:
+            raise ValueError
+        self.data = self.data + bytes([value % 256, (value // 256) % 256, (value // 65536) % 256, value // 16777216])
+
+    def write_u32_be(self, value: int) -> None:
+        if value < 0 or value > 4294967295:
+            raise ValueError
+        self.data = self.data + bytes([value // 16777216, (value // 65536) % 256, (value // 256) % 256, value % 256])
+
+    def append(self, data: bytes) -> None:
+        self.data = self.data + data
+
+    def finish(self) -> bytes:
+        return self.data
+
+    def clear(self) -> None:
+        self.data = b''
 
 def main() -> int:
     writer = BinaryWriter(b'AIL')
@@ -4156,6 +4403,7 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/csv_json_main.ail --ob
 位置引数一つの`str`を渡し、戻り値は符号付き64bit整数です。
 
 ```python
+# run: no
 from ail import file_size
 import sys
 
@@ -4647,7 +4895,7 @@ py -3 -B ailc.py language_examples/recovering_line_stats.ail -o recovering_line_
 含む値ではなく、速度改善の測定でもありません。長い行や保持する文字列が大きければ必要領域は増えます。
 
 `language_examples/filter_errors.ail` は `from filter_rules import *` で文字列判定関数を取り込み、
-補助ファイルの `const ERROR_PREFIX = "ERR:";` を共有します。
+補助ファイルの `ERROR_PREFIX = "ERR:"` を共有します。
 UTF-8入力から `ERR:` で始まる行を出力します。WindowsではCRLFと単独CRをLFに
 正規化してから処理し、出力はOSのテキスト改行になります。64KiB境界をまたぐCRLF、
 NUL、Ctrl-Z、改行なしも独立したPython参照と生バイトで照合済みです。
@@ -4680,7 +4928,7 @@ UTF-8ファイルの各行を文字列キーの辞書で数えます。最初に
 変数へ保存する場合は、従来どおり全行のリストを作ります。
 
 `language_examples/number_lines.ail` は `number_lines_core.ail` の関数で行番号を付け、
-`write_text(path, text);` でUTF-8ファイルへ保存します。既存ファイルは上書きし、
+`write_text(path, text)` でUTF-8ファイルへ保存します。既存ファイルは上書きし、
 改行は変換しません。引数を左から評価してからファイルを開き、読書き失敗は
 `except OSError` で捕捉できます。`write_text` は文として使い、戻り値はありません。
 
@@ -5517,7 +5765,7 @@ py -3 -B ailc.py language_examples/c_fnv_stream.ail --object stream_native.o --o
 
 この例はファイルを読み込み、8,192バイトずつCの状態を更新して最後にFNV-1a値を取得します。
 ファイル読込み自体は全体をメモリに置きます。Cの状態は一つで、処理前に初期化します。
-空更新ではAILライブラリの `return;` を使います。空入力と分割境界の前後、1MiB超を含む11入力を
+空更新ではAILライブラリの `return` を使います。空入力と分割境界の前後、1MiB超を含む11入力を
 独立Python参照と照合し、元ソースなし・移動後のリンクでも検証しています。速度・メモリ削減の主張ではありません。
 
 #### FNVファイル処理をAIL/Cから再利用する
@@ -6506,7 +6754,7 @@ A/A・計測の影響・順序別の影響の検査が失敗し、最適化は�
 負値やプラットフォームで表現できない範囲は `ValueError`、開く・位置を移動する・読む・閉じる失敗は
 `OSError` です。Windowsは64bitの位置、他OSはCの `long` の範囲を扱います（検証したLinuxでは64bit）。
 2引数・キーワード・小数の位置や長さは受け付けません。
-`write_bytes(path, data);` は `bytes` をそのままファイルへ保存する文です。
+`write_bytes(path, data)` は `bytes` をそのままファイルへ保存する文です。
 UTF-8変換や改行変換はせず、NULや0xFFなど任意のバイトを扱えます。
 
 ```powershell
@@ -6514,7 +6762,7 @@ py -3 -B ailc.py language_examples/binary_copy.ail -o binary_copy
 ./binary_copy.exe input.bin output.bin
 ```
 
-この例の本体は `write_bytes(sys.argv[2], read_bytes(sys.argv[1]));` です。
+この例の本体は `write_bytes(sys.argv[2], read_bytes(sys.argv[1]))` です。
 引数は左から評価し、入力の読込みが終わってから出力を開きます。
 既存の出力ファイルは置き換えます。書込み中の失敗では部分的な出力が残る場合があり、
 原子的な保存やロールバックは行いません。開く・読む・書く・閉じる処理の失敗は
@@ -6558,7 +6806,7 @@ EINTRの実注入とOS read回数は未検証です。
 
 ### 標準入力から標準出力へバイナリを送る
 
-`write_stdout_bytes(data);` は `bytes` を一度評価し、そのまま標準出力へ送ります。
+`write_stdout_bytes(data)` は `bytes` を一度評価し、そのまま標準出力へ送ります。
 空なら書きません。値として使うことやキーワード引数は拒否します。
 `binary_stream.ail` の `copy_stdin(size) -> int` は補助関数ごとに入力を送り、総バイト数を返します。
 sizeは正の整数で、0/負は `ValueError`。このCLIは8,192バイトずつ処理します。
@@ -6836,7 +7084,7 @@ R354の8MiB/全84実行は[旧生記録](language_examples/number_stream_diagnos
 
 ### バイナリを追記する
 
-`append_bytes(path, data);` は既存の内容を残して末尾へ `bytes` を追加します。
+`append_bytes(path, data)` は既存の内容を残して末尾へ `bytes` を追加します。
 ファイルがなければ作成し、空の `bytes` でも開いて閉じます。パスは `str`、データは
 `bytes` の2引数を左から一度だけ評価し、両方の評価が終わってから出力を開きます。
 引数評価が失敗した場合は出力を開きません。キーワード引数や値としての使用は拒否します。
@@ -7177,7 +7425,7 @@ py -3 -B ailc.py language_examples/binary_record_main.ail --object binary_record
 標準出力は復元後のバイト数です。長さは0～4,294,967,295を形式上の範囲とし、
 実際に処理できるサイズは空きメモリに制限されます。全体をコピーする方式です。
 `bytes` 戻り値は呼出し側の関数が終了するまで保持され、別のAIL/C関数へ渡せます。
-R396から `const RECORD_MAGIC = b"AIL1";` のような `bytes` 公開定数にも対応しました。
+R396から `RECORD_MAGIC = b"AIL1"` のような `bytes` 公開定数にも対応しました。
 空・NUL・非UTF-8を保持し、読み取り・比較・slice・関数への引数・返却に使えます。
 再代入や要素の書換えは拒否します。定数だけのモジュールも別途コンパイルできます。
 オブジェクトの `.o.json` は小文字・偶数桁・空白なしのhexを保存し、変更はABI照合で拒否します。

@@ -4,6 +4,8 @@
   ``ail_chatgpt.py compile`` and run in a fresh directory. ``# args: a b`` passes command-line
   arguments, ``# exit: N`` is the expected status, and the output is the following ``text`` block
   or the block's ``# prints ...`` comments.
+- The Japanese quickstart's whole programs are built too; ``# run: no`` marks an example that
+  needs a peer, an input file or command-line arguments, so it is only compiled.
 - No fenced block may contain the old brace spellings ``fn `` or ``let ``.
 """
 import ast
@@ -79,6 +81,39 @@ class ReferenceDocs(unittest.TestCase):
                 self.assertNotIn('let ', body, '%s still teaches brace syntax' % line)
                 if lang == 'python' and body.strip():
                     ast.parse(body)
+
+    def test_quickstart_whole_programs_build_and_run(self):
+        examples = [b for b in quickstart_blocks() if whole_program(b[0], b[1])]
+        self.assertGreaterEqual(len(examples), 30)
+        for lang, body, line, expected in examples:
+            with self.subTest(line=line), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                src = root / ('example.py' if lang == 'python' else 'example.ail')
+                src.write_text(body, encoding='utf-8')
+                exe = root / 'example'
+                env = dict(os.environ, AIL_PATH=str(HERE / 'language_examples'))
+                proc = subprocess.run([sys.executable, '-B', str(HERE / 'ail_chatgpt.py'), 'compile',
+                                       str(src), '-o', str(exe)], cwd=root, env=env,
+                                      capture_output=True, text=True, timeout=300)
+                if proc.returncode != 0:
+                    message = proc.stdout + proc.stderr
+                    if 'written in the brace syntax' in message:
+                        self.skipTest('%s imports a module that is still written in the brace syntax' % line)
+                    if 'define `make` yourself' in message or 'define `number_batch` yourself' in message:
+                        self.skipTest('%s uses a name supplied by an object file' % line)
+                self.assertEqual(proc.returncode, 0, '%s did not compile:\n%s%s'
+                                 % (line, proc.stdout[-1500:], proc.stderr[-1500:]))
+                if any(row.strip() == '# run: no' for row in body.splitlines()[:4]):
+                    continue
+                args = header(body, 'args') or []
+                want_exit = int((header(body, 'exit') or ['0'])[0])
+                run = subprocess.run([str(exe)] + args, cwd=root, capture_output=True,
+                                     timeout=60, input=b'')
+                self.assertEqual(run.returncode, want_exit, '%s exit %d, stderr: %s'
+                                 % (line, run.returncode, run.stderr[-800:].decode('utf-8', 'replace')))
+                want = expected if expected is not None else printed(body)
+                if want is not None:
+                    self.assertEqual(run.stdout.decode('utf-8', 'replace'), want, '%s stdout' % line)
 
     def test_whole_programs_build_and_print(self):
         examples = [b for b in blocks() if whole_program(b[0], b[1])]
