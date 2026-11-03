@@ -16,6 +16,45 @@ default and unified builds; the overflow probe stops loudly on both int64 paths 
 `--exact-int`, and the >2**64 list-element probe stays exact.  Added
 `test_ail_range_element_bounds.py` and registered it in `tests.d`; the targeted modules,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on the final commit.
+## 2026-11-03 -- arena1 S2: read-only list-field aliases feed sort keys in place (job-arena1s2b-11040443)
+
+`x = o.f` for a `list[int]`, `list[float]` or `list[str]` field normally copies the field into
+a private list.  The new AST pass in `pyfunc.py` (`_elide_readonly_field_aliases`, run in
+`_to_c_once` before `sortkeys.rewrite` and on the write-stage probe) drops that copy only when
+every use between the assignment and the last mention is read-only and the value cannot escape:
+`x` is assigned once, `o` is a plain name not rebound in the range, no attribute/element store or
+mutating method touches `x` or `o.f`, every call passes the borrow check, no user function
+receives `o` or the struct, `x` is not returned or aliased, and it is not captured by a
+non-sort-key lambda.  `do_sort` now reads `f_nm` / `f_par` in place.
+
+`_borrow_call_safe` is called through `_alias_call_safe`, which treats any typing context the
+light alias scope cannot supply as unsafe.  That fixes the crash on `t.par.pop()` (the field
+method path asked the scope for `type_of`) and keeps the copy, as the task requires.  A refused
+rewritten compile is retried with `_alias_elide=False`, so the old route survives.
+
+tree_fold, N=3,000,000, same input and runner:
+
+| | peak RSS | wall (median 5) | minor faults |
+|---|---:|---:|---:|
+| before (`b47e3fa9`) | 414,172 KiB | 1,536 ms | 135,313 |
+| after | 367,284 KiB | 1,490 ms | 136,124 |
+
+The target ≤415 MB is met (367.3 MB, −46.9 MB / −11.3%).  Wall is inside the noise band (direct
+runs: 1.45 s before, 1.48 s after).  Minor faults did **not** fall on this runner (they are 0.6%
+higher and the two ranges do not overlap), so that part of the plan's expectation is not met.
+
+The generated `do_sort` has no `ail_pslist_snapshot` / `ail_list_snapshot`.  The C diff is not
+limited to those lines: removing the local copies also lets the sort lowering take its `ir`
+form, so the rest of the body uses `ir` temporaries and reads the fields in place.
+
+Verification on this commit: `test_ail_readonly_field_alias` (now with the field-pop negative),
+`test_ail_sort_keys`, `test_ail_struct_list_inplace`, `test_ail_field_views`,
+`test_ail_heapq_bisect`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass at `-j 2`; all ten lab/compare tasks are correct on the typed path with every public and
+hidden case; a 300 s bounded `lab/corpus/check.py` run is 188 same / 1 refused / 1 limit (default)
+and 191 same / 1 refused / 1 limit (`AIL_IR=1`) with no DIFF or crash; twelve `/tmp/probes` programs
+match CPython on both builds; ASan+UBSan are clean on tree_fold's example case and on the mixed
+regression program.  The full corpus (219 programs) was not re-run.
 
 ## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
 
