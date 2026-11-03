@@ -1,3 +1,23 @@
+## 2026-11-03 -- CLI help review 1: run help stops advertising build-only options
+
+`ail run --help` no longer lists `-o/--output`, `--lib`, `--freestanding` or `--m32`,
+none of which `ail run` honours (it always writes its temporary executable, and `--lib`
+turns the compile into library mode). It now lists `--no-ffi`, which run does honour.
+The top-level `ail --help` splits the old "options for run and build" block into
+run-and-build options, a separate "build options" block for `-o` and `--lib`, and an
+experimental block whose build-only entries are labelled as such.
+
+`--debug-dir` now sits under an "experimental and debug options" argument group for
+`compile-module`, `compile-library` and `compile-c`, not the ordinary `options:` block;
+`test_ail_cli_help` checks that grouping and the run/help option split. No compiler or
+generated-C behaviour changed.
+
+Probes on the final commit: `hello`, `basics`, `readme_edge_values` and
+`readme_aliasing` match CPython on both the default and unified builds; the CLI probe
+passes every help, version, usage-error, missing-source and grouping check. Tests:
+`test_ail_cli_help`, `test_ail_packaging`, `test_ail_project`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` all pass (6 modules, 0 failed).
+
 ## 2026-11-03 -- CLI help: every subcommand, every option, argparse-style usage errors
 
 The `ail` command now has a finished help page. `ail --help` lists every subcommand

@@ -80,6 +80,26 @@ class CliHelpTests(unittest.TestCase):
         for option in options + ("--debug-dir",):
             with self.subTest(command="compile", option=option):
                 self.assertIn(option, experimental)
+        for command in ("compile-module", "compile-library", "compile-c"):
+            done = run_cli(command, "--help")
+            self.assertEqual(done.returncode, 0, done.stderr)
+            normal, marker, experimental = done.stdout.partition("experimental and debug options")
+            self.assertTrue(marker, command)
+            self.assertIn("--debug-dir", experimental)
+            self.assertNotIn("--debug-dir", normal.partition("options:")[2])
+
+    def test_run_help_only_advertises_run_options(self):
+        done = run_cli("--help")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        normal = done.stdout.partition("build options:")[0]
+        self.assertNotRegex(normal, r"(?m)^  -o, --output")
+        self.assertNotRegex(normal, r"(?m)^  --lib")
+        done = run_cli("run", "--help")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for option in ("-o", "--output", "--lib", "--freestanding", "--m32"):
+            with self.subTest(option=option):
+                self.assertNotRegex(done.stdout, r"(?m)^  %s\b" % re.escape(option))
+        self.assertRegex(done.stdout, r"(?m)^  --no-ffi\b")
 
     def test_missing_source_names_the_path_and_the_next_step(self):
         missing = ROOT / "no-such-source.py"

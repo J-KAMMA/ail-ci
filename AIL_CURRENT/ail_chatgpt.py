@@ -6178,7 +6178,8 @@ def main(argv=None):
         command.add_argument('--json', action='store_true', help='return structured build diagnostics without running the generated program')
     experimental.add_argument('--debug-dir', type=Path, help='keep native diagnostic reports and generated sources in a new directory')
     for command in (object_cmd, library_cmd, c_cmd):
-        command.add_argument('--debug-dir', type=Path, help='keep native diagnostic reports and generated sources in a new directory')
+        command.add_argument_group('experimental and debug options').add_argument(
+            '--debug-dir', type=Path, help='keep native diagnostic reports and generated sources in a new directory')
     for command in (compile_cmd, object_cmd, library_cmd, c_cmd):
         command.add_argument('--no-cache', action='store_true', help='do not read or write the build cache (same as AIL_NO_CACHE=1)')
     cache_cmd = sub.add_parser('cache', help='build cache in $AIL_CACHE (default ~/.cache/ail): stats, path or clear')

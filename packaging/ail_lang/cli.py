@@ -66,10 +66,8 @@ project commands (no source file):
                           build writes build/NAME
 
 options for run and build:
-  -o, --output PATH       write the executable to PATH (default: the source name without .py)
   --strict                build only on the typed path, listing every blocker and a rewrite
   --json                  with --strict, print blockers as machine-readable ail.strict/1 JSON
-  --lib NAME              build @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
   -I, --module-path DIR   add a module search directory (repeatable)
   --module FILE           add a source module to the build (repeatable)
   --object FILE           link an existing typed object (repeatable)
@@ -77,8 +75,13 @@ options for run and build:
   --static                link the C library statically instead of dynamically
   --no-cache              do not read or write the build cache
   --syntax MODE           source syntax: auto (default) or python
+  --no-ffi                refuse a program that declares C FFI functions (@extern)
 
-experimental and debug options (run and build; may change):
+build options:
+  -o, --output PATH       write the executable to PATH (default: the source name without .py)
+  --lib NAME              build @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
+
+experimental and debug options (may change; build-only ones are noted):
   --debug                 build for gdb: -g -O0 and #line directives to the source
   --debug-dir DIR         keep native diagnostic reports and generated sources in DIR
   --target TRIPLE         cross-compile with zig cc for another OS/CPU
@@ -86,8 +89,8 @@ experimental and debug options (run and build; may change):
   --separate              compile each typed source to an object, then link the objects
   --fe-cache              cache the generated C under ~/.cache/ail/fe
   --gpu                   build loops marked '# ail: gpu' as GPU kernels
-  --freestanding          emit a libc-free C file or object and a header
-  --m32                   with --freestanding: target 32-bit x86
+  --freestanding          build only: emit a libc-free C file or object and a header
+  --m32                   build only, with --freestanding: target 32-bit x86
 
 global options:
   -h, --help              show this help and exit
@@ -102,7 +105,6 @@ so program options do not need a `--`.
 options:
   --strict                build only on the typed path, listing every blocker and a rewrite
   --json                  with --strict, print blockers as machine-readable ail.strict/1 JSON
-  --lib NAME              build @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
   -I, --module-path DIR   add a module search directory (repeatable)
   --module FILE           add a source module to the build (repeatable)
   --object FILE           link an existing typed object (repeatable)
@@ -110,6 +112,7 @@ options:
   --static                link the C library statically instead of dynamically
   --no-cache              do not read or write the build cache
   --syntax MODE           source syntax: auto (default) or python
+  --no-ffi                refuse a program that declares C FFI functions (@extern)
   -h, --help              show this help and exit
 
 experimental and debug options (may change):
@@ -119,9 +122,7 @@ experimental and debug options (may change):
   --exact-int             use CPython's arbitrary-precision ints (about 20x slower)
   --separate              compile each typed source to an object, then link the objects
   --fe-cache              cache the generated C under ~/.cache/ail/fe
-  --gpu                   build loops marked '# ail: gpu' as GPU kernels
-  --freestanding          emit a libc-free C file or object and a header
-  --m32                   with --freestanding: target 32-bit x86"""
+  --gpu                   build loops marked '# ail: gpu' as GPU kernels"""
 
 BUILD_HELP = """usage: ail build PROG.py [options]
 
@@ -141,6 +142,7 @@ options:
   --static                link the C library statically instead of dynamically
   --no-cache              do not read or write the build cache
   --syntax MODE           source syntax: auto (default) or python
+  --no-ffi                refuse a program that declares C FFI functions (@extern)
   -h, --help              show this help and exit
 
 experimental and debug options (may change):
