@@ -1,3 +1,26 @@
+## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
+
+Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`
+is 1,306 lines and `AIL_REFERENCE.md` 73, both with 0 lines that start `fn`/`let`/`struct`/`impl`;
+the 34 fenced blocks are 17 `python`, 16 `text` and one `ail-refused`, and the 16 whole programs
+build (14 have a stated output that `test_ail_reference_docs` checks).  The quickstart has 275
+blocks, 38 of them whole programs.
+
+`tools/ail2py_docs.py` now leaves an `ail-refused` block as written (it holds Python programs the
+compiler rejects, not brace source) and its fragment wrapper is removed completely: a fragment no
+longer keeps the synthetic `import sys` or `return 0`, including a fragment that ends in its own
+`return 0`.  `test_ail_ail2py` covers both fragment shapes and the untouched refused block.
+
+`docs/spec/DIFFERENCES.md` now says AIL has one syntax, Python, with optional annotations; the
+stale brace-only row A14 and A65's reference to it are gone.  Probes: converting a fresh `ail`
+whole program and two fragments with `ail2py_docs` produced `python` fences that built and printed
+6/6/5 under `ail_chatgpt.py compile`, and a second run over the two reference files converted 0
+blocks and changed nothing.
+
+Tests: `test_ail_reference_docs`, `test_ail_reference_examples`, `test_ail_quickstart_docs`,
+`test_ail_tutorial`, `test_ail_files`, `test_ail_corpus_findings3` and `test_ail_ail2py` pass.
+`test_ail_safetynet` keeps the pre-existing `S4_generators_gc` failure seen on the base.
+
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
 Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's
