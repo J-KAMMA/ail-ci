@@ -227,6 +227,14 @@ fn f(n: int) -> int {
 }
 fn main() -> int { print(f(30)); return 0; }
 """),
+    ('depth_inner_symbol_collision', r"""
+fn f__d(n: int) -> int { return n + 1000; }
+fn f(n: int) -> int {
+    if n == 0 { return f__d(5); }
+    return f(n - 1) + 1;
+}
+fn main() -> int { print(f(3)); return 0; }
+"""),
     ('tally_like_eval', r"""
 struct Expr {
     ops: list[int]; left: list[int]; right: list[int]; vals: list[int];
@@ -282,10 +290,12 @@ fn main() -> int {
 DEPTH_ORACLE = {
     'depth_49999', 'depth_50000', 'depth_50001', 'depth_from_mutual',
     'depth_raise_reuse', 'depth_helper_ok', 'depth_helper_guarded',
+    'depth_inner_symbol_collision',
 }
 DEPTH_STATS = {
     'depth_helper_ok': ('f', 'param'),
     'depth_helper_guarded': ('f', 'callee other can reach a guarded function'),
+    'depth_inner_symbol_collision': ('f', 'inner symbol f__d is taken'),
 }
 
 STOPS = {
