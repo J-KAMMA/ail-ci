@@ -1,3 +1,17 @@
+## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
+
+Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
+zlib, libm, libc and sqlite3, each running through the ctypes shim under `python3` and compiling with
+`ail_chatgpt.py compile`. The stdout and exit status are identical on the default and `AIL_UNIFIED_FORCE=1`
+builds. `AIL_CURRENT/test_ail_ffi_examples.py` repeats the comparison and skips an example with the missing system
+header or library named. No FFI defect was hit, so `ail_ffi.py` and `ail_ffi_lower.py` are unchanged.
+`docs/FFI.md` documents the four examples, the build command and the docstring limits; tutorial section 6 links it.
+
+Probes: the four examples under `/tmp/probes/ffi` matched CPython on both builds (zlib checksums and round trip;
+libm with `-0.0`, `inf` and a subnormal; libc int64 edge, base 16/36 parsing and `ERANGE`; sqlite count/sum).
+Tests: `test_ail_ffi_examples`, `test_ail_ffi`, `test_ail_ffi_handles`, `test_ail_ffi_f3a`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
 Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`
