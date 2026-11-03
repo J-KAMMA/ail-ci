@@ -494,6 +494,7 @@ class _Defined(set):
     classes = frozenset()
     module_ints = {}        # module constants (assigned once, never rebound) -> their int value
     float_oracle = None     # optional: node -> True when the typed emitter's own typing says the expression is a float
+    int64_oracle = None     # optional: node -> True when the expression's C storage is int64 (not tagged or big)
 
 
 def module_int_consts(table):
@@ -571,12 +572,35 @@ def _lp_oracle_float(node, defined):
         return False
 
 
-def _lp_range_value(node, vals):
+def _lp_range_int64_args(args, defined):
+    """Whether every range() argument is a value whose C storage is int64 (the default int64 build).
+
+    A range counter always lies between its start and its stop, so when every argument is an int64 C
+    value the counter is int64 too. This is NOT true in the exact int mode (a tagged or big argument)
+    nor for a tagged parameter or a general-path value, so those keep the old, unproven route. The
+    emitter supplies the typing oracle; without one the route is unchanged."""
+    try:
+        import intmode
+        if intmode.exact():
+            return False
+    except Exception:
+        return False
+    oracle = getattr(defined, 'int64_oracle', None) if defined is not None else None
+    if oracle is None or not args:
+        return False
+    try:
+        return all(oracle(a) for a in args)
+    except Exception:
+        return False
+
+
+def _lp_range_value(node, vals, defined=None):
     """The value of the counter of `for i in range(...)` (also in a comprehension): the join of the bounded arguments when
     every argument is bounded; otherwise, for a bounded start and a constant nonzero step, the start plus at most _LP_LEN
     steps. A counter moves one step per iteration, so reaching 2**48 steps from its start takes some 2.8e14 iterations of
     one loop (days of run time); the same physical limit as a len() (_LP_LEN) and as the IR's int counters
     (ir/lower.py `_counters`). Arithmetic on the counter is still checked against its bounds (`i * i` is not proven).
+    When every argument's C storage is int64 the counter itself is int64, so its bounds are the full int64 range.
     Returns None when nothing is proven."""
     if all(v[0] in _LP_INTS and v[1] is not None for v in vals):
         return _lp_int(min(v[1] for v in vals), max(v[2] for v in vals))
@@ -587,13 +611,14 @@ def _lp_range_value(node, vals):
         start, step = vals[0], 1
     else:
         start, step = vals[0], _const_int(args[2])
-    if step is None or step == 0 or abs(step) > 1 << 8:
-        return None
-    if start[0] not in _LP_INTS or start[1] is None or start[2] is None:
-        return None
-    if step > 0:
-        return _lp_int(start[1], start[2] + _LP_LEN * step)
-    return _lp_int(start[1] + _LP_LEN * step, start[2])
+    if step is not None and step != 0 and abs(step) <= 1 << 8 \
+            and start[0] in _LP_INTS and start[1] is not None and start[2] is not None:
+        if step > 0:
+            return _lp_int(start[1], start[2] + _LP_LEN * step)
+        return _lp_int(start[1] + _LP_LEN * step, start[2])
+    if _lp_range_int64_args(args, defined):
+        return _lp_int(_LP_I64_MIN, _LP_I64_MAX)
+    return None
 
 
 def _lp_eval(node, env, defined, bad):
@@ -827,7 +852,7 @@ def _lp_eval(node, env, defined, bad):
                     and 'range' not in defined and not it.keywords and 1 <= len(it.args) <= 3 \
                     and not any(isinstance(a, ast.Starred) for a in it.args):
                 vals = [_lp_eval(a, sub, defined, bad) for a in it.args]
-                counter = _lp_range_value(it, vals)
+                counter = _lp_range_value(it, vals, defined)
                 if counter is not None:
                     _lp_assign(gen.target, counter, sub, defined)
                 else:
@@ -1215,7 +1240,7 @@ def _lp_run(stmts, env, defined, fixed=None, seqmap=None):
                     and 'range' not in defined and not it.keywords and 1 <= len(it.args) <= 3 \
                     and not any(isinstance(a, ast.Starred) for a in it.args):
                 vals = [_lp_eval(a, env, defined, None) for a in it.args]
-                iv = _lp_range_value(it, vals)
+                iv = _lp_range_value(it, vals, defined)
                 if iv is None:
                     iv = _lp_int()
             else:
