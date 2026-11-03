@@ -1,3 +1,14 @@
+## 2026-11-03 -- fuzzpyb: 500 typed-Python programs against the default build
+
+Ran `lab/fuzzpy/run.py` on seeds 1-500, two jobs, in chunks of 100, with the 1.5 GB limit
+and a 10 s timeout per process. `lab/fuzzpy/summary.json` has 500 rows: silent 0, loud-ok
+115, crash 0, refused 30, other 355 (346 identical + 9 stderr-only). The typed path built
+257/500 (51.4%). No silent wrong output and no crash: the 9 differing last stderr lines are
+the typed path's uncaught-trap text (no `IndexError:`/`ZeroDivisionError:` prefix; `KeyError`
+also loses the key), reduced to `lab/fuzzpy/findings/001.py`-`005.py`. The raw `seed22`
+finding is a compile-time int64 constant refusal, counted as loud-ok and not filed.
+`lab/fuzzpy/REPORT.md` has the numbers.
+
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
 Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`

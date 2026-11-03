@@ -191,7 +191,7 @@ def summary_rows(records):
     rows = []
     for r in sorted(records, key=lambda r: r['seed']):
         first = r.get('first_diff') or ''
-        if not first and r.get('cls') in ('refused', 'overflow', 'crash', 'timeout'):
+        if not first and r.get('cls') in ('DIFF', 'refused', 'overflow', 'crash', 'timeout'):
             first = r.get('reason', '').splitlines()[0] if r.get('reason') else ''
         rows.append({'seed': r['seed'], 'class': summary_class(r),
                      'path': r.get('path', 'typed'), 'first_diff': first})
