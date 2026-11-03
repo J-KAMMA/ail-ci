@@ -100,17 +100,13 @@ class SourceCheckTests(unittest.TestCase):
         self.assertNotIn('interface', report)
 
     def test_interface_struct_methods_void_floatlist_and_imports(self):
-        self.source('fn helper(x:list[float])->float {return sum(x);}', 'helper.ail')
-        source = self.source('''use helper;
-struct Pair {left:int; right:str;}
-impl Pair {fn value(self)->int {return self.left;} }
-fn show(p:Pair)->void {print(p.right);}
-''')
+        self.source('def helper(x: list[float]) -> float:\n    return sum(x)\n', 'helper.py')
+        source = self.source('from helper import *\nclass Pair:\n\n    def __init__(self, left: int, right: str):\n        self.left = left\n        self.right = right\n\n    def value(self) -> int:\n        return self.left\n\ndef show(p: Pair) -> None:\n    print(p.right)\n')
         status, report = self.check(source, '--library', '--interface')
         self.assertEqual(status, 0, report)
         api = report['interface']
         functions = {fn['name']: fn for fn in api['functions']}
-        self.assertEqual(functions['helper']['parameters'][0]['type'], 'list[float]')
+        self.assertEqual(functions['helper__helper']['parameters'][0]['type'], 'list[float]')
         self.assertEqual(functions['show']['returns'], 'void')
         pair, = api['structs']
         self.assertEqual(pair['fields'], [dict(name='left', type='int'), dict(name='right', type='str')])
@@ -142,11 +138,8 @@ def read(box:Box)->int:
         self.assertEqual(box['constructor_parameters'][0]['name'], 'value')
     def test_types_used_exception_values_keep_only_reachable_structs(self):
         import ast
-        from ail_syntax import translate
-        text = ('struct Unused {n:int;} struct Used {error:exception;} '
-                'fn keep(value:Used)->Used {return value;} '
-                'fn lookup(items:list[exception])->exception {return items[0];}')
-        tree = ast.parse(translate(text, module=True, imports=[]))
+        text = ('class Unused:\n\n    def __init__(self, n: int):\n        self.n = n\n\nclass Used:\n\n    def __init__(self, error: exception):\n        self.error = error\n\ndef keep(value: Used) -> Used:\n    return value\n\ndef lookup(items: list[exception]) -> exception:\n    return items[0]\n')
+        tree = ast.parse(text)
         for symbol, expected in (('keep', ['Used']), ('lookup', [])):
             with self.subTest(symbol=symbol):
                 report = ail_chatgpt._source_interface(tree, [symbol], True)
@@ -277,13 +270,13 @@ def chosen(x):
                 self.assertEqual(diagnostic['column'], text.index('return' if statement and 'return missing' in text else 'return take' if statement else 'fn f') + 1)
 
     def test_type_diagnostic_identifies_original_imported_function(self):
-        text = '# 日本語😀 fake fn ignored\nfn take(x:int)->int {return x;}\nfn bad()->int {return take("wrong");}\n'
+        text = "# 日本語😀 fake fn ignored\ndef take(x: int) -> int:\n    return x\n\ndef bad() -> int:\n    return take('wrong')\n"
         module = self.source(text, '部品 😀.ail')
         source = self.source('fn main()->int {return bad();}')
         status, report = self.check(source, '--module', module)
         self.assertEqual(status, 1)
         diagnostic = report['diagnostics'][0]
-        self.assertEqual((diagnostic['path'], diagnostic['line'], diagnostic['column']), (str(module), 3, 16))
+        self.assertEqual((diagnostic['path'], diagnostic['line'], diagnostic['column']), (str(module), 6, 5))
         self.assertEqual((diagnostic['function'], diagnostic['location_kind']), ('bad', 'source_statement'))
 
     def test_contract_diagnostic_identifies_struct_method(self):
@@ -336,24 +329,14 @@ fn main()->int {return 0;}
         self.assertIsNone(diagnostic['line'])
         self.assertIsNone(diagnostic['location_kind'])
     def test_statement_locations_survive_method_reordering_and_import_offsets(self):
-        text = '''struct Item {value:int;}
-fn helper()->int {return 0;}
-impl Item {
-  fn bad(self)->int {
-    if self.value {
-      return missing(self.value);
-    }
-    return 0;
-  }
-}
-'''
+        text = 'class Item:\n\n    def __init__(self, value: int):\n        self.value = value\n\n    def bad(self) -> int:\n        if self.value:\n            return missing(self.value)\n        return 0\n\ndef helper() -> int:\n    return 0\n'
         module = self.source(text, '部品 😀.ail')
-        self.source('fn extra()->int {return 1;}\n', 'extra.ail')
+        self.source('def extra() -> int:\n    return 1\n', 'extra.ail')
         source = self.source('use extra;\nfn main()->int {return 0;}')
         status, report = self.check(source, '--module', module)
         diagnostic = report['diagnostics'][0]
         self.assertEqual(status, 1, report)
-        self.assertEqual((diagnostic['path'], diagnostic['line'], diagnostic['column']), (str(module), 6, 7))
+        self.assertEqual((diagnostic['path'], diagnostic['line'], diagnostic['column']), (str(module), 8, 13))
         self.assertEqual((diagnostic['function'], diagnostic['location_kind']), ('Item.bad', 'source_statement'))
 
     def test_same_line_and_unicode_statement_positions(self):
@@ -397,12 +380,12 @@ impl Item {
                 self.assertEqual(diagnostic['location_kind'], 'source')
 
     def test_imported_and_python_int64_literal_positions(self):
-        module = self.source('# 日本語😀\nconst LIMIT=9223372036854775808;\nfn limit()->int {return LIMIT;}', '数値 😀.ail')
+        module = self.source('# 日本語😀\nLIMIT = 9223372036854775808\n\ndef limit() -> int:\n    return LIMIT\n', '数値 😀.ail')
         source = self.source('fn main()->int {return limit();}')
         status, report = self.check(source, '--module', module)
         diagnostic = report['diagnostics'][0]
         self.assertEqual(status, 1, report)
-        self.assertEqual((diagnostic['path'], diagnostic['line'], diagnostic['column']), (str(module), 2, 1))
+        self.assertEqual((diagnostic['path'], diagnostic['line'], diagnostic['column']), (str(module), 2, 9))
         text = 'def main()->int:\n    label="日本😀"; return -9223372036854775809\nmain()\n'
         source = self.source(text)
         status, report = self.check(source, '--syntax', 'python')

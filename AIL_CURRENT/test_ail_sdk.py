@@ -78,9 +78,7 @@ class SdkTests(unittest.TestCase):
             self.assertEqual((queried.returncode,queried.stderr),(0,b''))
             self.assertTrue(json.loads(queried.stdout)['entries'][0]['signature_known'])
         provider=self.root/'numeric_profiles.ail'
-        provider.write_text('fn report()->str {let rows:list[tuple[int,int]]=[(7,8)];'
-                            'let values:list[float]=[3.0,-2.0,float("inf")];values.sort();'
-                            'return ("x"+hex(rows[0][0]+int(values[0]))+"x").lstrip("x").rstrip("x");}',encoding='utf8')
+        provider.write_text("def report() -> str:\n    rows: list[tuple[int, int]] = [(7, 8)]\n    values: list[float] = [3.0, -2.0, float('inf')]\n    values.sort()\n    return ('x' + hex(rows[0][0] + int(values[0])) + 'x').lstrip('x').rstrip('x')\n",encoding='utf8')
         obj=self.build(sdk,environment,provider,'numeric-profiles.o',command='compile-module')
         provider.unlink()
         original=hashlib.sha256(obj.read_bytes()).hexdigest()
@@ -195,7 +193,7 @@ class SdkTests(unittest.TestCase):
         self.successful(self.build(sdk,environment,search_source,'search-alias-native'),b'1')
         source=self.root/'editable 日本.ail';body=self.root/'body.txt';output=self.root/'candidate.ail'
         source.write_bytes(b'use neighbor; fn helper(x:int)->int {return bump(x)+"broken";}\nfn main()->int {write_stdout_bytes(str(helper(2)).encode());return 0;}')
-        (self.root/'neighbor.ail').write_bytes(b'fn bump(x:int)->int {return x+1;}')
+        (self.root/'neighbor.ail').write_bytes(b'def bump(x: int) -> int:\n    return x + 1\n')
         body.write_bytes(b'return bump(x)+2;')
         original=source.read_bytes();sha=hashlib.sha256(original).hexdigest()
         plain=self.cli(sdk,environment,'context',source,'--symbol','helper','--include-body','--resolve-imports')
@@ -228,7 +226,7 @@ class SdkTests(unittest.TestCase):
         self.assertTrue(native_report['native_build']['generated'])
         self.successful(executable,b'5')
         self.assertEqual(source.read_bytes(),original);self.assertTrue(marker.is_file())
-        (self.root/'neighbor.ail').write_bytes(b'fn bump(x:int)->int {return x+50;}')
+        (self.root/'neighbor.ail').write_bytes(b'def bump(x: int) -> int:\n    return x + 50\n')
         stale=self.root/'stale-candidate.ail'
         refused=self.cli(sdk,environment,'edit',source,'--symbol','helper','--base-sha256',sha,
                          '--body',body,'--context',context_file,'-o',stale)
@@ -271,7 +269,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         from test_ail_grid_calls import LIBRARY,ENTRY
         sdk=self.exported(); environment,marker=self.environment()
         module=self.root/'grid_module.ail';module.write_text(LIBRARY,encoding='utf8')
-        source=self.root/'grid_client.ail';source.write_text('use grid_module;\n'+ENTRY,encoding='utf8')
+        source=self.root/'grid_client.ail';source.write_text('from grid_module import *\n'+ENTRY,encoding='utf8')
         executable=self.build(sdk,environment,source,'grid-client','--separate')
         rows,cols=4097,17
         values=[[i*100003+j-17 for j in range(cols)] for i in range(rows)]
@@ -281,8 +279,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
     def test_relocated_empty_bytes_list_constructor(self):
         sdk=self.exported(); environment,marker=self.environment()
         provider=self.root/'empty_provider.ail'
-        provider.write_text('struct Holder {parts:list[bytes]; tag:int;} '
-                            'fn make_empty(tag:int)->Holder {return Holder([],tag);}',encoding='utf8')
+        provider.write_text('class Holder:\n\n    def __init__(self, parts: list[bytes], tag: int):\n        self.parts = parts\n        self.tag = tag\n\ndef make_empty(tag: int) -> Holder:\n    return Holder([], tag)\n',encoding='utf8')
         obj=self.build(sdk,environment,provider,'empty-provider.o',command='compile-module')
         provider.unlink()
         source=self.root/'empty_client.ail'
@@ -394,9 +391,9 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         include = project / 'include'
         include.mkdir()
         helper = include / 'helper.ail'
-        helper.write_text('use binary_numbers; fn sdk_helper()->bytes {return pack_u16_le(4660);}', encoding='utf8')
+        helper.write_text('def sdk_helper() -> bytes:\n    value = 4660\n    return bytes([value % 256, value // 256])\n', encoding='utf8')
         wrapper = project / 'wrapper.ail'
-        wrapper.write_text('use helper; fn sdk_export()->bytes {return sdk_helper();}', encoding='utf8')
+        wrapper.write_text('from helper import sdk_helper\ndef sdk_export() -> bytes:\n    return sdk_helper()\n', encoding='utf8')
         obj = self.build(sdk, environment, wrapper, 'helper.o', '-I', include, command='compile-module')
         helper.unlink(); wrapper.unlink()
         consumer = project / 'consumer.ail'
@@ -515,10 +512,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         self.assertEqual((failure.returncode,failure.stdout,failure.stderr),(4,b'',b''))
         self.assertEqual(kept.read_bytes(),b'original');self.assertEqual(list(folder.iterdir()),[kept])
         provider=self.root/'provider.ail'
-        provider.write_text('fn roundtrip(path:str,data:bytes)->bytes { make_dir(path); '
-                            'let staged=path+"/stage";let final=path+"/final";'
-                            'write_bytes(staged,data);write_bytes(final,b"old");replace_path(staged,final);'
-                            'let result=read_bytes(final);remove_file(final);remove_dir(path);return result; }',encoding='utf8')
+        provider.write_text("from ail import make_dir, read_bytes, remove_dir, remove_file, replace_path, write_bytes\ndef roundtrip(path: str, data: bytes) -> bytes:\n    make_dir(path)\n    staged = path + '/stage'\n    final = path + '/final'\n    write_bytes(staged, data)\n    write_bytes(final, b'old')\n    replace_path(staged, final)\n    result = read_bytes(final)\n    remove_file(final)\n    remove_dir(path)\n    return result\n",encoding='utf8')
         obj=self.build(sdk,environment,provider,'filesystem.o',command='compile-module');provider.unlink()
         moved=self.root/'moved file operations 😀';moved.mkdir();target=moved/obj.name
         shutil.move(obj,target);shutil.move(str(obj)+'.json',str(target)+'.json')
@@ -535,7 +529,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         newline=os.linesep.encode()
         self.successful(exe,b'AIL bytes '+str(len(data)).encode()+newline+data+b'END'+newline,source)
         provider=self.root/'output.ail'
-        provider.write_text('fn emit(data:bytearray)->int { print("header");write_stdout_bytes(data);return len(data); }',encoding='utf8')
+        provider.write_text("from ail import write_stdout_bytes\ndef emit(data: bytearray) -> int:\n    print('header')\n    write_stdout_bytes(data)\n    return len(data)\n",encoding='utf8')
         obj=self.build(sdk,environment,provider,'output.o',command='compile-module');provider.unlink()
         moved=self.root/'moved output 😀';moved.mkdir();target=moved/obj.name
         shutil.move(obj,target);shutil.move(str(obj)+'.json',str(target)+'.json')
@@ -565,7 +559,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         source.write_bytes(b'"unfinished');target.write_bytes(b'keep')
         failure=self.run_binary(exe,source,target)
         self.assertEqual((failure.returncode,failure.stdout),(4,b''));self.assertEqual(target.read_bytes(),b'keep')
-        provider=self.root/'clock.ail';provider.write_text('fn clock_value()->int {return monotonic_ms();}',encoding='utf8')
+        provider=self.root/'clock.ail';provider.write_text('from ail import monotonic_ms\ndef clock_value() -> int:\n    return monotonic_ms()\n',encoding='utf8')
         obj=self.build(sdk,environment,provider,'clock.o',command='compile-module');provider.unlink()
         entry=self.root/'entry.ail';entry.write_text('fn main()->int {print(clock_value());return 0;}',encoding='utf8')
         linked=self.build(sdk,environment,entry,'clock-entry','--object',obj)
@@ -594,13 +588,17 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         target=self.root/'stream-output.csv';self.successful(exe,b'',source,target,4093,1024)
         self.same_bytes(target.read_bytes(),expected.getvalue().encode('utf8'))
         self.assertGreater(source.stat().st_size,1<<20)
-        provider=self.root/'stream-provider.ail'
-        provider.write_text('use csv_rewrite_stream; fn rewrite_files(input:str,output:str)->int {'
-                            'let reader=open_binary(input,"rb");try {let writer=open_binary(output,"wb");'
-                            'try {let n=csv_rewrite_stream(reader,writer,7,1024);writer.flush();return n;}'
-                            'finally {writer.close();}} finally {reader.close();}}',encoding='utf8')
-        obj=self.build(sdk,environment,provider,'stream-provider.o',command='compile-module');provider.unlink()
-        entry=self.root/'stream-entry.ail';entry.write_text('fn main()->int {print(rewrite_files(sys.argv[1],sys.argv[2]));return 0;}',encoding='utf8')
+        provider=examples/'csv_rewrite_stream.ail'
+        obj=self.build(sdk,environment,provider,'stream-provider.o',command='compile-module')
+        entry=self.root/'stream-entry.ail';entry.write_text('''fn main()->int {
+ let reader=open_binary(sys.argv[1],"rb");
+ try {
+  let writer=open_binary(sys.argv[2],"wb");
+  try {let n=csv_rewrite_stream(reader,writer,7,1024);writer.flush();print(n);return 0;}
+  finally {writer.close();}
+ }
+ finally {reader.close();}
+}''',encoding='utf8')
         linked=self.build(sdk,environment,entry,'linked-stream','--object',obj)
         source.write_bytes('"日本語😀",x\r\n"",last'.encode('utf8'))
         self.successful(linked,('2'+os.linesep).encode(),source,target)

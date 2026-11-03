@@ -4952,7 +4952,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
                 except (SyntaxError, ValueError):
                     entry_defs = None
-            if local_imports and entry and syntax == 'python' and (not module_only or merge_library):
+            if local_imports and (entry or (module_only and merge_library)) and syntax == 'python' and (not module_only or merge_library):
                 saved_path = os.environ.get('AIL_PATH')
                 if search_paths:
                     os.environ['AIL_PATH'] = os.pathsep.join(
@@ -6351,7 +6351,8 @@ def main(argv=None):
             parser.error('object output requires an existing directory and must differ from source')
         try:
             text = source.read_text(encoding='utf8') if is_c else _load_sources(
-                source, source_syntax=args.syntax, module_only=True, module_paths=args.module_path, **native_build.loading(args))[0]
+                source, source_syntax=args.syntax, module_only=True, module_paths=args.module_path,
+                local_imports=True, merge_library=True, **native_build.loading(args))[0]
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             parser.error(str(error))
         with tempfile.TemporaryDirectory(prefix='ail-module-') as directory:

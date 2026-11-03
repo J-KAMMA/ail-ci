@@ -19,35 +19,36 @@ def digest(source):
 
 class ReplaceBodyTests(unittest.TestCase):
     def test_unicode_crlf_and_lexical_braces_preserve_surrounding_bytes(self):
-        prefix = '# 日本語 { }\r\nfn chosen(x:int)->int {'.encode('utf8')
-        old = '\r\n let s = """日本語 } { fn fake() { }""";\r\n # } {\r\n let d = {"}": {"{": 2}};\r\n if x > 0 { return x; } else { return 0; }\r\n'.encode('utf8')
-        suffix = b'}\r\nfn untouched()->int { return 8; }\r\n'
-        body = '\r\n let text = "日本語 }";\r\n if x > 1 { return x+1; } else { return 1; }\r\n'.encode('utf8')
+        prefix = '# 日本語 { }\r\n\r\ndef chosen(x: int) -> int:\r\n'.encode('utf8')
+        old = '    s = """日本語 } { fn fake() { }"""\r\n    # } {\r\n    d = {"}": {"{": 2}}\r\n    if x > 0:\r\n        return x\r\n    else:\r\n        return 0'.encode('utf8')
+        suffix = '\r\n\r\ndef untouched() -> int:\r\n    return 8\r\n'.encode('utf8')
+        body = '    text = "日本語 }"\r\n    if x > 1:\r\n        return x+1\r\n    else:\r\n        return 1'.encode('utf8')
         source = prefix + old + suffix
         self.assertEqual(replace_body(source, 'chosen', body, digest(source)), prefix + body + suffix)
 
     def test_multiline_return_and_unicode_line_separator_offsets(self):
-        prefix=b'fn chosen()->str {'
-        old='return """line\n日本\u2028} {\nend""";'.encode()
-        suffix=b'}\nfn other()->int {return 1;}'
+        prefix=b'def chosen() -> str:\n'
+        old='    return """line\n日本\u2028} {\nend"""'.encode()
+        suffix=b'\n\ndef other() -> int:\n    return 1\n'
         source=prefix+old+suffix
-        body=b'return "new";'
+        body=b'    return "new"'
         self.assertEqual(replace_body(source,'chosen',body,digest(source)),prefix+body+suffix)
     def test_only_qualified_method_changes(self):
-        prefix = b'struct Box { x:int; }\nfn value()->int {return 4;}\nimpl Box { fn value(self)->int {'
-        suffix = b'} fn other(self)->int {return self.x;} }\nfn main()->int {return value();}\n'
-        source = prefix + b'return self.x;' + suffix
-        body = b' return self.x+1; '
+        prefix = b'class Box:\n    def __init__(self, x: int):\n        self.x = x\n\n    def value(self) -> int:\n'
+        suffix = b'\n\ndef value() -> int:\n    return 4\n\nclass Other:\n    def other(self) -> int:\n        return self.x\n\ndef main() -> int:\n    return value()\n'
+        source = prefix + b'        return self.x' + suffix
+        body = b'        return self.x + 1'
         self.assertEqual(replace_body(source, 'Box.value', body, digest(source)), prefix + body + suffix)
 
     def test_stale_unknown_unicode_and_invalid_syntax(self):
         source = b'def chosen() -> int:\n    return 1\n'
+        broken = b'def chosen() -> int:\n    return 1 +'
         cases = [(source, 'chosen', b'return 2;', '0'*64),
                  (source, 'missing', b'return 2;', digest(source)),
                  (source, 'chosen', b'\xff', digest(source)),
                  (b'\xff', 'chosen', b'return 2;', digest(b'\xff')),
                  (source, 'chosen', b'let x = ;', digest(source)),
-                 (b'fn chosen()->int {return ;', 'chosen', b'return 2;', digest(b'fn chosen()->int {return ;'))]
+                 (broken, 'chosen', b'return 2;', digest(broken))]
         for arguments in cases:
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 replace_body(*arguments)
@@ -94,22 +95,21 @@ class SourceEditCLITests(unittest.TestCase):
         self.assertFalse(report['runtime_verified'])
 
     def test_body_text_unicode_multiline_preserves_outer_bytes(self):
-        prefix = '# 日本語 😀\r\nfn helper(x:int)->int {'.encode('utf8')
-        suffix = b'}\r\nfn main()->int {return helper(2);}\r\n'
-        self.source.write_bytes(prefix + b'return x+1;' + suffix)
-        body = '\r\n let text="日本語 😀 } {";\r\n return x+len(text);\r\n'
+        prefix = '# 日本語 😀\r\n\r\ndef helper(x: int) -> int:\r\n'
+        suffix = '\r\n\r\ndef main() -> int:\r\n    return helper(2)\r\n\r\nmain()\r\n'.encode('utf8')
+        self.source.write_bytes(prefix.encode('utf8') + b'    return x+1' + suffix)
+        body = '    text="日本語 😀 } {"\r\n    return x+len(text)'
         status, report = self.edit(body_text=body)
         self.assertEqual(status, 0, report)
         self.assertEqual(report['schema'], 'ail.edit/1')
-        self.assertEqual(self.output.read_bytes(), prefix + body.encode('utf8') + suffix)
+        self.assertEqual(self.output.read_bytes(), prefix.encode('utf8') + body.encode('utf8') + suffix)
         self.assertFalse(self.body.exists())
         self.assertFalse(report['link_verified'])
         self.assertFalse(report['runtime_verified'])
 
     def test_body_text_empty_void_body_is_supplied(self):
-        prefix = '# 日本語 😀\r\nfn helper()->void {'.encode('utf8')
-        suffix = b'}\r\nfn main()->int {helper();return 0;}\r\n'
-        source = prefix + b'let value=1;' + suffix
+        source = ('# 日本語 😀\r\nfn helper()->void {\r\n    let value=1;\r\n}\r\n'
+                  'fn main()->int {helper();return 0;}\r\n').encode('utf8')
         for inline in (False, True):
             with self.subTest(inline=inline):
                 self.source.write_bytes(source)
@@ -118,7 +118,7 @@ class SourceEditCLITests(unittest.TestCase):
                 self.assertEqual(status, 0, report)
                 self.assertEqual(report['schema'], 'ail.edit/1')
                 self.assertEqual(report['candidate_check']['status'], 'passed')
-                self.assertEqual(output.read_bytes(), prefix + suffix)
+                self.assertEqual(output.read_bytes(), ('# 日本語 😀\r\nfn helper()->void {}\r\nfn main()->int {helper();return 0;}\r\n').encode('utf8'))
                 self.assertFalse(report['link_verified'])
                 self.assertFalse(report['runtime_verified'])
 

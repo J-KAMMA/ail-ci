@@ -79,9 +79,9 @@ class CheckRepairContextTests(unittest.TestCase):
         self.assertEqual(context['imports'], ['helper'])
 
     def test_struct_method_contract_and_type_failures(self):
-        for body, code in (('let ignored=1;', 'contract'), ('return "wrong";', 'type')):
-            with self.subTest(code=code):
-                source = self.source('struct Item {value:int;}\nimpl Item {fn bad(self)->int {' + body + '}}\nfn main()->int {return 0;}')
+        for body, code in (('        return', 'type'), ('        return "wrong"', 'type')):
+            with self.subTest(body=body):
+                source = self.source('class Item:\n\n    def __init__(self, value: int):\n        self.value = value\n\n    def bad(self) -> int:\n' + body + '\n\ndef main() -> int:\n    return 0\n\nmain()\n')
                 status, report = self.check(source, '--repair-context')
                 self.assertEqual(status, 1, report)
                 self.assertEqual(report['diagnostics'][0]['code'], code)

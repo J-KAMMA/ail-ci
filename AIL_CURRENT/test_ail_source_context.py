@@ -35,16 +35,16 @@ class SourceContextTests(unittest.TestCase):
             replace_body(changed, 'chosen', b'return 3;', report['source_sha256'])
 
     def test_unicode_crlf_and_braces_return_exact_inner_body(self):
-        body = '\r\n # 日本 } {\r\n let s = """日本\u2028} {""";\r\n if true {return s;} else {return "}";}\r\n'.encode()
-        source = b'fn chosen()->str {' + body + b'}\r\nfn other()->int {return 9;}\r\n'
+        body = '    s = """日本\u2028} {"""\r\n    if True:\r\n        return s\r\n    return "}"'.encode()
+        source = b'def chosen() -> str:\r\n' + body + b'\r\n\r\ndef other() -> int:\r\n    return 9\r\n'
         report = context(source, 'chosen', include_body=True)
         self.assertEqual(report['body'], body.decode('utf8'))
         self.assertEqual(report['body_sha256'], digest(body))
         self.assertNotIn('body', context(source, 'chosen'))
 
     def test_unrelated_large_body_is_omitted_and_context_is_smaller(self):
-        unrelated = b'let unused = "' + b'UNSELECTED_BODY_' * 2000 + b'"; return 9;'
-        source = b'fn chosen()->int {return 1;} fn other()->int {' + unrelated + b'}'
+        unrelated = b'def other() -> int:\n    unused = "' + b'UNSELECTED_BODY_' * 2000 + b'"\n    return 9\n'
+        source = b'def chosen() -> int:\n    return 1\n\n' + unrelated
         report = context(source, 'chosen')
         encoded = json.dumps(report).encode()
         self.assertNotIn(b'UNSELECTED_BODY_', encoded)
@@ -89,7 +89,7 @@ class SourceContextTests(unittest.TestCase):
         self.assertFalse(report['type_verified'])
     def test_empty_missing_invalid_syntax_and_utf8_are_refused(self):
         for source, symbol in [(b'', 'chosen'), (b'def chosen() -> int:\n    return 1\n', 'missing'),
-                               (b'fn chosen()->int {let x = ;}', 'chosen'), (b'\xff', 'chosen')]:
+                               (b'def chosen() -> int:\n    return 1 +\n', 'chosen'), (b'\xff', 'chosen')]:
             with self.subTest(source=source, symbol=symbol), self.assertRaises(ValueError):
                 context(source, symbol)
 
@@ -154,7 +154,7 @@ class SourceContextCLITests(unittest.TestCase):
                 self.assertEqual(report['schema'], 'ail.context/1')
                 self.assertEqual(report['status'], 'failed')
                 self.assertTrue(report['error'])
-        for invalid in (b'', b'\xff', b'fn chosen()->int {let x = ;}'):
+        for invalid in (b'', b'\xff', b'def chosen() -> int:\n    return 1 +\n'):
             self.source.write_bytes(invalid)
             status, report = self.invoke()
             self.assertEqual(status, 2, report)
