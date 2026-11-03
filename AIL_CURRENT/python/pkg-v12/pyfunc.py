@@ -15828,6 +15828,10 @@ def _attr_assign_inner(target, value, ctx, ind):
     elif ft in MAPS:
         value_slot, _ = ctx.temp(ft)
         capture_value = '({ const ail_%s *_source = %s; ail_%s_replace(&%s, ail_%s_copy(_source)); })' % (ft, v, ft, value_slot, ft)
+    elif ft == SLIST and isinstance(value, ast.Name) and value.id in getattr(ctx, 'packed_slist', ()):
+        # `o.f = xs` with `xs` a packed `ail_pslist` local: the field takes the local's storage
+        # whole (ail_pslist_move), so the column is never copied a second time.
+        value_slot, capture_value = ctx.cname(value.id), '(void)0'
     elif (ft == SLIST and isinstance(value, ast.Name) and value.id in ctx.locals
           and ctx.type_of(value.id) == SLIST and isinstance(target.value, ast.Name)):
         # `o.f = xs` with `xs` a local list[str] and `o` a name: reading `o` runs nothing, and
@@ -15878,6 +15882,8 @@ def _attr_assign_inner(target, value, ctx, ind):
         return pre + '%s%s(&%s->f_%s, %s, 0);\n' % (pad, _olist_helper(ft, 'store'), owner, target.attr, value_slot)
     if _is_obj_kind(ft):
         return pre + '%sail_obj_store_%s(&%s->f_%s, %s, 0);\n' % (pad, ft[1], owner, target.attr, value_slot)
+    if ft == SLIST and isinstance(value, ast.Name) and value.id in getattr(ctx, 'packed_slist', ()):
+        return pre + '%sail_pslist_move(&%s->f_%s, &%s);\n' % (pad, owner, target.attr, value_slot)
     if ft == SLIST:
         return pre + '%sail_obj_field_slist(&%s->f_%s, %s);\n' % (pad, owner, target.attr, value_slot)
     if ft in (LIST, FLIST):
@@ -19332,6 +19338,15 @@ def _method(node, ctx, *, as_stmt=False):
         # append branch above makes against its own promoted kind.
         if not _is_str_expr(a[0], ctx):
             raise Unsupported('%r holds str; appending a non-str value would mix types' % name)
+        if name in getattr(ctx, 'packed_slist', ()):
+            # `ail_pslist_push` copies the text immediately, so a builder buffer or a field
+            # element can be pushed as a borrowed view: no arena copy is left behind.
+            if isinstance(a[0], ast.Name) and a[0].id in getattr(ctx, 'builders', ()):
+                ctx.bl_views.add(id(a[0]))
+            for element in _slist_field_elements(a[0], ctx):
+                ctx.field_element_views.add(id(element))
+            ctx.parts.add('PSLIST')
+            return 'ail_pslist_push(&%s, %s)' % (c, _str_value(a[0], ctx))
         if _slist_local_field_view(name, a[0], ctx):
             ctx.field_element_views.add(id(a[0]))
         ctx.parts.add('SLIST')
@@ -21079,7 +21094,8 @@ def _loop_local_releases(statement, ctx, ind):
                                                 ctx.cname(name), ctx.cname(name)))
         elif kind in (LIST, FLIST, SLIST):
             # these free helpers zero the struct, so a later last-use/return free is harmless
-            out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, kind, ctx.cname(name)))
+            helper = 'pslist' if name in getattr(ctx, 'packed_slist', ()) else kind
+            out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, helper, ctx.cname(name)))
     return ''.join(out)
 
 
@@ -21096,7 +21112,8 @@ def _last_use_frees(statements, ctx, ind):
                 continue
             kind = ctx.types.get(name)
             if kind in (LIST, FLIST, SLIST):
-                out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, kind, ctx.cname(name)))
+                helper = 'pslist' if name in getattr(ctx, 'packed_slist', ()) else kind
+                out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, helper, ctx.cname(name)))
             elif kind == BYTES and _bytes_local_releasable(name, ctx):
                 out.append('%s{ ail_barena_release(&%s, %s.p); %s = (ail_bytes){0}; }\n'
                            % ('    ' * ind, ctx.barena(), ctx.cname(name), ctx.cname(name)))
@@ -21270,31 +21287,92 @@ def _append_loop_reserve(previous, node, ctx, ind):
         for child in ast.walk(stmt):
             for sub in ast.iter_child_nodes(child):
                 parents[sub] = child
-    appended = set()
-    for stmt in node.body:
-        for n in ast.walk(stmt):
-            if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                return ''
-            if isinstance(n, _APPEND_LOOP_SKIPS):
-                return ''
-            if not (isinstance(n, ast.Name) and n.id in names):
-                continue
-            attr = parents.get(n)
-            call = parents.get(attr) if attr is not None else None
-            if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
-                    and isinstance(call, ast.Call) and call.func is attr
-                    and isinstance(parents.get(call), ast.Expr)):
-                return ''
-            appended.add(n.id)
+    padded = list(getattr(ctx, 'packed_slist', ()))
+    packed = [name for name in names if name in padded]
+    plain = [name for name in names if name not in padded]
     trip = hi if len(it.args) == 1 else '(%s) - (%s)' % (hi, lo)
     limit = _LIST_RESERVE_LIMIT
     if trip.isdigit() and int(trip) <= limit:
         sized = trip
     else:
         sized = '(%s) < %d ? (%s) : %d' % (trip, limit, trip, limit)
-    return ''.join('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
-                                                    ctx.cname(name), sized)
-                   for name in names if name in appended)
+    out = []
+    if packed:
+        # A packed local only has `.append()` and `len()` uses, so control flow in the loop
+        # (an `if` around an append, a `continue`) can only make the trip count an upper bound,
+        # never make an append unsound; reserving the full range is still the right shape.
+        appended, hints, ok = set(), {}, True
+        for stmt in node.body:
+            for n in ast.walk(stmt):
+                if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    ok = False
+                    break
+                if not (isinstance(n, ast.Name) and n.id in packed):
+                    continue
+                attr = parents.get(n)
+                call = parents.get(attr) if attr is not None else None
+                if (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
+                        and isinstance(call, ast.Call) and call.func is attr
+                        and isinstance(parents.get(call), ast.Expr)):
+                    appended.add(n.id)
+                    arg = call.args[0] if len(call.args) == 1 else None
+                    hint = '0'
+                    if (isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Attribute)
+                            and isinstance(arg.value.value, ast.Name)
+                            and (arg.value.value.id in ctx.locals or arg.value.value.id in ctx.kind)):
+                        try:
+                            if _field_kind(arg.value, ctx) == SLIST:
+                                hint = '(%s)->f_%s.tn' % (ctx.cname(arg.value.value.id), arg.value.attr)
+                        except Unsupported:
+                            hint = '0'
+                    hints.setdefault(n.id, []).append(hint)
+                    continue
+                if (isinstance(parents.get(n), ast.Call)
+                        and len(parents[n].args) == 1 and parents[n].args[0] is n
+                        and isinstance(parents[n].func, ast.Name) and parents[n].func.id == 'len'
+                        and parents[n].func.id not in ctx.funcs and parents[n].func.id not in ctx.classes):
+                    continue
+                ok = False
+                break
+            if not ok:
+                break
+        if ok:
+            for name in packed:
+                if name not in appended:
+                    continue
+                found = hints.get(name, ['0'])
+                text_hint = found[0] if all(hint == found[0] for hint in found) else '0'
+                out.append('%sail_pslist_reserve(&%s, %s, %s);\n'
+                           % ('    ' * ind, ctx.cname(name), sized, text_hint))
+    if plain:
+        appended = set()
+        ok = True
+        for stmt in node.body:
+            for n in ast.walk(stmt):
+                if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    ok = False
+                    break
+                if isinstance(n, _APPEND_LOOP_SKIPS):
+                    ok = False
+                    break
+                if not (isinstance(n, ast.Name) and n.id in plain):
+                    continue
+                attr = parents.get(n)
+                call = parents.get(attr) if attr is not None else None
+                if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
+                        and isinstance(call, ast.Call) and call.func is attr
+                        and isinstance(parents.get(call), ast.Expr)):
+                    ok = False
+                    break
+                appended.add(n.id)
+            if not ok:
+                break
+        if ok:
+            for name in plain:
+                if name in appended:
+                    out.append('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
+                                                                 ctx.cname(name), sized))
+    return ''.join(out)
 
 
 def _stmts(body, ctx, ind):
@@ -22092,6 +22170,13 @@ def _stmt_inner(node, ctx, ind):
             return _flush(ctx, pad) + ('%s(void)%s;\n%sail_slist_free(&%s); %s = %s; %s = (ail_slist){0};\n'
                                       % (pad, expression, pad, destination, destination, temporary, temporary))
         if isinstance(node.value, ast.List) and (known == SLIST or _etype(node.value, ctx) == SLIST):
+            if t.id in getattr(ctx, 'packed_slist', ()):
+                if node.value.elts:
+                    raise Unsupported('a packed list[str] local must start empty')
+                destination = ctx.declare(t.id, SLIST)
+                ctx.parts.add('PSLIST')
+                return (_flush(ctx, pad) + '%sail_pslist_free(&%s); %s = (ail_pslist){0};\n'
+                        % (pad, destination, destination))
             temporary, _ = ctx.temp(SLIST)
             ctx.parts.add('SLIST')
             out = _flush(ctx, pad) + '%sail_slist_clear(&%s);\n' % (pad, temporary)
@@ -22694,9 +22779,12 @@ def _stmt_inner(node, ctx, ind):
             # time it is COMPILED -- reading `ctx.types` alone would say "not rebound yet" and emit
             # nothing, which is exactly the bug. Outside any loop, only an actual rebinding needs it.
             rebound = ctx.types.get(t.id) == kind or ctx.loopdepth > 0
+            packed = kind == SLIST and t.id in getattr(ctx, 'packed_slist', ())
             c = ctx.declare(t.id, kind)
             ctx.parts.add('LIST' if kind == LIST else 'FLIST' if kind == FLIST
                           else 'SLIST' if kind == SLIST else 'SROW' if kind == SROWS else 'TAB')
+            if packed:
+                ctx.parts.add('PSLIST')
             # Compiler bug #7, fixed 2026-09-14: this statement used to emit nothing when the name
             # already held a container, because the declaration is hoisted to the top of the
             # function. `ys = []` inside a loop therefore kept the previous iteration's contents
@@ -22706,6 +22794,7 @@ def _stmt_inner(node, ctx, ind):
             if rebound:
                 clear = ('%sail_list_clear(&%s);' % (pad, c) if kind == LIST
                          else '%sail_flist_clear(&%s);' % (pad, c) if kind == FLIST
+                         else '%sail_pslist_free(&%s); %s = (ail_pslist){0};' % (pad, c, c) if packed
                          else '%sail_slist_clear(&%s);' % (pad, c) if kind == SLIST
                          else '%sail_srows_clear(&%s);' % (pad, c) if kind == SROWS
                          else '%sail_btab_clear(&%s);' % (pad, c) if t.id in ctx.bkeys
@@ -29695,6 +29784,119 @@ def _mark_str_lists(fn, ctx, exclude):
                           'one kind of value throughout, exactly like a plain list of numbers -- '
                           'keep it to one kind, or build two separate lists' % name)
     return strs
+
+
+def _inside_loop(node, parents):
+    """True when a statement has a `for`/`while` ancestor, so it may execute more than once."""
+    cur = parents.get(node)
+    while cur is not None:
+        if isinstance(cur, (ast.For, ast.AsyncFor, ast.While)):
+            return True
+        cur = parents.get(cur)
+    return False
+
+
+def _mark_packed_str_lists(fn, ctx):
+    """Which `list[str]` locals can be a dense `ail_pslist` instead of an `ail_slist`.
+
+    A local qualifies only when its whole life is the append-only column shape: one initial `= []`,
+    `.append(str)` and `len(x)` uses, and exactly one final whole-field store `o.f = x` into a
+    `list[str]` field, which is also x's last mention. The store must run exactly once: `ail_pslist_move`
+    zeroes the local, so a store inside a loop would hand the field an empty column on every later
+    iteration. There must be no element read, iteration, slice, sort, call argument, return, alias or
+    rebinding, and no lambda or nested function may see the name. Everything else keeps `ail_slist`,
+    so a view into the packed text can never outlive the append that reallocates it.
+    """
+    candidates = set(ctx.strlist) - set(ctx.kind) - set(getattr(ctx, 'modconsts', {}))
+    candidates -= set(ctx.flist) | set(ctx.tstride) | set(ctx.nlist) | set(ctx.handles)
+    candidates -= set(getattr(ctx, 'local_records', {}))
+    if not candidates:
+        return set()
+    parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    captured = set()
+    for node in ast.walk(fn):
+        if node is fn or not isinstance(node, (ast.Lambda, ast.FunctionDef,
+                                               ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Name):
+                captured.add(inner.id)
+            elif isinstance(inner, ast.arg):
+                captured.add(inner.arg)
+    mentions = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Name) and node.id in candidates:
+            mentions.setdefault(node.id, []).append(node)
+    packed = set()
+    for name, nodes in mentions.items():
+        if name in captured or name in ctx.modconsts:
+            continue
+        stores = [n for n in nodes if isinstance(n.ctx, (ast.Store, ast.Del))]
+        if len(stores) != 1:
+            continue
+        definition = stores[0]
+        owner = parents.get(definition)
+        if isinstance(owner, ast.AnnAssign):
+            if owner.target is not definition or owner.value is None:
+                continue
+            initial = owner.value
+        elif isinstance(owner, ast.Assign):
+            if len(owner.targets) != 1 or owner.targets[0] is not definition:
+                continue
+            initial = owner.value
+        else:
+            continue
+        if not (isinstance(initial, ast.List) and not initial.elts):
+            continue
+        field_stores = []
+        ok = True
+        for node in nodes:
+            if node is definition:
+                continue
+            if not isinstance(node.ctx, ast.Load):
+                ok = False
+                break
+            parent = parents.get(node)
+            if (isinstance(parent, ast.Attribute) and parent.value is node
+                    and parent.attr == 'append'):
+                call = parents.get(parent)
+                if not (isinstance(call, ast.Call) and call.func is parent
+                        and len(call.args) == 1 and not call.keywords):
+                    ok = False
+                    break
+                continue
+            if (isinstance(parent, ast.Call) and len(parent.args) == 1
+                    and parent.args[0] is node and not parent.keywords
+                    and isinstance(parent.func, ast.Name) and parent.func.id == 'len'
+                    and parent.func.id not in ctx.funcs and parent.func.id not in ctx.classes
+                    and parent.func.id not in ctx.kind and parent.func.id not in ctx.types):
+                continue
+            if (isinstance(parent, ast.Assign) and parent.value is node
+                    and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Attribute)):
+                try:
+                    field_kind = _field_kind(parent.targets[0], ctx)
+                except Unsupported:
+                    field_kind = None
+                if field_kind == SLIST:
+                    field_stores.append(node)
+                    continue
+            ok = False
+            break
+        if not ok or len(field_stores) != 1:
+            continue
+        store = field_stores[0]
+        if _inside_loop(store, parents):
+            # The move zeroes the local, so a store that repeats would write an empty column after
+            # the first pass; only a store executed once can move.
+            continue
+        key = max((n.lineno, n.col_offset) for n in nodes)
+        if (store.lineno, store.col_offset) != key:
+            continue
+        packed.add(name)
+    return packed
 
 
 def _mark_float_lists(fn, ctx, exclude):
@@ -39404,6 +39606,10 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # above, decided the identical way and at the identical point -- before a line of the body is
     # compiled, so `words = []` emits an `ail_slist`, not an `ail_list`, the first time it is seen.
     ctx.strlist = _mark_str_lists(fn, ctx, exclude=ctx.nlist | ctx.handles) | {n for n, k in ctx.local_annotations.items() if k == SLIST}
+    # arena1 S4: a list[str] local that is only built by `.append`, measured by `len`, and moved
+    # once into a list[str] field is a dense `ail_pslist` local, not an `ail_slist` spine. Same
+    # point as every other container kind: decided before a line of the body is compiled.
+    ctx.packed_slist = _mark_packed_str_lists(fn, ctx)
     # AIL_TASK_p3idioms2_20260916.md idiom 8: a str-field row list, decided here -- AFTER
     # `_promote_floats` has settled `ctx.slist_names` (`rows.append((parts[0], int(parts[1])))`
     # needs `parts[0]` already known str, which is exactly the fact `_promote_floats` exposes,
@@ -39560,7 +39766,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         if ctx.types[v] == FLIST:
             return 'ail_flist_free'
         if ctx.types[v] == SLIST:
-            return 'ail_slist_free'
+            return 'ail_pslist_free' if v in getattr(ctx, 'packed_slist', ()) else 'ail_slist_free'
         if ctx.types[v] == SROWS:
             return 'ail_srows_free'
         # A bytes-keyed set/dict is an `ail_btab`, not an `ail_tab` (cruntime.BTAB), and a
@@ -39743,7 +39949,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         if ctx.exc_frame and _frame_ptr_kind(t) and v not in plain_cells:
             ct = ('ail_str' if t == STR else 'ail_bytes' if t == BYTES
                   else 'ail_nsum' if t == NSUM
-                  else 'ail_flist' if t == FLIST else 'ail_slist' if t == SLIST else 'ail_%s' % t if t in MAPS
+                  else 'ail_flist' if t == FLIST else 'ail_pslist' if t == SLIST and v in getattr(ctx, 'packed_slist', ()) else 'ail_slist' if t == SLIST else 'ail_%s' % t if t in MAPS
                   else 'ail_srows' if t == SROWS else 'ail_srow' if t == SROW
                   else 'ail_list' if t == LIST else tab_struct)
             decls += frame_cell(ct, 'v_' + v)
@@ -39763,6 +39969,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   # traps in `ail_pool_at` instead of silently aliasing whatever sits at index 0.
                   else '    %sint64_t %s = -1;\n' % (qual(ctx.cname(v), v), ctx.cname(v)) if t == HANDLE
                   else '    ail_flist %s = {0};\n' % ctx.cname(v) if t == FLIST
+                  else '    ail_pslist %s = {0};\n' % ctx.cname(v) if t == SLIST and v in getattr(ctx, 'packed_slist', ())
                   else '    ail_slist %s = {0};\n' % ctx.cname(v) if t == SLIST
                   else '    ail_%s %s = {0};\n' % (t, ctx.cname(v)) if t in MAPS
                   else '    ail_srows %s = {0};\n' % ctx.cname(v) if t == SROWS
