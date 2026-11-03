@@ -1,3 +1,15 @@
+## 2026-11-03 -- onelang s7 finish: batch 2 re-verified after the hung review
+
+Applied `e971249` on `job-onelangs7b` and kept both DEVLOG entries.  All 33 Appendix C modules pass
+`tools/par_check.py -j 2`; `test_ail_ir_rulex`'s six AddressSanitizer failures under `ulimit -v
+1500000` are that limit refusing the shadow mapping, not the code (it passes without the limit).
+The `fn main(` line count is 144 before and 102 after, exactly the 102 lines of
+`AIL_CURRENT/onelang_brace_only.txt`; every listed line still holds an unconverted source and no
+remaining source is unlisted.  No module with a `pyfunc.to_c` SHA-256 pin was converted
+(`test_ail_numeric_bindings`, `test_ail_builtin_maps` and `test_ail_build_reports` stay brace and
+their pins pass).  `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_ail2py` and `test_ail_map_fields` pass, and `update_manifest.py --check` passes.
+
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class
