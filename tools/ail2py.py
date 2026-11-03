@@ -205,16 +205,16 @@ def _is_bool_expression(node, bool_functions, bool_names=()):
     return False
 
 
-def _bool_declarations(tree, bool_functions):
-    """Names known to hold a bool (annotations and assignments of bool expressions)."""
-    names = set()
+def _bool_declarations(nodes, bool_functions, base=(), function=None):
+    """Names known to hold a bool in one scope (annotations, parameters, bool expressions)."""
+    names = set(base)
+    if function is not None:
+        for argument in [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]:
+            if _annotation_name(argument.annotation) in _BOOL_RESULTS:
+                names.add(argument.arg)
     assignments = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for argument in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
-                if _annotation_name(argument.annotation) in _BOOL_RESULTS:
-                    names.add(argument.arg)
-        elif isinstance(node, ast.AnnAssign):
+    for node in nodes:
+        if isinstance(node, ast.AnnAssign):
             if _annotation_name(node.annotation) in _BOOL_RESULTS \
                     and isinstance(node.target, ast.Name):
                 names.add(node.target.id)
@@ -265,85 +265,144 @@ def _container_annotation(node):
     return False
 
 
-def _container_declarations(tree):
-    """Names known to hold a list/dict/set (annotations, parameters, fresh values)."""
-    names = set()
-    fields = set()
+def _class_fields(tree):
+    """Each class's field types, from the annotations of its generated ``__init__`` parameters."""
+    raw = {}
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for argument in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
-                if _container_annotation(argument.annotation):
-                    names.add(argument.arg)
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if _container_annotation(node.annotation):
-                names.add(node.target.id)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            init = next((item for item in node.body if isinstance(item, ast.FunctionDef)
-                         and item.name == '__init__'), None)
-            if init is None:
-                continue
-            params = {argument.arg: argument.annotation for argument in
-                      [*init.args.posonlyargs, *init.args.args, *init.args.kwonlyargs]}
-            for item in ast.walk(init):
-                if isinstance(item, ast.Assign) and len(item.targets) == 1 \
-                        and isinstance(item.targets[0], ast.Attribute) \
-                        and isinstance(item.targets[0].value, ast.Name) \
-                        and item.targets[0].value.id == 'self' \
-                        and isinstance(item.value, ast.Name) \
-                        and _container_annotation(params.get(item.value.id)):
-                    fields.add(item.targets[0].attr)
-    assignments = [node for node in ast.walk(tree)
+        if not isinstance(node, ast.ClassDef):
+            continue
+        init = next((item for item in node.body if isinstance(item, ast.FunctionDef)
+                     and item.name == '__init__'), None)
+        if init is None:
+            raw[node.name] = {}
+            continue
+        params = {argument.arg: argument.annotation for argument in
+                  [*init.args.posonlyargs, *init.args.args, *init.args.kwonlyargs]}
+        fields = {}
+        for item in ast.walk(init):
+            if isinstance(item, ast.Assign) and len(item.targets) == 1 \
+                    and isinstance(item.targets[0], ast.Attribute) \
+                    and isinstance(item.targets[0].value, ast.Name) \
+                    and item.targets[0].value.id == 'self' \
+                    and isinstance(item.value, ast.Name) \
+                    and params.get(item.value.id) is not None:
+                fields[item.targets[0].attr] = params[item.value.id]
+        raw[node.name] = fields
+    result = {name: {} for name in raw}
+    for name, fields in raw.items():
+        for attr, annotation in fields.items():
+            result[name][attr] = _annotation_type(annotation, result)
+    return result
+
+
+def _annotation_type(node, class_fields):
+    if node is None:
+        return None
+    if _container_annotation(node):
+        return ('container',)
+    name = _annotation_name(node)
+    if name in class_fields:
+        return ('struct', name)
+    return ('other', name)
+
+
+def _infer_type(node, env, class_fields, alias_returns):
+    if isinstance(node, (ast.List, ast.Dict, ast.Set)):
+        return ('container',)
+    if isinstance(node, ast.Name):
+        return env.get(node.id)
+    if isinstance(node, ast.Attribute):
+        base = _infer_type(node.value, env, class_fields, alias_returns)
+        if base is not None and base[0] == 'struct':
+            return class_fields.get(base[1], {}).get(node.attr)
+        return None
+    if isinstance(node, ast.Call):
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        if name in class_fields:
+            return ('struct', name)
+        if name in alias_returns or name in ('list', 'dict', 'set'):
+            return ('container',)
+        return None
+    if isinstance(node, ast.IfExp):
+        return _infer_type(node.body, env, class_fields, alias_returns) \
+            or _infer_type(node.orelse, env, class_fields, alias_returns)
+    return None
+
+
+def _merge_type(env, name, kind):
+    if kind is None:
+        return False
+    old = env.get(name)
+    if old == kind:
+        return False
+    if old is None:
+        env[name] = kind
+        return True
+    if old[0] == 'container' or kind[0] == 'container':
+        merged = ('container',)
+    elif old[0] == 'struct' and kind[0] != 'struct':
+        merged = old
+    elif kind[0] == 'struct' and old[0] != 'struct':
+        merged = kind
+    else:
+        return False
+    if merged == old:
+        return False
+    env[name] = merged
+    return True
+
+
+def _scope_nodes(function):
+    """The nodes of one function body, without those of a nested function or class."""
+    for child in ast.iter_child_nodes(function):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield child
+        yield from _scope_nodes(child)
+
+
+def _scope_types(function, class_fields, alias_returns, base=None):
+    """The name types of one function, without another function's parameters or locals."""
+    env = dict(base or {})
+    for argument in [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]:
+        if argument.annotation is not None:
+            env[argument.arg] = _annotation_type(argument.annotation, class_fields)
+    assignments = [node for node in _scope_nodes(function)
                    if isinstance(node, (ast.Assign, ast.AnnAssign))]
     changed = True
     while changed:
         changed = False
         for node in assignments:
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            values = [node.value]
-            if any(isinstance(target, ast.Name) and target.id in names for target in targets):
-                continue
-            if any(isinstance(target, ast.Name) for target in targets) and any(
-                    _container_value(value, names, fields) for value in values):
-                for target in targets:
-                    if isinstance(target, ast.Name) and target.id not in names:
-                        names.add(target.id)
-                        changed = True
-    return names, fields
+            if isinstance(node, ast.AnnAssign) and node.annotation is not None \
+                    and isinstance(node.target, ast.Name):
+                kind = _annotation_type(node.annotation, class_fields)
+            else:
+                kind = _infer_type(node.value, env, class_fields, alias_returns)
+            for target in targets:
+                if isinstance(target, ast.Name) and _merge_type(env, target.id, kind):
+                    changed = True
+    return env
 
 
-def _scope_container_names(tree, function):
-    """Container names visible at one assignment, without another function's parameters."""
-    if function is not None:
-        local, _ = _container_declarations(function)
-    else:
-        local = set()
-    module = set()
-    for node in tree.body:
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
-                and _container_annotation(node.annotation):
-            module.add(node.target.id)
-        elif isinstance(node, ast.Assign):
-            if isinstance(node.value, (ast.List, ast.Dict, ast.Set)):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        module.add(target.id)
-    return local | module
-
-
-def _container_value(node, names, fields):
-    if isinstance(node, (ast.List, ast.Dict, ast.Set)):
-        return True
-    if isinstance(node, ast.Name):
-        return node.id in names
-    if isinstance(node, ast.Attribute):
-        return node.attr in fields
-    if isinstance(node, ast.Call):
-        return isinstance(node.func, ast.Name) and node.func.id in _ALIAS_RETURNS[0]
-    return False
-
-
-_ALIAS_RETURNS = [set()]
+def _module_types(tree, class_fields, alias_returns):
+    env = {}
+    assignments = [node for node in tree.body
+                   if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    changed = True
+    while changed:
+        changed = False
+        for node in assignments:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if isinstance(node, ast.AnnAssign) and node.annotation is not None \
+                    and isinstance(node.target, ast.Name):
+                kind = _annotation_type(node.annotation, class_fields)
+            else:
+                kind = _infer_type(node.value, env, class_fields, alias_returns)
+            for target in targets:
+                if isinstance(target, ast.Name) and _merge_type(env, target.id, kind):
+                    changed = True
+    return env
 
 
 def _alias_returns(tree):
@@ -415,9 +474,23 @@ def _copy_container_aliases(text, source_path=None, source=None):
     """Write ``.copy()`` where a brace container is stored into a second place and copies."""
     tree = ast.parse(text)
     analysis = _analysis_tree(text, source_path, source)
-    _ALIAS_RETURNS[0] = _alias_returns(analysis)
-    names, fields = _container_declarations(analysis)
+    alias_returns = _alias_returns(analysis)
+    class_fields = _class_fields(analysis)
     structs = _struct_containers(analysis)
+    module_types = _module_types(analysis, class_fields, alias_returns)
+    type_cache = {}
+
+    def env_for(function):
+        if function is None:
+            return module_types
+        key = id(function)
+        if key not in type_cache:
+            type_cache[key] = _scope_types(function, class_fields, alias_returns, module_types)
+        return type_cache[key]
+
+    def is_container(node, function):
+        kind = _infer_type(node, env_for(function), class_fields, alias_returns)
+        return kind is not None and kind[0] == 'container'
 
     def used_after(name, function, call):
         for item in ast.walk(function) if function is not None else ast.walk(tree):
@@ -459,19 +532,36 @@ def _copy_container_aliases(text, source_path=None, source=None):
                 return True
         return False
 
+    def mutates_through_element(name, function, node):
+        """A later write reaches an element of container ``name`` (``xs[0].append(...)``)."""
+        for item in ast.walk(function) if function is not None else ast.walk(tree):
+            if (getattr(item, 'lineno', -1), getattr(item, 'col_offset', -1)) <= (node.end_lineno, node.end_col_offset):
+                continue
+            if isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute) \
+                    and item.func.attr in _MUTATING_METHODS:
+                base = item.func.value
+                if isinstance(base, ast.Subscript) and isinstance(base.value, ast.Name) \
+                        and base.value.id == name:
+                    return True
+            if isinstance(item, ast.Subscript) and isinstance(item.ctx, ast.Store) \
+                    and isinstance(item.value, ast.Subscript) \
+                    and isinstance(item.value.value, ast.Name) \
+                    and item.value.value.id == name:
+                return True
+        return False
+
     targets = []
     for node, function in _walk_with_function(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             assign_targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             if any(isinstance(target, (ast.Subscript, ast.Attribute)) for target in assign_targets):
-                scope_names = _scope_container_names(tree, function)
-                if not _container_value(value, scope_names, fields):
+                if not is_container(value, function):
                     continue
                 if isinstance(value, ast.Name):
                     copy = used_after(value.id, function, node)
                 elif isinstance(value, ast.Call) and isinstance(value.func, ast.Name) \
-                        and value.func.id in _ALIAS_RETURNS[0]:
+                        and value.func.id in alias_returns:
                     copy = any(isinstance(argument, ast.Name)
                                and used_after(argument.id, function, node)
                                for argument in value.args)
@@ -484,12 +574,26 @@ def _copy_container_aliases(text, source_path=None, source=None):
                 continue
             if not all(isinstance(target, ast.Name) for target in assign_targets):
                 continue
+            if isinstance(value, ast.List):
+                through = any(mutates_through_element(target.id, function, node)
+                              for target in assign_targets)
+                for element in value.elts:
+                    if not is_container(element, function):
+                        continue
+                    if isinstance(element, ast.Name) and (
+                            through or mutated_after(element.id, function, node)):
+                        targets.append(element)
+                    elif isinstance(element, ast.Attribute) and isinstance(element.value, ast.Name) \
+                            and (through or mutated_attribute_after(
+                                element.value.id, element.attr, function, node)):
+                        targets.append(element)
+                continue
             if isinstance(value, ast.Name) or \
                     (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
-                     and value.func.id in _ALIAS_RETURNS[0]):
-                if _container_value(value, names, fields):
+                     and value.func.id in alias_returns):
+                if is_container(value, function):
                     targets.append(value)
-            elif isinstance(value, ast.Attribute) and _container_value(value, names, fields):
+            elif isinstance(value, ast.Attribute) and is_container(value, function):
                 target_name = assign_targets[0].id if isinstance(assign_targets[0], ast.Name) else None
                 source_name = value.value.id if isinstance(value.value, ast.Name) else None
                 if (target_name and mutated_after(target_name, function, node)) or \
@@ -497,10 +601,10 @@ def _copy_container_aliases(text, source_path=None, source=None):
                     targets.append(value)
         elif isinstance(node, ast.List):
             for element in node.elts:
-                if isinstance(element, ast.Name) and _container_value(element, names, fields) \
+                if isinstance(element, ast.Name) and is_container(element, function) \
                         and mutated_after(element.id, function, node):
                     targets.append(element)
-                elif isinstance(element, ast.Attribute) and _container_value(element, names, fields) \
+                elif isinstance(element, ast.Attribute) and is_container(element, function) \
                         and isinstance(element.value, ast.Name) \
                         and mutated_attribute_after(element.value.id, element.attr, function, node):
                     targets.append(element)
@@ -510,7 +614,7 @@ def _copy_container_aliases(text, source_path=None, source=None):
                 if index >= len(node.args):
                     continue
                 value = node.args[index]
-                if isinstance(value, ast.Name) and _container_value(value, names, fields) \
+                if isinstance(value, ast.Name) and is_container(value, function) \
                         and used_after(value.id, function, node):
                     targets.append(value)
     if not targets:
@@ -540,13 +644,18 @@ def _wrap_int_bool_returns(text, source_path=None, source=None):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and _annotation_name(node.returns) in _BOOL_RESULTS
     }
-    bool_names = _bool_declarations(analysis, bool_functions)
+    module_bool_names = _bool_declarations(
+        [item for item in analysis.body if isinstance(item, (ast.Assign, ast.AnnAssign))],
+        bool_functions)
     targets = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if _annotation_name(node.returns) not in _INT_RESULTS:
             continue
+        scope = [item for item in _scope_nodes(node)
+                 if isinstance(item, (ast.Assign, ast.AnnAssign))]
+        bool_names = _bool_declarations(scope, bool_functions, module_bool_names, node)
         for statement in _returns_in(node.body):
             value = statement.value
             if value is not None and _is_bool_expression(value, bool_functions, bool_names):

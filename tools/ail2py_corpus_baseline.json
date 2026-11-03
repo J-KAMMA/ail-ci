@@ -363,7 +363,7 @@
     {
       "stem": "collection_state_example",
       "result": "differ",
-      "first_difference": "typedef struct ail_obj_NamedCounters ail_obj_NamedCounters;",
+      "first_difference": "static void ail_unwind_py_main(void **p) { ail_list_free(p[0]); ail_list_free(p[1]); ail_list_free(p[2]); ail_list_free(p[3]); ail_sdict_free(p[4]); ail_sdict_free(p[5]); ail_sdict_free(p[6]); ail_sdict_free(p[7]); ail_obj_release(*(ail_obj_NamedCounters **)p[8]); ail_obj_release(*(ail_obj_NamedCounters **)p[9]); ail_sarena_free(p[10]); }",
       "last_stderr": ""
     },
     {
@@ -393,7 +393,7 @@
     {
       "stem": "csv_float_group_main",
       "result": "differ",
-      "first_difference": "typedef struct ail_obj_Utf8Decoder ail_obj_Utf8Decoder;",
+      "first_difference": "static void ail_unwind_csv_decode_feed(void **p) { ail_slist_free(p[0]); ail_slist_free(p[1]); ail_obj_release(*(ail_olist **)p[2]); ail_obj_release(*(ail_olist **)p[3]); ail_obj_release(*(ail_olist **)p[4]); ail_obj_release(*(ail_obj_CsvRow **)p[5]); ail_obj_release(*(ail_obj_CsvRow **)p[6]); ail_obj_release(*(ail_obj_CsvDecoder **)p[7]); ail_sarena_free(p[8]); }",
       "last_stderr": ""
     },
     {
@@ -417,13 +417,13 @@
     {
       "stem": "csv_stream_main",
       "result": "differ",
-      "first_difference": "typedef struct ail_obj_CsvRow ail_obj_CsvRow;",
+      "first_difference": "static void ail_unwind_csv_decode_feed(void **p) { ail_slist_free(p[0]); ail_slist_free(p[1]); ail_obj_release(*(ail_olist **)p[2]); ail_obj_release(*(ail_olist **)p[3]); ail_obj_release(*(ail_olist **)p[4]); ail_obj_release(*(ail_obj_CsvRow **)p[5]); ail_obj_release(*(ail_obj_CsvRow **)p[6]); ail_obj_release(*(ail_obj_CsvDecoder **)p[7]); ail_sarena_free(p[8]); }",
       "last_stderr": ""
     },
     {
       "stem": "csv_table_main",
       "result": "differ",
-      "first_difference": "typedef struct ail_obj_Utf8Decoder ail_obj_Utf8Decoder;",
+      "first_difference": "static void ail_unwind_csv_decode_feed(void **p) { ail_slist_free(p[0]); ail_slist_free(p[1]); ail_obj_release(*(ail_olist **)p[2]); ail_obj_release(*(ail_olist **)p[3]); ail_obj_release(*(ail_olist **)p[4]); ail_obj_release(*(ail_obj_CsvRow **)p[5]); ail_obj_release(*(ail_obj_CsvRow **)p[6]); ail_obj_release(*(ail_obj_CsvDecoder **)p[7]); ail_sarena_free(p[8]); }",
       "last_stderr": ""
     },
     {
@@ -687,7 +687,7 @@
     {
       "stem": "record_report_main",
       "result": "differ",
-      "first_difference": "typedef struct ail_obj_QueryRecord ail_obj_QueryRecord;",
+      "first_difference": "static void ail_unwind_csv_decode_feed(void **p) { ail_slist_free(p[0]); ail_slist_free(p[1]); ail_obj_release(*(ail_olist **)p[2]); ail_obj_release(*(ail_olist **)p[3]); ail_obj_release(*(ail_olist **)p[4]); ail_obj_release(*(ail_obj_CsvRow **)p[5]); ail_obj_release(*(ail_obj_CsvRow **)p[6]); ail_obj_release(*(ail_obj_CsvDecoder **)p[7]); ail_sarena_free(p[8]); ail_depth--; }",
       "last_stderr": ""
     },
     {

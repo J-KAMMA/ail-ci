@@ -9,6 +9,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -93,7 +94,10 @@ def _one(stem, original, converted, work):
             record['result'] = 'identical-renamed'
         else:
             record['result'] = 'differ'
-            record['first_difference'] = ail2py._difference(left, right)[1]
+            hash_name = re.compile(r'ail_fn_[0-9a-f]+')
+            diff_left = [hash_name.sub('ail_fn_HASH', line) for line in names_left]
+            diff_right = [hash_name.sub('ail_fn_HASH', line) for line in names_right]
+            record['first_difference'] = ail2py._difference(diff_left, diff_right)[1]
     stderr = converted_built.stderr or built.stderr
     record['last_stderr'] = _last_line(stderr).replace(str(work), '<work>')
     return record

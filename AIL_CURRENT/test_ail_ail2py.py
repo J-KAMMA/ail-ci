@@ -315,6 +315,30 @@ fn main() -> int {
 }
 '''
 
+CONTAINER_SCOPES = '''
+struct IntItem { items: int; }
+
+fn helper() -> int {
+    let b: list[int] = [1, 2];
+    return len(b);
+}
+
+fn main() -> int {
+    let b: int = 5;
+    let a = b;
+    let xs = [b];
+    b = 6;
+    let item = IntItem(7);
+    let x = item.items;
+    x = 8;
+    let list1: list[int] = [1, 2];
+    let nested: list[list[int]] = [list1];
+    nested[0].append(3);
+    print(a, xs[0], b, helper(), x, item.items, len(list1), len(nested[0]));
+    return 0;
+}
+'''
+
 CONTAINER_ALIASES = '''
 struct Holder { items: list[int]; }
 
@@ -483,6 +507,15 @@ class ConversionTests(unittest.TestCase):
         self.assertIn('[values.copy()]', converted)
         self.assertIn('saved = get(holder).copy()', converted)
         self._run_ail_and_converted('container_aliases', CONTAINER_ALIASES)
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_container_names_are_scoped_and_list_elements_copy_through_the_new_list(self):
+        _, _, converted = self.convert('container_scopes', CONTAINER_SCOPES)
+        self.assertIn('    a = b\n', converted)
+        self.assertIn('    xs = [b]\n', converted)
+        self.assertIn('    x = item.items\n', converted)
+        self.assertIn('[list1.copy()]', converted)
+        self._run_ail_and_converted('container_scopes', CONTAINER_SCOPES)
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_ail_heappush_with_equal_keys_matches_the_binary(self):

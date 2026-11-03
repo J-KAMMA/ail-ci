@@ -1,3 +1,18 @@
+## 2026-11-03 -- onelang s3b: scope container types per function and fix the corpus diff
+
+Review fixes.  Container inference is now per function and per struct field instead of a module-wide
+set of names: parameter/local annotations, assignments from struct constructors, and the annotated
+field type of the actual base object decide container-ness.  So an int local `b` is not copied
+because another function has a list `b`, and an int field `items` is not copied because another
+struct has a list `items`.  A list literal whose elements are mutated through the new list
+(`nested[0].append(3)`, `nested[0][0] = 9`) now copies each container element as R2 requires.
+The corpus report records `first_difference` after undoing module renames and normalizing
+`ail_fn_*` hashes, so it names the real C difference.  Corpus counts stay 14 identical, 46
+identical-renamed, 7 differ, 70 both-fail, 0 py-refused; all ten compare-lab `--check` are
+`identical`.  `test_ail_ail2py` gained the scoped-name/nested-element regression and passes with
+`test_ail_files` and `test_ail_corpus_findings3`; `test_ail_safetynet` still fails only
+`S4_generators_gc`, reproduced on the base checkout.
+
 ## 2026-11-03 -- onelang s3b: verification of s3 and the remaining return/store boundaries
 
 Re-applied the s3 work commit on the current integ.  Re-running `tools/ail2py_corpus.py` gives the
