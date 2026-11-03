@@ -685,6 +685,14 @@ PART_EDITS = {
          '        ail_exc_utf8_fail(b.p, b.n, "bytes are not valid UTF-8", AIL_EXC_UNICODE_DECODE);\n'
          '        if (ail_exc_top >= 0) ail_raise_named(AIL_EXC_UNICODE_DECODE);\n        ail_die("bytes are not valid UTF-8");\n        return (ail_str){0, 0, 0};'),
     ),
+    'ASCIICODEC': (
+        # a byte at or above 0x80 raises UnicodeDecodeError('ascii', data, i, i + 1, "ordinal not in range(128)")
+        ('static ail_str ail_bytes_decode_ascii(ail_sarena *A, ail_bytes b) {\n',
+         'static void ail_exc_ascii_fail(const unsigned char *b, int64_t nb, int64_t idx);\n'
+         'static ail_str ail_bytes_decode_ascii(ail_sarena *A, ail_bytes b) {\n'),
+        ('            if (ail_exc_top >= 0) ail_raise_named(AIL_EXC_UNICODE_DECODE);\n',
+         '            ail_exc_ascii_fail(b.p, b.n, i);\n'),
+    ),
     'UTF8LINES': (
         ('            if (ail_exc_top >= 0) ail_raise_named(AIL_EXC_UNICODE_DECODE);\n            ail_die("bytes are not valid UTF-8");\n            return;',
          '            ail_exc_utf8_fail(b.p, b.n, "bytes are not valid UTF-8", AIL_EXC_UNICODE_DECODE);\n'
@@ -1203,6 +1211,17 @@ static ail_str ail__exc_unicode_text(const ail_exception *e, ail_sarena *A) {
         o = snprintf((char *)q, (size_t)cap, "'%.*s' codec can't decode bytes in position %lld-%lld: %.*s", (int)a[0].n, a[0].p,
                      (long long)a[2].i, (long long)a[3].i - 1, (int)a[4].n, a[4].p);
     return (ail_str){q, o, 1};
+}
+/* `bytes.decode("ascii")` on a byte at or above 0x80, caught: UnicodeDecodeError('ascii', data, i, i + 1,
+   "ordinal not in range(128)"), exactly CPython's arguments, so str(e) is its one-byte message. */
+static void ail_exc_ascii_fail(const unsigned char *b, int64_t nb, int64_t idx) {
+    ail_exarg a[5];
+    a[0] = ail_exarg_s(ail__exc_lit("ascii"));
+    a[1] = ail_exarg_s((ail_str){b, nb, 0}); a[1].kind = 5;
+    a[2] = ail_exarg_i(idx);
+    a[3] = ail_exarg_i(idx + 1);
+    a[4] = ail_exarg_s(ail__exc_lit("ordinal not in range(128)"));
+    ail_raise_value_adopt(ail_exception_new_args(AIL_EXC_UNICODE_DECODE, 5, a));
 }
 /* an OSError for `path` with the errno of a failed open / read / stat: str(e) is "[Errno N] why: 'path'" */
 static void ail_exc_os_fail(int err, ail_str path) {
