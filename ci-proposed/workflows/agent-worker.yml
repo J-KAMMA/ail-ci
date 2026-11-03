@@ -1,0 +1,165 @@
+name: agent-worker
+# One AIL coding-agent worker run (DeepSeek V4.1 Flash through OpenCode Go, a $10/month flat plan with no extra charges)
+# on a job-* branch prepared by the maintainer's ci_job script. Owner-approved 2026-10-21.
+# - Dispatch only (repo writers). Runs only on job-* branches.
+# - Only the OpenCode key is used. harness=oc (default): the pinned OpenCode CLI (v1.19.4, sha256-checked; 1.19.3 bundled a Bun with CVE-2026-111497) reads it from
+#   its auth file in $HOME, outside the checkout, removed after the run. harness=agentpy: agent.py reads a key file and
+#   deletes it before any tool runs. The OpenCode run is cut off after 120 minutes. Before the push, the results are scanned for the key and the push is refused if found. The checkout keeps no credentials; results are pushed in a separate step after the agent
+#   has exited. With .agent/pipeline.sh present the reviewer and one fix round run here too (OpenCode CLI); the
+#   maintainer still spot-checks before merging.
+# - Packing (2026-10-28): agents mostly wait on the LLM API, so a 4-vCPU runner carries two tasks. `extra` names a second
+#   job-* branch; it is checked out in its own clone and runs the same pipeline concurrently with its own $HOME
+#   (symlinks to the shared OpenCode install and config, its own auth file) and scratch dir. Each checkout is key-scanned
+#   and pushed to its own branch separately.
+on:
+  workflow_dispatch:
+    inputs:
+      max_turns:
+        default: '250'
+      harness:
+        default: 'oc'
+      extra:
+        description: 'optional second job-* branch to run on this same runner'
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    if: startsWith(github.ref_name, 'job-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: python3 --version && gcc --version | head -1
+      - name: Key file
+        env:
+          K: ${{ secrets.OPENCODE_API_KEY }}
+          Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+        run: |
+          umask 077
+          printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
+          # Qoder CLI token (free DeepSeek V4.1 Flash until 2026-11-01 UTC+8); pipeline.sh reads it, public code only
+          [ -n "$Q" ] && printf '%s' "$Q" > "$RUNNER_TEMP/qoder.key" || true
+      - name: OpenCode CLI
+        if: inputs.harness == 'oc'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$HOME/opt/opencode" "$RUNNER_TEMP/oc"
+          gh release download v1.19.4 --repo sst/opencode -p opencode-linux-x64.tar.gz -D "$RUNNER_TEMP/oc"
+          tar -xzf "$RUNNER_TEMP/oc/opencode-linux-x64.tar.gz" -C "$HOME/opt/opencode"
+          echo "538fcb1b6408c8d4608822acee19f7ff5b3a3eb3383c0633c4f06170857312a7  $HOME/opt/opencode/opencode" | sha256sum -c -
+          mkdir -p "$HOME/.config/opencode"
+          cp .agent/opencode.json "$HOME/.config/opencode/opencode.json"
+      - name: Second checkout
+        if: inputs.extra != '' && inputs.harness == 'oc'
+        env:
+          EXTRA: ${{ inputs.extra }}
+        run: |
+          # the second job branch (same public repo, anonymous clone) outside the workspace
+          case "$EXTRA" in job-*) ;; *) echo "extra must be a job-* branch"; exit 0;; esac
+          if printf '%s' "$EXTRA" | grep -qE '[^A-Za-z0-9._-]'; then echo "bad extra branch name"; exit 0; fi
+          # its own clone, not a worktree: pipeline.sh moves the branch "work", which a shared repo would share
+          if git clone -q --depth 1 --no-tags --branch "$EXTRA" "https://github.com/${{ github.repository }}.git" "$RUNNER_TEMP/w2"; then
+            git -C "$RUNNER_TEMP/w2" config user.name "AIL agent"
+            git -C "$RUNNER_TEMP/w2" config user.email "agent@example.com"
+            git -C "$RUNNER_TEMP/w2" rev-parse HEAD > "$RUNNER_TEMP/start2"
+            printf '%s' "$EXTRA" > "$RUNNER_TEMP/extra_branch"
+          else
+            echo "could not check out $EXTRA: running the first task only"
+          fi
+      - name: Worker
+        run: |
+          git rev-parse HEAD > "$RUNNER_TEMP/start"
+          git config user.name "AIL agent"
+          git config user.email "agent@example.com"
+          # one task in checkout $1 with HOME $2 and scratch dir $3 (the shell runs it in a subshell, so HOME is per task)
+          task() {
+            cd "$1" || exit 0
+            export HOME="$2" AGENT_TMP="$3"
+            mkdir -p "$HOME/tools" "$HOME/corpus" "$AGENT_TMP"
+            cp .agent/cmp.sh .agent/cmpu.sh "$HOME/tools/" 2>/dev/null || true
+            [ -d corpus/gdev ] && ln -sfn "$PWD/corpus/gdev" "$HOME/corpus/gdev"
+            if [ "${{ inputs.harness }}" = oc ]; then
+              if [ -f .agent/pipeline.sh ]; then
+                # worker, reviewer and one fix round here, so the maintainer's machine only merges
+                bash .agent/pipeline.sh || true
+                rm -f "$HOME/.local/share/opencode/auth.json"
+                cp .agent/pipeline.md .agent/report.md
+              else
+                timeout 120m "$REAL_HOME/opt/opencode/opencode" run --format json --dir "$PWD" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f .agent/task.md > "$AGENT_TMP/oc.jsonl" 2> "$AGENT_TMP/oc.err" || true
+                rm -f "$HOME/.local/share/opencode/auth.json"
+                python3 .agent/oc_report.py "$AGENT_TMP/oc.jsonl" > .agent/report.md 2>&1 || true
+                tail -5 "$AGENT_TMP/oc.err" >> .agent/report.md
+              fi
+            else
+              python3 .agent/agent.py --provider openai --base-url https://opencode.ai/inference/go/openai/v1               --model deepseek-v4.1-flash --price-in 0.15 --price-out 0.60               --dir "$PWD" --prompt-file .agent/task.md --log .agent/work0.jsonl               --budget-usd 6 --max-turns "${{ inputs.max_turns }}" --key-file "$RUNNER_TEMP/agent.key"               > .agent/report.md 2>&1 || true
+            fi
+            tail -40 .agent/report.md
+          }
+          export REAL_HOME="$HOME"
+          mkdir -p "$HOME/.local/share/opencode"
+          if [ "${{ inputs.harness }}" = oc ]; then
+            ( umask 077; printf '{"opencode-go":{"type":"api","key":"%s"}}' "$(cat "$RUNNER_TEMP/agent.key")" > "$HOME/.local/share/opencode/auth.json" )
+            rm -f "$RUNNER_TEMP/agent.key"
+          fi
+          if [ -f "$RUNNER_TEMP/extra_branch" ]; then
+            # second task: own HOME that shares the OpenCode install and config by symlink and has its own auth file
+            H2="$RUNNER_TEMP/home2"
+            mkdir -p "$H2/.local/share/opencode"
+            ln -s "$HOME/opt" "$H2/opt"; ln -s "$HOME/.config" "$H2/.config"
+            ( umask 077; cp "$HOME/.local/share/opencode/auth.json" "$H2/.local/share/opencode/auth.json" )
+            # both tasks must finish inside the job limit: cut the pipelines a little earlier than a single task would
+            export PIPE_MIN=295
+            ( sleep 60; task "$RUNNER_TEMP/w2" "$H2" "$RUNNER_TEMP/t2" 2>&1 | sed 's/^/[2] /' ) &
+            p2=$!
+          fi
+          ( task "$PWD" "$HOME" "$RUNNER_TEMP/t1" 2>&1 | { [ -f "$RUNNER_TEMP/extra_branch" ] && sed 's/^/[1] /' || cat; } ) &
+          p1=$!
+          wait $p1 || true
+          [ -n "${p2:-}" ] && { wait $p2 || true; }
+          rm -f "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+      - name: Key scan
+        id: scan
+        if: always()
+        env:
+          K: ${{ secrets.OPENCODE_API_KEY }}
+          Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+        run: |
+          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+          bad=0
+          # scan checkout $1 (commits since the sha in $2); a clean checkout gets the marker file $3 and is pushed
+          scan() {
+            for s in "$K" "$Q"; do
+              [ -n "$s" ] || continue
+              if ( cd "$1" && { grep -rqF -e "$s" --exclude-dir=.git . || git log -p "$(cat "$2")..HEAD" | grep -qF -e "$s"; } ); then
+                echo "key found in results of $1: not pushing"; return 1
+              fi
+            done
+            touch "$3"
+          }
+          scan "$PWD" "$RUNNER_TEMP/start" "$RUNNER_TEMP/ok1" || bad=1
+          [ -f "$RUNNER_TEMP/extra_branch" ] && { scan "$RUNNER_TEMP/w2" "$RUNNER_TEMP/start2" "$RUNNER_TEMP/ok2" || bad=1; }
+          exit $bad
+      - name: Push results
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          push() {  # checkout $1, branch $2
+            ( cd "$1" && git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null) && { git commit -q -m "agent worker report" || true; } \
+              && git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:$2" )
+          }
+          rc=0
+          [ -f "$RUNNER_TEMP/ok1" ] && { push "$PWD" "${{ github.ref_name }}" || rc=1; }
+          [ -f "$RUNNER_TEMP/ok2" ] && { push "$RUNNER_TEMP/w2" "$(cat "$RUNNER_TEMP/extra_branch")" || rc=1; }
+          exit $rc
