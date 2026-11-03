@@ -1,3 +1,26 @@
+## 2026-11-03 -- codegen: popcount idiom and shared span check (job-spec2-11031052)
+
+Two exact-shape rewrites in `pyfunc._codegen_idioms`, applied once to the final generated C
+(`to_c`), keep every bounds check:
+
+* the `c = 0; v = x; while v != 0: c += v & 1; v >>= 1` idiom emits
+  `if (x >= 0) return __builtin_popcountll(x)` and keeps the original loop for negative values
+  (which do not terminate in CPython or AIL);
+* two adjacent `ail_list_span_get` reads of the same index on two numeric fields of one struct
+  share one fast-path bounds check when their counts match, and fall back to the two original
+  checked reads otherwise.
+
+Measured with callgrind on `tally_lang`'s compare-lab perf case: 21,658,123,856 -> 20,936,424,948
+instructions (-3.33%); binary 74,648 -> 74,688 bytes; RSS 22,588 -> 22,460 KiB; compile time
+3.96 -> 3.93 s. The other nine compare-lab tasks have identical instruction counts and binary
+bytes; a nine-run compile-time check on the four slowest-to-compile tasks shows no regression.
+`test_ail_span_cache`, `test_ail_numeric_loops`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; all 75 public/hidden tally cases plus its perf case match
+CPython. Probes for empty lists, last index, one past the end, unequal list lengths and popcount
+values through arguments/list items/attributes/dict values match CPython; negative popcount still
+times out on both sides. `perf_event_open` is unavailable on this runner, so instruction counts
+come from callgrind.
+
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class
