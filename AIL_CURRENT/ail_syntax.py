@@ -4550,6 +4550,975 @@ def lower_dict_of_lists(source):
     return data.decode('utf8')
 
 
+class _RecordUnsupported(Exception):
+    """The dict uses a shape this lowering does not model; leave the source as written."""
+
+
+def _r_load(name):
+    return ast.Name(id=name, ctx=ast.Load())
+
+
+def _r_store(name):
+    return ast.Name(id=name, ctx=ast.Store())
+
+
+def _r_const(value):
+    return ast.Constant(value=value)
+
+
+def _r_attr(value, attr, store=False):
+    return ast.Attribute(value=value, attr=attr, ctx=ast.Store() if store else ast.Load())
+
+
+def _r_sub(value, index, store=False):
+    return ast.Subscript(value=value, slice=index, ctx=ast.Store() if store else ast.Load())
+
+
+def _r_call(func, args, keywords=None):
+    return ast.Call(func=func, args=args, keywords=keywords or [])
+
+
+def _r_assign(target, value):
+    return ast.Assign(targets=[target], value=value)
+
+
+def _r_ann(target, annotation, value):
+    return ast.AnnAssign(target=target, annotation=annotation, value=value, simple=1)
+
+
+def _r_expr(value):
+    return ast.Expr(value=value)
+
+
+def _r_if(test, body):
+    return ast.If(test=test, body=body, orelse=[])
+
+
+def _r_cmp(left, op, right):
+    return ast.Compare(left=left, ops=[op], comparators=[right])
+
+
+def _is_set_value(node):
+    if isinstance(node, (ast.Set, ast.SetComp)):
+        return True
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'set')
+
+
+def _is_empty_dict(node):
+    if isinstance(node, ast.Dict):
+        return not node.keys
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'dict' and not node.args and not node.keywords)
+
+
+def _record_key_text(node):
+    try:
+        return ast.unparse(node)
+    except Exception:
+        return None
+
+
+def _record_hint(fn, node, assigned, seen=None):
+    """The kinds an expression may hold, as a set of category names ('int', 'bool', 'set', ...)."""
+    seen = set() if seen is None else seen
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool):
+            return {'bool'}
+        for kind in (int, float, str, bytes):
+            if isinstance(node.value, kind):
+                return {kind.__name__}
+        return set()
+    if isinstance(node, (ast.Set, ast.SetComp)):
+        return {'set'}
+    if isinstance(node, (ast.List, ast.ListComp)):
+        return {'list'}
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        name = node.func.id
+        if name == 'set':
+            return {'set'}
+        if name == 'list':
+            return {'list'}
+        if name in ('int', 'float', 'str', 'bytes', 'bool'):
+            return {name}
+        return set()
+    if isinstance(node, ast.BinOp):
+        return {'float'} if isinstance(node.op, ast.Div) else {'int'}
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            return {'bool'}
+        return _record_hint(fn, node.operand, assigned, seen)
+    if isinstance(node, (ast.Compare, ast.BoolOp)):
+        return {'bool'}
+    if isinstance(node, ast.IfExp):
+        return (_record_hint(fn, node.body, assigned, seen)
+                | _record_hint(fn, node.orelse, assigned, seen))
+    if isinstance(node, ast.Name):
+        if node.id in seen:
+            return set()
+        inner = seen | {node.id}
+        found = set()
+        for value in assigned.get(node.id, ()):
+            found |= _record_hint(fn, value, assigned, inner)
+        return found
+    return set()
+
+
+def _record_scope_statements(fn):
+    """Statements of `fn` itself (control-flow bodies included, nested scopes excluded)."""
+    stack = list(fn.body)
+    while stack:
+        stmt = stack.pop()
+        yield stmt
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for child in ast.iter_child_nodes(stmt):
+            if isinstance(child, ast.stmt):
+                stack.append(child)
+
+
+def _record_candidate_names(fn):
+    names = []
+    for stmt in _record_scope_statements(fn):
+        if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name) and _is_empty_dict(stmt.value)):
+            names.append(stmt.targets[0].id)
+    return names
+
+
+def _record_nested_scope_uses(fn, name):
+    for node in ast.walk(fn):
+        if node is fn or not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Name) and inner.id == name:
+                return True
+    return False
+
+
+def _record_classify(fn, name):
+    """('record'|'set', arity, list literals) for a candidate dict, or None."""
+    list_values = []
+    set_values = []
+    other = False
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Subscript)
+                and isinstance(node.targets[0].value, ast.Name)
+                and node.targets[0].value.id == name):
+            value = node.value
+            if isinstance(value, ast.List):
+                list_values.append(value)
+            elif _is_set_value(value):
+                set_values.append(value)
+            else:
+                other = True
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+              and node.func.attr in ('get', 'setdefault')):
+            if len(node.args) == 2:
+                default = node.args[1]
+                if isinstance(default, ast.List):
+                    list_values.append(default)
+                elif _is_set_value(default):
+                    set_values.append(default)
+                elif node.func.attr == 'setdefault':
+                    other = True
+    if other and not (list_values or set_values):
+        return None
+    if list_values and set_values:
+        raise _RecordUnsupported()
+    if list_values:
+        arity = len(list_values[0].elts)
+        if arity == 0 or any(len(value.elts) != arity for value in list_values):
+            raise _RecordUnsupported()
+        return 'record', arity, list_values
+    if set_values:
+        return 'set', 1, []
+    return None
+
+
+def _record_roles(fn, name, kind):
+    """Names bound to a row (or an items tuple) of dict `name`, from the uses this lowering knows."""
+    roles = {}
+
+    def role(nm, value):
+        if nm in roles and roles[nm] != value:
+            roles[nm] = 'conflict'
+        else:
+            roles[nm] = value
+
+    def is_items(node):
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+                and node.func.attr == 'items' and not node.args and not node.keywords)
+
+    def is_values(node):
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+                and node.func.attr == 'values' and not node.args and not node.keywords)
+
+    def unwrap(node):
+        while (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
+               and node.slice.lower is None and node.slice.step is None):
+            node = node.value
+        return node
+
+    for _ in range(4):
+        before = dict(roles)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                target, value = node.targets[0].id, node.value
+                if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                        and isinstance(value.func.value, ast.Name) and value.func.value.id == name
+                        and value.func.attr in ('get', 'setdefault')):
+                    role(target, 'row' if kind == 'record' else 'set')
+                elif (isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name)
+                      and value.value.id == name):
+                    role(target, 'row' if kind == 'record' else 'set')
+                elif (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                      and value.func.id == 'sorted' and value.args and is_items(unwrap(value.args[0]))):
+                    role(target, 'items')
+                elif isinstance(value, ast.Name) and value.id in roles and roles[value.id] in ('row', 'item', 'items'):
+                    role(target, roles[value.id])
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                it = node.iter
+                if is_values(it) and isinstance(node.target, ast.Name):
+                    role(node.target.id, 'row' if kind == 'record' else 'set')
+                elif is_items(it):
+                    if isinstance(node.target, ast.Name):
+                        role(node.target.id, 'item')
+                    elif (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
+                          and isinstance(node.target.elts[0], ast.Name)
+                          and isinstance(node.target.elts[1], ast.Name)):
+                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set')
+                elif isinstance(it, ast.Name) and roles.get(it.id) == 'items':
+                    if (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
+                            and isinstance(node.target.elts[0], ast.Name)
+                            and isinstance(node.target.elts[1], ast.Name)):
+                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set')
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted':
+                if node.args and is_items(unwrap(node.args[0])):
+                    for kw in node.keywords:
+                        if kw.arg == 'key' and isinstance(kw.value, ast.Lambda):
+                            for arg in kw.value.args.args:
+                                role(arg.arg, 'item')
+            if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+                for gen in node.generators:
+                    if is_values(gen.iter) and isinstance(gen.target, ast.Name):
+                        role(gen.target.id, 'row' if kind == 'record' else 'set')
+                    elif is_items(gen.iter):
+                        if isinstance(gen.target, ast.Name):
+                            role(gen.target.id, 'item')
+                        elif (isinstance(gen.target, ast.Tuple) and len(gen.target.elts) == 2
+                              and isinstance(gen.target.elts[1], ast.Name)):
+                            role(gen.target.elts[1].id, 'row' if kind == 'record' else 'set')
+        if roles == before:
+            break
+    return roles
+
+
+class _RecordTransformer(ast.NodeTransformer):
+    def __init__(self, fn, name, kind, arity, roles, box, taken, box_needed):
+        self.fn = fn
+        self.d = name
+        self.kind = kind
+        self.arity = arity
+        self.roles = roles
+        self.box = box
+        self.box_needed = box_needed
+        self.taken = taken
+        self.fields = []
+        for index in range(arity):
+            field = '%s__f%d' % (name, index)
+            while field in self.taken:
+                field += '_'
+            self.taken.add(field)
+            self.fields.append(field)
+        self.set_positions = set()
+        self.key_kind = None
+        self.proofs = []
+        self.assigned = {}
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                self.assigned.setdefault(node.targets[0].id, []).append(node.value)
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                self.assigned.setdefault(node.target.id, []).append(node.value)
+            elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name):
+                self.assigned.setdefault(node.target.id, []).append(node.iter)
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Subscript)
+                    and isinstance(node.targets[0].value, ast.Name)
+                    and node.targets[0].value.id == name and isinstance(node.value, ast.List)):
+                self.proofs.append((node.lineno, _record_key_text(node.targets[0].slice)))
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+                  and node.func.attr == 'setdefault' and len(node.args) == 2):
+                self.proofs.append((node.lineno, _record_key_text(node.args[0])))
+
+    def fresh(self, prefix):
+        name = prefix
+        while name in self.taken:
+            name += '_'
+        self.taken.add(name)
+        return name
+
+    def _proven(self, key, line):
+        text = _record_key_text(key)
+        if text is None:
+            return False
+        return any(at < line and other == text for at, other in self.proofs)
+
+    def _row_of(self, node):
+        if self.kind != 'record':
+            return None
+        if isinstance(node, ast.Name) and self.roles.get(node.id) == 'row':
+            return node
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            if node.value.id == self.d:
+                return node
+            if self.roles.get(node.value.id) == 'item':
+                if (isinstance(node.slice, ast.Constant) and node.slice.value == 1
+                        and not isinstance(node.slice.value, bool)):
+                    return node
+        return None
+
+    def _set_of(self, node):
+        if self.kind != 'set':
+            return None
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            if node.value.id == self.d:
+                return node
+            if (self.roles.get(node.value.id) == 'item' and isinstance(node.slice, ast.Constant)
+                    and node.slice.value == 1):
+                return node
+        return None
+
+    def _row_slot(self, node):
+        if isinstance(node, ast.Name):
+            return _r_load(node.id)
+        if isinstance(node, ast.Subscript):
+            key = self.visit(node.slice)
+            if isinstance(node.value, ast.Name) and node.value.id == self.d:
+                return _r_sub(_r_load(self.d), key)
+            if isinstance(node.value, ast.Name):
+                return _r_sub(_r_load(node.value.id), _r_const(1))
+        raise _RecordUnsupported()
+
+    def _field(self, slot, index, store=False):
+        if index < 0 or index >= self.arity:
+            raise _RecordUnsupported()
+        base = _r_sub(_r_load(self.fields[index]), slot, store=store and index not in self.set_positions)
+        if index in self.set_positions:
+            return _r_attr(base, 's', store=store)
+        return base
+
+    def _set_expr(self, node):
+        slot = self._row_slot(node)
+        return _r_attr(_r_sub(_r_load(self.fields[0]), slot), 's')
+
+    def _append_field(self, index, value):
+        if index in self.set_positions:
+            value = _r_call(_r_load(self.box), [value])
+        return _r_expr(_r_call(_r_attr(_r_load(self.fields[index]), 'append'), [value]))
+
+    def _store_row(self, key, listnode):
+        values = [self.visit(elt) for elt in listnode.elts]
+        temps = [self.fresh('_rval') for _ in values]
+        keytemp = self.fresh('_rkey')
+        out = [_r_assign(_r_store(temp), value) for temp, value in zip(temps, values)]
+        out.append(_r_assign(_r_store(keytemp), self.visit(key)))
+        for index, temp in enumerate(temps):
+            out.append(self._append_field(index, _r_load(temp)))
+        out.append(_r_assign(
+            _r_sub(_r_load(self.d), _r_load(keytemp), store=True),
+            ast.BinOp(left=_r_call(_r_load('len'), [_r_load(self.fields[0])]),
+                      op=ast.Sub(), right=_r_const(1))))
+        return out
+
+    def _store_set(self, key, value):
+        temp = self.fresh('_rval')
+        keytemp = self.fresh('_rkey')
+        out = [_r_ann(_r_store(temp), _r_sub(_r_load('set'), _r_load('int')), self.visit(value)),
+               _r_assign(_r_store(keytemp), self.visit(key)),
+               self._append_field(0, _r_load(temp)),
+               _r_assign(_r_sub(_r_load(self.d), _r_load(keytemp), store=True),
+                         ast.BinOp(left=_r_call(_r_load('len'), [_r_load(self.fields[0])]),
+                                   op=ast.Sub(), right=_r_const(1)))]
+        return out
+
+    def _insert_row(self, key, listnode, store):
+        values = [self.visit(elt) for elt in listnode.elts]
+        temps = [self.fresh('_rval') for _ in values]
+        keytemp = self.fresh('_rkey')
+        slot = self.fresh('_rslot')
+        out = [_r_assign(_r_store(keytemp), self.visit(key))]
+        out.extend(_r_assign(_r_store(temp), value) for temp, value in zip(temps, values))
+        out.append(_r_assign(_r_store(slot),
+                             _r_call(_r_attr(_r_load(self.d), 'get'),
+                                     [_r_load(keytemp), _r_const(-1)])))
+        body = [_r_assign(_r_store(slot), _r_call(_r_load('len'), [_r_load(self.fields[0])]))]
+        body.extend(self._append_field(index, _r_load(temp))
+                    for index, temp in enumerate(temps))
+        if store:
+            body.append(_r_assign(_r_sub(_r_load(self.d), _r_load(keytemp), store=True),
+                                  _r_load(slot)))
+        out.append(_r_if(_r_cmp(_r_load(slot), ast.Lt(), _r_const(0)), body))
+        return out, slot
+
+    def _insert_set(self, key, value, store):
+        temp = self.fresh('_rval')
+        keytemp = self.fresh('_rkey')
+        slot = self.fresh('_rslot')
+        out = [_r_assign(_r_store(keytemp), self.visit(key)),
+               _r_ann(_r_store(temp), _r_sub(_r_load('set'), _r_load('int')), self.visit(value)),
+               _r_assign(_r_store(slot),
+                         _r_call(_r_attr(_r_load(self.d), 'get'),
+                                 [_r_load(keytemp), _r_const(-1)]))]
+        body = [_r_assign(_r_store(slot), _r_call(_r_load('len'), [_r_load(self.fields[0])])),
+                self._append_field(0, _r_load(temp))]
+        if store:
+            body.append(_r_assign(_r_sub(_r_load(self.d), _r_load(keytemp), store=True),
+                                  _r_load(slot)))
+        out.append(_r_if(_r_cmp(_r_load(slot), ast.Lt(), _r_const(0)), body))
+        return out, slot
+
+    def _special_assign(self, target, value):
+        if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                and isinstance(value.func.value, ast.Name) and value.func.value.id == self.d):
+            return None
+        attr = value.func.attr
+        if attr not in ('get', 'setdefault') or value.keywords:
+            return None
+        if attr == 'get' and len(value.args) == 1:
+            if not self._proven(value.args[0], value.lineno):
+                raise _RecordUnsupported()
+            key = self.visit(value.args[0])
+            if self.kind == 'set':
+                slot = _r_sub(_r_load(self.d), key)
+                value_expr = _r_attr(_r_sub(_r_load(self.fields[0]), slot), 's')
+                return [_r_assign(target, value_expr)]
+            return [_r_assign(target, _r_sub(_r_load(self.d), key))]
+        if len(value.args) == 2:
+            default = value.args[1]
+            if isinstance(default, ast.List):
+                out, slot = self._insert_row(value.args[0], default, attr == 'setdefault')
+                if self.kind == 'set':
+                    raise _RecordUnsupported()
+                out.append(_r_assign(target, _r_load(slot)))
+                return out
+            if _is_set_value(default):
+                if self.kind != 'set':
+                    raise _RecordUnsupported()
+                out, slot = self._insert_set(value.args[0], default, attr == 'setdefault')
+                out.append(_r_assign(target, _r_attr(_r_sub(_r_load(self.fields[0]),
+                                                           _r_load(slot)), 's')))
+                return out
+        raise _RecordUnsupported()
+
+    def _special_expr(self, value):
+        if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                and isinstance(value.func.value, ast.Call)):
+            inner = value.func.value
+            if (isinstance(inner.func, ast.Attribute) and isinstance(inner.func.value, ast.Name)
+                    and inner.func.value.id == self.d and inner.func.attr == 'setdefault'
+                    and len(inner.args) == 2 and _is_set_value(inner.args[1])
+                    and not inner.keywords and self.kind == 'set'):
+                out, slot = self._insert_set(inner.args[0], inner.args[1], True)
+                receiver = _r_attr(_r_sub(_r_load(self.fields[0]), _r_load(slot)), 's')
+                args = [self.visit(arg) for arg in value.args]
+                keywords = [ast.keyword(arg=kw.arg, value=self.visit(kw.value))
+                            for kw in value.keywords]
+                out.append(_r_expr(_r_call(_r_attr(receiver, value.func.attr), args, keywords)))
+                return out
+            return None
+        if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                and isinstance(value.func.value, ast.Name) and value.func.value.id == self.d):
+            return None
+        attr = value.func.attr
+        if attr not in ('get', 'setdefault') or value.keywords:
+            return None
+        if len(value.args) != 2:
+            return None
+        default = value.args[1]
+        if isinstance(default, ast.List):
+            if self.kind != 'record':
+                raise _RecordUnsupported()
+            out, _slot = self._insert_row(value.args[0], default, attr == 'setdefault')
+            return out
+        if _is_set_value(default):
+            if self.kind != 'set':
+                raise _RecordUnsupported()
+            out, _slot = self._insert_set(value.args[0], default, attr == 'setdefault')
+            return out
+        raise _RecordUnsupported()
+
+    def visit_Expr(self, node):
+        special = self._special_expr(node.value)
+        if special is not None:
+            return special
+        return self.generic_visit(node)
+
+    def visit_Assign(self, node):
+        if len(node.targets) != 1:
+            return self.generic_visit(node)
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id == self.d:
+            if _is_empty_dict(node.value):
+                if self.key_kind in ('int', 'str'):
+                    node = ast.AnnAssign(
+                        target=node.targets[0],
+                        annotation=ast.Subscript(value=_r_load('dict'),
+                                                 slice=ast.Tuple(elts=[_r_load(self.key_kind),
+                                                                       _r_load('int')],
+                                                                 ctx=ast.Load()),
+                                                 ctx=ast.Load()),
+                        value=node.value, simple=1)
+                out = [node]
+                for index, field in enumerate(self.fields):
+                    value = ast.List(elts=[], ctx=ast.Load())
+                    if index in self.set_positions:
+                        out.append(ast.AnnAssign(
+                            target=_r_store(field),
+                            annotation=ast.Subscript(value=_r_load('list'), slice=_r_load(self.box),
+                                                     ctx=ast.Load()),
+                            value=value, simple=1))
+                    else:
+                        out.append(_r_assign(_r_store(field), value))
+                return out
+            raise _RecordUnsupported()
+        if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                and target.value.id == self.d):
+            if isinstance(node.value, ast.List):
+                if self.kind != 'record':
+                    raise _RecordUnsupported()
+                return self._store_row(target.slice, node.value)
+            if _is_set_value(node.value):
+                if self.kind != 'set':
+                    raise _RecordUnsupported()
+                return self._store_set(target.slice, node.value)
+            raise _RecordUnsupported()
+        if isinstance(target, ast.Name):
+            special = self._special_assign(target, node.value)
+            if special is not None:
+                return special
+            role = self.roles.get(target.id)
+            if role in ('row', 'item', 'items') and self._row_of(node.value) is not None:
+                if role == 'row':
+                    return [_r_assign(target, self._row_slot(node.value))]
+                if role == 'item' and isinstance(node.value, ast.Subscript):
+                    return [_r_assign(target, self._row_slot(node.value))]
+            if (role in ('row', 'item', 'items') and isinstance(node.value, ast.Name)
+                    and self.roles.get(node.value.id) == role):
+                return [node]
+            node.value = self.visit(node.value)
+            return [node]
+        if isinstance(target, ast.Subscript):
+            newtarget = self.visit(target)
+            return [_r_assign(newtarget, self.visit(node.value))]
+        return self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        node.target = self.visit(node.target)
+        node.value = self.visit(node.value)
+        return node
+
+    def visit_Delete(self, node):
+        for target in node.targets:
+            if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                    and target.value.id == self.d):
+                target.slice = self.visit(target.slice)
+            elif isinstance(target, ast.Name) and (target.id == self.d
+                                                   or self.roles.get(target.id) in ('row', 'item', 'items')):
+                raise _RecordUnsupported()
+            else:
+                self.visit(target)
+        return node
+
+    def visit_Subscript(self, node):
+        if (isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int)
+                and not isinstance(node.slice.value, bool)):
+            index = node.slice.value
+            row = self._row_of(node.value)
+            if row is not None:
+                return self._field(self._row_slot(row), index, store=isinstance(node.ctx, ast.Store))
+            if isinstance(node.value, ast.Name) and self.roles.get(node.value.id) == 'item':
+                if index in (0, 1):
+                    return node
+                raise _RecordUnsupported()
+        if self.kind == 'set':
+            if isinstance(node.value, ast.Name) and node.value.id == self.d:
+                if isinstance(node.ctx, ast.Load):
+                    return self._set_expr(node)
+                raise _RecordUnsupported()
+            if (isinstance(node.value, ast.Name) and self.roles.get(node.value.id) == 'item'
+                    and isinstance(node.slice, ast.Constant) and node.slice.value == 1):
+                if isinstance(node.ctx, ast.Load):
+                    return self._set_expr(node)
+                raise _RecordUnsupported()
+        if self.kind == 'record':
+            if isinstance(node.value, ast.Name) and node.value.id == self.d:
+                raise _RecordUnsupported()
+            if isinstance(node.value, ast.Name) and self.roles.get(node.value.id) == 'row':
+                raise _RecordUnsupported()
+            if (isinstance(node.value, ast.Name) and self.roles.get(node.value.id) == 'item'
+                    and isinstance(node.slice, ast.Constant) and node.slice.value == 1):
+                raise _RecordUnsupported()
+        node.value = self.visit(node.value)
+        node.slice = self.visit(node.slice)
+        return node
+
+    def visit_Compare(self, node):
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot)):
+            target = None
+            if isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None:
+                target = node.left
+            elif isinstance(node.left, ast.Constant) and node.left.value is None:
+                target = node.comparators[0]
+            if isinstance(target, ast.Name) and self.roles.get(target.id) in ('row', 'item'):
+                return _r_const(isinstance(node.ops[0], ast.IsNot))
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)):
+            if (isinstance(node.comparators[0], ast.Name)
+                    and node.comparators[0].id == self.d):
+                node.left = self.visit(node.left)
+                return node
+            row = self._row_of(node.comparators[0])
+            if row is not None:
+                if self.arity != 1:
+                    raise _RecordUnsupported()
+                left = self.visit(node.left)
+                field = self._field(self._row_slot(row), 0)
+                return _r_cmp(left, node.ops[0], field)
+        node.left = self.visit(node.left)
+        node.comparators = [self.visit(item) for item in node.comparators]
+        return node
+
+    def _items_target(self, target, source):
+        """Rewrite a `for k, v in d.items()` target: return (target, injected statements)."""
+        if isinstance(target, ast.Name):
+            return target, []
+        if not isinstance(target, ast.Tuple) or len(target.elts) != 2:
+            raise _RecordUnsupported()
+        key, row = target.elts
+        if isinstance(row, ast.Name):
+            return target, []
+        if not isinstance(row, ast.Tuple) or len(row.elts) != self.arity:
+            raise _RecordUnsupported()
+        if not all(isinstance(elt, ast.Name) for elt in row.elts):
+            raise _RecordUnsupported()
+        slot = self.fresh('_rslot')
+        statements = []
+        for index, elt in enumerate(row.elts):
+            value = self._field(_r_load(slot), index)
+            statements.append(_r_assign(_r_store(elt.id), value))
+        return ast.Tuple(elts=[key, _r_store(slot)], ctx=ast.Store()), statements
+
+    def _for_iter(self, it, target, inject=True):
+        """(new iter, new target, statements before the loop, statements in the loop body)."""
+        if (isinstance(it, ast.Call) and isinstance(it.func, ast.Attribute)
+                and isinstance(it.func.value, ast.Name) and it.func.value.id == self.d
+                and it.func.attr in ('values', 'items') and not it.args and not it.keywords):
+            if it.func.attr == 'values':
+                if self.kind == 'record':
+                    if not isinstance(target, ast.Name) or self.roles.get(target.id) != 'row':
+                        raise _RecordUnsupported()
+                    return it, target, [], []
+                if not isinstance(target, ast.Name):
+                    raise _RecordUnsupported()
+                slot = self.fresh('_rslot')
+                value = _r_attr(_r_sub(_r_load(self.fields[0]), _r_load(slot)), 's')
+                return it, _r_store(slot), [], [_r_assign(_r_store(target.id), value)]
+            if self.kind == 'record':
+                newtarget, statements = self._items_target(target, it)
+                return it, newtarget, [], statements
+            if not isinstance(target, ast.Tuple) or len(target.elts) != 2:
+                raise _RecordUnsupported()
+            slot = self.fresh('_rslot')
+            value = _r_attr(_r_sub(_r_load(self.fields[0]), _r_load(slot)), 's')
+            return it, ast.Tuple(elts=[target.elts[0], _r_store(slot)], ctx=ast.Store()), [], [
+                _r_assign(_r_store(target.elts[1].id), value)]
+        if isinstance(it, ast.Name) and self.roles.get(it.id) == 'items':
+            if self.kind == 'record':
+                newtarget, statements = self._items_target(target, it)
+                return it, newtarget, [], statements
+        if isinstance(it, ast.Name) and it.id == self.d:
+            return it, target, [], []
+        row = self._row_of(it)
+        if row is not None:
+            if self.arity != 1:
+                raise _RecordUnsupported()
+            value = self._field(self._row_slot(row), 0)
+            if inject:
+                temp = self.fresh('_riter')
+                return _r_load(temp), target, [_r_assign(_r_store(temp), value)], []
+            return value, target, [], []
+        setrow = self._set_of(it)
+        if setrow is not None:
+            value = self._set_expr(setrow)
+            if inject:
+                temp = self.fresh('_riter')
+                return _r_load(temp), target, [_r_assign(_r_store(temp), value)], []
+            return value, target, [], []
+        if isinstance(it, ast.Name) and self.roles.get(it.id) in ('row', 'set', 'item'):
+            raise _RecordUnsupported()
+        return self.visit(it), target, [], []
+
+    def _visit_statements(self, statements):
+        out = []
+        for stmt in statements:
+            result = self.visit(stmt)
+            if isinstance(result, list):
+                out.extend(result)
+            elif result is not None:
+                out.append(result)
+        return out
+
+    def visit_For(self, node):
+        node.iter, node.target, before, body = self._for_iter(node.iter, node.target)
+        node.body = body + self._visit_statements(node.body)
+        node.orelse = self._visit_statements(node.orelse)
+        if before:
+            return before + [node]
+        return node
+
+    def visit_AsyncFor(self, node):
+        return self.visit_For(node)
+
+    def _comp(self, node):
+        for gen in node.generators:
+            gen.iter, gen.target, before, body = self._for_iter(gen.iter, gen.target, inject=False)
+            if before or body:
+                raise _RecordUnsupported()
+            gen.ifs = [self.visit(item) for item in gen.ifs]
+        if isinstance(node, ast.DictComp):
+            node.key = self.visit(node.key)
+            node.value = self.visit(node.value)
+        else:
+            node.elt = self.visit(node.elt)
+        return node
+
+    def visit_GeneratorExp(self, node):
+        return self._comp(node)
+
+    def visit_ListComp(self, node):
+        return self._comp(node)
+
+    def visit_SetComp(self, node):
+        return self._comp(node)
+
+    def visit_DictComp(self, node):
+        return self._comp(node)
+
+    def visit_Lambda(self, node):
+        node.body = self.visit(node.body)
+        return node
+
+    def visit_Call(self, node):
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == 'len' and len(node.args) == 1:
+            row = self._row_of(node.args[0])
+            if row is not None:
+                return _r_const(self.arity)
+            if isinstance(node.args[0], ast.Name) and node.args[0].id == self.d:
+                return node
+        if isinstance(func, ast.Name) and func.id == 'sorted' and node.args:
+            first = node.args[0]
+            if (isinstance(first, ast.Call) and isinstance(first.func, ast.Attribute)
+                    and isinstance(first.func.value, ast.Name) and first.func.value.id == self.d
+                    and first.func.attr == 'items'):
+                node.args = [first] + [self.visit(arg) for arg in node.args[1:]]
+                node.keywords = [ast.keyword(arg=kw.arg, value=self.visit(kw.value))
+                                 for kw in node.keywords]
+                return node
+        if isinstance(func, ast.Attribute):
+            if isinstance(func.value, ast.Name) and func.value.id == self.d:
+                if func.attr == 'keys' and not node.args and not node.keywords:
+                    return node
+                if func.attr in ('values', 'items', 'get', 'setdefault', 'pop', 'update',
+                                 'clear', 'popitem'):
+                    raise _RecordUnsupported()
+            if (self.kind == 'record' and isinstance(func.value, ast.Subscript)
+                    and self._row_of(func.value.value) is not None):
+                field = self.visit(func.value)
+                node.func = ast.Attribute(value=field, attr=func.attr, ctx=ast.Load())
+                node.args = [self.visit(arg) for arg in node.args]
+                node.keywords = [ast.keyword(arg=kw.arg, value=self.visit(kw.value))
+                                 for kw in node.keywords]
+                return node
+            if (self.kind == 'record' and isinstance(func.value, ast.Name)
+                    and self.roles.get(func.value.id) == 'row'):
+                raise _RecordUnsupported()
+        return self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load):
+            if node.id == self.d:
+                raise _RecordUnsupported()
+            if self.roles.get(node.id) in ('row', 'set', 'item', 'items'):
+                raise _RecordUnsupported()
+        return node
+
+
+def _lower_record_dict(fn, name, box, taken, box_needed):
+    if _record_nested_scope_uses(fn, name):
+        raise _RecordUnsupported()
+    inits = []
+    for stmt in _record_scope_statements(fn):
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            if stmt.targets[0].id == name:
+                if not _is_empty_dict(stmt.value):
+                    raise _RecordUnsupported()
+                inits.append(stmt)
+        elif (isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name)
+              and stmt.target.id == name):
+            raise _RecordUnsupported()
+    if len(inits) != 1:
+        raise _RecordUnsupported()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name
+                                                for t in node.targets):
+            if node is not inits[0]:
+                raise _RecordUnsupported()
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name:
+            raise _RecordUnsupported()
+    classified = _record_classify(fn, name)
+    if classified is None:
+        raise _RecordUnsupported()
+    kind, arity, list_values = classified
+    roles = _record_roles(fn, name, kind)
+    if any(role == 'conflict' for role in roles.values()):
+        raise _RecordUnsupported()
+    transformer = _RecordTransformer(fn, name, kind, arity, roles, box, taken, box_needed)
+    key_hints = set()
+    for node in ast.walk(fn):
+        key = None
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Subscript)
+                and isinstance(node.targets[0].value, ast.Name)
+                and node.targets[0].value.id == name):
+            key = node.targets[0].slice
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+              and node.func.attr in ('get', 'setdefault') and node.args):
+            key = node.args[0]
+        if key is not None:
+            key_hints |= _record_hint(fn, key, transformer.assigned)
+    if len(key_hints) == 1:
+        transformer.key_kind = next(iter(key_hints))
+    if kind == 'set':
+        transformer.set_positions.add(0)
+        box_needed[0] = True
+    if kind == 'record':
+        hints = [set() for _ in range(arity)]
+        unknowns = [False for _ in range(arity)]
+        for value in list_values:
+            for index, elt in enumerate(value.elts):
+                found = _record_hint(fn, elt, transformer.assigned)
+                if found:
+                    hints[index] |= found
+                else:
+                    unknowns[index] = True
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in (
+                    'add', 'discard', 'remove'):
+                row = transformer._row_of(node.func.value.value) if isinstance(node.func.value, ast.Subscript) else None
+                if row is not None and isinstance(node.func.value.slice, ast.Constant) \
+                        and isinstance(node.func.value.slice.value, int) \
+                        and not isinstance(node.func.value.slice.value, bool):
+                    index = node.func.value.slice.value
+                    if 0 <= index < arity:
+                        hints[index].add('set')
+        exact = str(os.environ.get('AIL_EXACT_INT', '')).strip().lower() in ('1', 'on', 'yes', 'true')
+        for index in range(arity):
+            found = hints[index]
+            if len(found) > 1:
+                raise _RecordUnsupported()
+            if found:
+                category = next(iter(found))
+                if category in ('set', 'list', 'bool') and unknowns[index]:
+                    raise _RecordUnsupported()
+                if category == 'int' and exact:
+                    for value in list_values:
+                        elt = value.elts[index]
+                        if not (isinstance(elt, ast.Constant) and isinstance(elt.value, int)
+                                and not isinstance(elt.value, bool)
+                                and -(1 << 63) <= elt.value < (1 << 63)):
+                            raise _RecordUnsupported()
+                if category == 'set':
+                    transformer.set_positions.add(index)
+                if category not in ('int', 'float', 'str', 'bytes', 'bool', 'set', 'list'):
+                    raise _RecordUnsupported()
+    if transformer.set_positions:
+        box_needed[0] = True
+    new_fn = transformer.visit(fn)
+    ast.fix_missing_locations(new_fn)
+    return new_fn
+
+
+def lower_dict_of_records(source):
+    """A local dict whose values are record rows (`d[k] = [a, b, True]`, `setdefault(k, [0, 0, 0])`)
+    or sets (`setdefault(k, set()).add(v)`) becomes a key -> slot dict plus one typed list per row
+    position (python/pkg-v12/nested_lists.py).  A fetched row is a slot index, so `r = d.get(k)` and
+    `r[i] += v` change the stored row; a set position is a one-field box so it stays one set object.
+    Any use not modelled here leaves the whole dict as written."""
+    if '{}' not in source and 'dict()' not in source:
+        return source
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    taken = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    taken |= {node.name for node in ast.walk(tree)
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    box = '_AilRowSet'
+    while box in taken:
+        box += '_'
+    box_needed = [False]
+    replacements = []
+    for fn in tree.body:
+        if not isinstance(fn, ast.FunctionDef) or fn.decorator_list:
+            continue
+        names = _record_candidate_names(fn)
+        if not names:
+            continue
+        current = fn
+        for name in names:
+            clone = copy.deepcopy(current)
+            try:
+                updated = _lower_record_dict(clone, name, box, taken, box_needed)
+            except (_RecordUnsupported, RecursionError):
+                continue
+            current = updated
+        if current is not fn:
+            replacements.append((fn, current))
+    if not replacements:
+        return source
+    starts = _byte_offsets(source.encode('utf8'))
+    data = source.encode('utf8')
+    edits = []
+    for old, new in replacements:
+        a = starts[old.lineno - 1] + old.col_offset
+        b = starts[old.end_lineno - 1] + old.end_col_offset
+        edits.append((a, b, ast.unparse(new)))
+    edits.sort(key=lambda edit: edit[0], reverse=True)
+    for a, b, text in edits:
+        data = data[:a] + text.encode('utf8') + data[b:]
+    text = data.decode('utf8')
+    if box_needed[0]:
+        head = ('class %s:\n'
+                '    def __init__(self, s: set[int]):\n'
+                '        self.s: set[int] = s\n\n' % box)
+        lines = text.splitlines(True)
+        at = 0
+        if lines and lines[0].startswith('#!'):
+            at = 1
+        if len(lines) > at and 'coding' in lines[at] and lines[at].lstrip().startswith('#'):
+            at += 1
+        text = ''.join(lines[:at]) + head + ''.join(lines[at:])
+    return text
+
+
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
@@ -4598,6 +5567,7 @@ def python_surface(source, notes=None, library=False):
         source = _optlib().rewrite(source, notes)
     if "(" in source:
         source = _modtables().rewrite_text(source, library, notes)
+    source = lower_dict_of_records(source)
     tuplib = _tuplib()
     try:
         source = tuplib.rewrite(source, notes)
