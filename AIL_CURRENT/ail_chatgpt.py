@@ -6035,19 +6035,22 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     check_cmd = sub.add_parser('check', help='strict source/type check without a C build; exit 0 passed, 1 source error, 2 configuration/I/O/dependency')
-    check_cmd.add_argument('source', type=Path)
-    check_cmd.add_argument('--syntax', choices=('auto', 'ail', 'python'), default='auto')
-    check_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[])
-    check_cmd.add_argument('--module', action='append', type=Path, default=[])
+    check_cmd.add_argument('source', type=Path, help='source file to check')
+    check_cmd.add_argument('--syntax', choices=('auto', 'ail', 'python'), default='auto', metavar='{auto,python}',
+        help='source syntax: auto (default) or python')
+    check_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[],
+        help='add a module search directory (repeatable)')
+    check_cmd.add_argument('--module', action='append', type=Path, default=[],
+        help='add a source module to check (repeatable)')
     check_cmd.add_argument('--object', action='append', type=Path, default=[], help='typed object metadata; may query compiler identity, never builds or links')
-    check_cmd.add_argument('--library', action='store_true')
+    check_cmd.add_argument('--library', action='store_true', help='check a library source (exported functions, no main)')
     check_cmd.add_argument('--ffi', action='store_true', help='list the C FFI declarations (@extern stubs) of the program')
     check_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions')
     check_cmd.add_argument('--repair-context', action='store_true', help='include SHA-bound failing AIL function body and declared import/API context')
     check_cmd.add_argument('--interface', action='store_true', help='include checked source declarations without function bodies; absent types are null')
     check_cmd.add_argument('--symbol', action='append', default=[], help='select top-level function declarations with --interface; repeatable; struct declarations retained')
     api_cmd = sub.add_parser('api', help='check a bundled source module and return its typed API without compiling C')
-    api_cmd.add_argument('api_module', help='bundled module name, without path or .ail suffix')
+    api_cmd.add_argument('api_module', help='bundled module name, without path or file extension')
     builtin_cmd = sub.add_parser('api-builtin', help='query intrinsic signatures and declared ownership without building or running code')
     builtin_cmd.add_argument('symbol', nargs='?', help='builtin name or typed receiver.method; omitted lists the available inventory')
     api_cmd.add_argument('--object', action='append', type=Path, default=[], help='typed object metadata; may query compiler identity, never builds or links')
@@ -6057,33 +6060,36 @@ def main(argv=None):
     check_cmd.add_argument('--contracts', action='store_true', help='include declared ownership and conservative static call contracts; requires --interface')
     api_cmd.add_argument('--contracts', action='store_true', help='include declared ownership and conservative static call contracts')
     context_cmd = sub.add_parser('context', help='read a local function declaration and call candidates without type checking')
-    context_cmd.add_argument('source', type=Path)
-    context_cmd.add_argument('--symbol', required=True)
-    context_cmd.add_argument('--include-body', action='store_true')
+    context_cmd.add_argument('source', type=Path, help='source file that declares the function')
+    context_cmd.add_argument('--symbol', required=True, help='name of the function to describe')
+    context_cmd.add_argument('--include-body', action='store_true', help='include the function body in the context')
     context_cmd.add_argument('--contracts', action='store_true', help='include syntax-derived ownership/call contracts without binding or runtime proof')
     context_cmd.add_argument('--compact', action='store_true', help='encode context parameter rows in reversible compact JSON')
-    context_cmd.add_argument('--resolve-imports', action='store_true')
-    context_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[])
+    context_cmd.add_argument('--resolve-imports', action='store_true', help='resolve imported declarations as well')
+    context_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[],
+        help='add a module search directory (repeatable)')
     edit_cmd = sub.add_parser('edit', help='replace function bodies in a new source/type-checked candidate')
-    edit_cmd.add_argument('source', type=Path)
-    edit_cmd.add_argument('--symbol')
-    edit_cmd.add_argument('--base-sha256', required=True)
+    edit_cmd.add_argument('source', type=Path, help='source file to edit')
+    edit_cmd.add_argument('--symbol', help='name of the function whose body is replaced')
+    edit_cmd.add_argument('--base-sha256', required=True, help='SHA-256 of the source the edit was prepared from')
     body_input = edit_cmd.add_mutually_exclusive_group(required=True)
-    body_input.add_argument('--body', type=Path)
+    body_input.add_argument('--body', type=Path, help='file holding the replacement function body')
     body_input.add_argument('--body-text', help='replacement body directly; no temporary body file needed')
     body_input.add_argument('--edits-text', help='JSON array of symbol/body strings, checked together')
     edit_cmd.add_argument('--context', type=Path, help='bind the resolved source context and dependency hashes')
-    edit_cmd.add_argument('-o', '--output', required=True, type=Path)
-    edit_cmd.add_argument('--library', action='store_true')
-    edit_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[])
-    edit_cmd.add_argument('--module', action='append', type=Path, default=[])
-    edit_cmd.add_argument('--object', action='append', type=Path, default=[])
-    doctor_cmd = sub.add_parser('doctor')
+    edit_cmd.add_argument('-o', '--output', required=True, type=Path, help='write the edited candidate to this file')
+    edit_cmd.add_argument('--library', action='store_true', help='treat the source as a library (no main)')
+    edit_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[],
+        help='add a module search directory (repeatable)')
+    edit_cmd.add_argument('--module', action='append', type=Path, default=[],
+        help='add a source module to the check (repeatable)')
+    edit_cmd.add_argument('--object', action='append', type=Path, default=[], help='typed object metadata (repeatable)')
+    doctor_cmd = sub.add_parser('doctor', help='report the Python, the C compiler and the SDK root')
     doctor_cmd.add_argument('--check', action='store_true',
                             help='compile and run a representative SDK program to check the C/OS runtime')
-    sub.add_parser('integrity')
+    sub.add_parser('integrity', help='verify the SDK files against MANIFEST.json')
     sdk_cmd = sub.add_parser('export-sdk', help='copy the verified language compiler and standard sources to a new SDK directory')
-    sdk_cmd.add_argument('-o', '--output', type=Path, required=True)
+    sdk_cmd.add_argument('-o', '--output', type=Path, required=True, help='write the exported SDK to this new directory')
     http_cmd = sub.add_parser('compare-http', help='compare local read-only HTTP commands with exact output checks')
     http_cmd.add_argument('manifest', type=Path)
     http_cmd.add_argument('-o', '--output', required=True, type=Path)
@@ -6098,61 +6104,64 @@ def main(argv=None):
     build_http_cmd.add_argument('-o', '--output', required=True, type=Path)
     build_http_cmd.add_argument('--compare', action='store_true')
     compile_cmd = sub.add_parser('compile', help='compile AIL source to a standalone executable')
-    compile_cmd.add_argument('source', type=Path)
-    compile_cmd.add_argument('-o', '--output', required=True, type=Path)
+    experimental = compile_cmd.add_argument_group('experimental and debug options')
+    compile_cmd.add_argument('source', type=Path, help='source file to compile')
+    compile_cmd.add_argument('-o', '--output', required=True, type=Path, help='write the executable to this file')
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
-        help='additional .ail file containing functions and literal numeric constants')
+        help='additional source module containing functions and literal numeric constants')
     compile_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions (@extern)')
-    compile_cmd.add_argument('--debug', action='store_true',
-                             help='build for gdb: -g -O0, #line directives back to the .py/.ail source (same code generator as a release build), and an uncaught exception names the last statement run (stderr is then not CPython-compatible)')
+    experimental.add_argument('--debug', action='store_true',
+                             help='build for gdb: -g -O0, #line directives back to the source (same code generator as a release build), and an uncaught exception names the last statement run (stderr is then not CPython-compatible)')
     compile_cmd.add_argument('--link', action='append', default=[], metavar='LIB',
                              help='link this library as well, like link("LIB") in the source (a name, or a path to a shared library); repeatable')
-    compile_cmd.add_argument('--separate', action='store_true',
+    experimental.add_argument('--separate', action='store_true',
         help='compile each typed source into a C object, then link the objects')
     compile_cmd.add_argument('--object', action='append', type=Path, default=[],
         help='link an existing typed .o and its adjacent .o.json without its source')
-    compile_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto',
-        help='source syntax; auto detects fn/const/use/struct declarations, ail uses brace-delimited blocks')
+    compile_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto', metavar='{auto,python}',
+        help='source syntax: auto (default) or python')
     compile_cmd.add_argument('--strict', action='store_true',
         help='build on the typed path or refuse, listing every blocker with a rewrite (also AIL_STRICT=1); '
              'with --json the blockers are printed as ail.strict/1 JSON')
-    compile_cmd.add_argument('--exact-int', action='store_true',
+    experimental.add_argument('--exact-int', action='store_true',
         help='exact (arbitrary precision) ints as in CPython; the default is 64-bit ints that stop with an OverflowError-style '
              'message on overflow, and a program whose source needs a big int is refused at compile time (also AIL_EXACT_INT=1; '
              'the exact path is the general path, about 20x slower)')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
-    compile_cmd.add_argument('--fe-cache', action='store_true',
+    experimental.add_argument('--fe-cache', action='store_true',
         help='cache the emitted C under $XDG_CACHE_HOME/ail/fe (also AIL_FE_CACHE=1); an unchanged source, '
              'import, flag or environment then skips the Python lowering')
-    compile_cmd.add_argument('--gpu', action='store_true',
+    experimental.add_argument('--gpu', action='store_true',
         help="build the loops marked '# ail: gpu' as GPU kernels (docs/design/GPU.md; stage G1 runs the kernel on the "
              "CPU as an emulation, same output): a marked loop that is not provably eligible is refused by name "
              "(also AIL_GPU_BUILD=1)")
     compile_cmd.add_argument('--lib', metavar='NAME',
         help='build the @export functions of the source as a C library: -o DIR receives lib<NAME>.so, '
              'lib<NAME>.a and <NAME>.h (error codes, NAME_last_error(), NAME_free(); see NATIVE_LIBRARIES.md)')
-    compile_cmd.add_argument('--target', choices=sorted(ZIG_TARGETS),
+    experimental.add_argument('--target', choices=sorted(ZIG_TARGETS),
         help='cross-compile with zig cc for another OS/CPU (needs zig: $AIL_ZIG, PATH, or ~/tools/zig/zig)')
-    compile_cmd.add_argument('--freestanding', action='store_true',
+    experimental.add_argument('--freestanding', action='store_true',
         help='compile one Python-syntax module to C (-o x.c) or an object (-o x.o) that needs no runtime and no libc, '
              'plus a header x.h; see docs/design/FREESTANDING.md')
-    compile_cmd.add_argument('--m32', action='store_true',
+    experimental.add_argument('--m32', action='store_true',
         help='with --freestanding: target 32-bit x86 (usize is 32 bits, gcc -m32); see docs/design/FREESTANDING.md')
     object_cmd = sub.add_parser('compile-module', help='compile typed functions, scalar structs and scalar constants to a reusable object')
-    object_cmd.add_argument('source', type=Path)
-    object_cmd.add_argument('-o', '--output', required=True, type=Path)
-    object_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto')
+    object_cmd.add_argument('source', type=Path, help='source file to compile to an object')
+    object_cmd.add_argument('-o', '--output', required=True, type=Path, help='write the object to this file')
+    object_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto', metavar='{auto,python}',
+        help='source syntax: auto (default) or python')
     object_cmd.add_argument('--object', action='append', type=Path, default=[],
         help='typed dependency objects; entry linking requires their full object closure')
     object_cmd.add_argument('--c-api-name', help='build a dependency dedicated to this C library name')
     library_cmd = sub.add_parser('compile-library', help='build a C callable library with owned results and error returns')
-    library_cmd.add_argument('source', type=Path)
-    library_cmd.add_argument('--name', required=True)
-    library_cmd.add_argument('-o', '--output', required=True, type=Path)
-    library_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto')
+    library_cmd.add_argument('source', type=Path, help='source file to build as a library')
+    library_cmd.add_argument('--name', required=True, help='C library name (libNAME.so, libNAME.a, NAME.h)')
+    library_cmd.add_argument('-o', '--output', required=True, type=Path, help='write the library and header to this directory')
+    library_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto', metavar='{auto,python}',
+        help='source syntax: auto (default) or python')
     library_cmd.add_argument('--module', action='append', type=Path, default=[],
-        help='additional typed .ail source, combined with transitive use dependencies')
+        help='additional typed source module, combined with transitive use dependencies')
     library_cmd.add_argument('--export', action='append',
         help='public function name; repeat to select the C API (default: all functions)')
     library_cmd.add_argument('--object', action='append', type=Path, default=[],
@@ -6161,17 +6170,20 @@ def main(argv=None):
         command.add_argument('-I', '--module-path', action='append', type=Path, default=[],
             help='use module search directory; local, then -I in order, then bundled standard modules')
     c_cmd = sub.add_parser('compile-c', help='compile trusted C functions to a typed reusable object')
-    c_cmd.add_argument('source', type=Path)
-    c_cmd.add_argument('--interface', required=True, type=Path)
-    c_cmd.add_argument('-o', '--output', required=True, type=Path)
+    c_cmd.add_argument('source', type=Path, help='C source file to compile')
+    c_cmd.add_argument('--interface', required=True, type=Path, help='typed interface describing the C functions')
+    c_cmd.add_argument('-o', '--output', required=True, type=Path, help='write the object to this file')
     c_cmd.add_argument('--c-api-name', help='build a dependency dedicated to this C library name')
     for command in (compile_cmd, object_cmd, library_cmd, c_cmd):
         command.add_argument('--json', action='store_true', help='return structured build diagnostics without running the generated program')
+    experimental.add_argument('--debug-dir', type=Path, help='keep native diagnostic reports and generated sources in a new directory')
+    for command in (object_cmd, library_cmd, c_cmd):
         command.add_argument('--debug-dir', type=Path, help='keep native diagnostic reports and generated sources in a new directory')
     for command in (compile_cmd, object_cmd, library_cmd, c_cmd):
         command.add_argument('--no-cache', action='store_true', help='do not read or write the build cache (same as AIL_NO_CACHE=1)')
     cache_cmd = sub.add_parser('cache', help='build cache in $AIL_CACHE (default ~/.cache/ail): stats, path or clear')
-    cache_cmd.add_argument('action', choices=('stats', 'path', 'clear'))
+    cache_cmd.add_argument('action', choices=('stats', 'path', 'clear'),
+        help='stats: show cache size and hits; path: print the cache directory; clear: delete it')
     smoke = sub.add_parser('selftest'); smoke.add_argument('--out', required=True)
     build = sub.add_parser('build'); build.add_argument('--project')
     build.add_argument('--out', '-o'); build.add_argument('--candidate-patch')
@@ -6320,7 +6332,7 @@ def main(argv=None):
         metadata = Path(str(output) + '.json')
         is_c = args.command == 'compile-c'
         if source.suffix.lower() != ('.c' if is_c else '.ail') or not source.is_file():
-            parser.error('source must be an existing ' + ('.c' if is_c else '.ail') + ' file')
+            parser.error('source file %s is missing or has the wrong type; check the path' % source)
         if is_c and (not args.interface.is_file() or args.interface.resolve() in (output, metadata)):
             parser.error('interface must be an existing file distinct from outputs')
         if output.exists() or metadata.exists() or output.is_symlink() or metadata.is_symlink():
@@ -6396,7 +6408,8 @@ def main(argv=None):
         if sys.version_info < (3, 10):
             parser.error('AIL compilation requires Python 3.10 or newer')
         if source.suffix.lower() not in ('.ail', '.py') or not source.is_file():
-            parser.error('source must be an existing .ail or .py file')
+            parser.error('source file %s is missing or is not a source file; check the path or run `ail new NAME`'
+                         % source)
         notes = {}
         gpu_sites = []
         if args.command == 'compile' and os.environ.get('AIL_GPU_BUILD', '').strip().lower() in ('1', 'on', 'yes', 'true') \

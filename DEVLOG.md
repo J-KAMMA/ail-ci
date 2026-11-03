@@ -1,3 +1,30 @@
+## 2026-11-03 -- CLI help: every subcommand, every option, argparse-style usage errors
+
+The `ail` command now has a finished help page. `ail --help` lists every subcommand
+(run, build, check, new, lsp, compile, compile-module, compile-library, compile-c,
+api, api-builtin, context, edit, doctor, integrity, cache, export-sdk) with a one-line
+English description, and separates the debug/experimental options into their own
+heading. `ail <command> --help` exits 0 for every command; the SDK commands keep
+their own detailed option help (with the program name shown as `ail`). `ail` with no
+arguments and an unknown command both print a short usage and exit 2, like argparse.
+`ail --version` still prints `ailc <version>`. The help and the `--syntax` metavar no
+longer advertise the old brace `.ail` syntax: only `auto` and `python` are shown,
+while the code path still accepts the old value. Error messages for a missing source
+file now name the path and say what to do next.
+
+The finish pass moves `--separate` and `--debug-dir` under the experimental heading in
+`ail compile --help` (they were already there for `ail run` and `ail build`), and makes
+`ail run`, `ail build` and `ail check` reject a missing source with the same one-line
+message that names the path and the next step, instead of the SDK's `ail_chatgpt.py`
+usage text.  The new test also asserts that the experimental options stay under their
+heading and that the three commands name a missing source without `ail_chatgpt.py`.
+
+New `test_ail_cli_help` runs `ail --help` and every `ail <command> --help` (exit 0,
+all subcommands named) plus the no-argument, unknown-command and `--version` cases.
+Probes: `hello.py` matches CPython on both builds; the CLI probe shows all 17 help
+commands exit 0, no arguments/unknown exit 2, a missing source names its path, and
+`ail new` still scaffolds a project.
+
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class

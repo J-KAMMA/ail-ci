@@ -34,28 +34,146 @@ BUILD_COMMANDS = ("compile", "compile-module", "compile-library", "compile-c")
 PASS_THROUGH = BUILD_COMMANDS + ("api", "api-builtin", "context", "edit", "doctor", "integrity", "cache",
                                  "export-sdk")
 
-USAGE = """usage: ail <command> ...
+SHORT_USAGE = """usage: ail <command> [options] [arguments]
+Try 'ail --help' for the command list, or 'ail <command> --help' for one command."""
 
-  ail run prog.py [args...]     compile to a temporary executable and run it
-  ail build prog.py [-o prog]   compile to an executable (default output: the file name without .py)
-  ail check prog.py             strict source/type check (needs no C compiler)
-  ail new NAME                  create a project: NAME/ail.toml and NAME/src/main.py
-  ail build | run | check       no source file: the project found from the current directory upwards
-                                (ail.toml, or [tool.ail] in pyproject.toml); the program is build/NAME
-  ail build --debug             -g -O0, #line directives to the source, an uncaught exception names file:line
-  ail lsp                       language server on stdio (diagnostics, hover)
-  ail build --lib NAME prog.py [-o DIR]
-                                build the @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
-  ail build --strict prog.py    build on the typed path or refuse, listing every blocker and a rewrite
-                                (also `ail run --strict`, AIL_STRICT=1; add --json for a machine-readable list)
-  ail doctor [--check]          report the Python, the C compiler and the SDK root
-  ail cache stats|path|clear    the per-user build cache
-  ail --version
+HELP = """usage: ail <command> [options] [arguments]
 
-Also available, as in ail_chatgpt.py: """ + ", ".join(PASS_THROUGH[:-1]) + """.
-Options before the source file (for example --syntax, -I DIR, --static, --no-cache) go to the compiler;
-everything after the source file of `ail run` goes to the program.
-"""
+AIL compiles Python-syntax programs to standalone C executables.
+Run `ail <command> --help` for the options of one command.
+
+commands:
+  run PROG.py [ARGS...]   compile to a temporary executable and run it; ARGS go to the program
+  build PROG.py           compile to an executable (default output: PROG without .py)
+  check PROG.py           type-check source without a C compiler
+  new NAME                create a project directory (ail.toml and src/main.py)
+  lsp                     run the language server on stdio (diagnostics and hover)
+  compile PROG.py         compile to an executable (the SDK compile command)
+  compile-module FILE     compile typed functions and data to a reusable object
+  compile-library FILE    build a C-callable library with owned results and error returns
+  compile-c FILE          compile trusted C functions to a typed reusable object
+  api MODULE              print the typed API of a bundled module
+  api-builtin [SYMBOL]    print intrinsic signatures or ownership contracts
+  context PROG.py         read a function declaration and its call candidates
+  edit PROG.py            replace function bodies in a new checked candidate
+  doctor [--check]        report the Python, the C compiler and the SDK root
+  integrity               verify the SDK files against MANIFEST.json
+  cache stats|path|clear  inspect or clear the per-user build cache
+  export-sdk -o DIR       copy the verified SDK to a new directory
+
+project commands (no source file):
+  run | build | check     use the nearest project (ail.toml or [tool.ail] in pyproject.toml);
+                          build writes build/NAME
+
+options for run and build:
+  -o, --output PATH       write the executable to PATH (default: the source name without .py)
+  --strict                build only on the typed path, listing every blocker and a rewrite
+  --json                  with --strict, print blockers as machine-readable ail.strict/1 JSON
+  --lib NAME              build @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
+  -I, --module-path DIR   add a module search directory (repeatable)
+  --module FILE           add a source module to the build (repeatable)
+  --object FILE           link an existing typed object (repeatable)
+  --link LIB              link this C library as well (repeatable)
+  --static                link the C library statically instead of dynamically
+  --no-cache              do not read or write the build cache
+  --syntax MODE           source syntax: auto (default) or python
+
+experimental and debug options (run and build; may change):
+  --debug                 build for gdb: -g -O0 and #line directives to the source
+  --debug-dir DIR         keep native diagnostic reports and generated sources in DIR
+  --target TRIPLE         cross-compile with zig cc for another OS/CPU
+  --exact-int             use CPython's arbitrary-precision ints (about 20x slower)
+  --separate              compile each typed source to an object, then link the objects
+  --fe-cache              cache the generated C under ~/.cache/ail/fe
+  --gpu                   build loops marked '# ail: gpu' as GPU kernels
+  --freestanding          emit a libc-free C file or object and a header
+  --m32                   with --freestanding: target 32-bit x86
+
+global options:
+  -h, --help              show this help and exit
+  --version, -V           print the version and exit"""
+
+RUN_HELP = """usage: ail run PROG.py [options] [ARGS...]
+
+Compile PROG.py to a temporary executable and run it. The first word that is not an
+option (or an option value) is the source file; everything after it goes to the program,
+so program options do not need a `--`.
+
+options:
+  --strict                build only on the typed path, listing every blocker and a rewrite
+  --json                  with --strict, print blockers as machine-readable ail.strict/1 JSON
+  --lib NAME              build @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
+  -I, --module-path DIR   add a module search directory (repeatable)
+  --module FILE           add a source module to the build (repeatable)
+  --object FILE           link an existing typed object (repeatable)
+  --link LIB              link this C library as well (repeatable)
+  --static                link the C library statically instead of dynamically
+  --no-cache              do not read or write the build cache
+  --syntax MODE           source syntax: auto (default) or python
+  -h, --help              show this help and exit
+
+experimental and debug options (may change):
+  --debug                 build for gdb: -g -O0 and #line directives to the source
+  --debug-dir DIR         keep native diagnostic reports and generated sources in DIR
+  --target TRIPLE         cross-compile with zig cc for another OS/CPU
+  --exact-int             use CPython's arbitrary-precision ints (about 20x slower)
+  --separate              compile each typed source to an object, then link the objects
+  --fe-cache              cache the generated C under ~/.cache/ail/fe
+  --gpu                   build loops marked '# ail: gpu' as GPU kernels
+  --freestanding          emit a libc-free C file or object and a header
+  --m32                   with --freestanding: target 32-bit x86"""
+
+BUILD_HELP = """usage: ail build PROG.py [options]
+
+Compile PROG.py to an executable. Without -o/--output the output is PROG.py without
+.py. With no source file, build the project found from the current directory upwards
+(ail.toml or [tool.ail] in pyproject.toml) and write build/NAME.
+
+options:
+  -o, --output PATH       write the executable to PATH (default: the source name without .py)
+  --strict                build only on the typed path, listing every blocker and a rewrite
+  --json                  with --strict, print blockers as machine-readable ail.strict/1 JSON
+  --lib NAME              build @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
+  -I, --module-path DIR   add a module search directory (repeatable)
+  --module FILE           add a source module to the build (repeatable)
+  --object FILE           link an existing typed object (repeatable)
+  --link LIB              link this C library as well (repeatable)
+  --static                link the C library statically instead of dynamically
+  --no-cache              do not read or write the build cache
+  --syntax MODE           source syntax: auto (default) or python
+  -h, --help              show this help and exit
+
+experimental and debug options (may change):
+  --debug                 build for gdb: -g -O0 and #line directives to the source
+  --debug-dir DIR         keep native diagnostic reports and generated sources in DIR
+  --target TRIPLE         cross-compile with zig cc for another OS/CPU
+  --exact-int             use CPython's arbitrary-precision ints (about 20x slower)
+  --separate              compile each typed source to an object, then link the objects
+  --fe-cache              cache the generated C under ~/.cache/ail/fe
+  --gpu                   build loops marked '# ail: gpu' as GPU kernels
+  --freestanding          emit a libc-free C file or object and a header
+  --m32                   with --freestanding: target 32-bit x86"""
+
+NEW_HELP = """usage: ail new NAME
+
+Create the project directory NAME with NAME/ail.toml and NAME/src/main.py.
+The directory must not exist yet. Then `cd NAME` and run `ail run` or `ail build`.
+
+  -h, --help              show this help and exit"""
+
+LSP_HELP = """usage: ail lsp
+
+Run the AIL language server on stdin/stdout, for an editor's LSP client
+(diagnostics and hover).
+
+  -h, --help              show this help and exit"""
+
+COMMAND_HELP = {"run": RUN_HELP, "build": BUILD_HELP, "new": NEW_HELP, "lsp": LSP_HELP}
+
+
+def _command_help(command):
+    """The help text of one command; the SDK commands print their own --help when it is available."""
+    return COMMAND_HELP.get(command)
 
 NO_COMPILER = """ail: no C compiler found.
 
@@ -211,9 +329,23 @@ def _project():
 
 
 def _no_project(command):
-    print("usage: ail %s prog.py ...   (or run it inside a project: ail.toml or [tool.ail] in pyproject.toml; "
-          "`ail new NAME` creates one)" % command, file=sys.stderr)
+    print("ail: no project found from %s (looked for ail.toml or [tool.ail] in pyproject.toml).\n"
+          "Give a source file: ail %s prog.py\n"
+          "Or create a project first: ail new NAME" % (Path.cwd(), command), file=sys.stderr)
     return 2
+
+
+def _help_wanted(rest):
+    return bool(rest) and rest[0] in ("-h", "--help")
+
+
+def _missing_source(source):
+    """True (and a message on stderr) when SOURCE is not an existing file."""
+    if source is not None and not Path(source).is_file():
+        print("ail: source file %s is missing or is not a source file; check the path or run `ail new NAME`"
+              % source, file=sys.stderr)
+        return True
+    return False
 
 
 def cmd_check(argv):
@@ -223,6 +355,8 @@ def cmd_check(argv):
         if found is None:
             return _no_project("check")
         return subprocess.call(_sdk_command("check", *found.compiler_options(), *options, found.entry), env=_env())
+    if _missing_source(source):
+        return 2
     return subprocess.call(_sdk_command("check", *argv), env=_env())
 
 
@@ -245,6 +379,8 @@ def _run_compiler(options, source, rest, env, debug, quiet=False):
 
 def cmd_build(argv):
     options, source, rest = _split_source(argv)
+    if _missing_source(source):
+        return 2
     debug = "--debug" in options
     env = _env()
     if source is None:
@@ -289,6 +425,8 @@ def cmd_run(argv):
         if found is None:
             return _no_project("run")
         options, source = found.build_options() + options, str(found.entry)
+    if _missing_source(source):
+        return 2
     if not require_compiler(env):
         return 2
     prepare_cache(env)
@@ -331,19 +469,52 @@ def cmd_lsp(argv):
     return lsp.serve()
 
 
+def _sdk_help(command):
+    """The SDK command's own help, with the program name the user typed."""
+    if (SDK / "ail_chatgpt.py").is_file():
+        done = subprocess.run(_sdk_command(command, "--help"), env=_env(), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        sys.stdout.write(done.stdout.replace("ail_chatgpt.py", "ail"))
+        sys.stderr.write(done.stderr.replace("ail_chatgpt.py", "ail"))
+        return done.returncode
+    print("usage: ail %s [options]\n\nThe bundled SDK is missing at %s (broken installation; reinstall ailc)."
+          % (command, SDK), file=sys.stderr)
+    return 2
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] in ("-h", "--help", "help"):
-        print(USAGE)
-        return 0 if argv else 2
-    command, rest = argv[0], argv[1:]
-    if command in ("--version", "-V", "version"):
+    if not argv:
+        print(SHORT_USAGE, file=sys.stderr)
+        return 2
+    if argv[0] in ("-h", "--help"):
+        print(HELP)
+        return 0
+    if argv[0] == "help":
+        if len(argv) == 1:
+            print(HELP)
+            return 0
+        command = argv[1]
+        if command in COMMAND_HELP:
+            print(COMMAND_HELP[command])
+            return 0
+        if command == "check" or command in PASS_THROUGH:
+            return _sdk_help(command)
+        print("ail: unknown command %r\n\n%s" % (command, SHORT_USAGE), file=sys.stderr)
+        return 2
+    if argv[0] in ("--version", "-V", "version"):
         print("ailc %s" % __version__)
+        return 0
+    command, rest = argv[0], argv[1:]
+    if command in COMMAND_HELP and _help_wanted(rest):
+        print(COMMAND_HELP[command])
         return 0
     if not (SDK / "ail_chatgpt.py").is_file():
         print("ail: the bundled SDK is missing at %s (broken installation; reinstall ailc)" % SDK,
               file=sys.stderr)
         return 2
+    if _help_wanted(rest) and (command == "check" or command in PASS_THROUGH):
+        return _sdk_help(command)
     try:
         if command == "run":
             return cmd_run(rest)
@@ -365,7 +536,7 @@ def main(argv=None):
             return subprocess.call(_sdk_command(command, *rest), env=env)
     except KeyboardInterrupt:
         return 130
-    print("ail: unknown command %r\n\n%s" % (command, USAGE), file=sys.stderr)
+    print("ail: unknown command %r\n\n%s" % (command, SHORT_USAGE), file=sys.stderr)
     return 2
 
 
