@@ -63,7 +63,7 @@ class SourceCheckTests(unittest.TestCase):
         self.assertEqual((status, report['diagnostics'][0]['code']), (2, 'configuration'))
         self.assertNotIn('interface', report)
     def test_bundled_api_rejects_invalid_manifest_before_loading(self):
-        for text in ('{', '[]', '{"sdk_files":"language_examples/checked_integer.ail"}', '{"sdk_files":[1]}', b'\xff'):
+        for text in ('{', '[]', '{"sdk_files":"language_examples/checked_integer.py"}', '{"sdk_files":[1]}', b'\xff'):
             (self.root / 'MANIFEST.json').write_bytes(text if isinstance(text, bytes) else text.encode('utf8'))
             with self.subTest(manifest=text), patch.object(ail_chatgpt, 'ROOT', self.root), patch.object(
                     ail_chatgpt, '_load_sources', side_effect=AssertionError('invalid manifest must not load a source')):

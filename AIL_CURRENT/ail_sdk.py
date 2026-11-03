@@ -768,7 +768,8 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         # The IR is a package below the compiler directory (python/pkg-v12/ir/, ir/passes/).
         if (compiler / 'ir').is_dir():
             selected.update(p for p in (compiler / 'ir').rglob('*.py') if '__pycache__' not in p.parts)
-        selected.update(p for p in examples.iterdir() if p.suffix in ('.ail', '.c', '.h', '.S', '.s', '.json'))
+        selected.update(p for p in examples.iterdir() if p.suffix in ('.ail', '.c', '.h', '.S', '.s', '.json')
+                        or (p.suffix == '.py' and 'language_examples/' + p.name in pins))
         # bundled standard modules written in AIL over the C FFI (G5a): stdlib/zlib.py and its C glue
         if (root / 'stdlib').is_dir() and any(name.startswith('stdlib/') for name in pins):
             _no_links(root / 'stdlib', root)

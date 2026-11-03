@@ -1,0 +1,17 @@
+# language_examples/*.ail reads that stay on the brace source after onelang s11.
+# Each line is the grep hit and the first blocker seen when the .py twin is built.
+test_ail_sdk.py:129:        batch = self.build(sdk, environment, sdk / 'language_examples/config_batch.ail', 'config-batch') -- config_batch.py builds; the merged Python entry cannot resolve its local config_core import through -I
+test_ail_sdk.py:137:        prefix=(sdk/'language_examples/config_batch.ail').read_bytes().split(b'fn main()',1)[0] -- same merged config_batch entry
+test_ail_sdk.py:150:        broken.write_bytes((sdk / 'language_examples/config_batch.ail').read_bytes().replace(b'errors.append(error);', b'errors.append(7);')) -- same merged config_batch entry
+test_ail_sdk.py:430:        exe = self.build(sdk, environment, sdk / 'language_examples/tcp_json_lines_main.ail', 'json-server') -- json_document.py:20: _json_space() is declared int but returns bool
+test_ail_sdk.py:438:        provider = self.build(sdk, environment, sdk / 'language_examples/tcp_json_lines.ail', -- json_document.py:20: _json_space() is declared int but returns bool
+test_ail_sdk.py:446:        entry.write_text((sdk / 'language_examples/tcp_json_lines_main.ail').read_text(encoding='utf8') -- json_document.py:20: _json_space() is declared int but returns bool
+test_ail_sdk.py:631:        self.assertEqual(api_report['source_sha256'],hashlib.sha256((sdk/'language_examples/checked_integer.ail').read_bytes()).hexdigest()) -- the api command still reports the brace source
+test_ail_sdk.py:734:        provider.write_bytes((sdk/'language_examples/integer_row_stream.ail').read_bytes()) -- integer_row_stream.py needs a module-only class, refused by the loader
+test_ail_sdk.py:767:        executable=self.build(sdk,environment,sdk/'language_examples/json_kv_tcp_main.ail','kv-service') -- json_document.py:20: _json_space() is declared int but returns bool
+test_ail_sdk.py:781:        module=sdk/'language_examples/csv_column_stats.ail' -- csv_integer_stream.py:43: field negative is bool in some places and int in others
+test_ail_source_check.py:44:        source = ail_chatgpt.ROOT / 'language_examples/checked_integer.ail' -- api source_sha/comparison still names the brace source
+test_ail_source_check.py:74:        source=ail_chatgpt.ROOT/'language_examples/json_document.ail' -- json_document.py needs a module-only class, refused by the loader
+test_integer_row_stream.py:103:        library=self.write('integer_row_stream.ail',(ROOT/'language_examples/integer_row_stream.ail').read_bytes()) -- integer_row_stream.py needs a module-only class, refused by the loader
+test_json_document_library.py:14:        result=self.command('compile-module',support.ROOT/'language_examples/json_document.ail','-o',obj) -- json_document.py needs a module-only class, refused by the loader
+test_json_kv_tcp.py:21:        result=subprocess.run([sys.executable,'-X','utf8','-B',support.ROOT/'ail_chatgpt.py','compile',support.ROOT/'language_examples/json_kv_tcp_main.ail','-o',exe],capture_output=True,timeout=180) -- json_document.py:20: _json_space() is declared int but returns bool

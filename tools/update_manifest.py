@@ -86,7 +86,27 @@ def main():
     # modules and the registration files are pinned.
     registered = set(re.findall(r"'(test_[a-z0-9_]+)'", (SRC / "ail_check.py").read_text(encoding="utf-8")))
     registered |= {n[len("tests.d/"):-len(".txt")] for n in names if n.startswith("tests.d/") and n.endswith(".txt")}
+    # The named standard-source API rows now point at the generated .py twins, and the SDK must
+    # carry those files: pin each catalog dependency as an sdk source.
+    catalog_py = set()
+    catalog = SRC / "language_examples/STANDARD_SOURCE_API.json"
+    if catalog.is_file():
+        try:
+            declared = json.loads(catalog.read_text(encoding="utf-8"))
+            dependencies = declared.get("dependency_pins", {})
+        except (OSError, ValueError):
+            dependencies = {}
+        if isinstance(dependencies, dict):
+            catalog_py = {name for name in dependencies
+                          if isinstance(name, str) and name.startswith("language_examples/")
+                          and name.endswith(".py")}
+    # The generated `.py` twin replaces its `.ail` sibling as the shipped source, so both are pinned
+    # and selected for an exported SDK.
+    catalog_py |= {name[:-4] + ".py" for name, (_, flags) in pins.items()
+                   if name.startswith("language_examples/") and name.endswith(".ail") and "s" in flags
+                   and (SRC / (name[:-4] + ".py")).is_file()}
     must = {name for name, (_, flags) in pins.items() if "s" in flags}
+    must |= catalog_py
     must |= {n for n in names if n.startswith("tests.d/") and n.endswith(".txt")}
     must |= {n for n in names if n.endswith(".py") and (n.startswith("python/pkg-v12/") or n[:-3] in registered)}
     must |= {n for n in names if sdk_source(n)}
@@ -96,7 +116,7 @@ def main():
     for name in unpinned:
         print(("unpinned " if check else "pinned ") + name)
         flags = pins.get(name, ("", ""))[1]
-        if sdk_source(name):
+        if sdk_source(name) or name in catalog_py:
             # A merge that keeps the side without a new compiler file's pin must restore it as an SDK
             # file: test_ail_packaging fails when a pinned compiler file is not in sdk_files.
             flags = ail_manifest._flags(flags + "s")
@@ -104,6 +124,11 @@ def main():
     for name, digest in stale.items():
         print(("stale " if check else "updated ") + name)
         pins[name] = (digest, pins[name][1])
+    # Every catalog .py dependency must be in sdk_files too (ail_sdk selects the pinned ones).
+    for name in sorted(catalog_py & names):
+        if name in pins and "s" not in pins[name][1]:
+            pins[name] = (pins[name][0], "".join(sorted(set(pins[name][1]) | {"s"})))
+            stale.setdefault(name, pins[name][0])
     # Every compiler source must be in sdk_files (the packaging test checks the same set).
     unselected = sorted(n for n in compiler if "s" not in pins.get(n, ("", ""))[1])
     for name in unselected:

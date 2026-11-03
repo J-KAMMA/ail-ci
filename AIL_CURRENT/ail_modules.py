@@ -365,9 +365,10 @@ class Program:
         for d in dirs:
             inits = [p for p in (d / leaf / '__init__.py', d / leaf / '__init__.ail') if p.is_file()]
             files = [p for p in (d / (leaf + '.py'), d / (leaf + '.ail')) if p.is_file()]
-            if (len(files) == 2 and files[0].suffix == '.py' and _generated_twin(files[0])
-                    and not _is_brace_or_sexpr(self.read(files[1]))):
-                files = [files[1]]
+            if len(files) == 2 and files[0].suffix == '.py' and _generated_twin(files[0]):
+                # A generated Python twin wins over a brace .ail source; a Python-syntax .ail
+                # remains the source of record for its twin (test_ail_onelang_twins).
+                files = [files[0]] if _is_brace_or_sexpr(self.read(files[1])) else [files[1]]
             if inits:
                 if len(inits) > 1 or files:
                     self.refuse(importer, node, "import of %r is ambiguous: %s all exist, and CPython would pick the "

@@ -158,12 +158,14 @@ int main(void) {
         exported=subprocess.run([sys.executable,'-X','utf8','-B',str(examples/'build_crc_library.py'),
             '--c-api-name','capicrc','--out',str(native)],capture_output=True,timeout=180)
         self.assertEqual(exported.returncode,0,exported.stderr.decode(errors='replace'))
-        compiled=self.command('compile-module',examples/'crc32_stream.ail','--object',native,
+        stream_source=self.root/'crc32_stream.ail'
+        stream_source.write_bytes((examples/'crc32_stream.py').read_bytes())
+        compiled=self.command('compile-module',stream_source,'--object',native,
             '--c-api-name','capicrc','-o',stream)
         self.assertEqual(compiled.returncode,0,compiled.stderr.decode(errors='replace'))
         before=self.snapshot(native,stream)
         library=self.root/'library'
-        compiled=self.command('compile-library',examples/'crc_c_api.ail','--name','capicrc',
+        compiled=self.command('compile-library',examples/'crc_c_api.py','--name','capicrc',
             '--object',native,'--object',stream,'-o',library)
         self.assertEqual(compiled.returncode,0,compiled.stderr.decode(errors='replace'))
         self.assertEqual(self.snapshot(native,stream),before)

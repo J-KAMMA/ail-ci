@@ -5,8 +5,8 @@
   "modules": [
     {
       "module": "text_search",
-      "source": "language_examples/text_search.ail",
-      "sha256": "5d22ade25ae3c96068a760494542923a43587c6a19f111a6fba203d1aaeb39ea",
+      "source": "language_examples/text_search.py",
+      "sha256": "19a52b9f8baaa306d06f459646c73e097e89d073bdf7e0e151ffe462d758f7ad",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -45,8 +45,8 @@
     },
     {
       "module": "binary_search",
-      "source": "language_examples/binary_search.ail",
-      "sha256": "c5cbdbda90910c98a130060c0830d6ad0e70ce1a3464446e03993b18574d32ec",
+      "source": "language_examples/binary_search.py",
+      "sha256": "3b0dd600718d2248d21907fe851b78995ddbba1e587cbd86371b88a202368c7e",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -217,8 +217,8 @@
     },
     {
       "module": "utf8_stream",
-      "source": "language_examples/utf8_stream.ail",
-      "sha256": "24bc70595616ff825e7a5de2787d5ac5cec1dce7263b5f1598a63738d533cef7",
+      "source": "language_examples/utf8_stream.py",
+      "sha256": "090b02105567b8e8526d489b81512847142297d11b4e2f20220b4560ea9ad0f6",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -303,8 +303,8 @@
     },
     {
       "module": "binary_numbers",
-      "source": "language_examples/binary_numbers.ail",
-      "sha256": "c50fa2995ffeaa7fac6d9c39f9cf4cb1e321c8424430f334dca99f470822ea84",
+      "source": "language_examples/binary_numbers.py",
+      "sha256": "28b42e386b9084d2f4ff3e0c97246f348c4a60e051c2a71576b5e6dc6b820d19",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -520,8 +520,8 @@
     },
     {
       "module": "binary_float64",
-      "source": "language_examples/binary_float64.ail",
-      "sha256": "a7ac4e48a1896db30057e179da1989421c093aa868404d02f58e7b6220977ad4",
+      "source": "language_examples/binary_float64.py",
+      "sha256": "731a6740e18bf636f711ee8e7ff559493771e7b3e8f55e7eda3855b7652d8535",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -581,8 +581,8 @@
     },
     {
       "module": "base64_codec",
-      "source": "language_examples/base64_codec.ail",
-      "sha256": "ee2c6a863b9afd7bc0b296bc25fcc9f044c8998977ee722140cac700eeefe171",
+      "source": "language_examples/base64_codec.py",
+      "sha256": "75173255cfdd0c955d330cab308d31e0dfbabc767d1548427c419e258f2d46de",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -629,8 +629,8 @@
     },
     {
       "module": "url_codec",
-      "source": "language_examples/url_codec.ail",
-      "sha256": "165be3913e5be5e5e610e7cf7757a36ae7beac8e4272008ab4184a63e63f28d7",
+      "source": "language_examples/url_codec.py",
+      "sha256": "f6da21a7afde4587774a59842b7c147051c6651e57ab5ec9084c5373f29a6bcd",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -677,8 +677,8 @@
     },
     {
       "module": "csv_table",
-      "source": "language_examples/csv_table.ail",
-      "sha256": "4811c289909cfe3fed2a02d85b05ec9c141cf6665fdc9b1634bf90984de54613",
+      "source": "language_examples/csv_table.py",
+      "sha256": "848a8e31353a3c2d641f8b6ba9a64ca5dcc224400fc2ffbc558a9bc0b6504e97",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -752,8 +752,8 @@
     },
     {
       "module": "csv_stream",
-      "source": "language_examples/csv_stream.ail",
-      "sha256": "a175c2f7d47a19967f5bd89e45fe8806ddc523fe15568134e1c2dbb309d90598",
+      "source": "language_examples/csv_stream.py",
+      "sha256": "eb9c5d0874f418d4cb17e5602bc46ea4d9de6ae5a32701dc41c2319cf084247f",
       "imports": [
         "json_text"
       ],
@@ -935,8 +935,8 @@
     },
     {
       "module": "csv_group",
-      "source": "language_examples/csv_group.ail",
-      "sha256": "22d40e5d3ef1283514d57f2c363e51b0e547143f1a1baf2d4ce108a7ba51c7d9",
+      "source": "language_examples/csv_group.py",
+      "sha256": "5732cb27498407e191a10c795ad175594b85e00470b2d4fd4d7072315741a32e",
       "imports": [
         "csv_stream",
         "checked_integer",
@@ -1127,8 +1127,8 @@
     },
     {
       "module": "csv_writer",
-      "source": "language_examples/csv_writer.ail",
-      "sha256": "89c8d53ec9a5a9d14f5aa9954e77ecc024671777cd181a2fbcc058adc06619ad",
+      "source": "language_examples/csv_writer.py",
+      "sha256": "13ab3938c0564c67b911934d36c774fed8f85d7bc5ade8d6cdfb983aa68a6eba",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -1164,8 +1164,8 @@
     },
     {
       "module": "json_document",
-      "source": "language_examples/json_document.ail",
-      "sha256": "75a843bbe374ccd059be58e4f9465f32f3eff767e9f18d20d13773194ef47bbd",
+      "source": "language_examples/json_document.py",
+      "sha256": "1f62f53f284a3959a661a894e28dffc8708f45d100ac4fa0f1b23e6cd867c18c",
       "imports": [
         "json_text"
       ],
@@ -1313,8 +1313,8 @@
     },
     {
       "module": "json_tree",
-      "source": "language_examples/json_tree.ail",
-      "sha256": "a95ac93368faccfb6ff74db8ccd08e303ec5645a27f20a0a39443b57107d0791",
+      "source": "language_examples/json_tree.py",
+      "sha256": "731dad7b5be4a00e7ef2155063ec670a099f43892f4deedea5bf340dc8b3a0c6",
       "imports": [
         "json_document",
         "json_text"
@@ -1380,8 +1380,8 @@
     },
     {
       "module": "json_pointer",
-      "source": "language_examples/json_pointer.ail",
-      "sha256": "76036a9d1c3883535bfb21ac5a5547cf00de1454a9ab8821eca571d12740c2e3",
+      "source": "language_examples/json_pointer.py",
+      "sha256": "9dae71626016aa5ad58afe537b36ad8a20949cdd0de9ff8b7915778ae4764d75",
       "imports": [
         "json_tree"
       ],
@@ -1452,8 +1452,8 @@
     },
     {
       "module": "directory_catalog",
-      "source": "language_examples/directory_catalog.ail",
-      "sha256": "ce54ace0050fd85bfadd4e6d1be99787ca3cd9df0f69fd90ec6fb1068272dae5",
+      "source": "language_examples/directory_catalog.py",
+      "sha256": "8710ee7c3e825ca14f8afc411dc787da3d61abd7fb18da52fcab7380a49d7c61",
       "imports": [
         "json_text"
       ],
@@ -1490,8 +1490,8 @@
     },
     {
       "module": "environment_config",
-      "source": "language_examples/environment_config.ail",
-      "sha256": "e00d30619557d1d135543c4f154beeefd7521f6f30bf4be8898914785382936c",
+      "source": "language_examples/environment_config.py",
+      "sha256": "d996cba59d0b3f5f80e252344582748eeb156672aa9096939ccd8785481fd8f5",
       "imports": [
         "checked_integer"
       ],
@@ -1552,8 +1552,8 @@
     },
     {
       "module": "integer_column_stats",
-      "source": "language_examples/integer_column_stats.ail",
-      "sha256": "9a37ab4cb6459ab6157b6a241da9d597ca8f90b685698742c706e3d7f8c58b1f",
+      "source": "language_examples/integer_column_stats.py",
+      "sha256": "df25e0f47babee9b55521a77b44a0c41b40458dbc0759ff6d34cb6e19a929250",
       "imports": [
         "checked_integer"
       ],
@@ -1692,8 +1692,8 @@
     },
     {
       "module": "csv_column_stats",
-      "source": "language_examples/csv_column_stats.ail",
-      "sha256": "c6d4cf7701ac8b8d41477fd9c15f92eebc081d6dda3f18ff61ecdbe0d25a48a2",
+      "source": "language_examples/csv_column_stats.py",
+      "sha256": "1335832ed36764e71c6a273e2e0dc85d8f5270eeacfd293b49e70767c466f183",
       "imports": [
         "csv_integer_stream"
       ],
@@ -1736,8 +1736,8 @@
     },
     {
       "module": "csv_column_stats_stream",
-      "source": "language_examples/csv_column_stats_stream.ail",
-      "sha256": "646d4c3af64f9cd9a6de61c1bec497fa28e0a73d4b785973122785e049854897",
+      "source": "language_examples/csv_column_stats_stream.py",
+      "sha256": "277fdfbbaa6aab5a48267c40b4993589dc28b1854910277d19a059b6e98a0bef",
       "imports": [
         "csv_integer_stream",
         "csv_stream",
@@ -1792,8 +1792,8 @@
     },
     {
       "module": "tcp_json_lines",
-      "source": "language_examples/tcp_json_lines.ail",
-      "sha256": "eded8832ed5cc0b674ad9cc0f5f0110c99fdd014897620f9ae615a84f4040a4a",
+      "source": "language_examples/tcp_json_lines.py",
+      "sha256": "7bb4dbfe43ce02cc8e2935324355f00760bede7f1151e7a91134cb383e2ec5d3",
       "imports": [
         "json_pointer",
         "checked_integer"
@@ -1847,8 +1847,8 @@
     },
     {
       "module": "tcp_json_lines_poll",
-      "source": "language_examples/tcp_json_lines_poll.ail",
-      "sha256": "3a030fdf5b69d2b2c30a77f52a28ee646478efa2c6bf6b303dbd511d649128a2",
+      "source": "language_examples/tcp_json_lines_poll.py",
+      "sha256": "888ca931a15fa44d71dc4b5cc9520318a034d39c81d7a9c8c3e844c3dbcb82fc",
       "imports": [
         "json_pointer",
         "checked_integer"
@@ -2084,8 +2084,8 @@
     },
     {
       "module": "string_map",
-      "source": "language_examples/string_map.ail",
-      "sha256": "80e2bd975788dfb9b6fe783c0de5b65deb217ed6a56ddb2148e177befe2525cd",
+      "source": "language_examples/string_map.py",
+      "sha256": "06241b28c9969f90770c046dcd5242cb571ff28ed4fee8be735c504979d44e53",
       "imports": [
         "json_text"
       ],
@@ -2186,8 +2186,8 @@
     },
     {
       "module": "checked_integer",
-      "source": "language_examples/checked_integer.ail",
-      "sha256": "13af69bb8fd55bdf665d38a7410a228f95679e28483842c900127a1aded78660",
+      "source": "language_examples/checked_integer.py",
+      "sha256": "9396a23a276214ccf6ab327757e63ac388a0c61e898699b5274a36b3f262b521",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -2262,8 +2262,8 @@
     },
     {
       "module": "cli_args",
-      "source": "language_examples/cli_args.ail",
-      "sha256": "56fad985a43f291bc3bab72cde469c1f49cf0991d4699f94b88480ef6631c972",
+      "source": "language_examples/cli_args.py",
+      "sha256": "0230e7faaf71e4a2007bbacf8c0cb78b1276e348fa3edcaa29f1206bde281617",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -2337,8 +2337,8 @@
     },
     {
       "module": "json_pointer_batch",
-      "source": "language_examples/json_pointer_batch.ail",
-      "sha256": "c89e2180b82f198d0b7f97cc1739f3709ea79575468a7c57e36508937201f131",
+      "source": "language_examples/json_pointer_batch.py",
+      "sha256": "7d253999f26fc6f001ecc8136b3a262583c129eb857f9ea35cb3af46baa8094d",
       "imports": [
         "json_pointer",
         "json_tree"
@@ -2398,8 +2398,8 @@
     },
     {
       "module": "integer_row_stream",
-      "source": "language_examples/integer_row_stream.ail",
-      "sha256": "1e180c8fac332ac2e27a0d0d1e3203557a92b25012df7873c14557b4d5cc4518",
+      "source": "language_examples/integer_row_stream.py",
+      "sha256": "ec1e52f7e15fae170424ea274f3fdfe5ebce67858fc72c2e2acc7307ae46ab78",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -2506,34 +2506,34 @@
   ],
   "source_check_all_passed": true,
   "dependency_pins": {
-    "language_examples/text_search.ail": "5d22ade25ae3c96068a760494542923a43587c6a19f111a6fba203d1aaeb39ea",
-    "language_examples/binary_search.ail": "c5cbdbda90910c98a130060c0830d6ad0e70ce1a3464446e03993b18574d32ec",
-    "language_examples/utf8_stream.ail": "24bc70595616ff825e7a5de2787d5ac5cec1dce7263b5f1598a63738d533cef7",
-    "language_examples/binary_numbers.ail": "c50fa2995ffeaa7fac6d9c39f9cf4cb1e321c8424430f334dca99f470822ea84",
-    "language_examples/binary_float64.ail": "a7ac4e48a1896db30057e179da1989421c093aa868404d02f58e7b6220977ad4",
-    "language_examples/base64_codec.ail": "ee2c6a863b9afd7bc0b296bc25fcc9f044c8998977ee722140cac700eeefe171",
-    "language_examples/url_codec.ail": "165be3913e5be5e5e610e7cf7757a36ae7beac8e4272008ab4184a63e63f28d7",
-    "language_examples/csv_table.ail": "4811c289909cfe3fed2a02d85b05ec9c141cf6665fdc9b1634bf90984de54613",
-    "language_examples/csv_stream.ail": "a175c2f7d47a19967f5bd89e45fe8806ddc523fe15568134e1c2dbb309d90598",
-    "language_examples/json_text.ail": "01c06114d903efeaefcb9b49d005bae19cfd4c5fe98fe0b5879099d7320e240b",
-    "language_examples/csv_group.ail": "22d40e5d3ef1283514d57f2c363e51b0e547143f1a1baf2d4ce108a7ba51c7d9",
-    "language_examples/checked_integer.ail": "13af69bb8fd55bdf665d38a7410a228f95679e28483842c900127a1aded78660",
-    "language_examples/csv_writer.ail": "89c8d53ec9a5a9d14f5aa9954e77ecc024671777cd181a2fbcc058adc06619ad",
-    "language_examples/json_document.ail": "75a843bbe374ccd059be58e4f9465f32f3eff767e9f18d20d13773194ef47bbd",
-    "language_examples/json_tree.ail": "a95ac93368faccfb6ff74db8ccd08e303ec5645a27f20a0a39443b57107d0791",
-    "language_examples/json_pointer.ail": "76036a9d1c3883535bfb21ac5a5547cf00de1454a9ab8821eca571d12740c2e3",
-    "language_examples/directory_catalog.ail": "ce54ace0050fd85bfadd4e6d1be99787ca3cd9df0f69fd90ec6fb1068272dae5",
-    "language_examples/environment_config.ail": "e00d30619557d1d135543c4f154beeefd7521f6f30bf4be8898914785382936c",
-    "language_examples/integer_column_stats.ail": "9a37ab4cb6459ab6157b6a241da9d597ca8f90b685698742c706e3d7f8c58b1f",
-    "language_examples/csv_column_stats.ail": "c6d4cf7701ac8b8d41477fd9c15f92eebc081d6dda3f18ff61ecdbe0d25a48a2",
-    "language_examples/csv_integer_stream.ail": "947db895093cbeca129211bc3da9d2d43f64e38a10b550dd3669193de69c036a",
-    "language_examples/csv_column_stats_stream.ail": "646d4c3af64f9cd9a6de61c1bec497fa28e0a73d4b785973122785e049854897",
-    "language_examples/tcp_json_lines.ail": "eded8832ed5cc0b674ad9cc0f5f0110c99fdd014897620f9ae615a84f4040a4a",
-    "language_examples/tcp_json_lines_poll.ail": "3a030fdf5b69d2b2c30a77f52a28ee646478efa2c6bf6b303dbd511d649128a2",
-    "language_examples/string_map.ail": "80e2bd975788dfb9b6fe783c0de5b65deb217ed6a56ddb2148e177befe2525cd",
-    "language_examples/cli_args.ail": "56fad985a43f291bc3bab72cde469c1f49cf0991d4699f94b88480ef6631c972",
-    "language_examples/json_pointer_batch.ail": "c89e2180b82f198d0b7f97cc1739f3709ea79575468a7c57e36508937201f131",
-    "language_examples/integer_row_stream.ail": "1e180c8fac332ac2e27a0d0d1e3203557a92b25012df7873c14557b4d5cc4518"
+    "language_examples/text_search.py": "19a52b9f8baaa306d06f459646c73e097e89d073bdf7e0e151ffe462d758f7ad",
+    "language_examples/binary_search.py": "3b0dd600718d2248d21907fe851b78995ddbba1e587cbd86371b88a202368c7e",
+    "language_examples/utf8_stream.py": "090b02105567b8e8526d489b81512847142297d11b4e2f20220b4560ea9ad0f6",
+    "language_examples/binary_numbers.py": "28b42e386b9084d2f4ff3e0c97246f348c4a60e051c2a71576b5e6dc6b820d19",
+    "language_examples/binary_float64.py": "731a6740e18bf636f711ee8e7ff559493771e7b3e8f55e7eda3855b7652d8535",
+    "language_examples/base64_codec.py": "75173255cfdd0c955d330cab308d31e0dfbabc767d1548427c419e258f2d46de",
+    "language_examples/url_codec.py": "f6da21a7afde4587774a59842b7c147051c6651e57ab5ec9084c5373f29a6bcd",
+    "language_examples/csv_table.py": "848a8e31353a3c2d641f8b6ba9a64ca5dcc224400fc2ffbc558a9bc0b6504e97",
+    "language_examples/csv_stream.py": "eb9c5d0874f418d4cb17e5602bc46ea4d9de6ae5a32701dc41c2319cf084247f",
+    "language_examples/json_text.py": "ebea9746f3e8d7ba4facae82293dfb0e7fd9a136158ebbb67e49ff0eb58b3abe",
+    "language_examples/csv_group.py": "5732cb27498407e191a10c795ad175594b85e00470b2d4fd4d7072315741a32e",
+    "language_examples/checked_integer.py": "9396a23a276214ccf6ab327757e63ac388a0c61e898699b5274a36b3f262b521",
+    "language_examples/csv_writer.py": "13ab3938c0564c67b911934d36c774fed8f85d7bc5ade8d6cdfb983aa68a6eba",
+    "language_examples/json_document.py": "1f62f53f284a3959a661a894e28dffc8708f45d100ac4fa0f1b23e6cd867c18c",
+    "language_examples/json_tree.py": "731dad7b5be4a00e7ef2155063ec670a099f43892f4deedea5bf340dc8b3a0c6",
+    "language_examples/json_pointer.py": "9dae71626016aa5ad58afe537b36ad8a20949cdd0de9ff8b7915778ae4764d75",
+    "language_examples/directory_catalog.py": "8710ee7c3e825ca14f8afc411dc787da3d61abd7fb18da52fcab7380a49d7c61",
+    "language_examples/environment_config.py": "d996cba59d0b3f5f80e252344582748eeb156672aa9096939ccd8785481fd8f5",
+    "language_examples/integer_column_stats.py": "df25e0f47babee9b55521a77b44a0c41b40458dbc0759ff6d34cb6e19a929250",
+    "language_examples/csv_column_stats.py": "1335832ed36764e71c6a273e2e0dc85d8f5270eeacfd293b49e70767c466f183",
+    "language_examples/csv_integer_stream.py": "94fb89ddcfe6cfd0b5312d201fd2decb112fdc6228c53ac769bb60fb71b331d1",
+    "language_examples/csv_column_stats_stream.py": "277fdfbbaa6aab5a48267c40b4993589dc28b1854910277d19a059b6e98a0bef",
+    "language_examples/tcp_json_lines.py": "7bb4dbfe43ce02cc8e2935324355f00760bede7f1151e7a91134cb383e2ec5d3",
+    "language_examples/tcp_json_lines_poll.py": "888ca931a15fa44d71dc4b5cc9520318a034d39c81d7a9c8c3e844c3dbcb82fc",
+    "language_examples/string_map.py": "06241b28c9969f90770c046dcd5242cb571ff28ed4fee8be735c504979d44e53",
+    "language_examples/cli_args.py": "0230e7faaf71e4a2007bbacf8c0cb78b1276e348fa3edcaa29f1206bde281617",
+    "language_examples/json_pointer_batch.py": "7d253999f26fc6f001ecc8136b3a262583c129eb857f9ea35cb3af46baa8094d",
+    "language_examples/integer_row_stream.py": "ec1e52f7e15fae170424ea274f3fdfe5ebce67858fc72c2e2acc7307ae46ab78"
   },
   "qualification_scope": "Source/type checks at generation only; behavior/ownership/errors require SEMANTICS and runtime evidence"
 }

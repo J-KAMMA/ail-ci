@@ -56,7 +56,7 @@ class IntegerRowStreamTests(unittest.TestCase):
         return result
 
     def test_public_cli_profile_and_late_error_has_no_partial_stdout(self):
-        result = self.command('compile',ROOT/'language_examples/row_reduce_stream_main.ail','-o',self.root/'cli.exe')
+        result = self.command('compile',ROOT/'language_examples/row_reduce_stream_main.py','-o',self.root/'cli.exe')
         self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace')[:2500])
         lo,hi=-(1<<63),(1<<63)-1
         for values,cols,repeat in [([],3,2),([lo,hi,hi,-hi],2,2),

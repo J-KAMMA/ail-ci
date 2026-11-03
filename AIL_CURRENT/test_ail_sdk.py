@@ -91,7 +91,7 @@ class SdkTests(unittest.TestCase):
         self.assertTrue(marker.is_file())
     def test_relocated_integer_quantiles_expression_extend(self):
         sdk = self.exported(); environment, marker = self.environment()
-        binary = self.build(sdk, environment, sdk / 'language_examples/integer_quantiles.ail', 'quantiles')
+        binary = self.build(sdk, environment, sdk / 'language_examples/integer_quantiles.py', 'quantiles')
         paths = [self.root / 'first 日本.txt', self.root / 'second 😀.txt']
         cases = [([], []), ([3, -2, 3], [7, 0]),
                  ([-(1 << 63), (1 << 63) - 1], [0, -1]),
@@ -116,7 +116,7 @@ class SdkTests(unittest.TestCase):
     def test_relocated_exception_config_application(self):
         from test_ail_exception_values_app import reference
         sdk = self.exported(); environment, marker = self.environment()
-        binary = self.build(sdk, environment, sdk / 'language_examples/config_validate.ail', 'config-app')
+        binary = self.build(sdk, environment, sdk / 'language_examples/config_validate.py', 'config-app')
         path = self.root / 'config 日本.txt'
         for payload in (b'x=2\ny=-3\n', 'x=日本😀'.encode(), b'\xff'):
             path.write_bytes(payload)
@@ -456,7 +456,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         from test_ail_tcp_listener import RunningServer
         sdk=self.exported()
         environment,marker=self.environment()
-        example=self.build(sdk,environment,sdk/'language_examples/handle_list_main.ail','handles-example')
+        example=self.build(sdk,environment,sdk/'language_examples/handle_list_main.py','handles-example')
         self.successful(example,b'AIL!\n')
         source=self.root/'provider.ail'; source.write_text(FIELD_PROVIDER,encoding='utf8')
         obj=self.build(sdk,environment,source,'provider.o',command='compile-module')
@@ -506,7 +506,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
 
     def test_relocated_filesystem_lifecycle_and_source_free_result(self):
         sdk=self.exported();environment,marker=self.environment()
-        exe=self.build(sdk,environment,sdk/'language_examples/filesystem_main.ail','filesystem')
+        exe=self.build(sdk,environment,sdk/'language_examples/filesystem_main.py','filesystem')
         folder=self.root/'new directory 日本語😀'
         self.successful(exe,b'new\0\xff',folder)
         self.assertFalse(folder.exists())
@@ -529,7 +529,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
 
     def test_relocated_mixed_output_and_source_free_mutable_buffer(self):
         sdk=self.exported();environment,marker=self.environment()
-        exe=self.build(sdk,environment,sdk/'language_examples/mixed_output_main.ail','mixed')
+        exe=self.build(sdk,environment,sdk/'language_examples/mixed_output_main.py','mixed')
         data=bytes(range(256))*4097+b'\r\n\0\xff'
         source=self.root/'payload 日本語😀';source.write_bytes(data)
         newline=os.linesep.encode()
@@ -839,14 +839,14 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         manifest_path = sdk / 'MANIFEST.json'
         manifest = json.loads(manifest_path.read_text(encoding='utf8'))
         self.assertEqual(set(manifest['sdk_files']), set(manifest['sha256']) - {'SDK_README_JA.md'})
-        (sdk / 'language_examples/unadopted.ail').write_text('invalid research source', encoding='utf8')
+        (sdk / 'language_examples/unadopted.py').write_text('invalid research source', encoding='utf8')
         copied = exporter(sdk, self.root / 'with-unadopted')
         self.assertEqual(copied['sha256'], manifest['sha256'])
-        self.assertNotIn('language_examples/unadopted.ail', copied['sdk_files'])
+        self.assertNotIn('language_examples/unadopted.py', copied['sdk_files'])
         # The legacy discovery path remains supported for older SDKs.
         legacy = dict(manifest)
         legacy.pop('sdk_files')
-        (sdk / 'language_examples/unadopted.ail').unlink()
+        (sdk / 'language_examples/unadopted.py').unlink()
         manifest_path.write_text(json.dumps(legacy), encoding='utf8')
         self.assertEqual(exporter(sdk, self.root / 'legacy-copy')['sha256'], manifest['sha256'])
         names = manifest['sdk_files']
@@ -902,8 +902,8 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         exporter=importlib.import_module('ail_sdk').export_sdk
         sdk=self.exported();manifest_path=sdk/'MANIFEST.json';original=json.loads(manifest_path.read_text(encoding='utf8'))
         catalog_path=sdk/'language_examples/STANDARD_SOURCE_API.json';catalog=json.loads(catalog_path.read_text(encoding='utf8'))
-        changed=sdk/'language_examples/json_text.ail';changed.write_bytes(changed.read_bytes()+b'\n# changed dependency\n')
-        manifest=dict(original);manifest['sha256']=dict(original['sha256']);manifest['sha256']['language_examples/json_text.ail']=hashlib.sha256(changed.read_bytes()).hexdigest()
+        changed=sdk/'language_examples/json_text.py';changed.write_bytes(changed.read_bytes()+b'\n# changed dependency\n')
+        manifest=dict(original);manifest['sha256']=dict(original['sha256']);manifest['sha256']['language_examples/json_text.py']=hashlib.sha256(changed.read_bytes()).hexdigest()
         manifest_path.write_text(json.dumps(manifest),encoding='utf8')
         destination=self.root/'stale-copy'
         with self.assertRaisesRegex(ValueError,'standard API dependency'):exporter(sdk,destination)
@@ -911,7 +911,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         variants=[{**catalog,'dependency_pins':{}},{**catalog,'dependency_pins':{'../outside':'bad'}},{**catalog,'modules':[{'source':'missing','sha256':'bad'}]},{**catalog,'modules':[{'source':[],'sha256':'bad'}]}]
         for index,value in enumerate(variants):
             # Restore dependency bytes so the module-row/schema gates are exercised.
-            changed.write_bytes((support.ROOT/'language_examples/json_text.ail').read_bytes())
+            changed.write_bytes((support.ROOT/'language_examples/json_text.py').read_bytes())
             catalog_path.write_text(json.dumps(value),encoding='utf8');manifest=json.loads(json.dumps(original));manifest['sha256']['language_examples/STANDARD_SOURCE_API.json']=hashlib.sha256(catalog_path.read_bytes()).hexdigest();manifest_path.write_text(json.dumps(manifest),encoding='utf8')
             destination=self.root/f'bad-catalog{index}'
             with self.assertRaises(ValueError):exporter(sdk,destination)
