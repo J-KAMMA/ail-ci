@@ -155,11 +155,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # the job token cannot write .github/workflows (2026-11-02: two accepted jobs were refused and lost), so edits
+          # there are squashed into one commit that keeps them under ci-proposed/workflows for the maintainer to install
+          aside() {  # checkout $1, start sha file $2
+            ( cd "$1" && st=$(cat "$2") && wf=$(git diff --name-only "$st" HEAD -- .github/workflows) && [ -n "$wf" ] || exit 0
+              mkdir -p ci-proposed/workflows
+              for f in $wf; do [ -f "$f" ] && cp "$f" ci-proposed/workflows/; done
+              { echo "agent work (workflow edits moved to ci-proposed/workflows)"; echo; git log --format='- %s' "$st..HEAD"; } > "$RUNNER_TEMP/msgs"
+              git reset -q --soft "$st"
+              for f in $wf; do git rm -q --cached --ignore-unmatch "$f"; rm -f "$f"; git checkout -q "$st" -- "$f" 2>/dev/null || true; done
+              git add -A ci-proposed && git commit -q -F "$RUNNER_TEMP/msgs" )
+          }
           push() {  # checkout $1, branch $2
             ( cd "$1" && git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null) && { git commit -q -m "agent worker report" || true; } \
               && git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:$2" )
           }
           rc=0
+          [ -f "$RUNNER_TEMP/ok1" ] && aside "$PWD" "$RUNNER_TEMP/start"
+          [ -f "$RUNNER_TEMP/ok2" ] && aside "$RUNNER_TEMP/w2" "$RUNNER_TEMP/start2"
           [ -f "$RUNNER_TEMP/ok1" ] && { push "$PWD" "${{ github.ref_name }}" || rc=1; }
           [ -f "$RUNNER_TEMP/ok2" ] && { push "$RUNNER_TEMP/w2" "$(cat "$RUNNER_TEMP/extra_branch")" || rc=1; }
           exit $rc
