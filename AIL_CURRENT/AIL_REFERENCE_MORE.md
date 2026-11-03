@@ -858,6 +858,30 @@ needs a final `return`. Handler names: Local names.
 | a file mode, encoding or `os` call that is not built | `read_bytes`, `write_text`, `file_chunks` |
 | big integers (`Fraction` has 64-bit parts) | limbs in a `list[int]`; a `@dataclass` class |
 
+```ail-refused
+print(tuple[int, ...])
+
+print("abc".translate({}))
+
+import unicodedata
+print(unicodedata.name("a"))
+
+from contextlib import ExitStack
+print(ExitStack)
+
+import random
+print(random.SystemRandom())
+
+from array import array
+print(array("f", [1]))
+
+import io
+print(io.BytesIO())
+
+from pathlib import Path
+print(Path("x").stat())
+```
+
 ## Word count: top-N, grouping by key (example)
 
 ```python
