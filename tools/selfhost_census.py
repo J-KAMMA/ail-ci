@@ -21,6 +21,7 @@ import ast
 import json
 import multiprocessing
 import os
+import re
 import resource
 import signal
 import subprocess
@@ -55,8 +56,16 @@ def _relative(path):
         return str(Path(path).resolve())
 
 
+_TEMP_SOURCE = re.compile(r"/tmp/ail-hybrid-src-[A-Za-z0-9_]+\.py")
+
+
+def _normalize(text):
+    """Drop the analysis run's temporary source name so a census is reproducible."""
+    return _TEMP_SOURCE.sub("<source>", text or "")
+
+
 def _first_line(text):
-    for line in (text or "").splitlines():
+    for line in _normalize(text).splitlines():
         line = line.strip()
         if line:
             return line[:400]
@@ -119,7 +128,7 @@ def _classify(text, label):
     except _Timeout:
         raise
     except BaseException as error:
-        return {"error": "%s: %s" % (type(error).__name__, str(error)[:300]),
+        return {"error": _normalize("%s: %s" % (type(error).__name__, str(error)[:300])),
                 "chosen": {}, "rejected": {}, "units": [], "facts": set(),
                 "note": "", "label": label}
     try:
@@ -127,7 +136,7 @@ def _classify(text, label):
     except _Timeout:
         raise
     except BaseException as error:
-        return {"error": "%s: %s" % (type(error).__name__, str(error)[:300]),
+        return {"error": _normalize("%s: %s" % (type(error).__name__, str(error)[:300])),
                 "chosen": {}, "rejected": {}, "units": [], "facts": set(),
                 "note": _first_line(report.get("note")), "label": label}
     units = [unit[1] for unit in (report.get("mix_units") or []) if len(unit) > 1]
@@ -298,6 +307,8 @@ def classify_chunked(path, timeout, chunk_lines):
             }
         records.append(record)
         covered.update(node.name for node in functions if start <= node.lineno <= end)
+    if records:
+        records[0]["classes"] = _classes(tree)
     missing = [node for node in functions if node.name not in covered]
     if missing:
         fake = {"chosen": {}, "rejected": {}, "units": [], "facts": set(),
