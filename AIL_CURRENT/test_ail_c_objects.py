@@ -37,7 +37,7 @@ class CObjectTests(unittest.TestCase):
     def command(self, *args):
         return subprocess.run([sys.executable, '-X', 'utf8', '-B', str(ROOT / 'ail_chatgpt.py'),
                                *map(str, args)], capture_output=True, timeout=180,
-                              env=dict(os.environ, PYTHONUTF8='1'))
+                              env=dict(os.environ, PYTHONUTF8='1', AIL_BRACE_WARNING='0'))
 
     def write(self, name, text):
         path = self.root / name

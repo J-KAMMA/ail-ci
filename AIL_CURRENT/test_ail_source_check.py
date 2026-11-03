@@ -26,7 +26,7 @@ class SourceCheckTests(unittest.TestCase):
     def check(self, source, *args, command="check"):
         out, err = io.StringIO(), io.StringIO()
         before = {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
-        with patch.dict(os.environ, {'PATH': ''}), patch.object(ail_chatgpt.subprocess, 'run',
+        with patch.dict(os.environ, {'PATH': '', 'AIL_BRACE_WARNING': '0'}), patch.object(ail_chatgpt.subprocess, 'run',
                 side_effect=AssertionError('source check must not launch a process')), \
                 redirect_stdout(out), redirect_stderr(err):
             status = ail_chatgpt.main([command, str(source), *map(str, args)])

@@ -44,7 +44,8 @@ class SdkTests(unittest.TestCase):
             'sys.addaudithook(deny_original)\n'
             f'with open({str(marker)!r}, "a", encoding="utf8") as stream: stream.write("active\\n")\n',
             encoding='utf8')
-        return dict(os.environ, PYTHONPATH=str(guard), PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1'), marker
+        return dict(os.environ, PYTHONPATH=str(guard), PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1',
+                    AIL_BRACE_WARNING='0'), marker
 
     def cli(self, sdk, environment, *args):
         return subprocess.run([sys.executable, '-X', 'utf8', '-B', str(sdk / 'ail_chatgpt.py'),
