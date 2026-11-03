@@ -886,6 +886,37 @@ import biggate
 USER_MARK = biggate.USER_MARK
 _PREAMBLE_HEAD = ('/* ============================ pyboxed2.py generated preamble (v2) ============ */\n'
                   + _runtime_text())
+_RECURSION_SUPPORT = r'''
+/* ===================================================================================
+   The general/unified path's recursion depth guard.  The typed path finds every
+   self-reachable function and gives it the same 50,000-call guard (pyfunc.py's
+   AIL_MAX_RECURSION_DEPTH); the general path used to have none at all, so a deep
+   recursion ran the C stack off its end and died with SIGSEGV.  The counter and the
+   messages are deliberately the typed path's: bare "recursion depth exceeded", exit 1.
+
+   A unified frame is larger than a typed one (the boxed frame's slot array), so the
+   default 8-16 MiB stack can run out before call 50,000.  Raise the soft stack limit for
+   a program that actually has a recursive function; the stack is only faulted in as it
+   is used, so the larger limit costs no memory by itself.
+   =================================================================================== */
+#define AIL2_MAX_RECURSION_DEPTH 50000
+static int64_t ail2_depth = 0;
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/resource.h>
+static inline void ail2_raise_stack_limit(void) {
+    struct rlimit lim;
+    if (getrlimit(RLIMIT_STACK, &lim) != 0) return;
+    rlim_t want = (rlim_t)64 * 1024 * 1024;
+    if (lim.rlim_cur != RLIM_INFINITY && lim.rlim_cur < want) {
+        lim.rlim_cur = (lim.rlim_max == RLIM_INFINITY || lim.rlim_max > want) ? want : lim.rlim_max;
+        (void)setrlimit(RLIMIT_STACK, &lim);
+    }
+}
+#else
+static inline void ail2_raise_stack_limit(void) {}
+#endif
+'''
+
 _PREAMBLE_TAIL = r'''
 #include <unistd.h>
 #include <stdlib.h>
@@ -2866,6 +2897,7 @@ class Compiler(boxclosure.ClosureMixin):
                 self._register_class(n)
         self.class_init_index = {name: index for index, name in enumerate(self.class_order)}
         self.rebound_functions = _rebound_function_names(tree, self.functions)
+        self.recursive_fns = self._recursive_function_keys()
 
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
@@ -3098,6 +3130,8 @@ class Compiler(boxclosure.ClosureMixin):
         parts.append('static ail_obj g_slots_arr[%d];\n' % max(ng, 1))
         parts.append('static int g_class_init_arr[%d];\n' % max(len(self.class_order), 1))
         parts.append('static ail_frame g_frame;\n')
+        if self.recursive_fns:
+            parts.append(_RECURSION_SUPPORT)
         parts.append('\n/* ---- forward declarations ---- */\n')
         parts.extend(self.top_decls)
         for cname in self.class_order:
@@ -3187,6 +3221,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(self._array_entry_main(array_entry, tree, setup))
             return ''.join(parts)
         parts.append('int main(int argc, char **argv) {\n' if self.uses_argv else 'int main(void) {\n')
+        if self.recursive_fns:
+            parts.append('    ail2_raise_stack_limit();\n')
         parts.append('    ail_ctx cxs, *cx = &cxs;\n    ail_ctx_init(cx);\n')
         parts.extend(setup)
         if self.uses_argv:
@@ -3912,6 +3948,8 @@ class Compiler(boxclosure.ClosureMixin):
         usage = 'usage: tool FILE' + ''.join(' N%d' % (i + 1) for i in range(len(extra)))
         lines = []
         lines.append('int main(int argc, char **argv) {\n')
+        if self.recursive_fns:
+            lines.append('    ail2_raise_stack_limit();\n')
         lines.append('    ail_ctx cxs, *cx = &cxs;\n    ail_ctx_init(cx);\n')
         lines.extend(setup_lines)
         lines.append('    if (argc < %d) { fputs("%s\\n", stderr); ail_ctx_destroy(cx); return 2; }\n' %
@@ -4097,6 +4135,55 @@ class Compiler(boxclosure.ClosureMixin):
         pass  # validated in Pass 0 (_check_importfrom); nothing to emit
 
     # ------------------------------------------------------------------------- function register
+    def _recursive_function_keys(self):
+        """Keys ((owner_class + '.')? + name) of the functions that can reach themselves.
+
+        Only direct calls are followed (a bare name, `self.method()`, `Class.method()`),
+        which is exactly the shape a self-recursive user function takes.  A function
+        reached through a value or a callback may still recurse, but the typed path does
+        not count that either, and this guard must fire at the typed path's depth."""
+        nodes, owners = {}, {}
+        for name, info in self.functions.items():
+            nodes[name] = info['node']
+        for cname, cls in self.classes.items():
+            for mname, info in cls['methods'].items():
+                key = cname + '.' + mname
+                nodes[key] = info['node']
+                owners[key] = (cname, info)
+        calls = {}
+        for key, node in nodes.items():
+            targets = set()
+            for n in ast.walk(node):
+                if not isinstance(n, ast.Call):
+                    continue
+                f = n.func
+                if isinstance(f, ast.Name) and f.id in self.functions:
+                    targets.add(f.id)
+                elif isinstance(f, ast.Attribute):
+                    if isinstance(f.value, ast.Name) and f.value.id in self.classes:
+                        target = f.value.id + '.' + f.attr
+                        if target in nodes:
+                            targets.add(target)
+                    elif key in owners and isinstance(f.value, ast.Name) \
+                            and f.value.id == owners[key][1]['all_params'][0]:
+                        target = owners[key][0] + '.' + f.attr
+                        if target in nodes:
+                            targets.add(target)
+            calls[key] = targets
+        recursive = set()
+        for start in nodes:
+            seen, todo = set(), list(calls.get(start, ()))
+            while todo:
+                cur = todo.pop()
+                if cur == start:
+                    recursive.add(start)
+                    break
+                if cur in seen:
+                    continue
+                seen.add(cur)
+                todo.extend(calls.get(cur, ()))
+        return recursive
+
     def _register_function(self, node, cname=None, is_method=False, owner_class=None):
         posonly = [a.arg for a in node.args.posonlyargs]
         params = posonly + [a.arg for a in node.args.args]
@@ -4440,11 +4527,35 @@ class Compiler(boxclosure.ClosureMixin):
             if guard:
                 head = 'static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n' % (impl_cname, sig)
                 full = full.replace(head, head + guard, 1)
+        if self._guard_recursion(info):
+            full = self._apply_recursion_guard(full)
         self.top_defs.append(full)
         if info['lru_cache']:
             self._emit_lru_wrapper(info)
         if info.get('generator'):
             self._emit_generator_wrapper(info, impl_cname, sig)
+
+    def _guard_recursion(self, info):
+        node = info['node']
+        key = (info['owner_class'] + '.' + node.name) if info.get('is_method') else node.name
+        if key not in self.recursive_fns:
+            return False
+        # A unified function has two C bodies: the boxed generic wrapper and the specialised
+        # one.  Recursive calls inside either body name the specialised function, so only that
+        # body counts; guarding both would count the wrapper as an extra call.
+        if self.uplan is not None and not info.get('is_method'):
+            spec = self.uplan.spec.get(node.name)
+            if spec is not None and info['cname'] != spec.name:
+                return False
+        return True
+
+    def _apply_recursion_guard(self, full):
+        full = full.replace('AIL_FRAME_LEAVE(cx, f);',
+                            'AIL_FRAME_LEAVE(cx, f); ail2_depth--;')
+        head, rest = full.split('{\n', 1)
+        guard = ('{\n    if (++ail2_depth > AIL2_MAX_RECURSION_DEPTH) '
+                 'ail_die_bare("recursion depth exceeded");\n')
+        return head + guard + rest
 
     def _emit_generator_wrapper(self, info, impl_cname, sig):
         """Calling a generator function makes a generator object holding the arguments (safetyrt.GEN); its
