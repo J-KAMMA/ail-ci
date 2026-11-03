@@ -2,8 +2,9 @@
 
 Look-up sections behind AIL_REFERENCE.md, whose last line gives each section's line range here:
 read only the slice you need (`sed -n A,Bp AIL_REFERENCE_MORE.md`). A refusal names the construct,
-the rewrite and `file:line:col`. Most examples use the brace surface (`fn`, `let`, `;`, braces);
-write them in Python as usual (`struct` is a `@dataclass`, `impl` its methods; brace `let ys = xs;` copies).
+the rewrite and `file:line:col`. AIL has one syntax, Python; annotations are optional and the
+compiler picks the representation. Examples use `def main() -> int` and plain classes (a
+`@dataclass` works too); `ys = xs` shares a flat list, `ys = xs.copy()` copies it.
 
 ## Commands
 
@@ -16,7 +17,7 @@ python3 ail_chatgpt.py api csv_stream              # signatures of a bundled mod
 Both `compile` (stderr) and `check` (`slow_patterns` in the JSON) name at most 3 commonly O(n²)
 loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove` on a list, `.pop(0)`
 / `.insert(0, x)`, `min`/`max`/`sort` of a list the loop keeps changing, a scan of all rows for the
-current key, nested loops over one list, a struct heap keyed by a computed value. They never
+current key, nested loops over one list, a heap of class instances keyed by a computed value. They never
 fail the build; fix them when n can be large. `s += t` on a str is linear (no hint).
 Projects (`ail new`, `ail.toml`), `ail lsp` and `ail build --debug`: see Tooling at the end.
 
@@ -80,7 +81,7 @@ row 0: 0 0
 row 1: 0 0
 ```
 
-- `fn main()` takes no parameters and returns the exit code (falling off the end is 0); `sys.argv`
+- `def main() -> int` takes no parameters and returns the exit code (falling off the end is 0); `sys.argv`
   is a `list[str]` with the program name first; `sys.exit(n)` works anywhere.
 - Input: `for line in sys.stdin` (keeps `\n`; input that is not UTF-8 exits 1: read bytes instead),
   `input()` (`EOFError` at the end), `open(path).read()` and `for line in open(path)`.
@@ -171,31 +172,30 @@ sys.exit(main())
 2 0 1 yz
 ```
 
-## Syntax: top level, functions, statements, let, const
+## Syntax: top level, functions, statements, names, constants
 
-- Top level holds only `use NAME;`, `const`, `struct`, `impl`, `fn`. No top-level `let` (pass
-  state in a struct), no nested `fn`, no `class`, no `lambda` value (only as a sort key).
-- `fn f(a: int, b: str = "x") -> int { ... }`: parameters and result annotated; `-> void` or no
-  arrow returns nothing. Keyword arguments work. Recursion works. Pass a top-level `fn` by name as
+- Top level holds only imports, constants, class definitions and functions. No top-level assignment
+  (pass state in a class), no nested `def`, no `lambda` value (only as a sort key).
+- `def f(a: int, b: str = "x") -> int:` parameters and result annotated; `-> None` or no arrow
+  returns nothing. Keyword arguments work. Recursion works. Pass a top-level function by name as
   a `Callable[[int], int]` value (also a field type).
-- Every statement ends with `;`, never after `}`. Blocks use braces: `if c { } elif d { } else { }`
-  (no `else if`), `while c { }`, `for x in xs { }`, `try { } except E as e { } finally { }`.
-  Comments start with `#`. Logic is `and or not`.
+- Blocks use indentation: `if c: ... elif d: ... else: ...`, `while c:`, `for x in xs:`,
+  `try: ... except E as e: ... finally: ...`. Comments start with `#`. Logic is `and or not`.
 - `with expr as name:` / `with a as x, b as y:` is built: `with open(...)` on the typed path, and on
   the general path user `__enter__` / `__exit__` (a true result suppresses) and `contextlib.contextmanager`,
   `suppress`, `closing`, `nullcontext` (the default build falls back).
-- `let x = 1;` or `let x: list[str] = [];`: an initializer is required and fixes the type.
-  `const N = 3;` takes a number, str, bytes or numeric-list literal.
+- `x = 1` or `x: list[str] = []`: an initializer is required and fixes the type.
+  `N = 3` takes a number, str, bytes or numeric-list literal.
 
 ## Local names: one type per name, loop and except names
 
-- `let` is function-scoped: a name has one type in the whole function, also across blocks. Give a
-  value of another type a new name (`let x = 1;` then `let x = "a";` in another block is refused).
+- A name is function-scoped: it has one type in the whole function, also across blocks. Give a
+  value of another type a new name (`x = 1` then `x = "a"` in another block is refused).
 - A `for` variable belongs to its loop, and a lambda parameter to its lambda: two loops may reuse
   `t` with different types, and `idx.sort(key=lambda i: ...)` next to `for i in` is fine.
 - `except E as e` binds `e` inside the handler only. If the function also has a local `e` that is
   read after the handler, the binding is refused: pick a fresh name (`as err`).
-- A top-level `fn`, `struct` or `const` named like a built-in (`abs`, `min`, `sorted`, `print`,
+- A top-level function, class or constant named like a built-in (`abs`, `min`, `sorted`, `print`,
   `heappush`, `read_bytes`, ...) wins everywhere, as in Python. Type names (`int`, `str`, `list`,
   ...), exception names, `math`, `sys`, `os` are refused when used: rename the definition.
 
@@ -237,26 +237,30 @@ KeyError 6
 - `int(str)`, `int(bytes)` (`ValueError` on bad text), `int(float)`, `float(str)`, `round(x)` (half
   to even, int), `round(x, n)`, `abs`, `max(a, b)`, `min(a, b)`, `sum/min/max/any/all(list)`.
   No `math` module: `x ** 0.5`. For text that may overflow: `parse_int64_decimal(s)` (Modules).
-- `bool` is Python's: `True`/`False` (also `true/false`), comparisons, `not`, `and`/`or` of bools,
+- `bool` is Python's: `True`/`False`, comparisons, `not`, `and`/`or` of bools,
   `bool(x)`, `any/all`, the `is...()`/`startswith`/`issubset`... predicates, a `-> bool` result, a
   `bool` field or a local only ever given bools all print `True`/`False` (also `str(b)`, `f"{b}"`,
   `"%s" % b`); a spec'd field formats the number (`f"{b:>3}"` is `  1`, as CPython). In
   arithmetic a bool is 1/0 (`total += x > 0`). A declared bool slot (parameter, result, field,
-  `let ok: bool`, `list[bool]`) takes only bools: write `n != 0`, not `n`. A function declared
-  `-> int` returns an int (`print` shows `1`). `0 or 5` is `1` (an int `and`/`or` gives 1/0).
+  `ok: bool`, `list[bool]`) takes only bools: write `n != 0`, not `n`. A function declared
+  `-> int` returns an int (`print` shows `1`). `0 or 5` is `5` and `0 and 5` is `0`: `and`/`or`
+  return an operand, as in Python.
 
-## Structs: fields, methods, aliasing, writable parameters
+## Classes: fields, methods, aliasing, writable parameters
 
-- `struct P { x: int; name: str; }` is built `P(1, "a")` or `P(name="a", x=1)`; every field needs
-  a value (list/dict/set fields take `[]`/`{}`/`set()`). Methods: `impl P { fn m(self, d: int) ->
-  int { ... } }`. A field may be any type, the struct's own type only as `P | None` or `list[P]`.
-  A Python `@dataclass` class may derive from one `@dataclass` base on the general path (the default
-  build falls back): inherited fields, `==` and printing work there.
-- A struct is a shared reference (assignment, list elements and arguments alias it), as are nested
-  lists and their rows; `let ys = xs;` copies a flat list. No tuples: return a struct.
+- A `@dataclass class P` with annotated fields `x: int` and `name: str` (or a plain `class P` with
+  an annotated `__init__`) is built `P(1, "a")` or `P(name="a", x=1)`; every field needs a value
+  (list/dict/set fields take
+  `[]`/`{}`/`set()`). Methods are methods of the class: `def m(self, d: int) -> int: ...`. A field
+  may be any type, the class's own type only as `P | None` or `list[P]`. A `@dataclass` class may
+  derive from one `@dataclass` base on the general path (the default build falls back): inherited
+  fields, `==` and printing work there.
+- An instance is a shared reference (assignment, list elements and arguments alias it), as are
+  nested lists and their rows; `ys = xs` shares a flat list, `ys = xs.copy()` copies it. No
+  tuples: return a class instance.
 - Flat `list`, `dict` and `set` parameters are read-only: to modify one in a helper, keep it in a
-  struct field and pass the struct (or return a new list). Struct, `bytearray` and
-  `list[list[T]]` parameters are writable. `print(p)` and `p1 == p2` on structs: use the fields.
+  class field and pass the instance (or return a new list). Class, `bytearray` and
+  `list[list[T]]` parameters are writable. `print(p)` and `p1 == p2` on class instances: use the fields.
 
 ```python
 import sys
@@ -288,7 +292,7 @@ def main() -> int:
     bump(p, b)
     xs = [0] * 3
     # a copy
-    ys = xs
+    ys = xs.copy()
     ys.append(3)
     a = 1
     c = 2
@@ -306,16 +310,17 @@ if __name__ == "__main__":
 
 ## Trees: linked lists, `Node | None`
 
-A struct field, parameter, result or `let` written `Node | None` (or `Optional[Node]`) may be `None`.
+A class field, parameter, result or annotated name written `Node | None` (or `Optional[Node]`) may be `None`.
 On the typed path `int | None`, `float | None` and `str | None` are built too; `bool`, `bytes` and
 `list[T]` with `| None` need the general path (the default build falls back). Test with `is None`,
 `is not None`, `if x`; `a is b` compares identity. Reading or writing a field (or calling a method)
-through None raises `RuntimeError` (message `field access on None`), catchable. Structs are
+through None raises `RuntimeError` (message `field access on None`), catchable. Class instances are
 reference counted: trees and lists are freed when unreferenced, a reference cycle (parent pointer,
-doubly linked list) is never freed. `let x = None;` alone is not a struct: write
-`let x: Node | None = None;`. `a if c else None` is refused: use if/else.
+doubly linked list) is never freed. `x = None` alone is not a class instance: write
+`x: Node | None = None`. `a if c else None` is refused: use if/else.
 
 ```python
+from __future__ import annotations
 import sys
 
 class Node:
@@ -378,7 +383,7 @@ field access on None
 
 ## Lists: methods, copying, list()
 
-- `list[T]`, T: int, float, str, bytes, bytearray, bool, a struct, or a row (Nested lists).
+- `list[T]`, T: int, float, str, bytes, bytearray, bool, a class instance, or a row (Nested lists).
   `[0] * n`, `[0.0] * n`, `[False] * n` allocate; `[f(i) for i in range(n) if c]` builds.
 - `append extend insert pop([i]) remove index count clear copy reverse`, `sort(key=, reverse=)`,
   `del xs[i]`, slices with steps, `+`, `+=`, `in`, `len`, `reversed(xs)`, `enumerate(xs)`,
@@ -386,7 +391,7 @@ field access on None
   `IndexError`; `xs[-1]` works.
 - `list(x)` copies any list, set, dict (its keys), `d.keys()`, `d.values()`, str (its characters)
   or range into a new list. On a list field, `x in st.xs` and `st.xs.count(x)` read it in place.
-- A flat list parameter is read-only on the typed path (Structs). `print(xs)` is the list's repr;
+- A flat list parameter is read-only on the typed path (Classes). `print(xs)` is the list's repr;
   `print` of a dict needs the general path (the default build falls back).
 - `x in xs`, `index`, `count`, `remove`, `pop(0)`, `insert(0, x)` are O(n), as in Python: in a
   loop use a set or `[False] * n`, a queue as list + head index (BFS), a heap (Heaps).
@@ -402,28 +407,28 @@ instead of writing a merge sort. `reverse=` is literally `True` or `False`.
 
 ## Nested lists: `list[list[T]]`
 
-Nested lists (T int, float, str or a struct) work as locals, struct fields, parameters and
+Nested lists (T int, float, str or a class instance) work as locals, class fields, parameters and
 results, with Python's meaning:
 - Build rows with `[[] for _ in range(n)]`, `[[0] * w for _ in range(h)]`, `[[1, 2], [3]]`,
   `[[i * j for j in range(w)] for i in range(h)]` or `g.append(row)`; annotate an empty one
-  (`let g: list[list[str]] = [];`). `[[0] * w] * h` is refused: every row would be one list.
+  (`g: list[list[str]] = []`). `[[0] * w] * h` is refused: every row would be one list.
 - `g[i][j]` read, write and `+=` (O(1), nothing copied), `g[i].append(x)`, `len(g[i])`,
   `for row in g`, `for x in g[i]`, `x in g[i]`, `sum/min/max(g[i])`, `g[i][a:b]`,
   `g[i].sort()` / `.sort(reverse=True)`, `pop insert extend remove clear reverse index count`,
   `g.sort(key=lambda r: len(r))`, `[x for row in g for x in row]`. A bad index raises `IndexError`.
-- Aliasing is Python's: `let r = g[i];`, `for r in g` and `g[j] = g[i]` share the row, so
-  `r.append(x)` is seen in `g`; `let h = g;` and a `list[list[T]]` parameter share the whole list
+- Aliasing is Python's: `r = g[i]`, `for r in g` and `g[j] = g[i]` share the row, so
+  `r.append(x)` is seen in `g`; `h = g` and a `list[list[T]]` parameter share the whole list
   (a callee's `g[i].append(x)`, `g.append(row)` and `g[i] = row` are seen by the caller);
   `g.copy()` copies the outer list only. Storing a plain list (`g.append(xs)`, `g[i] = xs`), and
-  reading a row into a `list[T]` (`let r: list[int] = g[i];`, an argument or result of type
+  reading a row into a `list[T]` (`r: list[int] = g[i]`, an argument or result of type
   `list[T]`), copies it. `for x in g[i]` sees appends made in the loop, as Python does.
 - Not built: deeper nesting, rows of bytes, `key=` on a row's `sort`, `print(g)`.
 
 ## Dicts: `dict[str, T]`, `dict[int, T]`
 
 - T: int, float, str, bytes. Insertion ordered. Key an int id as an int (`d[r.id]`, never
-  `d[str(r.id)]`). `dict[str, Struct]` and `dict[str, list[T]]` need the general path (the default
-  build falls back); the typed path maps the key to an index into a `list[Struct]` or a `list[list[T]]`.
+  `d[str(r.id)]`). `dict[str, C]` and `dict[str, list[T]]` need the general path (the default
+  build falls back); the typed path maps the key to an index into a `list[C]` or a `list[list[T]]`.
 - `d[k]` (`KeyError`), `get(k, default)` (one-argument `get(k)` is refused: there is no None for a
   value; use `d.get(k, -1)` or `if k in d`), `setdefault`, `pop(k[, default])`, `del d[k]`, `in`,
   `len`, `keys()`, `values()`, `items()`, `update`, `copy`, `clear`; `for k in d`,
@@ -432,7 +437,7 @@ results, with Python's meaning:
 
 ## Sets: `set[int]`, `set[str]`
 
-`let s: set[int] = set();` (or `{1, 2}`, `set(xs)`): `add discard remove clear update copy`,
+`s: set[int] = set()` (or `{1, 2}`, `set(xs)`): `add discard remove clear update copy`,
 `x in s`, `len`, `for`, `sorted`, `list(s)`, `sum/min/max` (int), `| & - ^` and `|= &= -= ^=`
 (also `union intersection difference symmetric_difference`, `*_update`), `== != <= < >= >`
 (`issubset`, `issuperset`), `isdisjoint`. Insertion ordered; `s.pop()` removes the first element in that order
@@ -482,7 +487,7 @@ if __name__ == "__main__":
 
 ```text
 007|   7|3.14|ab  |8     7|3.1 7!
-True 1 3.5 3 2 1024
+True 5 3.5 3 2 1024
 ```
 
 ## Regex: re (Python syntax)
@@ -794,20 +799,20 @@ variable first when it sits behind another call.
 
 ## Heaps: heapq, bisect
 
-No import, on a list of int, float, str or structs: `heappush(h, x)`, `heappop(h)` (`IndexError`
+No import, on a list of int, float, str or class instances: `heappush(h, x)`, `heappop(h)` (`IndexError`
 when empty), `heapify(h)`, `heappushpop(h, x)`, `heapreplace(h, x)`;
 `bisect_left/bisect_right/bisect(xs, x[, lo[, hi]])`, `insort/insort_left/insort_right(xs, x[, lo[,
 hi]])`. Same results and heap layout as CPython, O(log n), the list changed in place.
-- The list that changes must be a local or a struct field (`heappush(self.h, x)`), not a list
+- The list that changes must be a local or a class field (`heappush(self.h, x)`), not a list
   parameter.
-- A heap of structs takes a sort key on every call: `heappush(h, n, key=lambda n: (n.dist, n.id))`,
+- A heap of class instances takes a sort key on every call: `heappush(h, n, key=lambda n: (n.dist, n.id))`,
   `heappop(h, key=lambda n: (n.dist, n.id))` (the same key each time; Python would use a tuple).
   A key of 1-4 int/float fields read as they are (`(n.dist, n.id)`) is sifted in C over the list's
   pointers, no reference count per step; any other key (negated, computed, str) is slower, so there
   prefer a heap of ints: push `(d << 20) | v`, pop `p >> 20` and `p & 1048575`.
   `bisect_left(xs, x, key=lambda n: n.t)` compares `x` with `key(xs[i])`.
 - A call that pops inside a larger expression must come before any other read of that list in it;
-  otherwise bind it first: `let x = heappop(h);`. A function you define with the same name wins.
+  otherwise bind it first: `x = heappop(h)`. A function you define with the same name wins.
 
 ## Loops: for, comprehensions
 
@@ -817,7 +822,7 @@ hi]])`. Same results and heap layout as CPython, O(log n), the list changed in p
 `x if c else y`, list and dict comprehensions (also nested `for`), `zip(a, b)` as the iterable of
 `for a, b in`, `isinstance(x, int)` (and str / float / bool). `parallel for` (Parallel).
 No `for ... else`, `list(zip(...))`, `enumerate(zip(...))`, `enumerate(str)`, tuple unpacking
-beyond `for a, b in zip(...)` / `enumerate(...)` / `d.items()`, or `isinstance` of a struct.
+beyond `for a, b in zip(...)` / `enumerate(...)` / `d.items()`, or `isinstance` of a class instance.
 
 ## Exceptions
 
@@ -832,52 +837,26 @@ arguments. Own classes: `class E(Base)` where Base is `Exception`, `ValueError`,
 with one `super().__init__(..)` and `self.x = <expression of the parameters>` (annotate the parameters or let the
 calls show their kinds), constants in the body (`status = 404`) and a `__str__` returning an expression of `self.x`;
 read `e.x` under `except E as e`.
-On the brace surface: `e.kind`, `e.message` are strs. `raise ValueError("m");`, `raise;`,
-`assert c, "m";`. Uncaught: message on stderr, exit 1. A function whose body only raises still
+`raise ValueError("m")`, bare `raise`, `assert c, "m"`. Uncaught: message on stderr, exit 1. A function whose body only raises still
 needs a final `return`. Handler names: Local names.
 
 ## Refused: what to write instead
 
 | Python | AIL |
 |---|---|
-| tuples beyond the Tuples section, `zip` over non-lists | a struct; index loops |
-| a lambda that escapes, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
-| changing a global list / str / dict | a struct holding the state, passed to each function; a module-level int / float may use `global` |
-| `dict[str, Struct]`, `dict[str, list[T]]` on the typed path | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`); the default build falls back |
+| tuples beyond the Tuples section, `zip` over non-lists | a class; index loops |
+| a lambda that escapes, nested `def` | a top-level function passed as `Callable[[A], R]` |
+| changing a global list / str / dict | a class holding the state, passed to each function; a module-level int / float may use `global` |
+| `dict[str, C]`, `dict[str, list[T]]` on the typed path | a `dict[str, int]` index into a `list[C]` (or a `list[list[T]]`); the default build falls back |
 | `None` for a list on the typed path | a sentinel (-1, ""), or raise; int / float / str may be `int \| None` |
-| `xs[i] = v` or `xs.append(v)` on a list parameter (typed path) | a struct field `s.xs`, or return a new list; the default build falls back |
+| `xs[i] = v` or `xs.append(v)` on a list parameter (typed path) | a class field `s.xs`, or return a new list; the default build falls back |
 | one name holding an int, later a str | a second name |
 | `str(b)` of bytes on the typed path | `b.decode()`; the default build prints the repr |
 | `print` of a dict on the typed path | `sorted(d.items())`; a list and a tuple print as their repr |
-| `d.get(k)` (None when missing) | `d.get(k, -1)` with a sentinel, or `if k in d { ... d[k] ... }` |
+| `d.get(k)` (None when missing) | `d.get(k, -1)` with a sentinel, or `if k in d: ... d[k] ...` |
 | `int(s)` on text that may overflow | `parse_int64_decimal(s)` from `checked_integer` (`ValueError`) |
 | a file mode, encoding or `os` call that is not built | `read_bytes`, `write_text`, `file_chunks` |
 | big integers (`Fraction` has 64-bit parts) | limbs in a `list[int]`; a `@dataclass` class |
-
-```ail-refused
-fn main() { let t = (1, 2); print(t[0]); }
-
-let counter = 0;
-fn main() { counter += 1; }
-
-fn main() { let x: int | None = None; print(1); }
-
-fn push(xs: list[int]) -> void { xs.append(1); }
-fn main() { let a: list[int] = []; push(a); }
-
-fn main() { let x = 1; if x == 1 { print(1); } else if x == 2 { print(2); } }
-
-fn main() { if true { print(1); }; }
-
-struct N { v: int; next: N; }
-fn main() { print(1); }
-
-fn main() { if 1 > 0 { let x = 1; print(x); } else { let x = "a"; print(x); } }
-
-fn main() { let d = b"ab"; print(str(d)); }
-
-fn main() { let e = 5; try { raise ValueError("x"); } except ValueError as e { print(1); } print(e); }
-```
 
 ## Word count: top-N, grouping by key (example)
 
@@ -1049,14 +1028,14 @@ if __name__ == "__main__":
 
 ## Modules: csv, json, checked ints
 
-`use NAME;` at the top; exact signatures: `python3 ail_chatgpt.py api NAME`.
+`from NAME import *` at the top (or name what you use); exact signatures: `python3 ail_chatgpt.py api NAME`.
 
-| module | use |
+| module | names |
 |---|---|
 | `checked_integer` | `parse_int64_decimal(s) -> int` (`[+-]?[0-9]+` within int64, else `ValueError`), `checked_int64_add(a, b)` |
-| `csv_stream` | `dec = csv_decoder_new(); rows = csv_decode_feed(dec, text); rows.extend(csv_decode_finish(dec));` gives `list[CsvRow]`, `CsvRow{number; fields: list[str]}`; RFC 4180, empty lines skipped, bad quote `ValueError` |
-| `json_pointer_scan` | `json_pointer_scan_bytes(data, pointers: list[str]) -> JsonPointerValues{error; values: list[str]}`: values as compact JSON; `error != 0` or `ValueError` if invalid or not found |
-| `json_pointer` | `json_parse_document(text) -> list[JsonValue]`, `JsonValue{kind; parent; key; text}` (kind 0 null, 1 bool, 2 number, 3 string, 4 array, 5 object), `json_quote(s)` |
+| `csv_stream` | `dec = csv_decoder_new()`, `rows = csv_decode_feed(dec, text)`, `rows.extend(csv_decode_finish(dec))` gives `list[CsvRow]`, a `CsvRow` with fields `number` and `fields: list[str]`; RFC 4180, empty lines skipped, bad quote `ValueError` |
+| `json_pointer_scan` | `json_pointer_scan_bytes(data, pointers: list[str]) -> JsonPointerValues` with fields `error` and `values: list[str]`: values as compact JSON; `error != 0` or `ValueError` if invalid or not found |
+| `json_pointer` | `json_parse_document(text) -> list[JsonValue]`, a `JsonValue` with fields `kind`, `parent`, `key` and `text` (kind 0 null, 1 bool, 2 number, 3 string, 4 array, 5 object), `json_quote(s)` |
 | `utf8_stream`, `cli_args`, `path_posix`, `base64_codec`, `csv_writer`, `binary_cursor` | see `api NAME` |
 
 ```python
@@ -1105,18 +1084,19 @@ with `s[i]` on a str 190; `out += line + "\n"` 148 versus `out += line; out += "
 
 ## Parallel: `parallel for` loops
 
-`parallel for i in range(a, b) { ... }` runs iterations on all cores and gives exactly the result of
-the plain `for` (`AIL_THREADS=n` fixes the thread count). The compiler refuses, by name, a body whose
+`from ail import par_range` then `for i in par_range(a, b): ...` runs iterations on all cores and
+gives exactly the result of the plain `for` (`AIL_THREADS=n` fixes the thread count). The compiler
+refuses, by name, a body whose
 iterations could see each other:
 - The body computes int/float values and may read anything. It writes only (a) locals it creates
   itself, private to one iteration and unusable after the loop, and (b) elements `xs[i]`,
   `xs[i * K + j]` (`j` from an inner `for j in range(0, K)`) or `xs[i * 4 + 1]` of a list or
   bytearray sized before the loop (`[0.0] * n`, `bytearray(n)`), touched nowhere else in the body.
 - Refused: a total carried between iterations (`t += x`: write `out[i]`, add up after the loop),
-  append/pop, str, bytes, print, try, return, a nested `parallel for`, any call except
-  int/float/abs/min/max/round/len and top-level `fn`s that take and return only int/float.
+  append/pop, str, bytes, print, try, return, a nested `par_range` loop, any call except
+  int/float/abs/min/max/round/len and top-level functions that take and return only int/float.
 - An error in the body (IndexError, OverflowError) is raised after the loop, the same one a
-  sequential run hits first. Not allowed in a function that has try/except: put the loop in its own `fn`.
+  sequential run hits first. Not allowed in a function that has try/except: put the loop in its own function.
 
 ```python
 from ail import par_range
