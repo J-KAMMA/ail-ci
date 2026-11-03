@@ -26720,6 +26720,72 @@ _RANGE_FAST = {
 }
 _RANGE_STRIP_RE = re.compile(r'\((/\*R\d+\*/)')
 
+_POPCOUNT_RE = re.compile(
+    r'(?m)^(?P<sig>int64_t (?P<fn>[A-Za-z_]\w*)\(int64_t (?P<x>[A-Za-z_]\w*)\) \{\n)'
+    r'(?P<body>'
+    r'    int64_t (?P<acc0>[A-Za-z_]\w*) = 0;\n'
+    r'    int64_t (?P<acc>[A-Za-z_]\w*) = 0LL;\n'
+    r'    int64_t (?P<v>[A-Za-z_]\w*) = (?P=x);\n'
+    r'    for \(;;\) \{\n'
+    r'        int64_t (?P<cond>[A-Za-z_]\w*) = \((?P=v) != 0LL\);\n'
+    r'        if \(!\((?P=cond)\)\) \{\n'
+    r'            (?P=acc0) = (?P=acc);\n'
+    r'            break;\n'
+    r'        \}\n'
+    r'        int64_t (?P<bit>[A-Za-z_]\w*) = \((?P=v) & 1LL\);\n'
+    r'        int64_t (?P<sum>[A-Za-z_]\w*) = ck_add\((?P=acc), (?P=bit)\);\n'
+    r'        int64_t (?P<shr>[A-Za-z_]\w*) = ck_shr\((?P=v), 1LL\);\n'
+    r'        int64_t (?P<t1>[A-Za-z_]\w*) = (?P=sum);\n'
+    r'        int64_t (?P<t2>[A-Za-z_]\w*) = (?P=shr);\n'
+    r'        (?P=acc) = (?P=t1);\n'
+    r'        (?P=v) = (?P=t2);\n'
+    r'    \}\n'
+    r'    return (?P=acc0);\n'
+    r'\}\n)')
+_SPAN_SHARE_RE = re.compile(
+    r'(?m)^(?P<indent> +)ail_list \*(?P<l1>[A-Za-z_]\w*) = \(&\((?P<base>[A-Za-z_]\w*)\)->(?P<f1>[A-Za-z_]\w*)\);\n'
+    r'(?P=indent)int64_t (?P<v1>[A-Za-z_]\w*) = ail_list_span_get\(\((?P=l1)\)->p, \((?P=l1)\)->n, (?P<idx>[A-Za-z_]\w*|\d+)\);\n'
+    r'(?P=indent)ail_list \*(?P<l2>[A-Za-z_]\w*) = \(&\((?P=base)\)->(?P<f2>[A-Za-z_]\w*)\);\n'
+    r'(?P=indent)int64_t (?P<v2>[A-Za-z_]\w*) = ail_list_span_get\(\((?P=l2)\)->p, \((?P=l2)\)->n, (?P=idx)\);\n')
+
+
+def _popcount_idiom(text):
+    def replace(match):
+        x = match.group('x')
+        return (match.group('sig')
+                + '    if (%s >= 0LL) return (int64_t)__builtin_popcountll((unsigned long long)%s);\n'
+                  % (x, x)
+                + match.group('body'))
+    return _POPCOUNT_RE.sub(replace, text)
+
+
+def _share_span_checks(text):
+    def replace(match):
+        i = match.group('indent')
+        l1, l2 = match.group('l1'), match.group('l2')
+        v1, v2 = match.group('v1'), match.group('v2')
+        base, f1, f2 = match.group('base'), match.group('f1'), match.group('f2')
+        idx = match.group('idx')
+        return (f'{i}ail_list *{l1} = (&({base})->{f1});\n'
+                f'{i}ail_list *{l2} = (&({base})->{f2});\n'
+                f'{i}int64_t {v1}, {v2};\n'
+                f'{i}if (__builtin_expect((uint64_t){idx} < (uint64_t){l1}->n && {l1}->n == {l2}->n, 1)) {{\n'
+                f'{i}    {v1} = {l1}->p[{idx}];\n'
+                f'{i}    {v2} = {l2}->p[{idx}];\n'
+                f'{i}}} else {{\n'
+                f'{i}    {v1} = ail_list_span_get({l1}->p, {l1}->n, {idx});\n'
+                f'{i}    {v2} = ail_list_span_get({l2}->p, {l2}->n, {idx});\n'
+                f'{i}}}\n')
+    return _SPAN_SHARE_RE.sub(replace, text)
+
+
+def _codegen_idioms(text):
+    if 'ail_list_span_get' in text:
+        text = _share_span_checks(text)
+    if 'ck_shr' in text:
+        text = _popcount_idiom(text)
+    return text
+
 
 def _range_mark(node, ctx):
     marks = getattr(ctx, 'range_marks', None)
@@ -37368,10 +37434,11 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     # range-proof markers left by code compiled outside a function body (struct constructors, ...)
     # are plain comments in still-checked calls; drop them so that C is byte-for-byte as before
     if isinstance(result, str):
-        result = _range_strip(result)
+        result = _codegen_idioms(_range_strip(result))
     if info is not None and 'c_units' in info:
         declarations, bodies = info['c_units']
-        info['c_units'] = (_range_strip(declarations), [(unit, _range_strip(body)) for unit, body in bodies])
+        info['c_units'] = (_codegen_idioms(_range_strip(declarations)),
+                           [(unit, _codegen_idioms(_range_strip(body))) for unit, body in bodies])
     if info is not None and 'c_source_regions' in info:
         info['c_source_regions'] = [(unit, _range_strip(body)) for unit, body in info['c_source_regions']]
     if shadow and info is not None:
