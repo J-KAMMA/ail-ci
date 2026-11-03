@@ -7,6 +7,7 @@
 `optimize(fn, program)` runs them on one lowered function. `AIL_IR_PASSES` (comma list, default
 all) selects passes, for tests and for pricing each pass separately. `AIL_IR_DUMP_FINAL=path` appends
 the text of every function after the last pass (for reading what the passes made of a program).
+`AIL_BCE=0` turns off the bounds-check-elision rules of the later steps.
 """
 import os
 
@@ -15,6 +16,10 @@ from .. import ir as I
 from . import mem2reg, simplify, ranges, licm, window, specsel
 
 ALL = ('mem2reg', 'simplify', 'ranges', 'licm', 'specsel', 'window')
+
+
+def bce_enabled():
+    return os.environ.get('AIL_BCE', '1').strip().lower() not in ('0', 'off', 'no', 'false')
 
 
 def enabled():
