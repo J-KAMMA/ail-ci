@@ -220,6 +220,30 @@ def _if_branches(root):
         return branches
 
 
+def _branch_nonname_binds(node, name):
+    """True when `name` is bound in `node` by something other than a plain `Name` store
+    (`except ... as name`, `import ... as name`, `def name`, `class name`). Renaming only the
+    Name nodes would leave such a binding behind, so a branch that has one is never split."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.ExceptHandler) and current.name == name:
+            return True
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if current.name == name:
+                return True
+            continue                  # a nested scope binds its own locals, not this name
+        if isinstance(current, ast.Lambda):
+            continue
+        if isinstance(current, (ast.Global, ast.Nonlocal)) and name in current.names:
+            return True
+        if isinstance(current, ast.alias):
+            if (current.asname or current.name.split('.')[0]) == name:
+                return True
+        stack.extend(ast.iter_child_nodes(current))
+    return False
+
+
 def _branch_kind_split(fn, name, used):
     """Renames each branch that binds `name` in one if/elif chain, when no use can observe a
     value after or across the chain. Returns (edits, fresh) or (None, {}).
@@ -239,6 +263,8 @@ def _branch_kind_split(fn, name, used):
     edits, fresh = [], {}
     for root in _if_roots(fn):
         branches = _if_branches(root)
+        if any(_branch_nonname_binds(st, name) for branch in branches for st in branch):
+            continue                  # a non-Name binding in a branch cannot be split exactly
         mentioned, stored = [], []
         for branch in branches:
             nodes = [n for st in branch for n in ast.walk(st)

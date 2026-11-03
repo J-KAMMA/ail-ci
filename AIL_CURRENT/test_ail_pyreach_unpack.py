@@ -116,6 +116,22 @@ KIND_READ_AFTER = '''def main():
 main()
 '''
 
+KIND_EXCEPT_BINDING = '''def main():
+    if 1 == 1:
+        x = b"aa"
+        try:
+            z = int("no")
+        except ValueError as x:
+            z = 0
+        print(x.decode("ascii"))
+    else:
+        x = 2
+        print(x)
+
+
+main()
+'''
+
 KIND_LOOP = '''def main():
     total = 0
     for word in ["1", "2", "3"]:
@@ -266,6 +282,24 @@ class PyreachUnpack(unittest.TestCase):
             result, exe = build_source(tmp, 'kind_after', source)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('being assigned', result.stderr)
+
+    def test_kind_split_refuses_except_binding_in_branch(self):
+        with tempfile.TemporaryDirectory(prefix='ail-s4-') as tmp:
+            source = Path(tmp) / 'kind_except.py'
+            source.write_text(KIND_EXCEPT_BINDING, encoding='utf8')
+            reference = subprocess.run([sys.executable, str(source)], capture_output=True,
+                                       text=True, timeout=120)
+            self.assertEqual(reference.returncode, 1)
+            result, exe = build_source(tmp, 'kind_except', source)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("exception handler binding 'x'", result.stderr)
+            for unified in (False, True):
+                result, exe = build_probe(tmp, 'kind_except', source, unified)
+                self.assertEqual(result.returncode, 0, (unified, result.stderr[-3000:]))
+                got = run(exe)
+                self.assertEqual(got.returncode, reference.returncode, unified)
+                self.assertEqual(got.stdout, reference.stdout, unified)
+                self.assertIn('UnboundLocalError', got.stderr, unified)
 
     def test_loop_kind_split_still_works(self):
         self._typed('kind_loop', KIND_LOOP, '1\n3\n6\n16\n26\n')

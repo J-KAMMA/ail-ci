@@ -1,3 +1,18 @@
+## 2026-11-03 -- pyreach s4 review: no branch kind split across an `except ... as` binding
+
+Fixed the review defect in `rebinding._branch_kind_split`: it counted only `ast.Name` stores, so a
+branch containing `except E as x` looked like it did not bind `x`.  The chain was split anyway, the
+branch's `x = b"aa"` and the read after the handler were renamed together, and the handler's
+runtime unbinding of `x` was hidden (`/tmp/probes/r21min.py` printed `aa`, exit 0, instead of
+CPython's `UnboundLocalError`, exit 1).  A branch now blocks the chain when it binds the name
+through anything but a plain `Name` store: `ExceptHandler.name`, `import ... as`, a nested
+`def`/`class` name, or `global`/`nonlocal`; such a chain keeps the old refusal by name.  The plain
+if/elif kind split from s4 is unchanged.
+
+`test_ail_pyreach_unpack` gains `test_kind_split_refuses_except_binding_in_branch`; the strict
+build refuses with "exception handler binding 'x' conflicts ...", and the default and unified
+builds both match CPython's exit 1, empty stdout and `UnboundLocalError` text.
+
 ## 2026-11-03 -- pyreach s4 review: caught ASCII decode carries CPython's UnicodeDecodeError text
 
 Fixed the review defect in the s4 decode lowering: on the typed path `bytes.decode("ascii")` on a
