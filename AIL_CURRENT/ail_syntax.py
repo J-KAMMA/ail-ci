@@ -4130,11 +4130,11 @@ def _ail_imports(source):
                 if alias.name not in AIL_IMPORT_NAMES:
                     raise SyntaxErrorAIL('ail has no ' + alias.name,
                                          lineno=node.lineno, offset=node.col_offset + 1)
-                if alias.asname and alias.asname != alias.name:
-                    if alias.asname in from_aliases and from_aliases[alias.asname] != alias.name:
-                        raise SyntaxErrorAIL('ail import alias ' + alias.asname + ' is rebound',
-                                             lineno=node.lineno, offset=node.col_offset + 1)
-                    from_aliases[alias.asname] = alias.name
+                bound = alias.asname or alias.name
+                if bound in from_aliases and from_aliases[bound] != alias.name:
+                    raise SyntaxErrorAIL('ail import alias ' + bound + ' is rebound',
+                                         lineno=node.lineno, offset=node.col_offset + 1)
+                from_aliases[bound] = alias.name
             dropped.append(node)
         elif isinstance(node, ast.Import) and all(alias.name == 'ail' for alias in node.names):
             for alias in node.names:
@@ -4203,7 +4203,7 @@ def _ail_imports(source):
                     if bound not in tracked:
                         continue
                     if id(node) in dropped_ids and not node.level \
-                            and node.module == 'ail' and alias.asname == bound:
+                            and node.module == 'ail':
                         continue
                     rebound, rebound_name = node, bound
                     break

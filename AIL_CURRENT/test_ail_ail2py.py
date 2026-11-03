@@ -194,6 +194,10 @@ REBIND_PROGRAMS = {
     'match': 'from ail import wrapping_add as w\nmatch 1:\n    case w:\n        print(w)\n',
     'second_alias': 'from ail import wrapping_add as w\nprint(w(1, 2))\n'
                     'from ail import wrapping_mul as w\nprint(w(3, 4))\n',
+    'asname_eq_name': 'from ail import wrapping_add as wrapping_add\n'
+                      'print(wrapping_add(1, 2))\n'
+                      'from ail import wrapping_mul as wrapping_add\n'
+                      'print(wrapping_add(3, 4))\n',
 }
 
 REPEAT_ALIAS_PROGRAM = '''
@@ -359,7 +363,8 @@ class ConversionTests(unittest.TestCase):
                 result = run([sys.executable, '-B', CLI, 'compile', str(source), '-o',
                               str(Path(self.tmp) / (name + '.bin')), '--syntax', 'python'])
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn(b'ail import alias w is rebound', result.stderr)
+                self.assertIn(b'ail import alias ', result.stderr)
+                self.assertIn(b' is rebound', result.stderr)
 
     def _run_ail_and_python(self, stem, ail_source, python_source):
         source = Path(self.tmp) / (stem + '.ail')

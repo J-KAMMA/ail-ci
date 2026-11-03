@@ -1,3 +1,18 @@
+## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
+
+`from ail import X as Y` now records the binding even when `Y == X`, so an alias spelled with the
+same name as its source is visible to the repeated-binding check.  A later `from ail import Z as Y`
+with `Z != X` is refused by name (`ail import alias Y is rebound`) instead of silently rewriting
+the earlier loads to `Z`; `alias_asname_eq_name.py` used to print `2`/`12`, CPython prints `3`/`12`,
+and both builds now refuse it.  Repeating the same source under the same alias, including
+`from ail import X as X`, still matches CPython and builds `program.c` identical to the bare
+program.  A plain `from ail import X` now also refuses a later store or different-source rebinding
+of `X` by name instead of silently changing its meaning.
+
+Probes `alias_asname_eq_name`, `alias_rebind_same_import` and `alias_plain_then_alias_diff` refuse
+by name in the default and unified builds; `alias_repeat_same`, `alias_repeat_same_eq` and
+`alias_valid` match CPython in both builds.  `test_ail_ail2py` covers the `asname == name` case.
+
 ## 2026-11-02 -- onelang s2 review 4: a repeated `from ail import ... as Y` alias is refused
 
 A second top-level `from ail import X as Y` whose source name differs from the first is now a named
