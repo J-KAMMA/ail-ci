@@ -9,12 +9,15 @@ Languages (columns): ail      AIL compiling the task's annotated Python source (
                      c        gcc -O2          rust  rustc -C opt-level=3 (cargo --release level)
                      go       go build         nim   nim c -d:release
                      python   CPython 3.12, the program is the .py source run by the interpreter
+                     codon    Codon build -release (same typed.py source; codon shim for the ail helpers)
+                     mypyc    mypyc extension loaded by CPython (needs a CPython interpreter at run time)
+                     nuitka   Nuitka --standalone --onefile (same typed.py source)
 
 Per language: build ok, compile time (median of 3 cold builds), build disk (KiB added under a fresh build dir
 that also holds the language's caches, `du -sk`), binary bytes (as built, and stripped), stdout and exit code
 checked against the task's CPython reference.py on the perf input and on every public and hidden case of the task's
 gen.py (`cases_public` / `cases_hidden` in the JSON), peak RSS (/usr/bin/time -v, median of the timed runs), wall
-time (median of 5 timed runs of the perf input, minimum also kept), instructions (see icount_method) and, for the
+time (median of 5 timed runs of the perf input, 3 for the Python compilers, minimum also kept), instructions (see icount_method) and, for the
 two AIL columns, whether the program built on the typed path (`compile --strict` accepts it) or only on the
 general path (plus the note the default build prints when it falls back). Nothing here is a verdict:
 lab/compare/merge.py builds the tables and the per-task scorecard.
@@ -29,11 +32,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 AIL = REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'
-LANGS = ['ail', 'ail-py', 'c', 'rust', 'go', 'nim', 'python']
+LANGS = ['ail', 'ail-py', 'c', 'rust', 'go', 'nim', 'python', 'codon', 'mypyc', 'nuitka']
 SOURCE = {'ail': 'typed.py', 'ail-py': 'main.py', 'c': 'main.c', 'rust': 'main.rs', 'go': 'main.go',
-          'nim': 'main.nim', 'python': 'main.py'}
+          'nim': 'main.nim', 'python': 'main.py', 'codon': 'typed.py', 'mypyc': 'typed.py', 'nuitka': 'typed.py'}
+PYCOMP = ('codon', 'mypyc', 'nuitka')
 BUILD_RUNS = 3
 WALL_RUNS = 5
+PYCOMP_WALL_RUNS = 3
 CASE_TIMEOUT = 120
 RUN_TIMEOUT = 1500
 CALLGRIND_TIMEOUT = 7000
@@ -52,6 +57,61 @@ def du_kib(path):
 # their ail-py build asks for the exact ints explicitly, so the comparison still measures them (on the general path).
 EXACT_INT_TASKS = ('rail_transfer', 'chain_relax')
 CURRENT_TASK = None
+
+
+def pycomp_env(lang, fresh, env):
+    """PYTHONPATH for the Python compilers: the Codon shim, or the AIL CPython helpers."""
+    path = HERE / 'compat' / 'codon' if lang == 'codon' else REPO / 'AIL_CURRENT'
+    old = env.get('PYTHONPATH')
+    env['PYTHONPATH'] = str(path) + (os.pathsep + old if old else '')
+    return env
+
+
+
+def build_pycomp(lang, src, root, label):
+    """One cold build of a Python compiler; returns the record and the command that runs it."""
+    fresh, env = fresh_dir(root, label)
+    pycomp_env(lang, fresh, env)
+    empty = du_kib(fresh)
+    start = time.perf_counter()
+    binary = None
+    run = None
+    if lang == 'codon':
+        shutil.copy2(src, fresh / 'main.py')
+        shutil.copy2(HERE / 'compat' / 'codon' / 'ail.py', fresh / 'ail.py')
+        binary = fresh / 'out' / 'prog'
+        cmd = ['codon', 'build', '-release', 'main.py', '-o', str(binary)]
+        run = [str(binary)]
+    elif lang == 'mypyc':
+        shutil.copy2(src, fresh / 'mod.py')
+        shutil.copy2(REPO / 'AIL_CURRENT' / 'ail.py', fresh / 'ail.py')
+        cmd = ['mypyc', 'mod.py']
+        run = None
+    elif lang == 'nuitka':
+        shutil.copy2(src, fresh / 'prog.py')
+        cmd = ['nuitka', '--standalone', '--onefile', '--output-dir=' + str(fresh / 'dist'),
+               '--assume-yes-for-downloads', '--quiet', 'prog.py']
+        binary = fresh / 'dist' / 'prog.bin'
+        run = [str(binary)]
+    else:
+        raise ValueError(lang)
+    try:
+        p = subprocess.run(cmd, cwd=fresh, env=env, capture_output=True, timeout=1800)
+    except FileNotFoundError as e:
+        return dict(ok=False, seconds=time.perf_counter() - start, disk_kib=0, binary=None, run=None,
+                    stderr=str(e).encode(), stdout=b'', dir=fresh, error=str(e))
+    elapsed = time.perf_counter() - start
+    if lang == 'mypyc' and p.returncode == 0:
+        extensions = sorted(fresh.glob('mod*.so'))
+        if extensions:
+            binary = extensions[0]
+            launcher = fresh / 'run.py'
+            launcher.write_text('import sys\nsys.argv[0] = "prog"\nimport mod\nsys.exit(mod.main())\n')
+            run = [sys.executable, '-B', str(launcher)]
+    ok = p.returncode == 0 and binary is not None and Path(binary).is_file()
+    return dict(ok=ok, seconds=elapsed, disk_kib=max(du_kib(fresh) - empty, 0), binary=binary, run=run,
+                stderr=p.stderr, stdout=p.stdout, dir=fresh,
+                error=tail((p.stderr or p.stdout) if not ok else b''))
 
 
 def build_cmd(lang, src, out, strict=False):
@@ -129,6 +189,30 @@ def build_language(lang, task_src, root):
     if lang == 'python':
         rec.update(build_ok=True, interpreted=True)
         return rec, [sys.executable, '-B', str(src)]
+    if lang in PYCOMP:
+        runs = []
+        for i in range(BUILD_RUNS):
+            b = build_pycomp(lang, src, root, '%s-build%d' % (lang, i))
+            runs.append(b)
+            if not b['ok']:
+                break
+        rec['build_ok'] = all(b['ok'] for b in runs)
+        if lang == 'mypyc':
+            rec['needs_cpython'] = True
+            rec['runtime'] = 'CPython extension'
+        if not rec['build_ok']:
+            rec['build_error'] = runs[-1].get('error') or tail(runs[-1]['stderr'] or runs[-1]['stdout'])
+            return rec, None
+        rec['compile_s_runs'] = [round(b['seconds'], 3) for b in runs]
+        rec['compile_s'] = round(statistics.median(b['seconds'] for b in runs), 3)
+        rec['build_disk_kib'] = runs[0]['disk_kib']
+        binary = runs[0]['binary']
+        rec['binary_bytes'] = Path(binary).stat().st_size
+        rec['stripped_bytes'] = stripped_bytes(binary, root)
+        command = runs[0]['run']
+        for b in runs[1:]:
+            shutil.rmtree(b['dir'], ignore_errors=True)
+        return rec, command
     if lang.startswith('ail'):
         probe = build(lang, src, root, 'probe-' + lang, strict=True)
         rec['path'] = 'typed' if probe['ok'] else 'general'
@@ -207,25 +291,47 @@ def reference_outputs(name, check, work):
     return expected
 
 
+def first_diff(expected, got):
+    """First differing line of two byte strings, for the report."""
+    a = expected.splitlines()
+    b = got.splitlines()
+    for i, (x, y) in enumerate(zip(a, b), 1):
+        if x != y:
+            return 'line %d: expected %r got %r' % (i, x[:160], y[:160])
+    if len(a) != len(b):
+        if len(a) > len(b):
+            return 'line %d: expected %r got end of output' % (len(b) + 1, a[len(b)][:160])
+        return 'line %d: expected end of output got %r' % (len(a) + 1, b[len(a)][:160])
+    return 'same lines, different trailing bytes'
+
+
 def check_cases(lang, cmd, check, expected, work):
     """Run the program on every public and hidden case; stdout and exit code must equal the reference's."""
     tally = {'public': [0, 0], 'hidden': [0, 0]}
     failed = []
+    detail = None
     for kind, case_name, case in check:
         out = work / ('chk-' + lang)
         ok = False
         try:
             p = exec_prog([], cmd, case, out, CASE_TIMEOUT)
-            ok = (p.returncode, out.read_bytes()) == expected[(kind, case_name)]
+            got_exit, got = p.returncode, out.read_bytes()
+            want_exit, want = expected[(kind, case_name)]
+            ok = (got_exit, got) == (want_exit, want)
+            if not ok and detail is None:
+                why = 'exit %d (want %d)' % (got_exit, want_exit) if got_exit != want_exit else first_diff(want, got)
+                detail = '%s/%s: %s' % (kind, case_name, why)
         except subprocess.TimeoutExpired:
-            pass
+            if detail is None:
+                detail = '%s/%s: timeout' % (kind, case_name)
         tally[kind][1] += 1
         if ok:
             tally[kind][0] += 1
         else:
             failed.append('%s/%s' % (kind, case_name))
     out.unlink(missing_ok=True)
-    return dict(cases_public=tally['public'], cases_hidden=tally['hidden'], cases_failed=failed[:20])
+    return dict(cases_public=tally['public'], cases_hidden=tally['hidden'], cases_failed=failed[:20],
+                first_mismatch=detail)
 
 
 def exec_prog(prefix, cmd, case, stdout_path, timeout):
@@ -255,11 +361,12 @@ def rss_from(time_file):
     return int(m.group(1)) if m else None
 
 
-def run_pass(lang, cmd, case, expected, work, smoke):
+def run_pass(lang, cmd, case, expected, work, smoke, wall_runs=WALL_RUNS):
     """Correctness, peak RSS and wall time. Returns a dict."""
     out, tfile = work / ('out-' + lang), work / ('time-' + lang)
     walls, rss, correct, exits = [], [], True, set()
-    runs = 1 if smoke else WALL_RUNS
+    detail = None
+    runs = 1 if smoke else wall_runs
     i = 0
     while i < runs:
         start = time.perf_counter()
@@ -275,6 +382,11 @@ def run_pass(lang, cmd, case, expected, work, smoke):
             rss.append(value)
         if p.returncode != expected['returncode'] or not same_file(out, expected['stdout']):
             correct = False
+            if detail is None:
+                if p.returncode != expected['returncode']:
+                    detail = 'exit %d (want %d)' % (p.returncode, expected['returncode'])
+                else:
+                    detail = first_diff(Path(expected['stdout']).read_bytes(), out.read_bytes())
         if i == 0 and elapsed > 60:
             runs = min(runs, 2)     # long programs: two runs are enough
         elif i == 0 and elapsed > 15:
@@ -286,6 +398,7 @@ def run_pass(lang, cmd, case, expected, work, smoke):
                   rss_kib=int(statistics.median(rss)) if rss else None)
     if not correct:
         result['expected_exit'] = expected['returncode']
+        result['first_mismatch'] = detail
     return result
 
 
@@ -310,7 +423,8 @@ def count_instructions(lang, cmd, case, work, icount, mode):
         (work / ('ic-' + lang)).unlink(missing_ok=True)
         return int(text[-1]) if p.returncode == 0 and text and text[-1].isdigit() else None
     cg = work / ('cg-' + lang)
-    prefix = ['valgrind', '--tool=callgrind', '--cache-sim=no', '--callgrind-out-file=' + str(cg)]
+    prefix = ['valgrind', '--tool=callgrind', '--trace-children=yes', '--cache-sim=no',
+              '--callgrind-out-file=' + str(cg)]
     try:
         p = exec_prog(prefix, cmd, case, work / ('ic-' + lang), CALLGRIND_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -318,8 +432,9 @@ def count_instructions(lang, cmd, case, work, icount, mode):
     finally:
         cg.unlink(missing_ok=True)
         (work / ('ic-' + lang)).unlink(missing_ok=True)
-    m = re.search(rb'Collected\s*:\s*(\d+)', p.stderr)
-    return int(m.group(1)) if m else None
+    # Nuitka --onefile unpacks itself and runs the program in a child process; trace it too and add every process's Ir.
+    found = re.findall(rb'Collected\s*:\s*(\d+)', p.stderr)
+    return sum(int(v) for v in found) if found else None
 
 
 def read_pins():
@@ -343,7 +458,9 @@ def tool_versions():
         except Exception as e:
             return 'missing (%s)' % type(e).__name__
     return dict(gcc=first(['gcc', '--version']), rustc=first(['rustc', '--version']), go=first(['go', 'version']),
-                nim=first(['nim', '--version']), python=sys.version.split()[0], valgrind=first(['valgrind', '--version']))
+                nim=first(['nim', '--version']), python=sys.version.split()[0], valgrind=first(['valgrind', '--version']),
+                codon=first(['codon', '--version']), mypyc=first(['mypy', '--version']),
+                nuitka=first(['nuitka', '--version']))
 
 
 def toolchain_kib():
@@ -366,6 +483,10 @@ def toolchain_kib():
     else:
         sizes['python'] = du(sys.base_prefix)
     sizes['ail'] = du(REPO / 'AIL_CURRENT')   # the compiler tree; it also needs the C toolchain and python
+    for key, tool in (('codon', 'codon'), ('mypyc', 'mypy'), ('nuitka', 'nuitka')):
+        path = shutil.which(tool)
+        if path:
+            sizes[key] = du(Path(os.path.realpath(path)).parent.parent)
     return sizes
 
 
@@ -409,7 +530,8 @@ def main():
         for lang in langs:
             if commands[lang]:
                 print('run', lang, file=sys.stderr, flush=True)
-                results[lang].update(run_pass(lang, commands[lang], case, expected, work, args.smoke))
+                results[lang].update(run_pass(lang, commands[lang], case, expected, work, args.smoke,
+                                           PYCOMP_WALL_RUNS if lang in PYCOMP else WALL_RUNS))
                 if check:
                     results[lang].update(check_cases(lang, commands[lang], check, cases_expected, work))
         mode = args.icount

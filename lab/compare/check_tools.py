@@ -9,13 +9,17 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PROBE = {'GCC': (['gcc', '--version'], r'\) (\d+\.\d+\.\d+)'), 'RUSTC': (['rustc', '--version'], r'rustc (\d+\.\d+\.\d+)'),
          'GO': (['go', 'version'], r'go(\d+\.\d+(?:\.\d+)?)'), 'NIM': (['nim', '--version'], r'Version (\d+\.\d+\.\d+)'),
-         'PYTHON': ([sys.executable, '--version'], r'Python (\d+\.\d+)')}
-LANG_OF = {'c': 'GCC', 'rust': 'RUSTC', 'go': 'GO', 'nim': 'NIM', 'python': 'PYTHON'}
+         'PYTHON': ([sys.executable, '--version'], r'Python (\d+\.\d+)'),
+         'CODON': (['codon', '--version'], r'(\d+\.\d+\.\d+)'),
+         'MYPY': (['mypy', '--version'], r'mypy (\d+\.\d+\.\d+)'),
+         'NUITKA': (['nuitka', '--version'], r'(\d+\.\d+\.\d+)')}
+LANG_OF = {'c': 'GCC', 'rust': 'RUSTC', 'go': 'GO', 'nim': 'NIM', 'python': 'PYTHON',
+           'codon': 'CODON', 'mypyc': 'MYPY', 'nuitka': 'NUITKA'}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--langs', default='c,rust,go,nim,python')
+    parser.add_argument('--langs', default='c,rust,go,nim,python,codon,mypyc,nuitka')
     wanted = {LANG_OF[l] for l in parser.parse_args().langs.split(',') if l in LANG_OF}
     pins = dict(line.split('=', 1) for line in (HERE / 'toolchains.env').read_text().splitlines() if '=' in line and line[0] != '#')
     bad = 0
