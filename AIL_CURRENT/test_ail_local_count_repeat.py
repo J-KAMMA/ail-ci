@@ -12,23 +12,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-fn main() {
-    let n = 5;
-    let m = -3;
-    let z = 0;
-    let k = 2;
-    let xs = [0] * n;
-    let ys = [1.5] * m;
-    let ws = n * [7];
-    let zs = [0] * z;
-    let ss = "ab" * k;
-    let ts = [0] * (n + k);
-    let us = [2.5] * (k - n);
-    n = n + 1;
-    xs[n - 2] = 9;
-    print(len(xs), xs[4], len(ys), len(ws), ws[3], len(zs), ss, len(ts), len(us), n);
-}
+SOURCE = """import sys
+
+def main() -> int:
+    n = 5
+    m = -3
+    z = 0
+    k = 2
+    xs = [0] * n
+    ys = [1.5] * m
+    ws = n * [7]
+    zs = [0] * z
+    ss = 'ab' * k
+    ts = [0] * (n + k)
+    us = [2.5] * (k - n)
+    n = n + 1
+    xs[n - 2] = 9
+    print(len(xs), xs[4], len(ys), len(ws), ws[3], len(zs), ss, len(ts), len(us), n)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 PYTHON = """

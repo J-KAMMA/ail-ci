@@ -15,75 +15,102 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-struct Node { v: int; w: float; }
-struct Bag { items: list[Node]; counts: list[int]; }
+SOURCE = """import sys
 
-fn bump(b: Bag, i: int) -> int {
-    let n = b.items[i];
-    n.v = n.v + 1;
-    n.w = n.w * 2.0;
-    b.counts[i] = b.counts[i] + n.v;
-    b.counts.append(len(b.counts));
-    return b.counts[i] + len(b.counts);
-}
+class Node:
 
-fn total(xs: list[Node]) -> float {
-    let t = 0.0;
-    for i in range(len(xs)) {
-        let n = xs[i];
-        for j in range(i + 1, len(xs)) {
-            let m = xs[j];
-            t = t + n.w * m.w + n.v - m.v;
-        }
-    }
-    return t;
-}
+    def __init__(self, v: int, w: float):
+        self.v = v
+        self.w = w
 
-fn deep(d: int, lim: int) -> int {
-    if d >= lim { raise ValueError; }
-    return deep(d + 1, lim) + 1;
-}
+class Bag:
 
-fn guarded(d: int, lim: int) -> int {
-    if d >= lim { raise KeyError; }
-    let r = 0;
-    try { r = guarded(d + 1, lim) + 1; } except KeyError { r = -d; }
-    return r;
-}
+    def __init__(self, items: list[Node], counts: list[int]):
+        self.items = items
+        self.counts = counts
 
-fn cleaned(d: int, lim: int, log: Bag) -> int {
-    if d >= lim { raise ValueError; }
-    try { return cleaned(d + 1, lim, log) + 1; } finally { log.counts.append(d); }
-}
+def bump(b: Bag, i: int) -> int:
+    n = b.items[i]
+    n.v = n.v + 1
+    n.w = n.w * 2.0
+    b.counts[i] = b.counts[i] + n.v
+    b.counts.append(len(b.counts))
+    return b.counts[i] + len(b.counts)
 
-fn main() {
-    let b = Bag([], []);
-    for i in range(4) { b.items.append(Node(i, i * 0.5)); b.counts.append(i * 10); }
-    print(bump(b, 1), bump(b, 1), bump(b, 3), b.counts[1], len(b.counts), b.items[1].v, b.items[1].w);
-    let first = b.items[0];
-    b.items[0] = Node(77, 7.5);
-    first.v = first.v + 5;
-    print(first.v, b.items[0].v, b.items[-1].v, total(b.items));
-    let alias = b.items[2];
-    alias = b.items[3];
-    alias.v = alias.v + 100;
-    print(b.items[2].v, b.items[3].v);
-    try { let bad = b.items[9]; print(bad.v); } except IndexError { print("index error"); }
+def total(xs: list[Node]) -> float:
+    t = 0.0
+    for i in range(len(xs)):
+        n = xs[i]
+        for j in range(i + 1, len(xs)):
+            m = xs[j]
+            t = t + n.w * m.w + n.v - m.v
+    return t
 
-    let hits = 0;
-    for k in range(120) {
-        let r = 0;
-        try { r = deep(0, 700); } except ValueError { r = -1; hits += 1; }
-        if k % 40 == 0 { print(r, hits); }
-    }
-    print(hits, guarded(0, 40), guarded(0, 5));
-    let log = Bag([], []);
-    let out = 0;
-    try { out = cleaned(0, 6, log); } except ValueError { out = -2; }
-    print(out, len(log.counts), log.counts[0], log.counts[5]);
-    print(deep(0, 0) if false else deep(0, 49000) if false else 3);
-}
+def deep(d: int, lim: int) -> int:
+    if d >= lim:
+        raise ValueError
+    return deep(d + 1, lim) + 1
+
+def guarded(d: int, lim: int) -> int:
+    if d >= lim:
+        raise KeyError
+    r = 0
+    try:
+        r = guarded(d + 1, lim) + 1
+    except KeyError:
+        r = -d
+    return r
+
+def cleaned(d: int, lim: int, log: Bag) -> int:
+    if d >= lim:
+        raise ValueError
+    try:
+        return cleaned(d + 1, lim, log) + 1
+    finally:
+        log.counts.append(d)
+
+def main() -> int:
+    b = Bag([], [])
+    for i in range(4):
+        b.items.append(Node(i, i * 0.5))
+        b.counts.append(i * 10)
+    print(bump(b, 1), bump(b, 1), bump(b, 3), b.counts[1], len(b.counts), b.items[1].v, b.items[1].w)
+    first = b.items[0]
+    b.items[0] = Node(77, 7.5)
+    first.v = first.v + 5
+    print(first.v, b.items[0].v, b.items[-1].v, total(b.items))
+    alias = b.items[2]
+    alias = b.items[3]
+    alias.v = alias.v + 100
+    print(b.items[2].v, b.items[3].v)
+    try:
+        bad = b.items[9]
+        print(bad.v)
+    except IndexError:
+        print('index error')
+    hits = 0
+    for k in range(120):
+        r = 0
+        try:
+            r = deep(0, 700)
+        except ValueError:
+            r = -1
+            hits += 1
+        if k % 40 == 0:
+            print(r, hits)
+    print(hits, guarded(0, 40), guarded(0, 5))
+    log = Bag([], [])
+    out = 0
+    try:
+        out = cleaned(0, 6, log)
+    except ValueError:
+        out = -2
+    print(out, len(log.counts), log.counts[0], log.counts[5])
+    print(deep(0, 0) if False else deep(0, 49000) if False else 3)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 PYTHON = """
@@ -153,63 +180,66 @@ print(3)
 """
 
 
-ALIAS_SOURCE = """
-struct P { x: float; v: float; n: int; }
+ALIAS_SOURCE = """import sys
 
-fn kernel(ps: list[P], steps: int) -> float {
-    let e = 0.0;
-    for s in range(steps) {
-        for i in range(len(ps)) {
-            let a = ps[i];
-            for j in range(i + 1, len(ps)) {
-                let b = ps[j];
-                let d = a.x - b.x;
-                a.v = a.v - d * 0.5;
-                b.v = b.v + d * 0.5;
-                a.n += 1;
-            }
-        }
-        for i in range(len(ps)) {
-            let q = ps[i];
-            q.x = q.x + 0.1 * q.v;
-            e = e + q.x;
-        }
-    }
-    return e;
-}
+class P:
 
-fn swap_ends(ps: list[P]) -> int {
-    let first = ps[0];
-    let last = ps[len(ps) - 1];
-    ps[0] = last;
-    ps[len(ps) - 1] = first;
-    first.n = first.n + 10;
-    return ps[0].n + ps[len(ps) - 1].n;
-}
+    def __init__(self, x: float, v: float, n: int):
+        self.x = x
+        self.v = v
+        self.n = n
 
-fn pop_keeps(ps: list[P]) -> int {
-    let last = ps[len(ps) - 1];
-    ps.pop();
-    last.n = last.n + 1;
-    return last.n + len(ps);
-}
+def kernel(ps: list[P], steps: int) -> float:
+    e = 0.0
+    for s in range(steps):
+        for i in range(len(ps)):
+            a = ps[i]
+            for j in range(i + 1, len(ps)):
+                b = ps[j]
+                d = a.x - b.x
+                a.v = a.v - d * 0.5
+                b.v = b.v + d * 0.5
+                a.n += 1
+        for i in range(len(ps)):
+            q = ps[i]
+            q.x = q.x + 0.1 * q.v
+            e = e + q.x
+    return e
 
-fn with_call(ps: list[P]) -> int {
-    let p = ps[1];
-    let total = kernel(ps, 1) > 0.0;
-    p.n = p.n + 1;
-    return p.n;
-}
+def swap_ends(ps: list[P]) -> int:
+    first = ps[0]
+    last = ps[len(ps) - 1]
+    ps[0] = last
+    ps[len(ps) - 1] = first
+    first.n = first.n + 10
+    return ps[0].n + ps[len(ps) - 1].n
 
-fn main() {
-    let ps: list[P] = [];
-    for i in range(5) { ps.append(P(i * 1.5, 0.25 * i, i)); }
-    print(kernel(ps, 3));
-    for i in range(len(ps)) { print(ps[i].x, ps[i].v, ps[i].n); }
-    print(swap_ends(ps), ps[0].n, ps[4].n);
-    print(pop_keeps(ps), len(ps));
-    print(with_call(ps), ps[1].n);
-}
+def pop_keeps(ps: list[P]) -> int:
+    last = ps[len(ps) - 1]
+    ps.pop()
+    last.n = last.n + 1
+    return last.n + len(ps)
+
+def with_call(ps: list[P]) -> int:
+    p = ps[1]
+    total = kernel(ps, 1) > 0.0
+    p.n = p.n + 1
+    return p.n
+
+def main() -> int:
+    ps: list[P] = []
+    for i in range(5):
+        ps.append(P(i * 1.5, 0.25 * i, i))
+    print(kernel(ps, 3))
+    for i in range(len(ps)):
+        print(ps[i].x, ps[i].v, ps[i].n)
+    print(swap_ends(ps), ps[0].n, ps[4].n)
+    print(pop_keeps(ps), len(ps))
+    print(with_call(ps), ps[1].n)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 ALIAS_PYTHON = """
@@ -257,27 +287,48 @@ print(with_call(ps), ps[1].n)
 """
 
 
-FIELD_LIST_SOURCE = """
-struct Q { xs: list[int]; fs: list[float]; }
+FIELD_LIST_SOURCE = """import sys
 
-fn grow(q: Q, n: int) -> int {
-    for i in range(n) { q.xs.append(i * 3 - 7); q.fs.append(i * 0.25); }
-    q.xs[0] = 99;
-    q.fs[-1] = -1.5;
-    return q.xs[n - 1] + q.xs[-2] + len(q.xs);
-}
+class Q:
 
-fn main() {
-    let q = Q([], []);
-    try { print(q.xs[0]); } except IndexError { print("empty"); }
-    try { q.xs[0] = 1; } except IndexError { print("empty set"); }
-    print(grow(q, 1000), q.xs[0], q.fs[999], q.fs[0], len(q.fs));
-    try { print(q.xs[1000]); } except IndexError { print("past end"); }
-    try { print(q.fs[-1001]); } except IndexError { print("before start"); }
-    q.xs.pop();
-    q.xs.append(5);
-    print(q.xs[-1], len(q.xs));
-}
+    def __init__(self, xs: list[int], fs: list[float]):
+        self.xs = xs
+        self.fs = fs
+
+def grow(q: Q, n: int) -> int:
+    for i in range(n):
+        q.xs.append(i * 3 - 7)
+        q.fs.append(i * 0.25)
+    q.xs[0] = 99
+    q.fs[-1] = -1.5
+    return q.xs[n - 1] + q.xs[-2] + len(q.xs)
+
+def main() -> int:
+    q = Q([], [])
+    try:
+        print(q.xs[0])
+    except IndexError:
+        print('empty')
+    try:
+        q.xs[0] = 1
+    except IndexError:
+        print('empty set')
+    print(grow(q, 1000), q.xs[0], q.fs[999], q.fs[0], len(q.fs))
+    try:
+        print(q.xs[1000])
+    except IndexError:
+        print('past end')
+    try:
+        print(q.fs[-1001])
+    except IndexError:
+        print('before start')
+    q.xs.pop()
+    q.xs.append(5)
+    print(q.xs[-1], len(q.xs))
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 FIELD_LIST_PYTHON = """

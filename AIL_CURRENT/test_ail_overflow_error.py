@@ -59,29 +59,42 @@ assert not zero
 OverflowError custom
 """
 
-UNCAUGHT = """
-fn main() {
-    let x = 9223372036854775807;
-    try { print(x // 1); }
-    except OverflowError { print("unreached"); }
-    print(x + 1);
-}
+UNCAUGHT = """import sys
+
+def main() -> int:
+    x = 9223372036854775807
+    try:
+        print(x // 1)
+    except OverflowError:
+        print('unreached')
+    print(x + 1)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 
-WRAPPING = """
-fn fnv(s: str) -> int {
-    let x = -3750763034362895579;
-    for c in s { x = wrapping_mul(x ^ ord(c), 1099511628211); }
-    return x;
-}
-fn main() {
-    print(wrapping_add(9223372036854775807, 1), wrapping_sub(-9223372036854775807 - 1, 1), wrapping_mul(3037000500, 3037000500));
-    print(fnv("hello"), fnv(""));
-    let acc = 0;
-    for i in range(0, 1000) { acc = wrapping_add(wrapping_mul(acc, 6364136223846793005), 1442695040888963407); }
-    print(acc);
-}
+WRAPPING = """from ail import wrapping_add, wrapping_mul, wrapping_sub
+import sys
+
+def fnv(s: str) -> int:
+    x = -3750763034362895579
+    for c in s:
+        x = wrapping_mul(x ^ ord(c), 1099511628211)
+    return x
+
+def main() -> int:
+    print(wrapping_add(9223372036854775807, 1), wrapping_sub(-9223372036854775807 - 1, 1), wrapping_mul(3037000500, 3037000500))
+    print(fnv('hello'), fnv(''))
+    acc = 0
+    for i in range(0, 1000):
+        acc = wrapping_add(wrapping_mul(acc, 6364136223846793005), 1442695040888963407)
+    print(acc)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 WRAPPING_PYTHON = """

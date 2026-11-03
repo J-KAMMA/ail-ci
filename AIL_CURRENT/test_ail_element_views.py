@@ -26,82 +26,104 @@ from pathlib import Path
 
 from test_ail_text_views import body_of, build, peak_rss_kb
 
-BYTES_SOURCE = r"""
-struct Box { items: list[bytes]; n: int; }
+BYTES_SOURCE = """from ail import read_stdin_bytes
+import sys
 
-fn isd(c: int) -> bool { return c >= 48 and c <= 57; }
-fn digits(f: bytes, lo: int, hi: int) -> bool {
-    let n = len(f);
-    if n < lo or n > hi { return false; }
-    for i in range(n) { if not isd(f[i]) { return false; } }
-    return true;
-}
-fn ident(x: bytes) -> bytes { return x; }
-fn steal(b: Box, x: bytes) -> int {
-    b.items.pop();
-    b.items.append(b"zz");
-    return len(x) * 1000 + x[0];
-}
-fn rec(t: bytes, f: list[bytes]) -> int {
-    if len(f) < 2 { return -1; }
-    if not (digits(f[0], 1, 6) and digits(f[1], 1, 6)) { return -2; }
-    let key = f[0].decode() + ":" + f[1].decode();
-    return int(f[0]) * 7 + int(f[1]) + len(key) + len(t) + f[1].find(b"9");
-}
+class Box:
 
-fn main() {
-    let data = read_stdin_bytes(1 << 30);
-    let pos = 0;
-    let total = len(data);
-    let acc = 0;
-    let lines = 0;
-    let firsts: list[bytes] = [];
-    while pos < total {
-        let q = pos;
-        while q < total and data[q] != 10 { q += 1; }
-        let ln = data[pos:q];
-        pos = q + 1;
-        lines += 1;
-        let fields: list[bytes] = [];
-        let s = 0;
-        for i in range(len(ln)) {
-            if ln[i] == 124 { fields.append(ln[s:i]); s = i + 1; }
-        }
-        fields.append(ln[s:len(ln)]);
-        let t = fields[0];
-        let rest: list[bytes] = [];
-        for i in range(1, len(fields)) { rest.append(fields[i]); }
-        if t == b"END" { break; }
-        let r = rec(t, rest);
-        acc = (acc * 31 + r + 1000) % 1000000007;
-        if len(firsts) < 4 { firsts.append(fields[0]); }
-    }
-    print(acc, lines, len(firsts), b"|".join(firsts).decode());
-    let xs: list[bytes] = [b"one", b"two", b"three"];
-    let a = xs[0];
-    xs[0] = b"ONE";
-    let b = xs[2];
-    xs.pop();
-    print(a.decode(), b.decode(), len(xs), xs[0].decode());
-    let ys: list[bytes] = [b"keep"];
-    let v = ys[0];
-    ys = [b"new"];
-    print(v.decode(), ys[0].decode());
-    let box = Box([b"abc", b"de"], 0);
-    let zs = box.items;
-    print(steal(box, zs[0]), steal(box, zs[1]), len(zs), zs[len(zs) - 1].decode());
-    let ws: list[bytes] = [b"orig", b"x"];
-    let w = ident(ws[0]);
-    ws[0] = b"repl";
-    print(w.decode(), ws[0].decode(), ws[0] == ws[1], len(ws[1]));
-    let src: list[bytes] = [b"p", b"q"];
-    let dst: list[bytes] = [];
-    for i in range(len(src)) { dst.append(src[i]); }
-    let d0 = src[0].decode();
-    src.clear();
-    src.append(b"r");
-    print(b",".join(dst).decode(), d0, src[0].decode());
-}
+    def __init__(self, items: list[bytes], n: int):
+        self.items = items
+        self.n = n
+
+def isd(c: int) -> bool:
+    return c >= 48 and c <= 57
+
+def digits(f: bytes, lo: int, hi: int) -> bool:
+    n = len(f)
+    if n < lo or n > hi:
+        return False
+    for i in range(n):
+        if not isd(f[i]):
+            return False
+    return True
+
+def ident(x: bytes) -> bytes:
+    return x
+
+def steal(b: Box, x: bytes) -> int:
+    b.items.pop()
+    b.items.append(b'zz')
+    return len(x) * 1000 + x[0]
+
+def rec(t: bytes, f: list[bytes]) -> int:
+    if len(f) < 2:
+        return -1
+    if not (digits(f[0], 1, 6) and digits(f[1], 1, 6)):
+        return -2
+    key = f[0].decode() + ':' + f[1].decode()
+    return int(f[0]) * 7 + int(f[1]) + len(key) + len(t) + f[1].find(b'9')
+
+def main() -> int:
+    data = read_stdin_bytes(1 << 30)
+    pos = 0
+    total = len(data)
+    acc = 0
+    lines = 0
+    firsts: list[bytes] = []
+    while pos < total:
+        q = pos
+        while q < total and data[q] != 10:
+            q += 1
+        ln = data[pos:q]
+        pos = q + 1
+        lines += 1
+        fields: list[bytes] = []
+        s = 0
+        for i in range(len(ln)):
+            if ln[i] == 124:
+                fields.append(ln[s:i])
+                s = i + 1
+        fields.append(ln[s:len(ln)])
+        t = fields[0]
+        rest: list[bytes] = []
+        for i in range(1, len(fields)):
+            rest.append(fields[i])
+        if t == b'END':
+            break
+        r = rec(t, rest)
+        acc = (acc * 31 + r + 1000) % 1000000007
+        if len(firsts) < 4:
+            firsts.append(fields[0])
+    print(acc, lines, len(firsts), b'|'.join(firsts).decode())
+    xs: list[bytes] = [b'one', b'two', b'three']
+    a = xs[0]
+    xs[0] = b'ONE'
+    b = xs[2]
+    xs.pop()
+    print(a.decode(), b.decode(), len(xs), xs[0].decode())
+    ys: list[bytes] = [b'keep']
+    v = ys[0]
+    ys = [b'new']
+    print(v.decode(), ys[0].decode())
+    box = Box([b'abc', b'de'], 0)
+    zs = box.items
+    print(steal(box, zs[0]), steal(box, zs[1]), len(zs), zs[len(zs) - 1].decode())
+    ws: list[bytes] = [b'orig', b'x']
+    w = ident(ws[0])
+    ws[0] = b'repl'
+    print(w.decode(), ws[0].decode(), ws[0] == ws[1], len(ws[1]))
+    src: list[bytes] = [b'p', b'q']
+    dst: list[bytes] = []
+    for i in range(len(src)):
+        dst.append(src[i])
+    d0 = src[0].decode()
+    src.clear()
+    src.append(b'r')
+    print(b','.join(dst).decode(), d0, src[0].decode())
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 BYTES_PYTHON = r'''
@@ -164,68 +186,89 @@ def bytes_input(n):
     return ("\n".join(rows) + "\nEND|0\ntail|1\n").encode()
 
 
-STR_SOURCE = r"""
-struct T { nm: list[str]; w: list[int]; }
-fn clobber(t: T) -> void { t.nm[0] = "XX"; }
-fn rebuild(t: T, order: list[int]) -> void {
-    let nm: list[str] = [];
-    let w: list[int] = [];
-    for o in order { nm.append(t.nm[o]); w.append(t.w[o]); }
-    t.nm = nm;
-    t.w = w;
-}
-fn find(t: T, s: str) -> int {
-    for i in range(len(t.nm)) { if t.nm[i] == s { return i; } }
-    return -1;
-}
-fn path(t: T, i: int) -> str {
-    let parts: list[str] = [];
-    let j = i;
-    while j >= 0 { parts.append(t.nm[j]); j -= 1; }
-    parts.reverse();
-    return "/".join(parts);
-}
-fn held_after_store(t: T) -> str {
-    let held: list[str] = [];
-    held.append(t.nm[0]);
-    t.nm[0] = "YY";
-    return held[0];
-}
-fn held_after_call(t: T) -> str {
-    let held: list[str] = [];
-    held.append(t.nm[1]);
-    held.append(t.nm[0]);
-    clobber(t);
-    return "|".join(held);
-}
-fn store_then_read(t: T) -> int {
-    let nm: list[str] = [];
-    nm.append(t.nm[1]);
-    nm.append(t.nm[0]);
-    t.nm = nm;
-    return len(nm[0]) * 10 + len(t.nm);
-}
-fn joined(t: T) -> str {
-    let out = "";
-    for i in range(len(t.nm)) { out += t.nm[i]; out += ","; }
-    let name = t.nm[0];
-    name += "+";
-    name += t.nm[1];
-    return out + name;
-}
-fn main() {
-    let t = T([], []);
-    for i in range(12) { t.nm.append(f"n{i * 7 % 12}"); t.w.append(i); }
-    let order = [11 - i for i in range(12)];
-    rebuild(t, order);
-    print("|".join(t.nm), find(t, "n5"), find(t, "zz"), path(t, 4));
-    print(held_after_store(t), t.nm[0]);
-    print(held_after_call(t), t.nm[0]);
-    print(store_then_read(t), "|".join(t.nm));
-    print(joined(t));
-    rebuild(t, [1, 0, 1]);
-    print("|".join(t.nm), t.w[0], t.w[2]);
-}
+STR_SOURCE = """import sys
+
+class T:
+
+    def __init__(self, nm: list[str], w: list[int]):
+        self.nm = nm
+        self.w = w
+
+def clobber(t: T) -> None:
+    t.nm[0] = 'XX'
+
+def rebuild(t: T, order: list[int]) -> None:
+    nm: list[str] = []
+    w: list[int] = []
+    for o in order:
+        nm.append(t.nm[o])
+        w.append(t.w[o])
+    t.nm = nm
+    t.w = w
+
+def find(t: T, s: str) -> int:
+    for i in range(len(t.nm)):
+        if t.nm[i] == s:
+            return i
+    return -1
+
+def path(t: T, i: int) -> str:
+    parts: list[str] = []
+    j = i
+    while j >= 0:
+        parts.append(t.nm[j])
+        j -= 1
+    parts.reverse()
+    return '/'.join(parts)
+
+def held_after_store(t: T) -> str:
+    held: list[str] = []
+    held.append(t.nm[0])
+    t.nm[0] = 'YY'
+    return held[0]
+
+def held_after_call(t: T) -> str:
+    held: list[str] = []
+    held.append(t.nm[1])
+    held.append(t.nm[0])
+    clobber(t)
+    return '|'.join(held)
+
+def store_then_read(t: T) -> int:
+    nm: list[str] = []
+    nm.append(t.nm[1])
+    nm.append(t.nm[0])
+    t.nm = nm
+    return len(nm[0]) * 10 + len(t.nm)
+
+def joined(t: T) -> str:
+    out = ''
+    for i in range(len(t.nm)):
+        out += t.nm[i]
+        out += ','
+    name = t.nm[0]
+    name += '+'
+    name += t.nm[1]
+    return out + name
+
+def main() -> int:
+    t = T([], [])
+    for i in range(12):
+        t.nm.append(f'n{i * 7 % 12}')
+        t.w.append(i)
+    order = [11 - i for i in range(12)]
+    rebuild(t, order)
+    print('|'.join(t.nm), find(t, 'n5'), find(t, 'zz'), path(t, 4))
+    print(held_after_store(t), t.nm[0])
+    print(held_after_call(t), t.nm[0])
+    print(store_then_read(t), '|'.join(t.nm))
+    print(joined(t))
+    rebuild(t, [1, 0, 1])
+    print('|'.join(t.nm), t.w[0], t.w[2])
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 STR_PYTHON = r'''
@@ -265,32 +308,43 @@ rebuild(t, [1, 0, 1])
 print("|".join(t.nm), t.w[0], t.w[2])
 '''
 
-RAISE_SOURCE = r"""
-fn check(x: int) -> int {
-    if x % 97 == 13 { raise ValueError(f"bad {x}"); }
-    return x;
-}
-fn ev(depth: int, x: int) -> int {
-    if x < 0 { raise ValueError("neg"); }
-    if depth == 0 {
-        if x % 89 == 7 { raise KeyError("odd"); }
-        return check(x);
-    }
-    return ev(depth - 1, x + 1) + 1;
-}
-fn main() {
-    let n = int(sys.argv[1]);
-    let ok = 0;
-    let bad = 0;
-    let last = "";
-    for i in range(n) {
-        try { ok += ev(i % 5, i); }
-        except ValueError as err1 { bad += 1 + len(err1.message); }
-        except KeyError as err3 { bad += 1000; }
-    }
-    try { ok += ev(3, -1); } except ValueError as err2 { last = last + "/" + err2.message; }
-    print(ok, bad, last);
-}
+RAISE_SOURCE = """import sys
+
+def check(x: int) -> int:
+    if x % 97 == 13:
+        raise ValueError(f'bad {x}')
+    return x
+
+def ev(depth: int, x: int) -> int:
+    if x < 0:
+        raise ValueError('neg')
+    if depth == 0:
+        if x % 89 == 7:
+            raise KeyError('odd')
+        return check(x)
+    return ev(depth - 1, x + 1) + 1
+
+def main() -> int:
+    n = int(sys.argv[1])
+    ok = 0
+    bad = 0
+    last = ''
+    for i in range(n):
+        try:
+            ok += ev(i % 5, i)
+        except ValueError as err1:
+            bad += 1 + len(err1.message)
+        except KeyError as err3:
+            bad += 1000
+    try:
+        ok += ev(3, -1)
+    except ValueError as err2:
+        last = last + '/' + err2.message
+    print(ok, bad, last)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 RAISE_PYTHON = r'''
@@ -318,36 +372,54 @@ print(ok, bad, last)
 # The runtime's own boundaries: payload size classes (16-byte steps up to 64, malloc above, NULL for
 # empty), the bounded per-class caches, the 8-entry header cache and its 64-slot limit, negative and
 # out-of-range view indexes.
-POOL_SOURCE = r"""
-fn ck(xs: list[bytes]) -> int {
-    let t = 0;
-    for i in range(len(xs)) { t = (t * 131 + len(xs[i]) * 7 + i) % 1000003; }
-    return t;
-}
-fn main() {
-    let rounds = int(sys.argv[1]);
-    let xs: list[bytes] = [];
-    for n in [0, 1, 15, 16, 17, 31, 32, 33, 47, 48, 49, 63, 64, 65, 200] { xs.append(b"a" * n); }
-    let acc = 0;
-    for r in range(rounds) {
-        for i in range(len(xs)) { xs[i] = xs[(i + r) % len(xs)][0:(i * 5 + r) % 70] + b"z"; }
-        let ys: list[bytes] = [];
-        let zs: list[bytes] = [];
-        for i in range(len(xs)) { ys.append(xs[i]); zs.append(xs[len(xs) - 1 - i]); }
-        for i in range(r % 90) { zs.append(xs[i % len(xs)]); }
-        while len(ys) > 3 { ys.pop(); }
-        let big: list[bytes] = [];
-        for i in range(300 + r) { big.append(b"q" * (i % 70)); }
-        acc = (acc * 31 + ck(ys) + ck(zs) * 3 + ck(big) + len(zs[-1]) + int(len(ys[-3]) > 0)) % 1000000007;
-        big.clear();
-        for i in range(40) { big.append(xs[i % len(xs)]); }
-        acc = (acc + ck(big)) % 1000000007;
-    }
-    let caught = 0;
-    try { acc += len(xs[99]); } except IndexError as err { caught = 1; }
-    try { acc += int(xs[-99]); } except IndexError as err2 { caught += 2; }
-    print(acc, caught, ck(xs), len(xs[-1]), xs[0].decode());
-}
+POOL_SOURCE = """import sys
+
+def ck(xs: list[bytes]) -> int:
+    t = 0
+    for i in range(len(xs)):
+        t = (t * 131 + len(xs[i]) * 7 + i) % 1000003
+    return t
+
+def main() -> int:
+    rounds = int(sys.argv[1])
+    xs: list[bytes] = []
+    for n in [0, 1, 15, 16, 17, 31, 32, 33, 47, 48, 49, 63, 64, 65, 200]:
+        xs.append(b'a' * n)
+    acc = 0
+    for r in range(rounds):
+        for i in range(len(xs)):
+            xs[i] = xs[(i + r) % len(xs)][0:(i * 5 + r) % 70] + b'z'
+        ys: list[bytes] = []
+        zs: list[bytes] = []
+        for i in range(len(xs)):
+            ys.append(xs[i])
+            zs.append(xs[len(xs) - 1 - i])
+        for i in range(r % 90):
+            zs.append(xs[i % len(xs)])
+        while len(ys) > 3:
+            ys.pop()
+        big: list[bytes] = []
+        for i in range(300 + r):
+            big.append(b'q' * (i % 70))
+        acc = (acc * 31 + ck(ys) + ck(zs) * 3 + ck(big) + len(zs[-1]) + int(len(ys[-3]) > 0)) % 1000000007
+        big.clear()
+        for i in range(40):
+            big.append(xs[i % len(xs)])
+        acc = (acc + ck(big)) % 1000000007
+    caught = 0
+    try:
+        acc += len(xs[99])
+    except IndexError as err:
+        caught = 1
+    try:
+        acc += int(xs[-99])
+    except IndexError as err2:
+        caught += 2
+    print(acc, caught, ck(xs), len(xs[-1]), xs[0].decode())
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 POOL_PYTHON = r'''
@@ -411,19 +483,25 @@ print(t.decode())
 
 # Lists of 8-, 24-, 40- and 60-byte elements built and dropped in turn: released payloads must go
 # back to malloc for the next class (found in review: fixed slabs held every class's peak at once).
-CHURN_SOURCE = r"""
-fn build(n: int, w: int) -> int {
-    let L: list[bytes] = [];
-    let src = b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    for i in range(n) { L.append(src[0:w]); }
-    return len(L);
-}
-fn main() {
-    let n = int(sys.argv[1]);
-    let t = 0;
-    for w in [8, 24, 40, 60] { t += build(n, w); }
-    print(t);
-}
+CHURN_SOURCE = """import sys
+
+def build(n: int, w: int) -> int:
+    L: list[bytes] = []
+    src = b'0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    for i in range(n):
+        L.append(src[0:w])
+    return len(L)
+
+def main() -> int:
+    n = int(sys.argv[1])
+    t = 0
+    for w in [8, 24, 40, 60]:
+        t += build(n, w)
+    print(t)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 

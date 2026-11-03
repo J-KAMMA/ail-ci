@@ -260,7 +260,9 @@ int main(int argc,char **argv) {
     def test_owned_c_wrappers_refuse_handle_lists_and_nested_callbacks(self):
         sources = [f'fn identity(values:list[{kind}])->list[{kind}] {{ return values; }}'
                    for kind in ('bytearray','binaryfile','tcpsocket')]
-        sources.append('fn consume(callback:Callable[[list[bytearray]],list[bytearray]])->int { return 0; }')
+        sources.append('''def consume(callback: Callable[[list[bytearray]], list[bytearray]]) -> int:
+    return 0
+''')
         for index,source in enumerate(sources):
             path=self.write(f'wrapper{index}.ail',source)
             output=self.root/f'wrapper{index}'

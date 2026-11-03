@@ -330,60 +330,83 @@ for a in range(3):
 
 # 300k keys in each kind of table, then every other one deleted: quadratic before (minutes),
 # well under a second now. The bound is loose on purpose -- it only has to catch O(n) per del.
-SCALE = """
-fn main() {
-    let n = 300000;
-    let d: dict[str, int] = {};
-    let m: dict[str, str] = {};
-    let e = {};
-    let s = set();
-    for i in range(0, n) {
-        let k = (i * 7919) % 1000003;
-        d[str(k)] = i; m[str(k)] = "v"; e[k] = i; s.add(k);
-    }
-    for i in range(0, n) {
-        if i % 2 == 0 {
-            let k = (i * 7919) % 1000003;
-            del d[str(k)]; del m[str(k)]; del e[k]; s.discard(k);
-        }
-    }
-    let t = 0;
-    for ks in d { t = (t + len(ks)) % 1000003; }
-    for ks, vs in m.items() { t = (t + len(ks) + len(vs)) % 1000003; }
-    for ki in e { t = (t * 3 + ki) % 1000003; }
-    for ki in s { t = (t * 5 + ki) % 1000003; }
-    print(t, len(d), len(m), len(e), len(s));
-}
+SCALE = """import sys
+
+def main() -> int:
+    n = 300000
+    d: dict[str, int] = {}
+    m: dict[str, str] = {}
+    e = {}
+    s = set()
+    for i in range(0, n):
+        k = i * 7919 % 1000003
+        d[str(k)] = i
+        m[str(k)] = 'v'
+        e[k] = i
+        s.add(k)
+    for i in range(0, n):
+        if i % 2 == 0:
+            k = i * 7919 % 1000003
+            del d[str(k)]
+            del m[str(k)]
+            del e[k]
+            s.discard(k)
+    t = 0
+    for ks in d:
+        t = (t + len(ks)) % 1000003
+    for ks, vs in m.items():
+        t = (t + len(ks) + len(vs)) % 1000003
+    for ki in e:
+        t = (t * 3 + ki) % 1000003
+    for ki in s:
+        t = (t * 5 + ki) % 1000003
+    print(t, len(d), len(m), len(e), len(s))
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
-FIELD = """
-struct T { par: list[int]; sub: list[int]; }
+FIELD = """import sys
 
-fn fold(t: T) -> int {
-    let i = len(t.par) - 1;
-    while i >= 1 {
-        t.sub[t.par[i]] += t.sub[i];
-        i -= 1;
-    }
-    return t.sub[0];
-}
+class T:
 
-fn far(t: T, i: int) -> int {
-    return t.sub[t.par[i]];
-}
+    def __init__(self, par: list[int], sub: list[int]):
+        self.par = par
+        self.sub = sub
 
-fn main() {
-    let n = 200000;
-    let par = [0] * n;
-    let sub = [1] * n;
-    for i in range(1, n) { par[i] = (i - 1) // 2; }
-    let t = T(par, sub);
-    print(fold(t), t.sub[1], t.sub[n - 1]);
-    let u = T([0, 0, 7], [1, 2, 3]);
-    print(far(u, 1));
-    try { print(far(u, 2)); } except IndexError { print("index error"); }
-    try { print(far(u, 3)); } except IndexError { print("index error"); }
-}
+def fold(t: T) -> int:
+    i = len(t.par) - 1
+    while i >= 1:
+        t.sub[t.par[i]] += t.sub[i]
+        i -= 1
+    return t.sub[0]
+
+def far(t: T, i: int) -> int:
+    return t.sub[t.par[i]]
+
+def main() -> int:
+    n = 200000
+    par = [0] * n
+    sub = [1] * n
+    for i in range(1, n):
+        par[i] = (i - 1) // 2
+    t = T(par, sub)
+    print(fold(t), t.sub[1], t.sub[n - 1])
+    u = T([0, 0, 7], [1, 2, 3])
+    print(far(u, 1))
+    try:
+        print(far(u, 2))
+    except IndexError:
+        print('index error')
+    try:
+        print(far(u, 3))
+    except IndexError:
+        print('index error')
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 FIELD_PY = """
