@@ -19,6 +19,44 @@ without the line (or segfaults on recursion, as before).  Library export and the
 probe were re-run directly.  The 20 shard gate is left to CI; instruction counts remain
 unmeasurable here (`perf_event_open` denied).
 
+## 2026-11-03 -- rel-rterr finish (job-relrterr3-11040001): cherry-picked, re-measured, one test expectation fixed
+
+Cherry-picked the first two runs' work (`job relrterr: name uncaught runtime errors and report
+their source line`, `job relrterr2: verify exception names and source lines`, `job relrterr2: fix C
+API tail, cache key and build-report baseline`), excluding the worker reports, and regenerated the
+manifest.  Re-ran 26 probes against CPython on both builds: list/str/bytes/tuple indexes (positive,
+negative, empty, int64), pop through a variable and an alias, dict keys through a variable, an
+argument, a list item and a dict value, int/mod/float division through locals, a list item, an
+attribute and an argument, recursion (default only), explicit and custom raises, a caught
+`IndexError`, and source lines after leading blank lines, across functions and through a class
+attribute.  Every probe matched CPython's stdout and exit code or was refused by name; the default
+build printed the expected `Name: message` line, and the unified build the expected existing text.
+The unified recursion probe still segfaults; the test skips it with that comment.
+
+One boundary is pre-existing and deliberately unchanged: the site is the last statement that
+*began* to run, so a trap in the caller after a callee returns reports the callee's last line (e.g.
+line 3 instead of the trap's line 8).  The base `--debug` build already did this; changing it would
+change `--debug` output and add save/restore instructions, so it is left as the documented
+"last statement" semantics.
+
+`test_ail_debug_flush` assumed a release build never prints `raised near`; the default release now
+does, so its assertion now checks absence only on the general release path (and presence on the
+default path where `site=True`).  The other updated expectations are the first run's:
+`test_ail_debug`, `test_ail_debug_lines`, `test_ail_exception_context`,
+`test_ail_exception_values_core`, `test_ail_numeric_bindings`, `test_ail_record_initializers`.
+
+Binary sizes on the ten `lab/compare/src/*/main.ail` tasks re-measured against `727b91e` are
+identical to the first run: berth_sim 64864 -> 73296, chain_relax 34888 -> 39224, echo_pack 35896
+-> 40232, ledger_bin 61016 -> 69360, rail_transfer 64936 -> 81560, scar_life 40432 -> 48632,
+tally_lang 74648 -> 95280, term_rank 74392 -> 82816, ticket_audit 104248 -> 124880, tree_fold
+86288 -> 102912 (+4,336 to +20,632 bytes).  Instruction counts still cannot be measured here:
+`tools/icount.c` builds but `perf_event_open` returns EPERM (`perf_event_paranoid=4`) and valgrind
+is not installed.  Site literals repeat a source line 5-38% in the generated C (tree_fold 379
+sites / 270 unique, tally_lang 304 / 280, berth_sim 163 / 100), but the compiler merges the
+identical constants: the built binaries contain no duplicate `file:line` literal, so a per-line
+emitter change would save nothing; a line-number table would add a second global store and a
+different print path, so it was not done.
+
 ## 2026-11-03 -- rel-rterr follow-up (job-relrterr2-11031503): verified the exception name and source line
 
 Cherry-picked the first run's work commit (`job relrterr: name uncaught runtime errors and report

@@ -102,6 +102,7 @@ class RuntimeErrorNames(unittest.TestCase):
                                      capture_output=True, text=True, encoding="utf-8", timeout=120)
             cpython_last = self.last_line(cpython.stderr)
             for unified in (False, True):
+                # AIL_UNIFIED_FORCE=1 segfaults on recursion (an existing bug, out of scope here).
                 if unified and unified_message is None:
                     continue
                 with self.subTest(name=name, unified=unified):
