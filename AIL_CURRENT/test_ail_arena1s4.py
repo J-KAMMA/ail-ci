@@ -12,7 +12,9 @@ of building a second copy of the column. This module pins against CPython, the l
 * the C shape: `ail_pslist_*` for the moved local, the field-text hint on the reserve, and no
   `ail_bl_copy` of the builder before the packed push;
 * the same programs in a shape that reads, returns or aliases the local stay on `ail_slist`, so
-  the packed representation is chosen only where a view cannot escape.
+  the packed representation is chosen only where a view cannot escape;
+* a whole-field store that repeats inside a `for`/`while` loop keeps `ail_slist`, because the move
+  zeroes the local and later iterations would store an empty column.
 """
 import os
 import re
@@ -165,6 +167,22 @@ def explode(src: T, order: list[int]) -> T:
     return out
 
 
+def repeated_store(t: T, k: int) -> None:
+    nm: list[str] = []
+    nm.append("a")
+    for i in range(k):
+        t.nm = nm
+
+
+def while_store(t: T, k: int) -> None:
+    nm: list[str] = []
+    nm.append("w")
+    i = 0
+    while i < k:
+        t.nm = nm
+        i += 1
+
+
 def describe(t: T) -> str:
     return ",".join(t.nm) + ":" + ",".join(str(v) for v in t.w)
 
@@ -194,6 +212,12 @@ def main() -> int:
         explode(src, small)
     except ValueError as exc:
         print("M", exc)
+    looped = T([], [])
+    repeated_store(looped, 3)
+    print("N", len(looped.nm), ",".join(looped.nm))
+    whiled = T([], [])
+    while_store(whiled, 3)
+    print("O", len(whiled.nm), ",".join(whiled.nm))
     return 0
 
 
@@ -265,6 +289,13 @@ class PackedStringListLocalTests(unittest.TestCase):
         self.assertNotIn('ail_pslist_push(&v_nm,', returned)
         for name in ('iterate', 'sorted_copy', 'two_fields', 'passed'):
             body = body_of(self.c, name)
+            self.assertNotIn('ail_pslist_push(&v_nm,', body, name)
+            self.assertNotIn('ail_pslist_move(', body, name)
+
+    def test_a_store_inside_a_loop_keeps_the_local_on_the_spine(self):
+        for name in ('repeated_store', 'while_store'):
+            body = body_of(self.c, name)
+            self.assertIn('ail_slist_push(&v_nm,', body, name)
             self.assertNotIn('ail_pslist_push(&v_nm,', body, name)
             self.assertNotIn('ail_pslist_move(', body, name)
 

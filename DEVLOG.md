@@ -1,3 +1,12 @@
+## 2026-11-03 -- arena1 S4 fix: a repeated field store keeps the spine
+
+The packed-local marker accepted `o.nm = nm` as the local's last mention even when the store sat in
+a `for`/`while` body.  `ail_pslist_move` zeroes the local, so every iteration after the first stored
+an empty column (`build(t, 3)` gave `0` / empty instead of `1` / `a` on the typed path).  The marker
+now rejects any whole-field store that has a loop ancestor, so that shape stays `ail_slist` and
+matches CPython.  Stores outside loops, including after an append loop, still move.
+`test_ail_arena1s4` now covers repeated `for` and `while` stores.
+
 ## 2026-11-03 -- arena1 S4: packed append-only list[str] locals (job-arena1s4-11040050)
 
 A local `list[str]` that starts as `[]`, is only appended to and measured with `len`, and is stored

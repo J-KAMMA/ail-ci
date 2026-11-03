@@ -29786,15 +29786,26 @@ def _mark_str_lists(fn, ctx, exclude):
     return strs
 
 
+def _inside_loop(node, parents):
+    """True when a statement has a `for`/`while` ancestor, so it may execute more than once."""
+    cur = parents.get(node)
+    while cur is not None:
+        if isinstance(cur, (ast.For, ast.AsyncFor, ast.While)):
+            return True
+        cur = parents.get(cur)
+    return False
+
+
 def _mark_packed_str_lists(fn, ctx):
     """Which `list[str]` locals can be a dense `ail_pslist` instead of an `ail_slist`.
 
     A local qualifies only when its whole life is the append-only column shape: one initial `= []`,
     `.append(str)` and `len(x)` uses, and exactly one final whole-field store `o.f = x` into a
-    `list[str]` field, which is also x's last mention. There must be no element read, iteration,
-    slice, sort, call argument, return, alias or rebinding, and no lambda or nested function may see
-    the name. Everything else keeps `ail_slist`, so a view into the packed text can never outlive
-    the append that reallocates it.
+    `list[str]` field, which is also x's last mention. The store must run exactly once: `ail_pslist_move`
+    zeroes the local, so a store inside a loop would hand the field an empty column on every later
+    iteration. There must be no element read, iteration, slice, sort, call argument, return, alias or
+    rebinding, and no lambda or nested function may see the name. Everything else keeps `ail_slist`,
+    so a view into the packed text can never outlive the append that reallocates it.
     """
     candidates = set(ctx.strlist) - set(ctx.kind) - set(getattr(ctx, 'modconsts', {}))
     candidates -= set(ctx.flist) | set(ctx.tstride) | set(ctx.nlist) | set(ctx.handles)
@@ -29876,8 +29887,13 @@ def _mark_packed_str_lists(fn, ctx):
             break
         if not ok or len(field_stores) != 1:
             continue
+        store = field_stores[0]
+        if _inside_loop(store, parents):
+            # The move zeroes the local, so a store that repeats would write an empty column after
+            # the first pass; only a store executed once can move.
+            continue
         key = max((n.lineno, n.col_offset) for n in nodes)
-        if (field_stores[0].lineno, field_stores[0].col_offset) != key:
+        if (store.lineno, store.col_offset) != key:
             continue
         packed.add(name)
     return packed
