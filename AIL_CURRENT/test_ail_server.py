@@ -150,12 +150,12 @@ class ServerBase(unittest.TestCase):
 
 class SameBuilds(ServerBase):
     def test_compare_lab_tasks(self):
-        tasks = sorted(path for path in LAB.iterdir() if (path / 'main.ail').is_file()) if LAB.is_dir() else []
+        tasks = sorted(path for path in LAB.iterdir() if (path / 'typed.py').is_file()) if LAB.is_dir() else []
         if not tasks:
             self.skipTest('lab/compare is not part of this tree')
         for task in tasks:
             with self.subTest(task=task.name):
-                plain, served = self.same(['compile', task / 'main.ail', '-o', '{OUT}'], expect=0)
+                plain, served = self.same(['compile', task / 'typed.py', '--syntax', 'python', '-o', '{OUT}'], expect=0)
                 self.assertTrue(plain[3] and served[3])
         self.wait_for_sockets(1)
 
@@ -209,26 +209,26 @@ class SameBuilds(ServerBase):
             self.build(['compile', 'hello.py', '-o', '{OUT}'], True)
             self.wait_for_sockets(1)
         for name in ('rail_transfer', 'chain_relax'):
-            source = LAB / name / 'main.ail'
+            source = LAB / name / 'typed.py'
             if not source.is_file():
                 continue
             with self.subTest(task=name):
-                plain = self.build(['compile', source, '--exact-int', '-o', '{OUT}'], False)
-                served = self.build(['compile', source, '--exact-int', '-o', '{OUT}'], True)
+                plain = self.build(['compile', source, '--syntax', 'python', '--exact-int', '-o', '{OUT}'], False)
+                served = self.build(['compile', source, '--syntax', 'python', '--exact-int', '-o', '{OUT}'], True)
                 self.assertEqual(plain[:3], served[:3])
                 self.assertEqual(plain[3], served[3])
-                default_plain = self.build(['compile', source, '-o', '{OUT}'], False)
-                default_served = self.build(['compile', source, '-o', '{OUT}'], True)
+                default_plain = self.build(['compile', source, '--syntax', 'python', '-o', '{OUT}'], False)
+                default_served = self.build(['compile', source, '--syntax', 'python', '-o', '{OUT}'], True)
                 self.assertEqual(default_plain[:3], default_served[:3])
                 self.assertEqual(default_plain[3], default_served[3])
 
     def test_per_build_environment(self):
-        source = LAB / 'chain_relax' / 'main.ail'
+        source = LAB / 'chain_relax' / 'typed.py'
         if not source.is_file():
             self.skipTest('lab/compare is not part of this tree')
-        forced = self.same(['compile', source, '-o', '{OUT}'], extra={'AIL_UNIFIED_FORCE': '1'})
-        default = self.same(['compile', source, '-o', '{OUT}'], expect=0)
-        self.same(['compile', source, '-o', '{OUT}'], extra={'AIL_UNIFIED_FORCE': '1', 'AIL_NO_GENERAL': '1'})
+        forced = self.same(['compile', source, '--syntax', 'python', '-o', '{OUT}'], extra={'AIL_UNIFIED_FORCE': '1'})
+        default = self.same(['compile', source, '--syntax', 'python', '-o', '{OUT}'], expect=0)
+        self.same(['compile', source, '--syntax', 'python', '-o', '{OUT}'], extra={'AIL_UNIFIED_FORCE': '1', 'AIL_NO_GENERAL': '1'})
         self.assertNotEqual(forced[0][:2], default[0][:2])   # the variable changes the build, and the server followed it
         self.wait_for_sockets(1)                              # one server answered every one of them
 
@@ -250,12 +250,12 @@ class SameBuilds(ServerBase):
         self.assertEqual(self.build(['cache', '--help'], True)[:3], self.build(['cache', '--help'], False)[:3])
 
     def test_concurrent_requests(self):
-        source = LAB / 'chain_relax' / 'main.ail'
+        source = LAB / 'chain_relax' / 'typed.py'
         if not source.is_file():
             self.skipTest('lab/compare is not part of this tree')
         (self.work / 'hello.py').write_text(HELLO)
-        jobs = [['compile', source, '-o', '{OUT}'], ['compile', 'hello.py', '-o', '{OUT}'], ['check', 'hello.py'],
-                ['compile', source, '-o', '{OUT}'], ['compile', 'hello.py', '-o', '{OUT}'], ['check', source]]
+        jobs = [['compile', source, '--syntax', 'python', '-o', '{OUT}'], ['compile', 'hello.py', '-o', '{OUT}'], ['check', 'hello.py'],
+                ['compile', source, '--syntax', 'python', '-o', '{OUT}'], ['compile', 'hello.py', '-o', '{OUT}'], ['check', source]]
         expected = [self.build(job, False) for job in jobs]
         with concurrent.futures.ThreadPoolExecutor(len(jobs)) as pool:
             got = list(pool.map(lambda job: self.build(job, True), jobs))

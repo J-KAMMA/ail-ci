@@ -46,7 +46,7 @@ import run_task as rt  # noqa: E402
 
 
 def tasks():
-    return sorted(p.name for p in (COMPARE / 'src').iterdir() if (p / 'main.ail').is_file())
+    return sorted(p.name for p in (COMPARE / 'src').iterdir() if (p / 'typed.py').is_file())
 
 
 def median(values):
@@ -84,7 +84,7 @@ def build(task, mode, label, root, gcc, tcc, server_dir=None, server=False):
         env['WRAP_MODE'] = 'tcc' if mode == 'tcc' else 'split'
         env['WRAP_SAVE_C'] = str(root / 'c')
         env['WRAP_TCC_PRELUDE'] = str(PRELUDE)
-    command = [sys.executable, '-B', str(AIL), 'compile', str(COMPARE / 'src' / task / 'main.ail'), '-o', str(out)]
+    command = [sys.executable, '-B', str(AIL), 'compile', str(COMPARE / 'src' / task / 'typed.py'), '--syntax', 'python', '-o', str(out)]
     start = time.perf_counter()
     done = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, timeout=1800)
     wall = time.perf_counter() - start

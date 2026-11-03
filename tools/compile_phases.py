@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Where does the time of one cold AIL build go?  (POSIX; needs bash and gcc.)
 
-    python3 tools/compile_phases.py lab/compare/src/chain_relax/main.ail
+    python3 tools/compile_phases.py lab/compare/src/chain_relax/typed.py --syntax python
     python3 tools/compile_phases.py lab/compare/src/chain_relax/main.py --syntax python --runs 7
     python3 tools/compile_phases.py PROGRAM --repo /path/to/other/checkout     # same tool on a base checkout
 
