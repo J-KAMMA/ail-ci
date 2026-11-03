@@ -17,6 +17,28 @@ the ten `lab/compare` `main.ail` C hashes are unchanged.
 ## 2026-11-03 -- pyreach s1: re-land rbpyreach1 with its two review fixes
 
 Re-applied 3667f3af on integ, keeping both sides of the `_Surface`/`_tuplib` and optlib conflicts. `_dict_of_lists_kind` carries a `seen` set so `x = x` and `x = 1; y = x; x = y` stop at int instead of recursing, and `lower_dict_of_lists` rewrites only a standalone `setdefault(...).append(...)` expression statement, leaving `;`, assignment, lambda and inline-suite positions as written. Probes `p_dl_cycle`, `p_dl_cycle2`, `p_dl_semi`, `p_dl_expr`, `p_dl_lambda` match CPython on the default and unified builds. Review fix: a parenthesized standalone `(d.setdefault(...).append(...))` (also inside an `if`) is left as written instead of being rewritten inside its parentheses; probes `p_dl_paren` and `p_dl_paren_if` match CPython on both builds.
+## 2026-11-03 -- onelang s4: compare-lab typed.py twins added, deletion held
+
+Converted the ten compare-lab brace programs to annotated Python with `tools/ail2py.py`; every
+`--check --strict` run printed `identical`.  `run_task.py` now builds the `ail` column from
+`typed.py` with `--syntax python` (the `ail-py` column still uses `main.py`), and the compare-lab
+docs say so.  Generated `program.c` is byte-identical for all ten tasks and the binaries have the
+same size, but the cold builds of `typed.py` are 5-19% slower than the base `main.ail` builds
+(median of alternating runs), over the 3% budget in the step.  Stopped before deleting the ten
+`main.ail` files, as the stop rule requires; the remaining work is a front-end speed job.
+
+| task | head typed.py s | base main.ail s | ratio |
+| --- | ---: | ---: | ---: |
+| berth_sim | 8.394 | 8.333 | 1.007 |
+| chain_relax | 1.810 | 1.719 | 1.053 |
+| echo_pack | 3.416 | 3.147 | 1.085 |
+| ledger_bin | 3.422 | 3.014 | 1.135 |
+| rail_transfer | 2.689 | 2.377 | 1.131 |
+| scar_life | 2.212 | 2.068 | 1.070 |
+| tally_lang | 3.599 | 3.043 | 1.182 |
+| term_rank | 2.992 | 2.656 | 1.127 |
+| ticket_audit | 4.333 | 3.964 | 1.093 |
+| tree_fold | 4.897 | 4.406 | 1.111 |
 
 ## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
 
