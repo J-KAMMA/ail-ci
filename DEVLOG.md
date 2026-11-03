@@ -1,3 +1,28 @@
+## 2026-11-03 -- arena1 S4: packed append-only list[str] locals (job-arena1s4-11040050)
+
+A local `list[str]` that starts as `[]`, is only appended to and measured with `len`, and is stored
+once into a `list[str]` field as its last mention now lives as a dense `ail_pslist` for its whole
+lifetime (`_mark_packed_str_lists`).  Appends use `ail_pslist_push`, builders and field elements are
+pushed directly without an sarena copy, the final store uses the new `ail_pslist_move`, and
+declaration/cleanup/unwind use `ail_pslist_free`.  Step 3's reserve now covers these locals,
+including loops with `if`/`continue`, with the field text length as the hint when every append reads
+the same field.  `cruntime.py` also gained `ail_pslist_reserve`.
+
+`tree_fold`, N = 3M, actual perf input: 440,188 -> 414,220 KiB peak RSS, wall 1.75 -> 1.42 s, minor
+faults 194,030 -> 135,599.  The sort phase drops 429.8 -> 404.5 MiB.  This is **not landed**: the
+runner peak is still above the 350 MB bar.  The generated `do_sort` still has S2's
+`ail_slist_snapshot` for `let nm = t.nm` (about 83 MB including text) despite the task saying steps
+1-3 are merged, so the S2 residual is the blocker; see `docs/design/ARENA1.md`.  All ten
+`lab/compare` tasks and all public+hidden cases match, every task stays on the typed path, and
+other tasks are flat within noise.  `AIL_CURRENT/test_ail_arena1s4.py` is registered by
+`tests.d/test_ail_arena1s4.txt` (8 tests: packed shapes, builder/field views, same-field append,
+empty, non-ASCII, stays-slist cases, unwind, ASan/UBSan).  Modules run on the final tree:
+`test_ail_arena1s4`, `test_ail_slist_reserve`, `test_ail_element_views`, `test_ail_field_views`,
+`test_ail_string_field_mutation`, `test_ail_str_comprehension_move`, `test_ail_ir_s3`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`; `par_check -j 2` green.
+Probe `/tmp/probes/arena1s4.py` matched CPython on both builds.  No new DIFFERENCES row: output is
+unchanged.
+
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
 Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's

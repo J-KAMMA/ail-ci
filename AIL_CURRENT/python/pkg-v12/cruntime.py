@@ -4155,6 +4155,36 @@ static void ail_pslist_assign(ail_pslist *slot, ail_slist value) {
     ail_pslist_free(slot);
     *slot = r;
 }
+/* `o.f = xs` with `xs` a packed local list[str]: the field frees its old storage and takes the
+   local's, so the whole column is never copied a second time. The local is zeroed; it owns nothing
+   afterwards (its return/unwind free is a no-op, exactly like a moved ail_list). */
+static void ail_pslist_move(ail_pslist *slot, ail_pslist *local) {
+    if (slot == local) return;
+    ail_pslist_free(slot);
+    *slot = *local;
+    *local = (ail_pslist){0};
+}
+/* Exact reservation before an append loop with a known trip count: `extra` more elements, and
+   `text_hint` total text bytes when the loop reads a field of the same shape (0 when unknown).
+   Reserving both removes the realloc doubling holes that stayed resident in glibc's brk heap. */
+static void ail_pslist_reserve(ail_pslist *L, int64_t extra, int64_t text_hint) {
+    if (!L || extra <= 0 || L->n < 0 || L->wide) return;
+    if (extra > INT64_MAX - L->n) ail_die("string field too long");
+    int64_t need = L->n + extra;
+    if (need > L->cap) {
+        ail__need_elems(need + 1, AIL_ELEM_LIMIT(int64_t));
+        int64_t *q = (int64_t *)realloc(L->e, (size_t)(need + 1) * sizeof *q);
+        if (!q) ail_die("out of memory");
+        if (!L->e) q[0] = 0;
+        L->e = q; L->cap = need;
+    }
+    if (text_hint > L->tcap) {
+        ail__need_elems(text_hint, AIL_STR_LIMIT);
+        uint8_t *q = (uint8_t *)realloc(L->t, (size_t)text_hint);
+        if (!q) ail_die("out of memory");
+        L->t = q; L->tcap = text_hint;
+    }
+}
 /* An independent copy of a field (a whole-field read): one arena block holds every text and one
    vector holds the views, as ail_slist_snapshot does. */
 static ail_slist ail_pslist_snapshot(ail_sarena *A, ail_pslist L) {
