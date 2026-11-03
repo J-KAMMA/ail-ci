@@ -952,6 +952,17 @@ def fold_constants(text):
 
 _HEAPQ = ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')
 _BISECT = ('bisect_left', 'bisect_right', 'bisect', 'insort', 'insort_left', 'insort_right')
+# The AIL-only built-ins: `from ail import ...` binds these from AIL_CURRENT/ail.py for CPython,
+# and the compiler drops the import (their calls are already built under the bare name).
+AIL_IMPORT_NAMES = frozenset((
+    'append_bytes', 'current_dir', 'file_chunks', 'file_size', 'float64_decode',
+    'float64_encode', 'flush_stdout', 'get_env', 'heappop', 'heappush', 'integer_decode',
+    'integer_encode', 'is_dir', 'jscharat', 'jsdiv', 'jsnegzero', 'list_dir', 'make_dir',
+    'monotonic_ms', 'open_binary', 'par_range', 'path_exists', 'pcm16_scale_le', 'read_bytes',
+    'read_stdin_bytes', 'remove_dir', 'remove_file', 'replace_path', 'same_file', 'tcp_connect',
+    'tcp_listen', 'tcp_poll', 'wrapping_add', 'wrapping_mul', 'wrapping_sub', 'write_bytes',
+    'write_stdout_bytes', 'write_text',
+))
 _MATH_VALUES = {'pi': repr(math.pi), 'e': repr(math.e), 'tau': repr(math.tau),
                 'inf': "float('inf')", 'nan': "float('nan')"}
 # One-argument libm functions: name -> True when a finite argument can overflow (OverflowError, as
@@ -4092,6 +4103,118 @@ def _inline_type_aliases(source):
     return source
 
 
+def _ail_imports(source):
+    """Drop `from ail import ...` / `import ail` and write `ail.X` as the built-in `X`.
+
+    The names are checked against AIL_IMPORT_NAMES, so a typo is refused by name instead of becoming
+    a Python NameError.  A dropped import keeps its lines blank, so every later position is unchanged.
+    """
+    if 'ail' not in source:
+        return source
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    data = source.encode('utf8')
+    starts = _byte_offsets(data)
+
+    def offset(line, column):
+        return starts[line - 1] + column
+
+    dropped = []
+    aliases = set()
+    from_aliases = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and not node.level and node.module == 'ail':
+            for alias in node.names:
+                if alias.name not in AIL_IMPORT_NAMES:
+                    raise SyntaxErrorAIL('ail has no ' + alias.name,
+                                         lineno=node.lineno, offset=node.col_offset + 1)
+                bound = alias.asname or alias.name
+                if bound in from_aliases and from_aliases[bound] != alias.name:
+                    raise SyntaxErrorAIL('ail import alias ' + bound + ' is rebound',
+                                         lineno=node.lineno, offset=node.col_offset + 1)
+                from_aliases[bound] = alias.name
+            dropped.append(node)
+        elif isinstance(node, ast.Import) and all(alias.name == 'ail' for alias in node.names):
+            for alias in node.names:
+                aliases.add(alias.asname or 'ail')
+            dropped.append(node)
+    if not dropped:
+        return source
+    edits = []
+    for node in dropped:
+        start = offset(node.lineno, node.col_offset)
+        end = offset(node.end_lineno, node.end_col_offset)
+        edits.append((start, end, '\n' * data[start:end].count(b'\n')))
+    if aliases:
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id in aliases and isinstance(node.ctx, ast.Load)):
+                continue
+            if node.attr not in AIL_IMPORT_NAMES:
+                raise SyntaxErrorAIL('ail has no ' + node.attr,
+                                     lineno=node.lineno, offset=node.col_offset + 1)
+            edits.append((offset(node.lineno, node.col_offset),
+                          offset(node.end_lineno, node.end_col_offset), node.attr))
+    tracked = set(from_aliases) | aliases
+    if tracked:
+        dropped_ids = {id(node) for node in dropped}
+        rebound = None
+        rebound_name = None
+        for node in ast.walk(tree):
+            if rebound is not None:
+                break
+            if isinstance(node, ast.Name) and node.id in tracked:
+                if isinstance(node.ctx, ast.Load):
+                    if node.id in from_aliases:
+                        edits.append((offset(node.lineno, node.col_offset),
+                                      offset(node.end_lineno, node.end_col_offset),
+                                      from_aliases[node.id]))
+                else:
+                    rebound, rebound_name = node, node.id
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
+                    and node.name in tracked:
+                rebound, rebound_name = node, node.name
+            elif isinstance(node, ast.arg) and node.arg in tracked:
+                rebound, rebound_name = node, node.arg
+            elif isinstance(node, ast.ExceptHandler) and node.name in tracked:
+                rebound, rebound_name = node, node.name
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name in tracked:
+                rebound, rebound_name = node, node.name
+            elif isinstance(node, ast.MatchMapping) and node.rest in tracked:
+                rebound, rebound_name = node, node.rest
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound = alias.asname or alias.name.split('.')[0]
+                    if bound not in tracked:
+                        continue
+                    if bound in from_aliases:
+                        rebound, rebound_name = node, bound
+                        break
+                    if id(node) in dropped_ids and alias.name == 'ail' \
+                            and (alias.asname or 'ail') == bound:
+                        continue
+                    rebound, rebound_name = node, bound
+                    break
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    if bound not in tracked:
+                        continue
+                    if id(node) in dropped_ids and not node.level \
+                            and node.module == 'ail':
+                        continue
+                    rebound, rebound_name = node, bound
+                    break
+        if rebound is not None:
+            raise SyntaxErrorAIL('ail import alias ' + rebound_name + ' is rebound',
+                                 lineno=rebound.lineno, offset=rebound.col_offset + 1)
+    for start, end, text in sorted(edits, reverse=True):
+        data = data[:start] + text.encode('utf8') + data[end:]
+    return data.decode('utf8')
+
+
 def ail_array_surface(source, notes=None):
     """`import ail_array` lowered onto native array loops (python/pkg-v12/ailarray.py); the source as written when the
     program does not import it or a use is not built (the refusal is added to `notes`)."""
@@ -4116,6 +4239,8 @@ def python_surface(source, notes=None, library=False):
                         'or list every lambda parameter as a plain positional one',
                         lineno=node.lineno, offset=node.col_offset + 1)
     source = _inline_type_aliases(source)
+    if "ail" in source:
+        source = _ail_imports(source)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
     if "match" in source:

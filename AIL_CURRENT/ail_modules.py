@@ -324,8 +324,8 @@ class Program:
 
     def local_top(self, name):
         """True when `name` (a top-level module name) is provided by the search path."""
-        if not name:
-            return False
+        if not name or name == 'ail':
+            return False                   # `from ail import ...` is the compiler's built-in surface
         got = self.top_cache.get(name)
         if got is None:
             got = False

@@ -1,3 +1,100 @@
+## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
+
+`from ail import X as Y` now records the binding even when `Y == X`, so an alias spelled with the
+same name as its source is visible to the repeated-binding check.  A later `from ail import Z as Y`
+with `Z != X` is refused by name (`ail import alias Y is rebound`) instead of silently rewriting
+the earlier loads to `Z`; `alias_asname_eq_name.py` used to print `2`/`12`, CPython prints `3`/`12`,
+and both builds now refuse it.  Repeating the same source under the same alias, including
+`from ail import X as X`, still matches CPython and builds `program.c` identical to the bare
+program.  A plain `from ail import X` now also refuses a later store or different-source rebinding
+of `X` by name instead of silently changing its meaning.
+
+Probes `alias_asname_eq_name`, `alias_rebind_same_import` and `alias_plain_then_alias_diff` refuse
+by name in the default and unified builds; `alias_repeat_same`, `alias_repeat_same_eq` and
+`alias_valid` match CPython in both builds.  `test_ail_ail2py` covers the `asname == name` case.
+
+## 2026-11-02 -- onelang s2 review 4: a repeated `from ail import ... as Y` alias is refused
+
+A second top-level `from ail import X as Y` whose source name differs from the first is now a named
+compile-time refusal (`ail import alias Y is rebound`).  Previously the later source silently
+overwrote the alias map, so loads before it were rewritten to the later built-in and the program
+printed the wrong values (`alias_rebind_same_import.py`: `2`/`12` instead of CPython's `3`/`12`).
+Repeating the same source name under the same alias stays allowed, since both bindings denote the
+same built-in.
+
+Probes `alias_rebind_same_import`, `alias_rebind_same_import3` and `alias_rebind_mixed` refuse by
+name in the default and unified builds; `alias_repeat_same_source` and `alias_valid_nested` still
+match CPython and build `program.c` identical to the bare program.  `test_ail_ail2py` now covers
+both the differing-source refusal and the same-source repeat.
+
+## 2026-11-02 -- onelang s2 review 3: aliased `ail` imports refuse import/`except`/`match` rebinding
+
+`from ail import X as Y` now detects every binding of `Y` that is not the import declaration, not
+only assignments, arguments and definitions.  `import Z as Y`, `from Z import W as Y`,
+`import ail as Y`, `except E as Y` and `match` captures are named compile-time refusals
+(`ail import alias Y is rebound`) instead of silently rewriting the later uses back to `X`.
+
+Probes for import, from-import, `import ail`, `except`, `match`, assignment, `for`, `with`,
+lambda, `def` and plain `import Y` rebinding all refuse by name in the default and unified builds;
+valid aliases and `import ail` still match CPython and build `program.c` identical to the bare
+program.  The ten converted tasks remain `identical`, `ail2py_cpython_check` still reports nine
+tasks `mismatches 0` plus the listed `tally_lang hidden/long_unary_chain`, and
+`test_ail_ail2py`, `test_ail_python_syntax`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_safetynet` pass.
+
+## 2026-11-02 -- onelang s2 review 2: `same_file`, closed binary files and aliased `ail` imports
+
+Fixed the three remaining CPython-parity defects.
+
+* `same_file` computes both file identities before returning `0`, so a missing first path still
+  stats the second and an empty or `ENOTDIR` second path raises `OSError`, matching
+  `ail_same_file`.
+* `_BinaryFile` methods raise `ValueError` after `close()` (the runtime's
+  `ail_binaryfile_ready`), instead of dereferencing `None` and raising `AttributeError`.
+* `from ail import X as Y` now rewrites uses of `Y` to the built-in `X`; rebinding the alias is a
+  named compile-time refusal (`ail import alias Y is rebound`).
+
+Probes `rv_same2`, `rv_close2` and `rv_alias` match CPython and the default AOT build; the unified
+build refuses the AIL-only built-ins by name. The ten converted tasks still build identically and
+`tools/ail2py_cpython_check.py` reports nine tasks with `mismatches 0` and only the listed
+`tally_lang hidden/long_unary_chain` case. `test_ail_ail2py`, `test_ail_python_syntax`,
+`test_ail_heapq_bisect`, `test_ail_overflow_error`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass.
+
+## 2026-11-02 -- onelang s2 review 1: `ail.py` matches the runtime on path errors and astral `jscharat`
+
+Three CPython-parity defects in `AIL_CURRENT/ail.py` are fixed; no compiler or converter file changed.
+
+* `jscharat` now walks code points and counts UTF-16 units like `ail_str_charat`: the unit that
+  starts an astral character yields the whole character and the trailing unit raises `ValueError`
+  (previously it returned lone surrogates).
+* `same_file` raises `OSError` for an empty path and for a non-ENOENT `stat` failure such as
+  `ENOTDIR`, and only treats a missing path as `0`, matching `ail_file_identity`.
+* `path_exists` / `is_dir` stat directly and only swallow `ENOENT` / `ENOTDIR`; permission and
+  other OS errors now propagate as `OSError`.
+
+Probes for astral `jscharat`, `same_file` (equal, missing, empty, `ENOTDIR`) and `path_exists` /
+`is_dir` (file, directory, missing, `ENOTDIR`, empty, unreadable parent) match the default AOT
+build; the unified build refuses these builtins as it did on the base. `test_ail_ail2py`,
+`test_ail_python_syntax`, `test_ail_heapq_bisect`, `test_ail_overflow_error`,
+`test_ail_builtin_contracts`, `test_ail_api_profiles`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass.
+
+## 2026-11-02 -- onelang s2: the `ail` module for AIL-only built-ins
+
+`AIL_CURRENT/ail.py` now gives CPython the AIL-only built-ins (the free functions in
+`ail_builtin_api.DECLARATIONS` that CPython lacks, plus keyed `heappush`/`heappop`, `par_range`
+and `file_chunks`). The compiler rewrites `from ail import ...` / `import ail` in Python syntax to
+the bare built-in names and refuses an unknown name as `ail has no X`; `ail_modules` never merges
+`ail.py`. `tools/ail2py.py` writes `from ail import <sorted names>` after the `from m import *`
+lines for every AIL-only built-in the converted program calls.
+
+`tools/ail2py_cpython_check.py` runs the converter's output against each task's reference for every
+public and hidden case: nine tasks report `mismatches 0`, and `tally_lang` reports the one listed
+`hidden/long_unary_chain` CPython recursion limit. All ten compare-lab tasks still build
+`identical` under `--strict`, and `test_ail_ail2py` gained import, equal-key heap and near-2**62
+wrapping regressions.
+
 ## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
 
 Two remaining comment-placement defects in `tools/ail2py.py` are fixed; no compiler file changed.
