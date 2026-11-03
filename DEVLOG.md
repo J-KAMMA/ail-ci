@@ -107,6 +107,70 @@ empty, non-ASCII, stays-slist cases, unwind, ASan/UBSan).  Modules run on the fi
 `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`; `par_check -j 2` green.
 Probe `/tmp/probes/arena1s4.py` matched CPython on both builds.  No new DIFFERENCES row: output is
 unchanged.
+## 2026-11-03 -- pyreach s4 review: no branch kind split across an `except ... as` binding
+
+Fixed the review defect in `rebinding._branch_kind_split`: it counted only `ast.Name` stores, so a
+branch containing `except E as x` looked like it did not bind `x`.  The chain was split anyway, the
+branch's `x = b"aa"` and the read after the handler were renamed together, and the handler's
+runtime unbinding of `x` was hidden (`/tmp/probes/r21min.py` printed `aa`, exit 0, instead of
+CPython's `UnboundLocalError`, exit 1).  A branch now blocks the chain when it binds the name
+through anything but a plain `Name` store: `ExceptHandler.name`, `import ... as`, a nested
+`def`/`class` name, or `global`/`nonlocal`; such a chain keeps the old refusal by name.  The plain
+if/elif kind split from s4 is unchanged.
+
+`test_ail_pyreach_unpack` gains `test_kind_split_refuses_except_binding_in_branch`; the strict
+build refuses with "exception handler binding 'x' conflicts ...", and the default and unified
+builds both match CPython's exit 1, empty stdout and `UnboundLocalError` text.
+
+## 2026-11-03 -- pyreach s4 review: caught ASCII decode carries CPython's UnicodeDecodeError text
+
+Fixed the review defect in the s4 decode lowering: on the typed path `bytes.decode("ascii")` on a
+byte at or above 0x80 raised a named `UnicodeDecodeError` with an empty message when a handler
+caught it, so `str(e)` was `""` even though the uncaught trap already printed CPython's text.
+`exctext` now has the ASCII twin of `ail_exc_utf8_fail`: a program that reads exception text
+rewrites the ASCII codec's raise to build `UnicodeDecodeError('ascii', data, i, i + 1,
+"ordinal not in range(128)")` through `ail_exception_new_args`, which `ail__exc_unicode_text`
+prints as `'ascii' codec can't decode byte 0xNN in position N: ordinal not in range(128)`; the
+uncaught path still prints the same `UnicodeDecodeError: ...` line, and programs that do not read
+exception text keep their C byte for byte.  Encoding remains UTF-8-only and `errors=` other than
+`strict` is still refused by name.
+
+Probes `p5c` (the review's ValueError/utf-8/UnicodeDecodeError shapes), `p5c_pos2` (position 2,
+clean inputs, subtype `type(e).__name__`), `p5c_after` (uncaught ASCII decode after an unrelated
+caught error), `p5c_uncaught` and `p5c_latin` match CPython on the default and unified builds (the
+`ascii()` builtin used by the latin probe is refused by name on both builds, so that line is
+checked with `repr`/`ord` in `test_ail_pyreach_unpack`); the no-general typed build of `p5c`
+prints CPython's three lines exactly (`unicode 77 False`).
+`test_ail_pyreach_unpack` gains `test_ascii_decode_caught_message` (typed and both builds);
+11 tests pass.  `e.encoding`/`e.start`/`e.reason` remain unsupported on the typed path for every
+decoder (pre-existing; not part of this fix).
+
+## 2026-11-03 -- pyreach s4: slice/call unpacking, branch kind splits, ASCII/latin-1 decode
+
+`a, b, c = xs[lo:hi]` now unpacks a local list of ints, floats, strs or bytes on the typed path.
+The slice follows CPython's clamping (negative bounds wrap, out-of-range bounds clamp, an empty
+slice is length 0) and the length check is the same catchable `ValueError` the whole-list unpack
+already used; each name then takes a bounds-checked element.  `a, b = helper()` also unpacks a
+fixed-arity numeric tuple return through the existing `ail_slot`/`_return_tuple` ABI, with the
+same arity check.  `bytes.decode("ascii")` and `bytes.decode("latin-1")` join `"utf-8"` on the
+typed path: ASCII raises the catchable UnicodeDecodeError above 0x80 (and prints CPython's
+`can't decode byte 0xNN in position N` when uncaught), latin-1 maps every byte to U+0000..U+00FF.
+Encoding remains UTF-8-only, and other codecs are still refused by name.
+
+`rebinding.split` now also handles the `cents` shape from ticket_audit: a local bound to different
+kinds in two branches of one if/elif chain, never read after or between the branches, is split
+into one local per branch (fresh `<name>__b<line>_<branch>` names, source positions unchanged).
+A read after the chain, a read in a branch that does not bind it, a parameter, a global/nonlocal
+or a nested-scope mention still refuses; the existing for/except regions keep priority.
+
+Probes `s4_slice`, `s4_call`, `s4_kind`, `s4_decode`, `s4_ascii_edge`, `s4_ascii_uncaught`,
+`s4_reuse_after`, `s4_encode_latin` match CPython (or are refused by name) on the default,
+unified and strict/no-general builds.  `test_ail_pyreach_unpack` (10 tests),
+`test_ail_pytyped_reach`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.  On ticket_audit the `cents` kind conflict is gone; its other
+blockers (regex-helper `s` annotation, typed-dict key, `t`, `events`, `out`, `per`) remain, and
+the ten-lab before/after typed gate is not reachable in this tree because pyreach s2/s3 are not
+present.
 
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
