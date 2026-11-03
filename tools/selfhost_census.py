@@ -108,11 +108,28 @@ def _function_text(lines, node):
     return "".join(lines[start - 1:end])
 
 
-def _preamble_text(lines, functions):
-    if not functions:
-        return ""
-    first = min(_node_start(fn) for fn in functions)
-    return "".join(lines[:first - 1])
+def _statement_text(lines, node):
+    start = _node_start(node)
+    end = getattr(node, "end_lineno", node.lineno) or node.lineno
+    return "".join(lines[start - 1:end])
+
+
+def _chunk_text(lines, tree, selected):
+    """Module-level code plus only the selected top-level functions.
+
+    A chunk keeps every module-level statement (imports, assignments, classes, ...) so names the
+    selected functions use still resolve.  Dropping it makes a chunk's verdict an artefact of the
+    slice rather than of the function.
+    """
+    wanted = {id(node) for node in selected}
+    parts = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if id(node) in wanted:
+                parts.append(_function_text(lines, node))
+        else:
+            parts.append(_statement_text(lines, node))
+    return "".join(parts)
 
 
 def _classify(text, label):
@@ -151,7 +168,10 @@ def _classify(text, label):
     }
 
 
-def _function_verdict(name, result):
+def _function_verdict(node, result, primary=None):
+    name = node.name
+    if primary is not None and primary.get(name, node.lineno) != node.lineno:
+        return "reject", "a later definition of the same name replaces this one"
     if name in result["chosen"]:
         return "accept", ""
     reason = result["rejected"].get(name)
@@ -166,13 +186,10 @@ def _function_verdict(name, result):
     return "reject", "not emitted by the typed path"
 
 
-def _function_records(path, functions, result, verdicts=None):
+def _function_records(path, functions, result, primary=None):
     records = []
     for node in functions:
-        if verdicts is not None:
-            verdict, reason = verdicts[node.name]
-        else:
-            verdict, reason = _function_verdict(node.name, result)
+        verdict, reason = _function_verdict(node, result, primary)
         records.append({
             "file": path,
             "name": node.name,
@@ -194,8 +211,7 @@ def classify_file(path, start=None, end=None, timeout=None):
         selected = [fn for fn in functions
                     if (start is None or fn.lineno >= start)
                     and (end is None or fn.lineno <= end)]
-        text = _preamble_text(lines, selected) + "".join(_function_text(lines, fn)
-                                                         for fn in selected)
+        text = _chunk_text(lines, tree, selected)
         label = "%s:%s-%s" % (path.name, start, end)
     else:
         selected = functions
@@ -209,7 +225,8 @@ def classify_file(path, start=None, end=None, timeout=None):
     finally:
         if timeout:
             signal.alarm(0)
-    records = _function_records(str(path), selected, result)
+    primary = {node.name: node.lineno for node in functions}
+    records = _function_records(str(path), selected, result, primary=primary)
     return {
         "file": str(path),
         "label": label,

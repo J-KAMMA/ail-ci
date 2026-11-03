@@ -8457,18 +8457,43 @@
       "units": []
     },
     {
-      "accepted": 0,
-      "accepted_names": [],
-      "chunked": true,
+      "accepted": 5,
+      "accepted_names": [
+        "ampm",
+        "hour12",
+        "kind_name",
+        "ord_year",
+        "pad_space"
+      ],
+      "chunked": false,
       "chunks": [
         {
-          "chosen": [],
-          "end": 2040,
+          "chosen": [
+            "ampm",
+            "hour12",
+            "kind_name",
+            "ord_year",
+            "pad_space"
+          ],
+          "end": null,
           "error": "",
-          "label": "dtrt.py:59-2040",
-          "note": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
-          "rejected": {},
-          "start": 59
+          "label": "dtrt.py",
+          "note": "",
+          "rejected": {
+            "alt_end": "indexing can raise",
+            "digits_at": "a call can raise or have side effects",
+            "float_secs": "the function can raise",
+            "iso_separator": "a call can raise or have side effects",
+            "local_off": "the function can raise",
+            "mktime_fields": "a call can raise or have side effects",
+            "p2": "a call can raise or have side effects",
+            "p4": "a call can raise or have side effects",
+            "p6": "a call can raise or have side effects",
+            "round_div": "division or power can raise",
+            "strp_expand": "indexing can raise",
+            "tz_text": "a call can raise or have side effects"
+          },
+          "start": null
         }
       ],
       "classes": [
@@ -8534,7 +8559,7 @@
           "length": 2,
           "line": 59,
           "name": "isleap",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8542,7 +8567,7 @@
           "length": 4,
           "line": 63,
           "name": "dim",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8550,7 +8575,7 @@
           "length": 6,
           "line": 69,
           "name": "ymd2ord",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8558,15 +8583,15 @@
           "length": 13,
           "line": 77,
           "name": "ord_year",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
-          "verdict": "reject"
+          "reason": "",
+          "verdict": "accept"
         },
         {
           "file": "AIL_CURRENT/python/pkg-v12/dtrt.py",
           "length": 10,
           "line": 92,
           "name": "ord_month",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8574,7 +8599,7 @@
           "length": 4,
           "line": 104,
           "name": "ord_day",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8582,7 +8607,7 @@
           "length": 16,
           "line": 110,
           "name": "from_k",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8590,7 +8615,7 @@
           "length": 7,
           "line": 128,
           "name": "check_ymd",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8598,7 +8623,7 @@
           "length": 9,
           "line": 137,
           "name": "check_hmsu",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8606,7 +8631,7 @@
           "length": 3,
           "line": 148,
           "name": "mk_date",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8614,7 +8639,7 @@
           "length": 4,
           "line": 153,
           "name": "mk_datetime",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8622,7 +8647,7 @@
           "length": 3,
           "line": 159,
           "name": "mk_time",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8630,7 +8655,7 @@
           "length": 10,
           "line": 164,
           "name": "mk_timedelta",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8638,7 +8663,7 @@
           "length": 6,
           "line": 176,
           "name": "mk_ordinal",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8646,7 +8671,7 @@
           "length": 2,
           "line": 184,
           "name": "date_min",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8654,7 +8679,7 @@
           "length": 2,
           "line": 188,
           "name": "date_max",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8662,7 +8687,7 @@
           "length": 2,
           "line": 192,
           "name": "datetime_min",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8670,7 +8695,7 @@
           "length": 2,
           "line": 196,
           "name": "datetime_max",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8678,7 +8703,7 @@
           "length": 2,
           "line": 200,
           "name": "in_range",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8686,15 +8711,15 @@
           "length": 8,
           "line": 205,
           "name": "kind_name",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
-          "verdict": "reject"
+          "reason": "",
+          "verdict": "accept"
         },
         {
           "file": "AIL_CURRENT/python/pkg-v12/dtrt.py",
           "length": 2,
           "line": 215,
           "name": "bad_operands",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8702,7 +8727,7 @@
           "length": 17,
           "line": 219,
           "name": "add",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8710,7 +8735,7 @@
           "length": 15,
           "line": 238,
           "name": "sub",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8718,7 +8743,7 @@
           "length": 4,
           "line": 255,
           "name": "neg",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8726,7 +8751,7 @@
           "length": 6,
           "line": 261,
           "name": "absval",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8734,7 +8759,7 @@
           "length": 9,
           "line": 269,
           "name": "mul",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8742,7 +8767,7 @@
           "length": 6,
           "line": 280,
           "name": "floordiv_int",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8750,7 +8775,7 @@
           "length": 6,
           "line": 288,
           "name": "floordiv_td",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8758,7 +8783,7 @@
           "length": 6,
           "line": 296,
           "name": "truediv_int",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8766,7 +8791,7 @@
           "length": 13,
           "line": 304,
           "name": "round_div",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "division or power can raise",
           "verdict": "reject"
         },
         {
@@ -8774,7 +8799,7 @@
           "length": 6,
           "line": 319,
           "name": "truediv_td",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8782,7 +8807,7 @@
           "length": 6,
           "line": 327,
           "name": "mod",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8790,7 +8815,7 @@
           "length": 4,
           "line": 335,
           "name": "pick_max",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8798,7 +8823,7 @@
           "length": 4,
           "line": 341,
           "name": "pick_min",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8806,7 +8831,7 @@
           "length": 8,
           "line": 347,
           "name": "max_list",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8814,7 +8839,7 @@
           "length": 8,
           "line": 357,
           "name": "min_list",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8822,7 +8847,7 @@
           "length": 4,
           "line": 367,
           "name": "nonzero",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8830,7 +8855,7 @@
           "length": 8,
           "line": 373,
           "name": "total_seconds",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8838,7 +8863,7 @@
           "length": 3,
           "line": 384,
           "name": "weekday",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8846,7 +8871,7 @@
           "length": 2,
           "line": 389,
           "name": "isoweekday",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8854,7 +8879,7 @@
           "length": 2,
           "line": 393,
           "name": "toordinal",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8862,7 +8887,7 @@
           "length": 4,
           "line": 397,
           "name": "date_of",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8870,7 +8895,7 @@
           "length": 4,
           "line": 403,
           "name": "time_of",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8878,7 +8903,7 @@
           "length": 4,
           "line": 409,
           "name": "combine",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8886,7 +8911,7 @@
           "length": 23,
           "line": 415,
           "name": "replace",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8894,7 +8919,7 @@
           "length": 2,
           "line": 441,
           "name": "weekdays",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8902,7 +8927,7 @@
           "length": 3,
           "line": 445,
           "name": "months",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8910,7 +8935,7 @@
           "length": 5,
           "line": 450,
           "name": "p2",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "a call can raise or have side effects",
           "verdict": "reject"
         },
         {
@@ -8918,7 +8943,7 @@
           "length": 5,
           "line": 457,
           "name": "p4",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "a call can raise or have side effects",
           "verdict": "reject"
         },
         {
@@ -8926,7 +8951,7 @@
           "length": 5,
           "line": 464,
           "name": "p6",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "a call can raise or have side effects",
           "verdict": "reject"
         },
         {
@@ -8934,7 +8959,7 @@
           "length": 19,
           "line": 471,
           "name": "time_text",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8942,7 +8967,7 @@
           "length": 8,
           "line": 492,
           "name": "iso",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8950,7 +8975,7 @@
           "length": 15,
           "line": 502,
           "name": "td_str",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8958,7 +8983,7 @@
           "length": 4,
           "line": 519,
           "name": "text",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8966,7 +8991,7 @@
           "length": 15,
           "line": 525,
           "name": "td_repr",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8974,7 +8999,7 @@
           "length": 18,
           "line": 542,
           "name": "rep",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8982,7 +9007,7 @@
           "length": 2,
           "line": 563,
           "name": "doy",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8990,7 +9015,7 @@
           "length": 7,
           "line": 567,
           "name": "week_number",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -8998,7 +9023,7 @@
           "length": 11,
           "line": 576,
           "name": "iso_year_week",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9006,31 +9031,31 @@
           "length": 8,
           "line": 589,
           "name": "ampm",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
-          "verdict": "reject"
+          "reason": "",
+          "verdict": "accept"
         },
         {
           "file": "AIL_CURRENT/python/pkg-v12/dtrt.py",
           "length": 4,
           "line": 599,
           "name": "pad_space",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
-          "verdict": "reject"
+          "reason": "",
+          "verdict": "accept"
         },
         {
           "file": "AIL_CURRENT/python/pkg-v12/dtrt.py",
           "length": 5,
           "line": 605,
           "name": "hour12",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
-          "verdict": "reject"
+          "reason": "",
+          "verdict": "accept"
         },
         {
           "file": "AIL_CURRENT/python/pkg-v12/dtrt.py",
           "length": 107,
           "line": 612,
           "name": "fmt",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9038,7 +9063,7 @@
           "length": 2,
           "line": 722,
           "name": "isdig",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9046,7 +9071,7 @@
           "length": 11,
           "line": 726,
           "name": "digits_at",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "a call can raise or have side effects",
           "verdict": "reject"
         },
         {
@@ -9054,7 +9079,7 @@
           "length": 7,
           "line": 739,
           "name": "iso_week1_monday",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9062,7 +9087,7 @@
           "length": 15,
           "line": 748,
           "name": "iso_to_ordinal",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9070,7 +9095,7 @@
           "length": 9,
           "line": 765,
           "name": "from_isocalendar",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9078,7 +9103,7 @@
           "length": 45,
           "line": 776,
           "name": "parse_iso_date",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9086,7 +9111,7 @@
           "length": 2,
           "line": 823,
           "name": "bad_iso",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9094,7 +9119,7 @@
           "length": 6,
           "line": 827,
           "name": "packed_ordinal",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9102,7 +9127,7 @@
           "length": 8,
           "line": 835,
           "name": "from_iso_date",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9110,7 +9135,7 @@
           "length": 28,
           "line": 845,
           "name": "iso_separator",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "a call can raise or have side effects",
           "verdict": "reject"
         },
         {
@@ -9118,7 +9143,7 @@
           "length": 4,
           "line": 875,
           "name": "nul_at",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9126,7 +9151,7 @@
           "length": 50,
           "line": 881,
           "name": "parse_hh_mm_ss_ff",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9134,7 +9159,7 @@
           "length": 39,
           "line": 933,
           "name": "from_iso_datetime",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9142,7 +9167,7 @@
           "length": 2,
           "line": 974,
           "name": "strp_names_b",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9150,7 +9175,7 @@
           "length": 2,
           "line": 978,
           "name": "strp_names_a",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9158,7 +9183,7 @@
           "length": 2,
           "line": 982,
           "name": "strp_names_abb",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9166,7 +9191,7 @@
           "length": 2,
           "line": 986,
           "name": "strp_names_ab",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9174,7 +9199,7 @@
           "length": 2,
           "line": 990,
           "name": "strp_names_p",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9182,7 +9207,7 @@
           "length": 30,
           "line": 1016,
           "name": "strp_alts",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9190,7 +9215,7 @@
           "length": 9,
           "line": 1048,
           "name": "alt_end",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "indexing can raise",
           "verdict": "reject"
         },
         {
@@ -9198,7 +9223,7 @@
           "length": 7,
           "line": 1059,
           "name": "name_ends",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9206,7 +9231,7 @@
           "length": 39,
           "line": 1068,
           "name": "tz_offset_ends",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9214,7 +9239,7 @@
           "length": 31,
           "line": 1109,
           "name": "strp_cands",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9222,7 +9247,7 @@
           "length": 5,
           "line": 1142,
           "name": "index_of",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9230,7 +9255,7 @@
           "length": 54,
           "line": 1149,
           "name": "strp_set",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9238,7 +9263,7 @@
           "length": 36,
           "line": 1205,
           "name": "strp_match",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9246,7 +9271,7 @@
           "length": 21,
           "line": 1243,
           "name": "strp_expand",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "indexing can raise",
           "verdict": "reject"
         },
         {
@@ -9254,7 +9279,7 @@
           "length": 17,
           "line": 1266,
           "name": "strp_check",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9262,7 +9287,7 @@
           "length": 11,
           "line": 1285,
           "name": "calc_julian_uw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9270,7 +9295,7 @@
           "length": 63,
           "line": 1298,
           "name": "strptime",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9278,7 +9303,7 @@
           "length": 5,
           "line": 1391,
           "name": "local_off",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "the function can raise",
           "verdict": "reject"
         },
         {
@@ -9286,7 +9311,7 @@
           "length": 8,
           "line": 1398,
           "name": "local_secs",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9294,7 +9319,7 @@
           "length": 8,
           "line": 1408,
           "name": "tz_text",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "a call can raise or have side effects",
           "verdict": "reject"
         },
         {
@@ -9302,7 +9327,7 @@
           "length": 7,
           "line": 1418,
           "name": "year_error_n",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9310,7 +9335,7 @@
           "length": 2,
           "line": 1427,
           "name": "year_error",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9318,7 +9343,7 @@
           "length": 6,
           "line": 1431,
           "name": "wall_from_unix",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9326,7 +9351,7 @@
           "length": 6,
           "line": 1439,
           "name": "float_secs",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "the function can raise",
           "verdict": "reject"
         },
         {
@@ -9334,7 +9359,7 @@
           "length": 17,
           "line": 1447,
           "name": "ts_us",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9342,7 +9367,7 @@
           "length": 7,
           "line": 1466,
           "name": "floor_secs",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9350,7 +9375,7 @@
           "length": 2,
           "line": 1475,
           "name": "now_secs",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9358,7 +9383,7 @@
           "length": 15,
           "line": 1479,
           "name": "dt_from_us",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9366,7 +9391,7 @@
           "length": 3,
           "line": 1496,
           "name": "now_local",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9374,7 +9399,7 @@
           "length": 3,
           "line": 1501,
           "name": "now_utc",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9382,7 +9407,7 @@
           "length": 3,
           "line": 1506,
           "name": "dt_from_ts",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9390,7 +9415,7 @@
           "length": 3,
           "line": 1511,
           "name": "dt_today",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9398,7 +9423,7 @@
           "length": 7,
           "line": 1516,
           "name": "date_from_ts",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9406,7 +9431,7 @@
           "length": 2,
           "line": 1525,
           "name": "date_today",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9414,7 +9439,7 @@
           "length": 29,
           "line": 1529,
           "name": "local_to_utc",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9422,7 +9447,7 @@
           "length": 6,
           "line": 1560,
           "name": "timestamp",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9430,7 +9455,7 @@
           "length": 14,
           "line": 1568,
           "name": "sleep_for",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9438,7 +9463,7 @@
           "length": 10,
           "line": 1584,
           "name": "tm_build",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9446,7 +9471,7 @@
           "length": 3,
           "line": 1596,
           "name": "tm_gm",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9454,7 +9479,7 @@
           "length": 2,
           "line": 1601,
           "name": "tm_gm_now",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9462,7 +9487,7 @@
           "length": 3,
           "line": 1605,
           "name": "tm_at",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9470,7 +9495,7 @@
           "length": 3,
           "line": 1610,
           "name": "tm_local",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9478,7 +9503,7 @@
           "length": 2,
           "line": 1615,
           "name": "tm_local_now",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9486,7 +9511,7 @@
           "length": 6,
           "line": 1619,
           "name": "mktime_fields",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "a call can raise or have side effects",
           "verdict": "reject"
         },
         {
@@ -9494,7 +9519,7 @@
           "length": 2,
           "line": 1627,
           "name": "tm_mktime",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9502,7 +9527,7 @@
           "length": 6,
           "line": 1631,
           "name": "gmt_off_text",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9510,7 +9535,7 @@
           "length": 22,
           "line": 1639,
           "name": "tm_strftime",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9518,7 +9543,7 @@
           "length": 2,
           "line": 1676,
           "name": "tz_utc",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9526,7 +9551,7 @@
           "length": 13,
           "line": 1680,
           "name": "tz_offset_text",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9534,7 +9559,7 @@
           "length": 11,
           "line": 1695,
           "name": "tz_make",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9542,7 +9567,7 @@
           "length": 6,
           "line": 1708,
           "name": "tz_name",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9550,7 +9575,7 @@
           "length": 7,
           "line": 1716,
           "name": "tz_repr",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9558,7 +9583,7 @@
           "length": 2,
           "line": 1725,
           "name": "tz_rep",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9566,7 +9591,7 @@
           "length": 2,
           "line": 1729,
           "name": "tz_utcoffset",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9574,7 +9599,7 @@
           "length": 2,
           "line": 1733,
           "name": "tz_eq",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9582,7 +9607,7 @@
           "length": 6,
           "line": 1737,
           "name": "aw_set",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9590,7 +9615,7 @@
           "length": 2,
           "line": 1745,
           "name": "aw_tz",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9598,7 +9623,7 @@
           "length": 5,
           "line": 1749,
           "name": "aw_attach",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9606,7 +9631,7 @@
           "length": 5,
           "line": 1756,
           "name": "aw_strip",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9614,7 +9639,7 @@
           "length": 7,
           "line": 1763,
           "name": "aw_copy",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9622,7 +9647,7 @@
           "length": 2,
           "line": 1772,
           "name": "is_naive",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9630,7 +9655,7 @@
           "length": 2,
           "line": 1776,
           "name": "ukey",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9638,7 +9663,7 @@
           "length": 2,
           "line": 1780,
           "name": "is_mixed",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9646,7 +9671,7 @@
           "length": 2,
           "line": 1784,
           "name": "mixed_error",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9654,7 +9679,7 @@
           "length": 4,
           "line": 1788,
           "name": "cmp_lt",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9662,7 +9687,7 @@
           "length": 4,
           "line": 1794,
           "name": "cmp_le",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9670,7 +9695,7 @@
           "length": 4,
           "line": 1800,
           "name": "cmp_gt",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9678,7 +9703,7 @@
           "length": 4,
           "line": 1806,
           "name": "cmp_ge",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9686,7 +9711,7 @@
           "length": 4,
           "line": 1812,
           "name": "cmp_eq",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9694,7 +9719,7 @@
           "length": 2,
           "line": 1818,
           "name": "cmp_ne",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9702,7 +9727,7 @@
           "length": 5,
           "line": 1822,
           "name": "add_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9710,7 +9735,7 @@
           "length": 9,
           "line": 1829,
           "name": "sub_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9718,7 +9743,7 @@
           "length": 4,
           "line": 1840,
           "name": "pick_max_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9726,7 +9751,7 @@
           "length": 4,
           "line": 1846,
           "name": "pick_min_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9734,7 +9759,7 @@
           "length": 8,
           "line": 1852,
           "name": "max_list_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9742,7 +9767,7 @@
           "length": 8,
           "line": 1862,
           "name": "min_list_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9750,7 +9775,7 @@
           "length": 2,
           "line": 1872,
           "name": "replace_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9758,7 +9783,7 @@
           "length": 5,
           "line": 1876,
           "name": "iso_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9766,7 +9791,7 @@
           "length": 4,
           "line": 1883,
           "name": "text_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9774,7 +9799,7 @@
           "length": 5,
           "line": 1889,
           "name": "rep_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9782,7 +9807,7 @@
           "length": 24,
           "line": 1896,
           "name": "fmt_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9790,7 +9815,7 @@
           "length": 4,
           "line": 1922,
           "name": "utcoffset_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9798,7 +9823,7 @@
           "length": 4,
           "line": 1928,
           "name": "tzname_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9806,7 +9831,7 @@
           "length": 3,
           "line": 1934,
           "name": "wall_aware",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9814,7 +9839,7 @@
           "length": 5,
           "line": 1939,
           "name": "now_tz",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9822,7 +9847,7 @@
           "length": 5,
           "line": 1946,
           "name": "fromts_tz",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9830,7 +9855,7 @@
           "length": 3,
           "line": 1953,
           "name": "local_zone_at",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9838,7 +9863,7 @@
           "length": 11,
           "line": 1958,
           "name": "astimezone_to",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9846,7 +9871,7 @@
           "length": 9,
           "line": 1971,
           "name": "astimezone_local",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9854,7 +9879,7 @@
           "length": 6,
           "line": 1982,
           "name": "timestamp_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         },
         {
@@ -9862,17 +9887,35 @@
           "length": 51,
           "line": 1990,
           "name": "from_iso_datetime_aw",
-          "reason": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+          "reason": "not emitted by the typed path",
           "verdict": "reject"
         }
       ],
       "lines": 2040,
       "methods": 6,
-      "note": "<source>:1090:5: not in the subset: the name 'AilStrp' is not a known function/class/builtin",
+      "note": "",
       "path": "AIL_CURRENT/python/pkg-v12/dtrt.py",
-      "rejected": 167,
+      "rejected": 162,
       "top_level_functions": 167,
-      "units": []
+      "units": [
+        "alt_end",
+        "ampm",
+        "digits_at",
+        "float_secs",
+        "hour12",
+        "iso_separator",
+        "kind_name",
+        "local_off",
+        "mktime_fields",
+        "ord_year",
+        "p2",
+        "p4",
+        "p6",
+        "pad_space",
+        "round_div",
+        "strp_expand",
+        "tz_text"
+      ]
     },
     {
       "accepted": 0,
@@ -25213,7 +25256,7 @@
           "length": 5,
           "line": 583,
           "name": "_ail_takewhile",
-          "reason": "write instead: give each function its own name and call the right one (or dispatch with isinstance in one function)",
+          "reason": "a later definition of the same name replaces this one",
           "verdict": "reject"
         },
         {
@@ -25221,7 +25264,7 @@
           "length": 7,
           "line": 590,
           "name": "_ail_dropwhile",
-          "reason": "write instead: give each function its own name and call the right one (or dispatch with isinstance in one function)",
+          "reason": "a later definition of the same name replaces this one",
           "verdict": "reject"
         },
         {
@@ -34553,7 +34596,7 @@
           "length": 11,
           "line": 10446,
           "name": "_fn_parents",
-          "reason": "write instead: import it under another name (`from ... import ast as other`)",
+          "reason": "a later definition of the same name replaces this one",
           "verdict": "reject"
         },
         {
@@ -42462,16 +42505,16 @@
         "bit_len",
         "total"
       ],
-      "chunked": true,
+      "chunked": false,
       "chunks": [
         {
           "chosen": [
             "bit_len",
             "total"
           ],
-          "end": 753,
+          "end": null,
           "error": "",
-          "label": "strt.py:13-753",
+          "label": "strt.py",
           "note": "",
           "rejected": {
             "fmean": "division or power can raise",
@@ -42490,7 +42533,7 @@
             "var_num": "a call can raise or have side effects",
             "w_cmp": "indexing can raise"
           },
-          "start": 13
+          "start": null
         }
       ],
       "classes": [],
@@ -49316,12 +49359,12 @@
   "schema": "ail.selfhost_census/1",
   "timeout_seconds": 300,
   "totals": {
-    "accepted": 16,
-    "chunked_files": 2,
+    "accepted": 21,
+    "chunked_files": 0,
     "error_files": 0,
     "files": 156,
     "methods": 3538,
-    "rejected": 3136,
+    "rejected": 3131,
     "top_level_functions": 3152
   }
 }
