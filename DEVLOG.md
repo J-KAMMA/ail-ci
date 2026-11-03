@@ -1,3 +1,25 @@
+## 2026-11-03 -- bench review: callgrind Ir for the Python compilers, merge method text
+
+Fixed the two review defects in the Codon/mypyc/Nuitka comparison. The compare-lab runner installs
+valgrind (`compare-lab.yml`), so `run_task.py --icount auto` selects callgrind; a smoke run of
+`chain_relax` with `--langs ail,codon,mypyc,nuitka` now records `icount_method: callgrind` and numeric
+user-space Ir for all four columns. `docs/COMPARISON-PYCOMP.md` no longer claims instruction counts are
+unavailable; it gains an Ir table measured with callgrind. `merge.py` now derives the best-other list
+and the "3 runs for the Python compilers" wording from the selected columns instead of hard-coding
+"C, Rust, Go, Nim and Python" and "median of 5". No compiler change.
+
+## 2026-11-03 -- bench: Codon, mypyc and Nuitka in compare-lab
+
+Added the three Python compilers as compare-lab columns: Codon 0.20.6 (`codon build -release`, with
+`compat/codon/ail.py`), mypyc 2.4.1 (a CPython extension that still needs CPython) and Nuitka 4.3.4
+(`--standalone --onefile`), all compiling the same `typed.py` as the AIL column. Pins are in
+`lab/compare/toolchains.env`; the workflow installs them on the runner. Measured eight of the ten
+tasks; `docs/COMPARISON-PYCOMP.md` has the table and the per-metric verdict. On those eight AIL wins
+wall time 7/8 (Codon is 1.06x faster on `chain_relax`), compile time 6/8 (mypyc wins `berth_sim` and
+`ticket_audit`), and binary size, build disk and peak RSS on 7-8/8. Build failures: `echo_pack` (mypyc
+internal error on bytearray), `rail_transfer` and `ticket_audit` (Codon generic realization errors).
+`scar_life` (mypyc over 25 min) and `tree_fold` (Codon over 10 min) were stopped at the job budget and
+are recorded as losses. No compiler change.
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against

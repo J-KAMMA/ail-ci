@@ -14,9 +14,11 @@ import argparse, datetime, json, math, os, sys
 from pathlib import Path
 
 LANGS = ['ail', 'ail-py', 'c', 'rust', 'go', 'nim', 'python']
+NEW_LANGS = ['codon', 'mypyc', 'nuitka']
 AIL = ('ail', 'ail-py')
 OTHERS = [l for l in LANGS if l not in AIL]
-NAMES = {'ail': 'AIL', 'ail-py': 'AIL (py src)', 'c': 'C', 'rust': 'Rust', 'go': 'Go', 'nim': 'Nim', 'python': 'Python'}
+NAMES = {'ail': 'AIL', 'ail-py': 'AIL (py src)', 'c': 'C', 'rust': 'Rust', 'go': 'Go', 'nim': 'Nim',
+         'python': 'Python', 'codon': 'Codon', 'mypyc': 'mypyc', 'nuitka': 'Nuitka'}
 BUILD_ONLY = {'compile_s', 'build_disk_kib', 'binary_bytes'}   # CPython has no build step: no value for it
 
 
@@ -47,6 +49,21 @@ METHOD_LINES = [
     '- Wall time: median of 5 runs of the perf input (2-3 when one run takes more than 15 s). Same runner for every language.',
     '- Peak RSS: `/usr/bin/time -v` Maximum resident set size, median of the timed runs.',
 ]
+
+
+def method_lines(langs):
+    """The method section for the selected columns: the Python compilers use 3 timed runs, not 5."""
+    pycomp = any(l in NEW_LANGS for l in langs)
+    lines = list(METHOD_LINES)
+    lines[6] = ('- Wall time: median of 5 runs of the perf input (2-3 when one run takes more than 15 s%s). '
+                'Same runner for every language.' % (', 3 for the Python compilers' if pycomp else ''))
+    return lines
+
+
+def wall_title(langs):
+    pycomp = any(l in NEW_LANGS for l in langs)
+    return 'Wall time (ms, median of 5 timed runs of the perf input%s)' % (
+        ', 3 for the Python compilers' if pycomp else '')
 
 
 def geomean(xs):
@@ -179,22 +196,37 @@ def scorecard(tasks, lang):
 
 
 def main():
+    global LANGS, OTHERS
     parser = argparse.ArgumentParser()
     parser.add_argument('root')
     parser.add_argument('--json', help='write the merged results here')
+    parser.add_argument('--langs', help='comma separated columns (default: %s)' % ','.join(LANGS))
     args = parser.parse_args()
+    if args.langs:
+        chosen = [l.strip() for l in args.langs.split(',') if l.strip()]
+        unknown = [l for l in chosen if l not in set(LANGS) | set(NEW_LANGS)]
+        if unknown:
+            parser.error('unknown language(s): ' + ', '.join(unknown))
+        LANGS = chosen
+        OTHERS = [l for l in LANGS if l not in AIL]
     tasks = [json.loads(p.read_text()) for p in sorted(Path(args.root).rglob('result-*.json'))]
     if not tasks:
         print('# compare-lab\n\nNo results.')
         return
     first = tasks[0]
     methods = sorted({t.get('icount_method', '?') for t in tasks})
-    out = ['# compare-lab: AIL against C, Rust, Go, Nim and Python', '',
+    heading = 'AIL against ' + ', '.join(NAMES[l] for l in OTHERS)
+    best_others = ', '.join(NAMES[l] for l in OTHERS[:-1])
+    if len(OTHERS) > 1:
+        best_others += ' and ' + NAMES[OTHERS[-1]]
+    elif OTHERS:
+        best_others = NAMES[OTHERS[-1]]
+    out = ['# compare-lab: ' + heading, '',
            'AIL commit `%s`; %d tasks; instruction counts by `%s`; smoke run: %s.' % (
                first.get('head', '?'), len(tasks), '`, `'.join(methods), 'yes' if first.get('smoke') else 'no'),
            'Every program was run on the same input and its stdout and exit code compared with the CPython `reference.py` of the task. '
            'Ratios are AIL / best other language for that row (below 1.00: AIL is better, all metrics are lower-is-better). '
-           'Best-other covers C, Rust, Go, Nim and Python, and only programs whose output matched.', '']
+           'Best-other covers %s, and only programs whose output matched.' % best_others, '']
     summary = {}
     out += status_table(tasks) + [''] + cases_table(tasks) + ['']
     scores = {}
@@ -203,13 +235,19 @@ def main():
         out += lines + ['']
         out += ['Where %s loses: %s' % (NAMES[l], '; '.join(scores[l]['losses']) or 'nowhere'), '']
     for key, title, fmt in METRICS:
+        if key == 'wall_ms':
+            title = wall_title(LANGS)
         lines, g = table(tasks, key, title, fmt)
         summary[key] = g
         out += lines + ['']
     out += ['### Toolchain install size (KiB, `du -sk`, once)', '', '| language | KiB |', '|---|---:|']
     out += ['| %s | %s |' % (NAMES.get(k, k), '{:,}'.format(v) if v else 'missing') for k, v in first.get('toolchain_kib', {}).items()]
     out += ['', '### Tools', ''] + ['- %s: %s' % (k, v) for k, v in first.get('tools', {}).items()]
-    out += ['', '### Method', '', *METHOD_LINES]
+    extra = []
+    if any(l in NEW_LANGS for l in LANGS):
+        extra = ['- Python compilers: Codon `codon build -release`; mypyc `mypyc` (a CPython extension, run by CPython); '
+                 'Nuitka `--standalone --onefile`. All three compile the same `typed.py` as AIL.']
+    out += ['', '### Method', '', *method_lines(LANGS), *extra]
     print('\n'.join(out))
     if args.json:
         payload = dict(head=first.get('head', '?'), date=first.get('date') or datetime.date.today().isoformat(),

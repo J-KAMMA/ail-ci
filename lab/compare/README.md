@@ -1,7 +1,8 @@
 # lab/compare
 
-Language comparison: AIL against C, Rust, Go, Nim and CPython on ten programs, measured on a GitHub runner
-(`compare-lab` workflow, manual). Timing on a laptop is too noisy to use, so the laptop only runs the smoke check.
+Language comparison: AIL against C, Rust, Go, Nim, Codon, mypyc, Nuitka and CPython on ten programs, measured on a
+GitHub runner (`compare-lab` workflow, manual). Timing on a laptop is too noisy to use, so the laptop only runs the
+smoke check.
 
 - `src/<task>/typed.py` and `main.{c,rs,go,nim,py}`: the ten "novel task" programs of `experiments/llm-compare` (round 4 of the
   2026-10-14 run; every one of them passed that run's hidden tests and perf check). `typed.py` is the annotated Python form
@@ -11,6 +12,10 @@ Language comparison: AIL against C, Rust, Go, Nim and CPython on ten programs, m
 - rail_transfer's AIL program (now `typed.py`) was ported on 2026-11-02 to the two-sided search of `main.c`, because the LLM-written version searched one side (12x the work), so the AIL column measures the same algorithm as C and Rust. The same date also ported `main.py` the same way (owner decision 2026-11-02: every language runs the same algorithm).
 - `tasks/<task>/`: `spec.md`, `gen.py` (inputs; the perf case is used) and `reference.py` (the CPython oracle).
 - `run_task.py`: builds and measures one task in every language, writes `result-<task>.json`.
+- The three Python compilers use the same `typed.py` source as the `ail` column. Codon gets
+  `compat/codon/ail.py` (the helpers Codon can compile) on `PYTHONPATH`; mypyc and Nuitka get
+  `AIL_CURRENT/ail.py`. mypyc produces a CPython extension and still needs CPython to run; Nuitka
+  builds `--standalone --onefile`, so its binary needs no interpreter. Pins are in `toolchains.env`.
 - `merge.py`: tables (AIL first, ratio vs the best other language per metric) and one JSON.
 
 Smoke check, any languages that are installed: `python3 lab/compare/run_task.py --task chain_relax --smoke --out /tmp/r.json`
@@ -27,7 +32,11 @@ Full measurement (one command; manual trigger only, at most 4 task jobs at once)
     gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ            # all ten tasks
     gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ -f tasks='tree_fold tally_lang'
 
+Report with a subset of columns (the Python compilers alone, for example):
+
+    python3 lab/compare/merge.py results --langs ail,ail-py,codon,mypyc,nuitka,python
+
 Each program also runs on every public and hidden case of its task (`gen.py`) and is compared with `reference.py`. Wall time is
-the median of 5 runs; instructions come from callgrind (or perf_event if the runner has the counter). Toolchain versions are
+the median of 5 runs (3 for the three Python compilers); instructions come from callgrind (or perf_event if the runner has the counter). Toolchain versions are
 pinned in `toolchains.env` and verified by `check_tools.py`; the report ends with a per-task scorecard (W/L per column) for
 both AIL columns and shows whether each AIL build took the typed or the general path (and the compiler's fallback note).
