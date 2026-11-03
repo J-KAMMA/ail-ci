@@ -331,6 +331,8 @@ described in "Native libraries" in `AIL_CURRENT/AIL_REFERENCE_MORE.md`. In the o
 `ail build --lib NAME prog.py` builds the `@export` functions of a file as a C library
 (`libNAME.so`, `libNAME.a`, `NAME.h`).
 
+Four complete, CPython-checked examples are in [`FFI.md`](FFI.md): zlib, libm, libc and sqlite3.
+
 ## 7. Typed arrays and the GPU (briefly)
 
 `ail_array` gives arrays with a declared element type (`f64`, `f32`, `f16`, `int8`, `int32`).
