@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import pathlib
+from pathlib import Path
 import pstats
 import re
 import resource
@@ -35,12 +36,29 @@ TASKS = tuple(sorted(path.parent.name for path in SRC.glob('*/main.ail')))
 LIMIT = 1500000
 
 SITECUSTOMIZE = '''\
-import os, sys, atexit, cProfile
-if os.environ.get('AIL_PROFILE_OUT') and any(a.endswith('pyc.py') for a in sys.argv):
+import os, sys, atexit, cProfile, time
+_start = time.perf_counter()
+_child = any(a.endswith('pyc.py') for a in sys.argv)
+_parent = any(a.endswith('ail_chatgpt.py') for a in sys.argv)
+_stamp = os.environ.get('AILPROF_CHILD_TIME' if _child else 'AILPROF_PARENT_TIME')
+if _stamp:
+    def _stamp_exit():
+        try:
+            with open(_stamp, 'a', encoding='utf8') as handle:
+                handle.write('%.6f\\n' % (time.perf_counter() - _start))
+        except Exception:
+            pass
+    atexit.register(_stamp_exit)
+_profile = None
+if _child:
+    _profile = os.environ.get('AILPROF_CHILD_PROFILE')
+elif _parent:
+    _profile = os.environ.get('AILPROF_PARENT_PROFILE')
+if _profile:
     _p = cProfile.Profile(); _p.enable()
     def _dump():
         try:
-            _p.disable(); _p.dump_stats(os.environ['AIL_PROFILE_OUT'])
+            _p.disable(); _p.dump_stats(_profile)
         except Exception as error:
             sys.stderr.write('profile dump failed: %r\\n' % (error,))
     atexit.register(_dump)
@@ -80,28 +98,41 @@ def limit_memory():
     resource.setrlimit(resource.RLIMIT_AS, (LIMIT * 1024, LIMIT * 1024))
 
 
-def env_for(work, fe=False, profile=None):
+def env_for(work, fe=False, profile=None, fe_root=None, fe_log=None, parent_profile=None):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('AIL_') and key not in ('PIPE_CC', 'PYTHONPATH')}
-    env.update(PYTHONUTF8='1', PYTHONDONTWRITEBYTECODE='1', AIL_SERVER='0', AIL_NO_CACHE='1',
+    env.update(PYTHONUTF8='1', AIL_SERVER='0', AIL_NO_CACHE='1',
                AIL_CACHE=str(work / 'cache'), TMPDIR=str(work / 'tmp'),
                PIPE_CC=str(WRAPPER), WRAP_CC=shutil.which('gcc') or 'gcc', WRAP_MODE='split',
                WRAP_LOG=str(work / 'cc.jsonl'), WRAP_SAVE_C=str(work / 'c'))
+    site = work / 'site'
+    site.mkdir(parents=True, exist_ok=True)
+    (site / 'sitecustomize.py').write_text(SITECUSTOMIZE)
+    env.update(PYTHONPATH=str(site), AILPROF_CHILD_TIME=str(work / 'child.time'),
+               AILPROF_PARENT_TIME=str(work / 'parent.time'))
     if fe:
-        env.update(AIL_FE_CACHE='1', AIL_FE_CACHE_DIR=str(work / 'fe'),
-                   AIL_FE_CACHE_LOG=str(work / 'fe.log'))
+        env.update(AIL_FE_CACHE='1', AIL_FE_CACHE_DIR=str(fe_root or (work / 'fe')),
+                   AIL_FE_CACHE_LOG=str(fe_log or (work / 'fe.log')))
     if profile:
-        site = work / 'site'
-        site.mkdir()
-        (site / 'sitecustomize.py').write_text(SITECUSTOMIZE)
-        env.update(PYTHONPATH=str(site), AIL_PROFILE_OUT=str(profile))
+        env['AILPROF_CHILD_PROFILE'] = str(profile)
+    if parent_profile:
+        env['AILPROF_PARENT_PROFILE'] = str(parent_profile)
     return env
 
 
-def build(source, out, work, fe=False, profile=None):
+def read_times(path):
+    try:
+        return round(sum(float(line) for line in Path(path).read_text().split()), 4)
+    except (OSError, ValueError):
+        return None
+
+
+def build(source, out, work, fe=False, profile=None, fe_root=None, fe_log=None,
+          parent_profile=None):
     for sub in ('cache', 'tmp', 'c'):
         (work / sub).mkdir(parents=True, exist_ok=True)
-    env = env_for(work, fe=fe, profile=profile)
+    env = env_for(work, fe=fe, profile=profile, fe_root=fe_root, fe_log=fe_log,
+                  parent_profile=parent_profile)
     rss = work / 'rss'
     command = ['/usr/bin/time', '-f', '%M', '-o', str(rss), sys.executable, '-X', 'utf8', '-B',
                str(AIL), 'compile', str(source), '-o', str(out)]
@@ -115,10 +146,15 @@ def build(source, out, work, fe=False, profile=None):
         rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
     compiled = sum(row.get('compile') or 0.0 for row in rows)
     linked = sum(row.get('link') or 0.0 for row in rows)
-    events = (work / 'fe.log').read_text().splitlines() if (work / 'fe.log').exists() else []
+    log_path = Path(fe_log) if fe_log else (work / 'fe.log')
+    events = log_path.read_text().splitlines() if log_path.exists() else []
+    child_s = read_times(work / 'child.time')
     return {'ok': done.returncode == 0, 'wall': round(wall, 4),
             'front': round(wall - compiled - linked, 4), 'compile': round(compiled, 4),
-            'link': round(linked, 4), 'rss_kib': int(rss.read_text().split()[-1]) if rss.exists() else None,
+            'link': round(linked, 4),
+            'parent_s': round(wall - child_s, 4) if child_s is not None else None,
+            'child_s': child_s,
+            'rss_kib': int(rss.read_text().split()[-1]) if rss.exists() else None,
             'events': events, 'stderr': done.stderr[-2000:] if done.returncode else '',
             'binary': out.stat().st_size if out.is_file() else 0,
             'c_bytes': sum(path.stat().st_size for path in (work / 'c').glob('*.c'))
@@ -154,6 +190,49 @@ def profile_phases(path):
             own[phase_of(func)] = own.get(phase_of(func), 0.0) + tottime
     total = sum(own.values())
     return {key: round(value / total, 4) for key, value in own.items()}, round(total, 3)
+
+
+def import_cost():
+    """Seconds for a fresh child to import pyc (and everything pyc imports), bytecode warm."""
+    package = REPO / 'AIL_CURRENT' / 'python' / 'pkg-v12'
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('AIL_') and key != 'PYTHONPATH'}
+    command = [sys.executable, '-X', 'utf8', '-c', 'import pyc']
+    subprocess.run(command, cwd=str(package), env=env, capture_output=True)
+    values = []
+    for _ in range(3):
+        started = time.perf_counter()
+        subprocess.run(command, cwd=str(package), env=env, capture_output=True)
+        values.append(time.perf_counter() - started)
+    return round(min(values), 4)
+
+
+def top_functions(path, count=15):
+    stats = pstats.Stats(str(path))
+    rows = sorted(stats.stats.items(), key=lambda item: item[1][3], reverse=True)
+    result = []
+    for func, (_cc, _nc, tottime, cumtime, _callers) in rows[:count]:
+        name = '%s:%s' % (Path(func[0]).name, func[2]) if func[0] not in ('~', '<built-in>') else func[2]
+        result.append({'function': name, 'cumtime': round(cumtime, 3), 'tottime': round(tottime, 3)})
+    return result
+
+
+def cumulative_of(path, fragment):
+    stats = pstats.Stats(str(path))
+    best = 0.0
+    for func, (_cc, _nc, _tottime, cumtime, _callers) in stats.stats.items():
+        if fragment in func[2]:
+            best = max(best, cumtime)
+    return best
+
+
+def cumulative_function(path, name):
+    stats = pstats.Stats(str(path))
+    best = 0.0
+    for func, (_cc, _nc, _tottime, cumtime, _callers) in stats.stats.items():
+        if func[2] == name:
+            best = max(best, cumtime)
+    return best
 
 
 def function_names(source):
@@ -223,7 +302,7 @@ def gcc_split(work, source):
 
 def one_task(task, runs, root, do_profile):
     source = SRC / task / 'main.ail'
-    result = {'task': task, 'cold': [], 'fecache': [], 'profile': None}
+    result = {'task': task, 'cold': [], 'fecache': [], 'profile': None, 'hit_profile': None}
     for index in range(runs):
         work = root / ('%s-cold-%d' % (task, index))
         result['cold'].append(build(source, work / 'prog', work))
@@ -231,36 +310,76 @@ def one_task(task, runs, root, do_profile):
     if not ok:
         result['error'] = result['cold'][0]['stderr']
         return result
+    result['import_s'] = import_cost()
     result['cold_summary'] = {key: summary([row[key] for row in result['cold']])
-                              for key in ('wall', 'front', 'compile', 'link', 'rss_kib',
-                                          'binary', 'c_bytes')}
+                              for key in ('wall', 'front', 'compile', 'link', 'parent_s',
+                                          'child_s', 'rss_kib', 'binary', 'c_bytes')}
     result['gcc_split'] = gcc_split(pathlib.Path(ok[-1]['work']), source)
 
     for index in range(runs):
         work = root / ('%s-fe-%d' % (task, index))
-        first = build(source, work / 'cold' / 'prog', work / 'cold', fe=True)
-        second = build(source, work / 'warm' / 'prog', work / 'warm', fe=True)
+        fe_root, fe_log = work / 'fe', work / 'fe.log'
+        first = build(source, work / 'cold' / 'prog', work / 'cold', fe=True,
+                      fe_root=fe_root, fe_log=fe_log)
+        second = build(source, work / 'warm' / 'prog', work / 'warm', fe=True,
+                       fe_root=fe_root, fe_log=fe_log)
+        last = second['events'][-1] if second['events'] else ''
+        if not last.startswith('hit'):
+            raise RuntimeError('%s run %d: expected a front-end cache hit, log says %r'
+                               % (task, index, last))
         result['fecache'].append({'cold': first, 'hit': second})
     good = [row for row in result['fecache'] if row['cold']['ok'] and row['hit']['ok']]
     result['fecache_summary'] = {
         'cold': {key: summary([row['cold'][key] for row in good])
-                 for key in ('wall', 'front', 'compile', 'link')},
+                 for key in ('wall', 'front', 'compile', 'link', 'parent_s', 'child_s')},
         'hit': {key: summary([row['hit'][key] for row in good])
-                for key in ('wall', 'front', 'compile', 'link')},
+                for key in ('wall', 'front', 'compile', 'link', 'parent_s', 'child_s')},
         'hit_events': [row['hit']['events'][-1] if row['hit']['events'] else None for row in good]}
 
     if do_profile:
         work = root / ('%s-profile' % task)
-        profile = work / 'profile.out'
-        built = build(source, work / 'prog', work, profile=profile)
+        profile, parentp = work / 'child.prof', work / 'parent.prof'
+        built = build(source, work / 'prog', work, profile=profile, parent_profile=parentp)
+        result['profile'] = {'ok': False, 'stderr': built['stderr']}
         if built['ok'] and profile.exists():
             shares, total = profile_phases(profile)
-            result['profile'] = {'ok': True, 'shares': shares, 'profiled_s': total,
-                                 'python_wall': built['front'],
-                                 'phases_s': {key: round(value * built['front'], 4)
-                                              for key, value in shares.items()}}
+            child_non_gcc = max((built['child_s'] or 0.0) - built['compile'] - built['link'], 0.0)
+            entry = {'ok': True, 'shares': shares, 'profiled_s': total,
+                     'child_non_gcc': round(child_non_gcc, 4),
+                     'phases_s': {key: round(value * child_non_gcc, 4)
+                                  for key, value in shares.items()},
+                     'top': top_functions(profile)}
+            if parentp.exists():
+                pshares, ptotal = profile_phases(parentp)
+                wait = cumulative_function(parentp, 'run')
+                probe = max(ptotal - wait, 0.001)
+                parent_wall = max(built['wall'] - (built['child_s'] or 0.0), 0.0)
+                scale = parent_wall / probe
+                load = cumulative_of(parentp, '_load_sources') * scale
+                entry.update(parent_s=round(parent_wall, 4), parent_profiled_s=ptotal,
+                             load_sources_s=round(load, 4),
+                             parent_other_s=round(max(parent_wall - load, 0.0), 4))
+            result['profile'] = entry
+
+        work = root / ('%s-hit-profile' % task)
+        fe_root, fe_log = work / 'fe', work / 'fe.log'
+        first = build(source, work / 'cold' / 'prog', work / 'cold', fe=True,
+                      fe_root=fe_root, fe_log=fe_log)
+        profile = work / 'hit.prof'
+        second = build(source, work / 'warm' / 'prog', work / 'warm', fe=True,
+                       fe_root=fe_root, fe_log=fe_log, profile=profile)
+        last = second['events'][-1] if second['events'] else ''
+        if first['ok'] and second['ok'] and last.startswith('hit') and profile.exists():
+            shares, total = profile_phases(profile)
+            child_non_gcc = max((second['child_s'] or 0.0) - second['compile'] - second['link'], 0.0)
+            result['hit_profile'] = {'ok': True, 'shares': shares, 'profiled_s': total,
+                                     'wall': second['wall'],
+                                     'child_non_gcc': round(child_non_gcc, 4),
+                                     'phases_s': {key: round(value * child_non_gcc, 4)
+                                                  for key, value in shares.items()},
+                                     'top': top_functions(profile, 10)}
         else:
-            result['profile'] = {'ok': False, 'stderr': built['stderr']}
+            result['hit_profile'] = {'ok': False, 'event': last, 'stderr': second['stderr']}
     return result
 
 
