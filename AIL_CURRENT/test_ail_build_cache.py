@@ -274,7 +274,7 @@ class CompileCacheTests(CacheBase):
         for label, env in (('off', dict(self.env, AIL_NO_CACHE='1')), ('cold', self.env), ('warm', self.env)):
             for name in names:
                 out = self.root / ('%s_%s' % (label, name))
-                result = self.run_cli('compile', EXAMPLES / (name + '.py'), '-o', out, env=env)
+                result = self.run_cli('compile', EXAMPLES / (name + '.ail'), '-o', out, env=env)
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
                 results[label, name] = (sha(out), result.stderr.replace(str(out).encode(), b'OUT'))
         for name in names:

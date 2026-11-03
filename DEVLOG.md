@@ -1,13 +1,22 @@
+## 2026-11-03 -- onelang s10 review 1: keep the Python import ambiguity contract
+
+The twin conversion no longer touches the compiler.  `AIL_CURRENT/ail_modules.py` is back at the
+base: a Python `import` refuses `m.py` beside a brace `m.ail` (and a package `__init__.py` beside
+`__init__.ail`) as ambiguous, as `test_ail_modules` requires.  `build_cache` and `float64_codec`
+therefore keep their brace sources, because their twins import `binary_cursor_file`,
+`binary_float64`, `typed_sequences` and `checked_integer`, all of which have a brace `.ail` twin;
+they join the list in `AIL_CURRENT/onelang_brace_only.txt`.  The other six converted modules
+(`c_objects`, `ex13`, `ex32`, `exception_values_app`, `map_fields`, `no_implicit_decl`) still read
+the Python twins and pass.
+
 ## 2026-11-03 -- onelang s10: Appendix C tests read the `language_examples/*.py` twins
 
-The first half of the `language_examples` readers now build the Python twins: `build_cache`,
-`c_objects`, `ex13`, `ex32`, `exception_values_app`, `float64_codec`, `map_fields` and
-`no_implicit_decl`.  A Python `import` now prefers `m.py` over a brace `m.ail` in the same
-directory, matching CPython and the twins' `from m import *` lines; brace `use` still resolves
-`m.ail`.  The modules whose twin build needs a compiler change stay on the brace source and are
-listed in `AIL_CURRENT/onelang_brace_only.txt` (`binary_cursor_cli`, `cli_args`, `context_imports`,
-the three CSV modules and `object_json_query`).  The ten converted compare-lab tasks and the
-`.ail` codegen pins are unchanged.
+The first half of the `language_examples` readers now build the Python twins: `c_objects`, `ex13`,
+`ex32`, `exception_values_app`, `map_fields` and `no_implicit_decl`.  The modules whose twin build
+needs a compiler change stay on the brace source and are listed in
+`AIL_CURRENT/onelang_brace_only.txt` (`binary_cursor_cli`, `build_cache`, `cli_args`,
+`context_imports`, the three CSV modules, `float64_codec` and `object_json_query`).  The ten
+converted compare-lab tasks and the `.ail` codegen pins are unchanged.
 
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
