@@ -36,11 +36,12 @@ The first release of `ailc`, the AIL compiler and the `ail` command. It is built
   construct at compile time with `file:line:col` and a `write instead:` hint.
 - `int` is int64 by default. Arithmetic that leaves the range stops with `OverflowError` instead of
   wrapping; literals and constant expressions outside int64 are refused with a hint.
-- Runtime errors name the exception and the source line in the default build. Beginner mistakes
-  such as an undefined name, a missing argument or a method without `self` now carry a position and
-  often a "did you mean" suggestion.
-- Argument evaluation order is preserved on the typed path, including the list `count`/`index`
-  hoists that previously could run before an earlier operand.
+- Runtime errors keep CPython's exception name and message and exit status; a `--debug` build adds
+  the source line (`raised near file:line`).  Beginner mistakes such as an undefined name, a missing
+  argument or a method without `self` now carry a compile-time position and often a
+  "did you mean" suggestion.
+- List `count`/`index` hoists now wait for every earlier operand that can raise or change the list,
+  preserving Python's evaluation order in those cases.
 - Fixed CPython-parity defects in `same_file`, path errors (`ENOTDIR`, empty paths), closed binary
   files, astral `jscharat`, frozenset module constants, shadowed builtins and repeated `from ail`
   aliases.
