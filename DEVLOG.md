@@ -1172,6 +1172,77 @@ boundary program and the int-in-bool-row fallback. Passed: `test_ail_prog8`,
 `test_ail_nested_lists`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
 `test_ail_boolfield`, `test_ail_spec_fixes`, `test_ail_tuples`, `test_ail_cpython_hybrid`.
 
+## 2026-11-02 -- rbpyreach1: re-apply the accepted pyreach1 change (job-rbpyreach1-11021017)
+
+Re-applied the accepted `job-pyreach1-11020650` change on top of this tree. The diff no longer
+applied because this branch had independently changed the same files; resolved by keeping both
+sides: initialized `_Surface.match_patterns`/`match_targets` (the accepted change uses them for
+`m.groups()` loops) and kept this branch's `_claim` `comp_claims` path alongside the accepted
+`sys.argv` str claim. All other hunks applied cleanly. Regenerated the manifest; nothing else was
+changed.
+
+Probes/tests are those the accepted change names; this job re-ran the touched modules plus
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3, and
+`tools/update_manifest.py --check`.
+
+## 2026-11-01 -- pyreach1 review fix: a compared `get` result is not truth-tested
+
+The review found that `lower_dict_of_lists` accepted any `If` test that mentioned the name, so
+`y = d.get(k)` followed by `if y == []:` (or `if y is None:`) was lowered to the empty sentinel
+row. CPython returns `None` for a missing key, which is not `[]`, so the default build printed
+`empty` where CPython prints `notempty`; `--strict` only caught the `is None` form. `truth_tested`
+now accepts a name only in a truth-only position (`if x:`, `while x:`, `x and ...`, `not x`) and
+guards the body only when the test guarantees the name truthy. A comparison leaves the source
+unchanged: the default build falls back and matches CPython, and `--strict` refuses the dict of
+containers by name. `echo_pack` still builds typed. Added
+`test_dict_of_lists_comparison_keeps_none_semantics` to `test_ail_pytyped_reach.py`. Refreshed the
+stale manifest pins (the earlier claim that `--check` passed was wrong).
+
+Probes: `p_dict_eq`, `p_dict_none`, `p_dict_truth`, `p_dict_not`, `p_dict_and`, `p_dict_default`
+all match CPython on both builds; `p_dict_eq`/`p_dict_none` are refused by name under `--strict`.
+Tests: test_ail_pytyped_reach, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3;
+`tools/update_manifest.py --check` exits 0.
+
+## 2026-11-01 -- pyreach1 review: echo_pack reaches the typed path (job-pyreach1-11011012)
+
+The review found Step 2 unmet: no lab/compare `.py` task built typed. Fixed the remaining
+echo_pack blockers in the front end, without touching the lab sources. A local `d = {}` used
+only through `d.setdefault(k, []).append(v)` and a truth-tested `x = d.get(k)` is lowered to
+the typed key -> slot dict plus `list[list[T]]` rows (row 0 is an empty sentinel); unannotated
+Python-surface helpers whose every return is `bytes(...)` now own their result like `-> bytes`;
+and a bytearray argument to a bytes/sequence parameter is passed as a read-only bytes view.
+Also lift a nested `def` that is a direct statement of a loop body (captures passed at each
+call), lower `for part in m.groups()` when every group always takes part, and recover the real
+entry point when generated helpers are appended after the script (`_script_entry`).
+
+`echo_pack` now exits 0 with `--syntax python --strict`, `run_task.py --smoke` reports
+`ail-py path: typed`, and all 57 public/hidden cases plus the perf input match CPython. The
+other nine tasks keep their earlier blockers (big ints, exec, dict-of-containers, etc.). All
+ten `.ail` sources still build typed and their emitted C is byte-identical to HEAD. Probes:
+`p_dlist3`, `p_owned_bytes2`, `p_ba_view`, `p_loop_def`, `p_groups_loop3`, `p_entry_re2`, plus
+the earlier argv/optional probes; `p_groups_optional` is refused by name. icount could not be
+measured here (perf_event_open denied, no valgrind): wall 1.06 s vs 4.88 s on the perf input.
+Tests: test_ail_pytyped_reach, test_ail_re, test_ail_nested_functions, test_ail_collections,
+test_ail_optional_locals, test_ail_optional_structs, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, and `tools/update_manifest.py --check`.
+
+## 2026-11-01 -- pyreach1: Python sources and the typed path (job-pyreach1-11011012)
+
+Built all ten `lab/compare/src/*/main.py` with `--syntax python --strict` (plus `--exact-int` for
+`chain_relax`/`rail_transfer`, as `run_task.py` does) and wrote the ranked blocker list to
+`docs/design/PY_TYPED_REACH.md`. The top reason is None/Optional (3 tasks: berth_sim, chain_relax,
+echo_pack). Fixed its two front-end causes: `sys.argv[i]` was typed as int in `_etype` and at call
+sites (`_claim`), so a str-only parameter lost to an int claim and then disagreed with a generated
+regex helper's `s: str`; and `optlib` only knew annotated helpers' return kinds, so an unannotated
+helper that always returns one scalar kind was treated as possibly None when assigned into an
+Optional local. `optlib._return_kinds` now infers those plain returns and `Lowerer.nonnull` uses
+them. echo_pack gets past the None reason; its next blocker is a bytes-keyed dict of int lists
+(`idx`), so no lab/compare task is fully typed yet. Probes: argv_starts, argv_re, optret3 build
+typed and match CPython; optbytes and the dict-of-containers probe still behave as documented.
+Added `test_ail_pytyped_reach.py`; final-state tests: test_ail_pytyped_reach, test_ail_argv_slices,
+test_ail_optional_locals, test_ail_optional_structs, test_ail_strict, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
