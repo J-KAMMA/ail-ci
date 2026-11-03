@@ -44,6 +44,13 @@ MIXED = ("def main() -> None:\n    m = 1\n    m = 2.5\n    print(m)\n\n\nmain()\
 CALLS = ("def main() -> None:\n    raw = b'a b'.split()\n    rng = range(3)\n"
          "    print(raw, rng)\n\n\nmain()\n")
 STRINGS = ("def main() -> None:\n    x = 1\n    print('x = 2')  # x = 3\n\n\nmain()\n")
+ATTRIBUTE = ("def main() -> None:\n    x = 1\n    obj = object()\n    print(obj.x)\n"
+             "    print(x)\n\n\nmain()\n")
+KEYWORD = ("def show(x: int) -> None:\n    print(x)\n\n\ndef main() -> None:\n"
+           "    show(x=2)\n\n\nmain()\n")
+GENERAL_IMPORT = ("from dep import value\n\ndef find(d: dict[int, int], k: int) -> int | None:\n"
+                  "    return d.get(k)\n\n\ndef main() -> None:\n"
+                  "    print(find(value(), 1))\n\n\nmain()\n")
 
 
 def setUpModule():
@@ -189,6 +196,7 @@ class Protocol(LspCase):
         self.assertEqual(item["severity"], 1)
         self.assertIn("never closed", item["message"])
         self.assertNotIn(".ail-lsp-", item["message"])
+        self.assertNotIn(str(folder) + "/" + str(folder), item["message"])
 
     @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
     def test_a_read_only_directory_still_resolves_imports(self):
@@ -279,6 +287,20 @@ class Protocol(LspCase):
                 "textDocument": {"uri": calls}, "position": {"line": line, "character": character}})
             self.assertIsNone(answer["result"])
 
+    def test_hover_is_none_for_an_attribute_and_a_keyword_label(self):
+        _, uri = self.open("attribute.py", ATTRIBUTE)
+        attribute = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 14}})
+        self.assertIsNone(attribute["result"])
+        local = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 4, "character": 10}})
+        self.assertIn("`x`: `int`", local["result"]["contents"]["value"])
+        _, uri = self.open("keyword.py", KEYWORD)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        label = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 5, "character": 9}})
+        self.assertIsNone(label["result"])
+
     def test_hover_ignores_strings_and_comments(self):
         _, uri = self.open("strings.py", STRINGS)
         self.assertEqual(self.client.diagnostics(uri), [])
@@ -331,6 +353,20 @@ class GeneralPath(LspCase):
         hover = self.client.request("textDocument/hover", {
             "textDocument": {"uri": uri}, "position": item["range"]["start"]})
         self.assertIn("**write instead:** return a sentinel", hover["result"]["contents"]["value"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_keeps_the_import_path_for_the_classifier(self):
+        folder = self.dir / "readonly-general"
+        folder.mkdir()
+        (folder / "dep.py").write_text("def value() -> int:\n    return 7\n", encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        uri = (folder / "main.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": GENERAL_IMPORT}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 2, item["message"])
+        self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
 
     def test_strict_project_makes_the_blocker_an_error(self):
         (self.dir / "ail.toml").write_text('entry = "blocker.py"\nstrict = true\n', encoding="utf-8")

@@ -35,8 +35,8 @@ Hover shows a type only when it is certain:
   `bytes`, `bool` or `None`) shows that type.
 
 Every other name shows nothing, including a name assigned from arithmetic or a call (for example the
-five names in the review probe), `b"a b".split()`, `range(3)`, and any position inside a string or a
-comment. A wrong type is worse than no type.
+five names in the review probe), `b"a b".split()`, `range(3)`, an attribute (`obj.x`) or a keyword
+label (`f(x=x)`), and any position inside a string or a comment. A wrong type is worse than no type.
 
 ## Prerequisites
 

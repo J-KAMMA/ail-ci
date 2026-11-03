@@ -87,10 +87,10 @@ class Diagnoser:
 
     def builds_on_general_path(self, path, options, digest, env=None):
         """True / False when the full build accepts / refuses the program, None when it cannot be tried."""
-        key = (digest, tuple(options))
+        env = env or cli._env()
+        key = (digest, tuple(options), env.get("AIL_PATH") or "")
         if key in self.verdicts:
             return self.verdicts[key]
-        env = env or cli._env()
         if not cli.find_c_compiler(env)[0]:
             return None
         cli.prepare_cache(env)
@@ -101,16 +101,17 @@ class Diagnoser:
         self.verdicts[key] = verdict
         return verdict
 
-    def strict_blockers(self, path, options, digest):
+    def strict_blockers(self, path, options, digest, env=None):
         """Every typed-path blocker, from `compile --strict --json` (schema ail.strict/1; it stops before the C
         compiler, so none is needed). Items shaped like check diagnostics; blockers without a position are left out.
         None when the report is not available."""
-        key = ("blockers", str(path), digest, tuple(options))
+        env = env or cli._env()
+        key = ("blockers", str(path), digest, tuple(options), env.get("AIL_PATH") or "")
         if key in self.verdicts:
             return self.verdicts[key]
         with tempfile.TemporaryDirectory(prefix="ail-lsp-") as directory:
             done = self._run(cli._sdk_command("compile", "--strict", "--json", *options, path,
-                                              "-o", Path(directory) / "probe"), BUILD_TIMEOUT)
+                                              "-o", Path(directory) / "probe"), BUILD_TIMEOUT, env)
         result = None
         for line in done.stdout.splitlines():
             try:
@@ -149,18 +150,18 @@ class Diagnoser:
         found_strict = bool(found and found.strict)
         items = report.get("diagnostics") or []
         if items and report.get("stage") == "type" and items[0].get("code") not in HARD_CODES:
-            blockers = self.strict_blockers(path, options, report.get("source_sha256"))
+            blockers = self.strict_blockers(path, options, report.get("source_sha256"), env)
             if blockers:
                 items = blockers
         for item in items:
-            problems.append(self.classify(path, item, report, options, found_strict))
+            problems.append(self.classify(path, item, report, options, found_strict, env))
         for text in report.get("slow_patterns") or []:
             match = SLOW_PATTERN.match(text)
             if match:
                 problems.append((Path(match["path"]), int(match["line"]), 1, INFORMATION, "slow", match["text"]))
         return problems
 
-    def classify(self, path, item, report, options, strict):
+    def classify(self, path, item, report, options, strict, env=None):
         """The one place that decides Warning (general path) or Error (refused)."""
         where = Path(item["path"]) if item.get("path") else path
         line, column = item.get("line") or 1, item.get("column") or 1
@@ -168,7 +169,7 @@ class Diagnoser:
         code = item.get("code") or "type"
         if code in HARD_CODES or strict or report.get("stage") != "type":
             return (where, line, column, ERROR, code, message)
-        verdict = self.builds_on_general_path(path, options, report.get("source_sha256"))
+        verdict = self.builds_on_general_path(path, options, report.get("source_sha256"), env)
         if verdict is True:
             return (where, line, column, WARNING, "general-path", "runs on the slow general path because " + message)
         if verdict is None:
@@ -188,16 +189,17 @@ def _line_text(path, line):
 
 def _remap_problems(problems, path, temporary):
     """Point a buffer's diagnostics at the opened file, including any path the compiler printed."""
-    names = [str(temporary)]
-    if temporary.name not in names:
-        names.append(temporary.name)
+    full, base, real = str(temporary), temporary.name, str(path)
     result = []
     for where, line, column, severity, code, message in problems:
         if Path(where) == temporary:
             where = path
-        for name in names:
-            if name and name in message:
-                message = message.replace(name, str(path))
+        if message:
+            # Replace the full path first so a later base-name replacement cannot split it.
+            if full in message:
+                message = message.replace(full, real)
+            if base != path.name and base in message:
+                message = message.replace(base, path.name)
         result.append((where, line, column, severity, code, message))
     return result
 
@@ -377,7 +379,7 @@ def _position_offset(text, position):
     return start + offset
 
 
-def _name_at(text, position):
+def _token_at(text, position):
     """The identifier token at a position; strings and comments are not identifiers."""
     offset = _position_offset(text, position)
     lines = text.splitlines(keepends=True)
@@ -397,10 +399,53 @@ def _name_at(text, position):
             start = starts[row] + token.start[1]
             end = start + len(token.string)
             if start <= offset < end or (offset == end and token.end[1] == len(lines[row].rstrip("\r\n"))):
-                return token.string
+                return token
     except (tokenize.TokenError, IndentationError):
         pass
     return None
+
+
+def _name_at(text, position):
+    token = _token_at(text, position)
+    return token.string if token is not None else None
+
+
+def _char_index(text, lineno, byte_column):
+    """Absolute character index of an AST position (lineno is 1-based, column is UTF-8 bytes)."""
+    lines = text.splitlines(keepends=True)
+    if lineno < 1 or lineno > len(lines):
+        return None
+    line = lines[lineno - 1]
+    prefix = line.encode("utf-8")[:byte_column].decode("utf-8", "ignore")
+    return sum(len(item) for item in lines[:lineno - 1]) + len(prefix)
+
+
+def _plain_name_token(text, tree, token):
+    """True when the token is a plain name or argument, not an attribute or keyword label."""
+    lines = text.splitlines(keepends=True)
+    if token.start[0] < 1 or token.start[0] > len(lines):
+        return False
+    start = sum(len(item) for item in lines[:token.start[0] - 1]) + token.start[1]
+    end = start + len(token.string)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Name, ast.arg)):
+            name = node.id if isinstance(node, ast.Name) else node.arg
+            if name != token.string:
+                continue
+            node_start = _char_index(text, node.lineno, node.col_offset)
+            if node_start != start:
+                continue
+            if isinstance(node, ast.arg):
+                return True
+            if _char_index(text, node.end_lineno, node.end_col_offset) == end:
+                return True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            line = lines[node.lineno - 1] if 0 < node.lineno <= len(lines) else ""
+            match = re.search(r"\bdef\s+" + re.escape(node.name) + r"\b", line)
+            if match and token.start == (node.lineno, match.end() - len(node.name)) \
+                    and token.string == node.name:
+                return True
+    return False
 
 
 def _scopes_at(tree, line):
@@ -431,12 +476,15 @@ def _function_at(tree, name, line):
 
 def type_hover(text, position):
     """Markdown for a certain type or a function signature at the cursor; None when it is not certain."""
-    name = _name_at(text, position)
-    if name is None:
+    token = _token_at(text, position)
+    if token is None:
         return None
+    name = token.string
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
+        return None
+    if not _plain_name_token(text, tree, token):
         return None
     line = int(position.get("line") or 0) + 1
     for scope in reversed(_scopes_at(tree, line)):
