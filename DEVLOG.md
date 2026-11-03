@@ -4,14 +4,17 @@ Cherry-picked `5a015bb` and `c64abe3` from `job-relnotes-11031523` (the "agent w
 commit was left out).  The only conflict was `DEVLOG.md`; both entries are kept here, this one
 first.
 
-Removed the one performance ratio in the README that was not in the latest compare-lab report
-(`about 20x`, for the general path); it now says `much slower` and the comparison section still
-links `docs/COMPARISON.md` instead of copying numbers.  Nothing else in the README, CHANGELOG or
-install guide changed.
+The first run's README rewrite had dropped the four scorecard lines that `test_compare_publish`
+checks against the latest compare-lab report, so the test failed.  Restored them in the "How AIL
+compares" section (peak RSS 0/4, binary 10/10, compile 10/10 slower, wall 6/10) and kept the link
+to `docs/COMPARISON.md` for the full table.  Also removed the one performance ratio in the README
+that was not in the latest report (`about 20x`, for the general path); it now says `much slower`.
+Nothing else in the README, CHANGELOG or install guide changed.
 
 Verification on the final commit: `python3 tools/update_manifest.py --check` is clean; the four
 required modules (`test_ail_readme`, `test_ail_safetynet`, `test_ail_files`,
-`test_ail_corpus_findings3`) ran on both builds in 448 s with 0 failed.  Probes `readme_example`,
+`test_ail_corpus_findings3`) ran on both builds in 348 s with 0 failed, and `test_compare_publish`
+passes.  Probes `readme_example`,
 `readme_edge_values` (empty, negative, argument, list item, attribute, dict value) and
 `readme_aliasing` (copy, alias and mutation) match CPython on the default and unified builds.
 The README integer claims were checked by hand: a runtime int64 overflow stops with

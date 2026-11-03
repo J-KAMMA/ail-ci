@@ -87,11 +87,17 @@ are slower.
 
 ## How AIL compares
 
-The measured AIL comparison against Rust and the best other language is in
-[docs/COMPARISON.md](docs/COMPARISON.md). Where AIL wins: its binaries are much smaller, and wall
-time is often faster. Where it loses: compiles are much slower, peak memory is higher on the tasks
-with data, and Python-syntax sources do not yet reach the typed path. The page lists every task,
-metric, win and loss.
+The measured comparison is in [docs/COMPARISON.md](docs/COMPARISON.md). Against Rust, the report's
+scorecards say:
+
+- Peak RSS: AIL is lower on 0/4 tasks with data.
+- Binary size: AIL is smaller on 10/10 tasks.
+- Compile time: AIL is slower to compile on 10/10 tasks.
+- Wall time: AIL is lower on 6/10 tasks.
+
+So AIL wins on binary size and often on wall time, and loses on compile time and on peak memory
+for the tasks with data. The page also compares AIL with the best other language, includes the
+Python-syntax results, and lists every task, metric, win and loss.
 
 ## Learn more
 
