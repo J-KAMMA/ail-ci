@@ -181,6 +181,106 @@ def _rename_text(source, edits):
     return '\n'.join(lines)
 
 
+def _walk_no_nested_scope(node):
+    """Every node under `node`, but never inside a nested function, lambda or class."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        for child in ast.iter_child_nodes(current):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                continue
+            yield child
+            stack.append(child)
+
+
+def _if_roots(fn):
+    """The `if` starting each if/elif/else chain in `fn` (not an elif, not in a nested scope)."""
+    parent = _parents(fn)
+    roots = []
+    for node in _walk_no_nested_scope(fn):
+        if not isinstance(node, ast.If):
+            continue
+        owner = parent.get(node)
+        if isinstance(owner, ast.If) and node in owner.orelse:
+            continue
+        roots.append(node)
+    return roots
+
+
+def _if_branches(root):
+    """The statement lists of one if/elif/else chain, in source order."""
+    branches, current = [], root
+    while True:
+        branches.append(current.body)
+        if len(current.orelse) == 1 and isinstance(current.orelse[0], ast.If):
+            current = current.orelse[0]
+            continue
+        if current.orelse:
+            branches.append(current.orelse)
+        return branches
+
+
+def _branch_kind_split(fn, name, used):
+    """Renames each branch that binds `name` in one if/elif chain, when no use can observe a
+    value after or across the chain. Returns (edits, fresh) or (None, {}).
+
+    This is the conservative shape the pyreach design allows without a new data-flow pass: two
+    kinds bound in different branches of ONE chain and never read after it (nor in a branch that
+    does not bind it). Every mention inside a binding branch is renamed, so each branch keeps its
+    own local of its own kind and CPython's value is unchanged."""
+    if any(isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names
+           for node in ast.walk(fn)):
+        return None, {}
+    parameters = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs}
+    if (name in parameters
+            or (fn.args.vararg is not None and fn.args.vararg.arg == name)
+            or (fn.args.kwarg is not None and fn.args.kwarg.arg == name)):
+        return None, {}
+    edits, fresh = [], {}
+    for root in _if_roots(fn):
+        branches = _if_branches(root)
+        mentioned, stored = [], []
+        for branch in branches:
+            nodes = [n for st in branch for n in ast.walk(st)
+                     if isinstance(n, ast.Name) and n.id == name]
+            mentioned.append(bool(nodes))
+            stored.append(any(isinstance(n.ctx, ast.Store) for n in nodes))
+        if sum(stored) < 2:
+            continue
+        if any(m and not s for m, s in zip(mentioned, stored)):
+            continue                  # a branch reads a value the chain did not bind first
+        inside = {id(n) for branch in branches for st in branch for n in ast.walk(st)}
+        outside = [n for n in ast.walk(fn)
+                   if isinstance(n, ast.Name) and n.id == name and id(n) not in inside]
+        if outside:
+            continue                  # a read (or another binding) after or around the chain
+        late = []
+        for branch in branches:
+            for st in branch:
+                for node in ast.walk(st):
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                         ast.ClassDef)):
+                        if any(isinstance(n, ast.Name) and n.id == name
+                               for n in ast.walk(node)):
+                            late.append(node)
+        if late:
+            continue
+        for index, branch in enumerate(branches):
+            if not stored[index]:
+                continue
+            new = '%s__b%d_%d' % (name, root.lineno, index)
+            while new in used:
+                new += '_'
+            used.add(new)
+            fresh[new] = name
+            for st in branch:
+                for node in ast.walk(st):
+                    if isinstance(node, ast.Name) and node.id == name:
+                        edits.append((node.lineno, node.col_offset, node.end_col_offset, new))
+    if not edits:
+        return None, {}
+    return edits, fresh
+
 def split(source, name, taken=()):
     """`source` with every separable region of `name` renamed, a map {fresh name: name}, and the
     blocked regions as (region, text of the read that observes it) pairs."""
@@ -191,6 +291,7 @@ def split(source, name, taken=()):
     edits, fresh, blocked = [], {}, []
     functions = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
     for fn in functions:
+        before = len(edits)
         separable, stuck = _function_regions(fn, name)
         blocked += stuck
         for region in separable:
@@ -209,6 +310,11 @@ def split(source, name, taken=()):
                 if match is None:
                     return None, {}, blocked
                 edits.append((region.node.lineno, match.start(1), match.end(1), new))
+        if len(edits) == before:
+            branch_edits, branch_fresh = _branch_kind_split(fn, name, used)
+            if branch_edits:
+                edits.extend(branch_edits)
+                fresh.update(branch_fresh)
     if not edits:
         return None, {}, blocked
     return _rename_text(text, edits), fresh, blocked

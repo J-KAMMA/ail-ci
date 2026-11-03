@@ -26927,6 +26927,58 @@ ORDER.insert(ORDER.index('BYTES') + 1, 'UTF8CODEC')
 SOURCE['UTF8CODEC'] = UTF8CODEC
 REQUIRES['UTF8CODEC'] = ['STR', 'BYTES']
 
+ASCIICODEC = r'''
+/* `bytes.decode("ascii")`: every byte below 0x80, so the bytes are already the str. A byte at or
+   above 0x80 raises UnicodeDecodeError (catchable), exactly as CPython's ascii codec does. */
+static ail_str ail_bytes_decode_ascii(ail_sarena *A, ail_bytes b) {
+    for (int64_t i = 0; i < b.n; ++i) {
+        if (b.p[i] >= 0x80) {
+            if (ail_exc_top >= 0) ail_raise_named(AIL_EXC_UNICODE_DECODE);
+            char msg[160];
+            snprintf(msg, sizeof msg,
+                     "UnicodeDecodeError: 'ascii' codec can't decode byte 0x%02x in position %lld: "
+                     "ordinal not in range(128)", (unsigned)b.p[i], (long long)i);
+            ail_die(msg);
+            return (ail_str){0, 0, 0};
+        }
+    }
+    if (b.n < 0 || (uintmax_t)b.n > SIZE_MAX - 1) ail_die("ASCII result too long");
+    uint8_t *q = ail_sarena_alloc(A, b.n + 1);
+    if (b.n) memcpy(q, b.p, (size_t)b.n);
+    q[b.n] = 0;
+    return (ail_str){q, b.n, 1};
+}
+'''
+ORDER.insert(ORDER.index('UTF8CODEC') + 1, 'ASCIICODEC')
+SOURCE['ASCIICODEC'] = ASCIICODEC
+REQUIRES['ASCIICODEC'] = ['STR', 'BYTES']
+
+LATIN1CODEC = r'''
+/* `bytes.decode("latin-1")`: byte i is code point U+00ii, encoded into this runtime's UTF-8 str
+   as one byte below 0x80 or two bytes (0xC2/0xC3 + low six bits) above it. Total: no error. */
+static ail_str ail_bytes_decode_latin1(ail_sarena *A, ail_bytes b) {
+    if (b.n < 0 || (uintmax_t)b.n > (SIZE_MAX - 1) / 2) ail_die("latin-1 result too long");
+    int64_t want = b.n * 2 + 1;
+    uint8_t *q = ail_sarena_alloc(A, want);
+    int64_t o = 0;
+    _Bool ascii = 1;
+    for (int64_t i = 0; i < b.n; ++i) {
+        uint32_t c = b.p[i];
+        if (c < 0x80) q[o++] = (uint8_t)c;
+        else {
+            ascii = 0;
+            q[o++] = (uint8_t)(0xC0 | (c >> 6));
+            q[o++] = (uint8_t)(0x80 | (c & 0x3F));
+        }
+    }
+    q[o] = 0;
+    return (ail_str){q, o, ascii};
+}
+'''
+ORDER.insert(ORDER.index('UTF8CODEC') + 1, 'LATIN1CODEC')
+SOURCE['LATIN1CODEC'] = LATIN1CODEC
+REQUIRES['LATIN1CODEC'] = ['STR', 'BYTES']
+
 BYTEARRAY = r'''
 /* Mutable octets have their own shared identity, independent of object headers. */
 typedef struct { size_t refs; int64_t n, cap; unsigned char *p; } ail_bytearray;

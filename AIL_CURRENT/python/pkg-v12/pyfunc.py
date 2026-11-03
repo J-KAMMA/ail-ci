@@ -8001,7 +8001,22 @@ def _unused_decode_locals(fn):
     from collections import Counter
     return {name for name, count in Counter(stores).items() if count == 1} - excluded
 
-def _check_utf8_codec_args(node):
+_CODEC_UTF8_NAMES = frozenset(('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4'))
+_CODEC_ASCII_NAMES = frozenset((
+    'ascii', 'us_ascii', '646', 'us', 'ansi_x3.4_1968', 'ansi_x3.4_1986', 'ansi_x3_4_1968',
+    'cp367', 'csascii', 'ibm367', 'iso646_us', 'iso_646.irv_1991', 'iso_ir_6'))
+_CODEC_LATIN1_NAMES = frozenset((
+    'latin_1', 'latin1', 'iso_8859_1', 'iso8859_1', '8859', 'cp819', 'l1', 'latin',
+    'iso_ir_100', 'csisolatin1', 'ibm819', 'iso8859', 'iso_8859_1_1987'))
+
+
+def _check_utf8_codec_args(node, decode=False):
+    """The encoding name a bytes.decode()/str.encode() call uses: 'utf-8', 'ascii' or 'latin-1'.
+
+    Only strict errors are built. The caller uses the returned name to pick the exact C helper;
+    the function keeps its original name because every existing call site already relied on it
+    for validation, and UTF-8 remains its default. `decode=True` is the only door that admits
+    the new ASCII and latin-1 codecs; encoding stays UTF-8-only."""
     if len(node.args) > 2:
         raise Unsupported('UTF-8 conversion accepts only encoding and errors')
     values = dict(zip(('encoding', 'errors'), node.args))
@@ -8010,13 +8025,26 @@ def _check_utf8_codec_args(node):
             raise Unsupported('invalid or duplicate UTF-8 conversion argument')
         values[keyword.arg] = keyword.value
     import safetyrt
+    encoding = 'utf-8'
     for name, value in values.items():
         if not _is_strlit(value):
             raise Unsupported('UTF-8 encoding and errors must be string literals')
         norm = safetyrt.normalize_encoding_name(value.value)
-        if (name == 'encoding' and norm not in ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')
-                or name == 'errors' and value.value != 'strict'):
-            raise Unsupported('only UTF-8 with strict errors is supported')
+        if name == 'encoding':
+            if norm in _CODEC_UTF8_NAMES:
+                encoding = 'utf-8'
+            elif norm in _CODEC_ASCII_NAMES:
+                encoding = 'ascii'
+            elif norm in _CODEC_LATIN1_NAMES:
+                encoding = 'latin-1'
+            else:
+                raise Unsupported('only the UTF-8, ASCII and latin-1 codecs are supported')
+        elif value.value != 'strict':
+            raise Unsupported('only strict codec errors are supported')
+    if not decode and encoding != 'utf-8':
+        raise Unsupported('only UTF-8 encoding is supported (decoding also accepts ASCII and '
+                          'latin-1)')
+    return encoding
 
 
 def _is_str_expr(node, ctx):
@@ -8291,9 +8319,16 @@ def _str_value(node, ctx, *, owned_join_return=False):
         finally:
             ctx.pre = saved
     if _is_utf8_codec_call(node, ctx, 'decode'):
-        _check_utf8_codec_args(node)
-        ctx.parts.add('UTF8CODEC')
+        encoding = _check_utf8_codec_args(node, decode=True)
         source = node.func.value
+        if encoding == 'ascii':
+            ctx.has_try = True
+            ctx.parts.add('ASCIICODEC')
+            return 'ail_bytes_decode_ascii(&%s, %s)' % (ctx.sarena(), _bytes_value(source, ctx))
+        if encoding == 'latin-1':
+            ctx.parts.add('LATIN1CODEC')
+            return 'ail_bytes_decode_latin1(&%s, %s)' % (ctx.sarena(), _bytes_value(source, ctx))
+        ctx.parts.add('UTF8CODEC')
         fresh_read = (_is_read_bytes_call(source, ctx)
                       and all(source.func.id not in getattr(ctx, attr, {})
                               for attr in ('kind', 'types', 'classes', 'modconsts')))
@@ -16351,7 +16386,7 @@ def _refuse_int_in_float_slot(node, where):
 
 
 def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dynamic=None, owned_result=False, grid_result=False,
-                    proven_self=False):
+                    proven_self=False, tuple_result=False, tuple_out=None):
     """The C for calling another compiled function (or method, under its mangled name) by name,
     with `arg_nodes` the Python AST nodes at the call site, ALREADY resolved to one node per
     PARAMETER, in parameter order -- `_call`'s plain `f(...)` dispatch gets this from
@@ -16371,7 +16406,7 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
     pattern (`print`/`.pop()` already have one; CPython would hand back `None` here and this
     language has no `None`)."""
     params, ret = ctx.funcs[fname] if dynamic is None else dynamic[:2]
-    if _is_tuple_ret(ret):
+    if _is_tuple_ret(ret) and not tuple_result:
         raise Unsupported('calling %s(), which returns a tuple, as a value' % fname)
     if ret == NORET and not as_stmt:
         raise Unsupported('calling %s(), which never returns a value, as a value; CPython would '
@@ -16817,6 +16852,9 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
     if ret == BYTES and (owned_result or fname in getattr(ctx, 'owned_bytes_fns', ())):
         ctx.parts.add('BYTESRET')
         return ordered('%s(%s)' % (symbol, ', '.join(out)))
+    if _is_tuple_ret(ret) and tuple_result:
+        ctx.parts.add('TUPRET')
+        return ordered('%s(%s)' % (symbol, ', '.join(out + [tuple_out, str(len(ret[1]))])))
     call = ordered('%s(%s)' % (symbol, ', '.join(out)))
     if ret == INT and _tint_ret:
         ctx.parts.add('TINTT')
@@ -21596,6 +21634,82 @@ def _numeric_assign(node,ctx,ind):
     return _flush(ctx,pad)+pad+token+';\n'
 
 
+def _unpack_from_list_slice(t, node, ctx, pad):
+    """`a, b, c = xs[i:]` / `xs[i:j]` where `xs` names a list of int, float, str or bytes.
+
+    The slice is evaluated with CPython's clamping rules, its length is checked against the
+    number of names (a run-time ValueError, catchable, exactly like the existing whole-list
+    unpack), and each name then reads one bounds-checked element. Returns the C text, or None
+    when the shape is not one this branch handles (the caller's generic refusal then names it)."""
+    if not (isinstance(node.value, ast.Subscript) and isinstance(node.value.slice, ast.Slice)
+            and isinstance(node.value.value, ast.Name)
+            and node.value.slice.step is None):
+        return None
+    source = node.value.value.id
+    kind = _etype(node.value.value, ctx)
+    if kind == LIST and source in ctx.blist:
+        kind = BLIST
+    if kind not in (LIST, FLIST, SLIST, BLIST):
+        return None
+    if kind == LIST and (source in ctx.tstride or source in ctx.rowof or source in ctx.nlist
+                         or source in ctx.handles or source in ctx.strlist
+                         or source in ctx.srowtypes):
+        return None
+    bounds = []
+    for bound, default in ((node.value.slice.lower, '0'), (node.value.slice.upper, None)):
+        if bound is not None:
+            if _etype(bound, ctx) != INT:
+                raise Unsupported('list slice bounds in a tuple assignment must be integers')
+            bounds.append(_expr(bound, ctx))
+        else:
+            bounds.append(default)
+    pre = _flush(ctx, pad)
+    ctx.tmp += 1
+    tag = '_ail_u%d' % ctx.tmp
+    src = ctx.cname(source)
+    if kind == BLIST:
+        ctx.parts.update(('BLIST', 'BYTES'))
+        ctype = 'ail_blist *'
+        count = '%s->n' % src
+        get = 'ail_blist_get(&%s, %s, %%s)' % (ctx.barena(), src)
+    else:
+        ctype = {LIST: 'ail_list', FLIST: 'ail_flist', SLIST: 'ail_slist'}[kind]
+        ctx.parts.add(kind)
+        count = '%s.n' % src
+        get = {LIST: 'ail_list_get(&%s, %%s)', FLIST: 'ail_flist_get(&%s, %%s)',
+               SLIST: 'ail_slist_get(&%s, %%s)'}[kind] % (tag + '_src')
+    lo, hi = bounds
+    if hi is None:
+        hi = tag + '_n'
+    k = len(t.elts)
+    ctx.has_try = True
+    if exctext.ACTIVE:
+        _exc_text_parts(ctx)
+        check = 'if (%s_len != %d) ail_raise_unpack(%s_len, %d);' % (tag, k, tag, k)
+    else:
+        check = 'if (%s_len != %d) ail_raise_named(AIL_EXC_VALUE);' % (tag, k)
+    out = pre + '%s{\n' % pad
+    out += '%s    %s %s_src = %s;\n' % (pad, ctype, tag, src)
+    out += '%s    int64_t %s_n = %s;\n' % (pad, tag, count)
+    out += '%s    int64_t %s_lo = %s;\n' % (pad, tag, lo)
+    out += '%s    int64_t %s_hi = %s;\n' % (pad, tag, hi)
+    out += ('%s    if (%s_lo < 0) { %s_lo += %s_n; if (%s_lo < 0) %s_lo = 0; } '
+            'else if (%s_lo > %s_n) %s_lo = %s_n;\n'
+            % (pad, tag, tag, tag, tag, tag, tag, tag, tag, tag))
+    out += ('%s    if (%s_hi < 0) { %s_hi += %s_n; if (%s_hi < 0) %s_hi = 0; } '
+            'else if (%s_hi > %s_n) %s_hi = %s_n;\n'
+            % (pad, tag, tag, tag, tag, tag, tag, tag, tag, tag))
+    out += '%s    int64_t %s_len = %s_hi - %s_lo; if (%s_len < 0) %s_len = 0;\n' % (
+        pad, tag, tag, tag, tag, tag)
+    out += '%s    %s\n' % (pad, check)
+    kinds = {LIST: INT, FLIST: FLT, SLIST: STR, BLIST: BYTES}
+    for i, e in enumerate(t.elts):
+        name = ctx.declare(e.id, kinds[kind])
+        out += '%s    %s = %s;\n' % (pad, name, get % ('%s_lo + %d' % (tag, i)))
+    out += '%s}\n' % pad
+    return out
+
+
 def _stmt_inner(node, ctx, ind):
     if (isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)) and isinstance(node.value, ast.Name)
             and node.value.id in ctx.modconsts and ctx.modconsts[node.value.id][0] == SLIST
@@ -21759,6 +21873,42 @@ def _stmt_inner(node, ctx, ind):
                     out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
                 ctx.parts.add('SROW')
                 return pre + out
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in ctx.funcs
+                    and _is_tuple_ret(ctx.funcs[node.value.func.id][1])):
+                # `a, b, c = f(...)` where `f` returns a fixed-arity tuple of numbers. The call
+                # fills a private `ail_slot` array (the same ABI `_return_tuple` uses), then the
+                # true arity is checked exactly as a slice/list unpack is, and each name takes
+                # its own typed member.
+                fname = node.value.func.id
+                fkinds = ctx.funcs[fname][1][1]
+                if len(t.elts) != len(fkinds):
+                    raise Unsupported('%s() returns a %d-tuple; unpacking it into %d names would '
+                                      'not match' % (fname, len(fkinds), len(t.elts)))
+                args = _bind_call_args(fname, node.value, ctx)
+                ctx.tmp += 1
+                tmp = '_ail_tup%d' % ctx.tmp
+                ctx.parts.add('TUPRET')
+                call = _call_user_func(fname, args, ctx, tuple_result=True, tuple_out=tmp)
+                pre = _flush(ctx, pad)
+                ctx.has_try = True
+                if exctext.ACTIVE:
+                    _exc_text_parts(ctx)
+                    check = ('if (_ail_arity != %d) ail_raise_unpack(_ail_arity, %d);'
+                             % (len(fkinds), len(fkinds)))
+                else:
+                    check = ('if (_ail_arity != %d) ail_raise_named(AIL_EXC_VALUE);'
+                             % len(fkinds))
+                out = pre + '%s{\n' % pad
+                out += '%s    ail_slot %s[%d];\n' % (pad, tmp, len(fkinds))
+                out += '%s    int64_t _ail_arity = %s;\n' % (pad, call)
+                out += '%s    %s\n' % (pad, check)
+                names = [ctx.declare(e.id, fk) for e, fk in zip(t.elts, fkinds)]
+                for j, (nm, fk) in enumerate(zip(names, fkinds)):
+                    out += '%s    %s = %s[%d].%s;\n' % (pad, nm, tmp, j,
+                                                          'd' if fk == FLT else 'i')
+                out += '%s}\n' % pad
+                return out
             if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                     and node.value.func.id == 'map' and len(node.value.args) == 2
                     and not node.value.keywords
@@ -21940,6 +22090,9 @@ def _stmt_inner(node, ctx, ind):
                 names = [ctx.declare(e.id, kind) for e in t.elts]
                 return pre + ''.join('%s%s = %s;\n' % (pad, name, value)
                                      for name, value in zip(names, vals))
+            lowered = _unpack_from_list_slice(t, node, ctx, pad)
+            if lowered is not None:
+                return lowered
             if not isinstance(node.value, ast.Tuple) or len(node.value.elts) != len(t.elts):
                 raise Unsupported('tuple assignment from %s; the right-hand side has to be a '
                                   'literal tuple of the same length, or a NAME already bound to a '
@@ -22342,8 +22495,8 @@ def _stmt_inner(node, ctx, ind):
         if (t.id in getattr(ctx, 'unused_decode_locals', ())
                 and _is_utf8_codec_call(node.value, ctx, 'decode')
                 and isinstance(node.value.func.value, ast.Name)
-                and ctx.type_of(node.value.func.value.id) == BYTES):
-            _check_utf8_codec_args(node.value)
+                and ctx.type_of(node.value.func.value.id) == BYTES
+                and _check_utf8_codec_args(node.value, decode=True) == 'utf-8'):
             ctx.declare(t.id, STR)  # Retain annotation/parameter/type-conflict checks.
             ctx.parts.add('UTF8LINES')
             value = _bytes_value(node.value.func.value, ctx)

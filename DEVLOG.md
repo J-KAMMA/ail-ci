@@ -1,3 +1,30 @@
+## 2026-11-03 -- pyreach s4: slice/call unpacking, branch kind splits, ASCII/latin-1 decode
+
+`a, b, c = xs[lo:hi]` now unpacks a local list of ints, floats, strs or bytes on the typed path.
+The slice follows CPython's clamping (negative bounds wrap, out-of-range bounds clamp, an empty
+slice is length 0) and the length check is the same catchable `ValueError` the whole-list unpack
+already used; each name then takes a bounds-checked element.  `a, b = helper()` also unpacks a
+fixed-arity numeric tuple return through the existing `ail_slot`/`_return_tuple` ABI, with the
+same arity check.  `bytes.decode("ascii")` and `bytes.decode("latin-1")` join `"utf-8"` on the
+typed path: ASCII raises the catchable UnicodeDecodeError above 0x80 (and prints CPython's
+`can't decode byte 0xNN in position N` when uncaught), latin-1 maps every byte to U+0000..U+00FF.
+Encoding remains UTF-8-only, and other codecs are still refused by name.
+
+`rebinding.split` now also handles the `cents` shape from ticket_audit: a local bound to different
+kinds in two branches of one if/elif chain, never read after or between the branches, is split
+into one local per branch (fresh `<name>__b<line>_<branch>` names, source positions unchanged).
+A read after the chain, a read in a branch that does not bind it, a parameter, a global/nonlocal
+or a nested-scope mention still refuses; the existing for/except regions keep priority.
+
+Probes `s4_slice`, `s4_call`, `s4_kind`, `s4_decode`, `s4_ascii_edge`, `s4_ascii_uncaught`,
+`s4_reuse_after`, `s4_encode_latin` match CPython (or are refused by name) on the default,
+unified and strict/no-general builds.  `test_ail_pyreach_unpack` (10 tests),
+`test_ail_pytyped_reach`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.  On ticket_audit the `cents` kind conflict is gone; its other
+blockers (regex-helper `s` annotation, typed-dict key, `t`, `events`, `out`, `per`) remain, and
+the ten-lab before/after typed gate is not reachable in this tree because pyreach s2/s3 are not
+present.
+
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
 Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's
