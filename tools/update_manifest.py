@@ -100,8 +100,8 @@ def main():
             catalog_py = {name for name in dependencies
                           if isinstance(name, str) and name.startswith("language_examples/")
                           and name.endswith(".py")}
-    # The generated `.py` twin replaces its `.ail` sibling as the shipped source, so both are pinned
-    # and selected for an exported SDK.
+    # Every shipped `.ail` source also ships its generated `.py` twin: the twins are the source of
+    # record for an exported SDK (its tests build them), and the catalog's dependency pins name them.
     catalog_py |= {name[:-4] + ".py" for name, (_, flags) in pins.items()
                    if name.startswith("language_examples/") and name.endswith(".ail") and "s" in flags
                    and (SRC / (name[:-4] + ".py")).is_file()}

@@ -207,10 +207,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
+        "status": "failed",
         "checked_functions": 5,
-        "diagnostics": [],
-        "exit_code": 0
+        "diagnostics": [
+          {
+            "code": "type",
+            "message": "the result of binary_startswith() is declared int, but `data.startswith(prefix, start, end)` is a bool (Python would keep the bool and print True / False).\n  write instead: `-> bool`, or `int(data.startswith(prefix, start, end))`",
+            "path": "AIL_CURRENT/language_examples/binary_search.py",
+            "line": 12,
+            "column": 5,
+            "function": null,
+            "location_kind": "source_statement"
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -293,10 +303,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 6,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/utf8_stream.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -742,10 +762,20 @@
         "Strict comma CSV over Unicode scalar text; blank records do not consume rows."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 2,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/csv_table.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -925,10 +955,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 10,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/csv_stream.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -979,7 +1019,7 @@
                 "default": null
               }
             ],
-            "returns": "void"
+            "returns": "None"
           },
           {
             "name": "csv_groups_snapshot",
@@ -1117,10 +1157,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 19,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/csv_group.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1303,10 +1353,20 @@
         "Full JSON documents over Unicode scalar text; preserve member order and lexemes."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 12,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/json_document.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1370,10 +1430,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 16,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/json_tree.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1442,10 +1512,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 21,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/json_pointer.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1480,10 +1560,20 @@
         "A sorted, nonrecursive snapshot; metadata is queried after enumerating names."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 4,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/directory_catalog.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1542,10 +1632,20 @@
         "Configuration values are read at each call; no process-wide cache."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 6,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/environment_config.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1674,7 +1774,7 @@
                     "default": null
                   }
                 ],
-                "returns": "void"
+                "returns": "None"
               }
             ]
           }
@@ -1682,10 +1782,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 9,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/integer_column_stats.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1726,10 +1836,20 @@
         "Preserve the str API while avoiding whole-document row materialization."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 23,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/csv_column_stats.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1782,10 +1902,20 @@
         "The public contract is unchanged; the byte state avoids unused field/row objects."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 34,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/csv_column_stats_stream.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -1837,10 +1967,20 @@
         "JSON escaping can expand output; each response is bounded by 6 * max_line + 1 bytes."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 23,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/tcp_json_lines.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -2074,10 +2214,20 @@
         "Deadlines are checked between operations; this is not a real-time scheduling guarantee."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 30,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/tcp_json_lines_poll.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -2176,10 +2326,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 9,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/string_map.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -2327,10 +2487,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 3,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/cli_args.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -2388,10 +2558,20 @@
       },
       "source_comments": [],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 23,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/json_pointer_batch.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md",
       "runtime_all_api_qualified": false
@@ -2488,10 +2668,20 @@
         "Memory retains output plus a bounded chunk; the final bytes result is an immutable snapshot."
       ],
       "source_check": {
-        "status": "passed",
-        "checked_functions": 3,
-        "diagnostics": [],
-        "exit_code": 0
+        "status": "failed",
+        "checked_functions": null,
+        "diagnostics": [
+          {
+            "code": "syntax",
+            "message": "AIL module needs functions, class instances, or literal constants only: AIL_CURRENT/language_examples/integer_row_stream.py",
+            "path": null,
+            "line": null,
+            "column": null,
+            "function": null,
+            "location_kind": null
+          }
+        ],
+        "exit_code": 1
       },
       "contract_source": "python/pkg-v12/SEMANTICS.md section208",
       "runtime_all_api_qualified": false
@@ -2504,36 +2694,36 @@
     "ownership/error contracts inferred from annotations",
     "claim of all API runtime qualification"
   ],
-  "source_check_all_passed": true,
+  "source_check_all_passed": false,
   "dependency_pins": {
-    "language_examples/text_search.py": "19a52b9f8baaa306d06f459646c73e097e89d073bdf7e0e151ffe462d758f7ad",
-    "language_examples/binary_search.py": "3b0dd600718d2248d21907fe851b78995ddbba1e587cbd86371b88a202368c7e",
-    "language_examples/utf8_stream.py": "090b02105567b8e8526d489b81512847142297d11b4e2f20220b4560ea9ad0f6",
-    "language_examples/binary_numbers.py": "28b42e386b9084d2f4ff3e0c97246f348c4a60e051c2a71576b5e6dc6b820d19",
-    "language_examples/binary_float64.py": "731a6740e18bf636f711ee8e7ff559493771e7b3e8f55e7eda3855b7652d8535",
     "language_examples/base64_codec.py": "75173255cfdd0c955d330cab308d31e0dfbabc767d1548427c419e258f2d46de",
-    "language_examples/url_codec.py": "f6da21a7afde4587774a59842b7c147051c6651e57ab5ec9084c5373f29a6bcd",
-    "language_examples/csv_table.py": "848a8e31353a3c2d641f8b6ba9a64ca5dcc224400fc2ffbc558a9bc0b6504e97",
-    "language_examples/csv_stream.py": "eb9c5d0874f418d4cb17e5602bc46ea4d9de6ae5a32701dc41c2319cf084247f",
-    "language_examples/json_text.py": "ebea9746f3e8d7ba4facae82293dfb0e7fd9a136158ebbb67e49ff0eb58b3abe",
-    "language_examples/csv_group.py": "5732cb27498407e191a10c795ad175594b85e00470b2d4fd4d7072315741a32e",
+    "language_examples/binary_float64.py": "731a6740e18bf636f711ee8e7ff559493771e7b3e8f55e7eda3855b7652d8535",
+    "language_examples/binary_numbers.py": "28b42e386b9084d2f4ff3e0c97246f348c4a60e051c2a71576b5e6dc6b820d19",
+    "language_examples/binary_search.py": "3b0dd600718d2248d21907fe851b78995ddbba1e587cbd86371b88a202368c7e",
     "language_examples/checked_integer.py": "9396a23a276214ccf6ab327757e63ac388a0c61e898699b5274a36b3f262b521",
+    "language_examples/cli_args.py": "0230e7faaf71e4a2007bbacf8c0cb78b1276e348fa3edcaa29f1206bde281617",
+    "language_examples/csv_column_stats.py": "1335832ed36764e71c6a273e2e0dc85d8f5270eeacfd293b49e70767c466f183",
+    "language_examples/csv_column_stats_stream.py": "277fdfbbaa6aab5a48267c40b4993589dc28b1854910277d19a059b6e98a0bef",
+    "language_examples/csv_group.py": "5732cb27498407e191a10c795ad175594b85e00470b2d4fd4d7072315741a32e",
+    "language_examples/csv_integer_stream.py": "94fb89ddcfe6cfd0b5312d201fd2decb112fdc6228c53ac769bb60fb71b331d1",
+    "language_examples/csv_stream.py": "eb9c5d0874f418d4cb17e5602bc46ea4d9de6ae5a32701dc41c2319cf084247f",
+    "language_examples/csv_table.py": "848a8e31353a3c2d641f8b6ba9a64ca5dcc224400fc2ffbc558a9bc0b6504e97",
     "language_examples/csv_writer.py": "13ab3938c0564c67b911934d36c774fed8f85d7bc5ade8d6cdfb983aa68a6eba",
-    "language_examples/json_document.py": "1f62f53f284a3959a661a894e28dffc8708f45d100ac4fa0f1b23e6cd867c18c",
-    "language_examples/json_tree.py": "731dad7b5be4a00e7ef2155063ec670a099f43892f4deedea5bf340dc8b3a0c6",
-    "language_examples/json_pointer.py": "9dae71626016aa5ad58afe537b36ad8a20949cdd0de9ff8b7915778ae4764d75",
     "language_examples/directory_catalog.py": "8710ee7c3e825ca14f8afc411dc787da3d61abd7fb18da52fcab7380a49d7c61",
     "language_examples/environment_config.py": "d996cba59d0b3f5f80e252344582748eeb156672aa9096939ccd8785481fd8f5",
     "language_examples/integer_column_stats.py": "df25e0f47babee9b55521a77b44a0c41b40458dbc0759ff6d34cb6e19a929250",
-    "language_examples/csv_column_stats.py": "1335832ed36764e71c6a273e2e0dc85d8f5270eeacfd293b49e70767c466f183",
-    "language_examples/csv_integer_stream.py": "94fb89ddcfe6cfd0b5312d201fd2decb112fdc6228c53ac769bb60fb71b331d1",
-    "language_examples/csv_column_stats_stream.py": "277fdfbbaa6aab5a48267c40b4993589dc28b1854910277d19a059b6e98a0bef",
+    "language_examples/integer_row_stream.py": "ec1e52f7e15fae170424ea274f3fdfe5ebce67858fc72c2e2acc7307ae46ab78",
+    "language_examples/json_document.py": "1f62f53f284a3959a661a894e28dffc8708f45d100ac4fa0f1b23e6cd867c18c",
+    "language_examples/json_pointer.py": "9dae71626016aa5ad58afe537b36ad8a20949cdd0de9ff8b7915778ae4764d75",
+    "language_examples/json_pointer_batch.py": "7d253999f26fc6f001ecc8136b3a262583c129eb857f9ea35cb3af46baa8094d",
+    "language_examples/json_text.py": "ebea9746f3e8d7ba4facae82293dfb0e7fd9a136158ebbb67e49ff0eb58b3abe",
+    "language_examples/json_tree.py": "731dad7b5be4a00e7ef2155063ec670a099f43892f4deedea5bf340dc8b3a0c6",
+    "language_examples/string_map.py": "06241b28c9969f90770c046dcd5242cb571ff28ed4fee8be735c504979d44e53",
     "language_examples/tcp_json_lines.py": "7bb4dbfe43ce02cc8e2935324355f00760bede7f1151e7a91134cb383e2ec5d3",
     "language_examples/tcp_json_lines_poll.py": "888ca931a15fa44d71dc4b5cc9520318a034d39c81d7a9c8c3e844c3dbcb82fc",
-    "language_examples/string_map.py": "06241b28c9969f90770c046dcd5242cb571ff28ed4fee8be735c504979d44e53",
-    "language_examples/cli_args.py": "0230e7faaf71e4a2007bbacf8c0cb78b1276e348fa3edcaa29f1206bde281617",
-    "language_examples/json_pointer_batch.py": "7d253999f26fc6f001ecc8136b3a262583c129eb857f9ea35cb3af46baa8094d",
-    "language_examples/integer_row_stream.py": "ec1e52f7e15fae170424ea274f3fdfe5ebce67858fc72c2e2acc7307ae46ab78"
+    "language_examples/text_search.py": "19a52b9f8baaa306d06f459646c73e097e89d073bdf7e0e151ffe462d758f7ad",
+    "language_examples/url_codec.py": "f6da21a7afde4587774a59842b7c147051c6651e57ab5ec9084c5373f29a6bcd",
+    "language_examples/utf8_stream.py": "090b02105567b8e8526d489b81512847142297d11b4e2f20220b4560ea9ad0f6"
   },
   "qualification_scope": "Source/type checks at generation only; behavior/ownership/errors require SEMANTICS and runtime evidence"
 }

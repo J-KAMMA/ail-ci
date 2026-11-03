@@ -1,3 +1,29 @@
+## 2026-11-03 -- onelang s11 review fixes: catalog from the twins, compiler change reverted
+
+The reviewer found that the previous commit made an unrequested compiler change and shipped a
+catalog that did not describe its `.py` sources.
+
+`AIL_CURRENT/ail_modules.py` is back to the base rule: a generated `.py` twin does not win over a
+brace `.ail` sibling, so importing that name is the base named refusal.  Three Appendix C builds
+that need the twin beside a brace module went back to the `.ail` source (`integer_quantiles`,
+`config_validate`, `row_reduce_stream_main`) and their lines are listed in
+`AIL_CURRENT/onelang_brace_only.txt`; the Appendix C grep count is 18 and every hit is listed.
+
+`AIL_CURRENT/language_examples/STANDARD_SOURCE_API.json` is regenerated from the `.py` twins by
+the new `tools/standard_source_api.py` (the module list and order are unchanged).  Each row now
+carries the twin bytes, its own non-underscore declarations (two `void` returns read `None`), and
+the actual `ail_chatgpt.py check <twin> --library --interface` result: 7 pass and 19 fail (18
+twins fail the loader because they define classes; `binary_search` alone fails type checking
+because the Python surface types `bytes.startswith` as `bool`).  `source_check_all_passed` is
+false and `test_ail_sdk` pins the exact 19 failing modules.  The SDK still ships every `.ail`
+source and its generated `.py` twin (265 twins, including the 28 catalog dependencies), so its
+tests build the twins.
+
+Tests on the final commit: the 17 Appendix C modules pass (175 s), `test_ail_sdk` 31/31,
+`test_ail_files`, `test_ail_corpus_findings3` and `test_ail_packaging` pass,
+`test_ail_safetynet` 5/5 without a ulimit (S4_generators_gc runs out of memory at 2.5 GB),
+and `tools/update_manifest.py --check` and `tools/standard_source_api.py --check` exit 0.
+
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
 Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`

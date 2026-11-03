@@ -91,7 +91,7 @@ class SdkTests(unittest.TestCase):
         self.assertTrue(marker.is_file())
     def test_relocated_integer_quantiles_expression_extend(self):
         sdk = self.exported(); environment, marker = self.environment()
-        binary = self.build(sdk, environment, sdk / 'language_examples/integer_quantiles.py', 'quantiles')
+        binary = self.build(sdk, environment, sdk / 'language_examples/integer_quantiles.ail', 'quantiles')
         paths = [self.root / 'first 日本.txt', self.root / 'second 😀.txt']
         cases = [([], []), ([3, -2, 3], [7, 0]),
                  ([-(1 << 63), (1 << 63) - 1], [0, -1]),
@@ -116,7 +116,7 @@ class SdkTests(unittest.TestCase):
     def test_relocated_exception_config_application(self):
         from test_ail_exception_values_app import reference
         sdk = self.exported(); environment, marker = self.environment()
-        binary = self.build(sdk, environment, sdk / 'language_examples/config_validate.py', 'config-app')
+        binary = self.build(sdk, environment, sdk / 'language_examples/config_validate.ail', 'config-app')
         path = self.root / 'config 日本.txt'
         for payload in (b'x=2\ny=-3\n', 'x=日本😀'.encode(), b'\xff'):
             path.write_bytes(payload)
@@ -710,7 +710,15 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
     def test_relocated_standard_source_api_inventory(self):
         sdk=self.exported();environment,marker=self.environment()
         catalog=json.loads((sdk/'language_examples/STANDARD_SOURCE_API.json').read_text(encoding='utf8'))
-        self.assertEqual((len(catalog['modules']),catalog['source_check_all_passed']),(26,True))
+        self.assertEqual(len(catalog['modules']),26)
+        self.assertFalse(catalog['source_check_all_passed'])
+        self.assertEqual(sorted(row['module'] for row in catalog['modules']
+                                if row['source_check']['status']!='passed'),
+                         ['binary_search','cli_args','csv_column_stats','csv_column_stats_stream','csv_group',
+                          'csv_stream','csv_table','directory_catalog','environment_config',
+                          'integer_column_stats','integer_row_stream','json_document','json_pointer',
+                          'json_pointer_batch','json_tree','string_map','tcp_json_lines','tcp_json_lines_poll',
+                          'utf8_stream'])
         self.assertEqual(sum(len(row['declared_api']['functions']) for row in catalog["modules"]),74)
         for name,digest in catalog['dependency_pins'].items():
             self.assertEqual(hashlib.sha256((sdk/name).read_bytes()).hexdigest(),digest)
