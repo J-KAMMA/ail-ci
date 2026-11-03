@@ -9,7 +9,9 @@ the unchanged `if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exc
 self-calls to `f__d(..., ail_d + 1)`, and keeps today's wrapper `f(...)` calling
 `f__d(..., ail_depth + 1)`.  Non-selected functions keep the global counter.  Under
 `AIL_BCE_AUDIT=1` the inner function also keeps the old increment/leave and asserts
-`ail_d == ail_depth` right after incrementing.
+`ail_d == ail_depth` right after incrementing.  A user function already owning the generated
+inner symbol `f__d` keeps the global counter (stats reason `inner symbol f__d is taken`), so a
+legal program naming a function `f__d` still builds and runs.
 
 Depth probes (default/force/audit, each compared with the same mode at `AIL_BCE=0`): 49,999 and
 50,000 return normally, 50,001 exits 1 with `recursion depth exceeded`; mutual g/h reaching a

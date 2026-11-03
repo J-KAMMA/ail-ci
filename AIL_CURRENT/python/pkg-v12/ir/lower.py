@@ -263,6 +263,14 @@ class Lowering(TextLowering):
             return 'a try'
         if results and is_list(results[0]):
             return 'list return'
+        # The inner entry point is a generated C symbol (`<sym>__d`). A user function with that
+        # name keeps its own symbol, so the two would clash: leave this function on the global
+        # counter instead.
+        inner = self.cname + '__d'
+        used = set((getattr(self.ctx, 'csym', None) or {}).values())
+        used.update(getattr(self.ctx, 'funcs', None) or {})
+        if inner in used:
+            return 'inner symbol %s is taken' % inner
         info = getattr(self.ctx, 'recursion_info', None) or {}
         scc = (info.get('scc') or {}).get(fn.name)
         if scc is None:
