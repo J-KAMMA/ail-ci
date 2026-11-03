@@ -7,8 +7,8 @@ Reads RESULT_DIR/**/result-*.json (one per task, written by run_task.py). One ta
 tasks, columns are the languages with the AIL columns first, then the best other language for that row and the
 AIL / best ratio (below 1.00 means AIL is better; every metric here is lower-is-better). A program whose stdout
 or exit code differs from the CPython reference is shown as `n/a MISMATCH` and takes no part in best or ratio;
-a failed build is `build failed`. The two AIL columns are `ail` (the .ail source) and `ail-py` (the CPython
-source compiled by AIL); both are compared with the best of c, rust, go, nim and python.
+a failed build is `build failed`. The two AIL columns are `ail` (the annotated Python source `typed.py`) and
+`ail-py` (the plain CPython source compiled by AIL); both are compared with the best of c, rust, go, nim and python.
 """
 import argparse, datetime, json, math, os, sys
 from pathlib import Path

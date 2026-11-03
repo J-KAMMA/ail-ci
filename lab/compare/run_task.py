@@ -4,7 +4,7 @@
     python3 lab/compare/run_task.py --task tree_fold --out result-tree_fold.json
     python3 lab/compare/run_task.py --task chain_relax --smoke --langs ail,c,python   # tiny input, plumbing check
 
-Languages (columns): ail      AIL compiling the task's .ail source (brace syntax) from this checkout
+Languages (columns): ail      AIL compiling the task's annotated Python source (`typed.py`) from this checkout
                      ail-py   AIL compiling the CPython source (`compile --syntax python`) from this checkout
                      c        gcc -O2          rust  rustc -C opt-level=3 (cargo --release level)
                      go       go build         nim   nim c -d:release
@@ -30,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 AIL = REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'
 LANGS = ['ail', 'ail-py', 'c', 'rust', 'go', 'nim', 'python']
-SOURCE = {'ail': 'main.ail', 'ail-py': 'main.py', 'c': 'main.c', 'rust': 'main.rs', 'go': 'main.go',
+SOURCE = {'ail': 'typed.py', 'ail-py': 'main.py', 'c': 'main.c', 'rust': 'main.rs', 'go': 'main.go',
           'nim': 'main.nim', 'python': 'main.py'}
 BUILD_RUNS = 3
 WALL_RUNS = 5
@@ -57,8 +57,9 @@ CURRENT_TASK = None
 def build_cmd(lang, src, out, strict=False):
     if lang in ('ail', 'ail-py'):
         cmd = [sys.executable, '-B', str(AIL), 'compile', str(src), '-o', str(out)]
-        if lang == 'ail-py':
-            cmd[5:5] = ['--syntax', 'python'] + (['--exact-int'] if CURRENT_TASK in EXACT_INT_TASKS else [])
+        cmd[5:5] = ['--syntax', 'python']
+        if lang == 'ail-py' and CURRENT_TASK in EXACT_INT_TASKS:
+            cmd[5:5] = ['--exact-int']
         if strict:
             cmd.insert(5, '--strict')
         return cmd
