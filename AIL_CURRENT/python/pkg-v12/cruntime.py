@@ -29843,6 +29843,21 @@ ORDER.insert(ORDER.index('FLIST') + 1, 'IRFLIST')
 SOURCE['IRFLIST'] = IRFLIST
 REQUIRES['IRFLIST'] = ['FLIST', 'DIE']
 
+# Bounds-check-elision audit (AIL_BCE_AUDIT=1): every check the compiler proved away is emitted as a
+# guard that stops loudly if it would ever have fired. Selected only by the audit build, so the
+# default C and the runtime of every other program are unchanged.
+BCEAUDIT = r'''
+#include <unistd.h>
+static __attribute__((noreturn, noinline, cold)) void ail_bce_audit_fail(const char *fn, int site) {
+    fprintf(stderr, "AIL-BCE-AUDIT: removed check would fire in %s site %d\n", fn, site);
+    fflush(stderr);
+    _exit(86);
+}
+'''
+ORDER.insert(ORDER.index('DIE') + 1, 'BCEAUDIT')
+SOURCE['BCEAUDIT'] = BCEAUDIT
+REQUIRES['BCEAUDIT'] = []
+
 # IR text (stage S4a). Selected only by IR functions that walk a str by character: the character at a
 # known byte offset as a view (the legacy `for c in s` loop's own step, in one always-inlined helper).
 IRSTR = r'''
