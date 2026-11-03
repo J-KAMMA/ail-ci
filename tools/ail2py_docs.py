@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Rewrite the AIL brace-syntax fenced blocks of a Markdown file as Python.
 
-A block is converted when its fence is ``ail`` / ``ail-refused`` or when
-``ail_syntax.detect`` selects the brace front end for its text.  A whole
+A block is converted when its fence is ``ail`` or when ``ail_syntax.detect``
+selects the brace front end for its text.  A ``ail-refused`` block holds programs
+the compiler rejects in their final Python spelling, so it is left as written.  A whole
 program keeps its entry function; a fragment without a ``fn`` declaration is
 wrapped in ``fn main() -> int { ... return 0; }`` for the conversion and the
 wrapper is removed again afterwards.  Converted blocks use the ``python``
@@ -23,7 +24,7 @@ import ail_syntax  # noqa: E402
 
 FENCE = re.compile(r'^```(\S*)\s*$')
 CLOSE = re.compile(r'^```\s*$')
-AIL_FENCES = {'ail', 'ail-refused'}
+AIL_FENCES = {'ail'}
 
 
 def _has_top_level_fn(source):
@@ -44,7 +45,7 @@ def _wrap(source):
     return 'fn main() -> int {\n' + source.rstrip('\n') + '\n    return 0;\n}\n'
 
 
-def _unwrap(text):
+def _unwrap(text, source=''):
     """The body of the generated ``main`` without the entry wrapper and its imports."""
     lines = text.splitlines()
     start = None
@@ -73,11 +74,19 @@ def _unwrap(text):
     for line in lines[:start - 1]:
         if line.startswith('def main(') or line.startswith('if __name__'):
             continue
+        if line.strip() == 'import sys' and 'sys' not in source:
+            continue
         if line.strip() == '' and not head:
             continue
         head.append(line)
     while head and head[-1] == '':
         head.pop()
+    while body and body[-1] == '':
+        body.pop()
+    if body and body[-1] == 'return 0':
+        body.pop()
+    while body and body[-1] == '':
+        body.pop()
     result = head + ([''] if head and body else []) + body
     return '\n'.join(result).rstrip('\n') + '\n'
 
@@ -85,7 +94,7 @@ def _unwrap(text):
 def convert_block(source):
     """Return Python text for one fenced block, or raise if it cannot be converted."""
     if _is_fragment(source):
-        return _unwrap(ail2py.convert(_wrap(source)))
+        return _unwrap(ail2py.convert(_wrap(source)), source)
     return ail2py.convert(source)
 
 

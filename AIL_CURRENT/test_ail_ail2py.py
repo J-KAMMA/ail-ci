@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 CLI = str(ROOT / 'ail_chatgpt.py')
 TOOL = str(REPO / 'tools' / 'ail2py.py')
+DOCS_TOOL = str(REPO / 'tools' / 'ail2py_docs.py')
 HAVE_CC = shutil.which(os.environ.get('PIPE_CC') or 'gcc') is not None
 
 STRUCT_IMPL = '''
@@ -400,6 +401,23 @@ class ConversionTests(unittest.TestCase):
                 got = run([sys.executable, str(output)])
                 self.assertEqual(got.returncode, wanted.returncode)
                 self.assertEqual(got.stdout, wanted.stdout)
+
+
+
+class DocsConversionTests(unittest.TestCase):
+    def test_fragments_lose_the_synthetic_entry_and_refused_blocks_stay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'doc.md'
+            path.write_text(
+                '```ail\nlet n = 2;\nprint(n * 3);\n```\n\n'
+                '```ail\nlet n = 4;\nprint(n + 1);\nreturn 0;\n```\n\n'
+                '```ail-refused\nprint(tuple[int, ...])\n```\n', encoding='utf-8')
+            result = run([sys.executable, '-B', DOCS_TOOL, str(path)])
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            text = path.read_text(encoding='utf-8')
+            self.assertIn('```python\nn = 2\nprint(n * 3)\n```', text)
+            self.assertIn('```python\nn = 4\nprint(n + 1)\nreturn 0\n```', text)
+            self.assertIn('```ail-refused\nprint(tuple[int, ...])\n```', text)
 
 
 if __name__ == '__main__':
