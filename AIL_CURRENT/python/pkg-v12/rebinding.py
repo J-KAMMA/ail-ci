@@ -240,6 +240,10 @@ def _branch_nonname_binds(node, name):
         if isinstance(current, ast.alias):
             if (current.asname or current.name.split('.')[0]) == name:
                 return True
+        if isinstance(current, (ast.MatchAs, ast.MatchStar)) and current.name == name:
+            return True
+        if isinstance(current, ast.MatchMapping) and current.rest == name:
+            return True
         stack.extend(ast.iter_child_nodes(current))
     return False
 
