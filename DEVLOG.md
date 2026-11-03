@@ -1,3 +1,37 @@
+## 2026-11-03 -- rel-rterr finish (job-relrterr3b-11040718): applied relrterr3 work on current integ and re-verified
+
+Cherry-picked, in order, the work commits after `job relrterr3: export of staging:integ + task`
+(`job relrterr`, `job relrterr2` verify and fix, `job relrterr3` finish, and its `fix: uncommitted
+edits`), skipping the worker report.  The conflicts were generated manifest rows and DEVLOG order;
+`tools/update_manifest.py` regenerated the rows and `--check` passes.  This also brings the review's
+two defects: `//` by zero is now `integer division or modulo by zero` and recursion is
+`maximum recursion depth exceeded`, both equal to CPython's last traceback line.
+
+Probes (`/tmp/probes`, 25 programs, both builds): list/str/bytes/tuple index (positive, negative,
+empty, int64), pop through a variable and an alias, dict keys through a variable, argument, list
+item, attribute and dict value, `//`, `%` and float `/` through locals, argument, list item,
+attribute and dict value, recursion, explicit `raise`, a caught `IndexError`, leading blank lines,
+and a list reached through an attribute.  Every one matches CPython's stdout and exit status (or is
+the known `AIL_UNIFIED_FORCE=1` recursion segfault, which the test skips with a comment); the
+default typed build adds `Name: message` plus `  raised near file:line`, the general path keeps its
+existing text without a line.
+
+Binary sizes of the ten `lab/compare/src/*/main.ail` inputs against `737c2a2` (before -> after):
+berth_sim 64864 -> 73296, chain_relax 34888 -> 39224, echo_pack 35896 -> 40232, ledger_bin 61016
+-> 69360, rail_transfer 64936 -> 81560, scar_life 40432 -> 48632, tally_lang 74648 -> 95280,
+term_rank 74392 -> 82816, ticket_audit 104248 -> 124880, tree_fold 86336 -> 102960 (+4,336 to
++20,632 bytes, the expected per-statement site string).  The compiler merges repeated `file:line`
+literals (tally_lang has 188 unique sites and no duplicate constant in the binary), so no per-line
+dedup was added.  Instruction counts cannot be measured here: `tools/icount.c` builds, but
+`perf_event_open` returns EPERM (`perf_event_paranoid=4`) and valgrind is not installed.
+
+Gate modules, the changed expectation modules, `test_ail_bigint`, `test_ail_build_reports`,
+`test_ail_debug_flush`, the two pin modules, `test_ail_build_cache`, `test_ail_fe_cache`,
+`test_ail_c_export`, `test_c_api_bridge`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (the ASan and `S4_generators_gc` cases only fail under the 1.5 GB
+virtual-memory cap).  Message expectations updated by this change remain the ones listed in the
+three rel-rterr entries below.
+
 ## 2026-11-03 -- rel-rterr follow-up review: C API tail, cache key and build-report baseline
 
 Fixed the three review defects in the cherry-picked runtime-error work.
