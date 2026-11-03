@@ -3,18 +3,22 @@
 Two exact-shape rewrites in `pyfunc._codegen_idioms`, applied once to the final generated C
 (`to_c`), keep every bounds check:
 
-* the `c = 0; v = x; while v != 0: c += v & 1; v >>= 1` idiom emits
-  `if (x >= 0) return __builtin_popcountll(x)` and keeps the original loop for negative values
-  (which do not terminate in CPython or AIL);
+* the `c = 0; v = x; while v != 0: c += v & 1; v >>= 1` idiom emits a branch-free SWAR popcount
+  for `x >= 0` and keeps the original loop for negative values (which do not terminate in CPython
+  or AIL). SWAR rather than `__builtin_popcountll`: on this runner's generic x86-64 target gcc
+  lowers the builtin to a libgcc call (`__popcountdi2`), which cost 40 bytes of binary; SWAR is
+  inline and keeps `tally_lang` at its 74,648-byte baseline. The same rewrite is now applied to
+  `c_source_regions` as well as `c_units`, so `--debug-dir` keeps `popcnt`/`ev` mapped;
 * two adjacent `ail_list_span_get` reads of the same index on two numeric fields of one struct
   share one fast-path bounds check when their counts match, and fall back to the two original
   checked reads otherwise.
 
 Re-measured on the compare-lab perf cases with callgrind (valgrind 3.22 extracted from the
 Ubuntu package under /tmp; this runner has no valgrind and denies `perf_event_open`) against base
-`8c2374a`. Only `tally_lang` changes: 21,658,123,783 -> 20,936,425,206 instructions (-3.332%),
-binary 74,648 -> 74,688 bytes, RSS 1,496 -> 1,496 KiB. Every other task is instruction- and
-binary-byte-identical; their RSS moves only within run noise.
+`8c2374a`. Only `tally_lang` changes: 21,658,122,794 -> 20,933,098,586 instructions (-3.348%),
+binary 74,648 -> 74,648 bytes, RSS 1,496 -> 1,496 KiB. Every other task is instruction- and
+binary-byte-identical (its generated C is byte-for-byte unchanged); their RSS moves only within
+run noise.
 
 | task | instr before | instr after | delta | binary before -> after | RSS KiB before -> after | compile s before -> after |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -24,23 +28,27 @@ binary-byte-identical; their RSS moves only within run noise.
 | ledger_bin | 5,390,483,239 | 5,390,483,239 | +0.000% | 61,016 -> 61,016 | 337,616 -> 340,476 | 4.49 -> 4.49 |
 | rail_transfer | 387,938,152 | 387,938,152 | +0.000% | 64,936 -> 64,936 | 28,748 -> 28,824 | 3.53 -> 3.49 |
 | scar_life | 356,750,942,696 | 356,750,942,696 | +0.000% | 40,432 -> 40,432 | 17,532 -> 17,532 | 3.03 -> 2.89 |
-| tally_lang | 21,658,123,783 | 20,936,425,206 | -3.332% | 74,648 -> 74,688 | 1,496 -> 1,496 | 4.52 -> 4.41 |
+| tally_lang | 21,658,122,794 | 20,933,098,586 | -3.348% | 74,648 -> 74,648 | 1,496 -> 1,496 | 4.378 -> 4.380 |
 | term_rank | 15,990,360,094 | 15,990,360,094 | +0.000% | 74,392 -> 74,392 | 161,232 -> 162,140 | 3.86 -> 3.86 |
 | ticket_audit | 13,095,520,634 | 13,095,520,634 | +0.000% | 104,248 -> 104,248 | 254,688 -> 254,688 | 5.74 -> 5.55 |
 | tree_fold | 10,362,321,298 | 10,362,321,298 | +0.000% | 86,288 -> 86,288 | 441,236 -> 440,212 | 6.39 -> 6.00 |
 
 The non-`tally_lang` compile times were sampled while two measurement workers shared the runner
 and their generated C is identical, so those few-percent moves are load noise; an alternating
-five-pair build of `tally_lang` alone measured 4.381 s before and 4.330 s after. RSS is the median
+three-pair build of `tally_lang` alone measured 4.378 s before and 4.380 s after. RSS is the median
 of three timed runs.
 
-`test_ail_span_cache`, `test_ail_numeric_loops`, `test_ail_safetynet`, `test_ail_files` and
-`test_ail_corpus_findings3` pass (31 tests, 1 skipped); all 75 public/hidden tally cases plus its
-perf case (76) match CPython. Probes in `/tmp/probes` match CPython on both the default and
-unified builds for empty lists, the last index, one past the end (still `IndexError`), lists of
-unequal length in one loop, negative list indices, and popcount through an argument, a list item,
-an attribute and a dict value; negative popcount times out identically in CPython and both
-builds, so the retained fallback is unchanged.
+`test_ail_span_cache`, `test_ail_numeric_loops`, `test_ail_native_diagnostics`,
+`test_ail_build_reports`, `test_ail_nested_lists`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; all 75 public/hidden tally cases plus its perf case (76) match
+CPython. Probes in `/tmp/probes` and `/tmp/rprobes` match CPython on both the default and unified
+builds for empty lists, the last index, one past the end (still `IndexError`), lists of unequal
+length in one loop, negative list indices, aliasing and mutation, and popcount through an
+argument, a list item, an attribute and a dict value, including `2**63 - 1` and alternating-bit
+masks; negative popcount times out identically in CPython and both builds, so the retained
+fallback is unchanged. `--debug-dir` maps every function in the fixed `tally_lang` C, including
+`popcnt` and `ev`; on the unified build these two were already unmapped at base because that
+build takes the general (boxed) path.
 
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
