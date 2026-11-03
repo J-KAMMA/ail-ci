@@ -1,3 +1,24 @@
+## 2026-11-03 -- onelang s8 batch 3 finish: convert the rest of the Appendix C literals safely
+
+Finished the batch after the first run's review hung.  `tools/ail2py_tests.py` now requires the
+converter's Python text to emit byte-identical C for every candidate literal (not only the
+multi-function/struct ones), so a literal that changes the typed/general path or a refusal
+fixture stays as brace text.  Converted 7 more literals this run (2 `test_ail_lang_gaps`, 1 each
+in `test_ail_callable_values`, `test_ail_int_dict_set`, `test_ail_struct_list_objects`, and 2 in
+`test_ail_type_details`), for 50 conversions total.
+
+`fn main(` in the 33 Appendix C modules falls 144 -> 94; `AIL_CURRENT/onelang_brace_only.txt` has
+exactly 94 rows.  All 33 pass with `tools/par_check.py -j 2`; `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` and `test_ail_ail2py` pass.
+
+Five literals were reverted and reported as meaning differences (the first run converted them):
+`test_ail_build_cache` lines 26/27 (the cache counts a third compile), `test_ail_builtin_api`
+line 90 (the test concatenates a brace fragment, so the converted suffix mixes syntax),
+`test_ail_builtin_contracts` line 26 and `test_ail_nested_lists` line 129 (their oracle path runs
+`ail_syntax.translate` on the generated source, which needs brace text).  No expected output was
+edited; only source literals, imports/translate pass-throughs, file names and the manifest pins
+changed.
+
 ## 2026-11-03 -- onelang s8: embedded brace sources in test modules, batch 3 of 4
 
 Added `tools/ail2py_tests.py`, which finds brace declarations in a test module's string literals,

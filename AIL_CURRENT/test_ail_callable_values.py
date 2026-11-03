@@ -387,7 +387,14 @@ def main() -> int:
         )
         for index, body in enumerate(extra):
             with self.subTest(body=body):
-                path = self.write(f'extra{index}.ail', definitions + body + 'fn main()->int {return 0;}')
+                path = self.write(f'extra{index}.ail', definitions + body + """import sys
+
+def main() -> int:
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""")
                 result = self.command('compile', path, '-o', self.root / f'extra{index}')
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn(b'Traceback', result.stderr)

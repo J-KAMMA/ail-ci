@@ -164,85 +164,111 @@ def main():
 main()
 """
 
-SETS_AIL = """
-struct Bag { s: set[int]; t: set[str]; xs: list[int]; ws: list[str]; fs: list[float]; d: dict[str, int]; }
-fn show(xs: list[int]) -> str {
-    let parts: list[str] = [];
-    for x in xs { parts.append(str(x)); }
-    return ",".join(parts);
-}
-fn shows(s: set[int]) -> str { let l = sorted(s); return show(l); }
-fn showt(s: set[str]) -> str { let l = sorted(s); return ",".join(l); }
-fn field_hits(b: Bag, x: int, w: str) -> int {
-    let n = b.xs.count(x) + b.ws.count(w);
-    if x in b.xs { n += 10; }
-    if w not in b.ws { n += 100; }
-    return n;
-}
-fn main() {
-    let a: set[int] = {5, 1, 3};
-    let b: set[int] = {3, 4};
-    let c: set[int] = {9};
-    print(shows(a.union(b)), shows(a.union(b, c)), shows(a.intersection(b)), shows(a.difference(b)), shows(a.symmetric_difference(b)));
-    print(a.issubset(b), a.issuperset({1, 3}), a.isdisjoint(b), a.isdisjoint(c), {1, 3}.issubset(a));
-    let a2: set[int] = {3, 1, 5};
-    print(a == a2, a != a2, a == b, a != b, a <= a2, a < a2, a < a.union(c), a > {1}, a >= b);
-    let e: set[int] = set();
-    print(e == set(), e <= a, e < a, a > e, e.isdisjoint(a));
-    let u: set[int] = {1, 2, 3, 4};
-    u.intersection_update({2, 3, 7});
-    print(shows(u));
-    u.difference_update({3});
-    print(shows(u));
-    u.symmetric_difference_update({2, 8});
-    print(shows(u));
-    let one: set[int] = {42};
-    print(one.pop(), len(one));
-    try { one.pop(); print("no"); } except KeyError { print("empty pop"); }
-    let many: set[int] = {4, 8, 15, 16};
-    let popped: list[int] = [];
-    while len(many) > 0 { popped.append(many.pop()); }
-    popped.sort();
-    print(show(popped));
-    let l = list(a);
-    l.sort();
-    print(show(l), len(list(e)));
-    let s1: set[str] = {"b", "a"};
-    let s2: set[str] = {"a", "c"};
-    print(showt(s1.union(s2)), showt(s1 & s2), s1 == {"a", "b"}, s1 <= s2, s1.isdisjoint({"z"}), s1.issuperset({"a"}));
-    let sone: set[str] = {"zz"};
-    print(sone.pop(), len(sone));
-    let words = list(s1);
-    words.sort();
-    print(",".join(words));
-    let d: dict[int, int] = {3: 30, 1: 10, 2: 20};
-    let dk = list(d);
-    let dk2 = list(d.keys());
-    let dv = list(d.values());
-    print(show(dk), show(dk2), show(dv), d.get(1, -1), d.get(9, -1));
-    let ds: dict[str, str] = {"x": "1", "y": "2"};
-    print(",".join(list(ds)), ",".join(list(ds.values())));
-    let df: dict[str, float] = {"p": 1.5};
-    let fv = list(df.values());
-    print(fv[0]);
-    let chars = list("héllo");
-    print(len(chars), chars[1], len(list("")) == 0);
-    let bag = Bag({1, 2}, {"p", "q"}, [4, 5, 5, 6], ["a", "b", "a"], [1.5, 2.0, 1.5], {"k": 1});
-    print(5 in bag.xs, 7 in bag.xs, 7 not in bag.xs, bag.xs.count(5), bag.xs.count(9));
-    print("a" in bag.ws, "z" in bag.ws, "z" not in bag.ws, bag.ws.count("a"), bag.fs.count(1.5), bag.fs.count(2));
-    print(bag.s == {2, 1}, bag.s.issubset(a), bag.t.isdisjoint(s1), shows(bag.s | a));
-    print(field_hits(bag, 5, "a"), field_hits(bag, 9, "z"));
-    let ok12: set[int] = {1, 2};
-    print(bag.s.pop() in ok12, len(bag.s));
-    let un = {7, 3};
-    let un2 = {3, 7};
-    print(un == un2, un != un2, un <= un2, un.isdisjoint({1}), len(un.union(un2)));
-    let k = un.pop();
-    print(k == 3 or k == 7, len(un));
-    let r = list(range(3));
-    print(show(r), show(list(r)));
-    return 0;
-}
+SETS_AIL = """import sys
+
+class Bag:
+
+    def __init__(self, s: set[int], t: set[str], xs: list[int], ws: list[str], fs: list[float], d: dict[str, int]):
+        self.s = s
+        self.t = t
+        self.xs = xs
+        self.ws = ws
+        self.fs = fs
+        self.d = d
+
+def show(xs: list[int]) -> str:
+    parts: list[str] = []
+    for x in xs:
+        parts.append(str(x))
+    return ','.join(parts)
+
+def shows(s: set[int]) -> str:
+    l = sorted(s)
+    return show(l)
+
+def showt(s: set[str]) -> str:
+    l = sorted(s)
+    return ','.join(l)
+
+def field_hits(b: Bag, x: int, w: str) -> int:
+    n = b.xs.count(x) + b.ws.count(w)
+    if x in b.xs:
+        n += 10
+    if w not in b.ws:
+        n += 100
+    return n
+
+def main() -> int:
+    a: set[int] = {5, 1, 3}
+    b: set[int] = {3, 4}
+    c: set[int] = {9}
+    print(shows(a.union(b)), shows(a.union(b, c)), shows(a.intersection(b)), shows(a.difference(b)), shows(a.symmetric_difference(b)))
+    print(a.issubset(b), a.issuperset({1, 3}), a.isdisjoint(b), a.isdisjoint(c), {1, 3}.issubset(a))
+    a2: set[int] = {3, 1, 5}
+    print(a == a2, a != a2, a == b, a != b, a <= a2, a < a2, a < a.union(c), a > {1}, a >= b)
+    e: set[int] = set()
+    print(e == set(), e <= a, e < a, a > e, e.isdisjoint(a))
+    u: set[int] = {1, 2, 3, 4}
+    u.intersection_update({2, 3, 7})
+    print(shows(u))
+    u.difference_update({3})
+    print(shows(u))
+    u.symmetric_difference_update({2, 8})
+    print(shows(u))
+    one: set[int] = {42}
+    print(one.pop(), len(one))
+    try:
+        one.pop()
+        print('no')
+    except KeyError:
+        print('empty pop')
+    many: set[int] = {4, 8, 15, 16}
+    popped: list[int] = []
+    while len(many) > 0:
+        popped.append(many.pop())
+    popped.sort()
+    print(show(popped))
+    l = list(a)
+    l.sort()
+    print(show(l), len(list(e)))
+    s1: set[str] = {'b', 'a'}
+    s2: set[str] = {'a', 'c'}
+    print(showt(s1.union(s2)), showt(s1 & s2), s1 == {'a', 'b'}, s1 <= s2, s1.isdisjoint({'z'}), s1.issuperset({'a'}))
+    sone: set[str] = {'zz'}
+    print(sone.pop(), len(sone))
+    words = list(s1)
+    words.sort()
+    print(','.join(words))
+    d: dict[int, int] = {3: 30, 1: 10, 2: 20}
+    dk = list(d)
+    dk2 = list(d.keys())
+    dv = list(d.values())
+    print(show(dk), show(dk2), show(dv), d.get(1, -1), d.get(9, -1))
+    ds: dict[str, str] = {'x': '1', 'y': '2'}
+    print(','.join(list(ds)), ','.join(list(ds.values())))
+    df: dict[str, float] = {'p': 1.5}
+    fv = list(df.values())
+    print(fv[0])
+    chars = list('héllo')
+    print(len(chars), chars[1], len(list('')) == 0)
+    bag = Bag({1, 2}, {'p', 'q'}, [4, 5, 5, 6], ['a', 'b', 'a'], [1.5, 2.0, 1.5], {'k': 1})
+    print(5 in bag.xs, 7 in bag.xs, 7 not in bag.xs, bag.xs.count(5), bag.xs.count(9))
+    print('a' in bag.ws, 'z' in bag.ws, 'z' not in bag.ws, bag.ws.count('a'), bag.fs.count(1.5), bag.fs.count(2))
+    print(bag.s == {2, 1}, bag.s.issubset(a), bag.t.isdisjoint(s1), shows(bag.s | a))
+    print(field_hits(bag, 5, 'a'), field_hits(bag, 9, 'z'))
+    ok12: set[int] = {1, 2}
+    print(bag.s.pop() in ok12, len(bag.s))
+    un = {7, 3}
+    un2 = {3, 7}
+    print(un == un2, un != un2, un <= un2, un.isdisjoint({1}), len(un.union(un2)))
+    k = un.pop()
+    print(k == 3 or k == 7, len(un))
+    r = list(range(3))
+    print(show(r), show(list(r)))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 SETS_PY = """
@@ -333,37 +359,65 @@ def main():
 main()
 """
 
-ORDER_AIL = """
-fn f(d: dict[int, int], x: int) -> int { return len(d) * 100 + x; }
-fn g(xs: list[int], x: int) -> int { return len(xs) * 100 + x; }
-fn h(s: set[int], x: int) -> int { return len(s) * 100 + x; }
-fn w(ws: list[str], x: str) -> int { return len(ws) * 100 + len(x); }
-fn sd(d: dict[str, int], x: int) -> int { return len(d) * 100 + x; }
-fn fl(xs: list[float], x: float) -> float { return float(len(xs)) * 100.0 + x; }
-struct Box { d: dict[int, int]; xs: list[int]; ws: list[str]; fs: list[float]; s: set[str]; }
-fn reset(b: Box) -> int { b.d = {}; return 7; }
-fn ss(s: set[str], x: str) -> int { return len(s) * 100 + len(x); }
-fn order_local() -> int {
-    let d: dict[int, int] = {1: 10, 3: 30, 5: 50};
-    return f(d, d.pop(3)) + f(d, d.pop(5, 0)) * 1000;
-}
-fn main() {
-    let d: dict[int, int] = {1: 10, 3: 30};
-    print(f(d, d.pop(3)), len(d));
-    let xs = [1, 2, 3];
-    print(g(xs, xs.pop()), len(xs));
-    let s: set[int] = {7};
-    print(h(s, s.pop()), len(s));
-    let ws = ["a", "bb"];
-    print(w(ws, ws.pop()), len(ws));
-    let e: dict[str, int] = {"a": 1, "b": 2};
-    print(sd(e, e.pop("a")));
-    let bx = Box({1: 1, 2: 2}, [1, 2, 3], ["x", "yy"], [1.5, 2.5], {"q"});
-    print(f(bx.d, bx.d.pop(1)), g(bx.xs, bx.xs.pop()), w(bx.ws, bx.ws.pop()), fl(bx.fs, bx.fs.pop()), ss(bx.s, bx.s.pop()));
-    print(f(bx.d, reset(bx)), len(bx.d));
-    print(order_local());
-    return 0;
-}
+ORDER_AIL = """import sys
+
+def f(d: dict[int, int], x: int) -> int:
+    return len(d) * 100 + x
+
+def g(xs: list[int], x: int) -> int:
+    return len(xs) * 100 + x
+
+def h(s: set[int], x: int) -> int:
+    return len(s) * 100 + x
+
+def w(ws: list[str], x: str) -> int:
+    return len(ws) * 100 + len(x)
+
+def sd(d: dict[str, int], x: int) -> int:
+    return len(d) * 100 + x
+
+def fl(xs: list[float], x: float) -> float:
+    return float(len(xs)) * 100.0 + x
+
+class Box:
+
+    def __init__(self, d: dict[int, int], xs: list[int], ws: list[str], fs: list[float], s: set[str]):
+        self.d = d
+        self.xs = xs
+        self.ws = ws
+        self.fs = fs
+        self.s = s
+
+def reset(b: Box) -> int:
+    b.d = {}
+    return 7
+
+def ss(s: set[str], x: str) -> int:
+    return len(s) * 100 + len(x)
+
+def order_local() -> int:
+    d: dict[int, int] = {1: 10, 3: 30, 5: 50}
+    return f(d, d.pop(3)) + f(d, d.pop(5, 0)) * 1000
+
+def main() -> int:
+    d: dict[int, int] = {1: 10, 3: 30}
+    print(f(d, d.pop(3)), len(d))
+    xs = [1, 2, 3]
+    print(g(xs, xs.pop()), len(xs))
+    s: set[int] = {7}
+    print(h(s, s.pop()), len(s))
+    ws = ['a', 'bb']
+    print(w(ws, ws.pop()), len(ws))
+    e: dict[str, int] = {'a': 1, 'b': 2}
+    print(sd(e, e.pop('a')))
+    bx = Box({1: 1, 2: 2}, [1, 2, 3], ['x', 'yy'], [1.5, 2.5], {'q'})
+    print(f(bx.d, bx.d.pop(1)), g(bx.xs, bx.xs.pop()), w(bx.ws, bx.ws.pop()), fl(bx.fs, bx.fs.pop()), ss(bx.s, bx.s.pop()))
+    print(f(bx.d, reset(bx)), len(bx.d))
+    print(order_local())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 ORDER_PY = """

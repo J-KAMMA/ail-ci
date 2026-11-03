@@ -104,8 +104,22 @@ class TypeDetailsTests(unittest.TestCase):
                  ('fn main()->int {return missing(1);}', (), 1),
                  ('fn f()->int {let ignored=1;} fn main()->int {return f();}', (), 1),
                  ('fn main()->int {return 1 + * 2;}', (), 1),
-                 ('fn main()->int {return 0;}', ('--symbol', 'main'), 2),
-                 ('fn main()->int {return 0;}', (), 0)]
+                 ("""import sys
+
+def main() -> int:
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", ('--symbol', 'main'), 2),
+                 ("""import sys
+
+def main() -> int:
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", (), 0)]
         for text, args, expected_status in cases:
             with self.subTest(text=text):
                 status, report = self.check(self.source(text), *args)

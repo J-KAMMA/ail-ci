@@ -96,11 +96,7 @@ def convert_module(path):
         except Exception as exc:  # a refusal fixture or a source assembled at run time
             kept.append((token.start[0], str(exc).splitlines()[0], value))
             continue
-        verifiable = (ail2py._has_entry_main(value)
-                      and (len(re.findall(r'\bfn\s+[A-Za-z_]\w*', value)) > 1
-                           or re.search(r'\b(?:struct|impl)\s+[A-Za-z_]\w*', value)
-                           or re.search(r'(?m)^\s*use\s+', value)))
-        if verifiable and not same_c(value, converted):
+        if not same_c(value, converted):
             kept.append((token.start[0], 'C differs', value))
             continue
         edits.append((absolute(token.start), absolute(token.end), quote(converted)))

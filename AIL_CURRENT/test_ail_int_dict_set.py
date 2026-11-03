@@ -363,27 +363,48 @@ def main():
 main()
 """
 
-EXTRA = """
-struct Bag { s: set[int]; d: dict[int, int]; }
-fn count(s: set[int]) -> int { return len(s); }
-fn pick() -> set[int] { return {4, 2, 4}; }
-fn none() -> dict[int, int] { return {}; }
-fn twice(n: int) -> dict[int, int] { let d: dict[int, int] = {1: n}; d[2] = n * 2; return d; }
-fn strs() -> set[str] { return set(["x", "y", "x"]); }
-fn main() {
-    print(count(set()), count({7, 8}), count(pick()), len(none()), twice(5)[2], len(strs()));
-    let b = Bag({1, 2}, twice(3));
-    b.s |= pick();
-    b.d = none();
-    print(len(b.s), len(b.d));
-    let fromr: set[int] = set([1, 2, 2]);
-    let xs = [3, 3, 1];
-    print(len(fromr), len(set(xs)));
-    let q: set[int] = set(xs);
-    q &= {3};
-    q ^= {9, 3};
-    print(len(q), 9 in q, 3 in q);
-}
+EXTRA = """import sys
+
+class Bag:
+
+    def __init__(self, s: set[int], d: dict[int, int]):
+        self.s = s
+        self.d = d
+
+def count(s: set[int]) -> int:
+    return len(s)
+
+def pick() -> set[int]:
+    return {4, 2, 4}
+
+def none() -> dict[int, int]:
+    return {}
+
+def twice(n: int) -> dict[int, int]:
+    d: dict[int, int] = {1: n}
+    d[2] = n * 2
+    return d
+
+def strs() -> set[str]:
+    return set(['x', 'y', 'x'])
+
+def main() -> int:
+    print(count(set()), count({7, 8}), count(pick()), len(none()), twice(5)[2], len(strs()))
+    b = Bag({1, 2}, twice(3))
+    b.s |= pick()
+    b.d = none()
+    print(len(b.s), len(b.d))
+    fromr: set[int] = set([1, 2, 2])
+    xs = [3, 3, 1]
+    print(len(fromr), len(set(xs)))
+    q: set[int] = set(xs)
+    q &= {3}
+    q ^= {9, 3}
+    print(len(q), 9 in q, 3 in q)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 

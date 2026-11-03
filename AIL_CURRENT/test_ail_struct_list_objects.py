@@ -183,7 +183,15 @@ class StructListObjectTests(unittest.TestCase):
         self.refused('missing', 'fn main() -> int { let rows = wrapped(b"", 1); print(len(rows)); return 0; }',
                      objects[1:])
         self.refused('scalar', 'fn main() -> int { echo([1]); return 0; }', objects)
-        self.refused('shadow', 'fn main() -> int { let Row = 1; return Row; }', objects)
+        self.refused('shadow', """import sys
+
+def main() -> int:
+    Row = 1
+    return Row
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", objects)
         self.refused('other', '''struct Other { n: int; weight: float; label: str; data: bytes; }
 fn main() -> int { let rows = [Other(1, 1.0, "", b"")]; echo(rows); return 0; }''', objects)
         duplicate = self.relocate(self.ail_build('duplicate',
