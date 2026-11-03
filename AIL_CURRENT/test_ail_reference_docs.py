@@ -92,20 +92,30 @@ class ReferenceDocs(unittest.TestCase):
                 src.write_text(body, encoding='utf-8')
                 exe = root / 'example'
                 env = dict(os.environ, AIL_PATH=str(HERE / 'language_examples'))
+                extra = []
+                args = header(body, 'args') or []
+                if 'from byte_search_core import *' in body:
+                    native = root / 'byte_native.o'
+                    built = subprocess.run([sys.executable, '-B', str(HERE / 'ail_chatgpt.py'), 'compile-c',
+                                            str(HERE / 'language_examples/byte_search.c'), '--interface',
+                                            str(HERE / 'language_examples/byte_search.json'), '-o', str(native)],
+                                           cwd=root, env=env, capture_output=True, text=True, timeout=300)
+                    self.assertEqual(built.returncode, 0, '%s object did not build:\n%s%s'
+                                     % (line, built.stdout[-1500:], built.stderr[-1500:]))
+                    (root / 'input.bin').write_bytes(b'abc\x00def')
+                    extra = ['--object', str(native)]
+                    args = ['input.bin']
                 proc = subprocess.run([sys.executable, '-B', str(HERE / 'ail_chatgpt.py'), 'compile',
-                                       str(src), '-o', str(exe)], cwd=root, env=env,
+                                       str(src), *extra, '-o', str(exe)], cwd=root, env=env,
                                       capture_output=True, text=True, timeout=300)
                 if proc.returncode != 0:
                     message = proc.stdout + proc.stderr
-                    if 'written in the brace syntax' in message:
-                        self.skipTest('%s imports a module that is still written in the brace syntax' % line)
                     if 'define `make` yourself' in message or 'define `number_batch` yourself' in message:
                         self.skipTest('%s uses a name supplied by an object file' % line)
                 self.assertEqual(proc.returncode, 0, '%s did not compile:\n%s%s'
                                  % (line, proc.stdout[-1500:], proc.stderr[-1500:]))
                 if any(row.strip() == '# run: no' for row in body.splitlines()[:4]):
                     continue
-                args = header(body, 'args') or []
                 want_exit = int((header(body, 'exit') or ['0'])[0])
                 run = subprocess.run([str(exe)] + args, cwd=root, capture_output=True,
                                      timeout=60, input=b'')

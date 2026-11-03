@@ -177,9 +177,9 @@ Callable[[exception],exception]とCallable[[list[exception]],list[exception]]で
 
 ## 契約: requires と ensures（2026-10-11）
 
-関数本文の先頭に、入口の条件を`assert 条件, 'requires failed in 関数名: 条件'`で、出口の条件を戻り値`_ail_result`への`assert`で書けます。
-入口の`assert`は呼び出し時に、出口の`assert`はすべての`return`の直前（戻り値なしの関数は本文の末尾でも）に検査します。
-`_ail_result`は戻り値です。同名のローカル変数があっても、契約の中では戻り値を指します。
+関数本文の入口に、入口の条件を`assert 条件, 'requires failed in 関数名: 条件'`で、出口に戻り値を保持する変数`_ail_result`への`assert`を`return`の前に書けます。
+入口の`assert`は呼び出し時に、出口の`assert`は`return`の直前に実行されます。
+`_ail_result`はこの例で戻り値を保持するローカル変数で、自動的に戻り値を指す特別な名前ではありません。同じ名前の別の変数を検査するときは、その値を代入してから`assert`します。
 
 ```python
 def isqrt(n: int) -> int:
@@ -193,9 +193,9 @@ def isqrt(n: int) -> int:
     return _ail_result
 ```
 
-違反すると、stderrに`requires failed in isqrt: n >= 0`のように関数名と条件を出し、終了1で止まります（tryでは捕捉しません）。
-契約は本文の最初の文としてだけ書けます。途中・ブロックの中・`requires`での`result`・戻り値なしの関数の`result`はコンパイル時に拒否します。
-メソッドでも使え、メッセージの関数名は`Account.withdraw`のようになります。
+違反すると`AssertionError`になり、`requires failed in isqrt: n >= 0`のように関数名と条件をメッセージに出します。未捕捉なら終了1で止まります。
+`assert`は通常の文なので`try`/`except AssertionError`で捕捉でき、本文の途中や`if`の中にも書けます。契約を最初の文に限る規則や、`result`を戻り値に自動変換する規則はありません。
+メソッドでも使え、メッセージの関数名は`Account.withdraw`のようにします。
 
 ## 他のOS・CPU向けにビルドする（2026-10-11）
 
@@ -393,8 +393,35 @@ tcp_file_exchange 127.0.0.1 9000 input.bin output.bin 8192
 from ail import current_dir, get_env
 import sys
 
+def parse_int64_text(text: str) -> int:
+    body = text.strip('\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000')
+    accumulator: int = 0
+    first: int = 1
+    negative: int = 0
+    digits: int = 0
+    last_limit: int = 7
+    for c in body:
+        if first and (c == '+' or c == '-'):
+            if c == '-':
+                negative = 1
+                last_limit = 8
+        else:
+            digit: int = ord(c) - 48
+            if digit < 0 or digit > 9:
+                raise ValueError
+            if accumulator < -922337203685477580 or (accumulator == -922337203685477580 and digit > last_limit):
+                raise ValueError
+            accumulator = accumulator * 10 - digit
+            digits = 1
+        first = 0
+    if not digits:
+        raise ValueError
+    if negative:
+        return accumulator
+    return -accumulator
+
 def env_int(name: str, default: int) -> int:
-    return int(get_env(name, str(default)))
+    return parse_int64_text(get_env(name, str(default)))
 
 def env_bool(name: str, default: int) -> int:
     if default != 0 and default != 1:
@@ -421,8 +448,8 @@ if __name__ == "__main__":
 返した文字列は後の呼出しから独立しています。名前は空・NUL・`=`・不正Unicodeを拒否します。
 defaultにはNULを含められます。OSから受け取る値とパスは厳格なUnicodeとして扱い、
 不正な値はUnicodeDecodeErrorです。`current_dir()` は現在の絶対パスを返します。
-`env_int` は整数へ変換し、`env_bool` は空白を除いた1/0/true/false（大文字可）を受け付けます。
-不正な値はValueErrorです。環境変数の書換えや作業ディレクトリの変更は行いません。
+`env_int` は符号付き64ビットの整数へ変換し、`env_bool` は空白を除いた1/0/true/false（大文字可）を受け付けます。
+範囲外や不正な値はValueErrorです。環境変数の書換えや作業ディレクトリの変更は行いません。
 
 ```text
 python ail_chatgpt.py compile language_examples/environment_config_main.ail -o environment_config
@@ -7273,6 +7300,7 @@ R360から、AILの補助ソースを `from ... import *` で読み、C部分だ
 例えば同じフォルダに次のソースを置き、`--object byte_native.o` でビルドできます。
 
 ```python
+# prints: 3
 from byte_search_core import *
 from ail import read_bytes
 import sys

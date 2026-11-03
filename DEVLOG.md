@@ -1,3 +1,15 @@
+## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
+
+Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's
+`from byte_search_core import *` block builds with `--object byte_native.o` and prints `3`; the doc
+test now builds that object and runs the block instead of skipping it.  The `environment_config`
+example inlines `parse_int64_text`, so an out-of-int64 value raises `ValueError` as the text says.
+The contract paragraph now describes the `assert` form exactly: `AssertionError` is catchable, an
+`assert` may appear anywhere, and `_ail_result` is an ordinary local name.  `test_ail_reference_docs`,
+`test_ail_quickstart_docs`, `test_ail_reference_examples`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `test_ail_safetynet` keeps the pre-existing `S4_generators_gc`
+failure seen on the base.
+
 ## 2026-11-03 -- onelang s13: LANGUAGE_QUICKSTART_JA.md in Python syntax
 
 `AIL_CURRENT/LANGUAGE_QUICKSTART_JA.md` (7,840 lines) now has no brace code: all 68 code
@@ -6,8 +18,8 @@ were rewritten or removed.  `tools/ail2py_docs.py` from s12 is the converter; th
 fragments were hand-converted, and the leftover prose `;`/`{` rule spellings (requires/ensures,
 try/finally, calls, constants, struct fields) were rewritten in Python syntax.  The eight examples
 whose imports pointed at still-brace modules now define the same helpers inline, so all of them
-build again; of the 38 whole-program blocks, 35 compile (the other three are the pre-existing
-`--object` examples and the brace `byte_search_core` import, skipped by name).  `# run: no` marks
+build again; of the 38 whole-program blocks, 36 compile (the other two are the pre-existing
+`--object` examples, skipped by name).  `# run: no` marks
 examples that need a peer, an input file or arguments.  `test_ail_reference_docs` now builds every
 quickstart whole program and runs the standalone ones; it and `test_ail_quickstart_docs` pass.
 
