@@ -312,6 +312,25 @@ def _container_declarations(tree):
     return names, fields
 
 
+def _scope_container_names(tree, function):
+    """Container names visible at one assignment, without another function's parameters."""
+    if function is not None:
+        local, _ = _container_declarations(function)
+    else:
+        local = set()
+    module = set()
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                and _container_annotation(node.annotation):
+            module.add(node.target.id)
+        elif isinstance(node, ast.Assign):
+            if isinstance(node.value, (ast.List, ast.Dict, ast.Set)):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        module.add(target.id)
+    return local | module
+
+
 def _container_value(node, names, fields):
     if isinstance(node, (ast.List, ast.Dict, ast.Set)):
         return True
@@ -446,7 +465,8 @@ def _copy_container_aliases(text, source_path=None, source=None):
             value = node.value
             assign_targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             if any(isinstance(target, (ast.Subscript, ast.Attribute)) for target in assign_targets):
-                if not _container_value(value, names, fields):
+                scope_names = _scope_container_names(tree, function)
+                if not _container_value(value, scope_names, fields):
                     continue
                 if isinstance(value, ast.Name):
                     copy = used_after(value.id, function, node)

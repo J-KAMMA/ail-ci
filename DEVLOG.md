@@ -14,6 +14,8 @@ well, so `let ok: bool = n > 0; return ok` prints `1`/`0` like brace instead of 
 A container stored into a subscript or attribute target now gets `.copy()` when the source is still
 live after the store (`xs[0] = values`, `holder.items = values`), matching the brace snapshot;
 read-only attribute reads keep the existing mutation-based rule, so no corpus conversion changes.
+The store check uses the function's own container names, so a struct field called `b` cannot make an
+unrelated int local `b` look like a container; all ten compare-lab `--check` runs print `identical`.
 
 Probes `r1_control` (if/elif/except/not/bool call/True/False), `r1_bool_var`, `r1_bool_methods`,
 `r2_assign` (list/dict/set), `r2_struct_list`, `r2_list_literal`, `r2_attr_alias`,
