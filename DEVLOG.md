@@ -1,3 +1,22 @@
+## 2026-11-03 -- reldocs: README, CHANGELOG and install guide for 0.1
+
+Rewrote the top-level `README.md` for a reader who has never seen AIL: three-sentence introduction
+(Python syntax, optional annotations, native binary), `pip install ailc`, the C compiler for Linux,
+macOS and Windows, a short tested example with `ail run` / `ail build`, the int64 default and
+`--exact-int`, what is supported and what is not, and a link to `docs/COMPARISON.md` with the wins
+and losses instead of copied numbers.
+
+Added `CHANGELOG.md` with a 0.1.0 entry grouped into features, correctness, performance and known
+limitations, summarised from the exported commit and the recent `DEVLOG.md` entries.  Updated
+`docs/INSTALL.md` to install the PyPI distribution `ailc` by default (the checkout install remains
+the alternative).
+
+`AIL_CURRENT/test_ail_readme.py` (registered through `tests.d/test_ail_readme.txt`) extracts every
+fenced ```python block from `README.md`, runs it through `ail run` in `packaging/ail_lang`, and
+compares stdout and exit status with CPython.  Probes `readme_example` and `readme_edge_values`
+(negative and empty lists, argument/list-item/attribute/dict values) match CPython on both
+`cmp.sh` builds.  The readme test, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.  No compiler, runtime or version number changed.
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class
