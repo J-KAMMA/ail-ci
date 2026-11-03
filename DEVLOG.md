@@ -1,3 +1,28 @@
+## 2026-11-03 -- bce s1: BCE switch, audit mode, census tool (job-bces1-11040118)
+
+Added the bounds-check-elision groundwork without changing default codegen.  `ir/passes/__init__.py`
+has `bce_enabled()` (`AIL_BCE`, default on; nothing calls it yet).  `emit_c.py` has
+`bce_audit(depth, index, length)`: with `AIL_BCE_AUDIT=1` every one of the 13 `nck` sites (bytes.get,
+plist.get, ba.get/set, byte span.get/set, numeric span.get/set, numfield list.get/set, owned list.get/
+set, owned slist.get) first emits `if (__builtin_expect((uint64_t)idx >= (uint64_t)len, 0))
+ail_bce_audit_fail("<fn>", <site>);`, with the site counter reset per function.  The runtime part
+`BCEAUDIT` prints `AIL-BCE-AUDIT: ...` to stderr and `_exit(86)`; it is added only in audit mode, so the
+default C is byte-identical (codegen pins unchanged vs the export commit).  `lab/beatc/bce_census.py`
+and `AIL_CURRENT/test_ail_bce.py` (15 probes: range reads/stores, `i-1`, guarded `i+1`, bytes scan,
+all six list/bytes/field boundaries, pop-in-loop, int64-overflow text index) were added and registered.
+
+Verification: census smoke `echo_pack` both syntaxes `same C`, exit 0.  Full census check (ten tasks,
+both syntaxes): 18/20 `same C`; `tally_lang/python` and `tree_fold/python` fail to build in **both** the
+base export and this tree (`rc=3`, `re`/tuple subset limits — pre-existing, no change attributable here).
+Audit run of the ten tasks (`AIL_BCE_AUDIT=1`, `--langs ail`, smoke + all public/hidden cases): all 10
+`correct`, exit 0, 1,404 hidden cases total, **0 exit-86**; the audit guards are present (e.g. the
+range-read probe emits 2, the default build 0).  `difffuzz --start 0 --count 300` under audit reached
+seed 64 before the 80-minute stop, with **0 audit stops**/`AIL-BCE-AUDIT` lines (partial by budget).
+`par_check -j 2`: `test_ail_bce`, `test_ail_range_checks`, `test_ail_ir_gridbounds`,
+`test_ail_mixed_bounds`, `test_ail_ir_s1`, `test_ail_ir_s3`, `test_ail_files`,
+`test_ail_corpus_findings3` pass (the range/mixed/s3 modules need ASan's shadow mapping, so no
+`ulimit -v` for them); `test_ail_safetynet` keeps the pre-existing `S4_generators_gc` failure.
+
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
 Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's
