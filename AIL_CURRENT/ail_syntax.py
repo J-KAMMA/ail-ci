@@ -4343,7 +4343,17 @@ def lower_dict_of_lists(source):
     starts = _byte_offsets(source.encode('utf8'))
     taken = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
     taken |= {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+    parents = {id(child): parent
+               for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     edits = []
+
+    def inline_suite(stmt):
+        # A statement sharing the header line (`if c: d.setdefault(...)...`) belongs to an inline
+        # suite; rewriting it into several lines would move the later lines out of that suite.
+        parent = parents.get(id(stmt))
+        body = getattr(parent, 'body', None)
+        return (isinstance(body, list) and bool(body)
+                and getattr(parent, 'lineno', None) == body[0].lineno)
 
     def span(node):
         return (starts[node.lineno - 1] + node.col_offset,
@@ -4400,12 +4410,16 @@ def lower_dict_of_lists(source):
         if not inits:
             continue
         nodes = list(own_nodes(fn.body))
+        standalone = {id(n.value) for n in nodes
+                      if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
+                      and not inline_suite(n)}
         for name, init in inits.items():
             allowed = {id(init.targets[0])}
             setdefaults, gets = [], []
             for n in nodes:
                 if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'append'
-                        and len(n.args) == 1 and not n.keywords and isinstance(n.func.value, ast.Call)):
+                        and len(n.args) == 1 and not n.keywords and isinstance(n.func.value, ast.Call)
+                        and id(n) in standalone):
                     chain = n.func.value
                     if (isinstance(chain.func, ast.Attribute) and chain.func.attr == 'setdefault'
                             and isinstance(chain.func.value, ast.Name) and chain.func.value.id == name
@@ -4449,7 +4463,8 @@ def lower_dict_of_lists(source):
             for outer, chain in [(n, n.func.value) for n in setdefaults]:
                 key = ast.get_source_segment(source, chain.args[0]) or ast.unparse(chain.args[0])
                 value = ast.get_source_segment(source, outer.args[0]) or ast.unparse(outer.args[0])
-                pad = ' ' * outer.col_offset
+                line = source.splitlines()[outer.lineno - 1]
+                pad = line[:len(line) - len(line.lstrip())]
                 a, b = span(outer)
                 edits.append((a, b,
                               '%s = %s\n%s%s = %s.get(%s, -1)\n'

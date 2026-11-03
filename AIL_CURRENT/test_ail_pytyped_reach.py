@@ -137,6 +137,13 @@ class TypedReach(unittest.TestCase):
             'p_dl_cycle2': (DICT_OF_LISTS_CYCLE2, '1\n'),
         })
 
+    def test_dict_of_lists_non_statement_probes(self):
+        self._check_probes({
+            'p_dl_semi': (DICT_OF_LISTS_SEMI, '1 2\n'),
+            'p_dl_expr': (DICT_OF_LISTS_EXPR, 'None 4\n'),
+            'p_dl_lambda': (DICT_OF_LISTS_LAMBDA, '4\n'),
+        })
+
     def test_unannotated_bytes_helper_owns_its_result(self):
         with tempfile.TemporaryDirectory(prefix='ail-pyreach-') as tmp:
             result, exe = build(tmp, 'owned_bytes', OWNED_BYTES)
