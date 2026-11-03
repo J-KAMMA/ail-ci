@@ -80,7 +80,7 @@ are slower.
   your own modules. Constructs that are not built, such as `eval`, `exec`, `async def` and some
   `match` forms, are refused by name with a suggested rewrite.
 - Python-syntax versions of the compare-lab programs do not yet reach the typed path; they run on
-  the general path (about 20x slower) or are refused. The compiler is not a complete Python
+  the general path (much slower) or are refused. The compiler is not a complete Python
   implementation.
 - Compile time is much slower than Rust's, and there is no typed parallelism without the GIL yet.
 - The default integers are 64-bit; arbitrary-size integers need `--exact-int`.

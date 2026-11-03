@@ -1,3 +1,25 @@
+## 2026-11-03 -- reldocs: apply the first run's branch and verify release 0.1 docs
+
+Cherry-picked `5a015bb` and `c64abe3` from `job-relnotes-11031523` (the "agent worker report"
+commit was left out).  The only conflict was `DEVLOG.md`; both entries are kept here, this one
+first.
+
+Removed the one performance ratio in the README that was not in the latest compare-lab report
+(`about 20x`, for the general path); it now says `much slower` and the comparison section still
+links `docs/COMPARISON.md` instead of copying numbers.  Nothing else in the README, CHANGELOG or
+install guide changed.
+
+Verification on the final commit: `python3 tools/update_manifest.py --check` is clean; the four
+required modules (`test_ail_readme`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`) ran on both builds in 448 s with 0 failed.  Probes `readme_example`,
+`readme_edge_values` (empty, negative, argument, list item, attribute, dict value) and
+`readme_aliasing` (copy, alias and mutation) match CPython on the default and unified builds.
+The README integer claims were checked by hand: a runtime int64 overflow stops with
+`OverflowError` and exit 1, `--exact-int` matches CPython for `2 ** 200`, and a literal outside
+int64 is refused with a position and the flag hint.  `ail build` plus `./total`, and
+`ail run --strict`, both print `total: 42`.  No compiler, runtime, test, version, tag or
+publication changed.
+
 ## 2026-11-03 -- reldocs: README, CHANGELOG and install guide for 0.1
 
 Rewrote the top-level `README.md` for a reader who has never seen AIL: three-sentence introduction
