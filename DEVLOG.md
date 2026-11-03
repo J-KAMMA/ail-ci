@@ -5,18 +5,22 @@ selection accepts, which are hot, and why the rest fall off.  No compiler file w
 
 `tools/selfhost_census.py` analyses each file whole with `ail_cpython_hybrid._analysis` and `_select`,
 without building an extension, one file per process under a 1.5 GB `RLIMIT_AS` and a 300 s timeout.
-Over the 156 scope files (204,816 lines) there are **3,152 top-level functions, 16 accepted (0.51%)**,
-and 3,538 methods (counted, no verdict).  The 16 live in five prelude/helper files;
-every one of the 15 largest files is at 0%.  `dtrt.py` and `strt.py` exceeded the 300 s budget whole
-and are classified as one line-range chunk each (recorded as `chunked` in `lab/selfhost/census.json`).
+Over the 156 scope files (204,816 lines) there are **3,152 top-level functions, 21 accepted (0.67%)**,
+and 3,538 methods (counted, no verdict).  The 21 live in six files (`prelude_ailarray.py` 6,
+`dtrt.py` 5, `hash_prelude.py` 5, `prelude_fraction.py` 2, `strt.py` 2, `prelude_array.py` 1);
+14 of the 15 largest files are at 0% and `dtrt.py` is 5/167 (3.0%).  `dtrt.py` and `strt.py` hit the
+300 s timeout in the batched pass but finish whole with a longer limit (`dtrt.py` about 150 s here),
+so both were rerun whole and no file is recorded `chunked`.  The chunk fallback now keeps every
+module-level statement; the earlier slice dropped it and misclassified all 167 `dtrt.py` functions.
 The top two rejection reasons are module-level, 56% of all rejections: an unsupported import (940) and
-a name that is imported and also defined again (828).  Because the typed path analyses a program
+a name that is imported and also defined again (827).  Because the typed path analyses a program
 whole, one such line rejects every function in the file.
 
 Three cold builds (`chain_relax`, `tree_fold`, `tally_lang`) were profiled with `cProfile`, parent and
 `pyc.py` child both, into `lab/selfhost/hot.json` (`lab/selfhost/hot_functions.py`).  **0 of the 30
-hottest functions are accepted.**  `fastwalk.walk` alone is 4.53 s of the summed `tottime`; the rest
-are front-end predicates in `pyfunc.py`.  The report is `lab/selfhost/CENSUS.md`.
+hottest functions are accepted.**  `fastwalk.walk` alone is 4.53 s of the summed `tottime`; 25 of the
+30 are in `pyfunc.py`, the rest in `fastwalk.py`, `bigcap.py` and `boolkind.py`.  The report is
+`lab/selfhost/CENSUS.md`.
 
 `tools/update_manifest.py --check` passes; `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass.

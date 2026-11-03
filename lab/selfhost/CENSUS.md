@@ -4,7 +4,7 @@ Measured 2026-11-03 on `origin/integ`.  This is measure-only: no compiler file w
 
 **Two numbers.**
 
-- **16 of 3152 top-level functions (0.51%)** are accepted by the typed path
+- **21 of 3152 top-level functions (0.67%)** are accepted by the typed path
   (`ail_cpython_hybrid._analysis` + `_select`) when each file is analysed whole.
 - **0 of 30** of the hottest compiler functions (top 30 by summed `tottime` over three cold builds)
   are accepted.
@@ -20,16 +20,15 @@ Scope: `AIL_CURRENT/python/pkg-v12/*.py` (153 files), `AIL_CURRENT/ail_chatgpt.p
 `AIL_CURRENT/ail_syntax.py` and `AIL_CURRENT/ail_modules.py` — 156 files, 204816 lines.
 
 Each file ran in its own process under a 1.5 GB address-space limit (`RLIMIT_AS`) with a 300 s timeout,
-two at a time.  Two files did not finish whole and were classified as one line-range chunk each: the
-file's leading module preamble plus the top-level functions in the range.
+two at a time.  Two files recorded a 300 s timeout in that batched pass; both finish whole when given
+a longer limit (`dtrt.py` takes about 150 s here), so each was rerun whole and the census uses the
+whole-file verdict.  No file is recorded as `chunked`.
 
-| file | whole file | chunk | why |
-|------|-----------|-------|-----|
-| `dtrt.py` | timed out at 300 s | lines 59-2040 | 2,040 lines, 167 functions |
-| `strt.py` | timed out at 300 s | lines 13-753 | 753 lines, 53 functions |
-
-A chunk drops module-level statements after the first `def`, so a verdict from these two files is
-weaker evidence than the others; both are recorded as `chunked` in the JSON.  No file errored.
+The chunk fallback (used only for a file that does not finish) now keeps every module-level
+statement — imports, assignments, classes — as well as the top-level functions in the range.  The
+earlier chunk text dropped module-level code, so a later module-level name made the slice reject
+every function in it; that was an artefact of the slice, not a property of the functions.  A chunk
+is labelled `file:start-end` and `chunked` is set in the JSON.
 
 ## Totals
 
@@ -37,21 +36,22 @@ weaker evidence than the others; both are recorded as `chunked` in the JSON.  No
 |---------|-------|
 | files | 156 |
 | top-level functions | 3152 |
-| accepted | 16 |
-| rejected | 3136 |
-| share accepted | 0.51% |
+| accepted | 21 |
+| rejected | 3131 |
+| share accepted | 0.67% |
 | methods (in a class, no verdict) | 3538 |
-| chunked files | 2 |
+| chunked files | 0 |
 
-The 16 accepted functions live in five files, all in the prelude/helper tier:
+The 21 accepted functions live in six files, all in the prelude/helper tier:
 
 | file | accepted / functions |
 |------|----------------------|
-| `hash_prelude.py` | 5 / 53 |
 | `prelude_ailarray.py` | 6 / 97 |
-| `prelude_array.py` | 1 / 4 |
+| `dtrt.py` | 5 / 167 |
+| `hash_prelude.py` | 5 / 53 |
 | `prelude_fraction.py` | 2 / 13 |
-| `strt.py` (chunked) | 2 / 53 |
+| `strt.py` | 2 / 53 |
+| `prelude_array.py` | 1 / 4 |
 
 ## Share accepted in the 15 largest files
 
@@ -71,30 +71,32 @@ The 16 accepted functions live in five files, all in the prelude/helper tier:
 | `dunders.py` | 2794 | 23 | 0 | 0.0% |
 | `prelude_decimal.py` | 2545 | 85 | 0 | 0.0% |
 | `pyc.py` | 2085 | 57 | 0 | 0.0% |
-| `dtrt.py` | 2040 | 167 | 0 | 0.0% |
+| `dtrt.py` | 2040 | 167 | 5 | 3.0% |
 
-Every one of the 15 largest files is at 0%.  The typed path analyses a program whole, so one
-unsupported module-level statement (an `import ast`, an `os.environ.get()`, a redefined import name)
-rejects every top-level function in the file; the reason recorded for each function is that
-module-level note.  This is the dominant fact of the census, not a per-function property.
+Fourteen of the 15 largest files are at 0%; `dtrt.py` is 5/167 (3.0%).  The typed path analyses a
+program whole, so one unsupported module-level statement (an `import ast`, an `os.environ.get()`, a
+redefined import name) rejects every top-level function in most files; the reason recorded for each
+function is that module-level note.  This is the dominant fact of the census, not a per-function
+property.
 
 ## Top 10 rejection reasons
 
-Counted over the 3136 rejected functions; the analysis run's temporary source name is
-replaced by `<source>` (the tool normalises it so a rerun is comparable).
+Counted over the 3131 rejected functions; the analysis run's temporary source name is
+replaced by `<source>` and the `; built here: ...` tail of each note is dropped (the tool
+normalises the name so a rerun is comparable).
 
 | count | share of rejections | reason |
 |-------|--------------------|--------|
 | 940 | 30.0% | `write instead: drop the import and write what you need by hand with plain lists, dicts and loops` |
-| 828 | 26.4% | `write instead: import it under another name (from ... import ast as other)` — a name is imported and also assigned/defined again |
-| 347 | 11.1% | `not emitted by the typed path` (no mix unit and no explicit rejection) |
+| 827 | 26.4% | `write instead: import it under another name (from ... import ast as other)` — a name is imported and also assigned/defined again |
+| 497 | 15.9% | `not emitted by the typed path` (no mix unit and no explicit rejection) |
 | 234 | 7.5% | `cannot tell the type of element 0 of this tuple` |
 | 219 | 7.0% | `os.environ.get() with these arguments is not built` |
-| 167 | 5.3% | `not in the subset: the name 'AilStrp' is not a known function/class/builtin` |
-| 114 | 3.6% | `write instead: give each function its own name and call the right one` — duplicate function names |
+| 112 | 3.6% | `write instead: give each function its own name and call the right one` — duplicate function names |
 | 52 | 1.7% | `re.compile()` used other than `NAME = re.compile(literal)` |
 | 32 | 1.0% | `os.stat() with these arguments is not built` |
 | 24 | 0.8% | `not in the subset: raising URLError` |
+| 21 | 0.7% | `re.sub()`: the pattern has to be a string literal, not an expression |
 
 The top two reasons alone are 56% of all rejections, and both are module-level: the typed path
 accepted the program's shape and then refused one import binding for the whole file.
@@ -152,13 +154,20 @@ Three hotter names are not census units and are not ranked: the nested helpers `
 
 ## Closest to accepted
 
-All 30 are rejected, and none is one edit away: each takes AST nodes or compiler objects
-(`node, ctx`, `fn`, `stmts`), which the typed path cannot pass, and every body has a local refusal
-from `_unsafe_body`.  The three that are closest are the smallest bodies whose only local refusal is
-a call to another front-end predicate, so the body itself needs no new language feature —
-**`_mvk`** (3 lines, 0.186 s), **`_owned_method_name`** (3 lines, 0.164 s) and
-**`_is_owned_str_call`** (5 lines, 0.181 s).  Their shared upstream blocker is the whole-file refusal
-of `pyfunc.py` (an imported name that is also defined again, 828 functions share it); after that,
-each needs its parameter types narrowed to a scalar/bool ABI and its one call either inlined or
-cloned first.  A first rewrite step is therefore not "port one hot function" but "give the typed
-path a home for these three scalar predicates, outside the file that cannot be analysed whole."
+All 30 are rejected, and none is one edit away.  Their files fall into two groups: the pyfunc.py
+entries (25 of the 30) are refused at module level by an import name that is also defined again
+(827 functions share that note), and the other five — `walk` in `fastwalk.py`, `_walk_own`,
+`_lp_locals` and `_lp_eval` in `bigcap.py`, and `_own_nodes` in `boolkind.py` — are refused at
+module level by an unsupported `os.environ.get()`.  Only `_mvk` takes a plain scalar (`kind: str`);
+the other 29 take AST nodes or compiler objects (`node, ctx, ...`, `fn`, `stmts`).
+
+The three closest are the smallest bodies whose own body is the least of the problem:
+**`_mvk`** (3 lines, 0.186 s) takes one scalar `kind`, so it is the only one that fits the typed
+path's scalar ABI as written — its remaining blockers are the pyfunc.py module note and the
+module globals `MAPS`/`SETS` it reads plus its call to `_map_value_kind`;
+**`_owned_method_name`** (3 lines, 0.164 s) and **`_is_owned_str_call`** (5 lines, 0.181 s) are
+small, but they take `node`/`ctx` (and an ownership-name string), so they cannot be narrowed to a
+scalar/bool ABI — they are candidates only if the rewrite starts from already-extracted scalars
+rather than porting the predicate as-is.  A first rewrite step is therefore not "port one hot
+function" but "give the typed path a home for scalar predicates like `_mvk` outside the file that
+cannot be analysed whole."
