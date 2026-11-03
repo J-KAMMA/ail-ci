@@ -120,7 +120,12 @@ def one_seed(seed, args, modes):
         ail = None
     elif crc == 3:
         lines = [l for l in msg.strip().splitlines() if l.strip()]
-        rec.update(cls='refused', reason=(lines[-1] if lines else '')[:200])
+        detail = (lines[-1] if lines else '')[:200]
+        low = msg.lower()
+        if 'int64' in low or 'overflow' in low or 'does not fit' in low:
+            rec.update(cls='overflow', reason='compile-time int64 stop: ' + detail)
+        else:
+            rec.update(cls='refused', reason=detail)
         ail = None
     elif crc != 0:
         lines = [l for l in msg.strip().splitlines() if l.strip()]
@@ -137,6 +142,10 @@ def one_seed(seed, args, modes):
         ail = run_proc([str(exe)], args.timeout, env=env)
         rec['ail_rc'] = ail[0]
         rec['cls'], rec['reason'] = classify(cpy, ail)
+        rec['stdout_diff'] = cpy[1] != ail[1]
+        rec['stderr_diff'] = cpy[2] != ail[2]
+        rec['first_diff'] = first_diff(text(cpy[1]), text(ail[1])) if rec['stdout_diff'] else ''
+    rec['path'] = 'general' if rec.get('fallback') else 'typed'
     rec['ms'] = int((time.time() - t0) * 1000)
     if rec['cls'] in ('DIFF', 'crash', 'timeout'):
         d = Path(args.out) / 'findings' / ('seed%d-%s' % (seed, rec['cls']))
@@ -157,6 +166,52 @@ def one_seed(seed, args, modes):
                 fh.write(json.dumps(r) + '\n')
     shutil.rmtree(work, ignore_errors=True)
     return results
+
+
+CLASSES = ('silent', 'loud-ok', 'crash', 'refused', 'other')
+
+
+def summary_class(r):
+    cls = r.get('cls')
+    if cls == 'refused':
+        return 'refused'
+    if cls == 'overflow':
+        return 'loud-ok'
+    if cls == 'crash':
+        return 'crash'
+    if cls == 'DIFF':
+        if (r.get('cpython_rc') == 0 and r.get('ail_rc') == 0
+                and r.get('stdout_diff') and not r.get('reason', '').startswith('stderr-only')):
+            return 'silent'
+        return 'other'
+    return 'other'
+
+
+def summary_rows(records):
+    rows = []
+    for r in sorted(records, key=lambda r: r['seed']):
+        first = r.get('first_diff') or ''
+        if not first and r.get('cls') in ('refused', 'overflow', 'crash', 'timeout'):
+            first = r.get('reason', '').splitlines()[0] if r.get('reason') else ''
+        rows.append({'seed': r['seed'], 'class': summary_class(r),
+                     'path': r.get('path', 'typed'), 'first_diff': first})
+    return rows
+
+
+def write_summary_json(records, path):
+    p = Path(path)
+    merged = {}
+    if p.exists():
+        try:
+            for row in json.loads(p.read_text(encoding='utf-8')):
+                merged[row['seed']] = row
+        except (ValueError, TypeError, KeyError):
+            merged = {}
+    for row in summary_rows(records):
+        merged[row['seed']] = row
+    rows = [merged[k] for k in sorted(merged)]
+    p.write_text(json.dumps(rows, indent=0) + '\n', encoding='utf-8')
+    return rows
 
 
 def summarize(records, args, elapsed):
@@ -195,6 +250,7 @@ def main():
     ap.add_argument('--compile-timeout', type=float, default=120)
     ap.add_argument('--budget', type=float, default=0)
     ap.add_argument('--ail', default=str(HERE.parent.parent / 'AIL_CURRENT' / 'ail_chatgpt.py'))
+    ap.add_argument('--summary-json', default=str(HERE / 'summary.json'))
     args = ap.parse_args()
     out = Path(args.out)
     (out / 'findings').mkdir(parents=True, exist_ok=True)
@@ -212,6 +268,7 @@ def main():
             if (i + 1) % 100 == 0:
                 print('%d/%d in %.0f s' % (i + 1, len(futures), time.time() - t0), flush=True)
     (out / 'summary.md').write_text(summarize(records, args, time.time() - t0), encoding='utf-8')
+    write_summary_json(records, args.summary_json)
     print((out / 'summary.md').read_text(encoding='utf-8'))
 
 

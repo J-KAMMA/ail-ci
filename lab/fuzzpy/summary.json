@@ -1,0 +1,122 @@
+[
+{
+"seed": 1,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 2,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 3,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 4,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 5,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 6,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 22: cpython='5 5 0' ail='<end>'"
+},
+{
+"seed": 7,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 1: cpython='1' ail='<end>'"
+},
+{
+"seed": 8,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 9,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 10,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 11,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 12,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 13,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 14,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 15,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 16,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 17,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 18,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 19,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 20,
+"class": "other",
+"path": "general",
+"first_diff": ""
+}
+]
