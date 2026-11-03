@@ -5689,11 +5689,8 @@ def _source_check(args):
                 os.environ['AIL_SURFACE'] = 'python'
             else:
                 os.environ.pop('AIL_SURFACE', None)
-            info = {'_want_units': True, '_checked_arrays': True}
-            if getattr(args, 'types', False):
-                info['_want_types'] = True
             try:
-                to_c(text, strict=True, info=info,
+                to_c(text, strict=True, info={'_want_units': True, '_checked_arrays': True},
                      library=args.library, external=external)
             finally:
                 if saved_surface is None:
@@ -5713,10 +5710,6 @@ def _source_check(args):
                 if snapshots.get(source) != original or any(path.read_bytes() != data for path, data in snapshots.items()):
                     raise ValueError('source or dependency changed while collecting API contracts')
         report.update(status='passed', stage='type')
-        if getattr(args, 'types', False):
-            for key in ('local_types', 'bool_locals', 'module_types'):
-                if key in info:
-                    report[key] = info[key]
         slow = _slow_patterns(text, source_map)
         if slow:
             report['slow_patterns'] = slow
@@ -6053,7 +6046,6 @@ def main(argv=None):
     check_cmd.add_argument('--repair-context', action='store_true', help='include SHA-bound failing AIL function body and declared import/API context')
     check_cmd.add_argument('--interface', action='store_true', help='include checked source declarations without function bodies; absent types are null')
     check_cmd.add_argument('--symbol', action='append', default=[], help='select top-level function declarations with --interface; repeatable; struct declarations retained')
-    check_cmd.add_argument('--types', action='store_true', help='include the compiler-inferred local and module types (for editor hover)')
     api_cmd = sub.add_parser('api', help='check a bundled source module and return its typed API without compiling C')
     api_cmd.add_argument('api_module', help='bundled module name, without path or .ail suffix')
     builtin_cmd = sub.add_parser('api-builtin', help='query intrinsic signatures and declared ownership without building or running code')
