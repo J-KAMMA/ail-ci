@@ -1,0 +1,31 @@
+fn main() {
+    let data = read_stdin_bytes(1 << 40);
+    let counts: dict[str, int] = {};
+    let word = bytearray();
+    for b in data {
+        if b >= 65 and b <= 90 { word.append(b + 32); }
+        elif b >= 97 and b <= 122 { word.append(b); }
+        elif len(word) > 0 {
+            let key = word.decode();
+            if key in counts { counts[key] = counts[key] + 1; }
+            else { counts[key] = 1; }
+            word = bytearray();
+        }
+    }
+    if len(word) > 0 {
+        let key = word.decode();
+        if key in counts { counts[key] = counts[key] + 1; }
+        else { counts[key] = 1; }
+    }
+    let ranked: list[str] = [];
+    for key in counts { ranked.append(key); }
+    ranked.sort(key=lambda w: (-counts[w], w));
+    let limit = 20;
+    if len(ranked) < limit { limit = len(ranked); }
+    let out = bytearray();
+    for r in range(limit) {
+        let w = ranked[r];
+        out.extend(f"{counts[w]} {w}\n".encode());
+    }
+    write_stdout_bytes(out);
+}

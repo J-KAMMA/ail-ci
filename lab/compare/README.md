@@ -1,10 +1,11 @@
 # lab/compare
 
-Language comparison: AIL against C, Rust, Go, Nim and CPython on ten programs, measured on a GitHub runner
+Language comparison: AIL against C, Rust, Go, Nim and CPython on fourteen programs, measured on a GitHub runner
 (`compare-lab` workflow, manual). Timing on a laptop is too noisy to use, so the laptop only runs the smoke check.
 
 - `src/<task>/main.{ail,c,rs,go,nim,py}`: the ten "novel task" programs of `experiments/llm-compare` (round 4 of the
-  2026-10-14 run; every one of them passed that run's hidden tests and perf check). `main.ail` is the AIL source, `main.py`
+  2026-10-14 run; every one of them passed that run's hidden tests and perf check), plus four everyday stdin-filter
+  tasks added 2026-11-03 (`csv_group`, `word_freq`, `log_scan`, `json_lite`). `main.ail` is the AIL source, `main.py`
   the CPython source; the `ail-py` column compiles that same `main.py` with AIL (`compile --syntax python`).
 - rail_transfer's `main.ail` was ported on 2026-11-02 to the two-sided search of `main.c`, because the LLM-written version searched one side (12x the work), so the AIL column measures the same algorithm as C and Rust. The same date also ported `main.py` the same way (owner decision 2026-11-02: every language runs the same algorithm).
 - `tasks/<task>/`: `spec.md`, `gen.py` (inputs; the perf case is used) and `reference.py` (the CPython oracle).
@@ -22,7 +23,7 @@ front end and the gcc phases.
 
 Full measurement (one command; manual trigger only, at most 4 task jobs at once):
 
-    gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ            # all ten tasks
+    gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ            # every task
     gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ -f tasks='tree_fold tally_lang'
 
 Each program also runs on every public and hidden case of its task (`gen.py`) and is compared with `reference.py`. Wall time is

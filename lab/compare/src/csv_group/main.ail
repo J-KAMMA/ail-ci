@@ -1,0 +1,20 @@
+fn main() {
+    let data = read_stdin_bytes(1 << 40).decode();
+    let totals: dict[str, int] = {};
+    for line in data.split("\n") {
+        if len(line) == 0 { continue; }
+        let parts = line.split(",");
+        let key = parts[0];
+        let value = int(parts[1]);
+        if key in totals { totals[key] = totals[key] + value; }
+        else { totals[key] = value; }
+    }
+    let keys: list[str] = [];
+    for key in totals { keys.append(key); }
+    keys.sort();
+    let out = bytearray();
+    for key in keys {
+        out.extend(f"{key},{totals[key]}\n".encode());
+    }
+    write_stdout_bytes(out);
+}

@@ -1,0 +1,84 @@
+struct Jp { s: bytes; i: int; total: int; }
+
+fn jskip_ws(p: Jp) -> void {
+    while p.i < len(p.s) {
+        let c = p.s[p.i];
+        if c == 32 or c == 9 or c == 13 or c == 10 { p.i += 1; }
+        else { break; }
+    }
+}
+
+fn jskip_string(p: Jp) -> void {
+    p.i += 1;
+    while p.i < len(p.s) {
+        if p.s[p.i] == 92 { p.i += 2; }
+        elif p.s[p.i] == 34 { p.i += 1; return; }
+        else { p.i += 1; }
+    }
+}
+
+fn jparse_value(p: Jp) -> void {
+    jskip_ws(p);
+    if p.i >= len(p.s) { return; }
+    let c = p.s[p.i];
+    if c == 123 {
+        p.i += 1;
+        jskip_ws(p);
+        if p.i < len(p.s) and p.s[p.i] == 125 { p.i += 1; return; }
+        while True {
+            jskip_ws(p);
+            if p.i >= len(p.s) { return; }
+            jskip_string(p);
+            jskip_ws(p);
+            if p.i < len(p.s) and p.s[p.i] == 58 { p.i += 1; }
+            jparse_value(p);
+            jskip_ws(p);
+            if p.i < len(p.s) and p.s[p.i] == 44 { p.i += 1; continue; }
+            if p.i < len(p.s) and p.s[p.i] == 125 { p.i += 1; }
+            return;
+        }
+    }
+    if c == 91 {
+        p.i += 1;
+        jskip_ws(p);
+        if p.i < len(p.s) and p.s[p.i] == 93 { p.i += 1; return; }
+        while True {
+            jskip_ws(p);
+            if p.i < len(p.s) and p.s[p.i] == 93 { p.i += 1; return; }
+            if p.i >= len(p.s) { return; }
+            jparse_value(p);
+            jskip_ws(p);
+            if p.i < len(p.s) and p.s[p.i] == 44 { p.i += 1; continue; }
+            if p.i < len(p.s) and p.s[p.i] == 93 { p.i += 1; }
+            return;
+        }
+    }
+    if c == 34 { jskip_string(p); return; }
+    if c == 45 or (c >= 48 and c <= 57) {
+        let neg = false;
+        if p.s[p.i] == 45 { neg = true; p.i += 1; }
+        let value = 0;
+        while p.i < len(p.s) and p.s[p.i] >= 48 and p.s[p.i] <= 57 {
+            value = value * 10 + (p.s[p.i] - 48);
+            p.i += 1;
+        }
+        if neg { value = -value; }
+        p.total += value;
+        return;
+    }
+    if p.i + 4 <= len(p.s) and p.s[p.i:p.i + 4] == b"true" { p.i += 4; return; }
+    if p.i + 5 <= len(p.s) and p.s[p.i:p.i + 5] == b"false" { p.i += 5; return; }
+    if p.i + 4 <= len(p.s) and p.s[p.i:p.i + 4] == b"null" { p.i += 4; return; }
+    p.i += 1;
+}
+
+fn main() {
+    let data = read_stdin_bytes(1 << 40);
+    let p = Jp(data, 0, 0);
+    while p.i < len(p.s) {
+        jparse_value(p);
+        jskip_ws(p);
+        if p.i >= len(p.s) { break; }
+    }
+    print(p.total);
+}

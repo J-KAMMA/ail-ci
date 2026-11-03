@@ -1,3 +1,80 @@
+## 2026-11-03 -- compare-lab: four everyday stdin tasks
+
+Added `csv_group`, `word_freq`, `log_scan` and `json_lite` to `lab/compare`, each with the four
+task files (`spec.md`, `gen.py`, `reference.py`), all seven sources (`main.ail`, `main.py`, `main.c`,
+`main.rs`, `main.go`, `main.nim`), and `STDIN = True` in `gen.py` so the perf input is fed on
+standard input with no argv.  The tasks are ordinary text filters: group-and-sum CSV rows, top-20
+word frequency, status/hour counts from log lines, and an integer-summing hand parser for a small
+JSON subset.  The README and workflow comments now say fourteen tasks instead of ten.
+
+All 56 public and hidden cases plus the four perf inputs match `reference.py` stdout and exit status
+in every column (`ail`, `ail-py`, `c`, `rust`, `go`, `nim`, `python`): csv_group 3+9, word_freq
+3+11, log_scan 3+9, json_lite 3+15.  `json_lite/main.py` was rewritten from str slicing/recursion to
+bytes indexing on a `Parser` class so its general-path build finishes the 10.9 MB perf input in
+8.8 s rather than timing out; `main.ail` is a typed-path parser for all four tasks (`--strict` rc 0).
+No compiler or runtime source changed, so no DIFFERENCES row and no new `cmp.sh` probe: the new
+programs are inputs to the lab, and their parity check is the seven-column case suite.
+
+AIL typed-path status for `main.py` (`ail-py`): strict probe rc 3 for all four (the default builds
+take the general path, rc 0).  First/representative blockers, verbatim:
+
+* csv_group line 12 `for key in sorted(totals)` -- `with key= columns (sorted/sort/d.items())`;
+  "`totals.keys()` cannot be walked inline here; bind it to a name first"; also the `''.join(parts)`
+  blocker.  Default note: built on the general path because of the same `keys()` walk.
+* word_freq line 15 `word = bytes(current).decode('ascii')` -- "only UTF-8 with strict errors is
+  supported"; also `counts.items()` with `key=`, and `''.join(parts)`.  Default note names line 15.
+* log_scan line 16 `for status in sorted(status_counts)` -- same inline `keys()` walk; default note
+  names line 16.
+* json_lite line 108 `p = Parser(data)` -- "constructor Parser() needs int, got bytes"; the class
+  field reads (`self.s`) and attribute subscript are also blockers ("`self.s` cannot be walked
+  inline here; bind it to a name first"; "subscripting Attribute").  Default note names line 11
+  and the `self.s` walk.
+
+Local benchmark (`ulimit -v 1500000`, two tasks at a time, wall median of 3 runs,
+`--icount none`): instructions are unavailable because `perf_event_paranoid` is 4 and valgrind is
+not installed.  Nim was verified with the apt 1.6.14 package extracted under `/tmp`; CI pins
+2.2.12.  Timings are a local smoke, not the workflow verdict.
+
+| task | lang | path | compile s | binary bytes | RSS KiB | wall ms |
+|---|---|---|---:|---:|---:|---:|
+| csv_group | ail | typed | 1.723 | 40056 | 9164 | 38.8 |
+| csv_group | ail-py | general | 5.066 | 128136 | 29788 | 142.9 |
+| csv_group | c | - | 0.104 | 16392 | 10724 | 99.8 |
+| csv_group | rust | - | 0.558 | 4583544 | 5180 | 33.7 |
+| csv_group | go | - | 9.513 | 2287193 | 16936 | 88.8 |
+| csv_group | nim | - | 4.195 | 132888 | 11016 | 78.4 |
+| csv_group | python | - | - | - | 27432 | 188.9 |
+| word_freq | ail | typed | 2.127 | 43760 | 81964 | 277.9 |
+| word_freq | ail-py | general | 17.563 | 365800 | 486840 | 3242.6 |
+| word_freq | c | - | 0.113 | 16336 | 19556 | 250.5 |
+| word_freq | rust | - | 0.512 | 4584120 | 7232 | 98.8 |
+| word_freq | go | - | 7.537 | 2271589 | 17836 | 107.5 |
+| word_freq | nim | - | 3.269 | 128480 | 16004 | 142.5 |
+| word_freq | python | - | - | - | 16160 | 1042.6 |
+| log_scan | ail | typed | 2.217 | 53440 | 42624 | 149.4 |
+| log_scan | ail-py | general | 6.199 | 162936 | 119612 | 702.8 |
+| log_scan | c | - | 0.113 | 16408 | 22120 | 68.4 |
+| log_scan | rust | - | 0.726 | 4596968 | 22600 | 170.5 |
+| log_scan | go | - | 9.108 | 2306415 | 95572 | 274.4 |
+| log_scan | nim | - | 4.668 | 146384 | 66068 | 649.1 |
+| log_scan | python | - | - | - | 81788 | 1102.0 |
+| json_lite | ail | typed | 1.163 | 22072 | 22520 | 44.5 |
+| json_lite | ail-py | general | 12.629 | 393936 | 45996 | 8804.3 |
+| json_lite | c | - | 0.117 | 16392 | 12008 | 40.6 |
+| json_lite | rust | - | 0.198 | 4549864 | 12588 | 26.1 |
+| json_lite | go | - | 6.847 | 2254678 | 32896 | 106.7 |
+| json_lite | nim | - | 2.947 | 113080 | 28916 | 112.2 |
+| json_lite | python | - | - | - | 21316 | 2518.1 |
+
+Perf input/output sizes: csv_group 3,177,732/18,495 bytes, word_freq 5,000,066/196, log_scan
+21,195,464/414, json_lite 10,850,664/12.
+
+Tests: `test_ail_server.SameBuilds.test_compare_lab_tasks` (builds all fourteen `main.ail`
+programs on the plain and server paths), `test_ail_files` (18 tests, 1 skipped),
+`test_ail_corpus_findings3` (2) and `test_ail_safetynet` (5) pass.
+`tools/update_manifest.py --check` exits 0.  No new test module or `tests.d` entry: the server test
+discovers `lab/compare/src/*/main.ail` itself.
+
 ## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
 
 `from ail import X as Y` now records the binding even when `Y == X`, so an alias spelled with the

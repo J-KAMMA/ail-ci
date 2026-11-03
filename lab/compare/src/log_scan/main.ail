@@ -1,0 +1,35 @@
+fn two_digits(value: int) -> str {
+    if value < 10 { return "0" + str(value); }
+    return str(value);
+}
+
+fn main() {
+    let data = read_stdin_bytes(1 << 40).decode();
+    let statuses: dict[str, int] = {};
+    let hours: dict[int, int] = {};
+    for line in data.split("\n") {
+        if len(line) == 0 { continue; }
+        let parts = line.split(" ");
+        if len(parts) < 3 { continue; }
+        let hour = int(parts[1][0:2]);
+        let status = parts[2];
+        if status in statuses { statuses[status] = statuses[status] + 1; }
+        else { statuses[status] = 1; }
+        if hour in hours { hours[hour] = hours[hour] + 1; }
+        else { hours[hour] = 1; }
+    }
+    let status_keys: list[str] = [];
+    for status in statuses { status_keys.append(status); }
+    status_keys.sort();
+    let hour_keys: list[int] = [];
+    for hour in hours { hour_keys.append(hour); }
+    hour_keys.sort();
+    let out = bytearray();
+    for status in status_keys {
+        out.extend(f"status {status} {statuses[status]}\n".encode());
+    }
+    for hour in hour_keys {
+        out.extend(f"hour {two_digits(hour)} {hours[hour]}\n".encode());
+    }
+    write_stdout_bytes(out);
+}
