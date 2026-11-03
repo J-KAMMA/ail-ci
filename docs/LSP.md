@@ -14,7 +14,7 @@ normal `ail` installation.
 | `textDocument/didSave` | Re-checks the file on disk (or the text sent with the save). |
 | `textDocument/didClose` | Clears the diagnostics for the closed document. |
 | `textDocument/publishDiagnostics` | Diagnostics from the same `ail check` front end that `ail build` uses. |
-| `textDocument/hover` | On a diagnostic: its `write instead:` rewrite. Elsewhere: the type of a name the front end can name, or a function signature. |
+| `textDocument/hover` | On a diagnostic: its `write instead:` rewrite. Elsewhere: a function signature, an annotation, a certain literal type, or nothing. |
 
 Diagnostics carry the compiler message and its `write instead:` text. A source that does not load,
 parse or type-check is an **Error**. A program the typed path refuses but the general path builds is
@@ -24,8 +24,19 @@ slow-pattern findings are **Information**.
 
 The server checks the buffer through `ail check`, so unsaved edits get up-to-date diagnostics.
 Imports, the project file and relative paths keep working because the buffer is checked beside the
-real file. Hover types come from annotations and obvious initialisers (`x = 1`, `names = ["a"]`,
-`total = value + 4`); the server does not invent a type when the front end cannot tell one.
+real file; in a read-only directory it is checked in a temporary directory with the real directory
+first on `AIL_PATH`.
+
+Hover shows a type only when it is certain:
+
+* a function name shows its signature as written;
+* a parameter or a name with an annotation shows the annotation text;
+* a name whose every assignment in its scope is a literal of one type (`int`, `float`, `str`,
+  `bytes`, `bool` or `None`) shows that type.
+
+Every other name shows nothing, including a name assigned from arithmetic or a call (for example the
+five names in the review probe), `b"a b".split()`, `range(3)`, and any position inside a string or a
+comment. A wrong type is worse than no type.
 
 ## Prerequisites
 
