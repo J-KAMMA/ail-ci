@@ -14,45 +14,53 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-NUMERIC = """
-fn cell(i: int, j: int) -> float {
-    let s = i + j;
-    return 1.0 / float(s * (s + 1) // 2 + i + 1);
-}
-fn rows(v: list[float], n: int) -> list[float] {
-    let r: list[float] = [];
-    for i in range(0, n) {
-        let s = 0.0;
-        for j in range(0, n) { s = s + cell(i, j) * v[j]; }
-        r.append(s);
-    }
-    return r;
-}
-fn escape(cr: float, ci: float) -> int {
-    let zr = 0.0; let zi = 0.0; let tr = 0.0; let ti = 0.0;
-    let k = 0;
-    while k < 50 and tr + ti <= 4.0 {
-        zi = 2.0 * zr * zi + ci;
-        zr = tr - ti + cr;
-        tr = zr * zr;
-        ti = zi * zi;
-        k += 1;
-    }
-    return k;
-}
-fn main() {
-    let n = 40;
-    let v: list[float] = [];
-    for i in range(0, n) { v.append(1.0 + float(i % 3)); }
-    let r = rows(v, n);
-    let total = 0.0;
-    for i in range(0, n) { total += r[i] * 0.5; }
-    let hits = 0;
-    for y in range(0, 20) {
-        for x in range(0, 30) { hits += escape(float(x) / 10.0 - 2.0, float(y) / 10.0 - 1.0); }
-    }
-    print(total, hits);
-}
+NUMERIC = """import sys
+
+def cell(i: int, j: int) -> float:
+    s = i + j
+    return 1.0 / float(s * (s + 1) // 2 + i + 1)
+
+def rows(v: list[float], n: int) -> list[float]:
+    r: list[float] = []
+    for i in range(0, n):
+        s = 0.0
+        for j in range(0, n):
+            s = s + cell(i, j) * v[j]
+        r.append(s)
+    return r
+
+def escape(cr: float, ci: float) -> int:
+    zr = 0.0
+    zi = 0.0
+    tr = 0.0
+    ti = 0.0
+    k = 0
+    while k < 50 and tr + ti <= 4.0:
+        zi = 2.0 * zr * zi + ci
+        zr = tr - ti + cr
+        tr = zr * zr
+        ti = zi * zi
+        k += 1
+    return k
+
+def main() -> int:
+    n = 40
+    v: list[float] = []
+    for i in range(0, n):
+        v.append(1.0 + float(i % 3))
+    r = rows(v, n)
+    total = 0.0
+    for i in range(0, n):
+        total += r[i] * 0.5
+    hits = 0
+    for y in range(0, 20):
+        for x in range(0, 30):
+            hits += escape(float(x) / 10.0 - 2.0, float(y) / 10.0 - 1.0)
+    print(total, hits)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 PYTHON = """
@@ -87,12 +95,17 @@ for y in range(20):
 print(total, hits)
 """
 
-TEXT = """
-fn main() {
-    let out = "";
-    for i in range(0, 5) { out = out + str(i) + ","; }
-    print(out);
-}
+TEXT = """import sys
+
+def main() -> int:
+    out = ''
+    for i in range(0, 5):
+        out = out + str(i) + ','
+    print(out)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 

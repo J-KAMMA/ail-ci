@@ -16,11 +16,28 @@ class MonotonicTests(unittest.TestCase):
     ail_build=support.CObjectTests.ail_build
 
     def test_real_elapsed_source_free_and_frontends(self):
-        provider='fn tick()->int { return monotonic_ms(); }'
+        provider="""from ail import monotonic_ms
+def tick() -> int:
+    return monotonic_ms()
+"""
         obj=self.ail_build('clock',provider,library=True)
         moved=self.root/'moved clock 😀';moved.mkdir();target=moved/obj.name
         shutil.move(obj,target);shutil.move(str(obj)+'.json',str(target)+'.json')
-        source='fn main()->int { let start=tick();let listener=tcp_listen("127.0.0.1",0,1);listener.wait_readable(80);listener.close();let end=monotonic_ms();print(start,end,end-start);return 0; }'
+        source="""from ail import monotonic_ms, tcp_listen
+import sys
+
+def main() -> int:
+    start = tick()
+    listener = tcp_listen('127.0.0.1', 0, 1)
+    listener.wait_readable(80)
+    listener.close()
+    end = monotonic_ms()
+    print(start, end, end - start)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         exe=self.ail_build('elapsed',source,target)
         begin=time.monotonic();result=subprocess.run([str(exe)],capture_output=True,timeout=10);duration=time.monotonic()-begin
         self.assertEqual((result.returncode,result.stderr),(0,b''))

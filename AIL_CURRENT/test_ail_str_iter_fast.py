@@ -12,116 +12,137 @@ import test_ail_c_objects as support
 from test_ail_map_fields import build
 
 
-SOURCE = r'''fn digits_only(s: str) -> int {
-    if len(s) == 0 { return -1; }
-    for c in s {
-        if c < "0" or c > "9" { return -2; }
-    }
-    return 1;
-}
-fn ord_sum(s: str) -> int {
-    let t = 0;
-    for c in s {
-        let o = ord(c);
-        if o > 127 { t += 1000; } else { t += o; }
-    }
-    return t;
-}
-fn skip_stop(s: str) -> int {
-    let n = 0;
-    for c in s {
-        if c == "x" { continue; }
-        if c == "!" { break; }
-        n += 1;
-    }
-    return n;
-}
-fn lower_ascii(s: str) -> str {
-    let w = "";
-    for c in s {
-        if c >= "A" and c <= "Z" { w += chr(ord(c) + 32); } else { w += c; }
-    }
-    return w;
-}
-fn word_count(s: str) -> int {
-    let w = "";
-    let n = 0;
-    for c in s {
-        if c == " " {
-            if len(w) > 0 { n += 1; w = ""; }
-        } else {
-            w += c;
-        }
-    }
-    if len(w) > 0 { n += 1; }
-    return n;
-}
-fn reversed_text(s: str) -> str {
-    let r = "";
-    for c in s { r = c + r; }
-    return r;
-}
-fn last_char(s: str) -> str {
-    let last = "";
-    for c in s { last = c; }
-    return last;
-}
-fn widths(s: str) -> str {
-    let out = "";
-    for c in s {
-        out += str(len(c)) + str(len(c.encode()));
-    }
-    return out;
-}
-fn nested(s: str) -> int {
-    let n = 0;
-    for a in s {
-        for b in s {
-            if a == b { n += 1; }
-        }
-    }
-    return n;
-}
-fn guarded(s: str) -> int {
-    let n = 0;
-    try {
-        for c in s {
-            let d: int = ord(c) - 48;
-            if d < 0 or d > 9 { raise ValueError; }
-            n = n * 10 + d;
-            if n > 1000000000 { break; }
-        }
-    } except ValueError {
-        return -7;
-    }
-    return n;
-}
-fn flags(s: str) -> str {
-    let f = "";
-    if len(s) > 0 { f += "a"; }
-    if len(s) == 0 { f += "b"; }
-    if len(s) != 0 { f += "c"; }
-    if len(s) <= 0 { f += "d"; }
-    if len(s) >= 1 { f += "e"; }
-    if len(s) < 1 { f += "f"; }
-    if 0 < len(s) { f += "g"; }
-    if 1 > len(s) { f += "h"; }
-    if 0 == len(s) { f += "i"; }
-    if len(s) == 1 { f += "j"; }
-    if len(s) > 1 { f += "k"; }
-    return f;
-}
-fn main() -> int {
-    let text: str = read_bytes(sys.argv[1]).decode("utf-8");
-    let out: list[str] = [];
-    for line in text.split("\n") {
-        out.append(str(digits_only(line)) + "\t" + str(ord_sum(line)) + "\t" + str(skip_stop(line)) + "\t"
-                   + lower_ascii(line) + "\t" + str(word_count(line)) + "\t" + reversed_text(line) + "\t"
-                   + last_char(line) + "\t" + widths(line) + "\t" + str(nested(line)) + "\t" + flags(line) + "\t" + str(guarded(line)));
-    }
-    write_stdout_bytes("\n".join(out).encode("utf-8"));
-    return 0;
-}'''
+SOURCE = """from ail import read_bytes, write_stdout_bytes
+import sys
+
+def digits_only(s: str) -> int:
+    if len(s) == 0:
+        return -1
+    for c in s:
+        if c < '0' or c > '9':
+            return -2
+    return 1
+
+def ord_sum(s: str) -> int:
+    t = 0
+    for c in s:
+        o = ord(c)
+        if o > 127:
+            t += 1000
+        else:
+            t += o
+    return t
+
+def skip_stop(s: str) -> int:
+    n = 0
+    for c in s:
+        if c == 'x':
+            continue
+        if c == '!':
+            break
+        n += 1
+    return n
+
+def lower_ascii(s: str) -> str:
+    w = ''
+    for c in s:
+        if c >= 'A' and c <= 'Z':
+            w += chr(ord(c) + 32)
+        else:
+            w += c
+    return w
+
+def word_count(s: str) -> int:
+    w = ''
+    n = 0
+    for c in s:
+        if c == ' ':
+            if len(w) > 0:
+                n += 1
+                w = ''
+        else:
+            w += c
+    if len(w) > 0:
+        n += 1
+    return n
+
+def reversed_text(s: str) -> str:
+    r = ''
+    for c in s:
+        r = c + r
+    return r
+
+def last_char(s: str) -> str:
+    last = ''
+    for c in s:
+        last = c
+    return last
+
+def widths(s: str) -> str:
+    out = ''
+    for c in s:
+        out += str(len(c)) + str(len(c.encode()))
+    return out
+
+def nested(s: str) -> int:
+    n = 0
+    for a in s:
+        for b in s:
+            if a == b:
+                n += 1
+    return n
+
+def guarded(s: str) -> int:
+    n = 0
+    try:
+        for c in s:
+            d: int = ord(c) - 48
+            if d < 0 or d > 9:
+                raise ValueError
+            n = n * 10 + d
+            if n > 1000000000:
+                break
+    except ValueError:
+        return -7
+    return n
+
+def flags(s: str) -> str:
+    f = ''
+    if len(s) > 0:
+        f += 'a'
+    if len(s) == 0:
+        f += 'b'
+    if len(s) != 0:
+        f += 'c'
+    if len(s) <= 0:
+        f += 'd'
+    if len(s) >= 1:
+        f += 'e'
+    if len(s) < 1:
+        f += 'f'
+    if 0 < len(s):
+        f += 'g'
+    if 1 > len(s):
+        f += 'h'
+    if 0 == len(s):
+        f += 'i'
+    if len(s) == 1:
+        f += 'j'
+    if len(s) > 1:
+        f += 'k'
+    return f
+
+def main() -> int:
+    text: str = read_bytes(sys.argv[1]).decode('utf-8')
+    out: list[str] = []
+    for line in text.split('\\n'):
+        out.append(str(digits_only(line)) + '\\t' + str(ord_sum(line)) + '\\t' + str(skip_stop(line)) + '\\t' + lower_ascii(line) + '\\t' + str(word_count(line)) + '\\t' + reversed_text(line) + '\\t' + last_char(line) + '\\t' + widths(line) + '\\t' + str(nested(line)) + '\\t' + flags(line) + '\\t' + str(guarded(line)))
+    write_stdout_bytes('\\n'.join(out).encode('utf-8'))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 PIECES = ['a', 'Z', 'x', '!', ' ', '0', '9', '7', 'é', 'Ω', '日', '😀', '\U00010400', '́', 'ß', 'K', 'q', '\t']
 

@@ -5,7 +5,9 @@ HERE=Path(__file__).resolve().parent
 ROOT=HERE
 sys.path[:0]=[str(ROOT),str(ROOT/'python/pkg-v12')]
 import pyfunc as candidate
-from ail_syntax import translate
+from ail_syntax import translate as _ail_translate, detect as _ail_brace
+def translate(source, **options):
+    return _ail_translate(source, **options) if _ail_brace(source) else source
 from test_ail_scalar_list_mutations import MIXED_ITERATOR_WHOLE
 from test_ail_callable_values import oracle_source
 from test_ail_text_find_search import HEADERS

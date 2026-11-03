@@ -170,13 +170,29 @@ int main(void) {
             self.assertEqual(held[1] - direct[1], units, (text, direct, held))
 
     def test_separator_field_snapshot_survives_iterable_mutation(self):
-        source='''struct Holder {separator:str;}
-impl Holder {
- fn items(self)->list[str] {self.separator="new separator";return ["a","b"];}
- fn joined(self)->str {return self.separator.join(self.items());}
-}
-fn main()->int {let holder=Holder("|");print(holder.joined());print(holder.separator);return 0;}
-'''
+        source="""import sys
+
+class Holder:
+
+    def __init__(self, separator: str):
+        self.separator = separator
+
+    def items(self) -> list[str]:
+        self.separator = 'new separator'
+        return ['a', 'b']
+
+    def joined(self) -> str:
+        return self.separator.join(self.items())
+
+def main() -> int:
+    holder = Holder('|')
+    print(holder.joined())
+    print(holder.separator)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         executable=support.CObjectTests.ail_build(self,'ordinary_field_snapshot',source)
         support.CObjectTests.check_run(self,executable,'a|b\nnew separator\n')
     def test_checked_slist_marker_preserves_literal_return_validation(self):
