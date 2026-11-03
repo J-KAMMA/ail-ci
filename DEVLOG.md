@@ -1,3 +1,44 @@
+## 2026-11-03 -- pyreach s3: local kind inference for plain Python sources
+
+Six inference rules let the typed path read the shapes the lab tasks write without annotations,
+each checked at every use (a disagreeing use is still a refusal by name, never a coercion):
+
+1. `with open(path, 'rb') as f: data = f.read()` (also inside `try:`) makes `data` bytes, so
+   `data.split(b'\n')` is a list of bytes and each element is bytes; no mode or `'r'` is str.
+   `_open_mode_kind` recognises the handle at the pre-pass stage as well as after filelower.
+2. An unannotated helper parameter takes its kind from the call sites (`fail(1, 'header')`,
+   `fail(ln, 'syntax')` give `n: int, cat: str`). A str argument is now a `_claim`, which the
+   clone plan turns into variants; a disagreement across sites monomorphises rather than
+   refusing (s4's clone pass was already in the base -- the base refused only because str
+   arguments were not claims at all).
+3. A helper whose return the fixed point settles to str, with no annotation, is an owned-str
+   helper (`_owned_unannotated_str_fns`), so `"sum " + fmt(total)` and `"..." % v` after
+   `s = s[1:]` reassignments work.
+4. `_mark_str_lists` already accepted `%` formats; the tuple right side and `"a" + str_helper(x)`
+   now count as str appends, so `out = []` with only those appends is a list of str.
+5. `list(map(int, X.split()))` is an int LIST (`_is_map_int_blist_call`, `_map_int_blist_value`),
+   a `bytes.split()` result is byteish, a `for` over it binds bytes, and a list comprehension over
+   it builds a BYTES element (the comprehension ctype and kind include BYTES).
+6. `_promote_floats` leaves a name alone when it also reads bytes elements elsewhere, and the
+   unbound pass treats a constant `if` test as one branch, so `sl = st_lines[s]` before a loop and
+   `sl = st_lines[u]` inside it no longer produce the `_ail_set_sl or _ail_unbound_sl(...)`
+   ternary.
+
+Strict ten-source measurement (base `addbf5ea` -> this tree): in `ticket_audit` the three named
+blockers (`'s'` annotated bytes but the caller supplies int, `CODES[cat]` needs a str key,
+`'out'` appended both a str and a non-str) are gone; its first remaining blocker is the F3
+dict-of-containers at line 101. `chain_relax` loses both "concatenating a number with a str"
+blockers and keeps only two `return None` and the `18446744073709551615` literal (F2/F8).
+`rail_transfer` loses all five "cannot tell the type of element 0 of this tuple" notes and keeps
+its None / `get(k)` / `del` / tuple-target blockers. Probes `p1`-`p9` (open rb/text + split +
+regex, agreeing and mixed helper parameters, `%.9f` helper, str list, `list(map(int, split()))`
+with a beyond-int64 value, loop-rebound name, bytes walk) build typed and match CPython on the
+default and unified builds; the beyond-int64 value is a loud `OverflowError` on the default build
+and exact under `--exact-int`. The ten `.ail` twins generate byte-identical C.
+
+Tests: `test_ail_pyreach_infer` (9 tests, registered through `tests.d`), `test_ail_pyreach_unpack`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against

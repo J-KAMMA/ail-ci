@@ -324,6 +324,10 @@ class _Flow(object):
             return A
         if t is ast.If:
             A1 = self.expr(s.test, A)
+            if isinstance(s.test, ast.Constant):
+                # a constant condition takes exactly one branch; `with` lowering also spells its
+                # always-taken body as `if True:`, which must not make every binding conditional
+                return self.block(s.body if s.test.value else s.orelse, A1)
             return _inter(self.block(s.body, A1), self.block(s.orelse, A1))
         if t is ast.While:
             return self.loop(s, A, None)
