@@ -1,6 +1,6 @@
 ## 2026-11-03 -- pyreach s1: re-land rbpyreach1 with its two review fixes
 
-Re-applied 3667f3af on integ, keeping both sides of the `_Surface`/`_tuplib` and optlib conflicts. `_dict_of_lists_kind` carries a `seen` set so `x = x` and `x = 1; y = x; x = y` stop at int instead of recursing, and `lower_dict_of_lists` rewrites only a standalone `setdefault(...).append(...)` expression statement, leaving `;`, assignment, lambda and inline-suite positions as written. Probes `p_dl_cycle`, `p_dl_cycle2`, `p_dl_semi`, `p_dl_expr`, `p_dl_lambda` match CPython on the default and unified builds.
+Re-applied 3667f3af on integ, keeping both sides of the `_Surface`/`_tuplib` and optlib conflicts. `_dict_of_lists_kind` carries a `seen` set so `x = x` and `x = 1; y = x; x = y` stop at int instead of recursing, and `lower_dict_of_lists` rewrites only a standalone `setdefault(...).append(...)` expression statement, leaving `;`, assignment, lambda and inline-suite positions as written. Probes `p_dl_cycle`, `p_dl_cycle2`, `p_dl_semi`, `p_dl_expr`, `p_dl_lambda` match CPython on the default and unified builds. Review fix: a parenthesized standalone `(d.setdefault(...).append(...))` (also inside an `if`) is left as written instead of being rewritten inside its parentheses; probes `p_dl_paren` and `p_dl_paren_if` match CPython on both builds.
 
 ## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
 

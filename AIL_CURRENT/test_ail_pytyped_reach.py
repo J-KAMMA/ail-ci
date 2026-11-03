@@ -142,6 +142,8 @@ class TypedReach(unittest.TestCase):
             'p_dl_semi': (DICT_OF_LISTS_SEMI, '1 2\n'),
             'p_dl_expr': (DICT_OF_LISTS_EXPR, 'None 4\n'),
             'p_dl_lambda': (DICT_OF_LISTS_LAMBDA, '4\n'),
+            'p_dl_paren': (DICT_OF_LISTS_PAREN, '1\n'),
+            'p_dl_paren_if': (DICT_OF_LISTS_PAREN_IF, '1\n'),
         })
 
     def test_unannotated_bytes_helper_owns_its_result(self):
@@ -279,6 +281,29 @@ DICT_OF_LISTS_LAMBDA = '''def main():
     d = {}
     f = lambda v: d.setdefault("k", []).append(v)
     f(4)
+    row = d.get("k")
+    if row:
+        print(row[0])
+
+
+main()
+'''
+
+DICT_OF_LISTS_PAREN = '''def main():
+    d = {}
+    (d.setdefault("k", []).append(1))
+    row = d.get("k")
+    if row:
+        print(row[0])
+
+
+main()
+'''
+
+DICT_OF_LISTS_PAREN_IF = '''def main():
+    d = {}
+    if True:
+        (d.setdefault("k", []).append(1))
     row = d.get("k")
     if row:
         print(row[0])

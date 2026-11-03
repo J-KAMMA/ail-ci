@@ -4419,7 +4419,8 @@ def lower_dict_of_lists(source):
         nodes = list(own_nodes(fn.body))
         standalone = {id(n.value) for n in nodes
                       if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
-                      and not inline_suite(n) and own_line(n)}
+                      and not inline_suite(n) and own_line(n)
+                      and span(n) == span(n.value)}
         for name, init in inits.items():
             allowed = {id(init.targets[0])}
             setdefaults, gets = [], []
