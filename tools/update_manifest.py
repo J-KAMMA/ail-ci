@@ -31,6 +31,8 @@ def sha(name):
 
 def sdk_source(name):
     """A compiler source that the wheel and an exported SDK must carry."""
+    if name == "ail2py.py":       # `ail convert`'s core, imported by ail_chatgpt.py
+        return True
     return (name.startswith(("python/pkg-v12/", "stdlib/")) and name.endswith((".py", ".h", ".c"))
             and "__pycache__" not in name.split("/"))
 

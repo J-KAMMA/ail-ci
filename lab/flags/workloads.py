@@ -31,7 +31,7 @@ def build_spec(name, work, smoke):
         return dict(source=root / app.AIL_SOURCE, options=[o.replace('{work}', str(work)) for o in app.AIL_OPTIONS],
                     prepare=getattr(app, 'prepare_ail', None), case=app.generate(work, smoke))
     if name in SMALL:
-        return dict(source=HERE / 'programs' / (name + '.ail'), options=[], prepare=None, case=dict(args=[]))
+        return dict(source=HERE / 'programs' / (name + '.py'), options=[], prepare=None, case=dict(args=[]))
     if name == 'text_count':
         rnd = random.Random(7)
         words = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa']

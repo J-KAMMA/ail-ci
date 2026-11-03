@@ -149,9 +149,25 @@ def judge(job):
         exe = os.path.join(tmp, "prog")
         with open(sp, "w", encoding="utf-8") as fh:
             fh.write(src)
+        compile_source = sp
+        if variant == "ail-brace":
+            py = os.path.join(tmp, task + ".py")
+            try:
+                conv = subprocess.run(
+                    [sys.executable, os.path.join(COMPILER_DIR, "ail_chatgpt.py"), "convert", sp,
+                     "-o", py],
+                    cwd=COMPILER_DIR, capture_output=True, text=True, timeout=COMPILE_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                res.update(verdict="compile-error", detail="converter timeout")
+                return res
+            if conv.returncode != 0 or not os.path.isfile(py):
+                res.update(verdict="compile-error",
+                           detail="conversion: " + first_line(conv.stderr or conv.stdout))
+                return res
+            compile_source = py
         try:
             cp = subprocess.run(
-                [sys.executable, os.path.join(COMPILER_DIR, "ail_chatgpt.py"), "compile", sp, "-o", exe],
+                [sys.executable, os.path.join(COMPILER_DIR, "ail_chatgpt.py"), "compile", compile_source, "-o", exe],
                 cwd=COMPILER_DIR, capture_output=True, text=True, timeout=COMPILE_TIMEOUT)
         except subprocess.TimeoutExpired:
             res.update(verdict="compile-error", detail="compiler timeout")

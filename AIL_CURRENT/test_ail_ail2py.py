@@ -266,6 +266,14 @@ fn main() -> int {
 }
 '''
 
+WARN_PROGRAM = '''
+fn main() -> int {
+    print(1);
+    return 0;
+}
+'''
+
+
 WRAP_PYTHON = '''
 from ail import wrapping_add, wrapping_mul, wrapping_sub
 
@@ -388,6 +396,34 @@ class ConversionTests(unittest.TestCase):
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_ail_wrapping_near_2_62_matches_the_binary(self):
         self._run_ail_and_python('wrap', WRAP_AIL, WRAP_PYTHON)
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_cli_convert_writes_the_same_text(self):
+        source, output, _ = self.convert('cli', PROGRAMS['void_function'])
+        cli_output = Path(self.tmp) / 'cli-out.py'
+        result = run([sys.executable, '-B', CLI, 'convert', str(source), '-o', str(cli_output)])
+        self.assertEqual(result.returncode, 0, result.stderr[-3000:])
+        self.assertEqual(cli_output.read_text(encoding='utf-8'), output.read_text(encoding='utf-8'))
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_brace_warning_is_printed_once_and_can_be_silenced(self):
+        source = Path(self.tmp) / 'warn.ail'
+        source.write_text(WARN_PROGRAM, encoding='utf-8')
+        env = dict(os.environ)
+        env.pop('AIL_BRACE_WARNING', None)
+        first = Path(self.tmp) / 'warn1.bin'
+        built = run([sys.executable, '-B', CLI, 'compile', str(source), '-o', str(first)], env=env)
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        warning = ('the brace syntax is deprecated and will be removed; convert it with: ail convert '
+                   + str(source.resolve()))
+        self.assertEqual(built.stderr.decode('utf-8').count(warning), 1)
+        ran = run([str(first)], env=env)
+        self.assertEqual(ran.stderr, b'')
+        env['AIL_BRACE_WARNING'] = '0'
+        second = Path(self.tmp) / 'warn2.bin'
+        built = run([sys.executable, '-B', CLI, 'compile', str(source), '-o', str(second)], env=env)
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        self.assertNotIn(b'deprecated', built.stderr)
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_three_run_like_the_binary(self):

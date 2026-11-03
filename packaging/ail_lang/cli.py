@@ -11,6 +11,8 @@
     ail build | run | check        with no source file: the project of the current directory (ail.toml or [tool.ail])
     ail build --debug              -g -O0 with #line directives back to the source, for gdb; stdout buffered at a crash is lost
     ail lsp                        language server on stdio (diagnostics and hover)
+    ail convert FILE.ail [-o FILE.py]
+                                   convert the deprecated brace syntax to annotated Python
 
 Every other SDK command (compile, compile-module, compile-library, compile-c, api, api-builtin,
 context, edit, doctor, integrity, cache, export-sdk) is passed to ail_chatgpt.py unchanged. The
@@ -32,7 +34,7 @@ C_COMPILERS = ("cc", "clang", "gcc")
 EXE = ".exe" if os.name == "nt" else ""
 BUILD_COMMANDS = ("compile", "compile-module", "compile-library", "compile-c")
 PASS_THROUGH = BUILD_COMMANDS + ("api", "api-builtin", "context", "edit", "doctor", "integrity", "cache",
-                                 "export-sdk")
+                                 "export-sdk", "convert")
 
 USAGE = """usage: ail <command> ...
 

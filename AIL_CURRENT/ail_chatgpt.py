@@ -4894,6 +4894,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
     search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
     if any(not path.is_dir() for path in search_paths):
         raise ValueError('each --module-path must name an existing directory')
+    brace_warned = [False]
     standard = ROOT / 'language_examples'
     modules = []
     names = set()
@@ -4924,13 +4925,22 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 text=data.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             if prelower is not None and entry:
                 text = prelower(text)
+            brace = False
             if source_syntax in ('auto', 'ail') and ail_sexpr.detect(text):
                 # The S-expression surface is converted to block syntax and then checked exactly
                 # like it; positions in diagnostics refer to that block text.
+                brace = True
                 text = ail_sexpr.to_block(text)
             syntax = ('ail' if detect(text) else 'python') if source_syntax == 'auto' else source_syntax
             if path.suffix.lower() == '.py':
                 syntax = 'python'
+            elif syntax == 'ail':
+                brace = True
+            if brace and not brace_warned[0] and os.environ.get('AIL_BRACE_WARNING', '').strip().lower() \
+                    not in ('0', 'off', 'false', 'no'):
+                print(f'warning: {path}: the brace syntax is deprecated and will be removed; '
+                      f'convert it with: ail convert {path}', file=sys.stderr)
+                brace_warned[0] = True
             merged = None
             if entry and syntax == 'python' and 'ail_array' in text:
                 # typed arrays (TYPED_ARRAY.md T2): lowered before the module merge, which would otherwise pull in the
@@ -6046,6 +6056,12 @@ def main(argv=None):
     check_cmd.add_argument('--repair-context', action='store_true', help='include SHA-bound failing AIL function body and declared import/API context')
     check_cmd.add_argument('--interface', action='store_true', help='include checked source declarations without function bodies; absent types are null')
     check_cmd.add_argument('--symbol', action='append', default=[], help='select top-level function declarations with --interface; repeatable; struct declarations retained')
+    convert_cmd = sub.add_parser('convert', help='convert AIL brace syntax to annotated Python')
+    convert_cmd.add_argument('source', type=Path)
+    convert_cmd.add_argument('-o', '--output', type=Path, help='write the Python text here (default: stdout)')
+    convert_cmd.add_argument('--check', action='store_true',
+                             help='compile both forms and compare the generated C')
+    convert_cmd.add_argument('--flags', default='', help='extra compiler flags for --check')
     api_cmd = sub.add_parser('api', help='check a bundled source module and return its typed API without compiling C')
     api_cmd.add_argument('api_module', help='bundled module name, without path or .ail suffix')
     builtin_cmd = sub.add_parser('api-builtin', help='query intrinsic signatures and declared ownership without building or running code')
@@ -6233,6 +6249,16 @@ def main(argv=None):
         args.module = args.module_path = []
         args.syntax, args.library, args.interface = 'auto', True, True
         return _source_check(args)
+    if args.command == 'convert':
+        import ail2py
+        forwarded = [str(args.source)]
+        if args.output is not None:
+            forwarded += ['-o', str(args.output)]
+        if args.check:
+            forwarded += ['--check']
+        if args.flags:
+            forwarded += ['--flags', args.flags]
+        return ail2py.main(forwarded)
     if args.command == 'check':
         return _source_check(args)
     if args.command == 'api-builtin':
@@ -6247,7 +6273,7 @@ def main(argv=None):
     manifest_path = ROOT/'MANIFEST.json'
     if ((ROOT/'SDK_README_JA.md').is_file() and manifest_path.is_file()
             and json.loads(manifest_path.read_text(encoding='utf8')).get('kind') == 'ail_language_sdk'):
-        supported = ('doctor', 'integrity', 'cache', 'compile', 'compile-module', 'compile-library', 'compile-c', 'export-sdk', 'check', 'api', 'api-builtin', 'edit', 'context')
+        supported = ('doctor', 'integrity', 'cache', 'compile', 'compile-module', 'compile-library', 'compile-c', 'export-sdk', 'check', 'convert', 'api', 'api-builtin', 'edit', 'context')
         if args.command not in supported:
             parser.error('this language SDK supports: ' + ', '.join(supported))
     if args.command == 'cache':
