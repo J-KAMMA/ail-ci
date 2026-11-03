@@ -169,9 +169,114 @@ PROGRAMS = {
 CHECKED = ('struct_impl', 'void_function')
 RUNTIME = ('float_list', 'try_except', 'struct_list')
 
+AIL_IMPORT_PROGRAM = '''
+from ail import wrapping_add
 
-def run(command, cwd=None):
-    return subprocess.run(command, cwd=cwd, input=b'', capture_output=True, timeout=1800)
+print(wrapping_add(1, 2))
+'''
+
+BARE_IMPORT_PROGRAM = '''
+print(wrapping_add(1, 2))
+'''
+
+ALIAS_IMPORT_PROGRAM = '''
+from ail import wrapping_add as w
+
+print(w(1, 2))
+'''
+
+REBIND_PROGRAMS = {
+    'import': 'from ail import wrapping_add as w\nimport os as w\nprint(w(1, 2))\n',
+    'fromimport': 'from ail import wrapping_add as w\nfrom math import sqrt as w\nprint(w(1, 2))\n',
+    'import_ail': 'from ail import wrapping_add as w\nimport ail as w\nprint(w(1, 2))\n',
+    'except': "from ail import wrapping_add as w\ntry:\n    raise ValueError('x')\n"
+              "except ValueError as w:\n    print(w)\n",
+    'match': 'from ail import wrapping_add as w\nmatch 1:\n    case w:\n        print(w)\n',
+    'second_alias': 'from ail import wrapping_add as w\nprint(w(1, 2))\n'
+                    'from ail import wrapping_mul as w\nprint(w(3, 4))\n',
+    'asname_eq_name': 'from ail import wrapping_add as wrapping_add\n'
+                      'print(wrapping_add(1, 2))\n'
+                      'from ail import wrapping_mul as wrapping_add\n'
+                      'print(wrapping_add(3, 4))\n',
+}
+
+REPEAT_ALIAS_PROGRAM = '''
+from ail import wrapping_add as w
+
+print(w(1, 2))
+from ail import wrapping_add as w
+print(w(3, 4))
+'''
+
+REPEAT_BARE_PROGRAM = '''
+print(wrapping_add(1, 2))
+print(wrapping_add(3, 4))
+'''
+
+HEAP_AIL = '''
+struct Item { d: int; b: int; n: int; }
+
+fn main() -> int {
+    let h: list[Item] = [];
+    heappush(h, Item(1, 9, 0), key=lambda it: it.d);
+    heappush(h, Item(1, 7, 1), key=lambda it: it.d);
+    heappush(h, Item(0, 5, 2), key=lambda it: it.d);
+    heappush(h, Item(1, 3, 3), key=lambda it: it.d);
+    heappush(h, Item(0, 2, 4), key=lambda it: it.d);
+    heappush(h, Item(1, 1, 5), key=lambda it: it.d);
+    while len(h) > 0 {
+        let it = heappop(h, key=lambda it: it.d);
+        print(it.n, it.d, it.b);
+    }
+    return 0;
+}
+'''
+
+HEAP_PYTHON = '''
+from ail import heappush, heappop
+
+
+class Item:
+    def __init__(self, d, b, n):
+        self.d = d
+        self.b = b
+        self.n = n
+
+
+h = []
+heappush(h, Item(1, 9, 0), key=lambda it: it.d)
+heappush(h, Item(1, 7, 1), key=lambda it: it.d)
+heappush(h, Item(0, 5, 2), key=lambda it: it.d)
+heappush(h, Item(1, 3, 3), key=lambda it: it.d)
+heappush(h, Item(0, 2, 4), key=lambda it: it.d)
+heappush(h, Item(1, 1, 5), key=lambda it: it.d)
+while h:
+    it = heappop(h, key=lambda it: it.d)
+    print(it.n, it.d, it.b)
+'''
+
+WRAP_AIL = '''
+fn main() -> int {
+    print(wrapping_mul(4611686018427387904, 4611686018427387904));
+    print(wrapping_mul(-4611686018427387904, 3));
+    print(wrapping_add(4611686018427387904, 4611686018427387904));
+    print(wrapping_sub(-4611686018427387904, 4611686018427387904));
+    return 0;
+}
+'''
+
+WRAP_PYTHON = '''
+from ail import wrapping_add, wrapping_mul, wrapping_sub
+
+print(wrapping_mul(4611686018427387904, 4611686018427387904))
+print(wrapping_mul(-4611686018427387904, 3))
+print(wrapping_add(4611686018427387904, 4611686018427387904))
+print(wrapping_sub(-4611686018427387904, 4611686018427387904))
+'''
+
+
+def run(command, cwd=None, env=None):
+    return subprocess.run(command, cwd=cwd, env=env, input=b'', capture_output=True, timeout=1800)
 
 
 class ConversionTests(unittest.TestCase):
@@ -231,6 +336,57 @@ class ConversionTests(unittest.TestCase):
                                '--flags', '--strict'])
                 self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
                 self.assertEqual(checked.stdout.strip(), b'identical')
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_ail_import_builds_like_the_bare_program(self):
+        built = {}
+        for name, text in (('imported', AIL_IMPORT_PROGRAM), ('alias', ALIAS_IMPORT_PROGRAM),
+                           ('bare', BARE_IMPORT_PROGRAM), ('repeat', REPEAT_ALIAS_PROGRAM),
+                           ('repeat_bare', REPEAT_BARE_PROGRAM)):
+            source = Path(self.tmp) / (name + '.py')
+            source.write_text(text, encoding='utf-8')
+            debug = Path(self.tmp) / ('debug-' + name)
+            result = run([sys.executable, '-B', CLI, 'compile', str(source), '-o',
+                          str(Path(self.tmp) / (name + '.bin')), '--syntax', 'python',
+                          '--debug-dir', str(debug)])
+            self.assertEqual(result.returncode, 0, result.stderr[-3000:])
+            built[name] = (debug / 'program.c').read_bytes()
+        self.assertEqual(built['imported'], built['bare'])
+        self.assertEqual(built['alias'], built['bare'])
+        self.assertEqual(built['repeat'], built['repeat_bare'])
+
+    def test_ail_import_alias_rebinding_is_refused_by_name(self):
+        for name, text in REBIND_PROGRAMS.items():
+            with self.subTest(name):
+                source = Path(self.tmp) / (name + '.py')
+                source.write_text(text, encoding='utf-8')
+                result = run([sys.executable, '-B', CLI, 'compile', str(source), '-o',
+                              str(Path(self.tmp) / (name + '.bin')), '--syntax', 'python'])
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(b'ail import alias ', result.stderr)
+                self.assertIn(b' is rebound', result.stderr)
+
+    def _run_ail_and_python(self, stem, ail_source, python_source):
+        source = Path(self.tmp) / (stem + '.ail')
+        source.write_text(ail_source, encoding='utf-8')
+        binary = Path(self.tmp) / (stem + '.bin')
+        built = run([sys.executable, '-B', CLI, 'compile', str(source), '-o', str(binary)])
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        wanted = run([str(binary)])
+        script = Path(self.tmp) / (stem + '.py')
+        script.write_text(python_source, encoding='utf-8')
+        env = dict(os.environ, PYTHONPATH=str(ROOT) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+        got = run([sys.executable, '-B', str(script)], env=env)
+        self.assertEqual(got.returncode, wanted.returncode, got.stderr[-3000:])
+        self.assertEqual(got.stdout, wanted.stdout)
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_ail_heappush_with_equal_keys_matches_the_binary(self):
+        self._run_ail_and_python('heap', HEAP_AIL, HEAP_PYTHON)
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_ail_wrapping_near_2_62_matches_the_binary(self):
+        self._run_ail_and_python('wrap', WRAP_AIL, WRAP_PYTHON)
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_three_run_like_the_binary(self):
