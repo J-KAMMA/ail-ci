@@ -117,13 +117,31 @@ def run(n: int) -> int:
     return 0
 '''
 
-BRACE_LIBRARY = '''fn mark(n:int)->int {print(n);return n;}
-fn result(n:int)->int {
- try {try {return mark(n);} finally {print(11);}}
- finally {print(12);if n==1 {return 7;}}
-}
-'''
-BRACE_MAIN = '''fn main()->int {print(result(0));print(result(1));return 0;}'''
+BRACE_LIBRARY = """def mark(n: int) -> int:
+    print(n)
+    return n
+
+def result(n: int) -> int:
+    try:
+        try:
+            return mark(n)
+        finally:
+            print(11)
+    finally:
+        print(12)
+        if n == 1:
+            return 7
+"""
+BRACE_MAIN = """import sys
+
+def main() -> int:
+    print(result(0))
+    print(result(1))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 
 def brace_source(source):
@@ -309,7 +327,9 @@ class FinallyTests(unittest.TestCase):
         shutil.move(str(obj) + '.json', str(destination) + '.json')
         before = self.snapshot(destination)
         consumer = self.write('consumer.ail', BRACE_MAIN)
-        helper = self.write('helper.ail', 'fn _consume(n:int)->int {return n;}')
+        helper = self.write('helper.ail', """def _consume(n: int) -> int:
+    return n
+""")
         executable = self.root / 'consumer'
         built = self.command('compile', consumer, '--separate', '--module', helper,
                              '--object', destination, '-o', executable)
@@ -396,24 +416,39 @@ def main() -> int:
                 self.assertEqual(actual_stdout, expected)
 
     def test_file_iterator_pending_exit_cleanup(self):
-        source = '''fn file_exit(path:str,mode:int)->bytes {
- for i in range(2) {
-  try {for chunk in file_chunks(path,3) {return chunk;}}
-  finally {
-   if mode==1 {if i==0 {continue;}break;}
-   if mode==2 {raise ValueError;}
-  }
- }
- return b"fallback";
-}
-fn main()->int {
- for mode in range(3) {
-  try {let value=file_exit(sys.argv[1],mode);write_stdout_bytes(value);}
-  except ValueError {write_stdout_bytes(b"201\\n");}
-  try {raise IndexError;} except IndexError {write_stdout_bytes(b"202\\n");}
- }
- return 0;
-}'''
+        source = """from ail import file_chunks, write_stdout_bytes
+import sys
+
+def file_exit(path: str, mode: int) -> bytes:
+    for i in range(2):
+        try:
+            for chunk in file_chunks(path, 3):
+                return chunk
+        finally:
+            if mode == 1:
+                if i == 0:
+                    continue
+                break
+            if mode == 2:
+                raise ValueError
+    return b'fallback'
+
+def main() -> int:
+    for mode in range(3):
+        try:
+            value = file_exit(sys.argv[1], mode)
+            write_stdout_bytes(value)
+        except ValueError:
+            write_stdout_bytes(b'201\\n')
+        try:
+            raise IndexError
+        except IndexError:
+            write_stdout_bytes(b'202\\n')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         executable = self.ail_build('file_exit', source)
         path = self.root / 'chunks.bin'
         for size in (0, 1, 3, 8193):

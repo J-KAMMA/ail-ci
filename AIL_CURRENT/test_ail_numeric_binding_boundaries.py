@@ -4,15 +4,151 @@ from pathlib import Path
 from test_ail_numeric_bindings import generated,oracle_source,translate,HEADERS
 
 CASES=[
- 'fn probe(flag:int)->float {let item=0;if flag {item=1.5;}else {item=7;}return item+0;} fn main()->int {print(probe(1));return 0;}',
- 'fn main()->int {let flag=1;let item=0;if flag {item=1.5;}else {item=7;}print(int(item==1));return 0;}',
- 'fn range()->list[float] {return [1.5];} fn take() {for item in range() {return item;}return 0;} fn main()->int {print(take());return 0;}',
- 'fn main()->int {let xs:list[float]=[1.5];for item in xs {} item=7;item+=2;print(item);return 0;}',
- 'fn exact()->int {let floats:list[float]=[1.5];let ints:list[int]=[9223372036854775807];for item in floats {} for item in ints {return item-0;}return 0;} fn main()->int {print(exact());return 0;}',
- 'fn main()->int {let floats:list[float]=[1.5];let ints:list[int]=[9223372036854775807];for __item in floats {} for __item in ints {print(__item);}return 0;}',
- 'fn changed() {let xs:list[int]=[1];for item in xs {item=0.5;return item;}return 0.0;} fn main()->int {print(changed());return 0;}',
- 'fn main()->int {let floats:list[float]=[1.5];let ints:list[int]=[];for item in floats {} for item in ints {} print(item);print("__AIL_NB_wi_6974656d__");return 0;}',
- 'fn main()->int {let floats:list[float]=[float("nan")];let ints:list[int]=[];for item in floats {} for item in ints {} try {print(int(item));}except ValueError {print("invalid");}return 0;}',
+ """import sys
+
+def probe(flag: int) -> float:
+    item = 0
+    if flag:
+        item = 1.5
+    else:
+        item = 7
+    return item + 0
+
+def main() -> int:
+    print(probe(1))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def main() -> int:
+    flag = 1
+    item = 0
+    if flag:
+        item = 1.5
+    else:
+        item = 7
+    print(int(item == 1))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def range() -> list[float]:
+    return [1.5]
+
+def take():
+    for item in range():
+        return item
+    return 0
+
+def main() -> int:
+    print(take())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def main() -> int:
+    xs: list[float] = [1.5]
+    for item in xs:
+        pass
+    item = 7
+    item += 2
+    print(item)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def exact() -> int:
+    floats: list[float] = [1.5]
+    ints: list[int] = [9223372036854775807]
+    for item in floats:
+        pass
+    for item in ints:
+        return item - 0
+    return 0
+
+def main() -> int:
+    print(exact())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def main() -> int:
+    floats: list[float] = [1.5]
+    ints: list[int] = [9223372036854775807]
+    for __item in floats:
+        pass
+    for __item in ints:
+        print(__item)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def changed():
+    xs: list[int] = [1]
+    for item in xs:
+        item = 0.5
+        return item
+    return 0.0
+
+def main() -> int:
+    print(changed())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def main() -> int:
+    floats: list[float] = [1.5]
+    ints: list[int] = []
+    for item in floats:
+        pass
+    for item in ints:
+        pass
+    print(item)
+    print('__AIL_NB_wi_6974656d__')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+ """import sys
+
+def main() -> int:
+    floats: list[float] = [float('nan')]
+    ints: list[int] = []
+    for item in floats:
+        pass
+    for item in ints:
+        pass
+    try:
+        print(int(item))
+    except ValueError:
+        print('invalid')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
 ]
 
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('gcc') or shutil.which('cc'),'C compiler required')

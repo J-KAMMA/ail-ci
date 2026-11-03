@@ -7,30 +7,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-fn main() {
-    let first = read_stdin_bytes(200000);
-    let second = read_stdin_bytes(5);
-    let third = read_stdin_bytes(1 << 40);
-    let fourth = read_stdin_bytes(10);
-    print(len(first), len(second), len(third), len(fourth), first[0], first[199999], third[len(third) - 1]);
-    return 0;
-}
+SOURCE = """from ail import read_stdin_bytes
+import sys
+
+def main() -> int:
+    first = read_stdin_bytes(200000)
+    second = read_stdin_bytes(5)
+    third = read_stdin_bytes(1 << 40)
+    fourth = read_stdin_bytes(10)
+    print(len(first), len(second), len(third), len(fourth), first[0], first[199999], third[len(third) - 1])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
-LOOP = """
-fn main() {
-    let total = 0;
-    let calls = 0;
-    while true {
-        let chunk = read_stdin_bytes(100000);
-        if len(chunk) == 0 { break; }
-        total += len(chunk);
-        calls += 1;
-    }
-    print(total, calls);
-    return 0;
-}
+LOOP = """from ail import read_stdin_bytes
+import sys
+
+def main() -> int:
+    total = 0
+    calls = 0
+    while True:
+        chunk = read_stdin_bytes(100000)
+        if len(chunk) == 0:
+            break
+        total += len(chunk)
+        calls += 1
+    print(total, calls)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 

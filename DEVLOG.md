@@ -1,3 +1,29 @@
+## 2026-11-03 -- onelang s8: embedded brace sources in test modules, batch 3 of 4
+
+Added `tools/ail2py_tests.py`, which finds brace declarations in a test module's string literals,
+converts each with `tools/ail2py.convert`, keeps the replacement only when a complete program
+still emits byte-identical C, and reports partial or refused literals it leaves alone.  The s6
+helper named by the task was absent from the base, so this commit supplies it and the s8 batch-3
+conversion.
+
+Fifteen Appendix C modules now embed Python text (or use a small pass-through `translate` in the
+test helpers when they hand already-converted Python to `pyfunc.to_c`): `test_ail_callable_owned_results`,
+`test_ail_finally`, `test_ail_last_use_free`, `test_ail_memory_shapes`, `test_ail_monotonic`,
+`test_ail_numeric_binding_boundaries`, `test_ail_numeric_loop_arena`, `test_ail_numeric_profiles_native`,
+`test_ail_ordinary_join_return`, `test_ail_stdin_read_until`, `test_ail_str_iter_fast`,
+`test_ail_struct_list_inplace`, `test_ail_text_views`, `test_ail_try_locals` and
+`test_json_document_library`.
+
+`fn main(` in the 33 modules falls from 144 to 101.  The remaining 101 occurrences are listed one
+per line in `AIL_CURRENT/onelang_brace_only.txt`: 43 were converted and verified, while the rest are
+a converted C that differs (typed vs general path, for example `test_ail_arg_borrow`), a refusal
+fixture whose expected message names brace text, or a program assembled from brace partials at run
+time.  No expected output was edited.
+
+All 33 Appendix C modules pass with a direct `unittest` run (`-j 2` equivalent);
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and `test_ail_ail2py` pass.
+Probes: `/tmp/probes/s.ail` converted to `/tmp/probes/s.py` emits the same C bytes and prints `1`
+in both builds; the module runs are the regression probes for the converted literals.
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class

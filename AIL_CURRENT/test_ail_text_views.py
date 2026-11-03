@@ -214,23 +214,36 @@ INPUT = ("V|ABC|120\nS|123456|A12|bob1\nS|123456|A12|bob1\nP|12.35\nV|abc|7\nS|1
 
 # A ranking loop: per document, sort indices by (-score, key) over a list[str] FIELD and pass
 # keys to a reader. The keys were copied into main's arena on every read and never released.
-RANK = r"""
-struct Doc { keys: list[str]; total: list[int]; }
-fn item(key: str, v: int) -> int { return len(key) + v; }
-fn main() {
-    let d = Doc([], []);
-    for i in range(500) { d.keys.append(f"key{i * 7919 % 500:05d}"); d.total.append(i * 31 % 17); }
-    let docs = int(sys.argv[1]);
-    let used = 0;
-    let check = 0;
-    for doc in range(docs) {
-        let ix = [i for i in range(len(d.keys))];
-        ix.sort(key=lambda i: (-d.total[i], d.keys[i]));
-        for j in range(len(ix)) { used += item(d.keys[ix[j]], j); }
-        check = (check * 31 + ix[doc % len(ix)]) % 1000003;
-    }
-    print(check, used);
-}
+RANK = """import sys
+
+class Doc:
+
+    def __init__(self, keys: list[str], total: list[int]):
+        self.keys = keys
+        self.total = total
+
+def item(key: str, v: int) -> int:
+    return len(key) + v
+
+def main() -> int:
+    d = Doc([], [])
+    for i in range(500):
+        d.keys.append(f'key{i * 7919 % 500:05d}')
+        d.total.append(i * 31 % 17)
+    docs = int(sys.argv[1])
+    used = 0
+    check = 0
+    for doc in range(docs):
+        ix = [i for i in range(len(d.keys))]
+        ix.sort(key=lambda i: (-d.total[i], d.keys[i]))
+        for j in range(len(ix)):
+            used += item(d.keys[ix[j]], j)
+        check = (check * 31 + ix[doc % len(ix)]) % 1000003
+    print(check, used)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 RANK_PY = r'''

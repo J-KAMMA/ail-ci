@@ -11,23 +11,84 @@ import tempfile
 import unittest
 
 from test_ail_numeric_profiles import compiler, ROOT
-from ail_syntax import translate
+from ail_syntax import translate as _ail_translate, detect as _ail_brace
+def translate(source, **options):
+    return _ail_translate(source, **options) if _ail_brace(source) else source
 from test_ail_exception_resources import ALLOCATOR
 
 HEX_VALUES = [-(1 << 63), -(1 << 63) + 1, -65536, -16, -1, 0, 1, 15, 16, 255, (1 << 63) - 1]
 HEX_SOURCE = 'fn main()->int {' + ''.join('print(hex(' + str(value) + '));' for value in HEX_VALUES) + 'return 0;}'
-ONCE_SOURCE = '''struct State {calls:int;}
-fn value(state:State)->int {state.calls+=1;return -9223372036854775808;}
-fn main()->int {let state=State(0);let kept:str=hex(value(state));
-print(kept);print(state.calls);return 0;}'''
-SHADOW_SOURCE = 'fn hex(n:int)->int {return n+7;} fn main()->int {print(hex(5));return 0;}'
-CALLABLE_SHADOW_SOURCE = 'fn target(n:int)->int {return n+1;} fn apply(hex:Callable[[int],int],n:int)->int {return hex(n);} fn main()->int {let hex:Callable[[int],int]=target;print(hex(4));print(apply(target,9));return 0;}'
-CLEANUP_SOURCE = '''fn main()->int {let total:int=0;
-for i in range(1024) {let text:str=hex(i);total+=len(text);
-let xs:list[float]=[3.0,-0.0,0.0,float("inf"),float("-inf")];xs.sort();
-let failed:list[float]=[1.0,float("nan"),-2.0];
-try {failed.sort();return 9;}except ValueError {total+=len(failed);}}
-print(total);return 0;}'''
+ONCE_SOURCE = """import sys
+
+class State:
+
+    def __init__(self, calls: int):
+        self.calls = calls
+
+def value(state: State) -> int:
+    state.calls += 1
+    return -9223372036854775808
+
+def main() -> int:
+    state = State(0)
+    kept: str = hex(value(state))
+    print(kept)
+    print(state.calls)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+SHADOW_SOURCE = """import sys
+
+def hex(n: int) -> int:
+    return n + 7
+
+def main() -> int:
+    print(hex(5))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+CALLABLE_SHADOW_SOURCE = """import sys
+
+def target(n: int) -> int:
+    return n + 1
+
+def apply(hex: Callable[[int], int], n: int) -> int:
+    return hex(n)
+
+def main() -> int:
+    hex: Callable[[int], int] = target
+    print(hex(4))
+    print(apply(target, 9))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+CLEANUP_SOURCE = """import sys
+
+def main() -> int:
+    total: int = 0
+    for i in range(1024):
+        text: str = hex(i)
+        total += len(text)
+        xs: list[float] = [3.0, -0.0, 0.0, float('inf'), float('-inf')]
+        xs.sort()
+        failed: list[float] = [1.0, float('nan'), -2.0]
+        try:
+            failed.sort()
+            return 9
+        except ValueError:
+            total += len(failed)
+    print(total)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 
 def sort_source(bits, catches=False):
@@ -60,7 +121,10 @@ class NativeGateSourceTests(unittest.TestCase):
                 self.assertTrue(generate(source))
 
     def test_borrowed_sort_is_refused_before_native(self):
-        source = 'fn change(xs:list[float])->int {xs.sort();return len(xs);}'
+        source = """def change(xs: list[float]) -> int:
+    xs.sort()
+    return len(xs)
+"""
         with self.assertRaises(compiler.Unsupported):
             compiler.to_c(translate(source, module=True), library=True, strict=True)
 

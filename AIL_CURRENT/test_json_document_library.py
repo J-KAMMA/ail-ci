@@ -13,10 +13,22 @@ class JsonDocumentLibraryTests(unittest.TestCase):
         obj=self.root/'document.o'
         result=self.command('compile-module',support.ROOT/'language_examples/json_document.ail','-o',obj)
         self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
-        source=self.write('caller.ail','''fn main()->int {
- try {let data=read_bytes(sys.argv[1]).decode();let nodes:list[JsonValue]=json_parse_document(data);write_stdout_bytes((json_compact(data)+"\\n").encode());return 0;}
- except ValueError {return 2;}
-}''')
+        source=self.write('caller.ail',"""from ail import read_bytes, write_stdout_bytes
+import sys
+
+def main() -> int:
+    try:
+        data = read_bytes(sys.argv[1]).decode()
+        nodes: list[JsonValue] = json_parse_document(data)
+        write_stdout_bytes((json_compact(data) + '\\n').encode())
+        return 0
+    except ValueError:
+        return 2
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""")
         exe=self.root/'json-caller';result=self.command('compile',source,'--object',obj,'-o',exe)
         self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
         if not exe.exists():exe=exe.with_suffix('.exe')

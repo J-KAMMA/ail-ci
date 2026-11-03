@@ -296,7 +296,9 @@ def main() -> int:
         self.compare_program(source, 'readonly')
 
     def test_refuses_mismatched_results_and_legacy_owned_targets(self):
-        definitions = 'fn target(n:int)->str {return "ok";}'
+        definitions = """def target(n: int) -> str:
+    return 'ok'
+"""
         for index, body in enumerate((
                 'let cb:Callable[[int],bytes]=target;',
                 'let cb:Callable[[float],str]=target;',

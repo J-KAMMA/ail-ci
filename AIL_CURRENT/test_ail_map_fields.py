@@ -3,7 +3,9 @@ import ast
 import re
 import subprocess
 import unittest
-from ail_syntax import translate
+from ail_syntax import translate as _ail_translate, detect as _ail_brace
+def translate(source, **options):
+    return _ail_translate(source, **options) if _ail_brace(source) else source
 import test_ail_c_objects as support
 
 

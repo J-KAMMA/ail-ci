@@ -69,112 +69,151 @@ fn main() {
 }
 """
 
-RECORDS = r"""
-struct Rec { name: str; age: int; agestr: str; score: int; }
+RECORDS = """from ail import read_bytes
+import sys
 
-fn run() -> int {
-    let text = read_bytes(sys.argv[1]).decode();
-    let recs: list[Rec] = [];
-    let lines = text.split("\n");
-    for line in lines {
-        if len(line) == 0 { continue; }
-        let f = line.split(",");
-        recs.append(Rec(f[0], int(f[1]), f[1], int(f[2])));
-    }
-    recs.sort(key=lambda r: (-r.score, r.age, r.name));
-    if len(recs) > 1 {
-        let j = 1;
-        recs[j].agestr = "A" + recs[j].agestr;
-        recs[j].age += 100;
-        recs[j].score = recs[j].score - 1;
-    }
-    let out: list[str] = [];
-    for r in recs {
-        out.append(r.name + "," + r.agestr + "," + str(r.score) + "," + str(0 - r.age) + "," + str(r.score // 3));
-    }
-    if len(out) > 0 { print("\n".join(out)); }
-    return 0;
-}
+class Rec:
 
-fn main() { return run(); }
+    def __init__(self, name: str, age: int, agestr: str, score: int):
+        self.name = name
+        self.age = age
+        self.agestr = agestr
+        self.score = score
+
+def run() -> int:
+    text = read_bytes(sys.argv[1]).decode()
+    recs: list[Rec] = []
+    lines = text.split('\\n')
+    for line in lines:
+        if len(line) == 0:
+            continue
+        f = line.split(',')
+        recs.append(Rec(f[0], int(f[1]), f[1], int(f[2])))
+    recs.sort(key=lambda r: (-r.score, r.age, r.name))
+    if len(recs) > 1:
+        j = 1
+        recs[j].agestr = 'A' + recs[j].agestr
+        recs[j].age += 100
+        recs[j].score = recs[j].score - 1
+    out: list[str] = []
+    for r in recs:
+        out.append(r.name + ',' + r.agestr + ',' + str(r.score) + ',' + str(0 - r.age) + ',' + str(r.score // 3))
+    if len(out) > 0:
+        print('\\n'.join(out))
+    return 0
+
+def main() -> int:
+    return run()
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
-TABLE = r"""
-fn main() -> int {
-    let words = read_bytes(sys.argv[1]).decode("utf-8").split("\n");
-    let d: dict[str, int] = {};
-    let seen: list[str] = [];
-    let k = 0;
-    for w in words {
-        if k % 5 == 3 and len(seen) > 0 {
-            let victim = seen[k % len(seen)];
-            if victim in d { d.pop(victim); }
-        }
-        if w in d { d[w] = d[w] + 1; } else { d[w] = k; seen.append(w); }
-        k += 1;
-    }
-    let total = 0;
-    let first: list[str] = [];
-    for w in d.keys() {
-        total += d[w] * len(w);
-        if len(first) < 8 { first.append(w); }
-    }
-    let c = d.copy();
-    c["extra"] = 7;
-    d.update(c);
-    print(len(d), len(c), total, "extra" in d, d.get("zz-missing", -5));
-    print(",".join(first));
-    d.clear();
-    print(len(d), len(c), "extra" in d);
-    d["again"] = 1;
-    for w in c.keys() { if w in d { d[w] += 1; } else { d[w] = 2; } }
-    print(len(d), d["again"], d["extra"]);
-    return 0;
-}
-"""
+TABLE = """from ail import read_bytes
+import sys
 
+def main() -> int:
+    words = read_bytes(sys.argv[1]).decode('utf-8').split('\\n')
+    d: dict[str, int] = {}
+    seen: list[str] = []
+    k = 0
+    for w in words:
+        if k % 5 == 3 and len(seen) > 0:
+            victim = seen[k % len(seen)]
+            if victim in d:
+                d.pop(victim)
+        if w in d:
+            d[w] = d[w] + 1
+        else:
+            d[w] = k
+            seen.append(w)
+        k += 1
+    total = 0
+    first: list[str] = []
+    for w in d.keys():
+        total += d[w] * len(w)
+        if len(first) < 8:
+            first.append(w)
+    c = d.copy()
+    c['extra'] = 7
+    d.update(c)
+    print(len(d), len(c), total, 'extra' in d, d.get('zz-missing', -5))
+    print(','.join(first))
+    d.clear()
+    print(len(d), len(c), 'extra' in d)
+    d['again'] = 1
+    for w in c.keys():
+        if w in d:
+            d[w] += 1
+        else:
+            d[w] = 2
+    print(len(d), d['again'], d['extra'])
+    return 0
 
-SETS = r"""
-fn main() -> int {
-    let words = read_bytes(sys.argv[1]).decode().split("\n");
-    let st = set();
-    let m = {};
-    let k = 0;
-    for w in words {
-        st.add(w);
-        m[w] = len(w) + m.get(w, 0);
-        if k % 4 == 3 { st.discard(words[k // 2]); }
-        k += 1;
-    }
-    let total = 0;
-    for w in st { total += len(w) + 1; }
-    let mt = 0;
-    for w in m { mt += m[w]; }
-    print(len(st), total, len(m), mt, "w1" in st, "w1" in m);
-    for w in words { if w in m and len(w) > 2 { m.pop(w); } }
-    print(len(m));
-    return 0;
-}
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 
-FLOATS = r"""
-struct P { name: str; w: float; k: int; }
+SETS = """from ail import read_bytes
+import sys
 
-fn main() -> int {
-    let rows = read_bytes(sys.argv[1]).decode().split("\n");
-    let ps: list[P] = [];
-    for line in rows {
-        if len(line) == 0 { continue; }
-        let f = line.split(" ");
-        ps.append(P(f[0], float(f[1]), int(f[2])));
-    }
-    ps.sort(key=lambda p: (-p.w, p.name, -p.k));
-    for p in ps { print(p.name, p.w, p.k); }
-    let q = sorted(ps, key=lambda p: (p.k, p.w));
-    print(q[0].name, q[len(q) - 1].name);
-    return 0;
-}
+def main() -> int:
+    words = read_bytes(sys.argv[1]).decode().split('\\n')
+    st = set()
+    m = {}
+    k = 0
+    for w in words:
+        st.add(w)
+        m[w] = len(w) + m.get(w, 0)
+        if k % 4 == 3:
+            st.discard(words[k // 2])
+        k += 1
+    total = 0
+    for w in st:
+        total += len(w) + 1
+    mt = 0
+    for w in m:
+        mt += m[w]
+    print(len(st), total, len(m), mt, 'w1' in st, 'w1' in m)
+    for w in words:
+        if w in m and len(w) > 2:
+            m.pop(w)
+    print(len(m))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+
+FLOATS = """from ail import read_bytes
+import sys
+
+class P:
+
+    def __init__(self, name: str, w: float, k: int):
+        self.name = name
+        self.w = w
+        self.k = k
+
+def main() -> int:
+    rows = read_bytes(sys.argv[1]).decode().split('\\n')
+    ps: list[P] = []
+    for line in rows:
+        if len(line) == 0:
+            continue
+        f = line.split(' ')
+        ps.append(P(f[0], float(f[1]), int(f[2])))
+    ps.sort(key=lambda p: (-p.w, p.name, -p.k))
+    for p in ps:
+        print(p.name, p.w, p.k)
+    q = sorted(ps, key=lambda p: (p.k, p.w))
+    print(q[0].name, q[len(q) - 1].name)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 
@@ -231,50 +270,62 @@ def field_program(seed, steps=90):
     return ail_source, py_source
 
 
-SMALL = r"""
-fn main() -> int {
-    let lines = read_bytes(sys.argv[1]).decode().split("\n");
-    let xs: list[int] = [];
-    for i in range(0, 210) { xs.append(i - 3); }
-    let digits = "";
-    for v in xs {
-        digits += str(v) + ";";
-        digits += "<" + str(v) + ">" + str(v + 1) + str(-v) + "|";
-    }
-    print(digits);
-    for line in lines {
-        let f = line.split(",");
-        let sizes = str(len(f)) + ":";
-        for part in f { sizes += str(len(part)) + "/"; }
-        let a = line[2:7];
-        let b = line[-4:];
-        let c = line[:-3];
-        let d = line[5:2];
-        let e = line[100:];
-        let first = "!";
-        if len(line) > 3 { first = line[3]; }
-        let last = "?";
-        if len(line) > 0 { last = line[-1]; }
-        print(sizes, "[" + a + "]", "[" + b + "]", "[" + c + "]", "[" + d + "]", "[" + e + "]", first, last, line.find(","), len(line));
-    }
-    let n = len(xs);
-    print(xs[0], xs[-1], xs[n - 1], xs[-n]);
-    let text = read_bytes(sys.argv[1]).decode();
-    let sl = text.splitlines();
-    print(len(sl));
-    for x in sl { print(len(x), x[:3], x[-2:], x[1:-1]); }
-    let ws = text.split();
-    print(len(ws), len(ws[0]), ws[len(ws) - 1], ws[1][1:]);
-    for x in text.splitlines() { print(len(x) + 0, x[0:1] + "|"); }
-    let data = read_bytes(sys.argv[1]);
-    print(data[0], data[-1], data[len(data) - 1], data[-len(data)]);
-    print(sys.argv[2]);
-    if sys.argv[2] == "list-high" { print(xs[n]); }
-    if sys.argv[2] == "list-low" { print(xs[-n - 1]); }
-    if sys.argv[2] == "bytes-high" { print(data[len(data)]); }
-    if sys.argv[2] == "bytes-low" { print(data[-len(data) - 1]); }
-    return 0;
-}
+SMALL = """from ail import read_bytes
+import sys
+
+def main() -> int:
+    lines = read_bytes(sys.argv[1]).decode().split('\\n')
+    xs: list[int] = []
+    for i in range(0, 210):
+        xs.append(i - 3)
+    digits = ''
+    for v in xs:
+        digits += str(v) + ';'
+        digits += '<' + str(v) + '>' + str(v + 1) + str(-v) + '|'
+    print(digits)
+    for line in lines:
+        f = line.split(',')
+        sizes = str(len(f)) + ':'
+        for part in f:
+            sizes += str(len(part)) + '/'
+        a = line[2:7]
+        b = line[-4:]
+        c = line[:-3]
+        d = line[5:2]
+        e = line[100:]
+        first = '!'
+        if len(line) > 3:
+            first = line[3]
+        last = '?'
+        if len(line) > 0:
+            last = line[-1]
+        print(sizes, '[' + a + ']', '[' + b + ']', '[' + c + ']', '[' + d + ']', '[' + e + ']', first, last, line.find(','), len(line))
+    n = len(xs)
+    print(xs[0], xs[-1], xs[n - 1], xs[-n])
+    text = read_bytes(sys.argv[1]).decode()
+    sl = text.splitlines()
+    print(len(sl))
+    for x in sl:
+        print(len(x), x[:3], x[-2:], x[1:-1])
+    ws = text.split()
+    print(len(ws), len(ws[0]), ws[len(ws) - 1], ws[1][1:])
+    for x in text.splitlines():
+        print(len(x) + 0, x[0:1] + '|')
+    data = read_bytes(sys.argv[1])
+    print(data[0], data[-1], data[len(data) - 1], data[-len(data)])
+    print(sys.argv[2])
+    if sys.argv[2] == 'list-high':
+        print(xs[n])
+    if sys.argv[2] == 'list-low':
+        print(xs[-n - 1])
+    if sys.argv[2] == 'bytes-high':
+        print(data[len(data)])
+    if sys.argv[2] == 'bytes-low':
+        print(data[-len(data) - 1])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 
@@ -309,45 +360,52 @@ def small_expected(raw):
     return "\n".join(out) + "\n"
 
 
-DECODE = r"""
-fn width(b: bytes) -> int {
-    let s = b.decode();
-    return len(s) * 1000 + len(s.split(" "));
-}
+DECODE = """from ail import read_bytes
+import sys
 
-fn dec(b: bytes) -> str { return b.decode(); }
+def width(b: bytes) -> int:
+    s = b.decode()
+    return len(s) * 1000 + len(s.split(' '))
 
-fn words(b: bytes) -> list[str] { return b.decode().split(" "); }
+def dec(b: bytes) -> str:
+    return b.decode()
 
-fn run() -> int {
-    let data = read_bytes(sys.argv[1]);
-    let text = data.decode();
-    let n = len(data);
-    let total = 0;
-    let a = 0;
-    let i = 0;
-    let longest = "";
-    while i <= n {
-        if i == n or data[i] == 10 {
-            let piece = data[a:i].decode();
-            total += len(piece);
-            if len(piece) > len(longest) { longest = piece; }
-            a = i + 1;
-        }
-        i += 1;
-    }
-    print(len(text), total, longest, width(data), width(data[1:]));
-    print(text.upper() == text, text.find("e"), text[-5:], text[2:6]);
-    let w = words(read_bytes(sys.argv[1]));
-    let d = dec(read_bytes(sys.argv[1]));
-    print(len(w), w[0], w[len(w) - 1], d == text, len(d));
-    return 0;
-}
+def words(b: bytes) -> list[str]:
+    return b.decode().split(' ')
 
-fn main() -> int {
-    try { return run(); }
-    except UnicodeDecodeError { print("not utf-8"); return 3; }
-}
+def run() -> int:
+    data = read_bytes(sys.argv[1])
+    text = data.decode()
+    n = len(data)
+    total = 0
+    a = 0
+    i = 0
+    longest = ''
+    while i <= n:
+        if i == n or data[i] == 10:
+            piece = data[a:i].decode()
+            total += len(piece)
+            if len(piece) > len(longest):
+                longest = piece
+            a = i + 1
+        i += 1
+    print(len(text), total, longest, width(data), width(data[1:]))
+    print(text.upper() == text, text.find('e'), text[-5:], text[2:6])
+    w = words(read_bytes(sys.argv[1]))
+    d = dec(read_bytes(sys.argv[1]))
+    print(len(w), w[0], w[len(w) - 1], d == text, len(d))
+    return 0
+
+def main() -> int:
+    try:
+        return run()
+    except UnicodeDecodeError:
+        print('not utf-8')
+        return 3
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 
