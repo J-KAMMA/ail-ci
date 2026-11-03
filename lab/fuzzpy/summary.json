@@ -598,5 +598,605 @@
 "class": "other",
 "path": "general",
 "first_diff": ""
+},
+{
+"seed": 101,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 5: cpython='248' ail='<end>'"
+},
+{
+"seed": 102,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 103,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 104,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 105,
+"class": "refused",
+"path": "typed",
+"first_diff": "  write instead: `al18 = v15.copy()` for a copy (or list(v15) / dict(v15) / set(v15)); to share, keep a single name or pass the container to a function"
+},
+{
+"seed": 106,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 107,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 1: cpython='.5' ail='<end>'"
+},
+{
+"seed": 108,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 109,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 110,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 11: cpython='224' ail='<end>'"
+},
+{
+"seed": 111,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 17: cpython='False 2 False' ail='<end>'"
+},
+{
+"seed": 112,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 113,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 114,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 115,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 116,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 117,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 118,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 119,
+"class": "refused",
+"path": "typed",
+"first_diff": "  write instead: `al14 = v13.copy()` for a copy (or list(v13) / dict(v13) / set(v13)); to share, keep a single name or pass the container to a function"
+},
+{
+"seed": 120,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 121,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 122,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 123,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 124,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 4: cpython='158' ail='<end>'"
+},
+{
+"seed": 125,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 126,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 127,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 128,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 129,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 130,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 131,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 132,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 133,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 134,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 135,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 136,
+"class": "refused",
+"path": "typed",
+"first_diff": "  write instead: `al14 = v13.copy()` for a copy (or list(v13) / dict(v13) / set(v13)); to share, keep a single name or pass the container to a function"
+},
+{
+"seed": 137,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 138,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 139,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 140,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 141,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 142,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 30: cpython='0' ail='<end>'"
+},
+{
+"seed": 143,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 144,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 145,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 146,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 147,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 148,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 149,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 150,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 151,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 152,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 153,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 154,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 155,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 156,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 3: cpython='16' ail='<end>'"
+},
+{
+"seed": 157,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 158,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 159,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 160,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 161,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 162,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 163,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 164,
+"class": "refused",
+"path": "typed",
+"first_diff": "  write instead: `al9 = v8.copy()` for a copy (or list(v8) / dict(v8) / set(v8)); to share, keep a single name or pass the container to a function"
+},
+{
+"seed": 165,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 166,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 167,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 168,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 169,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 170,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 171,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 172,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 173,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 174,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 175,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 176,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 177,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 178,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 179,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 180,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 181,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.index() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 182,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 183,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 184,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 185,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 186,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 187,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 188,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 189,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 190,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 191,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 192,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 193,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 194,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+},
+{
+"seed": 195,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 196,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 197,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 6: cpython='1 1 0' ail='<end>'"
+},
+{
+"seed": 198,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 199,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 200,
+"class": "other",
+"path": "general",
+"first_diff": ""
 }
 ]
