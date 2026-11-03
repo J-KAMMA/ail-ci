@@ -1,3 +1,15 @@
+## 2026-11-03 -- onelang s5: a Python twin beside every `language_examples` source
+
+`tools/ail2py.py --twins DIR` writes a `X.py` twin beside every `X.ail` (brace sources are
+converted, the six Python-syntax sources are copied), each starting with the generated-file line.
+An existing `.py` that is not a twin is left alone and listed.  The 266 sources now have 266 twins.
+
+`AIL_CURRENT/test_ail_onelang_twins.py` re-converts every source and compares it with the checked-in
+twin; it also builds ten fixed twins both ways (eight single-module entries plus `block_use_math`
+and `codepoint_checksum`) and requires identical C, allowing only the `m__` module prefixes the
+Python merge adds.  The 37 `language_examples` readers from Appendix C and `test_ail_ail2py` pass;
+the two ASan cases need a normal address space (`ulimit -v` makes ASan's shadow reservation fail).
+
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
 Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's
