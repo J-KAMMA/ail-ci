@@ -17,8 +17,8 @@ compiler.
   that module's own.
 * `.py` and `.ail` (Python syntax) sources, for the entry and the modules; both existing is refused.
 * An import cycle that only meets in function bodies works; one that reads a name early is refused.
-* `_private` imports, imports below the top level, a module used as a value
-  are refused by name.
+* `_private` imports, imports below the top level, and a module returned by a call are refused by
+  name (a module used directly as a value now builds; see `test_ail_modules_values`).
 
 G2 (the classes after `SingleFilePrograms`) adds, each compared with CPython 3.12 on trees of files:
 
@@ -528,9 +528,12 @@ class Refusals(ModulesBase):
                                               irs=("1",)), "1\n")
 
     def test_module_as_value_and_attribute_assignment(self):
+        # MODVAL2: a local module used as a value is one generated instance (see test_ail_modules_values)
         files = {"lib.py": "X = 1\n\n\ndef f():\n    return X\n"}
-        self.refused({**files, "main.py": "import lib\nm = lib\nprint(m.f())\n"}, "used as a value")
-        self.refused({**files, "main.py": "import lib\nprint(len([lib]))\n"}, "used as a value")
+        self.assertEqual(self.same_as_cpython({**files, "main.py": "import lib\nm = lib\nprint(m.f())\n"},
+                                              irs=("1",)), "1\n")
+        self.assertEqual(self.same_as_cpython({**files, "main.py": "import lib\nprint(len([lib]))\n"},
+                                              irs=("1",)), "1\n")
         self.refused({**files, "main.py": "import lib\nprint(lib.nothing)\n"}, "no top-level name 'nothing'")
         self.refused({**files, "main.py": "from lib import nothing\nprint(nothing)\n"}, "no top-level name 'nothing'")
 

@@ -1,3 +1,26 @@
+## 2026-11-03 -- modval2: a local module can be used as a value (job-modval2-11040508)
+
+`ail_modules.py` used to refuse every local module used as a value (`m = pkg.util`, `[pkg.a,
+pkg.b]`, `getattr(m, "f")`).  The merge step now gives each such module one generated class and one
+instance, spliced in right after the module's body: a method per top-level function forwards its
+positional arguments to the merged function, a property per module global reads and writes the one
+merged variable, module aliases become properties, and `__name__`, `__file__`, `__package__` and
+`repr` return CPython's values.  Rewriting `pkg.util`, `pkg.util.attr`-as-value and a bare module
+name yields that instance, so `m is pkg.util` is true and `pkg.util.COUNT` after `m.COUNT = 5` sees
+the write.  A `getattr`/`setattr` with a run-time attribute name, a keyword call through the module
+value and a module returned by a getter stay refused by name.
+
+A module name bound directly (`m = pkg.util`) is folded to the merged names, so calls (keywords
+included), classes and function identity match CPython; a module chosen at run time keeps the
+instance.  `setattr` / `delattr` on a module value are refused by name because the compiler lowers
+them to a plain store that cannot run the generated properties.
+
+The nine probes live under `AIL_CURRENT/tests/modval/`; `test_ail_modules_values.py` (registered in
+`tests.d/`) runs 1-8 against CPython in the default and `AIL_UNIFIED_FORCE=1` builds and checks the
+probe09 refusal.  `test_ail_modules`, `test_ail_modules3`, `test_ail_lib_modules`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass; the ten
+`lab/compare/src/*/main.ail` builds keep byte-identical `program.c` against the integ export.
+
 ## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
 
 The daily fuzzer (seed 2076011178) printed `round((1e10 * 1e10))`.  On today's tree the seed already
