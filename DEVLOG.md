@@ -1,3 +1,25 @@
+## 2026-11-04 -- lsp1b: certain hover, read-only directories, clean messages
+
+Finished the lsp1 work from `job-lsp1-11031803` and fixed its review's three defects. The compiler
+and reference files stay exactly as on `integ`, so `compiler_types` and the `ail check --types` hover
+path are gone.
+
+Hover now shows a type only when it is certain: a function name gives its signature; a parameter or
+an annotated name gives the annotation text; a name whose every assignment in its scope is a literal
+of one kind (int, float, str, bytes, bool or None) gives that kind; every other name gives nothing.
+The five names in the review probe (`a`, `b`, `c`, `d`, `n`), `b"a b".split()`, `range(3)` and
+positions inside strings or comments now give `null`, down from 5 wrong types.
+
+A buffer in a read-only directory is checked in a `tempfile.mkdtemp()` directory with the real
+directory first on `AIL_PATH`, so diagnostics are published there and imports still resolve. Buffer
+diagnostics now replace both the temp file's full path and its base name in the message text, so no
+`.ail-lsp-XXXX.py` name leaks to the editor.
+
+`test_ail_lsp` (27 tests) covers each hover rule, the review probe, a `0555` directory (skipped for
+root), imports from it, and the diagnostic message. It passes with `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`; the manifest check is clean. No generated C
+changes.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against

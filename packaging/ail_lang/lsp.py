@@ -9,19 +9,20 @@
   With `strict = true` in the project (ail.toml / [tool.ail]) every typed-path refusal is an Error.
   `slow_patterns` of the report (quadratic shapes) are Information.
 * Hover on a diagnostic shows the rewrite ("write instead: ...") or, when there is none, the message.
-  Hover elsewhere shows the type of a name when the front end can tell it (an annotation, or an obvious
-  initialiser such as `x = 1`, `xs = [1, 2]`, `s = "hi"`), and a function's signature.
+  Hover elsewhere is certain or absent: a function name shows its signature; a parameter or an annotated
+  name shows its annotation; a name whose every assignment in its scope is a literal of one kind
+  (int, float, str, bytes, bool or None) shows that kind; anything else shows nothing.
 * didChange is full sync (LSP change kind 1). The buffer text is checked, so an unsaved edit still gets
   diagnostics; didSave with no text checks the file on disk.
 The blocker list comes from `compile --strict --json` (ail.strict/1: every blocker, with its rewrite); `classify()` decides
 Warning or Error.
 """
 import ast
-import hashlib
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,11 +74,8 @@ class Diagnoser:
         except (OSError, subprocess.SubprocessError) as error:
             return subprocess.CompletedProcess(command, 2, "", str(error))
 
-    def check(self, path, options, want_types=False):
-        command = cli._sdk_command("check", *options, path)
-        if want_types:
-            command.insert(-1, "--types")
-        done = self._run(command, CHECK_TIMEOUT)
+    def check(self, path, options, env=None):
+        done = self._run(cli._sdk_command("check", *options, path), CHECK_TIMEOUT, env)
         for line in reversed(done.stdout.splitlines()):
             try:
                 report = json.loads(line)
@@ -135,7 +133,7 @@ class Diagnoser:
         self.verdicts[key] = result
         return result
 
-    def diagnose(self, path, want_types=False, return_report=False):
+    def diagnose(self, path, env=None):
         """[(path, line, column, severity, code, message)] for the file; line and column are 1-based or None."""
         try:
             found = project.find(path.parent)
@@ -145,10 +143,9 @@ class Diagnoser:
         else:
             problems = []
         options = found.compiler_options() if found else []
-        report = self.check(path, options, want_types)
+        report = self.check(path, options, env)
         if isinstance(report, tuple):
-            failed = problems + [(path, 1, 1, ERROR, "check", "ail check failed: " + report[1])]
-            return (failed, None) if return_report else failed
+            return problems + [(path, 1, 1, ERROR, "check", "ail check failed: " + report[1])]
         found_strict = bool(found and found.strict)
         items = report.get("diagnostics") or []
         if items and report.get("stage") == "type" and items[0].get("code") not in HARD_CODES:
@@ -161,7 +158,7 @@ class Diagnoser:
             match = SLOW_PATTERN.match(text)
             if match:
                 problems.append((Path(match["path"]), int(match["line"]), 1, INFORMATION, "slow", match["text"]))
-        return (problems, report) if return_report else problems
+        return problems
 
     def classify(self, path, item, report, options, strict):
         """The one place that decides Warning (general path) or Error (refused)."""
@@ -232,257 +229,28 @@ def hover_for(diagnostics, position):
     return None
 
 
-IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
-_CALL_TYPES = {"int": "int", "float": "float", "str": "str", "bool": "bool", "bytes": "bytes",
-               "bytearray": "bytearray", "len": "int", "ord": "int", "input": "str", "list": "list",
-               "dict": "dict", "set": "set", "tuple": "tuple", "sorted": "list", "range": "range"}
-_HOVER_TYPES = {}
-
-
-def _public_kind(kind):
-    """The compiler's internal kind, as a JSON-safe value."""
-    if isinstance(kind, tuple):
-        return [_public_kind(item) for item in kind]
-    return kind
-
-
-def _sdk_root():
-    """The compiler sources: $AIL_SDK_DIR (cli.SDK), else the checkout beside packaging/."""
-    candidates = [Path(cli.SDK), Path(__file__).resolve().parents[2] / "AIL_CURRENT"]
-    for candidate in candidates:
-        if (candidate / "ail_chatgpt.py").is_file():
-            return candidate
-    return None
-
-
-def compiler_types(text, path=None):
-    """(local_types, bool_locals, module_types) from the compiler itself, or None.
-
-    This is the same `ail check` the build uses, asked for the types it inferred (`--types`); no
-    second checker decides what the compiler knows."""
-    root = _sdk_root()
-    if root is None:
-        return None
-    key = (hashlib.sha256(text.encode("utf-8")).hexdigest(), str(path) if path else None)
-    if key in _HOVER_TYPES:
-        return _HOVER_TYPES[key]
-    base = Path(path).parent if path is not None else None
-    try:
-        found = project.find(base) if base is not None else None
-    except project.ProjectError:
-        found = None
-    options = found.compiler_options() if found else []
-    directory = None
-    probe = None
-    try:
-        if base is not None and base.is_dir():
-            try:
-                handle, name = tempfile.mkstemp(prefix=".ail-lsp-hover-", suffix=Path(path).suffix or ".py",
-                                                dir=str(base))
-                os.close(handle)
-                probe = Path(name)
-            except OSError:
-                probe = None
-        if probe is None:
-            directory = tempfile.TemporaryDirectory(prefix="ail-lsp-hover-")
-            probe = Path(directory.name) / ((Path(path).name if path else "hover.py") or "hover.py")
-        probe.write_text(text, encoding="utf-8")
-        command = [sys.executable, "-X", "utf8", "-B", str(root / "ail_chatgpt.py"), "check", "--types",
-                   *map(str, options), str(probe)]
-        try:
-            done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
-                                  errors="replace", timeout=CHECK_TIMEOUT, env=cli._env())
-        except (OSError, subprocess.SubprocessError):
-            result = None
-        else:
-            result = None
-            for line in reversed(done.stdout.splitlines()):
-                try:
-                    report = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(report, dict) and report.get("schema") == "ail.check/1":
-                    result = (report.get("local_types") or {}, report.get("bool_locals") or {},
-                              report.get("module_types") or {})
-                    break
-    finally:
-        if probe is not None:
-            try:
-                probe.unlink()
-            except OSError:
-                pass
-        if directory is not None:
-            directory.cleanup()
-    _HOVER_TYPES[key] = result
-    return result
-
-
-def _clean_type(text):
-    if text is None:
-        return None
-    text = str(text)
-    if text.startswith("__ail_checked_"):
-        text = text[len("__ail_checked_"):]
-        if text.endswith("__"):
-            text = text[:-2]
-    return {"flist": "list[float]", "farray": "list[float]", "slist": "list[str]",
-            "blist": "list[bytes]"}.get(text, text)
-
-
-def _display_kind(kind):
-    """The editor spelling of one compiler kind."""
-    if isinstance(kind, list):
-        if not kind:
-            return None
-        tag = kind[0]
-        if tag in ("obj", "class") and len(kind) > 1:
-            return str(kind[1])
-        if tag == "tuple" and len(kind) > 1:
-            return _clean_type(kind[1])
-        return str(tag)
-    names = {
-        "int": "int", "float": "float", "str": "str", "bytes": "bytes", "bytearray": "bytearray",
-        "list": "list", "flist": "list[float]", "slist": "list[str]", "blist": "list[bytes]",
-        "set": "set", "dict": "dict", "range": "range", "nsum": "int | float",
-        "exception": "exception", "binaryfile": "binaryfile", "tcpsocket": "tcpsocket",
-        "bool": "bool",
-    }
-    return names.get(kind, str(kind))
-
-
 def _annotation(node):
-    return _clean_type(ast.unparse(node)) if node is not None else None
+    """The annotation text exactly as the source writes it."""
+    return ast.unparse(node) if node is not None else None
 
 
-def _element_type(kind):
-    if kind and kind.startswith("list[") and kind.endswith("]"):
-        return kind[5:-1]
-    if kind in ("list", "set", "tuple"):
+def _literal_type(node):
+    """The type of a literal of one of the six certain kinds, or None for anything else."""
+    if not isinstance(node, ast.Constant):
         return None
-    if kind == "range":
+    value = node.value
+    if value is None:
+        return "None"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
         return "int"
-    if kind and kind.startswith("dict[") and kind.endswith("]"):
-        inner = kind[5:-1]
-        depth = 0
-        for index, char in enumerate(inner):
-            if char == "[":
-                depth += 1
-            elif char == "]":
-                depth -= 1
-            elif char == "," and depth == 0:
-                return inner[index + 1:].strip()
-    return None
-
-
-def _value_type(node, env):
-    """The type of an initialiser the front end can name from its shape, or None."""
-    if isinstance(node, ast.Constant):
-        value = node.value
-        if value is None:
-            return "None"
-        if isinstance(value, bool):
-            return "bool"
-        if isinstance(value, int):
-            return "int"
-        if isinstance(value, float):
-            return "float"
-        if isinstance(value, str):
-            return "str"
-        if isinstance(value, bytes):
-            return "bytes"
-        return None
-    if isinstance(node, ast.Name):
-        return env.get(node.id)
-    if isinstance(node, ast.JoinedStr):
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
         return "str"
-    if isinstance(node, (ast.List, ast.ListComp)):
-        if isinstance(node, ast.List) and not node.elts:
-            return "list"
-        parts = {_value_type(item, env) for item in node.elts} if isinstance(node, ast.List) else set()
-        if len(parts) == 1 and None not in parts:
-            return "list[%s]" % parts.pop()
-        return "list"
-    if isinstance(node, (ast.Set, ast.SetComp)):
-        return "set"
-    if isinstance(node, (ast.Dict, ast.DictComp)):
-        if isinstance(node, ast.Dict) and node.keys and all(isinstance(k, ast.Constant) for k in node.keys):
-            keys = {_value_type(k, env) for k in node.keys}
-            values = {_value_type(v, env) for v in node.values}
-            if len(keys) == 1 and len(values) == 1 and None not in keys | values:
-                return "dict[%s, %s]" % (keys.pop(), values.pop())
-        return "dict"
-    if isinstance(node, ast.Tuple):
-        parts = [_value_type(item, env) for item in node.elts]
-        return "tuple[%s]" % ", ".join(part or "?" for part in parts) if parts else "tuple"
-    if isinstance(node, ast.UnaryOp):
-        if isinstance(node.op, ast.Not):
-            return "bool"
-        return _value_type(node.operand, env)
-    if isinstance(node, ast.BoolOp):
-        return "bool"
-    if isinstance(node, ast.Compare):
-        return "bool"
-    if isinstance(node, ast.IfExp):
-        left, right = _value_type(node.body, env), _value_type(node.orelse, env)
-        return left if left == right else None
-    if isinstance(node, ast.BinOp):
-        left, right = _value_type(node.left, env), _value_type(node.right, env)
-        if isinstance(node.op, ast.Div):
-            return "float" if {left, right} <= {"int", "float", "bool"} else None
-        if isinstance(node.op, ast.Mult) and (left in ("list", "str", "bytes") or right in ("list", "str", "bytes")):
-            return right if left in ("int",) else left if right in ("int",) else left or right
-        if {left, right} <= {"int", "bool"}:
-            return "int"
-        if left in ("int", "float", "bool") and right in ("int", "float", "bool"):
-            return "float" if "float" in (left, right) else "int"
-        if left == right and left in ("str", "bytes", "list", "dict", "set"):
-            return left
-        return None
-    if isinstance(node, ast.Subscript):
-        base = _value_type(node.value, env)
-        return _element_type(base)
-    if isinstance(node, ast.Attribute):
-        return None
-    if isinstance(node, ast.Call):
-        func = node.func
-        if isinstance(func, ast.Name) and func.id in _CALL_TYPES:
-            kind = _CALL_TYPES[func.id]
-            if func.id == "abs" and node.args:
-                return _value_type(node.args[0], env)
-            if func.id == "round":
-                return "float"
-            if func.id == "sum" and node.args:
-                element = _element_type(_value_type(node.args[0], env))
-                return element if element in ("int", "float") else "int | float"
-            if func.id in ("min", "max") and node.args:
-                parts = {_value_type(arg, env) for arg in node.args}
-                if len(parts) == 1 and None not in parts:
-                    return parts.pop()
-            if func.id == "sorted" and node.args:
-                element = _element_type(_value_type(node.args[0], env))
-                return "list[%s]" % element if element else "list"
-            return kind
-        if isinstance(func, ast.Attribute):
-            base = _value_type(func.value, env)
-            if func.attr in ("split", "splitlines"):
-                return "list[bytes]" if base == "bytes" else "list[str]"
-            if func.attr in ("strip", "lstrip", "rstrip", "lower", "upper", "replace", "join",
-                             "format", "read", "readline"):
-                return "bytes" if base == "bytes" and func.attr in ("strip", "lstrip", "rstrip",
-                                                                    "lower", "upper", "replace",
-                                                                    "read", "readline") else "str"
-            if func.attr in ("keys", "values", "items"):
-                if base and base.startswith("dict["):
-                    inner = base[5:-1]
-                    split = inner.split(", ", 1)
-                    if len(split) == 2:
-                        return {"keys": "list[%s]" % split[0], "values": "list[%s]" % split[1],
-                                "items": "list[tuple[%s, %s]]" % (split[0], split[1])}[func.attr]
-            if func.attr == "get" and node.args:
-                return _element_type(base)
-            if func.attr == "index" and node.args:
-                return "int"
-        return None
+    if isinstance(value, bytes):
+        return "bytes"
     return None
 
 
@@ -499,39 +267,91 @@ def _scope_nodes(scope, upto_line=None):
         pending[0:0] = list(ast.iter_child_nodes(node))
 
 
-def _scope_types(scope, upto_line=None):
-    env = {}
+def _bind_target(target, uncertain):
+    """Record a binding that is not a literal assignment as uncertain."""
+    if isinstance(target, ast.Name):
+        uncertain.add(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for item in target.elts:
+            _bind_target(item, uncertain)
+    elif isinstance(target, ast.Starred):
+        _bind_target(target.value, uncertain)
+
+
+def _scope_info(scope):
+    """(annotations, literal_types, uncertain, functions) for one scope.
+
+    `literal_types` is the set of literal kinds assigned to a name; `uncertain` holds a name with
+    any non-literal binding. A name is typed only when every assignment in the scope is a literal of
+    one kind and nothing else binds it.
+    """
+    annotations, literals, uncertain, functions = {}, {}, set(), {}
+
+    def annotate(name, text):
+        if not text:
+            return
+        if name in annotations and annotations[name] != text:
+            uncertain.add(name)
+        else:
+            annotations[name] = text
+
+    def assign(target, value):
+        if isinstance(target, ast.Name):
+            kind = _literal_type(value)
+            if kind is None:
+                uncertain.add(target.id)
+            else:
+                literals.setdefault(target.id, set()).add(kind)
+        else:
+            _bind_target(target, uncertain)
+
     args = getattr(scope, "args", None)
     if args is not None:
         for argument in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
-            kind = _annotation(argument.annotation)
-            if kind:
-                env[argument.arg] = kind
+            text = _annotation(argument.annotation)
+            if text:
+                annotate(argument.arg, text)
+            else:
+                uncertain.add(argument.arg)
         for argument in (args.vararg, args.kwarg):
             if argument is not None:
-                kind = _annotation(argument.annotation)
-                if kind:
-                    env[argument.arg] = kind
-    for node in _scope_nodes(scope, upto_line):
+                text = _annotation(argument.annotation)
+                if text:
+                    annotate(argument.arg, text)
+                else:
+                    uncertain.add(argument.arg)
+    for node in _scope_nodes(scope):
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            kind = _annotation(node.annotation)
-            if kind:
-                env[node.target.id] = kind
+            annotate(node.target.id, _annotation(node.annotation))
+            if node.value is not None:
+                assign(node.target, node.value)
         elif isinstance(node, ast.Assign):
-            kind = _value_type(node.value, env)
-            if kind:
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        env[target.id] = kind
-        elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name):
-            kind = _element_type(_value_type(node.iter, env)) or _value_type(node.iter, env)
-            if kind:
-                env[node.target.id] = kind
-        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
-            kind = _value_type(node.value, env)
-            if kind:
-                env[node.target.id] = kind
-    return env
+            for target in node.targets:
+                assign(target, node.value)
+        elif isinstance(node, ast.AugAssign):
+            _bind_target(node.target, uncertain)
+        elif isinstance(node, ast.NamedExpr):
+            assign(node.target, node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            _bind_target(node.target, uncertain)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    _bind_target(item.optional_vars, uncertain)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                uncertain.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                uncertain.add(alias.asname or alias.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions[node.name] = node
+        elif isinstance(node, ast.ClassDef):
+            uncertain.add(node.name)
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name:
+                uncertain.add(node.name)
+    return annotations, literals, uncertain, functions
 
 
 def _signature(node):
@@ -594,53 +414,23 @@ def _scopes_at(tree, line):
     return scopes
 
 
-def _scope_keys(scope):
-    """Names the compiler may use for a scope's locals."""
-    name = getattr(scope, "name", None)
-    if not name:
-        return ()
-    keys = [name]
-    if "." in name:
-        keys.append(name.rsplit(".", 1)[1])
-    return tuple(keys)
+def _function_at(tree, name, line):
+    """The function definition a hover on `name` means, preferring the one around the cursor."""
+    found = [node for node in ast.walk(tree)
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
+    if not found:
+        return None
+    found.sort(key=lambda node: node.lineno)
+    inside = [node for node in found
+              if node.lineno <= line <= getattr(node, "end_lineno", node.lineno)]
+    if inside:
+        return inside[-1]
+    before = [node for node in found if node.lineno <= line]
+    return before[-1] if before else found[0]
 
 
-def _compiler_hover(kind, name, line, tree, types):
-    local_types, bool_locals, module_types = types
-    scopes = _scopes_at(tree, line)
-    for scope in reversed(scopes):
-        for key in _scope_keys(scope):
-            env = local_types.get(key)
-            if env is not None and name in env:
-                if name in (bool_locals.get(key) or ()):
-                    return "bool"
-                display = _display_kind(env[name])
-                if display == "int | float":
-                    fallback = _value_type_from_scope(tree, line, name)
-                    if fallback:
-                        return fallback
-                if display:
-                    return display
-    module = module_types.get(name)
-    if module is not None:
-        display = _display_kind(module)
-        if display:
-            return display
-    return None
-
-
-def _value_type_from_scope(tree, line, name):
-    for scope in reversed(_scopes_at(tree, line)):
-        if not hasattr(scope, "body"):
-            continue
-        env = _scope_types(scope, upto_line=line)
-        if name in env:
-            return env[name]
-    return None
-
-
-def type_hover(text, position, path=None, types=None):
-    """Markdown for the type of the name under the cursor, or None when the compiler cannot name it."""
+def type_hover(text, position):
+    """Markdown for a certain type or a function signature at the cursor; None when it is not certain."""
     name = _name_at(text, position)
     if name is None:
         return None
@@ -649,27 +439,20 @@ def type_hover(text, position, path=None, types=None):
     except (SyntaxError, ValueError):
         return None
     line = int(position.get("line") or 0) + 1
-    scopes = _scopes_at(tree, line)
-    for scope in reversed(scopes):
-        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and scope.name == name:
-            if isinstance(scope, ast.ClassDef):
-                return "```python\nclass %s\n```" % scope.name
-            return "```python\n%s\n```" % _signature(scope)
-    if types is None:
-        types = compiler_types(text, path)
-    if types:
-        kind = _compiler_hover(kind=None, name=name, line=line, tree=tree, types=types)
-        if kind:
-            return "`%s`: `%s`" % (name, kind)
-    for scope in reversed(scopes):
-        env = _scope_types(scope, upto_line=line)
-        if name in env:
-            return "`%s`: `%s`" % (name, env[name])
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return "```python\n%s\n```" % _signature(node)
-        if isinstance(node, ast.ClassDef) and node.name == name:
-            return "```python\nclass %s\n```" % node.name
+    for scope in reversed(_scopes_at(tree, line)):
+        annotations, literals, uncertain, functions = _scope_info(scope)
+        if not (name in annotations or name in literals or name in uncertain or name in functions):
+            continue
+        if name in annotations:
+            return "`%s`: `%s`" % (name, annotations[name])
+        if name in functions and name not in literals and name not in uncertain:
+            return "```python\n%s\n```" % _signature(functions[name])
+        if name in uncertain:
+            return None
+        kinds = literals.get(name) or set()
+        if len(kinds) == 1:
+            return "`%s`: `%s`" % (name, next(iter(kinds)))
+        return None
     return None
 
 
@@ -694,7 +477,6 @@ class Server:
         self.published = {}                # uri -> diagnostics last published
         self.shown = {}                    # opened uri -> every uri it published to
         self.documents = {}                # uri -> current buffer text
-        self.types = {}                    # uri -> the compiler's (local, bool, module) types
 
     # -- framing
     def read(self):
@@ -731,12 +513,13 @@ class Server:
         path = uri_to_path(uri)
         if path is None:
             return
-        probe, temporary, directory = path, None, None
+        probe, temporary, directory, env = path, None, None, None
         try:
             if text is not None:
                 # Check the buffer through the same `ail check` the build uses. A sibling file keeps the
                 # project, local imports and relative paths intact; a read-only directory (or a path
-                # that has no directory yet) is checked in a private temporary directory instead.
+                # that has no directory yet) is checked in a private temporary directory instead, with
+                # the real directory first on AIL_PATH so imports still resolve.
                 if path.parent.is_dir():
                     try:
                         handle, name = tempfile.mkstemp(prefix=".ail-lsp-", suffix=path.suffix or ".py",
@@ -749,18 +532,16 @@ class Server:
                         probe.write_text(text, encoding="utf-8")
                         temporary = probe
                 if temporary is None:
-                    directory = tempfile.TemporaryDirectory(prefix="ail-lsp-buffer-")
-                    probe = Path(directory.name) / (path.name or "buffer.py")
+                    directory = tempfile.mkdtemp(prefix="ail-lsp-buffer-")
+                    probe = Path(directory) / (path.name or "buffer.py")
                     probe.write_text(text, encoding="utf-8")
                     temporary = probe
-            problems, report = self.diagnoser.diagnose(probe, want_types=True, return_report=True)
+                    env = cli._env()
+                    existing = env.get("AIL_PATH")
+                    env["AIL_PATH"] = str(path.parent) + (os.pathsep + existing if existing else "")
+            problems = self.diagnoser.diagnose(probe, env)
             if temporary is not None:
                 problems = _remap_problems(problems, path, temporary)
-            if report is not None:
-                self.types[uri] = (report.get("local_types") or {}, report.get("bool_locals") or {},
-                                   report.get("module_types") or {})
-            else:
-                self.types.pop(uri, None)
             grouped = to_lsp(problems, path)
             for other in self.shown.get(uri, set()) - set(grouped):
                 self.publish(other, [])
@@ -769,13 +550,13 @@ class Server:
                 self.publish(target, items)
             self.shown[uri] = set(grouped)
         finally:
-            if temporary is not None:
+            if directory is not None:
+                shutil.rmtree(directory, ignore_errors=True)
+            elif temporary is not None:
                 try:
                     temporary.unlink()
                 except OSError:
                     pass
-            if directory is not None:
-                directory.cleanup()
 
     # -- dispatch
     def handle(self, message):
@@ -814,7 +595,6 @@ class Server:
         elif method == "textDocument/didClose":
             uri = (params.get("textDocument") or {}).get("uri", "")
             self.documents.pop(uri, None)
-            self.types.pop(uri, None)
             for target in self.shown.pop(uri, {uri}):
                 self.publish(target, [])
         elif method == "textDocument/hover":
@@ -828,7 +608,7 @@ class Server:
                     if path is not None and path.is_file():
                         text = path.read_text(encoding="utf-8", errors="replace")
                 if text is not None:
-                    value = type_hover(text, position, uri_to_path(uri), self.types.get(uri))
+                    value = type_hover(text, position)
                     if value:
                         answer = {"contents": {"kind": "markdown", "value": value}}
             self.reply(message, answer)

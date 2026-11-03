@@ -4,7 +4,7 @@
 * didOpen / didChange / didSave publish diagnostics from `ail check`: a source that does not load is an Error
   with its "write instead:" text; a typed-path blocker the general path builds is a Warning "runs on the slow
   general path because ..."; `strict = true` in ail.toml makes it an Error; a clean file publishes none;
-* hover on a diagnostic shows the rewrite, and elsewhere shows an inferred type or a signature;
+* hover on a diagnostic shows the rewrite, and elsewhere a certain annotation, literal type or signature;
 * didClose clears, unknown requests get -32601, shutdown + exit end the process with status 0.
 
 The warning/error split builds the program once, so those cases need a C compiler and are skipped without one.
@@ -34,8 +34,16 @@ REFUSED = "def main() -> None:\n    print('hi')\n"
 BROKEN = "def main() -> None:\n    x = [1, 2\n    print(x)\nmain()\n"
 # a real front-end type error: the annotation and the value disagree
 TYPE_ERROR = 'def main() -> None:\n    x: int = "hi"\n    print(x)\n\n\nmain()\n'
-TYPED = ("def total() -> int:\n    value: int = 3\n    result = value + 4\n    return result\n\n\n"
+TYPED = ("def total() -> int:\n    value: int = 3\n    return value\n\n\n"
          "def main() -> None:\n    print(total())\n\n\nmain()\n")
+LITERALS = ("def main() -> None:\n    i = 1\n    f = 2.5\n    s = 'text'\n    b = b'raw'\n"
+            "    t = True\n    n = None\n    print(i, f, s, b, t, n)\n\n\nmain()\n")
+PROBE = ("def main() -> None:\n    a = 1 / 2\n    b = not 1\n    c = abs(-3.5)\n"
+         "    d = sum([1.5, 2.5])\n    n = round(1.234, 2)\n    print(a, b, c, d, n)\n\n\nmain()\n")
+MIXED = ("def main() -> None:\n    m = 1\n    m = 2.5\n    print(m)\n\n\nmain()\n")
+CALLS = ("def main() -> None:\n    raw = b'a b'.split()\n    rng = range(3)\n"
+         "    print(raw, rng)\n\n\nmain()\n")
+STRINGS = ("def main() -> None:\n    x = 1\n    print('x = 2')  # x = 3\n\n\nmain()\n")
 
 
 def setUpModule():
@@ -162,6 +170,39 @@ class Protocol(LspCase):
         self.assertEqual(item["range"]["start"]["line"], 1)
         self.assertIn("never closed", item["message"])
 
+    def test_a_buffer_diagnostic_never_shows_the_temp_file_name(self):
+        _, uri = self.open("helper.py", BROKEN)
+        (item,) = self.client.diagnostics(uri)
+        self.assertNotIn(".ail-lsp-", item["message"])
+        self.assertIn("helper.py", item["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_publishes_a_syntax_error(self):
+        folder = self.dir / "readonly"
+        folder.mkdir()
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        uri = (folder / "broken.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": BROKEN}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 1)
+        self.assertIn("never closed", item["message"])
+        self.assertNotIn(".ail-lsp-", item["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_still_resolves_imports(self):
+        folder = self.dir / "readonly-import"
+        folder.mkdir()
+        (folder / "dep.py").write_text("def value() -> int:\n    return 7\n", encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        text = "from dep import value\n\ndef main() -> None:\n    print(value())\n\n\nmain()\n"
+        uri = (folder / "main.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": text}})
+        self.assertEqual(self.client.diagnostics(uri), [])
+
     def test_a_refusal_is_an_error_with_the_rewrite_and_hover_shows_it(self):
         _, uri = self.open("refused.py", REFUSED)
         (item,) = self.client.diagnostics(uri)
@@ -199,18 +240,55 @@ class Protocol(LspCase):
         self.assertEqual(len(self.client.diagnostics(uri)), 1)
         self.assertEqual(path.read_text(encoding="utf-8"), CLEAN)
 
-    def test_hover_shows_an_inferred_type_and_a_signature(self):
+    def test_hover_shows_an_annotation_and_a_signature(self):
         _, uri = self.open("types.py", TYPED)
         self.assertEqual(self.client.diagnostics(uri), [])
-        result = self.client.request("textDocument/hover", {
-            "textDocument": {"uri": uri}, "position": {"line": 2, "character": 5}})
-        self.assertIn("`result`: `int`", result["result"]["contents"]["value"])
         annotated = self.client.request("textDocument/hover", {
             "textDocument": {"uri": uri}, "position": {"line": 1, "character": 5}})
         self.assertIn("`value`: `int`", annotated["result"]["contents"]["value"])
         signature = self.client.request("textDocument/hover", {
             "textDocument": {"uri": uri}, "position": {"line": 0, "character": 4}})
         self.assertIn("def total() -> int", signature["result"]["contents"]["value"])
+
+    def test_hover_shows_a_type_only_for_literal_assignments(self):
+        _, uri = self.open("literals.py", LITERALS)
+        expected = [("i", 1, "int"), ("f", 2, "float"), ("s", 3, "str"),
+                    ("b", 4, "bytes"), ("t", 5, "bool"), ("n", 6, "None")]
+        for name, line, kind in expected:
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": line, "character": 4}})
+            self.assertEqual(answer["result"]["contents"]["value"], "`%s`: `%s`" % (name, kind))
+
+    def test_hover_is_none_for_the_review_probe_and_derived_names(self):
+        _, uri = self.open("probe.py", PROBE)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        for line in range(1, 6):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": line, "character": 4}})
+            self.assertIsNone(answer["result"], "line %d" % line)
+
+    def test_hover_is_none_for_a_mixed_type_and_for_calls(self):
+        _, mixed = self.open("mixed.py", MIXED)
+        for line in (1, 2):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": mixed}, "position": {"line": line, "character": 4}})
+            self.assertIsNone(answer["result"])
+        _, calls = self.open("calls.py", CALLS)
+        for line, character in ((1, 4), (2, 4), (1, 17), (2, 10)):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": calls}, "position": {"line": line, "character": character}})
+            self.assertIsNone(answer["result"])
+
+    def test_hover_ignores_strings_and_comments(self):
+        _, uri = self.open("strings.py", STRINGS)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        name = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 1, "character": 4}})
+        self.assertIn("`x`: `int`", name["result"]["contents"]["value"])
+        for character in (11, 22):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": 2, "character": character}})
+            self.assertIsNone(answer["result"])
 
     def test_a_type_error_in_a_strict_project_is_an_error(self):
         (self.dir / "strict").mkdir()
