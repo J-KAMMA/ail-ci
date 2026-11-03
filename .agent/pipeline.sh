@@ -83,7 +83,14 @@ wait_offpeak() {  # paid DeepSeek costs double Mon-Fri 01-04 and 06-10 UTC (Open
 run_cc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; returns 1 if Command Code could not run
   wait_offpeak
   # Command Code CLI (GOAT plan, owner 2026-10-26), pinned; the key lives only in this process's environment
+  # 2026-11-03: @opentelemetry/semantic-conventions 1.44.0 (2026-10-28) drops the default export command-code imports,
+  # so every run died at start ("does not provide an export named 'default'"); hold it at 1.43.0
+  [ -f "$S/cc/package.json" ] || { mkdir -p "$S/cc"; echo '{"private": true, "overrides": {"@opentelemetry/semantic-conventions": "1.43.0"}}' > "$S/cc/package.json"; }
   [ -x "$S/cc/node_modules/.bin/cmd" ] || npm install --prefix "$S/cc" --no-fund --no-audit command-code@1.88.2 >/dev/null 2>&1 || return 1
+  # 2026-11-04: the CLI sent "deepseek/deepseek-v4-flash" when asked for deepseek-v4.1-flash; print once which DeepSeek
+  # ids the plan really offers (model names only; the key goes in a header from the file, never to the log)
+  [ -f "$S/cc_models_shown" ] || { touch "$S/cc_models_shown"; echo "(Command Code DeepSeek models: $(curl -s -m 20     -H "Authorization: Bearer $(cat "$RUNNER_TEMP/cc.key")" https://api.commandcode.ai/provider/v1/models     | grep -o '"id": *"[^"]*deepseek[^"]*"' | tr '
+' ' '))" >&2; }
   local cm=$3; lm=$(( $(left) - 10 )); [ "$cm" -gt "$lm" ] && cm=$lm; [ "$cm" -lt 5 ] && return 1
   COMMAND_CODE_API_KEY=$(cat "$RUNNER_TEMP/cc.key") timeout "${cm}m" "$S/cc/node_modules/.bin/cmd" -p --model deepseek-v4.1-flash \
     --yolo -t --max-turns 250 --output-format json \
@@ -93,9 +100,10 @@ run_cc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; return
   echo "[model commandcode/deepseek-v4.1-flash]"
   # 2026-11-03: Command Code failed with "(no final text)" and nothing else to go on; show why (the key is never in it,
   # and GitHub masks secrets in logs anyway)
-  grep -qs '"result"' "$S/$2.cc.json" || { echo "(Command Code exit $ccrc, $(wc -c < "$S/$2.cc.json") bytes of output; stderr tail:)";
-    tail -c 600 "$S/$2.cc.err" | tr -d '
-' | sed 's/^/    /'; tail -c 400 "$S/$2.cc.json" | sed 's/^/    /'; } >&2
+  # an error also ends with {"type":"result","subtype":"error",...}: only a non-error result counts
+  cc_ok() { grep -qs '"type":"result"' "$S/$2.cc.json" && ! grep -qs '"type":"result","subtype":"error"' "$S/$2.cc.json"; }
+  cc_ok || { echo "(Command Code exit $ccrc, $(wc -c < "$S/$2.cc.json") bytes of output; stderr tail:)";
+    tail -c 600 "$S/$2.cc.err" | tr -d '' | sed 's/^/    /'; tail -c 400 "$S/$2.cc.json" | sed 's/^/    /'; } >&2
   python3 - "$S/$2.cc.json" <<'PY'
 import json, sys
 final = None
@@ -107,21 +115,64 @@ for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
     if isinstance(e, dict) and (e.get('type') == 'result' or 'result' in e):
         # the last line is {"type": "result", ..., "finalText": "..."} (command-code 1.88.0)
         final = e.get('finalText') or final
-print(final or '(no final text)')
+        last = e
+    if isinstance(e, dict) and e.get('type') == 'event':
+        ev = e.get('event') or {}
+        if ev.get('type') == 'run_end':
+            r = ev.get('result') or {}
+            stop = (r.get('stopReason'), r.get('turnCount'), (r.get('usage') or {}).get('outputTokens'))
+        if ev.get('type') == 'run_error':
+            err = (ev.get('error') or {}).get('message')
+print(final.strip() if final and final.strip() else '(no final text)')
+# 2026-11-04: Command Code runs ended "successfully" with an empty answer; say how the run ended
+s_ = globals().get('stop'); print("[commandcode stop=%s turns=%s out_tokens=%s%s]" % (
+    s_[0] if s_ else '?', s_[1] if s_ else '?', s_[2] if s_ else '?',
+    (" error=" + str(globals().get('err'))[:200]) if globals().get('err') else ''))
 PY
-  grep -qs '"result"' "$S/$2.cc.json"
+  cc_ok
+}
+run_ghm() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; returns 1 if GitHub Models could not do it
+  # 2026-11-04 owner: use free models first. GitHub Models is free with the job's own token (permission models: read).
+  # The free tier caps requests per day and tokens per request; a cap or error makes this run skip it from then on
+  [ -s "$RUNNER_TEMP/ghm.key" ] && [ ! -f "$S/ghm_out" ] || return 1
+  local m="${GHM_MODEL:-}" cat cm lm rc
+  if [ -z "$m" ]; then
+    cat=$(curl -s -m 20 -H "Authorization: Bearer $(cat "$RUNNER_TEMP/ghm.key")" https://models.github.ai/catalog/models)
+    [ -f "$S/ghm_shown" ] || { touch "$S/ghm_shown"; echo "(GitHub Models: $(printf '%s' "$cat" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("catalog unreadable"); sys.exit()
+print(" ".join("%s[%s,%s]" % (x.get("id"), x.get("rate_limit_tier"), (x.get("limits") or {}).get("max_input_tokens")) for x in d))'))" >&2; }
+    m=$(printf '%s' "$cat" | grep -o '"id": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | grep -i -m1 deepseek)
+    [ -n "$m" ] || m=openai/gpt-4.1
+  fi
+  cm=$3; lm=$(( $(left) - 10 )); [ "$cm" -gt "$lm" ] && cm=$lm; [ "$cm" -lt 5 ] && return 1
+  ( umask 077; cp "$RUNNER_TEMP/ghm.key" "$S/ghm.k" )   # agent.py deletes the key file it reads
+  timeout "${cm}m" python3 .agent/agent.py --provider openai --base-url https://models.github.ai/inference --model "$m" \
+    --price-in 0 --price-out 0 --max-tokens 4000 --dir "$PWD" --prompt-file "$1" --log "$S/$2.ghm.jsonl" \
+    --key-file "$S/ghm.k" > "$S/$2.ghm.out" 2> "$S/$2.ghm.err"; rc=$?
+  rm -f "$S/ghm.k"
+  echo "[model github/$m]"
+  if [ $rc != 0 ] || ! grep -qv '^\[cost' "$S/$2.ghm.out"; then
+    echo "(GitHub Models exit $rc:)" >&2; tail -c 500 "$S/$2.ghm.err" | sed 's/^/    /' >&2
+    touch "$S/ghm_out"; return 1
+  fi
+  cat "$S/$2.ghm.out"
 }
 run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
   # The free Zen build of the model first (zero retention, not used for training); the paid Go model when it fails.
   # When the free quota is used up OpenCode does not exit, it retries silently (2026-10-24), so a watchdog reads
   # OpenCode's own log and switches at once.
-  local rc model mins pid quota cc_tried=0
+  local rc=0 model mins=$3 pid quota cc_tried=0
   run_qoder "$1" "$2" "$3" && return 0
   for model in opencode/deepseek-v4.1-flash-free opencode-go/deepseek-v4.1-flash; do
     [ "$model" = opencode/deepseek-v4.1-flash-free ] && [ -f "$S/free_out" ] && continue
     [ "$model" = opencode-go/deepseek-v4.1-flash ] && wait_offpeak
     # the paid stage tries Command Code first (owner, 2026-10-27: OpenCode Go had used half its month, Command Code
     # nothing); OpenCode Go is the fallback. CC_FIRST_HOURS=odd|even|all picks when (all for now)
+    [ "$model" = opencode-go/deepseek-v4.1-flash ] && run_ghm "$1" "$2" "$3" && return 0
     if [ "$model" = opencode-go/deepseek-v4.1-flash ] && [ -s "$RUNNER_TEMP/cc.key" ] &&        case "${CC_FIRST_HOURS:-all}" in all) true;; even) [ $(( $(date -u +%-H) % 2 )) = 0 ];; *) [ $(( $(date -u +%-H) % 2 )) = 1 ];; esac; then
       cc_tried=1; run_cc "$1" "$2" "$3" && return 0
     fi
@@ -155,6 +206,7 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
     run_cc "$1" "$2" "$3" && return 0
   fi
   echo "[model $model]"
+  [ -f "$S/$2.jsonl" ] || : > "$S/$2.jsonl"
   python3 .agent/oc_report.py "$S/$2.jsonl"
   python3 .agent/oc_steps.py "$S/$2.jsonl" 2>/dev/null | sed "s/^/    /"
   [ $rc = 124 ] && echo "(cut off after $mins minutes)"

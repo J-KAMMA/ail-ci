@@ -1,3 +1,49 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+**What the change really does:** in `pyfunc.py` it lowers `a,b,c = xs[i:j]`/`xs[i:]` (list of int/float/str/bytes) and `a,b = f()` for `_is_tuple_ret` returns to length-checked indexed loads; `_check_utf8_codec_args` now admits `ascii`/`latin-1` for decode only, with two new runtime helpers; `exctext` gives the caught ASCII error CPython's 5 args; `rebinding._branch_kind_split` renames each if/elif branch that binds a name to a fresh local. That matches the report.
+
+**DEFECT (change-caused, base refused)**
+
+`/tmp/rprobes/r21min.py`
+```python
+def main():
+    if 1 == 1:
+        x = b"aa"
+        try:
+            z = int("no")
+        except ValueError as x:
+            z = 0
+        print(x.decode("ascii"))
+    else:
+        x = 2
+        print(x)
+main()
+```
+Expected (CPython; and base default build, because base's typed path refused with "exception handler binding 'x' conflicts … reads 'x' after this handler"): exit 1, stdout empty, `UnboundLocalError: cannot access local variable 'x' where it is not associated with a value`.
+Actual on HEAD (default build **and** `AIL_NO_GENERAL=1 --strict`): exit 0, stdout `aa`.
+
+Cause: `_branch_kind_split` counts only `ast.Name` stores. `except … as x` binds through the string `ExceptHandler.name`, so it is neither a blocker nor renamed; the handler region is "stuck" (a read follows it), so `_function_regions` makes no edits and the branch split renames `x = b"aa"` plus the later read to one fresh name, hiding the handler's unbinding. Fix: skip a chain when a branch contains any non-`Name` binding of the name (at minimum `ast.ExceptHandler.name == name`), or rename the handler binding and body with it.
+
+**Pre-existing:** typed uncaught unpack length errors print bare `ValueError` (no CPython text); identical on base for `a, b = xs` — `r11b`. Not caused here.
+
+**Observations:** (a) `test_call_tuple_unpack`'s `CALL_UNPACK` compiles on the base with identical C/output (pre-existing `_AilT_` tuple-record route), so neither the new test nor my probes exercise the new `_call_user_func(tuple_result=True)` path — reachability unverified. (b) A program that reads exception text but never decodes ASCII gets an extra unused `ail_exc_ascii_fail` in its C (base vs HEAD C differ); semantics unchanged, and the claimed "never reads exception text ⇒ identical C" holds (`r8_plain` `program.c` byte-identical), as does the `.ail` gate (`ticket_audit` `program.c` byte-identical).
+
+**Claims:** ASCII caught `str(e)`/`repr(e)` fixed — verified (`r9`,`r16`); uncaught ASCII line — verified (`r5b`); latin-1 all 256 bytes/`len`/`ord` — verified (`r6`); slice unpack clamping, negative/empty bounds, str/float/bytes, aliasing, caught messages — verified (`r12`,`r14`); starred/step/param/nested-list shapes — refusals by name (`r3a`,`r17`,`r22`) or pre-existing support (`r3b`); tests — `test_ail_pyreach_unpack` + `test_ail_safetynet` pass (0 failures); remaining 6 modules, codegen pins, and the other nine lab strict lists — unverified (ticket_audit's list is identical to base, 6 blockers). Speed: untouched programs have identical C (plain `.py`, `.ail`), so no icount run needed.
+
+**Unverified:** reachability of the new tuple-call path; the other eight test modules; the ten-lab strict-list before/after; `AIL_IR=0` variants.
+
+VERDICT: FIX
+1. `rebinding._branch_kind_split` splits a chain across an `except … as <name>` binding in a branch and loses Python's unbinding. Probe `/tmp/rprobes/r21min.py`: expected exit 1, stdout empty, `UnboundLocalError: cannot access local variable 'x'…`; actual exit 0, stdout `aa` (base refused by name).
+
+
+--- ORIGINAL TASK ---
 Lane: pyreach
 
 # pyreach s4: unpack from a slice or call, kind split of reused names, `decode('ascii'/'latin-1')`
