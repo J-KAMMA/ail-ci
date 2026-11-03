@@ -133,6 +133,16 @@ DEL_ALIAS = '''def main():
 main()
 '''
 
+SORTED_ITEMS_NO_KEY = '''def main():
+    d = {}
+    d[2] = ["b", 1, True]
+    d[1] = ["a", 2, False]
+    print(sorted(d.items()))
+
+
+main()
+'''
+
 GET_WITHOUT_PROOF = '''def main():
     d = {}
     d[1] = [10, 20, 30]
@@ -249,6 +259,22 @@ class PyreachDictRows(unittest.TestCase):
     def test_alias_survives_del(self):
         self._typed('del_alias', DEL_ALIAS, 'a 6 True 0\n')
         self._both('del_alias', DEL_ALIAS, 'a 6 True 0\n')
+
+    def test_items_sort_without_key_refuses(self):
+        with tempfile.TemporaryDirectory(prefix='ail-s5-') as tmp:
+            source = Path(tmp) / 'sorted_items_no_key.py'
+            source.write_text(SORTED_ITEMS_NO_KEY, encoding='utf8')
+            reference = subprocess.run([sys.executable, str(source)], capture_output=True,
+                                       text=True, timeout=120)
+            self.assertEqual(reference.returncode, 0)
+            result, _ = build_source(tmp, 'sorted_items_no_key', source)
+            self.assertNotEqual(result.returncode, 0)
+            for unified in (False, True):
+                result, exe = build_probe(tmp, 'sorted_items_no_key', source, unified)
+                self.assertEqual(result.returncode, 0, (unified, result.stderr[-2000:]))
+                got = run(exe)
+                self.assertEqual(got.returncode, reference.returncode, unified)
+                self.assertEqual(got.stdout, reference.stdout, unified)
 
     def test_one_argument_get_without_proof_still_refuses(self):
         with tempfile.TemporaryDirectory(prefix='ail-s5-') as tmp:

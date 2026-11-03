@@ -5,7 +5,8 @@ same key -> slot form as the dict-of-lists work: `d` maps a key to a slot and on
 position holds the fields.  `r = d.get(k)` / `r = d[k]` followed by `r[i] += x`, `d[k][i] += x`, a
 bool position printing `True`/`False`, `d.values()` / `d.items()` in insertion order,
 `for k, (a, b, s) in d.items()`, `sorted(d.items(), key=lambda kv: ...)`, `len(d)`, `k in d` and
-`del d[k]` (an alias keeps the row alive) all match CPython.  `setdefault(k, set()).add(v)`,
+`del d[k]` (an alias keeps the row alive) all match CPython; `sorted(d.items())` without a key
+lambda and printing a record row from `items()` are refused rather than sorting slots.  `setdefault(k, set()).add(v)`,
 `setdefault(k, [0, 0, 0])` and `get(k, [0, 0, 0])` use the same slot form; a set position is a
 one-field `_AilRowSet` box so the set object is shared.  Any unlisted use leaves the source on the
 old route.

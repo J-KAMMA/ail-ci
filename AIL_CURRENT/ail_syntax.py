@@ -5144,7 +5144,7 @@ class _RecordTransformer(ast.NodeTransformer):
             if row is not None:
                 return self._field(self._row_slot(row), index, store=isinstance(node.ctx, ast.Store))
             if isinstance(node.value, ast.Name) and self.roles.get(node.value.id) == 'item':
-                if index in (0, 1):
+                if index == 0 and isinstance(node.ctx, ast.Load):
                     return node
                 raise _RecordUnsupported()
         if self.kind == 'set':
@@ -5327,6 +5327,9 @@ class _RecordTransformer(ast.NodeTransformer):
             if (isinstance(first, ast.Call) and isinstance(first.func, ast.Attribute)
                     and isinstance(first.func.value, ast.Name) and first.func.value.id == self.d
                     and first.func.attr == 'items'):
+                if not any(kw.arg == 'key' and isinstance(kw.value, ast.Lambda)
+                           for kw in node.keywords):
+                    raise _RecordUnsupported()
                 node.args = [first] + [self.visit(arg) for arg in node.args[1:]]
                 node.keywords = [ast.keyword(arg=kw.arg, value=self.visit(kw.value))
                                  for kw in node.keywords]
