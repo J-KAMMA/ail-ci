@@ -144,6 +144,12 @@ class TypedReach(unittest.TestCase):
             'p_dl_lambda': (DICT_OF_LISTS_LAMBDA, '4\n'),
             'p_dl_paren': (DICT_OF_LISTS_PAREN, '1\n'),
             'p_dl_paren_if': (DICT_OF_LISTS_PAREN_IF, '1\n'),
+            'r_dl_nested_read': (DICT_OF_LISTS_NESTED_READ, 'inner 7\nouter 7\n'),
+        })
+
+    def test_bytearray_argument_keeps_cpython_alias(self):
+        self._check_probes({
+            'r_ba_store': (BYTEARRAY_ALIAS, 'Zbcdef|Zbcdef\n'),
         })
 
     def test_unannotated_bytes_helper_owns_its_result(self):
@@ -251,6 +257,40 @@ DICT_OF_LISTS_CYCLE2 = '''def main():
     row = d.get("k")
     if row:
         print(row[0])
+
+
+main()
+'''
+
+DICT_OF_LISTS_NESTED_READ = '''def main():
+    d = {}
+    def show():
+        row = d.get("k")
+        if row:
+            print("inner", row[0])
+    d.setdefault("k", []).append(7)
+    show()
+    row = d.get("k")
+    if row:
+        print("outer", row[0])
+
+
+main()
+'''
+
+BYTEARRAY_ALIAS = '''import sys
+
+def keep(data: bytes) -> bytes:
+    return data
+
+def main():
+    a = bytearray(b"abc")
+    x = keep(a)
+    box = [x]
+    a[0] = 90
+    a.extend(b"def")
+    sys.stdout.buffer.write(box[0]); sys.stdout.buffer.write(b"|")
+    sys.stdout.buffer.write(x); sys.stdout.buffer.write(b"\\n")
 
 
 main()

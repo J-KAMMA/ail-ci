@@ -4417,11 +4417,22 @@ def lower_dict_of_lists(source):
         if not inits:
             continue
         nodes = list(own_nodes(fn.body))
+        nested_scopes = [n for n in ast.walk(fn)
+                         if n is not fn and isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                                           ast.ClassDef))]
         standalone = {id(n.value) for n in nodes
                       if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
                       and not inline_suite(n) and own_line(n)
                       and span(n) == span(n.value)}
         for name, init in inits.items():
+            if any(isinstance(n, ast.Name) and n.id == name
+                   for scope in nested_scopes for n in ast.walk(scope)):
+                # A nested function or class reads the dict from its enclosing scope.  Its
+                # `d.get(k)` would keep the original name while the enclosing body rewrote `d`
+                # into the key -> slot map, so the helper would subscript an int.  Leave the
+                # whole dict as written (the general path handles it) until nested scopes are
+                # lowered too.
+                continue
             allowed = {id(init.targets[0])}
             setdefaults, gets = [], []
             for n in nodes:

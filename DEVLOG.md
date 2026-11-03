@@ -1,3 +1,19 @@
+## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
+
+`lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class
+in the same function mentions `d`: the enclosing body used to rewrite `d` into the key -> slot map
+while the nested `d.get(k)` stayed an ordinary read, so the helper subscripted an int and crashed.
+`r_dl_nested_read` now prints CPython's `inner 7` / `outer 7` on both builds.
+
+A bytearray argument to a `bytes` parameter now passes through the read-only view only when the
+callee is a proven read-only bytes consumer (a scalar scan such as echo_pack's `hsh`); every other
+callee is refused by name and keeps the general path, because a typed bytes result is a copy while
+CPython returns the caller's bytearray object and later mutations stay visible.  `r_ba_store`,
+`r_ba_alias`, `r_ba_slice2`, `r_ba_int`, `r_ba_lenonly`, `r_ba_bytes`, `r_dl_nested_unrelated` and
+`r_dl_nested_both` match CPython on the default and unified builds; the two review probes are in
+`test_ail_pytyped_reach`.  echo_pack stays typed with all 57 cases correct, and the `.ail` pins and
+the ten `lab/compare` `main.ail` C hashes are unchanged.
+
 ## 2026-11-03 -- pyreach s1: re-land rbpyreach1 with its two review fixes
 
 Re-applied 3667f3af on integ, keeping both sides of the `_Surface`/`_tuplib` and optlib conflicts. `_dict_of_lists_kind` carries a `seen` set so `x = x` and `x = 1; y = x; x = y` stop at int instead of recursing, and `lower_dict_of_lists` rewrites only a standalone `setdefault(...).append(...)` expression statement, leaving `;`, assignment, lambda and inline-suite positions as written. Probes `p_dl_cycle`, `p_dl_cycle2`, `p_dl_semi`, `p_dl_expr`, `p_dl_lambda` match CPython on the default and unified builds. Review fix: a parenthesized standalone `(d.setdefault(...).append(...))` (also inside an `if`) is left as written instead of being rewritten inside its parentheses; probes `p_dl_paren` and `p_dl_paren_if` match CPython on both builds.

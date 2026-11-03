@@ -16579,6 +16579,18 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
             ctx.parts.add('FLIST')
         elif kind == BYTES:
             if _etype(arg, ctx) == BYTEARRAY:
+                if fname not in getattr(ctx, 'readonly_bytes_consumers', ()):
+                    # CPython passes the bytearray OBJECT itself to a `bytes` parameter, so a
+                    # later mutation of the caller's bytearray is visible through the callee's
+                    # result.  A typed `bytes` value is a read-only view/copy, which cannot keep
+                    # that identity across a return or a store.  Only a callee that provably
+                    # consumes its bytes argument and returns a scalar may take a bytearray; any
+                    # other shape keeps the general path instead of silently snapshotting.
+                    raise Unsupported(
+                        'passing a bytearray to the bytes parameter %r of %s() would copy it, '
+                        'while CPython keeps the bytearray object and shows later mutations; '
+                        'bind bytes(data) first if a snapshot is wanted'
+                        % (pname, fname))
                 # `bytes(bytearray)` and a bare bytearray both pass a read-only bytes view of the
                 # buffer: the callee's parameter is bytes, so it cannot write through it.
                 ctx.parts.add('BYTEREADONLYARG')
