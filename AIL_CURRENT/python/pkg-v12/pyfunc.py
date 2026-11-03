@@ -7398,6 +7398,17 @@ def _stepped_slice_temp(node, ctx):
     refuses it as before)."""
     if _is_slist_slice(node, ctx):
         return _slist_slice_c(node, ctx)
+    if _etype(node.value, ctx) == BLIST:
+        saved, ctx.pre = ctx.pre, []
+        try:
+            value = _blist_value(node, ctx)
+            result, logical = ctx.temp(BLIST)
+            ctx.blist.add(logical)
+            steps = [*ctx.pre, _obj_store(result, value, BLIST, ctx) + ';']
+        finally:
+            ctx.pre = saved
+        ctx.pre.extend(steps)
+        return result
     source = node.value
     if not (isinstance(source, ast.Name) and ctx.type_of(source.id) == LIST
             and all(source.id not in group for group in (
@@ -11679,6 +11690,24 @@ def _iter_plan(node, ctx):
             pre.extend(ctx.pre); ctx.pre = []
             pre.append('(void)%s;' % expression)
             return '0', '%s.n' % c, '%s.p[@]' % c, pre
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice) \
+            and _etype(node.value, ctx) == BLIST:
+        stepped = _stepped_slice_temp(node, ctx)
+        pre.extend(ctx.pre); ctx.pre = []
+        ctx.parts.update(('BLIST', 'BYTES'))
+        return '0', '%s->n' % stepped, 'ail_blist_get(&%s, %s, @)' % (ctx.barena(), stepped), pre
+    if isinstance(node, ast.Name) and _etype(node, ctx) == BLIST:
+        saved, ctx.pre = ctx.pre, []
+        try:
+            value = _blist_value(node, ctx)
+            result, logical = ctx.temp(BLIST)
+            ctx.blist.add(logical)
+            steps = [*ctx.pre, _obj_store(result, value, BLIST, ctx) + ';']
+        finally:
+            ctx.pre = saved
+        pre.extend(steps)
+        ctx.parts.update(('BLIST', 'BYTES'))
+        return '0', '%s->n' % result, 'ail_blist_get(&%s, %s, @)' % (ctx.barena(), result), pre
     if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
             and node.slice.step is not None):
         stepped = _stepped_slice_temp(node, ctx)
@@ -19667,6 +19696,22 @@ def _cond(node, ctx):
     return '(%s) != 0' % c
 
 
+def _iter_elem_is_bytes(node, ctx):
+    """Whether iterating `node` binds a BYTES, not a plain int64 -- true for a bound BLIST name,
+    a slice of one, or an inline `.split()` call, the shapes `_iter_plan` walks by materialising
+    each element through `ail_blist_get`."""
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+        return _iter_elem_is_bytes(node.value, ctx)
+    if _is_bytes_split_call(node, ctx):
+        return True
+    if isinstance(node, ast.Name):
+        try:
+            return ctx.type_of(node.id) == BLIST
+        except Unsupported:
+            return False
+    return False
+
+
 def _iter_elem_is_str(node, ctx):
     """Whether iterating `node` (a comprehension/generator's own `for ... in <node>`) binds a STR,
     not a plain int64 -- true for a bound SLIST name, or a contiguous slice of one, the only two
@@ -19989,6 +20034,7 @@ def _listcomp_into_temp(node, ctx):
     # exactly the one wrapper (a slice) `_iter_plan`'s own SLIST branches recurse through. The
     # The result's scalar kind is inferred independently from the source element.
     elem_is_str = _iter_elem_is_str(g.iter, ctx)
+    elem_is_bytes = _iter_elem_is_bytes(g.iter, ctx)
     source = g.iter
     while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
         source = source.value
@@ -20001,7 +20047,9 @@ def _listcomp_into_temp(node, ctx):
     cv = bound if struct_source else '_comp_element%d' % ctx.tmp
     ctx.comprehension_cnames = {**old_cnames, g.target.id: cv}
     ctx.kind.pop(g.target.id, None)
-    ctx.types[g.target.id] = (OBJ, source_kind[1]) if struct_source else STR if elem_is_str else FLT if elem_is_float else INT
+    ctx.types[g.target.id] = ((OBJ, source_kind[1]) if struct_source else
+                              BYTES if elem_is_bytes else STR if elem_is_str else
+                              FLT if elem_is_float else INT)
     if struct_source:
         ctx.kind[g.target.id] = ctx.types[g.target.id]
     if string_source:
@@ -20033,7 +20081,8 @@ def _listcomp_into_temp(node, ctx):
             '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)
     if pre:
         head = '%s %s' % (' '.join(pre), head)
-    element_ctype = 'ail_str' if elem_is_str else 'double' if elem_is_float else 'int64_t'
+    element_ctype = ('ail_bytes' if elem_is_bytes else 'ail_str' if elem_is_str
+                      else 'double' if elem_is_float else 'int64_t')
     bind = (_obj_store(cv, elem.replace('@', '_i'), (OBJ, source_kind[1]), ctx) + ';' if struct_source
             else '%s %s = %s;' % (element_ctype, cv, elem.replace('@', '_i')))
     lines = [head, bind]
