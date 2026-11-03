@@ -1,3 +1,23 @@
+## 2026-11-03 -- CLI help: every subcommand, every option, argparse-style usage errors
+
+The `ail` command now has a finished help page. `ail --help` lists every subcommand
+(run, build, check, new, lsp, compile, compile-module, compile-library, compile-c,
+api, api-builtin, context, edit, doctor, integrity, cache, export-sdk) with a one-line
+English description, and separates the debug/experimental options into their own
+heading. `ail <command> --help` exits 0 for every command; the SDK commands keep
+their own detailed option help (with the program name shown as `ail`). `ail` with no
+arguments and an unknown command both print a short usage and exit 2, like argparse.
+`ail --version` still prints `ailc <version>`. The help and the `--syntax` metavar no
+longer advertise the old brace `.ail` syntax: only `auto` and `python` are shown,
+while the code path still accepts the old value. Error messages for a missing source
+file now name the path and say what to do next.
+
+New `test_ail_cli_help` runs `ail --help` and every `ail <command> --help` (exit 0,
+all subcommands named) plus the no-argument, unknown-command and `--version` cases.
+Probes: `hello.py` matches CPython on both builds; the CLI probe shows all 17 help
+commands exit 0, no arguments/unknown exit 2, a missing source names its path, and
+`ail new` still scaffolds a project.
+
 ## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
 
 `from ail import X as Y` now records the binding even when `Y == X`, so an alias spelled with the
