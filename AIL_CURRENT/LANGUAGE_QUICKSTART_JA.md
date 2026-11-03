@@ -5,15 +5,19 @@
 所有するローカルの `list[int]`・`list[float]`・`list[str]` は `reverse()` を使えます。
 `list[str]` の `pop()`／`pop(index)` は、取り出した後に元のリストを空にしても使える文字列を返します。
 
-```ail
-fn main()->int {
-    let words:list[str]=["first","last"];
-    words.reverse();
-    let saved=words.pop();
-    words.clear();
-    print(saved);
-    return 0;
-}
+```python
+import sys
+
+def main() -> int:
+    words: list[str] = ['first', 'last']
+    words.reverse()
+    saved = words.pop()
+    words.clear()
+    print(saved)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 出力は `first` です。借用引数の変更は拒否します。小数リストの `sort()` は未対応です。
@@ -111,9 +115,20 @@ list[int]/list[float]/list[str]/list[bytes]のローカルへ、関数・型付�
 文字列fieldの変更はpacked保存を作り直すためO(n+文字列量)で、連続appendは二乗costになり得ます。大量入力はlocalで作り、fieldへbulk extendします。
 config_batch.ailのmerge_config_batchesは結果を一括結合し、結合元を保持します。分位点の例はinteger_quantiles.ailです。
 
-```ail
-fn parts()->list[int] {return [2,3];}
-fn main()->int {let values=[1];values.extend(parts());print(len(values));return 0;}
+```python
+import sys
+
+def parts() -> list[int]:
+    return [2, 3]
+
+def main() -> int:
+    values = [1]
+    values.extend(parts())
+    print(len(values))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ## メッセージを持つ例外値
@@ -121,17 +136,28 @@ fn main()->int {let values=[1];values.extend(parts());print(len(values));return 
 既存8種類の組込み例外は、引数なし、または任意のstr式1個で作れます。
 `exception`型のローカル・関数引数・戻り値は値を所有し、別コンパイルしたモジュール間でも渡せます。
 
-```ail
-fn fail(message: str) -> int { raise ValueError(message); return 0; }
-fn main() -> int {
-    try { fail("invalid setting"); }
-    except ValueError as e { print(e.kind + ": " + e.message); return 2; }
-    return 0;
-}
+```python
+# exit: 2
+import sys
+
+def fail(message: str) -> int:
+    raise ValueError(message)
+    return 0
+
+def main() -> int:
+    try:
+        fail('invalid setting')
+    except ValueError as e:
+        print(e.kind + ': ' + e.message)
+        return 2
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 kind/messageは変更できないstrです。messageを取り出したstrは元の例外を解放しても使えます。
-`raise e;`は値を再送出し、`raise;`は現在処理している例外を呼出先からも再送出します。
+`raise e`は値を再送出し、`raise`は現在処理している例外を呼出先からも再送出します。
 handlerの束縛名はそのhandler内だけで使い、既存の変数名は上書きしません。
 UnicodeDecodeErrorはValueErrorとしても捕捉されるため、種類別の処理は具体的な種類を先に置きます。
 未捕捉の例外は、空messageなら旧来の種類名、非空なら`Kind: message`をstderrに出して終了1です。
@@ -144,50 +170,32 @@ Callable[[exception],exception]とCallable[[list[exception]],list[exception]]で
 
 ## 空の関数・ブロック（R732）
 
-`fn noop()->void {}`や`if condition {}`の空本文は、何もしない処理として使えます。
+空の関数や `if` の空本文は、何もしない処理として使えます。
 コメントだけの本文も同じです。条件や繰り返し入力の評価、finallyの実行は省略されません。
-値を返す関数とmainには、引き続き必要なreturnが必要です。空のstruct/impl宣言は未対応です。
+値を返す関数とmainには、引き続き必要なreturnが必要です。空のclass宣言は未対応です。
 `edit --body-text ""`でもvoid関数を空本文に修正できます。原本のSHA確認と候補の型検査は行われます。
 
 ## 契約: requires と ensures（2026-10-11）
 
-関数本文の先頭に、入口の条件`requires 条件;`と出口の条件`ensures 条件;`を書けます。
-`requires`は呼び出し時に、`ensures`はすべての`return`の直前（戻り値なしの関数は本文の末尾でも）に検査します。
-`ensures`の中の`result`は戻り値です。同名のローカル変数があっても、契約の中では戻り値を指します。
+関数本文の入口に、入口の条件を`assert 条件, 'requires failed in 関数名: 条件'`で、出口に戻り値を保持する変数`_ail_result`への`assert`を`return`の前に書けます。
+入口の`assert`は呼び出し時に、出口の`assert`は`return`の直前に実行されます。
+`_ail_result`はこの例で戻り値を保持するローカル変数で、自動的に戻り値を指す特別な名前ではありません。同じ名前の別の変数を検査するときは、その値を代入してから`assert`します。
 
-```ail
-fn isqrt(n: int) -> int {
-    requires n >= 0;
-    ensures result * result <= n;
-    ensures (result + 1) * (result + 1) > n;
-    let r: int = 0;
-    while (r + 1) * (r + 1) <= n { r += 1; }
-    return r;
-}
+```python
+def isqrt(n: int) -> int:
+    assert n >= 0, 'requires failed in isqrt: n >= 0'
+    r: int = 0
+    while (r + 1) * (r + 1) <= n:
+        r += 1
+    _ail_result = r
+    assert _ail_result * _ail_result <= n, 'ensures failed in isqrt: result * result <= n'
+    assert (_ail_result + 1) * (_ail_result + 1) > n, 'ensures failed in isqrt: (result + 1) * (result + 1) > n'
+    return _ail_result
 ```
 
-違反すると、stderrに`requires failed in isqrt: n >= 0`のように関数名と条件を出し、終了1で止まります（tryでは捕捉しません）。
-契約は本文の最初の文としてだけ書けます。途中・ブロックの中・`requires`での`result`・戻り値なしの関数の`result`はコンパイル時に拒否します。
-メソッドでも使え、メッセージの関数名は`Account.withdraw`のようになります。
-
-## S式の書き方（2026-10-11）
-
-同じAILをS式（前置記法・括弧で区切る）でも書けます。先頭が`(`のファイルはS式として読み、
-通常のブロック構文へ変換してから同じ検査・コンパイルを通すので、意味は1つです。
-`python ail_sexpr.py FILE.ail`で、ブロック構文とS式を相互に変換できます（コメントは残りません）。
-
-```ail
-(fn isqrt ((n int)) int
-  (requires (>= n 0))
-  (ensures (<= (* result result) n))
-  (let r int 0)
-  (while (<= (* (+ r 1) (+ r 1)) n) (+= r 1))
-  (return r))
-(fn main () int (print (isqrt (int (@ sys.argv 1)))) (return 0))
-```
-
-形の一覧は`ail_sexpr.py`の先頭にあります。同梱の全ソースが「ブロック構文→S式→ブロック構文」で同じ構文木に戻ることをテストで確かめています。
-長さの実測（同梱258本）: S式は空白を詰めた文字数で1.04倍、語の数で1.13倍。今のLLMのトークナイザでは括弧の分だけ長く、主な書き方はブロック構文のままです。
+違反すると`AssertionError`になり、`requires failed in isqrt: n >= 0`のように関数名と条件をメッセージに出します。未捕捉なら終了1で止まります。
+`assert`は通常の文なので`try`/`except AssertionError`で捕捉でき、本文の途中や`if`の中にも書けます。契約を最初の文に限る規則や、`result`を戻り値に自動変換する規則はありません。
+メソッドでも使え、メッセージの関数名は`Account.withdraw`のようにします。
 
 ## 他のOS・CPU向けにビルドする（2026-10-11）
 
@@ -234,7 +242,7 @@ LLMが新しい内部処理を書く必要はなく、同じ公開関数を使�
 自分の関数・型・構造体・モジュールでプログラムを組み立て、単独の実行ファイルへ
 コンパイルする言語として開発しています。数値処理に加えて、文字列・バイナリ・
 コンテナ・ファイル入出力・例外処理を言語本体と標準APIで扱います。
-現在は64ビット整数、小数、文字列、bytes、型付きリスト・辞書、構造体、`use` による
+現在は64ビット整数、小数、文字列、bytes、型付きリスト・辞書、クラス、`from ... import *` による
 モジュール分割とソース不要のobjectリンクが使えます。対応する型・操作には制限があります。
 型付きの静的関数値とTCP接続・待受・非ブロッキングI/Oも使えます。クロージャ・汎用ジェネリック・スレッド・
 OS向けの低層APIまで揃った状態は未達です。
@@ -279,19 +287,42 @@ list[int] と list[float] の負の添字・範囲検査を保持しています
 
 ### TCPサーバーを作る（R601）
 
-```ail
-use tcp_echo_server;
-fn main()->int {
-    let listener = tcp_listen("127.0.0.1", 0, 16);
-    try {
-        print(listener.local_port());
-        flush_stdout();
-        let connection = listener.accept();
-        try { tcp_echo_connection(connection, 8192); }
-        finally { connection.close(); }
-    } finally { listener.close(); }
-    return 0;
-}
+```python
+# run: no
+from ail import flush_stdout, tcp_listen
+import sys
+
+def tcp_echo_connection(connection: tcpsocket, chunk_size: int) -> int:
+    if chunk_size <= 0 or chunk_size > 2147483647:
+        raise ValueError
+    buffer = bytearray(chunk_size)
+    total: int = 0
+    while True:
+        count = connection.recv_into(buffer)
+        if count != 0:
+            connection.send(buffer[:count])
+        if count == 0:
+            break
+        total += count
+    connection.shutdown_write()
+    return total
+
+def main() -> int:
+    listener = tcp_listen('127.0.0.1', 0, 16)
+    try:
+        print(listener.local_port())
+        flush_stdout()
+        connection = listener.accept()
+        try:
+            tcp_echo_connection(connection, 8192)
+        finally:
+            connection.close()
+    finally:
+        listener.close()
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 `tcp_listen(host,port,backlog)` は接続を待ち受け、`accept()` は独立した接続を返します。
@@ -313,18 +344,25 @@ tcp_echo_server 127.0.0.1 0 2 8192
 
 ### TCPでバイナリを送受信する（R600）
 
-```ail
-fn main()->int {
-    let connection: tcpsocket = tcp_connect("127.0.0.1", 9000);
-    try {
-        connection.send(b"request");
-        connection.shutdown_write();
-        let buffer = bytearray(8192);
-        let count = connection.recv_into(buffer);
-        write_stdout_bytes(bytes(buffer[:count]));
-    } finally { connection.close(); }
-    return 0;
-}
+```python
+# run: no
+from ail import tcp_connect, write_stdout_bytes
+import sys
+
+def main() -> int:
+    connection: tcpsocket = tcp_connect('127.0.0.1', 9000)
+    try:
+        connection.send(b'request')
+        connection.shutdown_write()
+        buffer = bytearray(8192)
+        count = connection.recv_into(buffer)
+        write_stdout_bytes(bytes(buffer[:count]))
+    finally:
+        connection.close()
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 `tcp_connect(host,port)` はASCIIのホスト名・IPv4・IPv6と、1〜65535のポートを受け付けます。
@@ -350,23 +388,68 @@ tcp_file_exchange 127.0.0.1 9000 input.bin output.bin 8192
 
 ### 環境変数と作業ディレクトリを使う（R599）
 
-```ail
-use environment_config;
-fn main()->int {
-    print(get_env("AIL_CONFIG_LABEL", "default"));
-    print(env_int("AIL_CONFIG_COUNT", 1));
-    print(env_bool("AIL_CONFIG_ENABLED", 0));
-    print(current_dir());
-    return 0;
-}
+```python
+# run: no
+from ail import current_dir, get_env
+import sys
+
+def parse_int64_text(text: str) -> int:
+    body = text.strip('\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000')
+    accumulator: int = 0
+    first: int = 1
+    negative: int = 0
+    digits: int = 0
+    last_limit: int = 7
+    for c in body:
+        if first and (c == '+' or c == '-'):
+            if c == '-':
+                negative = 1
+                last_limit = 8
+        else:
+            digit: int = ord(c) - 48
+            if digit < 0 or digit > 9:
+                raise ValueError
+            if accumulator < -922337203685477580 or (accumulator == -922337203685477580 and digit > last_limit):
+                raise ValueError
+            accumulator = accumulator * 10 - digit
+            digits = 1
+        first = 0
+    if not digits:
+        raise ValueError
+    if negative:
+        return accumulator
+    return -accumulator
+
+def env_int(name: str, default: int) -> int:
+    return parse_int64_text(get_env(name, str(default)))
+
+def env_bool(name: str, default: int) -> int:
+    if default != 0 and default != 1:
+        raise ValueError
+    value = get_env(name, str(default)).strip().lower()
+    if value == '1' or value == 'true':
+        return 1
+    if value == '0' or value == 'false':
+        return 0
+    raise ValueError
+
+def main() -> int:
+    print(get_env('AIL_CONFIG_LABEL', 'default'))
+    print(env_int('AIL_CONFIG_COUNT', 1))
+    print(env_bool('AIL_CONFIG_ENABLED', 0))
+    print(current_dir())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 `get_env(name,default)` は未設定ならdefault、設定済みの空値なら空文字を返します。
 返した文字列は後の呼出しから独立しています。名前は空・NUL・`=`・不正Unicodeを拒否します。
 defaultにはNULを含められます。OSから受け取る値とパスは厳格なUnicodeとして扱い、
 不正な値はUnicodeDecodeErrorです。`current_dir()` は現在の絶対パスを返します。
-`env_int` は整数へ変換し、`env_bool` は空白を除いた1/0/true/false（大文字可）を受け付けます。
-不正な値はValueErrorです。環境変数の書換えや作業ディレクトリの変更は行いません。
+`env_int` は符号付き64ビットの整数へ変換し、`env_bool` は空白を除いた1/0/true/false（大文字可）を受け付けます。
+範囲外や不正な値はValueErrorです。環境変数の書換えや作業ディレクトリの変更は行いません。
 
 ```text
 python ail_chatgpt.py compile language_examples/environment_config_main.ail -o environment_config
@@ -378,19 +461,168 @@ environment_config
 
 ### UTF-8テキストを分割して読む（R598）
 
-```ail
-use utf8_reader;
-fn main()->int {
-    let reader=utf8_reader_open("input.txt",8192);
-    try {
-        while True {
-            let text=utf8_reader_next(reader);
-            if text=="" { break; }
-            print(text,end="");
-        }
-    } finally { utf8_reader_close(reader); }
-    return 0;
-}
+```python
+# run: no
+from ail import open_binary
+import sys
+
+class Utf8Decoder:
+
+    def __init__(self, pending: bytes, closed: int):
+        self.pending = pending
+        self.closed = closed
+
+class Utf8Reader:
+
+    def __init__(self, file: binaryfile, decoder: Utf8Decoder, chunk_size: int, finished: int):
+        self.file = file
+        self.decoder = decoder
+        self.chunk_size = chunk_size
+        self.finished = finished
+
+def _utf8_complete_length(data: bytes) -> int:
+    position: int = 0
+    while position < len(data):
+        lead: int = data[position]
+        if lead <= 127:
+            position += 1
+        else:
+            width: int = 0
+            if lead >= 194 and lead <= 223:
+                width = 2
+            elif lead >= 224 and lead <= 239:
+                width = 3
+            elif lead >= 240 and lead <= 244:
+                width = 4
+            else:
+                raise ValueError
+            remaining: int = len(data) - position
+            checked: int = width
+            if remaining < checked:
+                checked = remaining
+            for i in range(1, checked):
+                byte: int = data[position + i]
+                if byte < 128 or byte > 191:
+                    raise ValueError
+                if i == 1:
+                    if lead == 224 and byte < 160 or (lead == 237 and byte > 159) or (lead == 240 and byte < 144) or (lead == 244 and byte > 143):
+                        raise ValueError
+            if remaining < width:
+                return position
+            position += width
+    return position
+
+def _utf8_tail_complete(data: bytes) -> int:
+    n: int = len(data)
+    if n == 0:
+        return 0
+    last: int = data[n - 1]
+    if last < 128:
+        return n
+    if last >= 192:
+        return -1
+    i: int = n - 1
+    while i > 0 and i > n - 4:
+        previous: int = data[i - 1]
+        if previous < 128 or previous > 191:
+            break
+        i -= 1
+    lead_index: int = i - 1
+    if lead_index < 0:
+        return -1
+    lead: int = data[lead_index]
+    width: int = 0
+    if lead >= 194 and lead <= 223:
+        width = 2
+    elif lead >= 224 and lead <= 239:
+        width = 3
+    elif lead >= 240 and lead <= 244:
+        width = 4
+    else:
+        return -1
+    if n - lead_index == width:
+        return n
+    return -1
+
+def _utf8_decoder_check(decoder: Utf8Decoder) -> None:
+    if decoder.closed != 0:
+        raise ValueError
+    pending: bytes = decoder.pending
+    if len(pending) > 3 or _utf8_complete_length(pending) != 0:
+        raise ValueError
+
+def utf8_decoder_new() -> Utf8Decoder:
+    return Utf8Decoder(b'', 0)
+
+def utf8_decode_feed(decoder: Utf8Decoder, data: bytes) -> str:
+    _utf8_decoder_check(decoder)
+    combined: bytes = decoder.pending + data
+    complete: int = _utf8_tail_complete(combined)
+    if complete < 0:
+        complete = _utf8_complete_length(combined)
+    text: str = combined[:complete].decode('utf-8')
+    pending: bytes = combined[complete:]
+    decoder.pending = pending
+    return text
+
+def utf8_decode_finish(decoder: Utf8Decoder) -> str:
+    _utf8_decoder_check(decoder)
+    if decoder.pending != b'':
+        raise ValueError
+    decoder.pending = b''
+    decoder.closed = 1
+    return ''
+
+def utf8_reader_from_file(file: binaryfile, chunk_size: int) -> Utf8Reader:
+    if chunk_size <= 0:
+        raise ValueError
+    if file.closed:
+        raise ValueError
+    return Utf8Reader(file, utf8_decoder_new(), chunk_size, 0)
+
+def utf8_reader_open(path: str, chunk_size: int) -> Utf8Reader:
+    if chunk_size <= 0:
+        raise ValueError
+    return utf8_reader_from_file(open_binary(path, 'r'), chunk_size)
+
+def utf8_reader_next(reader: Utf8Reader) -> str:
+    file: binaryfile = reader.file
+    if file.closed:
+        raise ValueError
+    if reader.finished:
+        return ''
+    chunk_size: int = reader.chunk_size
+    if chunk_size <= 0:
+        raise ValueError
+    while True:
+        raw: bytes = file.read(chunk_size)
+        if len(raw) == 0:
+            final: str = utf8_decode_finish(reader.decoder)
+            reader.finished = 1
+            return final
+        text: str = utf8_decode_feed(reader.decoder, raw)
+        if text != '':
+            return text
+    raise RuntimeError
+
+def utf8_reader_close(reader: Utf8Reader) -> None:
+    reader.file.close()
+    reader.finished = 1
+
+def main() -> int:
+    reader = utf8_reader_open('input.txt', 8192)
+    try:
+        while True:
+            text = utf8_reader_next(reader)
+            if text == '':
+                break
+            print(text, end='')
+    finally:
+        utf8_reader_close(reader)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 日本語や絵文字がバイトの読込み境界をまたいでも、完成した文字だけを返します。
@@ -410,14 +642,15 @@ utf8_copy input.txt output.txt 8192
 
 ### ファイルを開いたまま分割して処理する（R597）
 
-```ail
-let file: binaryfile = open_binary("input.bin", "r");
-try {
-    let buffer = bytearray(16384);
-    let count = file.readinto(buffer);
-    print(count);
-    print(file.tell());
-} finally { file.close(); }
+```python
+file: binaryfile = open_binary("input.bin", "r")
+try:
+    buffer = bytearray(16384)
+    count = file.readinto(buffer)
+    print(count)
+    print(file.tell())
+finally:
+    file.close()
 ```
 
 `read(size)` は有限長のbytes、`readinto(buffer)` は既存バッファへ読んだ数を返します。
@@ -440,13 +673,13 @@ modeはr/w/aと各+、bの通常表記が使え、常にバイナリです。テ
 
 ### バイナリを1バイト単位で書き換える（R596）
 
-```ail
-let buffer: bytearray = bytearray(bytes([0, 1, 127, 255]));
-let saved = bytes(buffer);
-buffer[0] = 42;
-buffer.append(7);
-print(bytes(buffer).hex());
-print(saved.hex());
+```python
+buffer: bytearray = bytearray(bytes([0, 1, 127, 255]))
+saved = bytes(buffer)
+buffer[0] = 42
+buffer.append(7)
+print(bytes(buffer).hex())
+print(saved.hex())
 ```
 
 出力は `2a017fff07` と `00017fff` です。バッファの要素は0〜255、実体は1バイトです。
@@ -463,7 +696,7 @@ python ail_chatgpt.py compile language_examples/binary_buffer_xor_main.ail -o bi
 binary_buffer_xor input.bin output.bin 255
 ```
 
-`use binary_buffer;` でバッファをその場で変換できます。ファイル例は同じ入力・出力実体を拒否し、
+`from binary_buffer import *` でバッファをその場で変換できます。ファイル例は同じ入力・出力実体を拒否し、
 引数と入力を確認してから書き込みます。成功0、引数数2、I/O3、不正キー4です。
 関数・callback・別objectリンクから使えます。Pythonのcompile_fn ctypes入口でPython bytearrayを
 共有する変換は未対応です。旧objectは新しいcompiler identityで再ビルドしてください。
@@ -471,19 +704,36 @@ binary_buffer_xor input.bin output.bin 255
 
 ### 構造体に処理を保持して差し替える（R594）
 
-```ail
-struct State { offset: int; }
-struct Handler { state: State; apply: Callable[[State,int],int]; }
-fn add(state: State, value: int) -> int { return value + state.offset; }
-fn subtract(state: State, value: int) -> int { return value - state.offset; }
-fn main() -> int {
-    let handler = Handler(State(3), add);
-    let saved = handler.apply;
-    handler.apply = subtract;
-    print(saved(handler.state, 10));
-    print(handler.apply(handler.state, 10));
-    return 0;
-}
+```python
+import sys
+
+class State:
+
+    def __init__(self, offset: int):
+        self.offset = offset
+
+class Handler:
+
+    def __init__(self, state: State, apply: Callable[[State, int], int]):
+        self.state = state
+        self.apply = apply
+
+def add(state: State, value: int) -> int:
+    return value + state.offset
+
+def subtract(state: State, value: int) -> int:
+    return value - state.offset
+
+def main() -> int:
+    handler = Handler(State(3), add)
+    saved = handler.apply
+    handler.apply = subtract
+    print(saved(handler.state, 10))
+    print(handler.apply(handler.state, 10))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 出力は13、7です。構造体は同じ型の関数へ処理を差し替えられ、保存した関数値は旧処理を保ちます。
@@ -497,7 +747,7 @@ python ail_chatgpt.py compile language_examples/record_policy_example.ail -o rec
 record_policy
 ```
 
-`use record_policies;` で状態付きのレコード選択・表示を再利用できます。
+`from record_policies import *` で状態付きのレコード選択・表示を再利用できます。
 例は閾値以上と未満の選択を切り替え、保存済み関数と訪問回数も示します。
 関数フィールドを持つ同型の構造体を直接比較するとValueErrorです。
 自己型を関数の引数型へ指定できますが、実際に構造体を所有する循環は引き続き拒否します。
@@ -505,13 +755,12 @@ ABI10は維持し、旧objectは変更したcompiler identityで再ビルドし�
 
 ### ディレクトリの名前とパスの種類を調べる（R593）
 
-```ail
-let names: list[str] = list_dir(".");
-for name in names {
-    print(name);
-    print(path_exists(name));
-    print(is_dir(name));
-}
+```python
+names: list[str] = list_dir(".")
+for name in names:
+    print(name)
+    print(path_exists(name))
+    print(is_dir(name))
 ```
 
 `list_dir(path)` は直下の名前だけを取得します。`.`・`..` は含めず、順序は未指定です。
@@ -533,12 +782,12 @@ Windowsでは列挙パスのワイルドカードを拒否し、POSIXでは名�
 
 ### 数値リストをコピーし、辞書の要素を更新する（R592）
 
-```ail
-fn shifted(values: list[int], amount: int) -> list[int] {
-    let result = values.copy();
-    for i in range(len(result)) { result[i] += amount; }
-    return result;
-}
+```python
+def shifted(values: list[int], amount: int) -> list[int]:
+    result = values.copy()
+    for i in range(len(result)):
+        result[i] += amount
+    return result
 ```
 
 整数・小数リストの `.copy()` は独立したリストを返します。読み取り専用の引数からも
@@ -572,7 +821,7 @@ record_report input.csv report.json positive
 出力は `{"rows":[{"key":"a","value":3}],"count":1,"total":3}` の形式、末尾改行なしです。
 quoted改行・comma・quote、Unicode・NUL、整数の最小/最大値を扱います。
 
-`use record_report;` でread/select/total/render/runを分けて再利用できます。
+`from record_report import *` でread/select/total/render/runを分けて再利用できます。
 `ReportConfig` は `ReportPaths` を保持し、選択には型付きcallbackを使っています。
 成功0、引数数2、I/O3、不正UTF-8/CSV/整数/mode/合計4です。
 検証失敗時は旧出力を保ち、同じ実体の入力・出力は書込み前に拒否します。
@@ -591,11 +840,11 @@ R591では元の参照を残し、キー所有領域を必要量で確保するC
 
 ### 値を使わずに式を実行する（R589）
 
-```ail
-read_bytes(path).decode();
-text.encode();
-parts[0];
-False and fail();
+```python
+read_bytes(path).decode()
+text.encode()
+parts[0]
+False and fail()
 ```
 
 対応済みの値を一度評価して、結果を捨てられます。副作用・境界検査・例外は通常どおり発生し、
@@ -613,18 +862,17 @@ utf8_validate input.txt
 
 ### 受けた例外を呼出し元へ返す（R588）
 
-```ail
-fn checked(value: str) -> int {
-    try { return int(value); }
-    except ValueError {
-        print("invalid number");
-        raise;
-    }
-    return 0;
-}
+```python
+def checked(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError:
+        print('invalid number')
+        raise
+    return 0
 ```
 
-`raise;` は、現在処理中の例外を同じ種類で再送します。呼び出したhelper・callback・別objectでも使えます。
+`raise` は、現在処理中の例外を同じ種類で再送します。呼び出したhelper・callback・別objectでも使えます。
 処理中の例外がなければRuntimeErrorです。内側で別の例外を処理しても、終了後は外側の例外に戻ります。
 伝播中のfinallyは保留された例外を扱い、通常のfinallyは外側の現在の例外を引き継ぎます。
 例外のメッセージ・traceback・`raise ... from ...`・独自例外クラスは未対応です。
@@ -639,18 +887,44 @@ reraise_example
 
 ### 利用者定義型を共通の処理へ渡す（R587）
 
-```ail
-use record_queries;
-fn positive(row: QueryRecord) -> int { return row.value > 0; }
-fn value(row: QueryRecord) -> int { return row.value; }
-fn main() -> int {
-    let rows: list[QueryRecord] = [QueryRecord("a", -1), QueryRecord("b", 3)];
-    let selected = query_select(rows, positive);
-    print(query_total(selected, value));
-    selected[0].value = 7;
-    print(rows[1].value);
-    return 0;
-}
+```python
+import sys
+
+class QueryRecord:
+
+    def __init__(self, key: str, value: int):
+        self.key = key
+        self.value = value
+
+def query_select(rows: list[QueryRecord], predicate: Callable[[QueryRecord], int]) -> list[QueryRecord]:
+    selected: list[QueryRecord] = []
+    for row in rows:
+        if predicate(row):
+            selected.append(row)
+    return selected
+
+def query_total(rows: list[QueryRecord], measure: Callable[[QueryRecord], int]) -> int:
+    total: int = 0
+    for row in rows:
+        total += measure(row)
+    return total
+
+def positive(row: QueryRecord) -> int:
+    return row.value > 0
+
+def value(row: QueryRecord) -> int:
+    return row.value
+
+def main() -> int:
+    rows: list[QueryRecord] = [QueryRecord('a', -1), QueryRecord('b', 3)]
+    selected = query_select(rows, positive)
+    print(query_total(selected, value))
+    selected[0].value = 7
+    print(rows[1].value)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 出力は3、7です。predicateの型は `Callable[[QueryRecord],int]`。
@@ -663,19 +937,33 @@ objectの署名にも型提供元への依存を記録します。旧objectは�
 
 ### 構造体の中に別の構造体を保持する（R586）
 
-```ail
-struct Point { x: int; y: int; }
-struct Rect { origin: Point; width: int; }
-fn main() -> int {
-    let point = Point(2, 3);
-    let rect = Rect(point, 4);
-    let saved = rect.origin;
-    point.x = 5;
-    print(rect.origin.x);
-    rect.origin = Point(8, 9);
-    print(saved.x);
-    return 0;
-}
+```python
+import sys
+
+class Point:
+
+    def __init__(self, x: int, y: int):
+        self.x = x
+        self.y = y
+
+class Rect:
+
+    def __init__(self, origin: Point, width: int):
+        self.origin = origin
+        self.width = width
+
+def main() -> int:
+    point = Point(2, 3)
+    rect = Rect(point, 4)
+    saved = rect.origin
+    point.x = 5
+    print(rect.origin.x)
+    rect.origin = Point(8, 9)
+    print(saved.x)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 出力は5、5です。親は子の参照を保持し、読み出した子も同じ値を共有します。
@@ -683,7 +971,7 @@ fn main() -> int {
 コンストラクタ引数は左から一度、フィールド代入は右辺→所有者の順に評価します。
 宣言型と違う構造体やNone、未知型、構造体リストを含む循環した所有関係は拒否します。
 
-`use geometry2d;` では `Point2`、2つのPoint2を持つ `Box2` と、
+`from geometry2d import *` では `Point2`、2つのPoint2を持つ `Box2` と、
 `box2_new`・境界を含む `box2_contains`・独立した子を作る `box2_copy` を使えます。
 newは軸の下限≤上限を確認し、不正な順序やNaNはValueErrorです。公開フィールドの変更は共有相手にも反映します。
 ABI10を維持していますが、以前のcompiler identityで作ったobjectは再ビルドしてください。
@@ -693,13 +981,16 @@ ABI10を維持していますが、以前のcompiler identityで作ったobject�
 `dict[str,int]` / `dict[str,float]` / `dict[str,str]` / `dict[str,bytes]` の
 フィールドに要素代入・削除、`clear`・`update`・`pop`・`setdefault` を使えます。
 
-```ail
-struct Counts { values: dict[str,int]; }
-fn add(counts: Counts, key: str) -> int {
-    let total = counts.values.setdefault(key, 0) + 1;
-    counts.values[key] = total;
-    return total;
-}
+```python
+class Counts:
+
+    def __init__(self, values: dict[str, int]):
+        self.values = values
+
+def add(counts: Counts, key: str) -> int:
+    total = counts.values.setdefault(key, 0) + 1
+    counts.values[key] = total
+    return total
 ```
 
 読み出した辞書は独立したsnapshotです。更新は共有する構造体の現在のフィールドに作用します。
@@ -708,7 +999,7 @@ fn add(counts: Counts, key: str) -> int {
 欠けたキーの削除・defaultなしpopはKeyErrorです。clear/updateは文として使います。
 辞書引数そのものへの更新は拒否します。構造体の辞書フィールドでは、数値の演算と文字列・bytesの`+=`に対応しています。
 
-再利用部品 `use named_counters;` はnew・add・snapshotを提供します。
+再利用部品 `from named_counters import *` はnew・add・snapshotを提供します。
 次のCLIはUTF-8の各行を集計し、初出順にUTF-8キーのhexと件数をタブ区切りで出力します。
 空行・NUL・Unicodeを区別できます。入力全体を読み出すため、ストリーミング処理ではありません。
 
@@ -724,10 +1015,10 @@ line_counts input.txt counts.tsv
 
 構造体の `list[int]` / `list[float]` フィールドにslice代入・削除を使えます。
 
-```ail
-samples.values[1:3] = [1.5, 2.5, 3.5];
-samples.values[::-1] = samples.values;
-del samples.values[::2];
+```python
+samples.values[1:3] = [1.5, 2.5, 3.5]
+samples.values[::-1] = samples.values
+del samples.values[::2]
 ```
 
 stepが1なら挿入・短縮・長さの変更ができます。その他のstepでは、代入する要素数と選択範囲の要素数が
@@ -757,11 +1048,14 @@ stepが1なら挿入・短縮・長さの変更ができます。その他のste
 `list[int]` / `list[float]` のフィールドへ直接append・extend・pop・clear・reverse、
 整数添字による要素代入・削除ができます。構造体を部品の状態として使えます。
 
-```ail
-struct Samples { values: list[float]; }
-fn add(samples: Samples, value: float) -> void {
-    samples.values.append(value);
-}
+```python
+class Samples:
+
+    def __init__(self, values: list[float]):
+        self.values = values
+
+def add(samples: Samples, value: float) -> None:
+    samples.values.append(value)
 ```
 
 読み出しとcopyは従来どおり独立したリストです。更新後も、前に読み出した値を保持できます。
@@ -772,7 +1066,7 @@ fn add(samples: Samples, value: float) -> void {
 引数自身の副作用は取り消しません。整数・小数の型は完全一致が必要です。
 pop以外のメソッドは文として使います。R584でsliceへの代入・削除に対応します。sortと`+=`は未対応です。
 
-標準部品 `use numeric_ring;` では、`sample_ring_new(capacity)`、`sample_ring_push(ring, value)`、
+標準部品 `from numeric_ring import *` では、`sample_ring_new(capacity)`、`sample_ring_push(ring, value)`、
 `sample_ring_snapshot(ring)` と、little-endian binary64の分割入力を処理する `sample_ring_feed(ring, data)` を使えます。
 capacityは正の整数、保持する要素数はcapacity以下です。feedは完成した要素を取り込み、未完成の最大7byteを返します。
 snapshotは古い順の独立した小数リストです。clearは確保済み容量を保持し、所有者の解放時にbufferも解放します。
@@ -792,11 +1086,15 @@ NaN payload・符号付きゼロを含むビット列の移動を検査してい
 
 構造体のリストから整数・小数のリストを作る、単一の内包表記を使えます。
 
-```ail
-struct Point { x: float; y: float; }
-fn energies(points: list[Point]) -> list[float] {
-    return [p.x * p.x + p.y * p.y for p in points if p.x >= 0.0];
-}
+```python
+class Point:
+
+    def __init__(self, x: float, y: float):
+        self.x = x
+        self.y = y
+
+def energies(points: list[Point]) -> list[float]:
+    return [p.x * p.x + p.y * p.y for p in points if p.x >= 0.0]
 ```
 
 源を一度評価し、各要素でfilterを評価してから結果を作ります。束縛変数は外側の同名変数を変更しません。
@@ -805,7 +1103,7 @@ fn energies(points: list[Point]) -> list[float] {
 結果の数値リストは独立しており、右辺の例外では代入前の結果を保ちます。
 構造体・文字列を結果にする形、混在型、入れ子、複数generatorはこの追加の対象外です。
 源は名前・関数結果・構造体フィールド・sliceに対応します。構造体literalリストを直接源にする形は未対応です。
-型付きの空リストも初期化できます。`let points: list[Point] = [];` と、型が確定したリストへの `points = [];` を扱います。
+型付きの空リストも初期化できます。`points: list[Point] = []` と、型が確定したリストへの `points = []` を扱います。
 
 同梱の `language_examples/points_energy_main.ail` はlittle-endian binary64の座標ペアを読み、
 各ペアの `x*x+y*y` をbinary64ファイルへ書きます。PythonやCの処理部品を呼ぶことなくAILで処理します。
@@ -823,18 +1121,25 @@ points_energy input-f64le-pairs.bin output-f64le.bin
 
 R570では関数を引数・戻り値・ローカル変数として扱えます。共通処理に、実行する関数を渡せます。
 
-```ail
-fn twice(x: int) -> int { return x * 2; }
-fn apply(values: list[int], operation: Callable[[int], int]) -> int {
-    let total = 0;
-    for value in values { total += operation(value); }
-    return total;
-}
-fn main() -> int {
-    let operation: Callable[[int], int] = twice;
-    print(apply([1, 2, 3], operation));
-    return 0;
-}
+```python
+import sys
+
+def twice(x: int) -> int:
+    return x * 2
+
+def apply(values: list[int], operation: Callable[[int], int]) -> int:
+    total = 0
+    for value in values:
+        total += operation(value)
+    return total
+
+def main() -> int:
+    operation: Callable[[int], int] = twice
+    print(apply([1, 2, 3], operation))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 Callableの引数はint/float/str/bytes/list[int]/list[float]です。R571では結果にstr/bytes/
@@ -852,15 +1157,29 @@ LFで連結します。元の文字列がLFで終わる場合だけ末尾LFを�
 同梱の `callback_text_rewrite_main.ail` はUTF-8ファイルを `trim` / `frame` で変換します。
 不正modeはファイル操作前に拒否。終了コードは成功0、引数2、I/O3、UTF-8/変換エラー4です。
 
-```ail
-use callback_text_pipeline;
-fn decorate(line: str) -> str { return "[" + line + "]"; }
-fn main() -> int {
-    let text = read_bytes(sys.argv[1]).decode();
-    let result = rewrite_lines(text, decorate);
-    write_bytes(sys.argv[2], result.encode());
-    return 0;
-}
+```python
+# run: no
+from ail import read_bytes, write_bytes
+import sys
+
+def rewrite_lines(text: str, operation: Callable[[str], str]) -> str:
+    lines: list[str] = [operation(line) for line in text.splitlines()]
+    result = '\n'.join(lines)
+    if text.endswith('\n'):
+        result = result + '\n'
+    return result
+
+def decorate(line: str) -> str:
+    return '[' + line + ']'
+
+def main() -> int:
+    text = read_bytes(sys.argv[1]).decode()
+    result = rewrite_lines(text, decorate)
+    write_bytes(sys.argv[2], result.encode())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 文字列の内包表記も使えます。たとえば `[decorate(line) for line in text.splitlines()]`、
@@ -872,10 +1191,11 @@ Unicode/NULを保持し、非空結果は独立した領域を所有します。
 
 R572ではリストを名前へ代入せず、そのまま走査できます。
 
-```ail
-for mode in ["trim", "frame"] { print(mode); }
-let doubles = [x * 2.0 for x in [1.5, 2.25]];
-print(sum([1, 2, 3]));
+```python
+for mode in ["trim", "frame"]:
+    print(mode)
+doubles = [x * 2.0 for x in [1.5, 2.25]]
+print(sum([1, 2, 3]))
 ```
 
 整数だけ、小数だけ、文字列だけの平坦なリストと空リストを扱います。
@@ -934,7 +1254,7 @@ R580では `read_bytes(...).decode()` や所有bytesを返す直接の関数呼�
 独立した文字列へdecodeした直後に一時bytesを解放します。不正UTF-8の例外でも解放します。
 名前で保持したbytes、literal、sliceなどの寿命は変えません。
 
-R569では `try { ... } finally { ... }` が使えます。正常終了、名前付き例外、
+R569では `try: ... finally: ...` が使えます。正常終了、名前付き例外、
 `return`・`break`・`continue` で抜ける場合に実行します。`except`・`else` とも組み合わせられます。
 戻り値はfinallyより先に一度評価し、文字列・bytes・整数/小数リストはその内容を保存します。
 finallyからのreturn・例外・break・continueは保留中の終了を上書きします。
@@ -947,27 +1267,37 @@ R568では `range(start, stop, step)` の正負の動的stepを扱えます。
 3引数版の要素数はint64上限までで、それを超える範囲は反復前に停止します。
 
 R567では小数の内包表記・絞り込み・返却が使えます。たとえば
-`return [value * factor for value in values];` は `list[float]` を返します。
+`return [value * factor for value in values]` は `list[float]` を返します。
 小数列の走査では値を整数に切り捨てません。整数との混在・入れ子は拒否します。
 
 R566では整数リストの内包表記を代入する際の全件再コピーを除去しました。
 右辺の完成後に保存領域を渡し、右辺の例外時は代入前の値を保ちます。
 `range` 引数の評価は左から一度ずつです。既存objectは再ビルドしてください。
 
-R564では整数データの一括変換を追加しました。`use binary_integers;` で
+R564では整数データの一括変換を追加しました。`from binary_integers import *` で
 `pack_integers(values, width, order)` と `unpack_integers(data, width, order)` を使えます。
 幅1/2/4は符号なし、幅8は符号付き64ビット、orderは0（little endian）/1（big endian）です。
 不正な幅・順序・範囲・端数長は `ValueError`。結果は独立した保存領域を持ちます。
 
-```ail
-use binary_integers;
-fn main() -> int {
-    let values = [0, 1, 4294967295];
-    let data = pack_integers(values, 4, 0);
-    let decoded = unpack_integers(data, 4, 0);
-    write_stdout_bytes(pack_integers(decoded, 4, 1));
-    return 0;
-}
+```python
+from ail import integer_decode, integer_encode, write_stdout_bytes
+import sys
+
+def unpack_integers(data: bytes, width: int, order: int) -> list[int]:
+    return integer_decode(data, width, order)
+
+def pack_integers(values: list[int], width: int, order: int) -> bytes:
+    return integer_encode(values, width, order)
+
+def main() -> int:
+    values = [0, 1, 4294967295]
+    data = pack_integers(values, 4, 0)
+    decoded = unpack_integers(data, 4, 0)
+    write_stdout_bytes(pack_integers(decoded, 4, 1))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 組込み `integer_encode` / `integer_decode` も同じ引数で使用できます。
@@ -998,14 +1328,23 @@ SDKは独立したスナップショットです。開発・更新の正本は�
 
 ## 自分のプロジェクトで標準部品を使う（R560）
 
-標準部品のソースをコピーせず、任意のプロジェクトの `.ail` から `use` できます。
+標準部品のソースをコピーせず、任意のプロジェクトの `.ail` から `from ... import *` できます。
 
-```ail
-use binary_numbers;
-fn main() -> int {
-    write_stdout_bytes(pack_u16_le(513));
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+def pack_u16_le(value: int) -> bytes:
+    if value < 0 or value > 65535:
+        raise ValueError
+    return bytes([value % 256, value // 256])
+
+def main() -> int:
+    write_stdout_bytes(pack_u16_le(513))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 この内容を `app.ail` に保存し、AILの `ailc.py` を指定してコンパイルします。
@@ -1022,9 +1361,9 @@ $ailCompiler = 'C:/path/to/AIL_CURRENT/ailc.py'
 出力は `01 02` の2byteです。独自ライブラリは `-I lib` または `--module-path lib` で追加でき、
 複数指定できます。相対ディレクトリはコマンドを実行した場所を基準にします。
 
-`use name;` は、取り込む側のファイルの隣、指定した `-I` の順、AIL同梱の
+`from name import *` は、取り込む側のファイルの隣、指定した `-I` の順、AIL同梱の
 `language_examples` の順に `name.ail` を探します。見つかったファイルが不正な場合は拒否し、
-後の候補へ切り替えません。入れ子の `use` にも同じ順序を適用します。
+後の候補へ切り替えません。入れ子の `from ... import *` にも同じ順序を適用します。
 `compile`・`compile-module`・`compile-library` で利用できます。
 `--module` による明示ファイル指定と、`--object` による元ソース不要リンクも引き続き使えます。
 標準部品に外部C依存がある場合、そのobjectは別途ビルドして指定します。
@@ -1032,7 +1371,7 @@ $ailCompiler = 'C:/path/to/AIL_CURRENT/ailc.py'
 
 ## ファイルをbytesのカーソルへ読み込む（R552）
 
-`use binary_cursor_file;` の `binary_cursor_file(path)` は、読み込んだbytesを
+`from binary_cursor_file import *` の `binary_cursor_file(path)` は、読み込んだbytesを
 `BinaryCursor`へ渡します。新しく作られたbytesをフィールドへ直接代入する場合、
 コンパイラが所有権を移し、入力全体の二重コピーを省きます。
 既存のbytes変数やスライスを代入する場合は、従来のコピーを保ちます。
@@ -1085,15 +1424,19 @@ floatにも `//`、`%`、`//=`、`%=` を使えます。
 floatの局所変数・引数にも `+=`、`-=`、`*=`、`/=`、`**=` を使えます。
 明示的な型注釈がなくても、既存のbinary64演算と同じ意味で処理します。
 
-```ail
-fn main() -> int {
-    let value = 1.5;
-    value += 0.5;
-    value *= 3.0;
-    value /= 2.0;
-    print(value);
-    return 0;
-}
+```python
+import sys
+
+def main() -> int:
+    value = 1.5
+    value += 0.5
+    value *= 3.0
+    value /= 2.0
+    print(value)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 出力は `3.0`。右辺は一度だけ評価し、右辺や演算が例外を投げた場合は更新前の値を保持します。
@@ -1131,14 +1474,17 @@ addのValueErrorではそのバッチの変更を反映せず、再試行でき�
 ## 小数値を名前で保持する（R524）
 
 `dict[str, float]` を型付き変数・関数・メソッド・構造体のフィールドで使えます。
-キーは文字列、値はbinary64です。例えば次のfn/let構文で集計できます。
+キーは文字列、値はbinary64です。例えば次のPython構文で集計できます。
 
-```ail
-fn main() -> int:
-    let totals: dict[str, float] = {"sample": 1.5}
+```python
+def main() -> int:
+    totals: dict[str, float] = {"sample": 1.5}
     totals["sample"] += 0.25
     print(totals.get("sample", 0.0))
     return 0
+
+
+main()
 ```
 
 keys()/values()/copy()は所有するスナップショットを返します。
@@ -1172,16 +1518,23 @@ Defenderのフォルダーアクセス制御（event1123）がPythonのOneDrive�
 
 ## 出力の確定と書込み失敗を捕捉する（R522）
 
-共通API `flush_stdout();` を追加しました。引数なしの文で、値としては使えません。
+共通API `flush_stdout()` を追加しました。引数なしの文で、値としては使えません。
 stdoutのstdio bufferを出力し、flush失敗または既存のerror flagをOSErrorとして捕捉できます。
 空のflushも許可。成功時だけdirtyを解除し、text/bytesの出力モードを変更しません。
-fn/let構文とPython構文はどちらも .ail ファイルでビルドできます。
+Python構文の .ail ファイルをビルドできます。
 
-```text
-fn main() -> int {
-    try { print("result"); flush_stdout(); return 0; }
-    except OSError { print("output failed", file=sys.stderr); return 2; }
-}
+```python
+def main() -> int:
+    try:
+        print("result")
+        flush_stdout()
+        return 0
+    except OSError:
+        print("output failed", file=sys.stderr)
+        return 2
+
+
+main()
 ```
 
 検索CLIで、正常入力でもLinuxの/dev/fullへ出力すると終了0・stderrなしになることを再現。
@@ -1238,12 +1591,12 @@ Linuxは対象と関連のdistinct9件、Windows最終10件79.341s PASS、skip0�
 
 ## 固定幅レコード配列の型注釈（R519）
 
-Python構文と `fn`/`let` 構文で、初期値付きのレコード配列を宣言できます。
+Python構文で、初期値付きのレコード配列を宣言できます。
 
-```text
-let numbers:list[tuple[int,int]]=[];
-let points:list[tuple[float,float]]=[(1.25,2.5)];
-let records:list[tuple[int,bytes]]=[(7,b"header")];
+```python
+numbers: list[tuple[int, int]] = []
+points: list[tuple[float, float]] = [(1.25, 2.5)]
+records: list[tuple[int, bytes]] = [(7, b"header")]
 ```
 
 同じ幅・型配置のappend、再代入、localからのlistコピー、負の添字に対応。
@@ -2175,14 +2528,17 @@ IQRは有限観測の判定で、統計的保証や未知の入力・別機械�
 全文のstrict UTF8検証を先に済ませ、各行を元のbufferの範囲として渡します。
 この処理は全文UTF16と行一覧を確保せず、入力byteを変更しません。
 
-```ail
-fn main() -> int {
-    let data: bytes = "日本語\nsecond\n".encode();
-    for line in data.utf8_lines() {
-        print(line.hex());
-    }
-    return 0;
-}
+```python
+import sys
+
+def main() -> int:
+    data: bytes = '日本語\nsecond\n'.encode()
+    for line in data.utf8_lines():
+        print(line.hex())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 11種類の改行、CRLF、末尾改行、空入力、NUL、非BMPを扱い、receiverは一度だけ評価します。
@@ -2368,13 +2724,16 @@ Cの同工程に対する達成比は0.436（仮定1.0）でした。C参照は�
 独立したコピーを作るため、元のリストや構造体を変更しても取得済みの値を使えます。
 整数とfloatの要素型は一致させてください。暗黙の変換はしません。空の `[]` はフィールドの型に従います。
 
-```ail
-struct Series { values: list[int]; }
-let source: list[int] = [1, 2];
-let series = Series(source);
-let saved: list[int] = series.values;
-saved.append(3);
-series.values = saved;
+```python
+class Series:
+    def __init__(self, values: list[int]):
+        self.values = values
+
+source: list[int] = [1, 2]
+series = Series(source)
+saved: list[int] = series.values
+saved.append(3)
+series.values = saved
 ```
 
 R582では直接の `series.values.append(...)`、要素代入・削除・reverseに対応します。sortと`+=`は未対応です。
@@ -2465,19 +2824,31 @@ Windows・Linuxで新規8種類と既存コマンド2種類の計10種類が、�
 定義が後にある構造体と、循環しない入れ子にも対応します。
 自己参照・循環する型、未知の要素型、異なる構造体を入れる代入は拒否します。
 
-```ail
-struct Item { value: int; }
-struct Box { items: list[Item]; }
-fn main() -> int {
-    let items: list[Item] = [Item(7)];
-    let box = Box(items);
-    box.items.append(Item(8));
-    print(len(items));
-    let copied = box.items.copy();
-    items.clear();
-    print(len(copied));
-    return 0;
-}
+```python
+import sys
+
+class Item:
+
+    def __init__(self, value: int):
+        self.value = value
+
+class Box:
+
+    def __init__(self, items: list[Item]):
+        self.items = items
+
+def main() -> int:
+    items: list[Item] = [Item(7)]
+    box = Box(items)
+    box.items.append(Item(8))
+    print(len(items))
+    copied = box.items.copy()
+    items.clear()
+    print(len(copied))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 この例は2を2回出します。構造体リストは参照を共有し、フィールドの読込み・初期化・代入でも同じリストを使います。
@@ -2537,7 +2908,7 @@ Windows/Linuxで新規12種類・関連8種類、計20種類の検査がskipな�
 ローカルへ取り出して変更し、フィールドへ代入してください。
 フィールドを直接走査する `for` と `items()` は、開始時の1つのコピーを最後まで走査します。
 
-`csv_group.ail` と `csv_project.ail` を `use` して再利用できます。
+`csv_group.ail` と `csv_project.ail` を `from ... import *` して再利用できます。
 
 | API | 結果 |
 | --- | --- |
@@ -2581,17 +2952,25 @@ int64端・中間合計/件数の範囲外・Unicode/NUL・重複/空の列指�
 
 構造体のフィールドに `list[str]` を使えます。初期化・代入で文字列とリストを独立して保持し、読み出しも独立したコピーになります。
 
-```ail
-struct Row { fields: list[str]; }
-fn main() -> int {
-    let values: list[str] = ["日本語", "", "😀"];
-    let row = Row(values);
-    values.clear();
-    let kept = row.fields;
-    row.fields = ["next"];
-    print("|".join(kept));
-    return 0;
-}
+```python
+import sys
+
+class Row:
+
+    def __init__(self, fields: list[str]):
+        self.fields = fields.copy()
+
+def main() -> int:
+    values: list[str] = ['日本語', '', '😀']
+    row = Row(values)
+    values.clear()
+    kept = row.fields.copy()
+    row.fields = ['next']
+    print('|'.join(kept))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 `row.fields.append(...)`や要素への直接代入など、フィールドそのものの変更は拒否します。読み出したローカル変数を変更してから `row.fields = values` と代入してください。構造体の参照は共有されますが、取り出したリストと文字列は後の置換や構造体の解放後も保持できます。
@@ -2638,13 +3017,18 @@ Windows初回の検査側不備2件を修正し、残った容量不具合も直
 pathは文字列、sizeは正のint64で、2個の位置引数を左から1回ずつ評価します。sizeが0以下なら、ファイルを開く前にValueErrorです。
 1回の読み取りは最大`min(size, 65536)`バイトです。NUL、CRLF、Ctrl-Z、UTF-8として不正なバイトも変換しません。
 
-```ail
-fn main() -> int {
-    for chunk in file_chunks("input.bin", 65536) {
-        write_stdout_bytes(chunk);
-    }
-    return 0;
-}
+```python
+# run: no
+from ail import file_chunks, write_stdout_bytes
+import sys
+
+def main() -> int:
+    for chunk in file_chunks('input.bin', 65536):
+        write_stdout_bytes(chunk)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 chunkは所有権のあるbytesで、後の読み取りやファイルの解放後も保持できます。
@@ -2789,21 +3173,26 @@ Windows/Linuxで新規12種類の検査がskipなしで成功しました。
 `dict[str,bytes]`を変数・読み取り専用引数・所有権を持つ戻り値として使えます。
 Unicode/NULを含む文字列キーと、空または任意のバイト列の値を保持します。
 
-```ail
-fn copied(values: dict[str,bytes]) -> dict[str,bytes] {
-    let result: dict[str,bytes] = values;
-    result["追加"] = b"\x00\xff";
-    return result;
-}
-fn main() -> int {
-    let original: dict[str,bytes] = {"画像": b"\x00\x80\xff"};
-    let saved: bytes = original["画像"];
-    let values: list[bytes] = original.values();
-    let independent: dict[str,bytes] = copied(original);
-    original.clear();
-    write_stdout_bytes(saved);
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+def copied(values: dict[str, bytes]) -> dict[str, bytes]:
+    result: dict[str, bytes] = values
+    result['追加'] = b'\x00\xff'
+    return result
+
+def main() -> int:
+    original: dict[str, bytes] = {'画像': b'\x00\x80\xff'}
+    saved: bytes = original['画像']
+    values: list[bytes] = original.values()
+    independent: dict[str, bytes] = copied(original)
+    original.clear()
+    write_stdout_bytes(saved)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 辞書の代入・copy・戻り値はキーと値を独立して所有します。
@@ -2962,12 +3351,11 @@ Windows/Linuxで新規10・関連4対象が成功しました。Windows初回で
 初期値付き変数、読み取り専用の関数・メソッド引数、所有権を持つ戻り値に
 `dict[str,str]`を使えます。キーと値はUnicode/NULを含む文字列です。
 
-```ail
-fn renamed(values: dict[str,str]) -> dict[str,str] {
-    let result: dict[str,str] = values;
-    result["名前"] = "AIL";
-    return result;
-}
+```python
+def renamed(values: dict[str, str]) -> dict[str, str]:
+    result: dict[str, str] = values
+    result['名前'] = 'AIL'
+    return result
 ```
 
 代入・`copy()`は独立したコピーです。検索・更新・削除・`len`・`in`・`clear`・`update`
@@ -3010,12 +3398,11 @@ Windows/Linux各35テスト（新規13・関連22）と、旧文字列コンテ�
 初期値付き変数、関数引数、戻り値に`dict[str,int]`を使えます。
 キーは文字列、値は符号付き64ビット整数です。空辞書も型を指定でき、別の型への暗黙変換は拒否します。
 
-```ail
-fn copied(values: dict[str,int]) -> dict[str,int] {
-    let result: dict[str,int] = values;
-    result["追加"] = 17;
-    return result;
-}
+```python
+def copied(values: dict[str, int]) -> dict[str, int]:
+    result: dict[str, int] = values
+    result['追加'] = 17
+    return result
 ```
 
 代入・`copy()`は独立したコピーです。引数は読み取り専用で、変更するにはローカルへ
@@ -3062,11 +3449,11 @@ Windows/Linux各26テスト（新規12・関連14）と、旧文字列コンテ�
 floatの要素には`float(value)`を明示してください。
 型付きリストの`clear()`は型を保ったまま空にします。
 
-```ail
-let numbers: list[int] = [1, 2, 3];
-let weights: list[float] = [-0.0, 0.5];
-let words: list[str] = ["日本語", "", str(17)];
-words = [words[2], words[0], words[1]];
+```python
+numbers: list[int] = [1, 2, 3]
+weights: list[float] = [-0.0, 0.5]
+words: list[str] = ["日本語", "", str(17)]
+words = [words[2], words[0], words[1]]
 ```
 
 関数の`list[int]`引数・戻り値は従来の整数`list`と同じ契約です。
@@ -3154,19 +3541,19 @@ WindowsのC診断時計はミリ秒単位で、性能評価には使いません
 初期値付きのローカル変数に`int`・`float`・`str`・`bytes`・既存の構造体名を宣言できます。
 `list[bytes]`も引き続き使えます。
 
-```ail
-let total: int = 0;
-let scale: float = float(total);
-let name: str = "日本語";
-let data: bytes = b"\x00\xff";
-let parts: list[bytes] = [data];
+```python
+total: int = 0
+scale: float = float(total)
+name: str = "日本語"
+data: bytes = b"\x00\xff"
+parts: list[bytes] = [data]
 ```
 
 型は関数内で固定し、初期値と後の代入が一致しなければビルドを拒否します。
 整数をfloat変数へ渡す場合は`float(value)`と明示します。同じ型の再宣言と、型の合う
 ループ変数・拡張代入も使えます。初期値のない宣言は対象外です。
 数値・文字列リストのローカル型宣言はR467で追加しています。
-関数の文字列・bytes戻り値は従来どおり`fn ... -> str`・`fn ... -> bytes`で明示します。
+関数の文字列・bytes戻り値は従来どおり `-> str`・`-> bytes` で明示します。
 
 `checked_integer`は符号付き64ビットの厳密な十進解析と、範囲を超えない加算を提供します。
 `IntegerColumnStats`は件数・合計・最小値・最大値を保存し、不正な件数や合計のoverflowで
@@ -3224,7 +3611,7 @@ Windows/Linux各20対象（新規10・関連既存10）が成功し、終了時�
 
 ## リストを持つ構造体とフィールド集約（R463）
 
-構造体フィールドにも`parts: list[bytes];`を宣言できます。
+構造体フィールドにも`parts: list[bytes]`を宣言できます。
 コンストラクタ・フィールド代入はリストを共有し、変更は別名からも見えます。
 別のリストへフィールドを置換しても、以前に取得したリストは保持できます。
 所有者の変数を再代入したり、関数の終了で解放されたりしても、取得済みのリストは使えます。
@@ -3258,7 +3645,7 @@ Windows/Linux各29項目（新機能12・関連既存17）が成功しました�
 ## バイト列のリストを部品間で渡す（R462）
 
 関数・メソッドの引数と戻り値に`list[bytes]`を使えます。
-`let parts: list[bytes] = [];`で空のリストにも型を指定できます。
+`parts: list[bytes] = []`で空のリストにも型を指定できます。
 代入・引数・戻り値は同じリストを共有し、追加・要素変更・clearは別名からも見えます。
 `list(parts)`、`parts.copy()`、スライス、`sorted(parts)`は独立したリストを作ります。
 要素のbytesは保持され、取り出したbytesは元リストの変更・解放後も使えます。
@@ -3294,19 +3681,62 @@ Windows/Linuxそれぞれで、新機能12項目と関連既存23項目が成功
 これらは値を返さないメソッドです。`finish()`は現在のbytesを返します。
 取得済みの結果は、その後の追加・初期化・変数の再代入後も保持できます。
 
-```ail
-use binary_writer;
-fn main() -> int {
-    let writer = BinaryWriter(b"AIL");
-    writer.write_u16_be(258);
-    let saved = writer.finish();
-    writer.clear();
-    write_stdout_bytes(saved);
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+class BinaryWriter:
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+    def write_u8(self, value: int) -> None:
+        if value < 0 or value > 255:
+            raise ValueError
+        self.data = self.data + bytes([value])
+
+    def write_u16_le(self, value: int) -> None:
+        if value < 0 or value > 65535:
+            raise ValueError
+        self.data = self.data + bytes([value % 256, value // 256])
+
+    def write_u16_be(self, value: int) -> None:
+        if value < 0 or value > 65535:
+            raise ValueError
+        self.data = self.data + bytes([value // 256, value % 256])
+
+    def write_u32_le(self, value: int) -> None:
+        if value < 0 or value > 4294967295:
+            raise ValueError
+        self.data = self.data + bytes([value % 256, (value // 256) % 256, (value // 65536) % 256, value // 16777216])
+
+    def write_u32_be(self, value: int) -> None:
+        if value < 0 or value > 4294967295:
+            raise ValueError
+        self.data = self.data + bytes([value // 16777216, (value // 65536) % 256, (value // 256) % 256, value % 256])
+
+    def append(self, data: bytes) -> None:
+        self.data = self.data + data
+
+    def finish(self) -> bytes:
+        return self.data
+
+    def clear(self) -> None:
+        self.data = b''
+
+def main() -> int:
+    writer = BinaryWriter(b'AIL')
+    writer.write_u16_be(258)
+    saved = writer.finish()
+    writer.clear()
+    write_stdout_bytes(saved)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
-出力は`41 49 4C 01 02`の5バイトです。ソースを隣へ置いて`use`するか、
+出力は`41 49 4C 01 02`の5バイトです。ソースを隣へ置いて`from ... import *`するか、
 `compile-module`で作ったobjectを`--object`で渡せます。
 現在の実装は追加ごとにバイト列を連結します。大量の小さな書込みをまとめる
 容量予約や、ファイルへの逐次書込みの機能はありません。
@@ -3402,20 +3832,31 @@ Linuxの固定128KiB入力を整数単位で合計する仕事では、変更前
 状態を変更するメソッドには`-> void`を使えます。呼出しは独立した文にします。
 値を代入・表示・計算・条件に使ったり、voidメソッドから値を返したりすることは拒否します。
 
-```ail
-struct Counter { value: int; }
-impl Counter {
-    fn set(self, value: int) -> void { self.value = value; }
-    fn reset(self) -> void { self.value = 0; return; }
-}
-fn main() -> int {
-    let counter = Counter(0);
-    counter.set(value=3);
-    print(counter.value);
-    counter.reset();
-    print(counter.value);
-    return 0;
-}
+```python
+import sys
+
+class Counter:
+
+    def __init__(self, value: int):
+        self.value = value
+
+    def set(self, value: int) -> None:
+        self.value = value
+
+    def reset(self) -> None:
+        self.value = 0
+        return
+
+def main() -> int:
+    counter = Counter(0)
+    counter.set(value=3)
+    print(counter.value)
+    counter.reset()
+    print(counter.value)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 通常・複数ソースの`--separate`・ソースなしobjectで使えます。型と引数順序を保ち、
@@ -3431,25 +3872,34 @@ objectのABIは10のままですが、更新後のコンパイラで既存object
 
 ## 構造体のメソッドとバイナリカーソル（R454）
 
-宣言した構造体へ`impl`でインスタンスメソッドを追加できます。先頭の引数は型なしの`self`、
+宣言したクラスへメソッドを追加できます。先頭の引数は型なしの`self`、
 残りの引数は型付きで、呼出しでは位置指定・キーワード指定を使えます。
 bytes・strを返すメソッドは、関数内の領域が解放された後も結果を保持します。
 
-```ail
-struct Blob { data: bytes; }
-impl Blob {
-    fn suffix(self, start: int) -> bytes { return self.data[start:]; }
-}
-fn main() -> int {
-    let blob = Blob(b"AIL\x00\xff");
-    let saved = blob.suffix(start=3);
-    blob.data = b"changed";
-    write_stdout_bytes(saved);
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+class Blob:
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+    def suffix(self, start: int) -> bytes:
+        return self.data[start:]
+
+def main() -> int:
+    blob = Blob(b'AIL\x00\xff')
+    saved = blob.suffix(start=3)
+    blob.data = b'changed'
+    write_stdout_bytes(saved)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
-同じ構造体へ複数の`impl`を追加できます。未知の構造体、フィールドと同じメソッド名、
+同じクラスへ複数のメソッドを追加できます。未知の構造体、フィールドと同じメソッド名、
 重複メソッド、コンストラクタの置換は拒否します。型付きの戻り値は、通常の関数と同様に、
 戻る経路に値が必要です。例外を送出して終わる経路も認めます。
 メソッドの呼出し対象にはローカル変数・`self`に加え、対応する構造体を返す関数呼出しや
@@ -3495,7 +3945,7 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/binary_cursor_object_m
 ```
 
 再利用に必要なのは同じ機械向けの`.o`と隣接する`.o.json`、宣言された依存objectです。
-利用側のソースに`use binary_cursor;`は不要です。メソッドの型・呼出し先・所有結果・依存を
+利用側のソースに`from binary_cursor import *`は不要です。メソッドの型・呼出し先・所有結果・依存を
 照合し、メタデータと実objectの契約が一致しなければリンクを拒否します。
 listを返すメソッドのobject公開は未対応です。voidメソッドはR456で対応しました。
 
@@ -3518,12 +3968,17 @@ Linuxの初回はWSL起動タイムアウトで検査未開始でしたが、通
 bytesの区切りを指定すると、先頭・末尾・連続区切りの空要素を残します。空の区切りは`ValueError`です。
 maxsplitはintで、負数なら全件、0なら分割しません。空白分割の0は先頭の空白だけを除きます。
 
-```ail
-fn main() -> int {
-    let fields = b"|a||b|\x00".split(b"|", 3);
-    write_stdout_bytes(b"\x00".join(fields));
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+def main() -> int:
+    fields = b'|a||b|\x00'.split(b'|', 3)
+    write_stdout_bytes(b'\x00'.join(fields))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 リストの長さ・索引・反復、`separator.join(parts)`で使えます。`b"|".join(data.split())`、
@@ -3566,14 +4021,20 @@ maxsplitの省略は-1です。countは10進数とLF、field/rejoinは生bytes�
 `data.removeprefix(prefix)`・`data.removesuffix(suffix)`は一致する先頭・末尾を1回だけ除きます。
 空または不一致のprefix/suffixは内容を変えません。引数はbytesの位置指定だけです。
 
-```ail
-fn main() -> int {
-    let table = [];
-    for i in range(256) { table.append(255 - i); }
-    let data = b"HEAD\x00\xffTAIL";
-    write_stdout_bytes(data.removeprefix(b"HEAD").removesuffix(b"TAIL").translate(bytes(table), b"\x00"));
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+def main() -> int:
+    table = []
+    for i in range(256):
+        table.append(255 - i)
+    data = b'HEAD\x00\xffTAIL'
+    write_stdout_bytes(data.removeprefix(b'HEAD').removesuffix(b'TAIL').translate(bytes(table), b'\x00'))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 receiver・各引数を左から一度ずつ評価し、後のフィールド変更から取得済みの値を保護します。
@@ -3627,12 +4088,17 @@ Amdahl上限は1.419・1.323・2.165倍です。複製は実測memcpy読書き5.
 一致は重ならない順に置換します。回数を省略するか負数なら全件、0なら内容を変えません。
 空のoldは先頭・各バイト間・末尾へ挿入します。countはint、引数は位置指定だけです。
 
-```ail
-fn main() -> int {
-    let data = b"ababa\x00\xff";
-    write_stdout_bytes(data.replace(b"aba", b"\xff\x00", 1));
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+def main() -> int:
+    data = b'ababa\x00\xff'
+    write_stdout_bytes(data.replace(b'aba', b'\xff\x00', 1))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 receiver・old・replacement・countを左から一度ずつ評価します。後の式がフィールドを変えても
@@ -3663,14 +4129,21 @@ Python参照の647境界結果、1MiB超の全出力、全256バイト、64ビ�
 `data.startswith(prefix[, start[, end]])`と`data.endswith(suffix[, start[, end]])`を使えます。
 範囲の先頭・末尾が一致すれば1、一致しなければ0です。判定する値はbytes、境界はintです。
 
-```ail
-fn main() -> int {
-    let data = b"\x89PNG\r\n\x1a\n";
-    print(data.startswith(b"\x89PNG"));  # 1
-    print(data.endswith(b"\x1a\n"));    # 1
-    print(data.startswith(b"PNG", 1, 4)); # 1
-    return 0;
-}
+```python
+import sys
+
+def main() -> int:
+    data = b'\x89PNG\r\n\x1a\n'
+    # 1
+    print(data.startswith(b'\x89PNG'))
+    # 1
+    print(data.endswith(b'\x1a\n'))
+    # 1
+    print(data.startswith(b'PNG', 1, 4))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 境界の省略・負数・空prefixは下記の検索と同じ範囲規則です。有効な範囲の空prefixは1ですが、
@@ -3718,14 +4191,21 @@ Amdahl上限は1.223・2.233・3.745倍です。実測memcpyの読書き5.181GB/
 一致がなければ-1です。`count`は重ならない一致の件数を返します。needleはbytes、境界はintです。
 開始・終了位置を省略すると0と全長を使い、負数は末尾から数えます。結果は元のdata内の位置です。
 
-```ail
-fn main() -> int {
-    let data = b"ababa\x00\xff";
-    print(data.find(b"aba", 1));       # 2
-    print(data.rfind(b"a", 0, 5));    # 4
-    print(data.count(b"aba"));        # 1
-    return 0;
-}
+```python
+import sys
+
+def main() -> int:
+    data = b'ababa\x00\xff'
+    # 2
+    print(data.find(b'aba', 1))
+    # 4
+    print(data.rfind(b'a', 0, 5))
+    # 1
+    print(data.count(b'aba'))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 開始が全長を超える範囲や終了が開始より前の範囲は一致なしです。
@@ -3760,12 +4240,17 @@ bytesを返すクラスメソッドは未対応です。任意のループで一
 `data * n`と`n * data`はbytesの反復です。どちらも式を左から一度だけ評価します。
 後で評価する式が元のフィールドを書き換えても、先に読み取ったbytesを使用します。
 
-```ail
-fn main() -> int {
-    let data = bytes(4) + 2 * b"\xff";
-    write_stdout_bytes(bytes(data));
-    return 0;
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+def main() -> int:
+    data = bytes(4) + 2 * b'\xff'
+    write_stdout_bytes(bytes(data))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 生成したbytesは変更できません。負の`bytes(n)`は捕捉できる`ValueError`、
@@ -3848,11 +4333,11 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/data_convert_main.ail 
 
 ## 文字と16進データを直接変換する（R440）
 
-```ail
-let character = chr(128512);              # 😀
-let text = b"\x00\xff".hex();            # "00ff"
-let data = bytes.fromhex("00 FF\r\n");   # b"\x00\xff"
-print(bytes.fromhex("00ff")[-1]);         # 255
+```python
+character = chr(128512)              # 😀
+text = b"\x00\xff".hex()            # "00ff"
+data = bytes.fromhex("00 FF\r\n")   # b"\x00\xff"
+print(bytes.fromhex("00ff")[-1])         # 255
 ```
 
 `chr`は整数を一つ受け、Unicode scalarの一文字を返します。NUL・BMP外文字にも対応します。
@@ -3944,13 +4429,22 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/csv_json_main.ail --ob
 `file_size(path)`は通常ファイルの論理サイズをバイト単位で返します。
 位置引数一つの`str`を渡し、戻り値は符号付き64bit整数です。
 
-```ail
-fn main() -> int {
-    if len(sys.argv) < 2 { return 2; }
-    try { print(file_size(sys.argv[1])); }
-    except (OSError, ValueError) { return 2; }
-    return 0;
-}
+```python
+# run: no
+from ail import file_size
+import sys
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        return 2
+    try:
+        print(file_size(sys.argv[1]))
+    except (OSError, ValueError):
+        return 2
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 Unicode・空白を含むパス、型付き関数や構造体フィールドの文字列も渡せます。
@@ -3986,23 +4480,37 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/file_manifest_main.ail
 
 同じ構造体型のリストを作り、関数へ渡し、返せます。
 
-```ail
-struct Item { name: str; size: int; }
-fn empty_items() -> list[Item] { let rows = []; return rows; }
-fn total(rows: list[Item]) -> int {
-    let out = 0;
-    for row in rows { out += row.size; }
-    return out;
-}
-fn main() -> int {
-    let rows = empty_items();
-    rows.append(Item("first", 7));
-    let alias = rows;
-    let kept = rows[0];
-    alias.clear();
-    print(kept.name); print(total(rows));
-    return 0;
-}
+```python
+import sys
+
+class Item:
+
+    def __init__(self, name: str, size: int):
+        self.name = name
+        self.size = size
+
+def empty_items() -> list[Item]:
+    rows = []
+    return rows
+
+def total(rows: list[Item]) -> int:
+    out = 0
+    for row in rows:
+        out += row.size
+    return out
+
+def main() -> int:
+    rows = empty_items()
+    rows.append(Item('first', 7))
+    alias = rows
+    kept = rows[0]
+    alias.clear()
+    print(kept.name)
+    print(total(rows))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 出力は`first`、`0`です。リストも共有参照なので、別名からの変更が見えます。
@@ -4020,7 +4528,7 @@ R432では`rows[i].field`、`make(...).field`、`rows.pop().field`を直接読�
 右辺が元リストを消去しても、`+=`の対象は更新が終わるまで残ります。
 文字列・bytesは変更前の値をコピーするので、右辺が同じフィールドを変更しても影響を受けません。
 別の構造体型・数値との混在、リストの入れ子、スライスへの代入・削除、反復器からの複製、内包表記は未対応です。
-`use`/`--module`によるソース再利用と`--separate`に対応します。
+`--module`によるソース再利用と`--separate`に対応します。
 `list[Item]`を公開引数・戻り値にする`compile-module`にも対応します（R431）。
 構造体名・フィールドの順序と型・リストの要素型を内部ABI9の契約に保存します。
 型を定義した部品への依存も契約に含め、必要な`.o`と`.o.json`を一緒に渡してください。
@@ -4064,10 +4572,10 @@ R433では`rows.extend(other)`で同じ型の一覧を結合し、`rows.reverse(
 
 R434では、構造体のフィールドで安定した並べ替えができます。
 
-```ail
-rows.sort(key=lambda item: item.size);
-rows.sort(key=lambda item: (item.size, item.name), reverse=True);
-rows.sort(key=lambda item: -item.size);
+```python
+rows.sort(key=lambda item: item.size)
+rows.sort(key=lambda item: (item.size, item.name), reverse=True)
+rows.sort(key=lambda item: -item.size)
 ```
 
 キーは一つのフィールド、またはフィールドのタプルです。数値フィールドには単項`-`も使えます。
@@ -4085,10 +4593,10 @@ PythonのNaNを含む並べ替え結果との一致を保証する仕様では�
 
 R435では、元の順序を残して別の一覧を作れます。
 
-```ail
-let copy = list(rows);
-let ordered = sorted(rows, key=lambda item: (item.size, item.name));
-let descending = sorted(rows, key=lambda item: item.size, reverse=True);
+```python
+copy = list(rows)
+ordered = sorted(rows, key=lambda item: (item.size, item.name))
+descending = sorted(rows, key=lambda item: item.size, reverse=True)
 ```
 
 一覧の順序・長さは独立します。`copy.clear()`しても`rows`は消えません。
@@ -4107,12 +4615,13 @@ let descending = sorted(rows, key=lambda item: item.size, reverse=True);
 
 R436では、構造体リストを番号付き・逆順で反復できます。
 
-```ail
-for rank, item in enumerate(rows, start=1) { print(rank, item.name); }
-for item in reversed(rows) { print(item.name); }
-for rank, item in enumerate(sorted(rows, key=lambda item: item.size)) {
-    print(rank, item.size);
-}
+```python
+for rank, item in enumerate(rows, start=1):
+    print(rank, item.name)
+for item in reversed(rows):
+    print(item.name)
+for rank, item in enumerate(sorted(rows, key=lambda item: item.size)):
+    print(rank, item.size)
 ```
 
 `enumerate`の開始番号は省略時0で、位置引数または`start=`で整数を指定します。
@@ -4139,12 +4648,13 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/inventory_ranked_objec
 
 R437では、スライスで一覧の一部を別の一覧へ取り出せます。
 
-```ail
-let page = rows[1:3];       # 添字1から、3を含めず取り出す
-let tail = rows[-2:];      # 末尾の2件
-let backwards = rows[::-1];
-let every_other = rows[::2];
-for rank, item in enumerate(rows[1:3], start=1) { print(rank, item.name); }
+```python
+page = rows[1:3]       # 添字1から、3を含めず取り出す
+tail = rows[-2:]      # 末尾の2件
+backwards = rows[::-1]
+every_other = rows[::2]
+for rank, item in enumerate(rows[1:3], start=1):
+    print(rank, item.name)
 ```
 
 開始・終了・刻み幅は省略でき、指定する値は符号付き64bit整数です。
@@ -4177,18 +4687,29 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/inventory_page_object_
 
 ## 名前付き構造体と矩形計算
 
-`struct`で名前と型を持つフィールドを定義できます。
+`class`で名前と型を持つフィールドを定義できます。
 
-```ail
-struct Point { x: int; y: float; }
-fn identity(p: Point) -> Point { return p; }
-fn main() -> int {
-    let p = Point(3, 0.5);
-    let q = identity(p);
-    q.x += 4;
-    print(p.x);
-    return 0;
-}
+```python
+import sys
+
+class Point:
+
+    def __init__(self, x: int, y: float):
+        self.x = x
+        self.y = y
+
+def identity(p: Point) -> Point:
+    return p
+
+def main() -> int:
+    p = Point(3, 0.5)
+    q = identity(p)
+    q.x += 4
+    print(p.x)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 結果は`7`です。構造体は共有参照なので、`q = p`や関数から同じ値を返す場合、
@@ -4204,7 +4725,7 @@ fn main() -> int {
 
 [geometry.ail](language_examples/geometry.ail)と[rectangle_main.ail](language_examples/rectangle_main.ail)は、
 二つの矩形の面積・交差面積・和集合面積を求めるCLIです。
-`use geometry;`で別ファイルの構造体と型付き関数を再利用します。
+`from geometry import *`で別ファイルの構造体と型付き関数を再利用します。
 
 ```powershell
 py -3 -X utf8 -B ail_chatgpt.py compile language_examples/rectangle_main.ail --separate -o rectangle
@@ -4230,15 +4751,21 @@ py -3 -X utf8 -B ail_chatgpt.py compile rectangle_object.ail --object geometry.o
 ```
 
 `rectangle_object.ail`には、たとえば次を記述します。
-`--object`で型と関数を読み込むので、このソースに`use geometry;`は不要です。
+`--object`で型と関数を読み込むので、このソースに`from geometry import *`は不要です。
 
-```ail
-fn main() -> int {
-    let a = make(0, 0, 3, 4);
-    let b = make(1, 2, 6, 6);
-    print(area(a)); print(area(b)); print(intersection(a, b));
-    return 0;
-}
+```python
+import sys
+
+def main() -> int:
+    a = make(0, 0, 3, 4)
+    b = make(1, 2, 6, 6)
+    print(area(a))
+    print(area(b))
+    print(intersection(a, b))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 出力は`12`、`20`、`4`です。元ソースを取り除いて移動したgeometry部品でも、
@@ -4249,16 +4776,21 @@ fn main() -> int {
 一時参照は次の評価または関数終了まで残る場合があるため、常に即時解放する保証ではありません。
 固定個数の参照を使う検査では1/16/10,000反復の終了時割当がゼロで、10,000反復の最大割当は
 16反復と同じ範囲でした。再帰の深さや参照の数が増える処理まで一定メモリとする保証はありません。
-Python風構文の固定形classも、これら4型のフィールドなら同じ参照管理を使います。
+Python構文のクラスも、これら4型のフィールドなら同じ参照管理を使います。
 
 ### 文字列・バイナリを持つ再利用部品
 
-```ail
-struct Artifact { label: str; data: bytes; revision: int; }
+```python
+class Artifact:
+
+    def __init__(self, label: str, data: bytes, revision: int):
+        self.label = label
+        self.data = data
+        self.revision = revision
 ```
 
 文字列とbytesは構築・フィールド代入時に部品自身の領域へコピーします。
-読み出した値も呼出し側が保持するため、`let saved = item.label;`の後にフィールドを
+読み出した値も呼出し側が保持するため、`saved = item.label`の後にフィールドを
 更新したり`item`を再代入したりしても`saved`は変わりません。
 文字列とbytesの混用を拒否し、自己代入・`+=`にも対応します。
 所有するフィールドは最後の構造体参照の解放時に解放します。
@@ -4312,25 +4844,24 @@ py -3 -X utf8 -B ail_chatgpt.py compile language_examples/access_log/main.ail -o
 
 検証結果と数値プロファイルは[binary_float_records_r414.json](language_examples/binary_float_records_r414.json)に保存しています。
 
-## AILのブロック構文
+## AILのPython構文
 
-AILのブロック構文では、Python風のインデントの代わりに `fn`、`const`、`let`、
-波括弧とセミコロンを使えます。`struct`で数値フィールドを持つ型も宣言できます。
-入口は引数なしの `fn main()` です。
+AILは Python 構文で書き、型注釈を任意に付けられます。`class` で数値フィールドを持つ型も宣言できます。
+入口は引数なしの `def main()` です。
 
 ```powershell
 py -3 -B ailc.py language_examples/block_use_math.ail -o block_main
 ./block_main.exe
 ```
 
-結果は `21` です。ソース内の `use block_math;` が同じフォルダの
+結果は `21` です。ソース内の `from block_math import *` が同じフォルダの
 `block_math.ail` を読み、定数と関数を一緒にコンパイルします。
-`fn sum_to(n: int) -> int` の引数・戻り値注釈はバックエンドの型推論でも検査します。
+`def sum_to(n: int) -> int` の引数・戻り値注釈はバックエンドの型推論でも検査します。
 関数呼出しの数値・文字列引数は記述順に評価し、名前付き引数でも記述順を守ります。
 数値の二項演算と文字列・bytesの連結・比較は左から評価し、連鎖比較では中間項を一度だけ評価します。
 平坦な整数配列・小数配列の `values = [式1, 式2]` は各要素を左から一度ずつ評価し、すべて成功してから
 代入先を置き換えます。`values = [values[-1], values[0]]` では代入前の要素を読めます。
-`let weights = [0.25, 0.5, 0.25];` のように小数配列を直接初期化できます。
+`weights = [0.25, 0.5, 0.25]` のように小数配列を直接初期化できます。
 要素はすべて小数式に揃えます。整数と小数を混ぜる場合は、整数側に明示的な `float(...)` が必要です。
 要素の評価中に例外が起きると代入は行われません。ただし、右辺で既に実行した `pop()` や
 C関数の副作用まで取り消すものではありません。コンパイラの実装識別が変わるため、既存の `.o` は再生成してください。
@@ -4343,8 +4874,9 @@ C関数の副作用まで取り消すものではありません。コンパイ�
 値を返す場合だけ受理します。`main` の注釈は `-> int` のみです。`-> str` は補助関数の
 文字列を一度の呼び出しで渡し、代入・表示・連結・別関数への引数に利用できます。
 `language_examples/block_use_text.ail` と `block_text.ail` が複数ソースの実例です。
-値を返さない関数は `fn notify(n: int) -> void { print(n); }` と書けます。
-`return;` による早期終了と、末尾まで実行して終了する形に対応します。`return 値;` は拒否します。
+値を返さない関数は `def notify(n: int) -> None:
+    print(n)` と書けます。
+`return` による早期終了と、末尾まで実行して終了する形に対応します。値を返す関数の `return 値` は型注釈と照合します。
 呼出しは文として使い、代入・表示・計算・条件式・配列の値には使えません。`main` は引き続き整数を返します。
 `void` 関数は `compile-module` でも公開でき、元ソースがなくても別のAILソースから呼べます。
 `py -3 -B ailc.py language_examples/block_use_text.ail -o block_use_text` でビルドします。
@@ -4352,8 +4884,8 @@ C関数の副作用まで取り消すものではありません。コンパイ�
 `len`・添字・スライス・比較・反復ではUnicodeの文字単位へ変換します。
 標準入力と `open(path).read()` のUTF-8でも、BMP外文字を同じ文字単位で扱います。
 `.strip(chars)`・`.lstrip(chars)`・`.rstrip(chars)` はBMP外文字を1文字として照合します。
-`use` はトップレベルに書きます。参照先はそのファイルの隣、`-I` の順、同梱標準部品から探します。
-参照先からさらに `use` でき、同じファイルは一度だけ取り込みます。循環、欠落、
+`from ... import *` はトップレベルに書きます。参照先はそのファイルの隣、`-I` の順、同梱標準部品から探します。
+参照先からさらに `from ... import *` でき、同じファイルは一度だけ取り込みます。循環、欠落、
 同名定義はビルド前に拒否します。通常ビルドはソース結合です。
 型付き経路でビルドできるプログラムは `--separate` を付けると、補助ソースの関数と
 入口ソースの関数を別々のCオブジェクトへコンパイルしてからリンクできます。
@@ -4368,8 +4900,7 @@ py -3 -B ailc.py language_examples/number_lines.ail --separate -o number_lines_l
 受理しない機能は拒否します。通常のビルドは従来の単一Cファイル方式です。
 両方式の出力を独立参照と照合して実測するには、Linuxで
 `python3 -B language_examples/bench_link_units.py --rows 200000 --cycles 6` を実行します。
-先頭の `fn`、`const` または `use` 宣言でこの構文を選びます。必要なら `--syntax ail` または
-`--syntax python` で明示的に固定できます。補助ファイルも個別に判定されます。
+先頭が Python の関数定義や import 宣言なら、そのまま Python 構文として読みます。必要なら `--syntax python` で明示的に固定できます。補助ファイルも個別に判定されます。
 標準入力、条件分岐、ループを使う例は `language_examples/block_stdin.ail` です。
 複数行をEOFまで読む `language_examples/block_line_stats.ail` は、件数と合計を出力します。
 空入力、CRLF、改行なし、20,000行、符号付き64ビット両端を独立したPython参照と照合済みです。
@@ -4390,15 +4921,15 @@ py -3 -B ailc.py language_examples/recovering_line_stats.ail -o recovering_line_
 13,566,352バイトから565バイトになりました。静的領域・C標準入出力・プロセス全体のRSSを
 含む値ではなく、速度改善の測定でもありません。長い行や保持する文字列が大きければ必要領域は増えます。
 
-`language_examples/filter_errors.ail` は `use filter_rules;` で文字列判定関数を取り込み、
-補助ファイルの `const ERROR_PREFIX = "ERR:";` を共有します。
+`language_examples/filter_errors.ail` は `from filter_rules import *` で文字列判定関数を取り込み、
+補助ファイルの `ERROR_PREFIX = "ERR:"` を共有します。
 UTF-8入力から `ERR:` で始まる行を出力します。WindowsではCRLFと単独CRをLFに
 正規化してから処理し、出力はOSのテキスト改行になります。64KiB境界をまたぐCRLF、
 NUL、Ctrl-Z、改行なしも独立したPython参照と生バイトで照合済みです。
 既定の型付き文字列はU+10FFFFまで受け入れ、不正UTF-8は停止します。
 `main` の戻り値はプロセスの終了値になります。
 
-`language_examples/codepoint_checksum.ail` は `use codepoint_checksum_core;` で
+`language_examples/codepoint_checksum.ail` は `from codepoint_checksum_core import *` で
 別ソースの関数を取り込み、`sys.argv[1]` で指定したUTF-8ファイルの文字数と
 文字単位のチェック値を表示します。次のようにビルドして実行します。
 
@@ -4420,11 +4951,11 @@ ASCII以外を含むUTF-8ファイルは検証・復号し、同じ文字単位�
 UTF-8ファイルの各行を文字列キーの辞書で数えます。最初に現れた順に
 「行、タブ、回数」を表示します。空行もキーとして扱います。
 `for line in content.splitlines()` は元の文字列を一度だけ評価し、行を順に取り出します。
-中間の行リストは作りません。`let lines = content.splitlines();` のようにリストを
+中間の行リストは作りません。`lines = content.splitlines()` のようにリストを
 変数へ保存する場合は、従来どおり全行のリストを作ります。
 
 `language_examples/number_lines.ail` は `number_lines_core.ail` の関数で行番号を付け、
-`write_text(path, text);` でUTF-8ファイルへ保存します。既存ファイルは上書きし、
+`write_text(path, text)` でUTF-8ファイルへ保存します。既存ファイルは上書きし、
 改行は変換しません。引数を左から評価してからファイルを開き、読書き失敗は
 `except OSError` で捕捉できます。`write_text` は文として使い、戻り値はありません。
 
@@ -4466,24 +4997,23 @@ ASCIIだけの入力は `--ascii-only` で測れます。この場合の `decode
 計時の挿入自体が実行時間へ影響し得るため、通常版との全体時間も一緒に確認します。
 現在の直接反復では行リスト作成関数を呼ばないため、この計時版に行分割の個別時間はありません。
 
-現在のブロック構文は `fn`、トップレベルの数値・文字列 `const`、関数内の `let`・代入・呼出し・
+現在のPython構文は、トップレベルの数値・文字列定数、関数内の代入・呼出し・
 `return`・`raise`・`if`/`elif`/`else`・`while`・`for`・`try`/`except`/`finally` に対応します。
 `except ZeroDivisionError` のように名前を指定し、`except (ValueError, ZeroDivisionError)` で
 複数の種類をまとめて捕捉できます。`try` の後の `else` は例外がなかった場合だけ実行します。
 捕捉できる名前は `ValueError`、`ZeroDivisionError`、`IndexError`、`KeyError`、
 `EOFError`、`OSError`、`FileNotFoundError`、`RuntimeError` です。
 `OSError` と `FileNotFoundError` は同じ内部区分です。
-`raise ValueError();` のように明示的に
+`raise ValueError()` のように明示的に
 発生させることもできます。
 例外の値・メッセージ、`except ... as` は未対応です。finallyの現在の制限は冒頭にあります。
-関数内では `let counts = {1: 7, 2: 11};` の辞書や `let seen = {3, 4};` の集合を
-ブロックの波括弧と区別して書けます。`if 1 in {1: 2} { ... }` のような条件も使えます。
+関数内では `counts = {1: 7, 2: 11}` の辞書や `seen = {3, 4}` の集合を書けます。`if 1 in {1: 2}: ...` のような条件も使えます。
 注釈なしの経路では入れ子辞書と集合リテラルを実行照合済みです。`-> int` などの注釈を
 付けた厳格経路では単純な数値辞書と、整数・文字列・bytesの各単一キー種の集合リテラルを
 実行照合済みです。異なるキー種の混在、浮動小数点や入れ子コンテナの集合要素は拒否します。
-整数キー・整数値の二段辞書 `let d = {1: {2: 3}};` は `d[1][2]` の読書き、
-`len(d[1])`、`2 in d[1]` に対応します。`let h = d[1]; let alias = h;` で
-内側辞書を共有でき、`alias[2] = 4;` は `d[1][2]` に反映されます。`d[4] = h;` で
+整数キー・整数値の二段辞書 `d = {1: {2: 3}}` は `d[1][2]` の読書き、
+`len(d[1])`、`2 in d[1]` に対応します。`h = d[1]` と `alias = h` で
+内側辞書を共有でき、`alias[2] = 4` は `d[1][2]` に反映されます。`d[4] = h` で
 別の外側キーにも同じ内側辞書を格納できます。外側辞書を作り直しても、変数 `h` が
 指す内側辞書は関数から戻るまで使えます。`for k in h`、`for k in d[1]`、
 `for k in h.keys()`、`for v in h.values()`、`for k, v in h.items()` は挿入順で
@@ -4494,8 +5024,7 @@ ASCIIだけの入力は `--ascii-only` で測れます。この場合の `decode
 関数が戻るまで古い内側辞書の領域も保持します。
 式の意味は既存のAILに従い、
 論理演算は `and`/`or`/`not` を使います。Cの `&&`、`||`、`!` は誤解を避けるため拒否します。
-コメントは `#`、整数の切り捨て除算は `//` です。構文変換後に既存のAILバックエンドで
-コンパイルする段階なので、コンパイラ自身はまだPythonとCコンパイラを必要とします。
+コメントは `#`、整数の切り捨て除算は `//` です。AILバックエンドでコンパイルする段階なので、コンパイラ自身はまだPythonとCコンパイラを必要とします。
 
 数値行集計の出力一致と実行時間を再測定するには、次を実行します。
 
@@ -4568,7 +5097,7 @@ py -3 -B ailc.py language_examples/object_text_main.ail --object block_text.o -o
 結果は `item:7` です。Linuxでは `py -3` を `python3`、実行名を `./object_text` に替えます。
 最初のコマンドで機械語の `block_text.o` と型情報の `block_text.o.json` を生成します。
 この2ファイルを一緒に移動すれば、モジュールの元ソースがなくても別の入口へリンクできます。
-入口に `use block_text;` は書かず、`--object` で既存オブジェクトを指定します。
+入口に `from block_text import *` は書かず、`--object` で既存オブジェクトを指定します。
 複数のオブジェクトは `--object` を繰り返して渡します。既存の出力は上書きしません。
 
 コンパイル済みモジュールから別のモジュールを呼ぶこともできます。上で作った
@@ -4640,13 +5169,13 @@ NUL・Unicode文字を扱います。定数値は型情報にも保存され、�
 入れ子関数、クラス、配列・真偽値・計算式の定数、既定値付き引数、
 および汎用経路への切替は未対応として拒否します。
 `abs`・`len` などの組込み名は、公開関数名として使用できません。
-R360から実行ファイルの入口は `--object` とソースの `--module`・`use` を併用できます。
+R360から実行ファイルの入口は `--object` とソースの `--module` を併用できます。
 読み込んだソースをまとめて型検査し、既存オブジェクトをリンクします。
 R392から`--object`と`--separate`を併用できます。ソースの各モジュールを別のCオブジェクトへ構築し、
 既存のC/AILライブラリとリンクします。例外・標準入出力などのruntime状態は一つを共有します。
 推移的なobject依存と隣接metadata全体が必要です。ソースの公開名とobjectの公開名の衝突、
 ABI・対象環境・compiler/runtime identity・内容の不一致は従来どおり拒否します。
-R361から `compile-module` も推移的な `use` を読み込み、一つのオブジェクトにまとめます。
+R361から `compile-module` も推移的な `from ... import *` を読み込み、一つのオブジェクトにまとめます。
 共有依存は一度だけ読み込みます。関数名・定数名は全ソースで共通なので、同名定義は拒否します。
 依存するCオブジェクトは内包せず、利用時にも完全なオブジェクトとmetadataを渡します。
 
@@ -4659,7 +5188,7 @@ py -3 -B ail_chatgpt.py compile-c language_examples/byte_search.c --interface la
 py -3 -B ailc.py language_examples/byte_scan_stdin.ail --separate --object byte_scan_build/native.o -o byte_scan_build/byte_scan
 ```
 
-`use`で`byte_scan_counts.ail`、さらに`byte_search_core.ail`を読み込み、Cのborrowed bytes関数を呼びます。
+`from ... import *`で`byte_scan_counts.ail`、さらに`byte_search_core.ail`を読み込み、Cのborrowed bytes関数を呼びます。
 引数なしでバイナリ標準入力を8,192バイトずつ読み、`bytes=数`と`zeros=数`をLF区切りで出力します。
 テキストの正規化はしません。これは利用機能の実例で、最速の計数アルゴリズムという主張はありません。
 Linuxでは独立Pythonの`len`/`bytes.count`に対し、空・全byte値・NUL/CRLF/Ctrl-Z・境界・
@@ -4748,7 +5277,7 @@ doubleのalignment不一致は状態9で拒否し、出力先を変更しませ�
 通常終了・未捕捉エラーとも、一回の呼出しで残った内部メモリとファイルを解放します。
 呼出し内の長いループのメモリ使用量を一定にはしません。途中のファイル書込みや標準出力は
 取り消しません。同じライブラリへの同時・再帰的なC呼出しは待機せず状態10を返します。
-型付きソースの `use` と `--module` に対応します。外部 `.o` は下記の専用方式で接続します。
+型付きソースの `from ... import *` と `--module` に対応します。外部 `.o` は下記の専用方式で接続します。
 `input()`、`sys`、整数/小数配列以外のコンテナの公開は未対応です。整数列は `list[int]` ではなく `list`、
 小数列の引数・戻り値は `list[float]` と宣言します。行列・レコード配列は拒否します。
 AIL内部でも、平坦な整数リストを `xs = f(values)`、`return f(values)`、
@@ -4796,7 +5325,7 @@ previousの範囲外は状態1、読込み失敗は状態6で戻り、失敗時�
 パスはUTF-8です。Windowsのmain(argv)がUTF-8とは限らないため、C側で適切に変換して渡します。
 同じ方式を一般の `compile-c --c-api-name NAME` / `compile-module --c-api-name NAME` に使えます。
 通常object、異なる名前、足りない依存は拒否し、専用objectを通常のAIL入口へ混用することも拒否します。
-R360から `compile-library` は専用 `--object` とソースの `use` / `--module` を併用できます。
+R360から `compile-library` は専用 `--object` とソースの `from ... import *` / `--module` を併用できます。
 読み込むソースとオブジェクトの公開名が衝突する場合は拒否します。専用namespaceと依存の条件は同じです。
 
 専用objectは、生成runtimeの状態・致命的エラー・確保・ファイル管理を同じC呼出し境界へ接続します。
@@ -4834,10 +5363,10 @@ gcc -std=c11 -I series_lib language_examples/integer_series_host.c series_lib/se
 
 ### 複数のAILソースからCライブラリを作る
 
-`use binary_record;` は、そのソースと同じフォルダの `binary_record.ail` を読みます。
-そこからの `use` もたどり、同じファイルは一度だけ取り込みます。関数・定数名は共通で、
+`from binary_record import *` は、そのソースと同じフォルダの `binary_record.ail` を読みます。
+そこからの `from ... import *` もたどり、同じファイルは一度だけ取り込みます。関数・定数名は共通で、
 循環依存・名前の重複・AIL定数の書き換えや引数による隠蔽は拒否します。
-`use` だけを記した入口も使えます。複数ソースの全関数に引数と戻り値の型が必要です。
+`from ... import *` だけを記した入口も使えます。複数ソースの全関数に引数と戻り値の型が必要です。
 既定では全関数を公開します。`--export 関数名` を繰り返すと、Cへ公開する関数を選べます。
 
 ```powershell
@@ -4859,9 +5388,9 @@ C実用例のパス引数はUTF-8として扱い、Windowsの通常の狭い文�
 内部の補助関数も従来の型付き `int`・`float`・`str`・`bytes` 契約が必要です。
 非公開指定によって対応外の型や構文が使えるようになるわけではありません。
 
-`--module helper.ail` で追加ソースを指定することもできます。`use` で既に読み込んだものは
+`--module helper.ail` で追加ソースを指定することもできます。`from ... import *` で既に読み込んだものは
 重複取り込みせず、同じ `--module` の二重指定や入口自身の指定は拒否します。
-`--syntax auto` は各ファイルでブロック構文・Python風構文を判別します。
+`--syntax auto` は各ファイルで Python 構文として読みます。
 生成したオブジェクトには依存ソースのコードも含み、Cでのリンク・実行時にはソース一式は不要です。
 これは複数ソースの一括ビルドで、既存の `.o` を追加リンクする機能ではありません。
 
@@ -5059,7 +5588,7 @@ Cの `float native_value(float x)` には、型JSONで引数と戻り値を `flo
 {"version":1,"functions":{"value":{"symbol":"native_value","params":[["x","float32"]],"result":"float32"}}}
 ```
 
-AILでは `let x = value(0.1);` のように通常の `float` として扱います。
+AILでは `x = value(0.1)` のように通常の `float` として扱います。
 Cへ渡す時に32ビットへ丸め、戻る時にdoubleへ拡張します。元のdoubleと結果が同一になる保証はありません。
 丸めは対象のC実装と実行時の浮動小数点環境に従います。既存の `float` 宣言はdoubleのままです。
 
@@ -5130,7 +5659,7 @@ py -3 -B ailc.py language_examples/float_stack.ail --object reverse.o -o float_s
 
 #### 係数配列を直接初期化してCへ渡す
 
-`c_float32_filter.ail` は、`let weights = [0.25, 0.5, 0.25];` で係数を作り、
+`c_float32_filter.ail` は、`weights = [0.25, 0.5, 0.25]` で係数を作り、
 Cの数値フィルターへ渡します。現在値・一つ前・二つ前の入力をこの順に重み付けします。
 先頭の不足要素はゼロとして扱い、出力の要素数は入力と同じです。
 
@@ -5263,7 +5792,7 @@ py -3 -B ailc.py language_examples/c_fnv_stream.ail --object stream_native.o --o
 
 この例はファイルを読み込み、8,192バイトずつCの状態を更新して最後にFNV-1a値を取得します。
 ファイル読込み自体は全体をメモリに置きます。Cの状態は一つで、処理前に初期化します。
-空更新ではAILライブラリの `return;` を使います。空入力と分割境界の前後、1MiB超を含む11入力を
+空更新ではAILライブラリの `return` を使います。空入力と分割境界の前後、1MiB超を含む11入力を
 独立Python参照と照合し、元ソースなし・移動後のリンクでも検証しています。速度・メモリ削減の主張ではありません。
 
 #### FNVファイル処理をAIL/Cから再利用する
@@ -5915,8 +6444,9 @@ py -3 -B ailc.py language_examples/c_integer_series.ail --object integer_native.
 ./integer_series.exe ./integers.txt 7
 ```
 
-ブロック構文の補助関数も `fn copied(values: list) -> list { let result = [x for x in values]; return result; }`
-のように書けます。`fn pair(a: int, b: int) -> list { return [a, b]; }` や `return []` も使えます。
+補助関数も `def copied(values: list) -> list:
+    return [x for x in values]` のように書けます。`def pair(a: int, b: int) -> list:
+    return [a, b]` や `return []` も使えます。
 直接返すリストの要素は平坦なint64整数に限り、整数式と数値を返す関数呼出しを含め左から評価します。
 小数を整数へ黙って変換したり、内側の配列を数値として返したりはしません。
 呼出し結果をC配列引数へ直接渡す場合も一度だけ評価し、左からの引数順を保持します。
@@ -5927,18 +6457,18 @@ WindowsとLinuxで検証しています。これは機能追加であり、高�
 
 ### 小数配列をAIL関数へ渡す
 
-`fn total(values: list[float]) -> float` のように、小数配列を読み取り専用で受け取れます。
+`def total(values: list[float]) -> float` のように、小数配列を読み取り専用で受け取れます。
 普通の関数、別コンパイル、再利用 `.o`、Cから呼ぶ `compile-library` で同じ型を使います。
 配列の名前を渡し、整数配列からの暗黙変換はしません。値と長さは呼出し中の借用で、
 引数の再代入、要素の変更、append/pop/sortなどの変更操作は拒否します。
 別名への単純代入も未対応です。加工する場合は新しい配列へ要素をappendしてコピーします。
 
-```ail
-fn total(values: list[float]) -> float {
-    let result=0.0;
-    for value in values { result=result+value; }
-    return result;
-}
+```python
+def total(values: list[float]) -> float:
+    result = 0.0
+    for value in values:
+        result = result + value
+    return result
 ```
 
 `float_series.ail` は合計・範囲内件数・添字取得・関数間の受渡しをまとめた実例です。
@@ -5965,10 +6495,9 @@ Python用の `compile_fn` でも `list[float]` 引数に対応し、floatのみ�
 `return []` や `return [1.25, -0.0]` も使えます。非空リテラルは全要素がfloatである必要があり、
 整数との混在、行・入れ子は未対応です。R567ではfloat内包表記も使えます。
 
-```ail
-fn scaled(values: list[float], factor: float) -> list[float] {
-    return [value * factor for value in values];
-}
+```python
+def scaled(values: list[float], factor: float) -> list[float]:
+    return [value * factor for value in values]
 ```
 
 実例 `float_transform.ail` と `float_transform_main.ail` はファイル中の全要素を指定倍率で変換します。
@@ -5995,10 +6524,11 @@ Cの関数は `double total(const double *values, size_t count);` のように�
 整数配列とは別の型です。引数は名前に束縛した平坦な小数配列に限り、整数列・行列・レコードは拒否します。
 次のように `float` 値をappendする処理から配列型を決めます。入力0件でもこのコードの配列は小数型です。
 
-```ail
-let values=[];
-for word in words { values.append(float(word)); }
-print(native_total(values));
+```python
+values = []
+for word in words:
+    values.append(float(word))
+print(native_total(values))
 ```
 
 借用期間はCの呼出し中だけです。Cは領域を書き換え・解放・保持してはいけません。
@@ -6251,7 +6781,7 @@ A/A・計測の影響・順序別の影響の検査が失敗し、最適化は�
 負値やプラットフォームで表現できない範囲は `ValueError`、開く・位置を移動する・読む・閉じる失敗は
 `OSError` です。Windowsは64bitの位置、他OSはCの `long` の範囲を扱います（検証したLinuxでは64bit）。
 2引数・キーワード・小数の位置や長さは受け付けません。
-`write_bytes(path, data);` は `bytes` をそのままファイルへ保存する文です。
+`write_bytes(path, data)` は `bytes` をそのままファイルへ保存する文です。
 UTF-8変換や改行変換はせず、NULや0xFFなど任意のバイトを扱えます。
 
 ```powershell
@@ -6259,7 +6789,7 @@ py -3 -B ailc.py language_examples/binary_copy.ail -o binary_copy
 ./binary_copy.exe input.bin output.bin
 ```
 
-この例の本体は `write_bytes(sys.argv[2], read_bytes(sys.argv[1]));` です。
+この例の本体は `write_bytes(sys.argv[2], read_bytes(sys.argv[1]))` です。
 引数は左から評価し、入力の読込みが終わってから出力を開きます。
 既存の出力ファイルは置き換えます。書込み中の失敗では部分的な出力が残る場合があり、
 原子的な保存やロールバックは行いません。開く・読む・書く・閉じる処理の失敗は
@@ -6303,7 +6833,7 @@ EINTRの実注入とOS read回数は未検証です。
 
 ### 標準入力から標準出力へバイナリを送る
 
-`write_stdout_bytes(data);` は `bytes` を一度評価し、そのまま標準出力へ送ります。
+`write_stdout_bytes(data)` は `bytes` を一度評価し、そのまま標準出力へ送ります。
 空なら書きません。値として使うことやキーワード引数は拒否します。
 `binary_stream.ail` の `copy_stdin(size) -> int` は補助関数ごとに入力を送り、総バイト数を返します。
 sizeは正の整数で、0/負は `ValueError`。このCLIは8,192バイトずつ処理します。
@@ -6417,8 +6947,14 @@ AILコンパイルを順に使います。出力にはCとAILのオブジェク�
 実行ファイルを保持します。`native.o` / `library.o` と両metadataを一緒に移せば、
 元のC・AILソースなしで次のように別のAILから再利用できます。
 
-```ail
-fn main() -> int { return number_batch(); }
+```python
+import sys
+
+def main() -> int:
+    return number_batch()
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```bash
@@ -6468,7 +7004,7 @@ python3 -B language_examples/compare_number_stream.py --native-raw --ail-c-batch
 python workflow/vibe/vibe.py auto main.ail --source helper.ail --object native.o --object library.o --checker oracle.py --input input.bin --repeatable-cli --mode original --out checked_app
 ```
 
-追加ソースとobjectが不要なら、その引数は省きます。`use`の全依存ソースを`--source`で、
+追加ソースとobjectが不要なら、その引数は省きます。`from ... import *`の全依存ソースを`--source`で、
 型付きobjectの全依存を`--object`で宣言してください。`.o.json`も隣に必要です。
 成果物には実行ファイルと宣言したobject/metadataを保持します。出力先には新しい
 ディレクトリを指定します。この`original`コマンドは動作の資格を確認し、新しい速度の採用判定はしません。
@@ -6575,7 +7111,7 @@ R354の8MiB/全84実行は[旧生記録](language_examples/number_stream_diagnos
 
 ### バイナリを追記する
 
-`append_bytes(path, data);` は既存の内容を残して末尾へ `bytes` を追加します。
+`append_bytes(path, data)` は既存の内容を残して末尾へ `bytes` を追加します。
 ファイルがなければ作成し、空の `bytes` でも開いて閉じます。パスは `str`、データは
 `bytes` の2引数を左から一度だけ評価し、両方の評価が終わってから出力を開きます。
 引数評価が失敗した場合は出力を開きません。キーワード引数や値としての使用は拒否します。
@@ -6760,22 +7296,29 @@ NULや非UTF-8もそのまま検索します。JSONの `borrowed_bytes` は入�
 元ソースを除去した後も `--object byte_native.o --object byte_core.o` で利用できます。
 それぞれの `.o.json` も保持してください。このCコードとAILモジュールの追加は機能拡張で、速度改善の測定ではありません。
 
-R360から、AILの補助ソースを `use` で読み、C部分だけオブジェクトをリンクする形も使えます。
+R360から、AILの補助ソースを `from ... import *` で読み、C部分だけオブジェクトをリンクする形も使えます。
 例えば同じフォルダに次のソースを置き、`--object byte_native.o` でビルドできます。
 
-```ail
-use byte_search_core;
-fn main() -> int {
-    if len(sys.argv) != 2 { return 2; }
-    let data = read_bytes(sys.argv[1]);
-    print(find_byte(data, 0, 0, len(data)));
-    return 0;
-}
+```python
+# prints: 3
+from byte_search_core import *
+from ail import read_bytes
+import sys
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        return 2
+    data = read_bytes(sys.argv[1])
+    print(find_byte(data, 0, 0, len(data)))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
-`use` の推移的依存と明示 `--module` は既存のソース検査を通し、オブジェクトの型・ABI・hash・完全な依存も照合します。
+`from ... import *` の推移的依存と明示 `--module` は既存のソース検査を通し、オブジェクトの型・ABI・hash・完全な依存も照合します。
 定義名・定数・引数・局所変数がオブジェクトの公開名を隠す場合は拒否します。
-通常オブジェクトとC API専用オブジェクトの区別は維持します。R361から `compile-module` 自体も `use` に対応します。
+通常オブジェクトとC API専用オブジェクトの区別は維持します。R361から `compile-module` 自体も `from ... import *` に対応します。
 
 ### 整数リストからバイナリを作る
 
@@ -6784,8 +7327,9 @@ fn main() -> int {
 リストの各式は左から一度評価され、全要素の値域検査後にバイト列を作ります。
 作成後に元リストの値を変更しても、作成済みのバイト列は変わりません。
 
-```ail
-fn payload(values: list) -> bytes { return bytes(values); }
+```python
+def payload(values: list) -> bytes:
+    return bytes(values)
 ```
 
 小数・文字列・bytes要素・入れ子のリストは拒否します。
@@ -6803,7 +7347,7 @@ R444からゼロ埋めの整数指定とbytes式の複製にも対応します�
 | 符号なし32ビット | `pack_u32_le` / `unpack_u32_le` | 0～4,294,967,295 | 4 |
 | 符号付き64ビット | `pack_i64_le` / `unpack_i64_le` | −2⁶³～2⁶³−1 | 8 |
 
-ソースから使う場合は `use binary_numbers;` を宣言します。同梱部品はコピーせず取り込めます。
+ソースから使う場合は `from binary_numbers import *` を宣言します。同梱部品はコピーせず取り込めます。
 別途コンパイルして使う場合は、次のobjectと隣接する `.o.json` を保持します。
 
 ```powershell
@@ -6896,7 +7440,7 @@ Windows/Linuxで16,777,480バイトの独立入力に対する10区間と保持�
 
 ### バイナリを返すライブラリ
 
-`fn pack_record(payload: bytes) -> bytes` のように、バイナリを返す関数を別途コンパイルできます。
+`def pack_record(payload: bytes) -> bytes` のように、バイナリを返す関数を別途コンパイルできます。
 次の例は `AIL1`、4バイトのlittle-endian長さ、入力データを連結したレコードを保存します。
 同じライブラリの `unpack_record` はヘッダーと長さを検査して元のデータを返します。
 
@@ -6909,7 +7453,7 @@ py -3 -B ailc.py language_examples/binary_record_main.ail --object binary_record
 標準出力は復元後のバイト数です。長さは0～4,294,967,295を形式上の範囲とし、
 実際に処理できるサイズは空きメモリに制限されます。全体をコピーする方式です。
 `bytes` 戻り値は呼出し側の関数が終了するまで保持され、別のAIL/C関数へ渡せます。
-R396から `const RECORD_MAGIC = b"AIL1";` のような `bytes` 公開定数にも対応しました。
+R396から `RECORD_MAGIC = b"AIL1"` のような `bytes` 公開定数にも対応しました。
 空・NUL・非UTF-8を保持し、読み取り・比較・slice・関数への引数・返却に使えます。
 再代入や要素の書換えは拒否します。定数だけのモジュールも別途コンパイルできます。
 オブジェクトの `.o.json` は小文字・偶数桁・空白なしのhexを保存し、変更はABI照合で拒否します。
@@ -7253,10 +7797,10 @@ CPU改善は未認定です。[採用範囲・実行物・再利用](language_ex
 
 write_bytes(path, data) と append_bytes(path, data) はbytesとbytearrayを受け付けます。
 
-~~~ail
-let output = bytearray(b"hello\n");
-write_bytes("output.bin", output);
-append_bytes("output.bin", bytearray(b"!"));
+~~~python
+output = bytearray(b"hello\n")
+write_bytes("output.bin", output)
+append_bytes("output.bin", bytearray(b"!"))
 ~~~
 
 bytearrayを直接渡すと、同期書き込みが返るまで保持し、その内容を書き込みます。
@@ -7265,17 +7809,19 @@ bytes(output)を渡す形は従来どおり独立コピーを作ります。
 
 `hex(value:int)` は小文字の `0x` / `-0x` 表記を返します。符号付き64ビット整数の全範囲に対応し、返る文字列は独立した値です。
 
-```text
-fn main()->int {
-    print(hex(-9223372036854775808));
-    let values:list[float]=[3.5,-1.0,2.0];
-    values.sort();
-    print(values[0]);
-    return 0;
-}
+```python
+def main() -> int:
+    print(hex(-9223372036854775808))
+    values: list[float] = [3.5, -1.0, 2.0]
+    values.sort()
+    print(values[0])
+    return 0
+
+
+main()
 ```
 
-所有するローカルの `list[float]` は、引数なしの `sort()` 文で昇順に並べ替えられます。無限大も扱い、NaNがあれば変更前にValueErrorを返します。正負のゼロは同値として扱い、同値間の順序は保証しません。借用引数を並べ替える場合は `let owned=values.copy(); owned.sort();` とします。
+所有するローカルの `list[float]` は、引数なしの `sort()` 文で昇順に並べ替えられます。無限大も扱い、NaNがあれば変更前にValueErrorを返します。正負のゼロは同値として扱い、同値間の順序は保証しません。借用引数を並べ替える場合は `owned = values.copy()` としてから `owned.sort()` とします。
 
 初期値付き `list[tuple[int,int]]`、`list[tuple[float,float]]`、`list[tuple[int,bytes]]` は上記の固定幅レコードの契約に従います。通常の `list[int]` / `list[float]` にtupleを混ぜることはできません。
 ## 文字列の評価順とcodecの値条件（R825）
