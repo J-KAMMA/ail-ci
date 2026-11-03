@@ -18674,6 +18674,18 @@ def _inline_fold_inner(f, arg, ctx):
         raise Unsupported('%s() over a nested container; its elements are handles, not numbers'
                           % f)
 
+    if var is not None:
+        # `sum(int(x) for x in raw)` where `raw` is a bytes list: the loop variable is bound to
+        # the element bytes while the accumulator is chosen from the element EXPRESSION's type,
+        # so a conversion would add int64_t to bytes. The general path computes the fold.
+        try:
+            bytes_source = (_is_bytes_split_call(src, ctx)
+                            or (isinstance(src, ast.Name) and src.id in ctx.blist))
+        except Unsupported:
+            bytes_source = False
+        if bytes_source:
+            raise Unsupported('a fold over a bytes list')
+
     if pair is not None:
         return _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager)
 
