@@ -1,3 +1,24 @@
+## 2026-11-03 -- rel-rterr follow-up review: C API tail, cache key and build-report baseline
+
+Fixed the three review defects in the cherry-picked runtime-error work.
+
+* `c_api.py` and `c_api_bridge.py` matched the pre-change one-line `ail_die` tail, so library and
+  separately compiled object exports raised `Unsupported`; both now match the multi-line tail
+  through the shared `FATAL_TAIL` constant.  `compile --lib edge` exits 0 again, and
+  `test_c_api_bridge` / `test_ail_c_export` pass.
+* `buildcache.build_env()` keyed the front-end and C compile caches on the `AIL_LINE_MAP` temporary
+  path, which changes every build.  It now hashes that file's contents, so two builds with the same
+  map hit even when the path differs; `test_ail_fe_cache` and `test_ail_build_cache` pass.
+* `test_ail_build_reports`'s in-process C baseline now loads the same source map and sets
+  `AIL_LINE_MAP`, so its release C contains the same `AIL_DBG_SITE` stores as the CLI output.
+
+Probes: the default and unified builds still match CPython's stdout and exit status for index, key,
+zero-division, recursion, pop, string index, caught `IndexError`, and argument/dict-value sites;
+the default build still names the exception and prints the source line, the unified build names it
+without the line (or segfaults on recursion, as before).  Library export and the two-path fe-cache
+probe were re-run directly.  The 20 shard gate is left to CI; instruction counts remain
+unmeasurable here (`perf_event_open` denied).
+
 ## 2026-11-03 -- rel-rterr follow-up (job-relrterr2-11031503): verified the exception name and source line
 
 Cherry-picked the first run's work commit (`job relrterr: name uncaught runtime errors and report

@@ -125,15 +125,11 @@ def generate(source, name, public=None, external=None, internal=()):
                 if count != 1:
                     raise Unsupported('C library function boundary marker changed')
     exports ={fn: spec for fn, spec in exports.items() if fn in selected}
-    replacements = {
-        'fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);':
-            'ail_api_trap(ail_exc_kind_of(w) ? ail_exc_kind_of(w) : 8, w);',
-    }
-    for old, new in replacements.items():
-        body, count = re.subn(r'^    ' + re.escape(old) + '$', '    ' + new, body, flags=re.MULTILINE)
-        if count != 1:
-            raise Unsupported('C library fatal boundary marker changed')
-    from c_api_bridge import rewrite_uncaught
+    from c_api_bridge import rewrite_uncaught, FATAL_TAIL
+    body, count = re.subn(re.escape(FATAL_TAIL),
+                          '    ail_api_trap(ail_exc_kind_of(w) ? ail_exc_kind_of(w) : 8, w);\n', body)
+    if count != 1:
+        raise Unsupported('C library fatal boundary marker changed')
     body = rewrite_uncaught(body, 'ail_api_trap')
     body = body.replace('    ail_str_write(s, stderr);\n    fputc(10, stderr);\n    _Exit(1);',
                         '    (void)s; ail_api_trap(8, "assertion failed");')
