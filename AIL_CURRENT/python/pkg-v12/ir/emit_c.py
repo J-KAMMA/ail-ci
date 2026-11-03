@@ -212,6 +212,7 @@ class Emitter(TextEmitter):
         self.names = {}
         self.defs = E.defs_of(fn)
         self.count = 0
+        self.bce_site = 0
         self.parts = set()
         self.need = set()
         self.floor = set()
@@ -327,6 +328,16 @@ class Emitter(TextEmitter):
             # --debug: `#line` numbers the line after it, so each C line carries its statement's line
             self.cx.lines.append('#line %d "%s"' % (where[1], where[0]))
         self.cx.lines.append('    ' * depth + text)
+
+    def bce_audit(self, depth, index, length):
+        """AIL_BCE_AUDIT=1: keep every check an `nck` access dropped, as a loud stop."""
+        if os.environ.get('AIL_BCE_AUDIT', '').strip().lower() in ('', '0', 'off', 'no', 'false'):
+            return
+        self.parts.add('BCEAUDIT')
+        site = self.bce_site
+        self.bce_site += 1
+        self.line(depth, 'if (__builtin_expect((uint64_t)(%s) >= (uint64_t)(%s), 0)) '
+                         'ail_bce_audit_fail("%s", %d);' % (index, length, self.fn.sym, site))
 
     def source_line(self, ins, depth):
         """`ail build --debug`: from an instruction lowered from a different statement than the last one
@@ -739,6 +750,7 @@ class Emitter(TextEmitter):
         if op == 'bytes.get':
             self.parts.add('BYTES')
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], '(%s).n' % o[0])
                 return self.assign_new(depth, ins.result, '((int64_t)(%s).p[%s])' % (o[0], o[1]))
             return self.assign_new(depth, ins.result, 'ail_bytes_get(%s, %s)' % (o[0], o[1]))
         if op == 'field.get':
@@ -754,6 +766,7 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % o[0])
         if op == 'plist.get':
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], '(%s)->n' % o[0])
                 return self.assign_new(depth, ins.result, 'ail_pslist_at(%s, %s)' % (o[0], o[1]))
             return self.assign_new(depth, ins.result, 'ail_pslist_get(%s, %s)' % (o[0], o[1]))
         if op == 'plist.has':
@@ -772,10 +785,12 @@ class Emitter(TextEmitter):
                 return self.assign_new(depth, ins.result, 'ail_bytearray_len(%s)' % B)
             if op == 'ba.get':
                 if ins.attrs.get('mode') == 'nck':
+                    self.bce_audit(depth, o[1], '(%s)->n' % B)
                     return self.assign_new(depth, ins.result, '((int64_t)(%s)->p[%s])' % (B, o[1]))
                 return self.assign_new(depth, ins.result, 'ail_bytearray_get(%s, %s)' % (B, o[1]))
             if op == 'ba.set':
                 if ins.attrs.get('mode') == 'nck':
+                    self.bce_audit(depth, o[1], '(%s)->n' % B)
                     return self.line(depth, '(%s)->p[%s] = (unsigned char)(%s);' % (B, o[1], o[2]))
                 return self.line(depth, 'ail_bytearray_set(%s, %s, %s);' % (B, o[1], o[2]))
             return self.line(depth, 'ail_bytearray_append(%s, %s);' % (B, o[1]))
@@ -783,10 +798,12 @@ class Emitter(TextEmitter):
             sp, sn, B = self.span_names[ins.operands[0]]
             if op == 'span.get':
                 if ins.attrs.get('mode') == 'nck':
+                    self.bce_audit(depth, o[1], sn)
                     return self.assign_new(depth, ins.result, '((int64_t)%s[%s])' % (sp, o[1]))
                 return self.assign_new(depth, ins.result, '((uint64_t)(%s) < (uint64_t)%s ? (int64_t)%s[%s] : '
                                        'ail__bytearray_get_slow(%s, %s))' % (o[1], sn, sp, o[1], B, o[1]))
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], sn)
                 return self.line(depth, '%s[%s] = (unsigned char)(%s);' % (sp, o[1], o[2]))
             if ins.attrs.get('mode') == 'vck':
                 # the index is proven in range; the value keeps its check (the slow path raises it)
@@ -823,9 +840,11 @@ class Emitter(TextEmitter):
                 view = 'ail_%s_view' % f
             if op == 'span.get':
                 if ins.attrs.get('mode') == 'nck':
+                    self.bce_audit(depth, o[1], sn)
                     return self.assign_new(depth, ins.result, '%s[%s]' % (sp, o[1]))
                 return self.assign_new(depth, ins.result, '%s_get(%s, %s, %s)' % (view, sp, sn, o[1]))
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], sn)
                 return self.line(depth, '%s[%s] = %s;' % (sp, o[1], o[2]))
             return self.line(depth, '%s_set(%s, %s, %s, %s);' % (view, sp, sn, o[1], o[2]))
         if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear'):
@@ -1263,10 +1282,12 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, 'ail_%s_span_len((%s)->p, (%s)->n)' % (f, L, L))
         if op == 'list.get':
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
             return self.assign_new(depth, ins.result, 'ail_%s_span_get((%s)->p, (%s)->n, %s)' % (f, L, L, o[1]))
         if op == 'list.set':
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.line(depth, '(%s)->p[%s] = %s;' % (L, o[1], o[2]))
             return self.line(depth, 'ail_numfield_%s_set(%s, %s, %s);' % (f, L, o[1], o[2]))
         if op == 'list.push':
@@ -1299,10 +1320,12 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % L)
         if op == 'list.get':
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
             return self.assign_new(depth, ins.result, '%s_get(%s, %s)' % (ir, L, o[1]))
         if op == 'list.set':
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.line(depth, '(%s)->p[%s] = %s;' % (L, o[1], o[2]))
             return self.line(depth, '%s_set(%s, %s, %s);' % (ir, L, o[1], o[2]))
         if op == 'list.push':
@@ -1325,6 +1348,7 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % L)
         if op == 'list.get':
             if ins.attrs.get('mode') == 'nck':
+                self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
             self.parts.add('DIE')
             return self.assign_new(depth, ins.result, 'ail_slist_get(%s, %s)' % (L, o[1]))

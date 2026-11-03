@@ -1,3 +1,20 @@
+## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
+
+The daily fuzzer (seed 2076011178) printed `round((1e10 * 1e10))`.  On today's tree the seed already
+classifies as the declared `overflow` (fz2 replaced the old uncatchable `round() result does not fit`
+text), but `cmp.sh` still showed AIL stopping at the int64 boundary where CPython prints
+`100000000000000000000`.  The pre54 refusal (`_refuse_round_at_int64_boundary`) only folded a float
+literal with unary signs, so the generated arithmetic expression was not seen as a constant.
+
+The refusal now folds constant numeric expressions (`+ - * / // % **`, unary signs, literals) with a
+depth cap, an integer-size cap and no calls or names, and refuses when the rounded value is at or
+outside int64.  In-range expressions, NaN/Infinity and zero division keep CPython's answers and
+exceptions; runtime values (argument, list item, attribute, dict value) keep the declared overflow
+contract.  With `--exact-int` the wide constants match CPython.  The fuzz seed now classifies as
+`refused` in both default and IR modes; `/tmp/probes/fz220_min.py`, `fz220_neg.py`, `fz220_div.py`,
+`fz220_in.py`, `fz220_bounds.py`, `fz220_edge.py` and `fz220_routes.py` match CPython or are refused
+by name.  Added `test_ail_fz220.py` and registered it in `tests.d`.
+
 ## 2026-11-02 -- prog29 review 2: typed set/dict sources join the mutation guard (job-prog29-11022055)
 
 Fixed the remaining defect in the set-comprehension guard.  `_setcomp_source_can_change` matched
@@ -34,6 +51,21 @@ function and matches the old sequence change (`3 3`); `--strict` names the refus
 unchanged; the strict build refuses the set-comprehension probe by name.  `lab/progfix/prog29.md`
 now records the actual results for the parameter/local `len` shadows and the annotated-frozenset
 parameter probe instead of claiming they were refused.
+## 2026-11-02 -- packaging: PyPI distribution name is ailc (job-relpkgname-11030037)
+
+The distribution is now `ailc`; the command stays `ail` and the import package stays `ail_lang`
+(`python -m ail_lang` still works). The build backend writes `ailc-<version>-py3-none-any.whl` and
+`ailc-<version>.dist-info/` while the wheel payload lives under `ail_lang/`. METADATA gained the
+Homepage / Documentation / Issues `Project-URL` lines and classifiers for development status,
+console, developers, Linux / macOS / Windows and Python 3.10-3.13 (13 classifiers, up from 2).
+Every user-facing `pip install ail-lang` is now `pip install ailc`; INSTALL keeps one sentence
+saying the PyPI project `ail-lang` is not AIL. `--version` prints `ailc <version>`. Publish nothing.
+
+`test_ail_packaging` follows the new wheel and dist-info names, asserts the Project-URL lines and
+the three Operating System classifiers, and scans `docs/` and `packaging/` for the old install
+command. 19 packaging tests pass, `tools/wheel_check.py` passes, and the built wheel is
+`ailc-0.1.0.dev0-py3-none-any.whl`.
+
 ## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
 
 Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an

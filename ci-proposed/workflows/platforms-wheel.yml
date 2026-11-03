@@ -1,0 +1,70 @@
+name: platforms-wheel
+
+# Release blocker: `pip install` then `ail` on every promised OS. Builds the wheel in a fresh venv,
+# installs it offline, runs `ail --version`, `ail doctor --check`, hello and typed fib against
+# CPython, then every docs/tutorial.md sample through the installed command (tools/wheel_check.py).
+#
+# The paths are deliberately narrow (packaging, docs, the wheel tool, the platforms lab): an integ
+# pull request that only changes AIL_CURRENT/** must not spend macOS/Windows runner minutes here.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, integ]
+    paths:
+      - 'packaging/**'
+      - 'pyproject.toml'
+      - 'tools/wheel_check.py'
+      - 'docs/**'
+      - 'lab/platforms/**'
+      - 'AIL_CURRENT/test_ail_tutorial.py'
+      - '.github/workflows/platforms.yml'
+      - '.github/workflows/platforms-wheel.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platforms-wheel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheel:
+    name: wheel ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: windows, runner: windows-latest}
+          - {platform: macos, runner: macos-14}
+          - {platform: linux, runner: ubuntu-24.04}
+    steps:
+      # The manifest pins hash the files byte for byte: keep LF on Windows.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: MinGW-w64 UCRT gcc (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # MSYS2 is preinstalled on the runner image; this only adds the UCRT64 gcc package.
+          C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-gcc"
+          "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Show the toolchain
+        shell: bash
+        run: |
+          python --version
+          gcc --version | head -1
+          gcc -dumpmachine
+          if [ "${{ matrix.platform }}" = macos ]; then echo "PIPE_CC=$(command -v cc)" >> "$GITHUB_ENV"; fi
+      - name: Build the wheel in a fresh venv and run the tutorial samples
+        shell: bash
+        env:
+          PYTHONUTF8: '1'
+        run: python tools/wheel_check.py

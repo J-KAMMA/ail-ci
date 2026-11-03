@@ -1,3 +1,335 @@
+## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
+
+Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`
+is 1,306 lines and `AIL_REFERENCE.md` 73, both with 0 lines that start `fn`/`let`/`struct`/`impl`;
+the 34 fenced blocks are 17 `python`, 16 `text` and one `ail-refused`, and the 16 whole programs
+build (14 have a stated output that `test_ail_reference_docs` checks).  The quickstart has 275
+blocks, 38 of them whole programs.
+
+`tools/ail2py_docs.py` now leaves an `ail-refused` block as written (it holds Python programs the
+compiler rejects, not brace source) and its fragment wrapper is removed completely: a fragment no
+longer keeps the synthetic `import sys` or `return 0`, including a fragment that ends in its own
+`return 0`.  `test_ail_ail2py` covers both fragment shapes and the untouched refused block.
+
+`docs/spec/DIFFERENCES.md` now says AIL has one syntax, Python, with optional annotations; the
+stale brace-only row A14 and A65's reference to it are gone.  Probes: converting a fresh `ail`
+whole program and two fragments with `ail2py_docs` produced `python` fences that built and printed
+6/6/5 under `ail_chatgpt.py compile`, and a second run over the two reference files converted 0
+blocks and changed nothing.
+
+Tests: `test_ail_reference_docs`, `test_ail_reference_examples`, `test_ail_quickstart_docs`,
+`test_ail_tutorial`, `test_ail_files`, `test_ail_corpus_findings3` and `test_ail_ail2py` pass.
+`test_ail_safetynet` keeps the pre-existing `S4_generators_gc` failure seen on the base.
+## 2026-11-03 -- onelang s5 finish: every source tree file has a twin, and twins do not shadow Python modules
+
+Applied the two s5 commits from `job-onelangs5-11031341` (skipping its worker report) and finished
+the job.  `--twins` now walks the directory tree, so all 268 `.ail` files under
+`AIL_CURRENT/language_examples` have a twin (261 brace sources converted, 7 Python-syntax sources
+copied); the two `c_headers_workflow` sources are covered too.  `test_ail_onelang_twins` checks the
+whole tree and adds a boundary build showing that a generated twin never shadows its Python-syntax
+source.
+
+Finishing the review found a real regression: with `byte_search_core.py` beside the now-Python
+`byte_search_core.ail`, the quickstart's `from byte_search_core import *` was refused as ambiguous
+(`LANGUAGE_QUICKSTART_JA.md:7302`).  `ail_modules.spec` now ignores a generated `.py` twin when a
+Python-syntax `.ail` with the same name exists, so the `.ail` stays the source of truth; a brace
+source still resolves through its twin.  The 10 fixed twins build with identical C (8 `identical`,
+2 `identical-renamed`), all 268 twins re-convert byte for byte, and the Appendix C modules,
+`test_ail_reference_docs`, the required safetynet/files/corpus tests and the manifest check pass.
+The two ASan cases and `test_ail_safetynet` pass without `ulimit -v`; the earlier `S4_generators_gc`
+failure was only the virtual-memory cap.  No compare-lab source or `program.c` changed.
+
+## 2026-11-03 -- onelang s5: a Python twin beside every `language_examples` source
+
+`tools/ail2py.py --twins DIR` writes a `X.py` twin beside every `X.ail` (brace sources are
+converted, the six Python-syntax sources are copied), each starting with the generated-file line.
+An existing `.py` that is not a twin is left alone and listed.  The 266 sources now have 266 twins.
+
+`AIL_CURRENT/test_ail_onelang_twins.py` re-converts every source and compares it with the checked-in
+twin; it also builds ten fixed twins both ways (eight single-module entries plus `block_use_math`
+and `codepoint_checksum`) and requires identical C, allowing only the `m__` module prefixes the
+Python merge adds.  The 37 `language_examples` readers from Appendix C and `test_ail_ail2py` pass;
+the two ASan cases need a normal address space (`ulimit -v` makes ASan's shadow reservation fail).
+## 2026-11-03 -- bce s1: BCE switch, audit mode, census tool (job-bces1-11040118)
+
+Added the bounds-check-elision groundwork without changing default codegen.  `ir/passes/__init__.py`
+has `bce_enabled()` (`AIL_BCE`, default on; nothing calls it yet).  `emit_c.py` has
+`bce_audit(depth, index, length)`: with `AIL_BCE_AUDIT=1` every one of the 13 `nck` sites (bytes.get,
+plist.get, ba.get/set, byte span.get/set, numeric span.get/set, numfield list.get/set, owned list.get/
+set, owned slist.get) first emits `if (__builtin_expect((uint64_t)idx >= (uint64_t)len, 0))
+ail_bce_audit_fail("<fn>", <site>);`, with the site counter reset per function.  The runtime part
+`BCEAUDIT` prints `AIL-BCE-AUDIT: ...` to stderr and `_exit(86)`; it is added only in audit mode, so the
+default C is byte-identical (codegen pins unchanged vs the export commit).  `lab/beatc/bce_census.py`
+and `AIL_CURRENT/test_ail_bce.py` (15 probes: range reads/stores, `i-1`, guarded `i+1`, bytes scan,
+all six list/bytes/field boundaries, pop-in-loop, int64-overflow text index) were added and registered.
+
+Verification: census smoke `echo_pack` both syntaxes `same C`, exit 0.  Full census check (ten tasks,
+both syntaxes): 18/20 `same C`; `tally_lang/python` and `tree_fold/python` fail to build in **both** the
+base export and this tree (`rc=3`, `re`/tuple subset limits — pre-existing, no change attributable here).
+Audit run of the ten tasks (`AIL_BCE_AUDIT=1`, `--langs ail`, smoke + all public/hidden cases): all 10
+`correct`, exit 0, 1,404 hidden cases total, **0 exit-86**; the audit guards are present (e.g. the
+range-read probe emits 2, the default build 0).  `difffuzz --start 0 --count 300` under audit reached
+seed 64 before the 80-minute stop, with **0 audit stops**/`AIL-BCE-AUDIT` lines (partial by budget).
+`par_check -j 2`: `test_ail_bce`, `test_ail_range_checks`, `test_ail_ir_gridbounds`,
+`test_ail_mixed_bounds`, `test_ail_ir_s1`, `test_ail_ir_s3`, `test_ail_files`,
+`test_ail_corpus_findings3` pass (the range/mixed/s3 modules need ASan's shadow mapping, so no
+`ulimit -v` for them); `test_ail_safetynet` keeps the pre-existing `S4_generators_gc` failure.
+
+## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
+
+Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's
+`from byte_search_core import *` block builds with `--object byte_native.o` and prints `3`; the doc
+test now builds that object and runs the block instead of skipping it.  The `environment_config`
+example inlines `parse_int64_text`, so an out-of-int64 value raises `ValueError` as the text says.
+The contract paragraph now describes the `assert` form exactly: `AssertionError` is catchable, an
+`assert` may appear anywhere, and `_ail_result` is an ordinary local name.  `test_ail_reference_docs`,
+`test_ail_quickstart_docs`, `test_ail_reference_examples`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `test_ail_safetynet` keeps the pre-existing `S4_generators_gc`
+failure seen on the base.
+
+## 2026-11-03 -- onelang s13: LANGUAGE_QUICKSTART_JA.md in Python syntax
+
+`AIL_CURRENT/LANGUAGE_QUICKSTART_JA.md` (7,840 lines) now has no brace code: all 68 code
+fences are Python, the S-expression section and every `use`/`fn`/`let`/`struct`/`impl` rule
+were rewritten or removed.  `tools/ail2py_docs.py` from s12 is the converter; the remaining
+fragments were hand-converted, and the leftover prose `;`/`{` rule spellings (requires/ensures,
+try/finally, calls, constants, struct fields) were rewritten in Python syntax.  The eight examples
+whose imports pointed at still-brace modules now define the same helpers inline, so all of them
+build again; of the 38 whole-program blocks, 36 compile (the other two are the pre-existing
+`--object` examples, skipped by name).  `# run: no` marks
+examples that need a peer, an input file or arguments.  `test_ail_reference_docs` now builds every
+quickstart whole program and runs the standalone ones; it and `test_ail_quickstart_docs` pass.
+
+## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
+
+`lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class
+in the same function mentions `d`: the enclosing body used to rewrite `d` into the key -> slot map
+while the nested `d.get(k)` stayed an ordinary read, so the helper subscripted an int and crashed.
+`r_dl_nested_read` now prints CPython's `inner 7` / `outer 7` on both builds.
+
+A bytearray argument to a `bytes` parameter now passes through the read-only view only when the
+callee is a proven read-only bytes consumer (a scalar scan such as echo_pack's `hsh`); every other
+callee is refused by name and keeps the general path, because a typed bytes result is a copy while
+CPython returns the caller's bytearray object and later mutations stay visible.  `r_ba_store`,
+`r_ba_alias`, `r_ba_slice2`, `r_ba_int`, `r_ba_lenonly`, `r_ba_bytes`, `r_dl_nested_unrelated` and
+`r_dl_nested_both` match CPython on the default and unified builds; the two review probes are in
+`test_ail_pytyped_reach`.  echo_pack stays typed with all 57 cases correct, and the `.ail` pins and
+the ten `lab/compare` `main.ail` C hashes are unchanged.
+
+## 2026-11-03 -- pyreach s1: re-land rbpyreach1 with its two review fixes
+
+Re-applied 3667f3af on integ, keeping both sides of the `_Surface`/`_tuplib` and optlib conflicts. `_dict_of_lists_kind` carries a `seen` set so `x = x` and `x = 1; y = x; x = y` stop at int instead of recursing, and `lower_dict_of_lists` rewrites only a standalone `setdefault(...).append(...)` expression statement, leaving `;`, assignment, lambda and inline-suite positions as written. Probes `p_dl_cycle`, `p_dl_cycle2`, `p_dl_semi`, `p_dl_expr`, `p_dl_lambda` match CPython on the default and unified builds. Review fix: a parenthesized standalone `(d.setdefault(...).append(...))` (also inside an `if`) is left as written instead of being rewritten inside its parentheses; probes `p_dl_paren` and `p_dl_paren_if` match CPython on both builds.
+## 2026-11-03 -- onelang s4: compare-lab typed.py twins added, deletion held
+
+Converted the ten compare-lab brace programs to annotated Python with `tools/ail2py.py`; every
+`--check --strict` run printed `identical`.  `run_task.py` now builds the `ail` column from
+`typed.py` with `--syntax python` (the `ail-py` column still uses `main.py`), and the compare-lab
+docs say so.  Generated `program.c` is byte-identical for all ten tasks and the binaries have the
+same size, but the cold builds of `typed.py` are 5-19% slower than the base `main.ail` builds
+(median of alternating runs), over the 3% budget in the step.  Stopped before deleting the ten
+`main.ail` files, as the stop rule requires; the remaining work is a front-end speed job.
+
+| task | head typed.py s | base main.ail s | ratio |
+| --- | ---: | ---: | ---: |
+| berth_sim | 8.394 | 8.333 | 1.007 |
+| chain_relax | 1.810 | 1.719 | 1.053 |
+| echo_pack | 3.416 | 3.147 | 1.085 |
+| ledger_bin | 3.422 | 3.014 | 1.135 |
+| rail_transfer | 2.689 | 2.377 | 1.131 |
+| scar_life | 2.212 | 2.068 | 1.070 |
+| tally_lang | 3.599 | 3.043 | 1.182 |
+| term_rank | 2.992 | 2.656 | 1.127 |
+| ticket_audit | 4.333 | 3.964 | 1.093 |
+| tree_fold | 4.897 | 4.406 | 1.111 |
+
+## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
+
+`from ail import X as Y` now records the binding even when `Y == X`, so an alias spelled with the
+same name as its source is visible to the repeated-binding check.  A later `from ail import Z as Y`
+with `Z != X` is refused by name (`ail import alias Y is rebound`) instead of silently rewriting
+the earlier loads to `Z`; `alias_asname_eq_name.py` used to print `2`/`12`, CPython prints `3`/`12`,
+and both builds now refuse it.  Repeating the same source under the same alias, including
+`from ail import X as X`, still matches CPython and builds `program.c` identical to the bare
+program.  A plain `from ail import X` now also refuses a later store or different-source rebinding
+of `X` by name instead of silently changing its meaning.
+
+Probes `alias_asname_eq_name`, `alias_rebind_same_import` and `alias_plain_then_alias_diff` refuse
+by name in the default and unified builds; `alias_repeat_same`, `alias_repeat_same_eq` and
+`alias_valid` match CPython in both builds.  `test_ail_ail2py` covers the `asname == name` case.
+
+## 2026-11-02 -- onelang s2 review 4: a repeated `from ail import ... as Y` alias is refused
+
+A second top-level `from ail import X as Y` whose source name differs from the first is now a named
+compile-time refusal (`ail import alias Y is rebound`).  Previously the later source silently
+overwrote the alias map, so loads before it were rewritten to the later built-in and the program
+printed the wrong values (`alias_rebind_same_import.py`: `2`/`12` instead of CPython's `3`/`12`).
+Repeating the same source name under the same alias stays allowed, since both bindings denote the
+same built-in.
+
+Probes `alias_rebind_same_import`, `alias_rebind_same_import3` and `alias_rebind_mixed` refuse by
+name in the default and unified builds; `alias_repeat_same_source` and `alias_valid_nested` still
+match CPython and build `program.c` identical to the bare program.  `test_ail_ail2py` now covers
+both the differing-source refusal and the same-source repeat.
+
+## 2026-11-02 -- onelang s2 review 3: aliased `ail` imports refuse import/`except`/`match` rebinding
+
+`from ail import X as Y` now detects every binding of `Y` that is not the import declaration, not
+only assignments, arguments and definitions.  `import Z as Y`, `from Z import W as Y`,
+`import ail as Y`, `except E as Y` and `match` captures are named compile-time refusals
+(`ail import alias Y is rebound`) instead of silently rewriting the later uses back to `X`.
+
+Probes for import, from-import, `import ail`, `except`, `match`, assignment, `for`, `with`,
+lambda, `def` and plain `import Y` rebinding all refuse by name in the default and unified builds;
+valid aliases and `import ail` still match CPython and build `program.c` identical to the bare
+program.  The ten converted tasks remain `identical`, `ail2py_cpython_check` still reports nine
+tasks `mismatches 0` plus the listed `tally_lang hidden/long_unary_chain`, and
+`test_ail_ail2py`, `test_ail_python_syntax`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_safetynet` pass.
+
+## 2026-11-02 -- onelang s2 review 2: `same_file`, closed binary files and aliased `ail` imports
+
+Fixed the three remaining CPython-parity defects.
+
+* `same_file` computes both file identities before returning `0`, so a missing first path still
+  stats the second and an empty or `ENOTDIR` second path raises `OSError`, matching
+  `ail_same_file`.
+* `_BinaryFile` methods raise `ValueError` after `close()` (the runtime's
+  `ail_binaryfile_ready`), instead of dereferencing `None` and raising `AttributeError`.
+* `from ail import X as Y` now rewrites uses of `Y` to the built-in `X`; rebinding the alias is a
+  named compile-time refusal (`ail import alias Y is rebound`).
+
+Probes `rv_same2`, `rv_close2` and `rv_alias` match CPython and the default AOT build; the unified
+build refuses the AIL-only built-ins by name. The ten converted tasks still build identically and
+`tools/ail2py_cpython_check.py` reports nine tasks with `mismatches 0` and only the listed
+`tally_lang hidden/long_unary_chain` case. `test_ail_ail2py`, `test_ail_python_syntax`,
+`test_ail_heapq_bisect`, `test_ail_overflow_error`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass.
+
+## 2026-11-02 -- onelang s2 review 1: `ail.py` matches the runtime on path errors and astral `jscharat`
+
+Three CPython-parity defects in `AIL_CURRENT/ail.py` are fixed; no compiler or converter file changed.
+
+* `jscharat` now walks code points and counts UTF-16 units like `ail_str_charat`: the unit that
+  starts an astral character yields the whole character and the trailing unit raises `ValueError`
+  (previously it returned lone surrogates).
+* `same_file` raises `OSError` for an empty path and for a non-ENOENT `stat` failure such as
+  `ENOTDIR`, and only treats a missing path as `0`, matching `ail_file_identity`.
+* `path_exists` / `is_dir` stat directly and only swallow `ENOENT` / `ENOTDIR`; permission and
+  other OS errors now propagate as `OSError`.
+
+Probes for astral `jscharat`, `same_file` (equal, missing, empty, `ENOTDIR`) and `path_exists` /
+`is_dir` (file, directory, missing, `ENOTDIR`, empty, unreadable parent) match the default AOT
+build; the unified build refuses these builtins as it did on the base. `test_ail_ail2py`,
+`test_ail_python_syntax`, `test_ail_heapq_bisect`, `test_ail_overflow_error`,
+`test_ail_builtin_contracts`, `test_ail_api_profiles`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass.
+
+## 2026-11-02 -- onelang s2: the `ail` module for AIL-only built-ins
+
+`AIL_CURRENT/ail.py` now gives CPython the AIL-only built-ins (the free functions in
+`ail_builtin_api.DECLARATIONS` that CPython lacks, plus keyed `heappush`/`heappop`, `par_range`
+and `file_chunks`). The compiler rewrites `from ail import ...` / `import ail` in Python syntax to
+the bare built-in names and refuses an unknown name as `ail has no X`; `ail_modules` never merges
+`ail.py`. `tools/ail2py.py` writes `from ail import <sorted names>` after the `from m import *`
+lines for every AIL-only built-in the converted program calls.
+
+`tools/ail2py_cpython_check.py` runs the converter's output against each task's reference for every
+public and hidden case: nine tasks report `mismatches 0`, and `tally_lang` reports the one listed
+`hidden/long_unary_chain` CPython recursion limit. All ten compare-lab tasks still build
+`identical` under `--strict`, and `test_ail_ail2py` gained import, equal-key heap and near-2**62
+wrapping regressions.
+## 2026-11-03 -- relwheelfix: macOS SDK export under /var and the Windows tutorial artifact path (job-relwheelfix-11031144)
+
+`ail_sdk.export_sdk` now resolves the export/source root with `os.path.realpath` and checks
+for symlinks or junctions only in the path components at or below that root.  macOS `/var` is
+a symlink to `/private/var` and pip builds the wheel under `/var/folders`, so the old check of
+every ancestor refused the export.  An internal file or directory symlink is still refused.
+`test_ail_sdk` gained both cases: an export reached through a symlinked parent succeeds, and a
+file and a directory symlink inside the tree are refused before any output is written.
+
+`test_ail_tutorial` now runs the built sample through an absolute path joined from the
+temporary work directory instead of `"./" + name + ".bin"`.  On Windows `CreateProcess`
+resolves that relative executable against the parent process's directory, not the `cwd`
+passed to `subprocess.run`, which made 10 samples fail with `FileNotFoundError`.  The helper
+also selects `name.bin.exe` when the platform's C compiler appended the suffix.  The build
+code (`ail_chatgpt.py`) writes exactly `name.bin` for `-o name.bin`, since the requested name
+already has an extension.
+
+No compiler or runtime behaviour changed.  Ran on Linux: `test_ail_tutorial` (15), `test_ail_sdk`
+(31), `test_ail_packaging` (19), `test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped),
+`test_ail_corpus_findings3` (2), and `tools/wheel_check.py` (fresh wheel, installed `ail`, all
+15 tutorial samples) pass.  Probes `/tmp/probes/sdk_symlink_roots.py` and
+`/tmp/probes/tutorial_artifact_abs.py` pass; both are refused by name under `cmp.sh` because
+AIL does not build `importlib`, which is expected for Python-only packaging code.
+
+## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
+
+Two remaining comment-placement defects in `tools/ail2py.py` are fixed; no compiler file changed.
+
+* An end-of-line comment on a block-closing `}` now belongs to the block it closes. A token scan
+  maps each closing-brace line to its opening line, and the comment is placed at the opening
+  statement (`class`, `if`, `def`, ...) instead of before the last statement in the body.
+* Comments are now targeted in source order rather than output order. A field comment before a
+  later `use` no longer lands on the generated import, because the import's source line is later
+  than the field's even though the import is printed first.
+
+`test_ail_ail2py` gained closing-brace and use-after-struct regressions. The ten compare-lab tasks
+are still 10/10 `identical` under `--strict`; all 275 brace files convert (except the intentionally
+invalid `lab/syntax/runs/_sample/ts-like/collatz_steps/attempt1.ail`) and keep every comment once;
+`test_ail_ail2py`, `test_ail_files` and `test_ail_corpus_findings3` pass, and `test_ail_safetynet`
+passes without a virtual-memory cap (its `S4_generators_gc` case needs more than 4 GB of address
+space under this runner).
+
+## 2026-11-02 -- onelang s1 review fixes: comment placement in `tools/ail2py.py`
+
+Two comment-placement defects are fixed without touching the compiler.
+
+* An end-of-line comment on a statement that spans several brace lines is now placed before that
+  statement, not after it. The converter distinguishes a comment that follows code on its line from
+  one on its own line and searches the output statements in the matching direction.
+* Comments before a `struct`, its fields, or a `use` import now stay with the generated
+  `class`/`__init__`/field/import lines. A small token scan records the source line of each struct
+  and field and each `use`, because `translate` gives those generated lines no `source_map` entry.
+
+`test_ail_ail2py` gained multiline-statement and struct/import comment-placement regressions. The
+ten compare-lab tasks are still 10/10 `identical` under `--strict`, all 260 brace examples convert
+and parse with every source comment kept, and `test_ail_ail2py`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
+## 2026-11-02 -- onelang s1: `tools/ail2py.py` converts brace syntax to annotated Python
+
+New converter over `ail_syntax.translate`: `python3 tools/ail2py.py SRC.ail [-o OUT.py]` writes
+readable Python (per-top-level `ast.unparse`, one blank line around defs/classes), rewrites the
+internal `__ail_checked_*` markers, emits `from m import *` for each `use m`, wraps the entry's
+final `sys.exit(main())` in `if __name__ == "__main__":`, and puts the brace source's `#` comments
+on their own lines at the following statement's indentation. `--check [--flags "..."]` builds the
+original and the converted file with `--debug-dir` and compares `program.c`.
+
+`AIL_CURRENT/test_ail_ail2py.py` covers five small programs (struct+impl, `list[float]`, `-> void`,
+`const`, try/except, start/end comments); two are `--check` identical and three run like the AOT
+binary. All ten `lab/compare/src/*/main.ail` tasks report `identical` under `--strict`.
+## 2026-11-02 -- rel-evalorder: quiet operands gate the list count/index hoist (job-relevalorder-11030340)
+
+`_ListLowering.index_or_count` hoisted `xs.count(v)` / `xs.index(v)` into the statement prelude
+whenever its own receiver and arguments looked safe, even when an earlier operand that Python
+evaluates first could raise or change the list.  On the Python surface it now hoists only when
+every earlier operand is quiet (a name, a constant, an attribute chain over a name, or `len()` of
+one), or, for `count`, when the receiver and argument are quiet and no earlier call can change the
+source.  `index` can raise `ValueError`, so it requires the first condition.  Everything else is
+refused by name as before and takes the general path, which keeps source order.  This fixes
+`print(xs[i], xs.index(99))` (was an uncaught ValueError on the default build) and
+`print(xs.pop(), xs.count(1))` on `[1, 2, 1]` (was `1 2`, CPython `1 1`).  The AIL brace syntax has
+no general fallback, so it keeps the old permissive decision rather than turning a build into a
+refusal.
+
+`AIL_CURRENT/test_ail_eval_order.py` (registered in `tests.d/`) compares the four release probes,
+the int64-overflow seed and the two extra order probes against CPython 3.12 in the default build
+and with `AIL_UNIFIED_FORCE=1`; the control `count_noexc` is also built with `--strict`.  The three
+other hoisting helpers found by the same template stay open, so change 2 stopped as instructed:
+list `+` (`print(xs[i], xs + [f(2)])`), `list(...)` (`print(xs[i], list(g()))`) and the heapq
+values (`print(xs[i], heappop(h))`) still run their side effect before the earlier operand on the
+default build; they are recorded as expected failures in the module.
+
 ## 2026-11-02 -- prog29 review fixes: shadowed `len` and frozenset reads before assignment
 
 Two review defects, both in the module-`frozenset` support, are fixed without touching a program.
@@ -70,6 +402,87 @@ refusal is named with a position. Generated C of the ten `lab/compare` programs 
 to `HEAD`. Gate modules, `test_ail_pre197`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is clean. No push (job
 instruction).
+## 2026-11-02 -- rail-s1: rail_transfer's AIL and CPython sources use the two-sided search (job-rails1-11030014)
+
+Ported the bidirectional Dijkstra of `lab/compare/src/rail_transfer/main.c` into `main.ail` (solve only;
+the parse and graph build are unchanged) and into `main.py`, so the AIL, ail-py and CPython columns run the
+same algorithm as C and Rust. The search keeps flat `dt`/`db`/`done` arrays of length `2*(n+k)` in the
+graph struct, one touched list per side, and the two record heaps; the meet, stale-entry and stop rules
+follow lines 119-176 of `main.c`. `main.py` uses the same two-sided search over its packed
+`(time << 24) | boardings` costs.
+
+Results on the generated perf input (seed `rail_transfer-20261012`, 4,066,652 bytes): stdout md5
+`e04679834cdf3d4d8441f9adf3182e91` for main.ail, main.py, reference.py and the ail-py build; all 24 public
+and hidden cases equal reference.py with `path: typed`; AIL wall 64.6 ms (median of 5, C 100.0 ms on this
+runner), down from the one-sided 862 ms laptop number. `tools/icount.c` could not run here
+(`perf_event_open: Permission denied`, `perf_event_paranoid=4`) and valgrind is not installed, so this
+entry has no instruction-count number; the wall time is inside the design's 50-75 ms expectation.
+Differential fuzz: 300 `random_net` cases (n 2..400, maxx 0/1000, maxt 0/100000) matched reference.py for
+main.py, the strict main.ail binary and the ail-py binary. A forced-general build
+(`AIL_UNIFIED_FORCE=1`, no `--strict`) is refused for this brace-syntax source with
+`not in the subset: general path explicitly requested`; the unmodified HEAD file is refused the same way,
+so the default typed build and CPython were the two builds fuzzed. Rust was not installed on this runner
+(rustup has no toolchain), so `run_task.py --langs ail,c,rust` reported a rust build failure; ail and c
+passed every public/hidden case. Modules run: `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+## 2026-11-02 -- SPEC1: tally_lang specialization measured, no code landed (job-spec1-11030015)
+
+Profiled `tally_lang` with `gprof` (perf and callgrind are unavailable on the runner) and priced
+the opcode-specialized-evaluator mechanism. `ev` is 83.9% of samples; the parallel-list span work
+is about 25% of the run and the recursion check about 6%. Hand prototypes on a `/tmp` copy of the
+generated C gave a safe +5.4% from shared span checks and +2.7% from a popcount idiom (about 1.08x
+together), while removing the bounds and recursion checks reached 1.305x but is not legal and is
+still 4% slower than C. Per the task's stop rule (below 1.2x, do not land), no compiler or runtime
+change was made. `echo_pack` was also profiled (int-key hash table, 46% of line samples; AIL/C is
+1.76x) for the record. Numbers, Amdahl bounds and cost are in `docs/design/SPEC1.md`.
+## 2026-11-02 -- re-apply accepted prog23 change on staging-integ (job-rbprog23-11022330)
+
+Re-applied the accepted job-prog23 change (typed reach for `t115` tuple/list target bindings and
+`t143` conditional numeric lists plus unannotated set operators, with the str/bytes-keyed set
+construction/rebind exclusion) on top of the current tree. The conflict in `_promote_floats` kept
+both sides: the existing `nsum_names` NSUM settling and the incoming str/bytes and unannotated-set
+fixed points. The manifest was regenerated. Probes and the touched modules plus the required
+safety modules pass. `tools/diff_ids.py` is not present in this tree (nor in the fetched job), so
+only `tools/update_manifest.py` was run.
+## 2026-11-02 -- rel-platinstall: wheel install + tutorial samples on macOS and Windows CI (job-relplatinstall-11030037)
+
+`.github/workflows/platforms-wheel.yml` gained a `wheel` job on `windows-latest`, `macos-14` and
+`ubuntu-24.04` that runs `tools/wheel_check.py` (fresh venv, `pip install` of the built wheel,
+`ail --version`, `ail doctor --check`, hello and typed fib against CPython, then every
+`docs/tutorial.md` sample through the installed command).  It lives in its own workflow with
+narrow `paths` (packaging, docs, the wheel tool, the platforms lab and the workflow files), so an
+`AIL_CURRENT/**`-only integ pull request starts neither workflow and spends no runner minutes; the
+`platform` and `console-probe` jobs in `platforms.yml` keep running only for `main` pull requests
+and manual runs.  `tools/wheel_check.py` now compares output after CRLF normalization, decodes UTF-8
+explicitly, keeps `PATH`/`PIPE_CC` for the venv's `ail`, and skips the tutorial `ffi` sample on
+Windows with a printed reason (`link("m")` and the CPython oracle's `find_library("m")` need a
+libm Windows does not have; a platform limitation, not a compiler difference).
+`lab/platforms/config.json` runs `test_ail_packaging` in the representative set (weight 60), and
+`docs/INSTALL.md` says per OS what CI now checks.  No compiler, runtime or test expectation
+changed.  Verified locally: `python3 tools/wheel_check.py` passes on Linux (15 tutorial tests) and
+the explicit-name skip path passes 14 tests; `test_ail_packaging`, `test_ail_tutorial`,
+`test_ail_platforms`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+The macOS and Windows jobs themselves were not run in this environment.
+## 2026-11-02 -- arena1 S1: free dead loop-block list locals and field-loop snapshots (job-arena1s1-11030038)
+
+`_loop_local_release_points` now covers `list[int]`, `list[float]` and `list[str]` locals declared fresh
+in any `if`/`elif`/`else` or loop body inside a loop, not only struct locals in a loop's top-level
+body.  Existing captures, `_ail_synth` names and `t = f(t)` are still excluded, and a value that can be
+observed after the block keeps today's lifetime: a read after the block, a return, an attribute store,
+an append into another container, or a `break`/`continue` inside the block.  `_for_inner_impl` frees
+the private `_numeric_field_value` snapshot after a numeric field loop, and both spines after a str-field
+loop.  The list free helpers zero the struct, so the existing last-use and return frees stay harmless.
+
+Design input `gen.random_tree(random.Random(1), 3_000_000, chain=0.35)` plus the 17 perf ops,
+`/usr/bin/time -f %M` median of 3: tree_fold 464.5 -> 430.8 MiB.  `tools/rss_phases.py` (new) gives
+peak 467.9 -> 445.8 MiB default and 419.3 -> 374.4 MiB with `glibc.malloc.mmap_threshold=131072`;
+the later cut/mirror phases stay at 445.8 MiB with the default glibc because freed brk heap stays
+resident.  Output on that input is byte-identical to C.  Probes `positive`, `fields3`, `neg2`,
+`s1_routes`, `s1_item_attr`, `fields`, `blocks`, `neg3` matched CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds.  `AIL_CURRENT/test_ail_loop_block_release.py` is registered by
+`tests.d/test_ail_loop_block_release.txt`; modules run on the final commit: `test_ail_loop_block_release`,
+`test_ail_last_use_free`, `test_ail_chunk_loop_release`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.  No new DIFFERENCES row: every changed program's output is unchanged.
 
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 
@@ -925,6 +1338,77 @@ Added `test_ail_prog8.py` (registered in `tests.d/`), covering the g09 program, 
 boundary program and the int-in-bool-row fallback. Passed: `test_ail_prog8`,
 `test_ail_nested_lists`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
 `test_ail_boolfield`, `test_ail_spec_fixes`, `test_ail_tuples`, `test_ail_cpython_hybrid`.
+
+## 2026-11-02 -- rbpyreach1: re-apply the accepted pyreach1 change (job-rbpyreach1-11021017)
+
+Re-applied the accepted `job-pyreach1-11020650` change on top of this tree. The diff no longer
+applied because this branch had independently changed the same files; resolved by keeping both
+sides: initialized `_Surface.match_patterns`/`match_targets` (the accepted change uses them for
+`m.groups()` loops) and kept this branch's `_claim` `comp_claims` path alongside the accepted
+`sys.argv` str claim. All other hunks applied cleanly. Regenerated the manifest; nothing else was
+changed.
+
+Probes/tests are those the accepted change names; this job re-ran the touched modules plus
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3, and
+`tools/update_manifest.py --check`.
+
+## 2026-11-01 -- pyreach1 review fix: a compared `get` result is not truth-tested
+
+The review found that `lower_dict_of_lists` accepted any `If` test that mentioned the name, so
+`y = d.get(k)` followed by `if y == []:` (or `if y is None:`) was lowered to the empty sentinel
+row. CPython returns `None` for a missing key, which is not `[]`, so the default build printed
+`empty` where CPython prints `notempty`; `--strict` only caught the `is None` form. `truth_tested`
+now accepts a name only in a truth-only position (`if x:`, `while x:`, `x and ...`, `not x`) and
+guards the body only when the test guarantees the name truthy. A comparison leaves the source
+unchanged: the default build falls back and matches CPython, and `--strict` refuses the dict of
+containers by name. `echo_pack` still builds typed. Added
+`test_dict_of_lists_comparison_keeps_none_semantics` to `test_ail_pytyped_reach.py`. Refreshed the
+stale manifest pins (the earlier claim that `--check` passed was wrong).
+
+Probes: `p_dict_eq`, `p_dict_none`, `p_dict_truth`, `p_dict_not`, `p_dict_and`, `p_dict_default`
+all match CPython on both builds; `p_dict_eq`/`p_dict_none` are refused by name under `--strict`.
+Tests: test_ail_pytyped_reach, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3;
+`tools/update_manifest.py --check` exits 0.
+
+## 2026-11-01 -- pyreach1 review: echo_pack reaches the typed path (job-pyreach1-11011012)
+
+The review found Step 2 unmet: no lab/compare `.py` task built typed. Fixed the remaining
+echo_pack blockers in the front end, without touching the lab sources. A local `d = {}` used
+only through `d.setdefault(k, []).append(v)` and a truth-tested `x = d.get(k)` is lowered to
+the typed key -> slot dict plus `list[list[T]]` rows (row 0 is an empty sentinel); unannotated
+Python-surface helpers whose every return is `bytes(...)` now own their result like `-> bytes`;
+and a bytearray argument to a bytes/sequence parameter is passed as a read-only bytes view.
+Also lift a nested `def` that is a direct statement of a loop body (captures passed at each
+call), lower `for part in m.groups()` when every group always takes part, and recover the real
+entry point when generated helpers are appended after the script (`_script_entry`).
+
+`echo_pack` now exits 0 with `--syntax python --strict`, `run_task.py --smoke` reports
+`ail-py path: typed`, and all 57 public/hidden cases plus the perf input match CPython. The
+other nine tasks keep their earlier blockers (big ints, exec, dict-of-containers, etc.). All
+ten `.ail` sources still build typed and their emitted C is byte-identical to HEAD. Probes:
+`p_dlist3`, `p_owned_bytes2`, `p_ba_view`, `p_loop_def`, `p_groups_loop3`, `p_entry_re2`, plus
+the earlier argv/optional probes; `p_groups_optional` is refused by name. icount could not be
+measured here (perf_event_open denied, no valgrind): wall 1.06 s vs 4.88 s on the perf input.
+Tests: test_ail_pytyped_reach, test_ail_re, test_ail_nested_functions, test_ail_collections,
+test_ail_optional_locals, test_ail_optional_structs, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, and `tools/update_manifest.py --check`.
+
+## 2026-11-01 -- pyreach1: Python sources and the typed path (job-pyreach1-11011012)
+
+Built all ten `lab/compare/src/*/main.py` with `--syntax python --strict` (plus `--exact-int` for
+`chain_relax`/`rail_transfer`, as `run_task.py` does) and wrote the ranked blocker list to
+`docs/design/PY_TYPED_REACH.md`. The top reason is None/Optional (3 tasks: berth_sim, chain_relax,
+echo_pack). Fixed its two front-end causes: `sys.argv[i]` was typed as int in `_etype` and at call
+sites (`_claim`), so a str-only parameter lost to an int claim and then disagreed with a generated
+regex helper's `s: str`; and `optlib` only knew annotated helpers' return kinds, so an unannotated
+helper that always returns one scalar kind was treated as possibly None when assigned into an
+Optional local. `optlib._return_kinds` now infers those plain returns and `Lowerer.nonnull` uses
+them. echo_pack gets past the None reason; its next blocker is a bytes-keyed dict of int lists
+(`idx`), so no lab/compare task is fully typed yet. Probes: argv_starts, argv_re, optret3 build
+typed and match CPython; optbytes and the dict-of-containers probe still behave as documented.
+Added `test_ail_pytyped_reach.py`; final-state tests: test_ail_pytyped_reach, test_ail_argv_slices,
+test_ail_optional_locals, test_ail_optional_structs, test_ail_strict, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3.
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 

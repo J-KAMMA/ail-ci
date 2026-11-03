@@ -1018,6 +1018,68 @@ def build_cached(source, out, strict=True, report=None, force_general=False):
     return result
 
 
+def _eval_constant_number(node, depth=0):
+    """The value of a constant int/float expression, or None when it is not one.
+
+    Only literals, unary +/-, and binary + - * / // % ** are folded.  A result that is not an
+    int/float (a zero division, a complex power, an overflowing float) is None: those are run-time
+    errors or values with their own rule, not a compile-time constant to refuse.  The depth and
+    integer-size caps keep a source like `round(10 ** 10 ** 9)` from building a giant int in the
+    compiler.
+    """
+    if depth > 32:
+        return None
+    if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _eval_constant_number(node.operand, depth + 1)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if not isinstance(node, ast.BinOp):
+        return None
+    left = _eval_constant_number(node.left, depth + 1)
+    right = _eval_constant_number(node.right, depth + 1)
+    if left is None or right is None:
+        return None
+    try:
+        if isinstance(node.op, ast.Add):
+            value = left + right
+        elif isinstance(node.op, ast.Sub):
+            value = left - right
+        elif isinstance(node.op, ast.Mult):
+            value = left * right
+        elif isinstance(node.op, ast.Div):
+            value = left / right
+        elif isinstance(node.op, ast.FloorDiv):
+            value = left // right
+        elif isinstance(node.op, ast.Mod):
+            value = left % right
+        elif isinstance(node.op, ast.Pow):
+            if isinstance(right, int) and right > 4096 and (isinstance(left, int) and abs(left) > 1 or isinstance(left, float)):
+                return None
+            value = left ** right
+        else:
+            return None
+    except (ArithmeticError, ValueError):
+        return None
+    if type(value) not in (int, float):
+        return None
+    if type(value) is int and value.bit_length() > (1 << 16):
+        return None
+    return value
+
+
+def _constant_float_expression(node):
+    """A finite constant float expression (one that contains a float literal), or None."""
+    if not any(isinstance(child, ast.Constant) and type(child.value) is float for child in ast.walk(node)):
+        return None
+    value = _eval_constant_number(node)
+    if type(value) is not float or value != value or value in (float('inf'), float('-inf')):
+        return None
+    return value
+
+
 def _refuse_round_at_int64_boundary(source):
     """Name the one `round(<float constant>)` whose int64 result cannot be used by abs()/-/* -1.
 
@@ -1026,6 +1088,9 @@ def _refuse_round_at_int64_boundary(source):
     but its absolute value is not: `abs`, unary `-` and `* -1` must overflow, where CPython returns
     2**63.  The value is known at compile time, so refuse the source there rather than compiling a
     program that stops later with `integer overflow` (found by the pre54 review as `z_intmin`).
+    The same holds for a constant float expression such as `round(1e10 * 1e10)`: it is folded here
+    too, otherwise it reached the run-time int64 stop while CPython printed the wide integer (found
+    by the fuzzer as seed 2076011178).
     A two-argument round() returns a float and is left alone; an int argument is exact already.
     With exact ints (BIGINT.md) abs/-/* -1 of that value is exact as in CPython, so nothing is refused.
     """
@@ -1051,14 +1116,14 @@ def _refuse_round_at_int64_boundary(source):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'round' and not node.keywords and len(node.args) == 1):
             continue
-        value = _number_constant(node.args[0])
-        if type(value) is not float or value != value or value in (float('inf'), float('-inf')):
+        value = _constant_float_expression(node.args[0])
+        if value is None:
             continue
         if value <= -(1 << 63) or value >= (1 << 63):
             refusal = Unsupported(
-                'round() of a constant float at the int64 boundary is refused: the rounded value '
-                'is at or outside the signed 64-bit range, so abs(), unary - and * -1 cannot '
-                'represent its magnitude (CPython\'s int is unbounded).\n'
+                'round() of a constant float expression at the int64 boundary is refused: the '
+                'rounded value is at or outside the signed 64-bit range, so abs(), unary - and '
+                '* -1 cannot represent its magnitude (CPython\'s int is unbounded).\n'
                 '  write instead: keep the value a float and call abs() on that, or use a value '
                 'whose absolute value is below 2**63')
             refusal.source_line = getattr(node, 'lineno', None)
