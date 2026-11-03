@@ -51,13 +51,13 @@ class CheckRepairContextTests(unittest.TestCase):
             sys.dont_write_bytecode = bytecode
 
     def test_root_failure_has_exact_body_and_declared_call_context(self):
-        source = self.source('fn take(x:int)->int {return x;}\nfn main()->int { return take("wrong"); }')
+        source = self.source('import sys\n\ndef take(x: int) -> int:\n    return x\n\ndef main() -> int:\n    return take(\'wrong\')\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         status, report = self.check(source, '--repair-context')
         self.assertEqual(status, 1, report)
         context = report['repair_context']
         self.assertEqual((context['schema'], context['status'], context['target']),
                          ('ail.context/1', 'available', 'main'))
-        self.assertEqual(context['body'], ' return take("wrong"); ')
+        self.assertEqual(context['body'], "    return take('wrong')")
         self.assertEqual(context['source_path'], str(source))
         self.assertEqual(context['source_sha256'], report['source_sha256'])
         self.assertEqual([item['name'] for item in context['interface']['functions']], ['take', 'main'])
@@ -67,9 +67,9 @@ class CheckRepairContextTests(unittest.TestCase):
         self.assertFalse(context['runtime_verified'])
 
     def test_imported_failure_uses_import_source_and_api_closure(self):
-        helper = self.source('fn take(x:int)->int {return x;}', 'helper.ail')
-        module = self.source('use helper;\nfn bad()->int {return take("wrong");}', 'broken.ail')
-        source = self.source('use broken;\nfn main()->int {return bad();}')
+        helper = self.source('def take(x: int) -> int:\n    return x\n', 'helper.ail')
+        module = self.source("from helper import *\ndef bad() -> int:\n    return take('wrong')\n", 'broken.ail')
+        source = self.source('from broken import *\nimport sys\n\ndef main() -> int:\n    return bad()\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         status, report = self.check(source, '--repair-context')
         self.assertEqual(status, 1, report)
         context = report['repair_context']
@@ -89,7 +89,7 @@ class CheckRepairContextTests(unittest.TestCase):
                 self.assertEqual((context['target'], context['receiver_owner'], context['body']), ('Item.bad', 'Item', body))
 
     def test_success_not_needed_and_default_output_unchanged(self):
-        source = self.source('fn main()->int {return 0;}')
+        source = self.source('import sys\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         status, default = self.check(source)
         self.assertEqual(status, 0, default)
         self.assertNotIn('repair_context', default)
@@ -97,27 +97,33 @@ class CheckRepairContextTests(unittest.TestCase):
         self.assertEqual(status, 0, report)
         self.assertEqual(report.pop('repair_context'), {'status': 'not_needed'})
         self.assertEqual(report, default)
-        source = self.source('fn main()->int {return "wrong";}')
+        source = self.source('import sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         _, default = self.check(source)
         _, report = self.check(source, '--repair-context')
         report.pop('repair_context')
         self.assertEqual(report, default)
 
+    def test_python_source_has_repair_context(self):
+        source = self.source('def take(x: int) -> int:\n    return x\n\ndef main() -> int:\n    return take("wrong")\n\nmain()\n')
+        status, report = self.check(source, '--repair-context')
+        self.assertEqual(status, 1, report)
+        self.assertEqual(report['diagnostics'][0]['code'], 'type')
+        context = report['repair_context']
+        self.assertEqual((context['status'], context['target']), ('available', 'main'))
+        self.assertEqual(context['body'], '    return take("wrong")')
+
     def test_unavailable_cases_preserve_diagnostics_and_status(self):
         cases = [('fn main()->int {return 1 + * 2;}', (), 'unsupported_diagnostic'),
-                 ('def take(x:int)->int:\n    return x\ndef main()->int:\n    return take("wrong")\nmain()\n', ('--syntax', 'python'), 'python_source'),
-                 ('fn main()->int {return 0;}', ('-I', self.root / 'absent'), 'unsupported_diagnostic'),
-                 ('fn main()->int {return "wrong";}', ('--module', self.source('fn extra()->int {return 0;}', 'extra.ail')), 'explicit_module_or_object'),
-                 ('fn main()->int {return 0;}', ('--object', self.root / 'missing.o'), 'explicit_module_or_object'),
-                 ('struct Item {value:int;} impl Item {fn bad(self)->int {let x=1;}} fn Item__bad()->int {return 1;} fn main()->int {return 0;}', (), 'missing_function_location')]
+                 ('import sys\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', ('-I', self.root / 'absent'), 'unsupported_diagnostic'),
+                 ('import sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n', ('--module', self.source('def extra() -> int:\n    return 0\n', 'extra.ail')), 'explicit_module_or_object'),
+                 ('import sys\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', ('--object', self.root / 'missing.o'), 'explicit_module_or_object'),
+                 ('import sys\n\nclass Item:\n\n    def __init__(self, value: int):\n        self.value = value\n\n    def bad(self) -> int:\n        x = 1\n\ndef Item__bad() -> int:\n    return 1\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', (), 'missing_function_location')]
         for text, args, reason in cases:
             with self.subTest(reason=reason, args=args):
                 source = self.source(text)
                 expected_status, expected = self.check(source, *args)
                 status, report = self.check(source, *args, '--repair-context')
                 self.assertEqual(status, expected_status)
-                if reason == 'python_source':
-                    self.assertEqual((status, report['diagnostics'][0]['code']), (1, 'type'))
                 self.assertEqual(report.pop('repair_context'), {'status': 'unavailable', 'reason': reason})
                 self.assertEqual(report, expected)
         status, report = self.check(self.root / 'missing.ail', '--repair-context')
@@ -129,29 +135,29 @@ class CheckRepairContextTests(unittest.TestCase):
         self.assertEqual(context['reason'], 'source_not_loaded')
 
     def test_dependency_changed_during_type_check_refuses_context(self):
-        module = self.source('fn bad()->int {return "wrong";}', 'broken.ail')
-        source = self.source('use broken; fn main()->int {return bad();}')
+        module = self.source("def bad() -> int:\n    return 'wrong'\n", 'broken.ail')
+        source = self.source('from broken import *\nimport sys\n\ndef main() -> int:\n    return bad()\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         compiler = self.compiler()
         original = compiler.to_c
         def change(*args, **kwargs):
             try:
                 return original(*args, **kwargs)
             finally:
-                module.write_bytes(b'fn bad()->int {return 1;}')
+                module.write_bytes(b'def bad() -> int:\n    return 1\n')
         with patch.object(compiler, 'to_c', side_effect=change), \
                 patch.object(ail_source_context, 'context', side_effect=AssertionError('stale source must not collect context')):
             status, report = self.check(source, '--repair-context')
         self.assertEqual(status, 1, report)
-        self.assertEqual(report['diagnostics'][0]['function'], 'bad')
+        self.assertEqual(report['diagnostics'][0]['function'], 'broken.bad')
         self.assertEqual(report['repair_context'], dict(status='unavailable', reason='source_changed'))
 
     def test_root_changed_during_context_collection_refuses_context(self):
-        source = self.source('fn main()->int {return "wrong";}')
+        source = self.source('import sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         original = ail_source_context.context
         def change(*args, **kwargs):
             result = original(*args, **kwargs)
-            source.write_bytes(b'fn main()->int {return 1;}')
+            source.write_bytes(b'import sys\n\ndef main() -> int:\n    return 1\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
             return result
         with patch.object(ail_source_context, 'context', side_effect=change):
             status, report = self.check(source, '--repair-context')
@@ -160,23 +166,23 @@ class CheckRepairContextTests(unittest.TestCase):
         self.assertEqual(report['repair_context'], dict(status='unavailable', reason='source_changed'))
 
     def test_original_bytes_and_edit_handoff_preserved(self):
-        source = self.source('# 日本語😀\r\nfn main()->int {\r\n  return "wrong";\r\n}\r\n')
+        source = self.source('import sys\n\n# 日本語😀\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         original = source.read_bytes()
         status, report = self.check(source, '--repair-context')
         self.assertEqual(status, 1, report)
         context = report['repair_context']
-        self.assertEqual(context['body'], '\r\n  return "wrong";\r\n')
+        self.assertEqual(context['body'], "    return 'wrong'")
         self.assertEqual(context['body_sha256'], hashlib.sha256(context['body'].encode('utf8')).hexdigest())
         self.assertEqual(source.read_bytes(), original)
         args = SimpleNamespace(module=[], module_path=[], symbol='main')
         self.assertEqual(_verify_context(context, source, original, args), {})
-        candidate = replace_body(original, context['target'], b'\r\n  return 7;\r\n', context['source_sha256'])
+        candidate = replace_body(original, context['target'], b"    return 7", context['source_sha256'])
         candidate_path = self.root / 'candidate.ail'
         candidate_path.write_bytes(candidate)
         status, report = self.check(candidate_path, '--repair-context')
         self.assertEqual(status, 0, report)
         self.assertEqual(source.read_bytes(), original)
-        self.assertTrue(candidate.startswith('# 日本語😀\r\n'.encode('utf8')))
+        self.assertIn('# 日本語😀\n'.encode('utf8'), candidate)
 
 
 if __name__ == '__main__':

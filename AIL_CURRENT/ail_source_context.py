@@ -33,7 +33,8 @@ def context(source, symbol, include_body=False, *, source_path=None, module_path
             raise ValueError('source bytes do not match the source path')
         library=not any(isinstance(node,ast.FunctionDef) and node.name=='main' for node in tree.body)
         loaded=_load_sources(root,module_only=library,module_paths=module_paths,
-                             declarations_only=True,source_bytes=snapshots)[0]
+                             declarations_only=True,source_bytes=snapshots,local_imports=True,
+                             merge_library=library)[0]
         if snapshots.get(root)!=source:
             raise ValueError('source changed while resolving imports')
         tree=ast.parse(loaded)
@@ -41,15 +42,18 @@ def context(source, symbol, include_body=False, *, source_path=None, module_path
     constructors=set()
     for node in tree.body:
         if isinstance(node,ast.ClassDef):
-            constructor=next(member for member in node.body if isinstance(member,ast.FunctionDef) and member.name=='__init__')
-            item=copy.copy(constructor);item.name=node.name;item.args=copy.deepcopy(constructor.args)
-            item.args.args=item.args.args[1:];item.returns=ast.Name(id=node.name,ctx=ast.Load())
-            functions[node.name]=item;constructors.add(node.name);tree.body.append(item)
+            constructor=next((member for member in node.body
+                              if isinstance(member,ast.FunctionDef) and member.name=='__init__'),None)
+            if constructor is not None:
+                item=copy.copy(constructor);item.name=node.name;item.args=copy.deepcopy(constructor.args)
+                item.args.args=item.args.args[1:];item.returns=ast.Name(id=node.name,ctx=ast.Load())
+                functions[node.name]=item;constructors.add(node.name);tree.body.append(item)
             for method in node.body:
                 if isinstance(method,ast.FunctionDef) and method.name!='__init__':
                     key=node.name+'.'+method.name
                     item=copy.copy(method);item.name=key;item.args=copy.deepcopy(method.args)
-                    item.args.args[0].annotation=ast.Name(id=node.name,ctx=ast.Load())
+                    if item.args.args:
+                        item.args.args[0].annotation=ast.Name(id=node.name,ctx=ast.Load())
                     functions[key]=item
                     tree.body.append(item)
     target=functions[symbol]

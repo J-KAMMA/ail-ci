@@ -20,17 +20,17 @@ def digest(source):
 
 class SourceContextTests(unittest.TestCase):
     def test_hash_binds_edit_and_rejects_stale_source(self):
-        source = b'fn chosen()->int {return 1;} fn main()->int {return chosen();}'
+        source = b'import sys\n\ndef chosen() -> int:\n    return 1\n\ndef main() -> int:\n    return chosen()\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         report = context(source, 'chosen')
         self.assertEqual(report['schema'], 'ail.context/1')
         self.assertEqual(report['target'], 'chosen')
         self.assertEqual(report['source_sha256'], digest(source))
-        self.assertEqual(report['body_sha256'], digest(b'return 1;'))
+        self.assertEqual(report['body_sha256'], digest(b'    return 1'))
         self.assertTrue(report['syntax_verified'])
         for key in ('type_verified', 'link_verified', 'runtime_verified'):
             self.assertFalse(report[key])
-        changed = replace_body(source, 'chosen', b'return 2;', report['source_sha256'])
-        self.assertEqual(changed, source.replace(b'return 1;', b'return 2;'))
+        changed = replace_body(source, 'chosen', b'    return 2', report['source_sha256'])
+        self.assertEqual(changed, source.replace(b'    return 1', b'    return 2'))
         with self.assertRaises(ValueError):
             replace_body(changed, 'chosen', b'return 3;', report['source_sha256'])
 
@@ -52,15 +52,15 @@ class SourceContextTests(unittest.TestCase):
         self.assertEqual([item['name'] for item in report['interface']['functions']], ['chosen'])
 
     def test_type_invalid_body_still_readable_and_hash_editable(self):
-        source = b'fn chosen()->int {return "wrong";} fn main()->int {return chosen();}'
+        source = b'import sys\n\ndef chosen() -> int:\n    return \'wrong\'\n\ndef main() -> int:\n    return chosen()\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         report = context(source, 'chosen', include_body=True)
-        self.assertEqual(report['body'], 'return "wrong";')
+        self.assertEqual(report['body'], "    return 'wrong'")
         self.assertFalse(report['type_verified'])
-        self.assertEqual(replace_body(source, 'chosen', b'return 1;', report['source_sha256']),
-                         source.replace(b'return "wrong";', b'return 1;'))
+        self.assertEqual(replace_body(source, 'chosen', b'    return 1', report['source_sha256']),
+                         source.replace(b"    return 'wrong'", b'    return 1'))
 
     def test_local_signatures_imports_and_unresolved_calls(self):
-        source = b'use absent; fn local(x:int)->int {return x;} fn chosen(x:int)->int {print(x); imported(x); return local(x)+missing(x);} fn untouched()->int {return 9;}'
+        source = b'from absent import *\ndef local(x: int) -> int:\n    return x\n\ndef chosen(x: int) -> int:\n    print(x)\n    imported(x)\n    return local(x) + missing(x)\n\ndef untouched() -> int:\n    return 9\n'
         report = context(source, 'chosen')
         self.assertEqual(report['imports'], ['absent'])
         self.assertEqual({item['name'] for item in report['interface']['functions']}, {'chosen', 'local'})
@@ -68,7 +68,7 @@ class SourceContextTests(unittest.TestCase):
         self.assertNotIn('body', report)
 
     def test_qualified_method_exposes_receiver_and_reachable_structs(self):
-        source = b'struct Box { x:int; } struct Other { y:int; } fn value()->int {return 4;} impl Box {fn value(self)->int {return self.x;}}'
+        source = b'class Box:\n\n    def __init__(self, x: int):\n        self.x = x\n\n    def value(self) -> int:\n        return self.x\n\nclass Other:\n\n    def __init__(self, y: int):\n        self.y = y\n\ndef value() -> int:\n    return 4\n'
         report = context(source, 'Box.value')
         self.assertEqual(report['receiver_owner'], 'Box')
         selected = report['interface']['functions']
@@ -76,10 +76,10 @@ class SourceContextTests(unittest.TestCase):
         self.assertEqual(selected[0]['parameters'][0]['type'], 'Box')
         self.assertIn('receiver', report['interface']['types'])
         self.assertEqual([item['name'] for item in report['interface']['structs']], ['Box'])
-        self.assertEqual(report['body_sha256'], digest(b'return self.x;'))
+        self.assertEqual(report['body_sha256'], digest(b'        return self.x'))
 
     def test_body_constructor_exposes_fields_even_with_scalar_return(self):
-        source=b'struct Box { x:int; } fn chosen()->int {let box=Box(1);return box.x;}'
+        source=b'class Box:\n\n    def __init__(self, x: int):\n        self.x = x\n\ndef chosen() -> int:\n    box = Box(1)\n    return box.x\n'
         report=context(source,'chosen')
         functions={item['name']:item for item in report['interface']['functions']}
         self.assertEqual(functions['Box']['returns'],'Box')
@@ -88,7 +88,7 @@ class SourceContextTests(unittest.TestCase):
         self.assertNotIn('Box',report['other_call_expressions'])
         self.assertFalse(report['type_verified'])
     def test_empty_missing_invalid_syntax_and_utf8_are_refused(self):
-        for source, symbol in [(b'', 'chosen'), (b'fn chosen()->int {return 1;}', 'missing'),
+        for source, symbol in [(b'', 'chosen'), (b'def chosen() -> int:\n    return 1\n', 'missing'),
                                (b'fn chosen()->int {let x = ;}', 'chosen'), (b'\xff', 'chosen')]:
             with self.subTest(source=source, symbol=symbol), self.assertRaises(ValueError):
                 context(source, symbol)
@@ -100,7 +100,7 @@ class SourceContextCLITests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.source = self.root / 'source.ail'
-        self.source.write_bytes(b'fn chosen()->int {return 1;}')
+        self.source.write_bytes(b'def chosen() -> int:\n    return 1\n')
 
     def invoke(self, source=None, symbol='chosen', extra=()):
         before = {path.name: path.read_bytes() for path in self.root.iterdir()}
@@ -116,7 +116,7 @@ class SourceContextCLITests(unittest.TestCase):
         status, report = self.invoke(extra=('--include-body',))
         self.assertEqual(status, 0, report)
         self.assertEqual(report['source_sha256'], digest(self.source.read_bytes()))
-        self.assertEqual(report['body'], 'return 1;')
+        self.assertEqual(report['body'], '    return 1')
 
     def test_compact_cli_matches_default_context(self):
         status, original = self.invoke(extra=('--include-body',))
@@ -127,12 +127,12 @@ class SourceContextCLITests(unittest.TestCase):
         self.assertEqual(original['schema'], 'ail.context/1')
 
     def test_invalid_typed_body_context_can_drive_checked_edit(self):
-        self.source.write_bytes(b'fn chosen()->int {return "wrong";} fn main()->int {return chosen();}')
+        self.source.write_bytes(b'import sys\n\ndef chosen() -> int:\n    return \'wrong\'\n\ndef main() -> int:\n    return chosen()\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         status, report = self.invoke()
         self.assertEqual(status, 0, report)
         body = self.root / 'body.ail'
         output = self.root / 'candidate.ail'
-        body.write_bytes(b'return 1;')
+        body.write_bytes(b'    return 1')
         original = self.source.read_bytes()
         stream = io.StringIO()
         with patch.dict(os.environ, {'PATH': ''}), patch.object(ail_chatgpt.subprocess, 'run',
@@ -140,7 +140,7 @@ class SourceContextCLITests(unittest.TestCase):
             status = ail_chatgpt.main(['edit', str(self.source), '--symbol', 'chosen', '--base-sha256',
                                       report['source_sha256'], '--body', str(body), '-o', str(output)])
         self.assertEqual(status, 0, stream.getvalue())
-        self.assertEqual(output.read_bytes(), original.replace(b'return "wrong";', b'return 1;'))
+        self.assertEqual(output.read_bytes(), original.replace(b"    return 'wrong'", b'    return 1'))
         self.assertEqual(self.source.read_bytes(), original)
 
     def test_failure_is_structured_exit_two_without_writes(self):
@@ -163,7 +163,7 @@ class SourceContextCLITests(unittest.TestCase):
 class CompactContextTests(unittest.TestCase):
     def test_roundtrip_keeps_unknown_kinds_defaults_and_receiver(self):
         import ast
-        report = context(b'struct Box { x:int; } impl Box {fn value(self)->int {return self.x;}}',
+        report = context(b'class Box:\n\n    def __init__(self, x: int):\n        self.x = x\n\n    def value(self) -> int:\n        return self.x\n',
                          'Box.value', include_body=True)
         extra = ail_chatgpt._source_interface(ast.parse(
             'def unknown(a, /, b: int = 3, *args, option=None, **kwargs): pass'))
@@ -177,7 +177,7 @@ class CompactContextTests(unittest.TestCase):
                          ['self', 'Box', 'positional', None])
 
     def test_malformed_transport_is_refused(self):
-        packed = compact_context(context(b'fn chosen(x:int)->int {return x;}', 'chosen'))
+        packed = compact_context(context(b'def chosen(x: int) -> int:\n    return x\n', 'chosen'))
         rows = [0, [0], [['x']], [['x', 0, 'positional', None]],
                 [['x', 'int', 'invalid', None]], [['x', 'int', 'positional', False]]]
         for parameters in rows:

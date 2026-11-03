@@ -4953,7 +4953,28 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 except (SyntaxError, ValueError):
                     entry_defs = None
             if local_imports and entry and syntax == 'python' and (not module_only or merge_library):
-                merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                saved_path = os.environ.get('AIL_PATH')
+                if search_paths:
+                    os.environ['AIL_PATH'] = os.pathsep.join(
+                        [*(str(item) for item in search_paths),
+                         *(saved_path.split(os.pathsep) if saved_path else [])])
+                reader = ffi.read if ffi is not None else None
+                if source_bytes is not None:
+                    base_reader = reader
+                    def reader(module_path):
+                        data = Path(module_path).read_bytes()
+                        source_bytes[Path(module_path).resolve()] = data
+                        if base_reader is not None:
+                            return base_reader(module_path)
+                        return data.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
+                try:
+                    merged = ail_modules.merge_program(path, text, **({} if reader is None else {'read': reader}))
+                finally:
+                    if search_paths:
+                        if saved_path is None:
+                            os.environ.pop('AIL_PATH', None)
+                        else:
+                            os.environ['AIL_PATH'] = saved_path
                 # F2: the front end's own passes (enum lowering) print class names too; the compiler process gets it from _surface_env
                 class_names = _class_names_env(merged)
                 if class_names:
@@ -5125,7 +5146,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                                   for arg in fn.args.args):
                     contracts.append(path)
         if (module_only or not entry) and ((not tree.body and not imports) or any(not (isinstance(node, ast.FunctionDef)
-                or (syntax == 'ail' or prelower is not None or postlower is not None) and isinstance(node, ast.ClassDef))
+                or isinstance(node, ast.ClassDef))
                 and not _module_constant(node) for node in tree.body)):
             raise ValueError(f'AIL module needs functions, structs, or literal constants only: {path}')
         if separate and not entry and any(
@@ -5416,16 +5437,17 @@ def _check_repair_context(args, report, source, original, snapshots):
         return unavailable('source_not_loaded')
     try:
         data = snapshots[target]
-        syntax = ('ail' if detect(data.decode('utf8')) else 'python') if args.syntax == 'auto' else args.syntax
-        if syntax != 'ail':
-            return unavailable('python_source')
         def unchanged():
             return snapshots.get(source) == original and all(
                 path.read_bytes() == data for path, data in snapshots.items())
         if not unchanged():
             return unavailable('source_changed')
         from ail_source_context import context
-        result = context(data, diagnostic['function'], include_body=True,
+        function = diagnostic['function']
+        syntax = ('ail' if detect(data.decode('utf8')) else 'python') if args.syntax == 'auto' else args.syntax
+        if syntax == 'python' and function.startswith(target.stem + '.'):
+            function = function[len(target.stem) + 1:]
+        result = context(data, function, include_body=True,
                          source_path=target, module_paths=args.module_path, resolve_imports=True)
         if not unchanged():
             return unavailable('source_changed')
@@ -5658,7 +5680,7 @@ def _source_check(args):
         ffi = _ffi_session(args)
         text, _, _ = _load_sources(source, args.module, args.syntax,
                                   module_only=args.library, module_paths=args.module_path, origins=origins, source_map=source_map,
-                                  local_imports=True, ffi=ffi, int64_literals=True,
+                                  local_imports=True, merge_library=args.library, ffi=ffi, int64_literals=True,
                                   **({'source_bytes': snapshots} if snapshots is not None else {}))
         check_objects = list(args.object)
         if getattr(args, 'ffi', False):
@@ -6211,8 +6233,8 @@ def main(argv=None):
     if args.command == 'context':
         from ail_source_context import context
         try:
-            if args.source.suffix.lower()!='.ail':
-                raise ValueError('context source must use .ail suffix')
+            if args.source.suffix.lower() not in ('.ail', '.py'):
+                raise ValueError('context source must use .ail or .py suffix')
             source=args.source.resolve(strict=True)
             report=context(source.read_bytes(),args.symbol,args.include_body,
                            source_path=source,module_paths=args.module_path,resolve_imports=args.resolve_imports,contracts=args.contracts)

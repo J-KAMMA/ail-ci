@@ -77,15 +77,15 @@ class SourceCheckTests(unittest.TestCase):
         self.assertEqual([item['name'] for item in report['interface']['structs']],['JsonValue'])
         self.assertEqual(report['interface']['functions'][0]['returns'],'list[JsonValue]')
     def test_valid_typed_source_with_no_compiler_and_explicit_library(self):
-        source = self.source('fn plus(x:int)->int {return x+1;} fn main()->int {return plus(2);}')
+        source = self.source('import sys\n\ndef plus(x: int) -> int:\n    return x + 1\n\ndef main() -> int:\n    return plus(2)\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         status, report = self.check(source)
         self.assertEqual((status, report['status'], report['stage'], report['diagnostics']), (0, 'passed', 'type', []))
         self.assertEqual(report['checked_functions'], 2)
-        source = self.source('fn plus(x:int)->int {return x+1;}')
+        source = self.source('def plus(x: int) -> int:\n    return x + 1\n')
         self.assertEqual(self.check(source, '--library')[0], 0)
 
     def test_interface_matches_checked_declarations_without_bodies(self):
-        source = self.source('fn plus(x:int,y:int)->int {return x+y;} fn main()->int {return plus(1,2);}')
+        source = self.source('import sys\n\ndef plus(x: int, y: int) -> int:\n    return x + y\n\ndef main() -> int:\n    return plus(1, 2)\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         status, report = self.check(source, '--interface')
         self.assertEqual(status, 0, report)
         api = report['interface']
@@ -94,7 +94,7 @@ class SourceCheckTests(unittest.TestCase):
             dict(name=name, type='int', kind='positional', default=None) for name in ('x', 'y')], returns='int'))
         self.assertNotIn('return x', json.dumps(api))
         self.assertNotIn('interface', self.check(source)[1])
-        source = self.source('fn plus(x:int)->int {return missing(x);}')
+        source = self.source('def plus(x: int) -> int:\n    return missing(x)\n')
         status, report = self.check(source, '--library', '--interface')
         self.assertEqual(status, 1)
         self.assertNotIn('interface', report)
@@ -154,14 +154,7 @@ def read(box:Box)->int:
                 self.assertEqual([item['name'] for item in report['structs']], expected)
 
     def test_types_used_transitive_fields_methods_and_callback_annotations(self):
-        source=self.source('''struct Gamma {number:int;}
-struct Beta {value:int;}
-impl Beta {fn read(self,other:Gamma)->int {return other.number;}}
-struct Alpha {child:Beta;}
-struct Unused {text:str;}
-fn chosen(value:Alpha,callback:Callable[[Gamma],Beta])->Alpha {return value;}
-fn irrelevant(value:Unused)->Unused {return value;}
-''')
+        source=self.source('class Gamma:\n\n    def __init__(self, number: int):\n        self.number = number\n\nclass Beta:\n\n    def __init__(self, value: int):\n        self.value = value\n\n    def read(self, other: Gamma) -> int:\n        return other.number\n\nclass Alpha:\n\n    def __init__(self, child: Beta):\n        self.child = child\n\nclass Unused:\n\n    def __init__(self, text: str):\n        self.text = text\n\ndef chosen(value: Alpha, callback: Callable[[Gamma], Beta]) -> Alpha:\n    return value\n\ndef irrelevant(value: Unused) -> Unused:\n    return value\n')
         status,report=self.check(source,'--library','--interface','--symbol','chosen','--types-used')
         self.assertEqual(status,0,report)
         self.assertEqual([item['name'] for item in report['interface']['structs']],['Gamma','Beta','Alpha'])
@@ -187,12 +180,12 @@ def chosen(box:Box)->int:
         status,report=self.check(source,'--syntax','python','--interface','--symbol','chosen','--types-used')
         self.assertEqual(status,0,report);self.assertEqual(report['interface']['struct_selection'],'all_when_unknown')
         self.assertEqual([item['name'] for item in report['interface']['structs']],['Box','Other'])
-        source=self.source('struct Box {value:int;} fn chosen(x:int)->int {return x;} fn bad()->int {return "bad";}')
+        source=self.source("class Box:\n\n    def __init__(self, value: int):\n        self.value = value\n\ndef chosen(x: int) -> int:\n    return x\n\ndef bad() -> int:\n    return 'bad'\n")
         status,report=self.check(source,'--library','--interface','--symbol','chosen','--types-used')
         self.assertEqual(status,1,report);self.assertNotIn('interface',report)
 
     def test_types_used_configuration_scalar_results_and_bundled_api(self):
-        source=self.source('struct Unused {value:int;} fn chosen(x:int)->int {return x;}')
+        source=self.source('class Unused:\n\n    def __init__(self, value: int):\n        self.value = value\n\ndef chosen(x: int) -> int:\n    return x\n')
         for args in (('--types-used',),('--interface','--types-used'),('--symbol','chosen','--types-used')):
             status,report=self.check(source,'--library',*args)
             self.assertEqual((status,report['diagnostics'][0]['code']),(2,'configuration'))
@@ -235,7 +228,7 @@ def chosen(x):
                 self.assertEqual(api['struct_selection'],'all_when_unknown')
                 self.assertEqual([item['name'] for item in api['structs']],['Box'])
     def test_interface_symbol_selection_and_configuration_errors(self):
-        source=self.source('fn one(x:int)->int {return x+1;} fn two(x:int)->int {return x*2;}')
+        source=self.source('def one(x: int) -> int:\n    return x + 1\n\ndef two(x: int) -> int:\n    return x * 2\n')
         status,report=self.check(source,'--library','--interface','--symbol','two','--symbol','two')
         self.assertEqual(status,0,report)
         self.assertEqual([fn['name'] for fn in report['interface']['functions']],['two'])
@@ -247,12 +240,12 @@ def chosen(x):
             self.assertNotIn('interface',report)
 
     def test_interface_selection_retains_structs_and_checks_unselected_bodies(self):
-        source=self.source('struct Item {value:int;} fn take(item:Item)->int {return item.value;} fn other()->int {return 3;}')
+        source=self.source('class Item:\n\n    def __init__(self, value: int):\n        self.value = value\n\ndef take(item: Item) -> int:\n    return item.value\n\ndef other() -> int:\n    return 3\n')
         status,report=self.check(source,'--library','--interface','--symbol','take')
         self.assertEqual(status,0,report)
         self.assertEqual([fn['name'] for fn in report['interface']['functions']],['take'])
         self.assertEqual([item['name'] for item in report['interface']['structs']],['Item'])
-        source=self.source('fn good()->int {return 1;} fn bad()->int {return "wrong";}')
+        source=self.source("def good() -> int:\n    return 1\n\ndef bad() -> int:\n    return 'wrong'\n")
         status,report=self.check(source,'--library','--interface','--symbol','good')
         self.assertEqual(status,1)
         self.assertNotIn('interface',report)
@@ -379,11 +372,11 @@ impl Item {
                          (1, 1, 'function_declaration'))
     def test_unicode_module_paths_and_cycle(self):
         modules = self.root / '部品 😀'; modules.mkdir()
-        self.source('fn value()->int {return 7;}', '部品 😀/helper.ail')
-        entry = self.source('use helper; fn main()->int {return value();}', '入力 😀.ail')
+        self.source('def value() -> int:\n    return 7\n', '部品 😀/helper.ail')
+        entry = self.source('from helper import *\nimport sys\n\ndef main() -> int:\n    return value()\n\nif __name__ == "__main__":\n    sys.exit(main())\n', '入力 😀.ail')
         self.assertEqual(self.check(entry, '-I', modules)[0], 0)
-        self.source('use other; fn value()->int {return 7;}', '部品 😀/helper.ail')
-        self.source('use helper; fn other()->int {return 1;}', '部品 😀/other.ail')
+        self.source('from other import *\ndef value() -> int:\n    return 7\n', '部品 😀/helper.ail')
+        self.source('from helper import *\ndef other() -> int:\n    return 1\n', '部品 😀/other.ail')
         status, report = self.check(entry, '-I', modules)
         self.assertEqual(status, 1)
         self.assertIn('cycle', report['diagnostics'][0]['message'])
