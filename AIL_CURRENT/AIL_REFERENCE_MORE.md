@@ -49,21 +49,30 @@ immortal static boxes) is on with it for programs without threads; `AIL_UNIFIED_
 
 ## Text I/O: main, arguments, stdin lines, print, files
 
-```ail
+```python
+import sys
+
 # args: 2
-fn main() {
-    if len(sys.argv) != 2 { print("usage: prog N", file=sys.stderr); return 2; }
-    let n = int(sys.argv[1]);
-    let total = 0;
-    let rows = 0;
-    for line in sys.stdin {                 # one str per line, "\n" kept
-        let f = line.split();
-        if len(f) == 0 { continue; }
-        total += int(f[0]);
-        rows += 1;
-    }
-    for i in range(n) { print(f"row {i}: {rows} {total}"); }
-}
+def main() -> int:
+    if len(sys.argv) != 2:
+        print('usage: prog N', file=sys.stderr)
+        return 2
+    n = int(sys.argv[1])
+    total = 0
+    rows = 0
+    # one str per line, "\n" kept
+    for line in sys.stdin:
+        f = line.split()
+        if len(f) == 0:
+            continue
+        total += int(f[0])
+        rows += 1
+    for i in range(n):
+        print(f'row {i}: {rows} {total}')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -89,17 +98,27 @@ row 1: 0 0
 
 ## Bytes: binary input, views, decode, bytearray
 
-```ail
-fn main() {
-    let data = b"7 42\n";                   # all of stdin: read_stdin_bytes(1 << 40)
-    let lines = 0;
-    for b in data { if b == b"\n"[0] { lines += 1; } }   # items are ints 0..255
-    let out = bytearray();
-    out.extend(data[0:1]);
-    out.append(ord(" "));
-    write_stdout_bytes(out);
-    print(lines, int(data[2:4]) + 1, data[2:4].decode() + "!");
-}
+```python
+from ail import write_stdout_bytes
+import sys
+
+def main() -> int:
+    # all of stdin: read_stdin_bytes(1 << 40)
+    data = b'7 42\n'
+    lines = 0
+    for b in data:
+        if b == b'\n'[0]:
+            # items are ints 0..255
+            lines += 1
+    out = bytearray()
+    out.extend(data[0:1])
+    out.append(ord(' '))
+    write_stdout_bytes(out)
+    print(lines, int(data[2:4]) + 1, data[2:4].decode() + '!')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -180,13 +199,23 @@ sys.exit(main())
   `heappush`, `read_bytes`, ...) wins everywhere, as in Python. Type names (`int`, `str`, `list`,
   ...), exception names, `math`, `sys`, `os` are refused when used: rename the definition.
 
-```ail
-fn main() {
-    let e = 3;
-    for t in ["a", "b"] { print(t); }
-    for t in [1, 2] { e += t; }
-    try { raise KeyError("k"); } except KeyError as err { print(err.kind, e); }
-}
+```python
+import sys
+
+def main() -> int:
+    e = 3
+    for t in ['a', 'b']:
+        print(t)
+    for t in [1, 2]:
+        e += t
+    try:
+        raise KeyError('k')
+    except KeyError as err:
+        print(err.kind, e)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -229,24 +258,46 @@ KeyError 6
   struct field and pass the struct (or return a new list). Struct, `bytearray` and
   `list[list[T]]` parameters are writable. `print(p)` and `p1 == p2` on structs: use the fields.
 
-```ail
-struct Point { x: int; y: int; }
-struct Bag { xs: list[int]; }
-impl Point { fn shift(self, d: int) -> void { self.x += d; } }
-fn bump(p: Point, b: Bag) -> void { p.y += 100; b.xs.append(p.y); }
-fn main() {
-    let p = Point(1, -2);
-    let q = p;                       # the same object
-    q.shift(3);
-    let b = Bag([]);
-    bump(p, b);
-    let xs = [0] * 3;
-    let ys = xs;                     # a copy
-    ys.append(3);
-    let a = 1; let c = 2;
-    a, c = c, a;
-    print(p.x, p.y, b.xs[0], len(xs), len(ys), a, c);
-}
+```python
+import sys
+
+class Point:
+
+    def __init__(self, x: int, y: int):
+        self.x = x
+        self.y = y
+
+    def shift(self, d: int) -> None:
+        self.x += d
+
+class Bag:
+
+    def __init__(self, xs: list[int]):
+        self.xs = xs
+
+def bump(p: Point, b: Bag) -> None:
+    p.y += 100
+    b.xs.append(p.y)
+
+def main() -> int:
+    p = Point(1, -2)
+    # the same object
+    q = p
+    q.shift(3)
+    b = Bag([])
+    bump(p, b)
+    xs = [0] * 3
+    # a copy
+    ys = xs
+    ys.append(3)
+    a = 1
+    c = 2
+    a, c = (c, a)
+    print(p.x, p.y, b.xs[0], len(xs), len(ys), a, c)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -264,33 +315,60 @@ reference counted: trees and lists are freed when unreferenced, a reference cycl
 doubly linked list) is never freed. `let x = None;` alone is not a struct: write
 `let x: Node | None = None;`. `a if c else None` is refused: use if/else.
 
-```ail
-struct Node { val: int; next: Node | None; }
-struct Tree { key: int; left: Tree | None; right: Tree | None; }
-fn total(head: Node | None) -> int {
-    let s = 0;
-    let cur = head;
-    while cur is not None { s += cur.val; cur = cur.next; }
-    return s;
-}
-fn insert(t: Tree | None, k: int) -> Tree {
-    if t is None { return Tree(k, None, None); }
-    if k < t.key { t.left = insert(t.left, k); } else { t.right = insert(t.right, k); }
-    return t;
-}
-fn depth(t: Tree | None) -> int {
-    if t is None { return 0; }
-    return 1 + max(depth(t.left), depth(t.right));
-}
-fn main() {
-    let list: Node | None = None;
-    for i in range(4) { list = Node(i, list); }
-    let root: Tree | None = None;
-    for k in [5, 2, 8, 1, 9, 7] { root = insert(root, k); }
-    print(total(list), depth(root), root.left.key, root.left.right is None);
-    try { print(root.left.right.key); }
-    except RuntimeError as e { print(e.message); }
-}
+```python
+import sys
+
+class Node:
+
+    def __init__(self, val: int, next: Node | None):
+        self.val = val
+        self.next = next
+
+class Tree:
+
+    def __init__(self, key: int, left: Tree | None, right: Tree | None):
+        self.key = key
+        self.left = left
+        self.right = right
+
+def total(head: Node | None) -> int:
+    s = 0
+    cur = head
+    while cur is not None:
+        s += cur.val
+        cur = cur.next
+    return s
+
+def insert(t: Tree | None, k: int) -> Tree:
+    if t is None:
+        return Tree(k, None, None)
+    if k < t.key:
+        t.left = insert(t.left, k)
+    else:
+        t.right = insert(t.right, k)
+    return t
+
+def depth(t: Tree | None) -> int:
+    if t is None:
+        return 0
+    return 1 + max(depth(t.left), depth(t.right))
+
+def main() -> int:
+    list: Node | None = None
+    for i in range(4):
+        list = Node(i, list)
+    root: Tree | None = None
+    for k in [5, 2, 8, 1, 9, 7]:
+        root = insert(root, k)
+    print(total(list), depth(root), root.left.key, root.left.right is None)
+    try:
+        print(root.left.right.key)
+    except RuntimeError as e:
+        print(e.message)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -387,12 +465,19 @@ module (`compile-library`) takes no table.
   [width][, or _][.precision][type]` with int types d x X o b (and e f g %), float types f F e E g G %
   or none (the repr), `!r`; refused by name: n, c, z, a nested `{w}`, grouping with zero padding.
 
-```ail
-fn main() {
-    let n = 7; let x = 3.14159; let name = "ab";
-    print(f"{n:03d}|{n:>4}|{x:.2f}|{name:<4}|{n + 1}", "%5d|%.1f" % (n, x), "{}!".format(n));
-    print(3 > 2, 0 or 5, 7 / 2, 7 // 2, -7 % 3, 2 ** 10);
-}
+```python
+import sys
+
+def main() -> int:
+    n = 7
+    x = 3.14159
+    name = 'ab'
+    print(f'{n:03d}|{n:>4}|{x:.2f}|{name:<4}|{n + 1}', '%5d|%.1f' % (n, x), '{}!'.format(n))
+    print(3 > 2, 0 or 5, 7 / 2, 7 // 2, -7 % 3, 2 ** 10)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -796,28 +881,44 @@ fn main() { let e = 5; try { raise ValueError("x"); } except ValueError as e { p
 
 ## Word count: top-N, grouping by key (example)
 
-```ail
-struct Group { key: str; count: int; total: int; }
-fn main() {
-    let counts: dict[str, int] = {};
-    for w in "b a b c b d d a e".split() { counts[w] = counts.get(w, 0) + 1; }
-    let shown = 0;
-    for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])) {
-        if shown == 3 { break; }
-        print(str(v) + "\t" + k);
-        shown += 1;
-    }
-    let slot: dict[str, int] = {};
-    let groups: list[Group] = [];
-    for row in ["b,2", "a,5", "b,3"] {
-        let f = row.split(",");
-        let i = slot.get(f[0], -1);
-        if i < 0 { slot[f[0]] = len(groups); groups.append(Group(f[0], 1, int(f[1]))); }
-        else { groups[i].count += 1; groups[i].total += int(f[1]); }
-    }
-    groups.sort(key=lambda g: (-g.total, g.key));
-    for g in groups { print(f"{g.key}\t{g.count}\t{g.total}"); }
-}
+```python
+import sys
+
+class Group:
+
+    def __init__(self, key: str, count: int, total: int):
+        self.key = key
+        self.count = count
+        self.total = total
+
+def main() -> int:
+    counts: dict[str, int] = {}
+    for w in 'b a b c b d d a e'.split():
+        counts[w] = counts.get(w, 0) + 1
+    shown = 0
+    for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        if shown == 3:
+            break
+        print(str(v) + '\t' + k)
+        shown += 1
+    slot: dict[str, int] = {}
+    groups: list[Group] = []
+    for row in ['b,2', 'a,5', 'b,3']:
+        f = row.split(',')
+        i = slot.get(f[0], -1)
+        if i < 0:
+            slot[f[0]] = len(groups)
+            groups.append(Group(f[0], 1, int(f[1])))
+        else:
+            groups[i].count += 1
+            groups[i].total += int(f[1])
+    groups.sort(key=lambda g: (-g.total, g.key))
+    for g in groups:
+        print(f'{g.key}\t{g.count}\t{g.total}')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -830,37 +931,49 @@ b	2	5
 
 ## Dijkstra: int heap, adjacency, insort (example)
 
-```ail
-struct Step { dist: int; node: int; }
-fn main() {
-    let n = 4;
-    let src = [0, 0, 1, 2];
-    let dst = [1, 2, 3, 3];
-    let w = [4, 1, 1, 5];
-    let out: list[list[int]] = [[] for _ in range(n)];
-    for e in range(len(src)) { out[src[e]].append(e); }
-    let best = [1 << 60] * n;
-    best[0] = 0;
-    let h = [(0 << 20) | 0];
-    while len(h) > 0 {
-        let p = heappop(h);
-        let d = p >> 20;
-        let u = p & 1048575;
-        if d > best[u] { continue; }
-        for e in out[u] {
-            if d + w[e] < best[dst[e]] {
-                best[dst[e]] = d + w[e];
-                heappush(h, (best[dst[e]] << 20) | dst[e]);
-            }
-        }
-    }
-    let sh: list[Step] = [];
-    for v in range(n) { heappush(sh, Step(best[v], v), key=lambda s: (s.dist, s.node)); }
-    let s = heappop(sh, key=lambda s: (s.dist, s.node));
-    let seen: list[int] = [];
-    for x in [5, 1, 4] { insort(seen, x); }
-    print(best[3], s.dist, s.node, seen[0], bisect_left(seen, 4));
-}
+```python
+from ail import heappop, heappush
+import sys
+
+class Step:
+
+    def __init__(self, dist: int, node: int):
+        self.dist = dist
+        self.node = node
+
+def main() -> int:
+    n = 4
+    src = [0, 0, 1, 2]
+    dst = [1, 2, 3, 3]
+    w = [4, 1, 1, 5]
+    out: list[list[int]] = [[] for _ in range(n)]
+    for e in range(len(src)):
+        out[src[e]].append(e)
+    best = [1 << 60] * n
+    best[0] = 0
+    h = [0 << 20 | 0]
+    while len(h) > 0:
+        p = heappop(h)
+        d = p >> 20
+        u = p & 1048575
+        if d > best[u]:
+            continue
+        for e in out[u]:
+            if d + w[e] < best[dst[e]]:
+                best[dst[e]] = d + w[e]
+                heappush(h, best[dst[e]] << 20 | dst[e])
+    sh: list[Step] = []
+    for v in range(n):
+        heappush(sh, Step(best[v], v), key=lambda s: (s.dist, s.node))
+    s = heappop(sh, key=lambda s: (s.dist, s.node))
+    seen: list[int] = []
+    for x in [5, 1, 4]:
+        insort(seen, x)
+    print(best[3], s.dist, s.node, seen[0], bisect_left(seen, 4))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -874,43 +987,59 @@ fn main() {
 
 ## BFS: graph, grid DP, buckets (example)
 
-```ail
-struct Graph { adj: list[list[int]]; }
-impl Graph {
-    fn add(self, u: int, v: int) -> void { self.adj[u].append(v); self.adj[v].append(u); }
-}
-fn bfs(adj: list[list[int]], src: int) -> list[int] {
-    let dist = [-1] * len(adj);
-    dist[src] = 0;
-    let q = [src];
-    let head = 0;
-    while head < len(q) {
-        let u = q[head];
-        head += 1;
-        for v in adj[u] {
-            if dist[v] < 0 { dist[v] = dist[u] + 1; q.append(v); }
-        }
-    }
-    return dist;
-}
-fn main() {
-    let n = 5;
-    let g = Graph([[] for _ in range(n)]);
-    g.add(0, 1); g.add(1, 2); g.add(0, 3); g.add(3, 2);
-    let d = bfs(g.adj, 0);
-    print(d[2], d[4], len(g.adj[2]));
-    let h = 3; let w = 4;
-    let paths = [[1] * w for _ in range(h)];
-    for i in range(1, h) {
-        for j in range(1, w) { paths[i][j] = paths[i - 1][j] + paths[i][j - 1]; }
-    }
-    let buckets: list[list[str]] = [[] for _ in range(3)];
-    for word in "pear fig apple kiwi plum".split() { buckets[len(word) % 3].append(word); }
-    for b in buckets { b.sort(); }
-    let row = paths[2];
-    row.append(0);
-    print(paths[h - 1][w - 1], len(paths[2]), ",".join(buckets[1]));
-}
+```python
+import sys
+
+class Graph:
+
+    def __init__(self, adj: list[list[int]]):
+        self.adj = adj
+
+    def add(self, u: int, v: int) -> None:
+        self.adj[u].append(v)
+        self.adj[v].append(u)
+
+def bfs(adj: list[list[int]], src: int) -> list[int]:
+    dist = [-1] * len(adj)
+    dist[src] = 0
+    q = [src]
+    head = 0
+    while head < len(q):
+        u = q[head]
+        head += 1
+        for v in adj[u]:
+            if dist[v] < 0:
+                dist[v] = dist[u] + 1
+                q.append(v)
+    return dist
+
+def main() -> int:
+    n = 5
+    g = Graph([[] for _ in range(n)])
+    g.add(0, 1)
+    g.add(1, 2)
+    g.add(0, 3)
+    g.add(3, 2)
+    d = bfs(g.adj, 0)
+    print(d[2], d[4], len(g.adj[2]))
+    h = 3
+    w = 4
+    paths = [[1] * w for _ in range(h)]
+    for i in range(1, h):
+        for j in range(1, w):
+            paths[i][j] = paths[i - 1][j] + paths[i][j - 1]
+    buckets: list[list[str]] = [[] for _ in range(3)]
+    for word in 'pear fig apple kiwi plum'.split():
+        buckets[len(word) % 3].append(word)
+    for b in buckets:
+        b.sort()
+    row = paths[2]
+    row.append(0)
+    print(paths[h - 1][w - 1], len(paths[2]), ','.join(buckets[1]))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -930,17 +1059,22 @@ fn main() {
 | `json_pointer` | `json_parse_document(text) -> list[JsonValue]`, `JsonValue{kind; parent; key; text}` (kind 0 null, 1 bool, 2 number, 3 string, 4 array, 5 object), `json_quote(s)` |
 | `utf8_stream`, `cli_args`, `path_posix`, `base64_codec`, `csv_writer`, `binary_cursor` | see `api NAME` |
 
-```ail
-use csv_stream;
-use json_pointer_scan;
-fn main() {
-    let dec = csv_decoder_new();
-    let rows = csv_decode_feed(dec, "name,qty\n\n\"x,\"\"y\",-5\r\nb,2");
-    rows.extend(csv_decode_finish(dec));
-    print(len(rows), rows[1].fields[0], rows[2].fields[1]);
-    let found = json_pointer_scan_bytes(b"{\"a\": {\"b\": [10, \"t\\u00e9\"]}}", ["/a/b/1", "/a"]);
-    print(found.error, found.values[0], found.values[1]);
-}
+```python
+from csv_stream import *
+from json_pointer_scan import *
+import sys
+
+def main() -> int:
+    dec = csv_decoder_new()
+    rows = csv_decode_feed(dec, 'name,qty\n\n"x,""y",-5\r\nb,2')
+    rows.extend(csv_decode_finish(dec))
+    print(len(rows), rows[1].fields[0], rows[2].fields[1])
+    found = json_pointer_scan_bytes(b'{"a": {"b": [10, "t\\u00e9"]}}', ['/a/b/1', '/a'])
+    print(found.error, found.values[0], found.values[1])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
@@ -984,22 +1118,29 @@ iterations could see each other:
 - An error in the body (IndexError, OverflowError) is raised after the loop, the same one a
   sequential run hits first. Not allowed in a function that has try/except: put the loop in its own `fn`.
 
-```ail
-fn row_sums(n: int) -> list[float] {
-    let out = [0.0] * n;
-    parallel for i in range(0, n) {
-        let s = 0.0;
-        for j in range(0, n) { s += 1.0 / float(i + j + 1); }
-        out[i] = s;
-    }
-    return out;
-}
-fn main() {
-    let r = row_sums(1000);
-    let total = 0.0;
-    for x in r { total += x; }
-    print(r[0], r[999], total);
-}
+```python
+from ail import par_range
+import sys
+
+def row_sums(n: int) -> list[float]:
+    out = [0.0] * n
+    for i in par_range(0, n):
+        s = 0.0
+        for j in range(0, n):
+            s += 1.0 / float(i + j + 1)
+        out[i] = s
+    return out
+
+def main() -> int:
+    r = row_sums(1000)
+    total = 0.0
+    for x in r:
+        total += x
+    print(r[0], r[999], total)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ```text
