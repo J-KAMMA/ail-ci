@@ -116,6 +116,27 @@ class TypedReach(unittest.TestCase):
             self.assertEqual(run(exe).stdout, expected)
             self.assertEqual(expected, 'notempty\nnone\n')
 
+    def _check_probes(self, probes):
+        with tempfile.TemporaryDirectory(prefix='ail-pyreach-') as tmp:
+            for name, (text, expected) in probes.items():
+                source = Path(tmp) / (name + '.py')
+                source.write_text(text, encoding='utf8')
+                reference = subprocess.run([sys.executable, str(source)], capture_output=True,
+                                           text=True, timeout=120)
+                self.assertEqual(reference.stdout, expected, name)
+                for unified in (False, True):
+                    result, exe = build_probe(tmp, name, source, unified)
+                    self.assertEqual(result.returncode, 0, (name, unified, result.stderr[-2000:]))
+                    got = run(exe)
+                    self.assertEqual((got.stdout, got.returncode),
+                                     (reference.stdout, reference.returncode), (name, unified))
+
+    def test_dict_of_lists_cycle_probes(self):
+        self._check_probes({
+            'p_dl_cycle': (DICT_OF_LISTS_CYCLE, '1\n'),
+            'p_dl_cycle2': (DICT_OF_LISTS_CYCLE2, '1\n'),
+        })
+
     def test_unannotated_bytes_helper_owns_its_result(self):
         with tempfile.TemporaryDirectory(prefix='ail-pyreach-') as tmp:
             result, exe = build(tmp, 'owned_bytes', OWNED_BYTES)
@@ -194,6 +215,66 @@ DICT_OF_LISTS_COMPARISON = '''def main():
         print("none")
     else:
         print("notnone")
+
+
+main()
+'''
+
+DICT_OF_LISTS_CYCLE = '''def main():
+    x = 1
+    x = x
+    d = {}
+    d.setdefault("k", []).append(x)
+    row = d.get("k")
+    if row:
+        print(row[0])
+
+
+main()
+'''
+
+DICT_OF_LISTS_CYCLE2 = '''def main():
+    x = 1
+    y = x
+    x = y
+    d = {}
+    d.setdefault("k", []).append(x)
+    row = d.get("k")
+    if row:
+        print(row[0])
+
+
+main()
+'''
+
+DICT_OF_LISTS_SEMI = '''def main():
+    d = {}
+    d.setdefault("k", []).append(1); d.setdefault("k", []).append(2)
+    row = d.get("k")
+    if row:
+        print(row[0], row[1])
+
+
+main()
+'''
+
+DICT_OF_LISTS_EXPR = '''def main():
+    d = {}
+    x = d.setdefault("k", []).append(4)
+    row = d.get("k")
+    print(x, row[0])
+
+
+main()
+'''
+
+DICT_OF_LISTS_LAMBDA = '''def main():
+    d = {}
+    f = lambda v: d.setdefault("k", []).append(v)
+    f(4)
+    row = d.get("k")
+    if row:
+        print(row[0])
 
 
 main()
@@ -288,6 +369,20 @@ main()
 '''
 
 ECHO_PACK = ROOT.parent / 'lab' / 'compare' / 'src' / 'echo_pack' / 'main.py'
+
+
+def build_probe(tmp, name, source, unified):
+    exe = Path(tmp) / (name + ('_unified' if unified else '_default'))
+    env = dict(os.environ, AIL_NO_CACHE='1')
+    env.pop('AIL_STRICT', None)
+    env.pop('AIL_NO_GENERAL', None)
+    if unified:
+        env['AIL_UNIFIED_FORCE'] = '1'
+    else:
+        env.pop('AIL_UNIFIED_FORCE', None)
+    result = subprocess.run([sys.executable, '-B', str(CLI), 'compile', str(source), '--syntax', 'python',
+                             '-o', str(exe)], capture_output=True, text=True, timeout=600, env=env)
+    return result, exe
 
 
 def build_source(tmp, name, source):

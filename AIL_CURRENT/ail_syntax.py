@@ -4266,11 +4266,13 @@ def ail_array_surface(source, notes=None):
     return _ailarray().rewrite_text(source, notes)
 
 
-def _dict_of_lists_kind(fn, values):
+def _dict_of_lists_kind(fn, values, seen=None):
     """The element kind a lowered dict-of-lists row holds, from the appended values.  Only the
     scalar kinds are built; anything ambiguous stays int (and is then refused by annotation if it
-    is not an int, never silently mistyped)."""
+    is not an int, never silently mistyped).  A name whose assignment chain reaches itself stops
+    at int instead of recursing forever."""
     found = set()
+    seen = set() if seen is None else seen
     assigned = {}
     for node in ast.walk(fn):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
@@ -4287,7 +4289,11 @@ def _dict_of_lists_kind(fn, values):
         elif isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
             found.add({'float': 'float', 'str': 'str', 'bytes': 'bytes'}.get(value.func.id, 'int'))
         elif isinstance(value, ast.Name):
-            kinds = {_dict_of_lists_kind(fn, [v]) for v in assigned.get(value.id, ())}
+            if value.id in seen:
+                found.add('int')
+                continue
+            inner = seen | {value.id}
+            kinds = {_dict_of_lists_kind(fn, [v], inner) for v in assigned.get(value.id, ())}
             kinds.discard(None)
             found |= kinds or {'int'}
             if not kinds:
