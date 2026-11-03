@@ -1550,8 +1550,21 @@ def _is_jd_result_call(node, ctx):
 
 
 def _etype(node, ctx):
-    if _NULLABLE and isinstance(node, ast.Constant) and node.value is None:
-        return NULLK
+    if isinstance(node, ast.Constant):
+        value = node.value
+        if value is None:
+            return NULLK if _NULLABLE else INT
+        if type(value) is bool or type(value) is int:
+            return INT
+        if type(value) is float:
+            return FLT
+        if type(value) is str:
+            return STR
+        if type(value) is bytes:
+            return BYTES
+        return INT
+    if isinstance(node, ast.Name) and (node.id in ctx.kind or node.id in ctx.types):
+        return ctx.type_of(node.id)
     if dunders.is_exc_code(node):
         return INT
     if _is_sys_argv_index(node):
@@ -7259,6 +7272,13 @@ def _slist_call_temp(node, ctx):
 
 
 def _is_slist_expr(node, ctx):
+    if isinstance(node, ast.Constant):
+        return False
+    if isinstance(node, ast.Name):
+        try:
+            return ctx.type_of(node.id) == SLIST
+        except Unsupported:
+            return False
     """Whether `node` denotes a list-of-str VALUE -- an already-bound SLIST name, or an inline
     `.split()`/`.splitlines()` call (`_is_slist_call`). Shared by `.join()`'s one argument
     (`_is_str_join_call`) and `_slist_arg_c` below, the read-side counterpart of `_is_str_expr`
@@ -8020,6 +8040,13 @@ def _check_utf8_codec_args(node):
 
 
 def _is_str_expr(node, ctx):
+    if isinstance(node, ast.Constant):
+        return type(node.value) is str
+    if isinstance(node, ast.Name):
+        try:
+            return ctx.type_of(node.id) == STR
+        except Unsupported:
+            return False
     if _local_slist_pop(node, ctx) or _string_field_call(node, ctx) and node.func.attr == 'pop':
         return True
     if _exception_field(node, ctx):
@@ -11208,6 +11235,13 @@ def _bytes_search_value(node, ctx):
 
 
 def _is_bytes_expr(node, ctx):
+    if isinstance(node, ast.Constant):
+        return type(node.value) is bytes
+    if isinstance(node, ast.Name):
+        try:
+            return ctx.type_of(node.id) == BYTES
+        except Unsupported:
+            return False
     """Whether `node` denotes a bytes VALUE (not a byte read out of one) -- used to route a
     comparison to `ail_bytes_cmp`/`ail_bytes_eq` instead of plain integer comparison, and to
     recognise a bytes-producing right-hand side wherever one may appear."""
@@ -28817,8 +28851,10 @@ def _promote_floats(fn, ctx):
     """
     _seed_local_annotations(fn, ctx)
     nodes = tuple(ast.walk(fn))
+    bind_nodes = tuple(n for n in nodes
+                       if isinstance(n, (ast.ListComp, ast.List, ast.Assign, ast.Call, ast.For, ast.Return)))
     for _ in range(len(nodes) + 1):
-        _bind_object_types(fn, ctx, nodes)
+        _bind_object_types(fn, ctx, nodes, bind_nodes=bind_nodes)
         changed = False
         for node in nodes:
             if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
@@ -28842,7 +28878,7 @@ def _promote_floats(fn, ctx):
     for name in ctx.blist:
         if name not in ctx.kind:
             ctx.types[name] = BLIST
-    _bind_object_types(fn, ctx, nodes)
+    _bind_object_types(fn, ctx, nodes, bind_nodes=bind_nodes)
     # `slist_names`: every name ever assigned a list of str (AIL_TASK_strops_20260915.md Part B)
     # -- the SLIST counterpart of `container_names` below, needed for the identical reason
     # (`words = s.split()` is settled in `_stmt`'s own SLIST branch, not here). Grown in the SAME
@@ -29912,7 +29948,7 @@ def _mark_tuple_dicts(fn, ctx):
     return out
 
 
-def _bind_object_types(fn, ctx, nodes=None, assigned_names=None):
+def _bind_object_types(fn, ctx, nodes=None, assigned_names=None, bind_nodes=None):
     """Seed `ctx.types` with the class of a local first assigned a constructor call, or a call to
     another function already known (from `ctx.funcs`, mid fixed-point) to return one -- the same
     job `_bind_container_types` does for LIST/FLIST, done here for class instances, and for the
@@ -29927,6 +29963,9 @@ def _bind_object_types(fn, ctx, nodes=None, assigned_names=None):
     handler, so without one it is never built (nor asked for)."""
     if nodes is None:
         nodes = list(ast.walk(fn))
+    if bind_nodes is None:
+        bind_nodes = [node for node in nodes
+                      if isinstance(node, (ast.ListComp, ast.List, ast.Assign, ast.Call, ast.For, ast.Return))]
     handlers = [node for node in nodes if isinstance(node, ast.ExceptHandler) and node.name]
     if handlers:
         if assigned_names is None:
@@ -29983,7 +30022,7 @@ def _bind_object_types(fn, ctx, nodes=None, assigned_names=None):
         return old != kind
     for _ in range(len(nodes) + 1):
         changed = False
-        for node in nodes:
+        for node in bind_nodes:
             if isinstance(node, ast.ListComp) and _is_ref_kind(known(node.elt)):
                 raise Unsupported('struct list comprehensions are unsupported')
             if isinstance(node, ast.List):
