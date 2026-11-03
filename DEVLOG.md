@@ -1,3 +1,14 @@
+## 2026-11-03 -- rel-rterr3b review fix: DIFFERENCES row no longer lists fixed `//`/recursion wording
+
+The reviewer's only defect was `DIFFERENCES.md`: the uncaught-trap row still claimed `//` and
+recursion printed the old `integer division by zero` / `recursion depth exceeded` text.  Probes
+`p19` (`x // 0`) and `p9` (recursion) print `ZeroDivisionError: integer division or modulo by
+zero` / `RecursionError: maximum recursion depth exceeded` in the default build, matching CPython;
+only the `KeyError` payload wording (`key error` vs `'key'`) remains.  The row is corrected and
+`test_ail_build_reports` is now named as the extra edited baseline in the finish entry below.
+Re-ran the gate modules, `test_ail_safetynet` (unlimited address space), `test_ail_files` and
+`test_ail_corpus_findings3`: all pass; `tools/update_manifest.py --check` is clean.
+
 ## 2026-11-03 -- rel-rterr finish (job-relrterr3b-11040718): applied relrterr3 work on current integ and re-verified
 
 Cherry-picked, in order, the work commits after `job relrterr3: export of staging:integ + task`
@@ -30,7 +41,8 @@ Gate modules, the changed expectation modules, `test_ail_bigint`, `test_ail_buil
 `test_ail_c_export`, `test_c_api_bridge`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass (the ASan and `S4_generators_gc` cases only fail under the 1.5 GB
 virtual-memory cap).  Message expectations updated by this change remain the ones listed in the
-three rel-rterr entries below.
+three rel-rterr entries below; `test_ail_build_reports` is also edited, but only its in-process C
+baseline (it now sets `AIL_LINE_MAP` so the release C matches the CLI), not a message assertion.
 
 ## 2026-11-03 -- rel-rterr follow-up review: C API tail, cache key and build-report baseline
 
