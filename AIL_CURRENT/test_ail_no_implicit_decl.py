@@ -211,7 +211,7 @@ print(1)
     def test_scan_example_set(self):
         # a spread of the repository's own programs: language examples, two compare-lab tasks in both syntaxes
         repo = HERE.parent
-        picks = sorted((HERE / 'language_examples').glob('*.ail'))[::90]
+        picks = sorted((HERE / 'language_examples').glob('*.py'))[::90]
         for task in ('tree_fold', 'tally_lang'):
             for fn in ('main.ail', 'main.py'):
                 p = repo / 'lab' / 'compare' / 'src' / task / fn

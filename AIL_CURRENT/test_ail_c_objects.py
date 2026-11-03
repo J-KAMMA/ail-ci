@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parent
 
 
 def raw_reader_source():
-    """c_interop.ail reading with newline='': text-mode open() translates CRLF and CR to LF
+    """c_interop.py reading with newline='': text-mode open() translates CRLF and CR to LF
     (universal newlines, as in CPython), but these tests checksum the file bytes unchanged."""
-    source = (ROOT / 'language_examples' / 'c_interop.ail').read_text(encoding='utf8')
+    source = (ROOT / 'language_examples' / 'c_interop.py').read_text(encoding='utf8')
     patched = source.replace('open(sys.argv[1])', "open(sys.argv[1], newline='')")
     assert patched != source
     return patched

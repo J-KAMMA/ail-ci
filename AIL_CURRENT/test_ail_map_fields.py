@@ -12,8 +12,8 @@ def build(case,name,source,modules=()):
     def include(module):
         if module in seen:return
         seen.add(module)
-        text=(support.ROOT/'language_examples'/(module+'.ail')).read_text(encoding='utf8')
-        for dependency in re.findall(r'^use (\w+);',text,re.M):include(dependency)
+        text=(support.ROOT/'language_examples'/(module+'.py')).read_text(encoding='utf8')
+        for dependency in re.findall(r'^from (\w+) import',text,re.M):include(dependency)
         paths.append(case.write(module+'.ail',text))
     for module in modules:include(module)
     ast.parse(translate(source,imports=[]))

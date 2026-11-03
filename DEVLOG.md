@@ -1,3 +1,14 @@
+## 2026-11-03 -- onelang s10: Appendix C tests read the `language_examples/*.py` twins
+
+The first half of the `language_examples` readers now build the Python twins: `build_cache`,
+`c_objects`, `ex13`, `ex32`, `exception_values_app`, `float64_codec`, `map_fields` and
+`no_implicit_decl`.  A Python `import` now prefers `m.py` over a brace `m.ail` in the same
+directory, matching CPython and the twins' `from m import *` lines; brace `use` still resolves
+`m.ail`.  The modules whose twin build needs a compiler change stay on the brace source and are
+listed in `AIL_CURRENT/onelang_brace_only.txt` (`binary_cursor_cli`, `cli_args`, `context_imports`,
+the three CSV modules and `object_json_query`).  The ten converted compare-lab tasks and the
+`.ail` codegen pins are unchanged.
+
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class

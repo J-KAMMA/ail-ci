@@ -1,0 +1,15 @@
+# Brace sources left in the Appendix C test modules after onelang s10.
+# One line per remaining `language_examples/X.ail` use; the reason is a compiler limit or a
+# brace-only fixture that has no twin build.
+AIL_CURRENT/test_ail_binary_cursor_cli.py:83  compile-module builds the brace class module; a Python class module is refused
+AIL_CURRENT/test_ail_binary_cursor_cli.py:100  compile-module builds the brace class module; a Python class module is refused
+AIL_CURRENT/test_ail_binary_cursor_cli.py:109  brace entry installs the class module object under test
+AIL_CURRENT/test_ail_binary_cursor_cli.py:116  brace module text is extended with brace state probes
+AIL_CURRENT/test_ail_cli_args.py:24  check --library refuses a Python class module
+AIL_CURRENT/test_ail_context_imports.py:100  the context API reads brace syntax only
+AIL_CURRENT/test_ail_csv_rewrite_stream.py:88  first difference: twin build refuses `csv_stream.CsvRow(row, fields)` aliasing
+AIL_CURRENT/test_ail_csv_rewrite_stream.py:221  brace API fixture; twin build refuses `csv_stream.CsvRow(row, fields)` aliasing
+AIL_CURRENT/test_ail_csv_rewrite_stream_resources.py:54  first difference: twin build refuses `csv_stream.CsvRow(row, fields)` aliasing
+AIL_CURRENT/test_ail_csv_writer.py:15  first difference: twin build refuses `csv_stream.CsvRow(row, fields)` aliasing
+AIL_CURRENT/test_ail_csv_writer.py:50  first difference: twin build refuses `csv_stream.CsvRow(row, fields)` aliasing
+AIL_CURRENT/test_ail_object_json_query.py:141  compile-module cannot take the Python twin; a Python class module is refused

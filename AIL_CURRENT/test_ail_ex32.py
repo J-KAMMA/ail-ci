@@ -1,6 +1,6 @@
 """ex32: a print-only script of an integer constant expression runs on the typed path.
 
-`language_examples/hello.ail` is `print(40 + 2)`.  The typed path refused it with
+`language_examples/hello.py` is `print(40 + 2)`.  The typed path refused it with
 "a script that is only print(<expression>) needs general object semantics" although 40 + 2 is a
 proven int constant expression, so the default build had to take the general path.  The print
 gate now accepts integer constant expressions whose exact value fits int64; an out-of-int64
@@ -93,7 +93,7 @@ class Ex32Tests(unittest.TestCase):
     def test_hello_and_integer_constant_expressions_match(self):
         with tempfile.TemporaryDirectory(prefix='ail-ex32-') as directory:
             cases = dict(MATCHING)
-            cases['hello'] = (EXAMPLES / 'hello.ail').read_text(encoding='utf-8')
+            cases['hello'] = (EXAMPLES / 'hello.py').read_text(encoding='utf-8')
             for slug, text in cases.items():
                 want = cpython(directory, slug, text)
                 for mode in ('g', 'd', 't'):

@@ -351,6 +351,10 @@ class Program:
         for d in dirs:
             inits = [p for p in (d / leaf / '__init__.py', d / leaf / '__init__.ail') if p.is_file()]
             files = [p for p in (d / (leaf + '.py'), d / (leaf + '.ail')) if p.is_file()]
+            if any(p.suffix == '.py' for p in inits):
+                inits = [p for p in inits if p.suffix == '.py']
+            if any(p.suffix == '.py' for p in files):
+                files = [p for p in files if p.suffix == '.py']
             if inits:
                 if len(inits) > 1 or files:
                     self.refuse(importer, node, "import of %r is ambiguous: %s all exist, and CPython would pick the "

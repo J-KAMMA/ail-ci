@@ -63,10 +63,10 @@ class ExceptionValuesAppTests(unittest.TestCase):
 
     def test_config_cli_reference_and_file_cleanup(self):
         examples = support.ROOT / 'language_examples'
-        shutil.copy2(examples / 'checked_integer.ail', self.root / 'checked_integer.ail')
-        shutil.copy2(examples / 'config_core.ail', self.root / 'config_core.ail')
+        shutil.copy2(examples / 'checked_integer.py', self.root / 'checked_integer.py')
+        shutil.copy2(examples / 'config_core.py', self.root / 'config_core.py')
         executable = self.ail_build('config_validate',
-                                   (examples / 'config_validate.ail').read_text(encoding='utf-8-sig'))
+                                   (examples / 'config_validate.py').read_text(encoding='utf-8-sig'))
         path = self.root / '設定😀.txt'
         cases = ['', '# only\n\n', '日本=+2\n二=-3\r\n', 'x=1\nx=2',
                  f'x={LOW}', f'x={HIGH}', f'x={HIGH}\ny=1', f'x={LOW}\ny=-1',
@@ -88,9 +88,9 @@ class ExceptionValuesAppTests(unittest.TestCase):
 
     def test_batch_retains_errors_and_struct_fields_until_reporting(self):
         examples = support.ROOT / 'language_examples'
-        for name in ('checked_integer.ail', 'config_core.ail', 'json_text.ail'):
+        for name in ('checked_integer.py', 'config_core.py', 'json_text.py'):
             shutil.copy2(examples / name, self.root / name)
-        binary = self.ail_build('config_batch', (examples / 'config_batch.ail').read_text(encoding='utf8'))
+        binary = self.ail_build('config_batch', (examples / 'config_batch.py').read_text(encoding='utf8'))
         paths = []; expected = {'reports': [], 'errors': []}
         payloads = [b'x=2\ny=-3', b'x=bad', b'x=9223372036854775807\ny=1', b'\xff',
                     ('x=' + '日😀' * 8193).encode(), b'x=-9223372036854775808', None]
@@ -121,15 +121,21 @@ class ExceptionValuesAppTests(unittest.TestCase):
 
     def test_batch_merge_owns_string_fields_and_preserves_source(self):
         examples = support.ROOT / 'language_examples'
-        for name in ('checked_integer.ail', 'config_core.ail', 'json_text.ail'):
+        for name in ('checked_integer.py', 'config_core.py', 'json_text.py'):
             shutil.copy2(examples / name, self.root / name)
-        prefix = (examples / 'config_batch.ail').read_text(encoding='utf8').split('fn main()', 1)[0]
-        main = '''fn main()->int {
-            let left=validate_many(sys.argv[1:2]);let right=validate_many(sys.argv[2:]);
-            let saved=batch_json(right);let merged=merge_config_batches(left,right);
-            if batch_json(right)!=saved {return 9;}
-            write_stdout_bytes((batch_json(merged)+"\\n").encode());return 0;
-        }'''
+        prefix = (examples / 'config_batch.py').read_text(encoding='utf8').split('def main()', 1)[0]
+        main = '''def main() -> int:
+    left = validate_many(sys.argv[1:2])
+    right = validate_many(sys.argv[2:])
+    saved = batch_json(right)
+    merged = merge_config_batches(left, right)
+    if batch_json(right) != saved:
+        return 9
+    write_stdout_bytes((batch_json(merged) + "\\n").encode())
+    return 0
+
+main()
+'''
         binary = self.ail_build('config_merge', prefix + main)
         payloads = [b'x=2\ny=-3', 'x=日本😀'.encode(), b'y=4']
         paths=[]; wanted={'reports': [], 'errors': []}

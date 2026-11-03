@@ -1,6 +1,6 @@
 """A Python source that is only definitions plus module constants runs no code, like CPython.
 
-`language_examples/math.ail` is such a file (`LIMIT = 6` and `def sum_to(n)`): CPython prints
+`language_examples/math.py` is such a file (`LIMIT = 6` and `def sum_to(n)`): CPython prints
 nothing and exits 0, and the general path already built the same no-op. The typed path compiled
 the functions and then tried to synthesize the array-entry "tool" wrapper, which refused because
 the entry function's first parameter is not a sequence. It now emits a no-op `main` for a source

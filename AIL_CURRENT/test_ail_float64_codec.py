@@ -49,7 +49,7 @@ class Float64CodecTests(unittest.TestCase):
         return exe
 
     def test_raw_bits_owned_results_and_relocated_source_free_module(self):
-        obj = self.ail_build('codec', (support.ROOT / 'language_examples/binary_float64.ail').read_text(),
+        obj = self.ail_build('codec', (support.ROOT / 'language_examples/binary_float64.py').read_text(),
                              library=True)
         folder = self.root / '移動 😀'; folder.mkdir()
         moved = folder / obj.name
@@ -226,7 +226,7 @@ int main(int argc,char **argv) {
     def test_practical_binary_pipeline_large_input_and_errors(self):
         examples = support.ROOT / 'language_examples'
         exe = self.root / ('scale.exe' if os.name == 'nt' else 'scale')
-        compiled = self.command('compile', examples / 'numeric_scale_binary_main.ail', '-o', exe)
+        compiled = self.command('compile', examples / 'numeric_scale_binary_main.py', '-o', exe)
         self.assertEqual(compiled.returncode, 0, compiled.stderr.decode(errors='replace'))
         src = self.root / 'numbers.bin'
         # Independent CPython arithmetic oracle; one multiply per finite input.
