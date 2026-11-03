@@ -283,9 +283,14 @@ def convert(source):
     head = [f'from {name} import *' for name in imports]
     head_meta = [(uses[index][1], 0) if index < len(uses) else None
                  for index in range(len(imports))]
-    used = {node.func.id for node in ast.walk(ast.parse(text))
+    module = ast.parse(text)
+    defined = {node.name for node in ast.walk(module)
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    defined.update(node.id for node in ast.walk(module)
+                   if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store))
+    used = {node.func.id for node in ast.walk(module)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id in ail_syntax.AIL_IMPORT_NAMES}
+            and node.func.id in ail_syntax.AIL_IMPORT_NAMES} - defined
     if used:
         head.append('from ail import ' + ', '.join(sorted(used)))
         head_meta.append(None)

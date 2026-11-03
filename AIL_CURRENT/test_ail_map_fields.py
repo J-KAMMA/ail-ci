@@ -3,7 +3,7 @@ import ast
 import re
 import subprocess
 import unittest
-from ail_syntax import translate
+from ail_syntax import detect, translate
 import test_ail_c_objects as support
 
 
@@ -16,7 +16,7 @@ def build(case,name,source,modules=()):
         for dependency in re.findall(r'^use (\w+);',text,re.M):include(dependency)
         paths.append(case.write(module+'.ail',text))
     for module in modules:include(module)
-    ast.parse(translate(source,imports=[]))
+    ast.parse(translate(source,imports=[]) if detect(source) else source)
     path=case.write(name+'.ail',source);output=case.root/name
     result=case.command('compile',path,*(arg for p in paths for arg in ('--module',p)),'-o',output)
     case.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))

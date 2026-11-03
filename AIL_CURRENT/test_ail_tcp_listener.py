@@ -17,63 +17,213 @@ from test_ail_map_fields import build
 from test_ail_exception_resources import ALLOCATOR, ROOT
 
 
-PROVIDER=r'''fn echo_peer(peer:tcpsocket)->int {
- let total:int=0; let buffer=bytearray(8193);
- while True { let count=peer.recv_into(buffer); if count==0 { break; } peer.send(buffer[:count]); total+=count; }
- peer.shutdown_write(); return total;
-}'''
-SERVER=PROVIDER+r'''fn main()->int {
- let listener=tcp_listen("127.0.0.1",0,4); print(listener.local_port()); flush_stdout();
- let peer=listener.accept(); listener.close(); let total=echo_peer(peer); peer.close(); print(total); return 0;
-}'''
-SHARED=PROVIDER+r'''struct Holder { listener:tcpsocket; }
-fn identity(peer:tcpsocket)->tcpsocket { return peer; }
-fn main()->int {
- let listener=tcp_listen("127.0.0.1",0,4); let holder=Holder(listener); let callback:Callable[[tcpsocket],tcpsocket]=identity;
- let alias=callback(holder.listener); print(listener.local_port()); flush_stdout();
- let first=alias.accept(); let kept=identity(first); let second=listener.accept(); second.close(); alias.close();
- if listener.closed!=1 or kept.closed!=0 { return 9; }
- let total=echo_peer(kept); first.close(); kept.close(); print(total); return 0;
-}'''
-ROLES=r'''fn main()->int {
- let listener=tcp_listen("127.0.0.1",0,4); let port=listener.local_port(); print(port); flush_stdout(); let caught:int=0;
- try { listener.send(b""); } except OSError { caught+=1; }
- try { listener.recv(0); } except OSError { caught+=1; }
- try { listener.recv_into(bytearray()); } except OSError { caught+=1; }
- try { listener.shutdown_write(); } except OSError { caught+=1; }
- let peer=listener.accept(); try { peer.accept(); } except OSError { caught+=1; }
- if peer.local_port()!=port { return 9; } peer.close(); listener.close(); listener.close();
- try { listener.accept(); } except ValueError { caught+=1; }
- try { listener.local_port(); } except ValueError { caught+=1; }
- try { listener.send(b""); } except ValueError { caught+=1; }
- try { listener.recv(0); } except ValueError { caught+=1; }
- try { listener.shutdown_write(); } except ValueError { caught+=1; }
- print(caught); return 0;
-}'''
-INVALID=r'''fn main()->int {
- let caught:int=0;
- try { tcp_listen("",0,1); } except ValueError { caught+=1; }
- try { tcp_listen("127\0.0.0.1",0,1); } except ValueError { caught+=1; }
- try { tcp_listen("127.0.0.1é",0,1); } except ValueError { caught+=1; }
- try { tcp_listen("127.0.0.1",-1,1); } except ValueError { caught+=1; }
- try { tcp_listen("127.0.0.1",65536,1); } except ValueError { caught+=1; }
- try { tcp_listen("127.0.0.1",0,0); } except ValueError { caught+=1; }
- try { tcp_listen("127.0.0.1",0,2147483648); } except ValueError { caught+=1; }
- print(caught); return 0;
-}'''
-NAMES=r'''fn accept()->int { return 17; } fn bind()->int { return 19; } fn listen()->int { return 23; }
-fn main()->int { let listener=tcp_listen("127.0.0.1",0,1); listener.close(); print(accept()); print(bind()); print(listen()); return 0; }'''
-RESOURCE=PROVIDER+r'''fn run(n:int)->int {
- let listener=tcp_listen("127.0.0.1",0,4); print(listener.local_port()); flush_stdout(); let total:int=0;
- try {
-  for i in range(n) {
-   let peer=listener.accept();
-   try { total+=echo_peer(peer); let temporary=bytearray(17); raise ValueError; }
-   except ValueError { total+=1; } finally { peer.close(); }
-  }
- } finally { listener.close(); }
- return total;
-}'''
+PROVIDER=r"""def echo_peer(peer: tcpsocket) -> int:
+    total: int = 0
+    buffer = bytearray(8193)
+    while True:
+        count = peer.recv_into(buffer)
+        if count == 0:
+            break
+        peer.send(buffer[:count])
+        total += count
+    peer.shutdown_write()
+    return total
+"""
+SERVER=PROVIDER+r"""from ail import flush_stdout, tcp_listen
+import sys
+
+def main() -> int:
+    listener = tcp_listen('127.0.0.1', 0, 4)
+    print(listener.local_port())
+    flush_stdout()
+    peer = listener.accept()
+    listener.close()
+    total = echo_peer(peer)
+    peer.close()
+    print(total)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+SHARED=PROVIDER+r"""from ail import flush_stdout, tcp_listen
+import sys
+
+class Holder:
+
+    def __init__(self, listener: tcpsocket):
+        self.listener = listener
+
+def identity(peer: tcpsocket) -> tcpsocket:
+    return peer
+
+def main() -> int:
+    listener = tcp_listen('127.0.0.1', 0, 4)
+    holder = Holder(listener)
+    callback: Callable[[tcpsocket], tcpsocket] = identity
+    alias = callback(holder.listener)
+    print(listener.local_port())
+    flush_stdout()
+    first = alias.accept()
+    kept = identity(first)
+    second = listener.accept()
+    second.close()
+    alias.close()
+    if listener.closed != 1 or kept.closed != 0:
+        return 9
+    total = echo_peer(kept)
+    first.close()
+    kept.close()
+    print(total)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+ROLES=r"""from ail import flush_stdout, tcp_listen
+import sys
+
+def main() -> int:
+    listener = tcp_listen('127.0.0.1', 0, 4)
+    port = listener.local_port()
+    print(port)
+    flush_stdout()
+    caught: int = 0
+    try:
+        listener.send(b'')
+    except OSError:
+        caught += 1
+    try:
+        listener.recv(0)
+    except OSError:
+        caught += 1
+    try:
+        listener.recv_into(bytearray())
+    except OSError:
+        caught += 1
+    try:
+        listener.shutdown_write()
+    except OSError:
+        caught += 1
+    peer = listener.accept()
+    try:
+        peer.accept()
+    except OSError:
+        caught += 1
+    if peer.local_port() != port:
+        return 9
+    peer.close()
+    listener.close()
+    listener.close()
+    try:
+        listener.accept()
+    except ValueError:
+        caught += 1
+    try:
+        listener.local_port()
+    except ValueError:
+        caught += 1
+    try:
+        listener.send(b'')
+    except ValueError:
+        caught += 1
+    try:
+        listener.recv(0)
+    except ValueError:
+        caught += 1
+    try:
+        listener.shutdown_write()
+    except ValueError:
+        caught += 1
+    print(caught)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+INVALID=r"""from ail import tcp_listen
+import sys
+
+def main() -> int:
+    caught: int = 0
+    try:
+        tcp_listen('', 0, 1)
+    except ValueError:
+        caught += 1
+    try:
+        tcp_listen('127\x00.0.0.1', 0, 1)
+    except ValueError:
+        caught += 1
+    try:
+        tcp_listen('127.0.0.1é', 0, 1)
+    except ValueError:
+        caught += 1
+    try:
+        tcp_listen('127.0.0.1', -1, 1)
+    except ValueError:
+        caught += 1
+    try:
+        tcp_listen('127.0.0.1', 65536, 1)
+    except ValueError:
+        caught += 1
+    try:
+        tcp_listen('127.0.0.1', 0, 0)
+    except ValueError:
+        caught += 1
+    try:
+        tcp_listen('127.0.0.1', 0, 2147483648)
+    except ValueError:
+        caught += 1
+    print(caught)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+NAMES=r"""from ail import tcp_listen
+import sys
+
+def accept() -> int:
+    return 17
+
+def bind() -> int:
+    return 19
+
+def listen() -> int:
+    return 23
+
+def main() -> int:
+    listener = tcp_listen('127.0.0.1', 0, 1)
+    listener.close()
+    print(accept())
+    print(bind())
+    print(listen())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+RESOURCE=PROVIDER+r"""from ail import flush_stdout, tcp_listen
+def run(n: int) -> int:
+    listener = tcp_listen('127.0.0.1', 0, 4)
+    print(listener.local_port())
+    flush_stdout()
+    total: int = 0
+    try:
+        for i in range(n):
+            peer = listener.accept()
+            try:
+                total += echo_peer(peer)
+                temporary = bytearray(17)
+                raise ValueError
+            except ValueError:
+                total += 1
+            finally:
+                peer.close()
+    finally:
+        listener.close()
+    return total
+"""
 
 
 class RunningServer:
@@ -182,7 +332,8 @@ class TcpListenerTests(unittest.TestCase):
         sys.path.insert(0,str(ROOT/'python/pkg-v12'))
         try:
             from pyfunc import to_c
-            code=to_c(translate(RESOURCE,module=True,imports=[]),name='run',strict=True)
+            resource=RESOURCE.replace('from ail import flush_stdout, tcp_listen\n','',1)
+            code=to_c(resource,name='run',strict=True)
         finally:sys.path.pop(0)
         drain='for(int64_t i=0;i<ail__blk_cache_n;i++)count_free(ail__blk_cache[i].p);ail__blk_cache_n=0;' if 'ail__blk_cache_n' in code else ''
         drain += ('for(int j=0;j<ail__ba_cache_n;j++){count_free(ail__ba_cache[j]->p);count_free(ail__ba_cache[j]);}ail__ba_cache_n=0;' if 'ail__ba_cache_n' in code else '')  # parked bytearrays (cruntime ail__ba_cache)

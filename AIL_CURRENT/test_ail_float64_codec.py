@@ -55,19 +55,34 @@ class Float64CodecTests(unittest.TestCase):
         moved = folder / obj.name
         obj.rename(moved); Path(str(obj) + '.json').rename(Path(str(moved) + '.json'))
         pins = self.snapshot(moved)
-        exe = self.ail_build('roundtrip', '''fn main()->int {
-let data=read_bytes(sys.argv[1]);let order=int(sys.argv[2]);
-let saved=unpack_float64((b"x"+data+b"y")[1:-1],order);
-let encoded=pack_float64(saved,1-order);
-let later=unpack_float64(data[:8],order);let extra=pack_float64(later,order);
-if len(saved)>0 {saved[0]=2.0;}
-if pack_float64(unpack_float64(data,order),order)!=data {return 4;}
-for i in range(19) {let temporary=float64_decode(data[:8],order);
-let bytes_again=float64_encode(temporary,order);}
-let seen=0;for value in float64_decode(data,order) {seen+=1;}
-if seen!=len(saved) or len(float64_encode([],True))!=0 {return 5;}
-write_stdout_bytes(encoded);return 0;
-}''', moved)
+        exe = self.ail_build('roundtrip', r"""from ail import float64_decode, float64_encode, read_bytes, write_stdout_bytes
+import sys
+
+def main() -> int:
+    data = read_bytes(sys.argv[1])
+    order = int(sys.argv[2])
+    saved = unpack_float64((b'x' + data + b'y')[1:-1], order)
+    encoded = pack_float64(saved, 1 - order)
+    later = unpack_float64(data[:8], order)
+    extra = pack_float64(later, order)
+    if len(saved) > 0:
+        saved[0] = 2.0
+    if pack_float64(unpack_float64(data, order), order) != data:
+        return 4
+    for i in range(19):
+        temporary = float64_decode(data[:8], order)
+        bytes_again = float64_encode(temporary, order)
+    seen = 0
+    for value in float64_decode(data, order):
+        seen += 1
+    if seen != len(saved) or len(float64_encode([], True)) != 0:
+        return 5
+    write_stdout_bytes(encoded)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", moved)
         rng = random.Random(498)
         bits = [0, 1, 0x8000000000000000, 0x8000000000000001,
                 0x0010000000000000, 0x000fffffffffffff, 0x7fefffffffffffff,
@@ -89,37 +104,86 @@ write_stdout_bytes(encoded);return 0;
         self.assertEqual(self.snapshot(moved), pins)
 
     def test_caught_invalid_input_evaluation_once_and_mutating_order(self):
-        exe = self.ail_build('arguments', '''struct Source { data: bytes; values: list[float]; }
-impl Source {
-fn bytes_source(self)->bytes {print(1);return self.data;}
-fn values_source(self)->list[float] {print(3);return self.values;}
-fn order(self)->int {print(2);self.data=b"";let empty:list[float]=[];self.values=empty;return 0;}
-fn fail(self)->int {print(4);raise ValueError;return 0;}
-fn float64_decode(self,x:int,y:int)->int {return x+y;}
-}
-fn main()->int {
-let s=Source(b"\\x00\\x00\\x00\\x00\\x00\\x00\\xf0\\x3f",[1.0,2.0]);
-if s.float64_decode(7,8)!=15 {return 10;}
-let decoded=float64_decode(s.bytes_source(),s.order());
-if len(decoded)!=1 or decoded[0]!=1.0 {return 4;}
-s.values=[1.0,2.0];let encoded=float64_encode(s.values_source(),s.order());
-if len(encoded)!=16 {return 5;}
-s.values=[1.0];let snapshot=float64_encode(s.values,s.order());
-if len(snapshot)!=8 {return 6;}
-s.data=b"\\x00\\x00\\x00\\x00\\x00\\x00\\xf0\\x3f";
-let field_copy=float64_decode(s.data,s.order());
-if len(field_copy)!=1 or field_copy[0]!=1.0 {return 9;}
-try {float64_encode(s.values,s.fail());return 7;} except ValueError {let caught=1;}
-let failures=0;let orders=[-9223372036854775808,-1,2,9223372036854775807];
-for order in orders {
-try {float64_decode(b"",order);} except ValueError {failures+=1;}
-try {float64_encode([],order);} except ValueError {failures+=1;}
-}
-let lengths=[1,7,9];
-for count in lengths {try {float64_decode(bytes(count),0);} except ValueError {failures+=1;}}
-if failures!=11 {return 8;}
-return 0;
-}''')
+        exe = self.ail_build('arguments', r"""from ail import float64_encode
+import sys
+
+class Source:
+
+    def __init__(self, data: bytes, values: list[float]):
+        self.data = data
+        self.values = values
+
+    def bytes_source(self) -> bytes:
+        print(1)
+        return self.data
+
+    def values_source(self) -> list[float]:
+        print(3)
+        return self.values
+
+    def order(self) -> int:
+        print(2)
+        self.data = b''
+        empty: list[float] = []
+        self.values = empty
+        return 0
+
+    def fail(self) -> int:
+        print(4)
+        raise ValueError
+        return 0
+
+    def float64_decode(self, x: int, y: int) -> int:
+        return x + y
+
+def main() -> int:
+    s = Source(b'\x00\x00\x00\x00\x00\x00\xf0?', [1.0, 2.0])
+    if s.float64_decode(7, 8) != 15:
+        return 10
+    decoded = float64_decode(s.bytes_source(), s.order())
+    if len(decoded) != 1 or decoded[0] != 1.0:
+        return 4
+    s.values = [1.0, 2.0]
+    encoded = float64_encode(s.values_source(), s.order())
+    if len(encoded) != 16:
+        return 5
+    s.values = [1.0]
+    snapshot = float64_encode(s.values, s.order())
+    if len(snapshot) != 8:
+        return 6
+    s.data = b'\x00\x00\x00\x00\x00\x00\xf0?'
+    field_copy = float64_decode(s.data, s.order())
+    if len(field_copy) != 1 or field_copy[0] != 1.0:
+        return 9
+    try:
+        float64_encode(s.values, s.fail())
+        return 7
+    except ValueError:
+        caught = 1
+    failures = 0
+    orders = [-9223372036854775808, -1, 2, 9223372036854775807]
+    for order in orders:
+        try:
+            float64_decode(b'', order)
+        except ValueError:
+            failures += 1
+        try:
+            float64_encode([], order)
+        except ValueError:
+            failures += 1
+    lengths = [1, 7, 9]
+    for count in lengths:
+        try:
+            float64_decode(bytes(count), 0)
+        except ValueError:
+            failures += 1
+    if failures != 11:
+        return 8
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""")
         actual = self.run_binary(exe)
         self.assertEqual((actual.returncode, actual.stdout.replace(b'\r\n', b'\n'), actual.stderr),
                          (0, b'1\n2\n3\n2\n2\n2\n4\n', b''))
@@ -135,9 +199,22 @@ return 0;
             with self.subTest(expression=expression), self.assertRaises(Unsupported):
                 to_c('def run() -> int:\n value = ' + expression + '\n return len(value)\n',
                      name='run', strict=True)
-        exe = self.ail_build('shadow', '''fn float64_decode(x:int,y:int)->int {return x+y;}
-fn float64_encode(x:str,y:int)->int {return len(x)+y;}
-fn main()->int {if float64_decode(7,8)!=15 or float64_encode("xy",9)!=11 {return 4;}return 0;}''')
+        exe = self.ail_build('shadow', r"""import sys
+
+def float64_decode(x: int, y: int) -> int:
+    return x + y
+
+def float64_encode(x: str, y: int) -> int:
+    return len(x) + y
+
+def main() -> int:
+    if float64_decode(7, 8) != 15 or float64_encode('xy', 9) != 11:
+        return 4
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""")
         actual = self.run_binary(exe)
         self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, b'', b''))
 

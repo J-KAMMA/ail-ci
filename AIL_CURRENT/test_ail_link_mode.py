@@ -16,7 +16,15 @@ ROOT = Path(__file__).resolve().parent
 class LinkModeTests(unittest.TestCase):
     def build(self, work, *flags):
         source = work / 'hello.ail'
-        source.write_text('fn main() -> int { print("hello"); return 0; }\n', encoding='utf8')
+        source.write_text(r"""import sys
+
+def main() -> int:
+    print('hello')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""", encoding='utf8')
         output = work / ('hello' + ''.join(f.strip('-') for f in flags))
         result = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', *flags,
                                  str(source), '-o', str(output)], capture_output=True, text=True)

@@ -11,24 +11,35 @@ import test_ail_c_objects as support
 from test_ail_map_fields import build
 
 
-SOURCE = r'''fn main() -> int {
-    let text: str = read_bytes(sys.argv[1]).decode("utf-8");
-    let quotes: int = 0;
-    let commas: int = 0;
-    let others: int = 0;
-    for c in text {
-        if c == "\"" { quotes += 1; }
-        if c != "," { others += 1; } else { commas += 1; }
-    }
-    let empty: int = 0;
-    for c in "" { if c == "a" { empty += 1; } }
-    let hits: int = 0;
-    for i in range(len(text)) {
-        if text[i] == "a" or text[-1 - i] == "\n" { hits += 1; }
-    }
-    print(quotes, commas, others, empty, hits);
-    return 0;
-}'''
+SOURCE = r"""from ail import read_bytes
+import sys
+
+def main() -> int:
+    text: str = read_bytes(sys.argv[1]).decode('utf-8')
+    quotes: int = 0
+    commas: int = 0
+    others: int = 0
+    for c in text:
+        if c == '"':
+            quotes += 1
+        if c != ',':
+            others += 1
+        else:
+            commas += 1
+    empty: int = 0
+    for c in '':
+        if c == 'a':
+            empty += 1
+    hits: int = 0
+    for i in range(len(text)):
+        if text[i] == 'a' or text[-1 - i] == '\n':
+            hits += 1
+    print(quotes, commas, others, empty, hits)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 ALPHABET = ['a', 'b', '"', ',', '\n', ' ', 'é', '日', '😀', '́', '¢', '߿', '￿', 'A']
 

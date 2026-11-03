@@ -7,30 +7,77 @@ import unittest
 import test_ail_c_objects as support
 from test_ail_map_fields import build
 
-PROBE=r'''fn main()->int {
- try {
-  if sys.argv[1]=="mkdir" { make_dir(sys.argv[2]); }
-  elif sys.argv[1]=="unlink" { remove_file(sys.argv[2]); }
-  elif sys.argv[1]=="rmdir" { remove_dir(sys.argv[2]); }
-  else { replace_path(sys.argv[2],sys.argv[3]); }
-  print("ok");return 0;
- } except ValueError { print("ValueError");return 4; }
- except OSError { print("OSError");return 3; }
-}'''
-ROUNDTRIP=r'''fn main()->int {
- let folder=sys.argv[1];make_dir(folder);
- let first=folder+"/stage.bin";let final=folder+"/result.bin";
- write_bytes(first,read_bytes(sys.argv[2]));write_bytes(final,b"old");
- replace_path(first,final);
- if path_exists(first)!=0 or path_exists(final)!=1 { return 9; }
- write_stdout_bytes(read_bytes(final));remove_file(final);remove_dir(folder);return 0;
-}'''
-SNAPSHOT=r'''struct PathBox { path:str; calls:int; }
-fn destination(box:PathBox,target:str)->str { box.path="missing source";box.calls+=1;return target; }
-fn main()->int {
- let box=PathBox(sys.argv[1],0);replace_path(box.path,destination(box,sys.argv[2]));
- write_stdout_bytes((str(box.calls)+"\n").encode("utf-8"));write_stdout_bytes(read_bytes(sys.argv[2]));return 0;
-}'''
+PROBE=r"""from ail import make_dir, remove_dir, remove_file, replace_path
+import sys
+
+def main() -> int:
+    try:
+        if sys.argv[1] == 'mkdir':
+            make_dir(sys.argv[2])
+        elif sys.argv[1] == 'unlink':
+            remove_file(sys.argv[2])
+        elif sys.argv[1] == 'rmdir':
+            remove_dir(sys.argv[2])
+        else:
+            replace_path(sys.argv[2], sys.argv[3])
+        print('ok')
+        return 0
+    except ValueError:
+        print('ValueError')
+        return 4
+    except OSError:
+        print('OSError')
+        return 3
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+ROUNDTRIP=r"""from ail import make_dir, path_exists, read_bytes, remove_dir, remove_file, replace_path, write_bytes, write_stdout_bytes
+import sys
+
+def main() -> int:
+    folder = sys.argv[1]
+    make_dir(folder)
+    first = folder + '/stage.bin'
+    final = folder + '/result.bin'
+    write_bytes(first, read_bytes(sys.argv[2]))
+    write_bytes(final, b'old')
+    replace_path(first, final)
+    if path_exists(first) != 0 or path_exists(final) != 1:
+        return 9
+    write_stdout_bytes(read_bytes(final))
+    remove_file(final)
+    remove_dir(folder)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+SNAPSHOT=r"""from ail import read_bytes, replace_path, write_stdout_bytes
+import sys
+
+class PathBox:
+
+    def __init__(self, path: str, calls: int):
+        self.path = path
+        self.calls = calls
+
+def destination(box: PathBox, target: str) -> str:
+    box.path = 'missing source'
+    box.calls += 1
+    return target
+
+def main() -> int:
+    box = PathBox(sys.argv[1], 0)
+    replace_path(box.path, destination(box, sys.argv[2]))
+    write_stdout_bytes((str(box.calls) + '\n').encode('utf-8'))
+    write_stdout_bytes(read_bytes(sys.argv[2]))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
 class FilesystemMutationTests(unittest.TestCase):
     setUp=support.CObjectTests.setUp
@@ -85,27 +132,77 @@ class FilesystemMutationTests(unittest.TestCase):
         result=subprocess.run([str(snapshot),str(first),str(final)],capture_output=True,timeout=15)
         self.assertEqual((result.returncode,result.stdout.replace(b'\r\n',b'\n'),result.stderr),(0,b'1\npayload',b''))
         self.assertFalse(first.exists());self.assertEqual(final.read_bytes(),b'payload')
-        provider='fn create(path:str)->void { make_dir(path); }\nfn discard(path:str)->void { remove_dir(path); }'
+        provider=r"""from ail import make_dir, remove_dir
+def create(path: str) -> None:
+    make_dir(path)
+
+def discard(path: str) -> None:
+    remove_dir(path)
+"""
         obj=self.ail_build('provider',provider,library=True)
         moved=self.root/'moved FS 😀';moved.mkdir();target=moved/obj.name
         shutil.move(obj,target);shutil.move(str(obj)+'.json',str(target)+'.json');before=self.snapshot(target)
-        entry='fn main()->int { create(sys.argv[1]); print(is_dir(sys.argv[1])); discard(sys.argv[1]); return 0; }'
+        entry=r"""from ail import is_dir
+import sys
+
+def main() -> int:
+    create(sys.argv[1])
+    print(is_dir(sys.argv[1]))
+    discard(sys.argv[1])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         linked=self.ail_build('entry',entry,target)
         result=subprocess.run([str(linked),str(folder)],capture_output=True,timeout=15)
         self.assertEqual((result.returncode,result.stdout.replace(b'\r\n',b'\n'),result.stderr),(0,b'1\n',b''))
         self.assertFalse(folder.exists());self.assertEqual(self.snapshot(target),before)
 
     def test_nul_empty_and_nonreturning_contracts(self):
-        source=r'''fn main()->int { let caught:int=0;
- try { make_dir("a\0b"); } except ValueError { caught+=1; }
- try { remove_file("a\0b"); } except ValueError { caught+=1; }
- try { remove_dir("a\0b"); } except ValueError { caught+=1; }
- try { replace_path(sys.argv[1],"a\0b"); } except ValueError { caught+=1; }
- try { replace_path("a\0b",sys.argv[1]); } except ValueError { caught+=1; }
- try { make_dir(""); } except OSError { caught+=1; }
- try { remove_file(""); } except OSError { caught+=1; }
- try { remove_dir(""); } except OSError { caught+=1; }
- print(caught);return 0;}'''
+        source=r"""from ail import make_dir, remove_dir, remove_file, replace_path
+import sys
+
+def main() -> int:
+    caught: int = 0
+    try:
+        make_dir('a\x00b')
+    except ValueError:
+        caught += 1
+    try:
+        remove_file('a\x00b')
+    except ValueError:
+        caught += 1
+    try:
+        remove_dir('a\x00b')
+    except ValueError:
+        caught += 1
+    try:
+        replace_path(sys.argv[1], 'a\x00b')
+    except ValueError:
+        caught += 1
+    try:
+        replace_path('a\x00b', sys.argv[1])
+    except ValueError:
+        caught += 1
+    try:
+        make_dir('')
+    except OSError:
+        caught += 1
+    try:
+        remove_file('')
+    except OSError:
+        caught += 1
+    try:
+        remove_dir('')
+    except OSError:
+        caught += 1
+    print(caught)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
         exe=build(self,'bounds',source);path=self.root/'kept';path.write_bytes(b'kept')
         result=subprocess.run([str(exe),str(path)],capture_output=True,timeout=15)
         self.assertEqual((result.returncode,result.stdout.replace(b'\r\n',b'\n'),result.stderr),(0,b'8\n',b''))
@@ -145,8 +242,31 @@ class FilesystemMutationTests(unittest.TestCase):
         self.assertFalse(link.exists());self.assertEqual((target/'kept').read_bytes(),b'kept')
 
     def test_function_and_callable_shadows_keep_user_behavior(self):
-        for i,source in enumerate(('fn make_dir(n:int)->int { return n+7; } fn main()->int { print(make_dir(3)); return 0; }',
-                                   'fn other(n:int)->int { return n+7; } fn main()->int { let remove_file:Callable[[int],int]=other; print(remove_file(3)); return 0; }')):
+        for i,source in enumerate((r"""import sys
+
+def make_dir(n: int) -> int:
+    return n + 7
+
+def main() -> int:
+    print(make_dir(3))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""",
+                                   r"""import sys
+
+def other(n: int) -> int:
+    return n + 7
+
+def main() -> int:
+    remove_file: Callable[[int], int] = other
+    print(remove_file(3))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+""")):
             exe=build(self,f'shadow{i}',source)
             result=subprocess.run([str(exe)],capture_output=True,timeout=10)
             self.assertEqual((result.returncode,result.stdout.replace(b'\r\n',b'\n'),result.stderr),(0,b'10\n',b''))

@@ -12,26 +12,36 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-struct S { xs: list[int]; fs: list[float]; }
+SOURCE = r"""import sys
 
-fn main() {
-    let st = S([], []);
-    for i in range(0, 12) { st.xs.append(i * i); st.fs.append(i * 0.5); }
-    let n = 3;
-    let total = 0;
-    let ftotal = 0.0;
-    for i in range(0, 4) {
-        let base = i * n;
-        for j in range(0, n) {
-            total += st.xs[base + j] * (j + 1);
-            ftotal += st.fs[base + j];
-        }
-    }
-    print(total, ftotal, st.xs[-n], st.xs[(n << 1) % 5], st.fs[-(n - 1)], st.xs[n * n & 7 | 1 ^ 2]);
-    try { print(st.xs[n * 10]); }
-    except IndexError as e { print("index error"); }
-}
+class S:
+
+    def __init__(self, xs: list[int], fs: list[float]):
+        self.xs = xs
+        self.fs = fs
+
+def main() -> int:
+    st = S([], [])
+    for i in range(0, 12):
+        st.xs.append(i * i)
+        st.fs.append(i * 0.5)
+    n = 3
+    total = 0
+    ftotal = 0.0
+    for i in range(0, 4):
+        base = i * n
+        for j in range(0, n):
+            total += st.xs[base + j] * (j + 1)
+            ftotal += st.fs[base + j]
+    print(total, ftotal, st.xs[-n], st.xs[(n << 1) % 5], st.fs[-(n - 1)], st.xs[n * n & 7 | 1 ^ 2])
+    try:
+        print(st.xs[n * 10])
+    except IndexError as e:
+        print('index error')
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 PYTHON = """

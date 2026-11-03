@@ -7,31 +7,47 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-fn zeros(n: int) -> list[int] { return [0] * n; }
-fn fzeros(n: int) -> list[float] { return [0.0] * n; }
-fn main() {
-    let db = b"acgtacgt";
-    let n = 0;
-    for b in db[2:6] { n += b; }
-    for b in b"acgt" { n += b; }
-    for c in "xyz".encode() { n += c; }
-    for c in "h\\u00e9\\u00e9".encode() { n += c; }
-    print(n);
-    let ba = bytearray();
-    ba.append(5); ba.append(250);
-    ba[0] += 7;
-    ba[0] -= 2;
-    ba[0] *= 3;
-    ba[1] //= 5;
-    ba[1] |= 1;
-    print(ba[0], ba[1]);
-    try { ba[0] += 250; } except ValueError { print("range"); }
-    print(ba[0]);
-    let z = zeros(3);
-    let f = fzeros(2);
-    print(len(z), z[2], len(f), f[1]);
-}
+SOURCE = r"""import sys
+
+def zeros(n: int) -> list[int]:
+    return [0] * n
+
+def fzeros(n: int) -> list[float]:
+    return [0.0] * n
+
+def main() -> int:
+    db = b'acgtacgt'
+    n = 0
+    for b in db[2:6]:
+        n += b
+    for b in b'acgt':
+        n += b
+    for c in 'xyz'.encode():
+        n += c
+    for c in 'héé'.encode():
+        n += c
+    print(n)
+    ba = bytearray()
+    ba.append(5)
+    ba.append(250)
+    ba[0] += 7
+    ba[0] -= 2
+    ba[0] *= 3
+    ba[1] //= 5
+    ba[1] |= 1
+    print(ba[0], ba[1])
+    try:
+        ba[0] += 250
+    except ValueError:
+        print('range')
+    print(ba[0])
+    z = zeros(3)
+    f = fzeros(2)
+    print(len(z), z[2], len(f), f[1])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 PYTHON = """
