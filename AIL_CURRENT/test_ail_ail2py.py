@@ -274,6 +274,50 @@ print(wrapping_add(4611686018427387904, 4611686018427387904))
 print(wrapping_sub(-4611686018427387904, 4611686018427387904))
 '''
 
+BOOL_RETURN = '''
+fn positive(n: int) -> int {
+    return n > 0;
+}
+
+fn main() -> int {
+    print(positive(2), positive(-1));
+    return 0;
+}
+'''
+
+CONTAINER_COPY = '''
+struct Holder { items: list[int]; }
+
+fn main() -> int {
+    let values: list[int] = [1, 2];
+    let holder = Holder(values);
+    values.append(3);
+    let saved = holder.items;
+    saved.append(4);
+    print(len(holder.items), len(values), len(saved));
+    return 0;
+}
+'''
+
+CONTAINER_ALIASES = '''
+struct Holder { items: list[int]; }
+
+fn get(holder: Holder) -> list[int] {
+    return holder.items;
+}
+
+fn main() -> int {
+    let values: list[int] = [1, 2];
+    let holder = Holder(values);
+    let nested: list[list[int]] = [values];
+    values.append(3);
+    let saved = get(holder);
+    saved.append(4);
+    print(len(nested[0]), len(holder.items), len(values), len(saved));
+    return 0;
+}
+'''
+
 
 def run(command, cwd=None, env=None):
     return subprocess.run(command, cwd=cwd, env=env, input=b'', capture_output=True, timeout=1800)
@@ -366,6 +410,24 @@ class ConversionTests(unittest.TestCase):
                 self.assertIn(b'ail import alias ', result.stderr)
                 self.assertIn(b' is rebound', result.stderr)
 
+    def _run_ail_and_converted(self, stem, ail_source):
+        source = Path(self.tmp) / (stem + '.ail')
+        source.write_text(ail_source, encoding='utf-8')
+        converted = Path(self.tmp) / (stem + '.py')
+        made = run([sys.executable, '-B', TOOL, str(source), '-o', str(converted)])
+        self.assertEqual(made.returncode, 0, made.stderr[-3000:])
+        binaries = {}
+        for tag, path in (('brace', source), ('python', converted)):
+            binary = Path(self.tmp) / (stem + '-' + tag)
+            flags = ['--syntax', 'python'] if tag == 'python' else []
+            built = run([sys.executable, '-B', CLI, 'compile', str(path), '-o', str(binary), *flags])
+            self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+            binaries[tag] = binary
+        wanted = run([str(binaries['brace'])])
+        got = run([str(binaries['python'])])
+        self.assertEqual(got.returncode, wanted.returncode, got.stderr[-3000:])
+        self.assertEqual(got.stdout, wanted.stdout)
+
     def _run_ail_and_python(self, stem, ail_source, python_source):
         source = Path(self.tmp) / (stem + '.ail')
         source.write_text(ail_source, encoding='utf-8')
@@ -379,6 +441,28 @@ class ConversionTests(unittest.TestCase):
         got = run([sys.executable, '-B', str(script)], env=env)
         self.assertEqual(got.returncode, wanted.returncode, got.stderr[-3000:])
         self.assertEqual(got.stdout, wanted.stdout)
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_bool_return_in_int_function_is_wrapped_and_builds_identically(self):
+        source, _, converted = self.convert('bool_return', BOOL_RETURN)
+        self.assertIn('return int(n > 0)', converted)
+        checked = run([sys.executable, '-B', TOOL, str(source), '--check'])
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        self.assertEqual(checked.stdout.strip(), b'identical')
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_container_copies_match_the_brace_binary(self):
+        _, _, converted = self.convert('container_copy', CONTAINER_COPY)
+        self.assertIn('Holder(values.copy())', converted)
+        self.assertIn('saved = holder.items.copy()', converted)
+        self._run_ail_and_converted('container_copy', CONTAINER_COPY)
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_container_list_elements_and_result_aliases_copy(self):
+        _, _, converted = self.convert('container_aliases', CONTAINER_ALIASES)
+        self.assertIn('[values.copy()]', converted)
+        self.assertIn('saved = get(holder).copy()', converted)
+        self._run_ail_and_converted('container_aliases', CONTAINER_ALIASES)
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_ail_heappush_with_equal_keys_matches_the_binary(self):

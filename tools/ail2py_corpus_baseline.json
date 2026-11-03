@@ -1,0 +1,833 @@
+{
+  "entries": [
+    {
+      "stem": "artifact_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `artifact` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "asm_checksum",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `checksum_step` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_buffer_example",
+      "result": "differ",
+      "first_difference": "#include <stdint.h>",
+      "last_stderr": "note: built on the general path (about 20x slower) because line 20: `shared = packet.data` makes a second reference to the same container (`shared` and `packet` are one list/dict/set, or one holds the other), and one of the two is written while the other is read afterwards. CPython shares the object there; this compiler would copy and print something else, so it refuses rather than differ. write instead: store `shared.copy()` (or list(shared) / dict(shared) / set(shared)) for a copy; to share, keep a single name or pass the container to a function; run with --strict to see why"
+    },
+    {
+      "stem": "binary_buffer_xor_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_copy",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_cursor_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_cursor_object_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `BinaryCursor` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_cursor_records_fixture_r550",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_cursor_records_fixture_r561",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_cursor_records_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_field_collection_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_fields_codec_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_fields_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_file_chunks_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_float_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `unpack_f64_le` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_float_range_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `read_binary_range` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_float_records_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `read_f64_records` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_layout_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_log_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `append_record` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_pipe",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `copy_stdin` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_record_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `pack_record` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_records_create_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_records_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_records_pack_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "binary_replace_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_search_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_stream_copy_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "binary_transform_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "block_line_count",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "block_line_count_for",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "block_line_stats",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "block_line_stats_for",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "block_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `sum_to` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "block_stdin",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "block_use_math",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "block_use_text",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "byte_map_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "note: <work>/converted/byte_map_main.py:141: dict.keys used as a value (line 141): the typed path holds `keys()` as a list and would print, compare or combine a list; dict views (`dict_keys([...])`, `d.keys() & s`, `d.keys() == s`) are on the general path"
+    },
+    {
+      "stem": "byte_scan_stdin",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `byte_search_native` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "byte_search",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `find_byte` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_binary",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `binary_count` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_bool",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `contains_nul` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_bytes_result",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `native_tail` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_crc16",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `crc16` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_float32_clip",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `clip_values` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_float32_filter",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "<work>/converted/c_float32_filter.py:4:1: not in the subset: smooth() return annotation flist disagrees with inferred int (the general path could not build this program either); general path: the name 'filter_values' is not a known function/class/builtin"
+    },
+    {
+      "stem": "c_float_result",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `native_moving_average` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_float_series",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `native_count_between` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_fnv32",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `hash32` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_fnv64",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `hash64` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_fnv_file_ranges",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `update_hash` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_fnv_stdin",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `hash_stdin` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_fnv_stream",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `reset_hash` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_fnv_stream_file",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `hash_file` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_integer_result",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `native_between` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_integer_series",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `native_count_above` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_interop",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `byte_count` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "c_text_result",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `native_value` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "callback_text_rewrite_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "callback_text_variants_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "codepoint_checksum",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "collection_state_example",
+      "result": "differ",
+      "first_difference": "typedef struct ail_obj_NamedCounters ail_obj_NamedCounters;",
+      "last_stderr": ""
+    },
+    {
+      "stem": "config_batch",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "config_validate",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "csv_column_stats_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: store the same kind everywhere (`int(flag)`, or a comparison)"
+    },
+    {
+      "stem": "csv_column_stats_stream_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: store the same kind everywhere (`int(flag)`, or a comparison)"
+    },
+    {
+      "stem": "csv_float_group_main",
+      "result": "differ",
+      "first_difference": "typedef struct ail_obj_Utf8Decoder ail_obj_Utf8Decoder;",
+      "last_stderr": ""
+    },
+    {
+      "stem": "csv_json_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `csv_json` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "csv_rewrite_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "csv_rewrite_stream_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "csv_stream_main",
+      "result": "differ",
+      "first_difference": "typedef struct ail_obj_CsvRow ail_obj_CsvRow;",
+      "last_stderr": ""
+    },
+    {
+      "stem": "csv_table_main",
+      "result": "differ",
+      "first_difference": "typedef struct ail_obj_Utf8Decoder ail_obj_Utf8Decoder;",
+      "last_stderr": ""
+    },
+    {
+      "stem": "data_convert_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "<work>/converted/data_convert_main.py:15:9: not in the subset: a method on Call (the general path could not build this program either); general path: the name 'json_compact' is not a known function/class/builtin"
+    },
+    {
+      "stem": "directory_catalog_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "environment_config_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "file_line_stats",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "file_manifest_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `manifest_empty` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "filesystem_main",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "filter_errors",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "filter_errors_count",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "float_series_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `count_between` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "float_stack",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `reverse_values` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "float_transform_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "<work>/converted/float_transform_main.py:6:5: not in the subset: 'values' is an int and is being assigned a flist; a local's kind is settled by its FIRST assignment and never changes afterwards -- give the second kind a different name, or use the value inline without binding it to one (the general path could not build this program either); general path: the name 'scaled' is not a known function/class/builtin"
+    },
+    {
+      "stem": "handle_list_main",
+      "result": "differ",
+      "first_difference": "#include <stdint.h>",
+      "last_stderr": "note: <work>/converted/handle_list_main.py:5:1: built on the general path (about 20x slower) because line 5: `values: list[bytearray] = [buffer]` makes a second reference to the same container (`values` and `buffer` are one list/dict/set, or one holds the other), and one of the two is written while the other is read afterwards. CPython shares the object there; this compiler would copy and print something else, so it refuses rather than differ. write instead: store `values.copy()` (or list(values) / dict(values) / set(values)) for a copy; to share, keep a single name or pass the container to a function; run with --strict to see why"
+    },
+    {
+      "stem": "hex_files_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `hex_file_write` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "integer_column_stats_bytes_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "integer_column_stats_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "integer_column_values_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "integer_map_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "note: <work>/converted/integer_map_main.py:193: dict.keys used as a value (line 193): the typed path holds `keys()` as a list and would print, compare or combine a list; dict views (`dict_keys([...])`, `d.keys() & s`, `d.keys() == s`) are on the general path"
+    },
+    {
+      "stem": "integer_quantiles",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "integer_series_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `filtered_differences` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "inventory_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "inventory_object_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `inventory_empty` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "inventory_page_object_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `inventory_empty` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "inventory_ranked_object_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `inventory_empty` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "json_kv_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "json_kv_tcp_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "json_lines_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "json_lines_transform_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "json_merge_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "json_query_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "note: <work>/converted/json_query_main.py:530: dict.keys used as a value (line 530): the typed path holds `keys()` as a list and would print, compare or combine a list; dict views (`dict_keys([...])`, `d.keys() & s`, `d.keys() == s`) are on the general path"
+    },
+    {
+      "stem": "line_counts_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "line_histogram",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "mixed_output_main",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "number_lines",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "number_pipe",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `number_stdin` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "numeric_scale_binary_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "numeric_series_native_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: make the value match the declared type, or convert it (`int(x)`, `float(x)`, `str(x)`)"
+    },
+    {
+      "stem": "object_filter_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `is_error` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "object_report_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `report` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "object_text_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `label` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "path_posix_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `path_normalize` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "pax_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "<work>/converted/pax_attributes.py:175:1: not in the subset: pax_attributes.pax_extension_header() return annotation bytes disagrees with inferred int (the general path could not build this program either); general path: the name '_tar_octal_decode' is not a known function/class/builtin"
+    },
+    {
+      "stem": "points_energy_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "record_policy_example",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "record_report_main",
+      "result": "differ",
+      "first_difference": "typedef struct ail_obj_QueryRecord ail_obj_QueryRecord;",
+      "last_stderr": ""
+    },
+    {
+      "stem": "recovering_line_stats",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "recovering_line_stats_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `parse` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "rectangle_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "replace_text",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "reraise_example",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "row_reduce_main",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "row_reduce_stream_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "sample_tail_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "string_map_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "note: <work>/converted/string_map_main.py:137: dict.keys used as a value (line 137): the typed path holds `keys()` as a list and would print, compare or combine a list; dict views (`dict_keys([...])`, `d.keys() & s`, `d.keys() == s`) are on the general path"
+    },
+    {
+      "stem": "tar_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    },
+    {
+      "stem": "tcp_echo_server_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "tcp_file_exchange_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "tcp_json_lines_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "tcp_json_lines_poll_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "text_count_batch_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "text_count_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "text_escape_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "text_search_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "utf8_copy_main",
+      "result": "identical-renamed",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "utf8_roundtrip",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "utf8_validate_main",
+      "result": "identical",
+      "first_difference": "",
+      "last_stderr": ""
+    },
+    {
+      "stem": "wav_audio_main",
+      "result": "both-fail",
+      "first_difference": "",
+      "last_stderr": "write instead: define `file_identity_status` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)"
+    }
+  ],
+  "counts": {
+    "both-fail": 70,
+    "differ": 7,
+    "identical-renamed": 46,
+    "identical": 14
+  },
+  "total": 137
+}

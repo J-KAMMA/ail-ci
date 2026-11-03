@@ -1,3 +1,30 @@
+## 2026-11-03 -- onelang s3: converter meaning rules and corpus check
+
+`tools/ail2py.py --check` now reports `identical-renamed` when removing the module-name prefixes
+and sorting top-level declarations makes the two debug C files equal; `ail_fn_*` type hashes are
+normalized for that comparison because R1 changes the source digest without changing the signature.
+
+The converter now follows the brace meaning rules for two categories.  R1 writes `int(E)` for a
+bool-valued `return E` in an `int` function (comparisons, `and`/`or`/`not`, bool constants, calls to
+bool-returning functions and bool string methods).  R2 writes `.copy()` where brace copies a
+list/dict/set stored a second time: assignments whose source is a local container or an alias
+function result, struct-constructor arguments that stay live after the call, attribute assignments
+whose target or source is mutated later, and list-literal elements whose source is mutated later.
+Bytearray fields and bytearray list elements keep sharing, as brace does.
+
+`tools/ail2py_corpus.py` builds every entry as written and after conversion and writes a JSON
+report.  The committed `tools/ail2py_corpus_baseline.json` is 137 entries: 14 identical, 46
+identical-renamed, 7 differ, 70 both-fail (need extra build inputs), and no py-refused entries.
+The seven `differ` entries are the listed R2 cases: `binary_buffer_example` and `handle_list_main`
+keep brace sharing and stay on the general path with the usual note, while
+`collection_state_example`, `csv_float_group_main`, `csv_stream_main`, `csv_table_main` and
+`record_report_main` carry one extra copy in C.  Both binaries print the same output for all seven
+(including `record_report_main` writing the same JSON report).
+
+Probes `r1`, `r2`, `lit2`, `call`, `alias`, `attr` and `lit` match the brace binary.
+`test_ail_ail2py` covers bool returns, struct/list element copies and alias results;
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
 
 `from ail import X as Y` now records the binding even when `Y == X`, so an alias spelled with the
