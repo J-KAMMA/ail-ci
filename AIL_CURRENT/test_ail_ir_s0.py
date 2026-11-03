@@ -600,9 +600,7 @@ class GeneratedProgramTests(unittest.TestCase):
 
 class SwitchTests(unittest.TestCase):
     # (`total` accumulates into a str local: a builder local, which the IR does not take before stage S4c)
-    SOURCE = ('fn sq(x: int) -> int { return x * x + 1; }\n'
-              'fn total(s: str) -> int { let t = ""; let i = 0; while i < 3 { t += s; i += 1; } return len(t); }\n'
-              'fn main() -> int { print(sq(4)); print(total("abc")); return 0; }\n')
+    SOURCE = ('import sys\n\ndef sq(x: int) -> int:\n    return x * x + 1\n\ndef total(s: str) -> int:\n    t = \'\'\n    i = 0\n    while i < 3:\n        t += s\n        i += 1\n    return len(t)\n\ndef main() -> int:\n    print(sq(4))\n    print(total(\'abc\'))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
 
     def to_c(self, mode, **extra):
         import pyfunc
@@ -618,7 +616,7 @@ class SwitchTests(unittest.TestCase):
             os.environ.pop('AIL_IR_FUNCS', None)
             os.environ.update(extra)
             del driver.STATS[:]
-            return pyfunc.to_c(translate(self.SOURCE), name='run', strict=True), list(driver.STATS)
+            return pyfunc.to_c(self.SOURCE, name='run', strict=True), list(driver.STATS)
         finally:
             for k, v in saved.items():
                 if v is None:

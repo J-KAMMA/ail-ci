@@ -10,60 +10,7 @@ import test_ail_c_objects as support
 from test_ail_map_fields import build
 
 
-SOURCE = r'''struct Box { counts: dict[str,int]; }
-fn pick(b: Box, d: dict[str,int]) -> Box { return b; }
-fn last_use(b: Box) -> void {
-    let d: dict[str,int] = b.counts;
-    d["moved"] = 1;
-    b.counts = d;
-}
-fn used_after(b: Box) -> int {
-    let d: dict[str,int] = b.counts;
-    d["kept"] = 2;
-    b.counts = d;
-    d["after"] = 3;
-    return len(d);
-}
-fn in_loop(b: Box) -> int {
-    let d: dict[str,int] = {};
-    for i in range(3) {
-        d[str(i)] = i;
-        b.counts = d;
-    }
-    return len(d);
-}
-fn rebound(b: Box) -> int {
-    let d: dict[str,int] = {"a": 1};
-    b.counts = d;
-    d = {"z": 9};
-    return len(d);
-}
-fn through_receiver(b: Box) -> void {
-    let d: dict[str,int] = {"r": 5};
-    pick(b, d).counts = d;
-}
-fn main() -> int {
-    let b = Box({"start": 0});
-    let alias = b;
-    let snapshot: dict[str,int] = b.counts;
-    snapshot["local"] = 7;
-    if "local" in b.counts { return 1; }
-    last_use(b);
-    if len(alias.counts) != 2 or alias.counts["moved"] != 1 { return 2; }
-    if "local" in alias.counts { return 3; }
-    if used_after(b) != 4 { return 4; }
-    if len(b.counts) != 3 or "after" in b.counts { return 5; }
-    if in_loop(b) != 3 or len(b.counts) != 3 or b.counts["2"] != 2 { return 6; }
-    if rebound(b) != 1 or len(b.counts) != 1 or b.counts["a"] != 1 { return 7; }
-    through_receiver(b);
-    if len(b.counts) != 1 or b.counts["r"] != 5 { return 8; }
-    let other = Box({"x": 1});
-    other.counts = b.counts;
-    b.counts["r"] = 6;
-    if other.counts["r"] != 5 { return 9; }
-    print("ok");
-    return 0;
-}'''
+SOURCE = 'import sys\n\nclass Box:\n\n    def __init__(self, counts: dict[str, int]):\n        self.counts = counts\n\ndef pick(b: Box, d: dict[str, int]) -> Box:\n    return b\n\ndef last_use(b: Box) -> None:\n    d: dict[str, int] = b.counts\n    d[\'moved\'] = 1\n    b.counts = d\n\ndef used_after(b: Box) -> int:\n    d: dict[str, int] = b.counts\n    d[\'kept\'] = 2\n    b.counts = d\n    d[\'after\'] = 3\n    return len(d)\n\ndef in_loop(b: Box) -> int:\n    d: dict[str, int] = {}\n    for i in range(3):\n        d[str(i)] = i\n        b.counts = d\n    return len(d)\n\ndef rebound(b: Box) -> int:\n    d: dict[str, int] = {\'a\': 1}\n    b.counts = d\n    d = {\'z\': 9}\n    return len(d)\n\ndef through_receiver(b: Box) -> None:\n    d: dict[str, int] = {\'r\': 5}\n    pick(b, d).counts = d\n\ndef main() -> int:\n    b = Box({\'start\': 0})\n    alias = b\n    snapshot: dict[str, int] = b.counts\n    snapshot[\'local\'] = 7\n    if \'local\' in b.counts:\n        return 1\n    last_use(b)\n    if len(alias.counts) != 2 or alias.counts[\'moved\'] != 1:\n        return 2\n    if \'local\' in alias.counts:\n        return 3\n    if used_after(b) != 4:\n        return 4\n    if len(b.counts) != 3 or \'after\' in b.counts:\n        return 5\n    if in_loop(b) != 3 or len(b.counts) != 3 or b.counts[\'2\'] != 2:\n        return 6\n    if rebound(b) != 1 or len(b.counts) != 1 or b.counts[\'a\'] != 1:\n        return 7\n    through_receiver(b)\n    if len(b.counts) != 1 or b.counts[\'r\'] != 5:\n        return 8\n    other = Box({\'x\': 1})\n    other.counts = b.counts\n    b.counts[\'r\'] = 6\n    if other.counts[\'r\'] != 5:\n        return 9\n    print(\'ok\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 
 class MapFieldMoveTests(unittest.TestCase):

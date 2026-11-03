@@ -23,7 +23,7 @@ def _zig():
 class CrossTargetTests(unittest.TestCase):
     def build(self, work, target):
         source = work / 'hello.ail'
-        source.write_text('fn main() -> int { print("hello " + str(6 * 7)); return 0; }\n', encoding='utf8')
+        source.write_text('import sys\n\ndef main() -> int:\n    print(\'hello \' + str(6 * 7))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', encoding='utf8')
         output = work / ('hello-' + target)
         result = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', '--target', target,
                                  str(source), '-o', str(output)], capture_output=True, text=True)

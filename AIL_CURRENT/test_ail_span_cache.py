@@ -21,62 +21,7 @@ LEGACY_C = os.environ.get('AIL_IR', '0').strip().lower() in ('', '0', 'off', 'no
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-struct S { x: list[float]; v: list[float]; k: list[int]; }
-
-fn step(s: S, n: int) -> void {
-    for t in range(0, n) {
-        for i in range(0, 4) {
-            for j in range(i + 1, 4) {
-                let d = s.x[i] - s.x[j];
-                s.v[i] = s.v[i] - d * 0.5;
-                s.v[j] = s.v[j] + d * 0.5;
-                s.k[i] = s.k[i] + 1;
-                s.k[-1] = s.k[-1] + s.k[j];
-            }
-        }
-        for i in range(0, 4) { s.x[i] = s.x[i] + 0.1 * s.v[i]; }
-    }
-}
-
-fn reach(s: S, n: int) -> float {
-    let total = 0.0;
-    for i in range(0, n) { total = total + s.x[i] + s.v[-1] + float(s.k[i % 4]); }
-    return total;
-}
-
-fn grow(s: S, n: int) -> int {
-    for i in range(0, n) { s.k.append(s.k[i] + 1); s.x[i % 2] = s.x[i % 2] + 1.0; }
-    return len(s.k);
-}
-
-fn swap(s: S) -> float {
-    let t = s;
-    let total = 0.0;
-    for i in range(0, 3) {
-        t.x = [1.0, 2.0, 3.0, 4.0];
-        total = total + s.x[i];
-    }
-    return total;
-}
-
-fn main() {
-    let s = S([1.0, 2.5, -3.0, 4.25], [0.0, 0.5, 0.25, -1.0], [1, 2, 3, 4]);
-    step(s, 3);
-    print("%.6f %.6f %.6f %.6f" % (s.x[0], s.x[1], s.x[2], s.x[3]));
-    print("%.6f %.6f %.6f %.6f" % (s.v[0], s.v[1], s.v[2], s.v[3]));
-    print(s.k[0], s.k[1], s.k[2], s.k[3]);
-    print("%.6f" % reach(s, 4));
-    try { print("%.6f" % reach(s, 5)); } except IndexError { print("index error"); }
-    print(grow(s, 3), s.k[4], s.k[5], s.k[6], "%.6f" % s.x[0]);
-    print("%.6f" % swap(s));
-    let u = S([1.0, 2.0, 3.0], [1.0, 2.0], [1, 2, 3]);
-    try { print("%.6f" % reach(u, 2)); } except IndexError { print("index error"); }
-    try { step(u, 1); print("stepped"); } except IndexError { print("index error"); }
-    let e = S([], [], []);
-    try { print("%.6f" % reach(e, 1)); } except IndexError { print("index error"); }
-}
-"""
+SOURCE = 'import sys\n\nclass S:\n\n    def __init__(self, x: list[float], v: list[float], k: list[int]):\n        self.x = x\n        self.v = v\n        self.k = k\n\ndef step(s: S, n: int) -> None:\n    for t in range(0, n):\n        for i in range(0, 4):\n            for j in range(i + 1, 4):\n                d = s.x[i] - s.x[j]\n                s.v[i] = s.v[i] - d * 0.5\n                s.v[j] = s.v[j] + d * 0.5\n                s.k[i] = s.k[i] + 1\n                s.k[-1] = s.k[-1] + s.k[j]\n        for i in range(0, 4):\n            s.x[i] = s.x[i] + 0.1 * s.v[i]\n\ndef reach(s: S, n: int) -> float:\n    total = 0.0\n    for i in range(0, n):\n        total = total + s.x[i] + s.v[-1] + float(s.k[i % 4])\n    return total\n\ndef grow(s: S, n: int) -> int:\n    for i in range(0, n):\n        s.k.append(s.k[i] + 1)\n        s.x[i % 2] = s.x[i % 2] + 1.0\n    return len(s.k)\n\ndef swap(s: S) -> float:\n    t = s\n    total = 0.0\n    for i in range(0, 3):\n        t.x = [1.0, 2.0, 3.0, 4.0]\n        total = total + s.x[i]\n    return total\n\ndef main() -> int:\n    s = S([1.0, 2.5, -3.0, 4.25], [0.0, 0.5, 0.25, -1.0], [1, 2, 3, 4])\n    step(s, 3)\n    print(\'%.6f %.6f %.6f %.6f\' % (s.x[0], s.x[1], s.x[2], s.x[3]))\n    print(\'%.6f %.6f %.6f %.6f\' % (s.v[0], s.v[1], s.v[2], s.v[3]))\n    print(s.k[0], s.k[1], s.k[2], s.k[3])\n    print(\'%.6f\' % reach(s, 4))\n    try:\n        print(\'%.6f\' % reach(s, 5))\n    except IndexError:\n        print(\'index error\')\n    print(grow(s, 3), s.k[4], s.k[5], s.k[6], \'%.6f\' % s.x[0])\n    print(\'%.6f\' % swap(s))\n    u = S([1.0, 2.0, 3.0], [1.0, 2.0], [1, 2, 3])\n    try:\n        print(\'%.6f\' % reach(u, 2))\n    except IndexError:\n        print(\'index error\')\n    try:\n        step(u, 1)\n        print(\'stepped\')\n    except IndexError:\n        print(\'index error\')\n    e = S([], [], [])\n    try:\n        print(\'%.6f\' % reach(e, 1))\n    except IndexError:\n        print(\'index error\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 PYTHON = """
 class S:
@@ -177,18 +122,7 @@ class SpanCacheTests(unittest.TestCase):
                 self.assertIn("if (_sc", program)
 
     def test_uncaught_index_error_matches_before(self):
-        text = """
-struct S { x: list[float]; y: list[float]; }
-fn run(s: S) -> float {
-    let t = 0.0;
-    for i in range(0, 5) { t = t + s.x[i] * s.y[i]; }
-    return t;
-}
-fn main() {
-    let s = S([1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 1.0, 1.0]);
-    print("%.1f" % run(s));
-}
-"""
+        text = 'import sys\n\nclass S:\n\n    def __init__(self, x: list[float], y: list[float]):\n        self.x = x\n        self.y = y\n\ndef run(s: S) -> float:\n    t = 0.0\n    for i in range(0, 5):\n        t = t + s.x[i] * s.y[i]\n    return t\n\ndef main() -> int:\n    s = S([1.0, 2.0, 3.0, 4.0, 5.0], [1.0, 1.0, 1.0])\n    print(\'%.1f\' % run(s))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         with tempfile.TemporaryDirectory() as directory:
             exe, program = build(directory, text)
             self.assertIn("view_get", program)

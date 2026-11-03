@@ -10,15 +10,7 @@ class ArgvSliceTests(unittest.TestCase):
     write=support.CObjectTests.write
 
     def test_owned_slices_pass_to_functions_and_keep_bound_order(self):
-        source='''fn bound(value:int)->int {print(value);return value;}
-fn emit(args:list[str])->void {for value in args {print(value.encode("utf-8").hex());}}
-fn main()->int {
- let args:list[str]=sys.argv[1:];emit(args);
- let saved:list[str]=sys.argv[-2:];args.clear();emit(saved);
- emit(sys.argv[bound(1):bound(3)]);
- emit(sys.argv[9223372036854775807:]);
- emit(sys.argv[-9223372036854775808:0]);return 0;
-}'''
+        source='import sys\n\ndef bound(value: int) -> int:\n    print(value)\n    return value\n\ndef emit(args: list[str]) -> None:\n    for value in args:\n        print(value.encode(\'utf-8\').hex())\n\ndef main() -> int:\n    args: list[str] = sys.argv[1:]\n    emit(args)\n    saved: list[str] = sys.argv[-2:]\n    args.clear()\n    emit(saved)\n    emit(sys.argv[bound(1):bound(3)])\n    emit(sys.argv[9223372036854775807:])\n    emit(sys.argv[-9223372036854775808:0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         executable=self.ail_build('argv_slices',source)
         values=['日本😀','','--flag','-1']
         encoded=[value.encode().hex()+'\n' for value in values]

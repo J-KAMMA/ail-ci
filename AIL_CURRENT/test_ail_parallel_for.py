@@ -99,75 +99,38 @@ fn main() {
 """
 
 REFUSED = {
-    "a running total": ("fn main() { let t = 0; parallel for i in range(0, 10) { t += i; } print(t); }",
+    "a running total": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    t = 0\n    for i in par_range(0, 10):\n        t += i\n    print(t)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                         "'t' is read before the body assigns it"),
-    "append": ("fn main() { let xs: list[int] = []; parallel for i in range(0, 10) { xs.append(i); } }",
+    "append": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    xs: list[int] = []\n    for i in par_range(0, 10):\n        xs.append(i)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                "not allowed; the body may only compute values"),
-    "print": ("fn main() { parallel for i in range(0, 10) { print(i); } }", "not allowed"),
-    "a str": ("fn main() { let s = \"a\"; parallel for i in range(0, 10) { let t = s + \"b\"; } }",
+    "print": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    for i in par_range(0, 10):\n        print(i)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', "not allowed"),
+    "a str": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    s = \'a\'\n    for i in par_range(0, 10):\n        t = s + \'b\'\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
               "only int, float and bool constants"),
-    "a shifted write": ("fn main() { let xs: list[int] = [0] * 20; parallel for i in range(0, 10) { xs[i + 1] = 1; } }",
+    "a shifted write": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    xs: list[int] = [0] * 20\n    for i in par_range(0, 10):\n        xs[i + 1] = 1\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                         "differ between iterations"),
-    "a read of a neighbour": ("fn main() { let xs: list[int] = [0] * 20; parallel for i in range(0, 10) { xs[i] = xs[i - 1] + 1; } }",
+    "a read of a neighbour": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    xs: list[int] = [0] * 20\n    for i in par_range(0, 10):\n        xs[i] = xs[i - 1] + 1\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                               "differ between iterations"),
-    "a result read after the loop": ("fn main() { let last = 0; let xs: list[int] = [0] * 20; parallel for i in range(0, 10) { last = i; xs[i] = last; } print(last); }",
+    "a result read after the loop": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    last = 0\n    xs: list[int] = [0] * 20\n    for i in par_range(0, 10):\n        last = i\n        xs[i] = last\n    print(last)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                                      "private to each iteration"),
-    "the loop variable after the loop": ("fn main() { let xs: list[int] = [0] * 20; parallel for i in range(0, 10) { xs[i] = 1; } print(i); }",
+    "the loop variable after the loop": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    xs: list[int] = [0] * 20\n    for i in par_range(0, 10):\n        xs[i] = 1\n    print(i)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                                          "private to each iteration"),
-    "a nested parallel for": ("fn main() { let xs: list[int] = [0] * 100; parallel for i in range(0, 10) { parallel for j in range(0, 10) { xs[i * 10 + j] = 1; } } }",
+    "a nested parallel for": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    xs: list[int] = [0] * 100\n    for i in par_range(0, 10):\n        for j in par_range(0, 10):\n            xs[i * 10 + j] = 1\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                               "cannot be nested"),
-    "return": ("fn f() -> int { parallel for i in range(0, 10) { return 1; } return 0; } fn main() { print(f()); }",
+    "return": ('from ail import par_range\nimport sys\n\ndef f() -> int:\n    for i in par_range(0, 10):\n        return 1\n    return 0\n\ndef main() -> int:\n    print(f())\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                "return is not allowed"),
-    "try": ("fn main() { try { parallel for i in range(0, 10) { let x = i; } } except ValueError { print(1); } }",
+    "try": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    try:\n        for i in par_range(0, 10):\n            x = i\n    except ValueError:\n        print(1)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
             "cannot be inside try"),
-    "a list argument": ("fn g(xs: list[int], i: int) -> int { return xs[i]; } fn main() { let xs: list[int] = [0] * 10; let t: list[int] = [0] * 10; parallel for i in range(0, 10) { t[i] = g(xs, i); } }",
+    "a list argument": ('from ail import par_range\nimport sys\n\ndef g(xs: list[int], i: int) -> int:\n    return xs[i]\n\ndef main() -> int:\n    xs: list[int] = [0] * 10\n    t: list[int] = [0] * 10\n    for i in par_range(0, 10):\n        t[i] = g(xs, i)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                         "parameters must be annotated int or float"),
-    "recursion": ("fn f(n: int) -> int { if n <= 0 { return 0; } return f(n - 1) + 1; } fn main() { let t: list[int] = [0] * 10; parallel for i in range(0, 10) { t[i] = f(i); } }",
+    "recursion": ('from ail import par_range\nimport sys\n\ndef f(n: int) -> int:\n    if n <= 0:\n        return 0\n    return f(n - 1) + 1\n\ndef main() -> int:\n    t: list[int] = [0] * 10\n    for i in par_range(0, 10):\n        t[i] = f(i)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
                   "is recursive"),
-    "a step": ("fn main() { parallel for i in range(0, 10, 2) { let x = i; } }", "a step is not available"),
+    "a step": ('from ail import par_range\nimport sys\n\ndef main() -> int:\n    for i in par_range(0, 10, 2):\n        x = i\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', "a step is not available"),
 }
 
 
-ALIAS = """
-fn main() {
-    let a = bytearray(100);
-    let b = a;
-    parallel for i in range(0, 100) {
-        a[i] = i;
-        let t = b[i];
-    }
-    print(a[5]);
-}
-"""
+ALIAS = 'from ail import par_range\nimport sys\n\ndef main() -> int:\n    a = bytearray(100)\n    b = a\n    for i in par_range(0, 100):\n        a[i] = i\n        t = b[i]\n    print(a[5])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
-UNITS = """
-fn cell(i: int, j: int) -> float { return 1.0 / float(i + j + 1); }
-fn rows(v: list[float], n: int) -> list[float] {
-    let r = [0.0] * n;
-    parallel for i in range(0, n) {
-        let s = 0.0;
-        for j in range(0, n) { s += cell(i, j) * v[j]; }
-        r[i] = s;
-    }
-    return r;
-}
-fn cols(v: list[float], n: int) -> list[float] {
-    let r = [0.0] * n;
-    parallel for i in range(0, n) {
-        let s = 0.0;
-        for j in range(0, n) { s += cell(j, i) * v[j]; }
-        r[i] = s;
-    }
-    return r;
-}
-fn main() {
-    let n = 300;
-    let v: list[float] = [];
-    for i in range(0, n) { v.append(1.0 + float(i % 4)); }
-    let w = cols(rows(v, n), n);
-    print(w[0], w[n - 1]);
-}
-"""
+UNITS = 'from ail import par_range\nimport sys\n\ndef cell(i: int, j: int) -> float:\n    return 1.0 / float(i + j + 1)\n\ndef rows(v: list[float], n: int) -> list[float]:\n    r = [0.0] * n\n    for i in par_range(0, n):\n        s = 0.0\n        for j in range(0, n):\n            s += cell(i, j) * v[j]\n        r[i] = s\n    return r\n\ndef cols(v: list[float], n: int) -> list[float]:\n    r = [0.0] * n\n    for i in par_range(0, n):\n        s = 0.0\n        for j in range(0, n):\n            s += cell(j, i) * v[j]\n        r[i] = s\n    return r\n\ndef main() -> int:\n    n = 300\n    v: list[float] = []\n    for i in range(0, n):\n        v.append(1.0 + float(i % 4))\n    w = cols(rows(v, n), n)\n    print(w[0], w[n - 1])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 
 def build(directory, name, source):
@@ -242,7 +205,7 @@ class ParallelForTests(unittest.TestCase):
             from ail_syntax import translate
             with tempfile.TemporaryDirectory() as directory:
                 exe = Path(directory, "units")
-                pyc.build_link_units(translate(UNITS), exe, {"rows": 1, "cols": 2, "cell": 0})
+                pyc.build_link_units(UNITS, exe, {"rows": 1, "cols": 2, "cell": 0})
                 built, whole, _ = build(directory, "whole", UNITS)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 expected = run(whole, 1)
@@ -254,7 +217,7 @@ class ParallelForTests(unittest.TestCase):
 
     def test_programs_without_it_carry_no_thread_code(self):
         with tempfile.TemporaryDirectory() as directory:
-            built, exe, debug = build(directory, "plain", "fn main() { let t = 0; for i in range(0, 10) { t += i; } print(t); }")
+            built, exe, debug = build(directory, "plain", 'import sys\n\ndef main() -> int:\n    t = 0\n    for i in range(0, 10):\n        t += i\n    print(t)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
             self.assertNotIn("ail_par", (debug / "program.c").read_text())
             self.assertNotIn("pthread", (debug / "program.c").read_text())

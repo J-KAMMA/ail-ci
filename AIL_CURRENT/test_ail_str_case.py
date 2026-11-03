@@ -11,15 +11,7 @@ import test_ail_c_objects as support
 from test_ail_map_fields import build
 
 
-SOURCE = r'''fn main() -> int {
-    let text: str = read_bytes(sys.argv[1]).decode("utf-8");
-    let out: list[str] = [];
-    for line in text.split("\n") {
-        out.append(line.lower() + "\t" + line.upper());
-    }
-    write_stdout_bytes("\n".join(out).encode("utf-8"));
-    return 0;
-}'''
+SOURCE = 'from ail import read_bytes, write_stdout_bytes\nimport sys\n\ndef main() -> int:\n    text: str = read_bytes(sys.argv[1]).decode(\'utf-8\')\n    out: list[str] = []\n    for line in text.split(\'\\n\'):\n        out.append(line.lower() + \'\\t\' + line.upper())\n    write_stdout_bytes(\'\\n\'.join(out).encode(\'utf-8\'))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 PIECES = ['Σ', 'σ', 'ς', 'Α', 'a', 'Z', "'", '́', 'ʰ', '·', ' ', '.', '1', 'İ', 'ß', 'ΐ',
           '’', 'ͅ', 'ǅ', '\U00010400', '日']

@@ -189,11 +189,7 @@ def run(n:int)->int:
         self.compare(source, exe, (-3, 0, 1, 2, 4))
 
     def test_source_free_compiled_module_retains_same_results(self):
-        module = '''fn expanded(n:int,prefix:str)->str {
- let a:str=prefix;let b:str="";let c:str="";let d:str="";
- for i in range(n) {a+="日本😀";b+="xy";c+="x";d+="y";}
- return a+"|"+b;
-}'''
+        module = "def expanded(n: int, prefix: str) -> str:\n    a: str = prefix\n    b: str = ''\n    c: str = ''\n    d: str = ''\n    for i in range(n):\n        a += '日本😀'\n        b += 'xy'\n        c += 'x'\n        d += 'y'\n    return a + '|' + b\n"
         obj = self.ail_build('builders', module, library=True)
         relocated = self.root / 'relocated'
         relocated.mkdir()
@@ -201,7 +197,7 @@ def run(n:int)->int:
         shutil.move(str(obj), moved)
         shutil.move(str(obj)+'.json', str(moved)+'.json')
         before = [(p.read_bytes(),p.stat().st_mtime_ns) for p in (moved,Path(str(moved)+'.json'))]
-        exe = self.ail_build('entry', 'fn main()->int {print(expanded(25,"seed"));return 0;}', moved)
+        exe = self.ail_build('entry', 'import sys\n\ndef main() -> int:\n    print(expanded(25, \'seed\'))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', moved)
         result = subprocess.run([str(exe)], capture_output=True, timeout=30)
         expected = ('seed'+'日本😀'*25+'|'+'xy'*25+'\n').encode('utf-8')
         if os.name == 'nt':

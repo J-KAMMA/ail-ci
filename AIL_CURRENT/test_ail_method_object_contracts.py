@@ -9,17 +9,8 @@ import unittest
 import test_ail_c_objects as support
 
 
-PROVIDER = '''struct Point { x: int; }
-struct Other { x: int; }
-impl Point {
- fn add(self, n: int) -> int { return self.x + n; }
- fn sub(self, n: int) -> int { return self.x - n; }
- fn text(self) -> str { return "point"; }
-}
-impl Other { fn add(self, n: int) -> int { return self.x + n; } }
-fn make(x: int) -> Point { return Point(x); }
-'''
-ENTRY = 'fn main() -> int { let p = make(5); print(p.add(2)); return 0; }'
+PROVIDER = "class Point:\n\n    def __init__(self, x: int):\n        self.x = x\n\n    def add(self, n: int) -> int:\n        return self.x + n\n\n    def sub(self, n: int) -> int:\n        return self.x - n\n\n    def text(self) -> str:\n        return 'point'\n\nclass Other:\n\n    def __init__(self, x: int):\n        self.x = x\n\n    def add(self, n: int) -> int:\n        return self.x + n\n\ndef make(x: int) -> Point:\n    return Point(x)\n"
+ENTRY = 'import sys\n\ndef main() -> int:\n    p = make(5)\n    print(p.add(2))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),
@@ -102,7 +93,7 @@ class MethodObjectContractTests(unittest.TestCase):
                 candidate = self.candidate(case, provider, original, lambda m: change(case, m))
                 pins = self.snapshot(candidate)
                 # Coherent edits pass shape validation but must fail the embedded ABI binding.
-                entry = ('fn main() -> int { print(make(5).x); return 0; }'
+                entry = ('import sys\n\ndef main() -> int:\n    print(make(5).x)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
                          if case in ('coherent_param', 'coherent_result', 'coherent_symbol', 'remove_methods')
                          else ENTRY)
                 diagnostic = self.refused('entry_' + case, entry, candidate)
@@ -113,9 +104,8 @@ class MethodObjectContractTests(unittest.TestCase):
 
     def test_dependencies_are_order_independent_and_provider_is_required(self):
         provider = self.ail_build('provider', PROVIDER, library=True)
-        wrapper = self.ail_build('wrapper', '''fn wrap(p: Point) -> int { return p.add(3); }
-fn nested(x: int) -> int { return wrap(make(x)); }''', provider, library=True)
-        entry = 'fn main() -> int { print(nested(4)); return 0; }'
+        wrapper = self.ail_build('wrapper', 'def wrap(p: Point) -> int:\n    return p.add(3)\n\ndef nested(x: int) -> int:\n    return wrap(make(x))\n', provider, library=True)
+        entry = 'import sys\n\ndef main() -> int:\n    print(nested(4))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         before = self.snapshot(provider, wrapper)
         for index, objects in enumerate(((provider, wrapper), (wrapper, provider))):
             self.check_run(self.ail_build('ordered_' + str(index), entry, *objects), '7\n')
@@ -139,7 +129,7 @@ fn __ail_method_Point_f(p: Point) -> int { return p.x; }''',
         }
         for case, body in cases.items():
             with self.subTest(case=case):
-                self.refused(case, 'struct Point { x: int; }\n' + body, library=True)
+                self.refused(case, 'class Point:\n\n    def __init__(self, x: int):\n        self.x = x\n' + body, library=True)
 
 
 if __name__ == '__main__':
