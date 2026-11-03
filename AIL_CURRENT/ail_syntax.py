@@ -4355,6 +4355,13 @@ def lower_dict_of_lists(source):
         return (isinstance(body, list) and bool(body)
                 and getattr(parent, 'lineno', None) == body[0].lineno)
 
+    def own_line(stmt):
+        parent = parents.get(id(stmt))
+        body = getattr(parent, 'body', None)
+        if not isinstance(body, list):
+            return True
+        return sum(1 for s in body if getattr(s, 'lineno', None) == stmt.lineno) == 1
+
     def span(node):
         return (starts[node.lineno - 1] + node.col_offset,
                 starts[node.end_lineno - 1] + node.end_col_offset)
@@ -4412,7 +4419,7 @@ def lower_dict_of_lists(source):
         nodes = list(own_nodes(fn.body))
         standalone = {id(n.value) for n in nodes
                       if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
-                      and not inline_suite(n)}
+                      and not inline_suite(n) and own_line(n)}
         for name, init in inits.items():
             allowed = {id(init.targets[0])}
             setdefaults, gets = [], []
