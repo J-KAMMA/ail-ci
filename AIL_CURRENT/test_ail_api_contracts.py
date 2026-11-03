@@ -30,7 +30,7 @@ class ApiContractsTests(unittest.TestCase):
         return status,json.loads(output.getvalue())
 
     def test_opt_in_interface_default_and_compact_are_compatible(self):
-        source=self.source('fn target(value:int)->int {print(value);return value;} fn main()->int {return target(1);}')
+        source=self.source('import sys\n\ndef target(value: int) -> int:\n    print(value)\n    return value\n\ndef main() -> int:\n    return target(1)\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         status,plain=self.cli('check',source,'--interface')
         self.assertEqual(status,0,plain);self.assertNotIn('contracts',plain)
         status,rich=self.cli('check',source,'--interface','--contracts')
@@ -47,9 +47,7 @@ class ApiContractsTests(unittest.TestCase):
         self.assertEqual(status,2,report)
 
     def test_declared_ownership_covers_all_types_without_type_proof(self):
-        source=b'''struct Box {value:int;}
-fn target(number:int,text:str,data:bytes,ints:list[int],floats:list[float],texts:list[str],blobs:list[bytes],handles:list[exception],box:Box,buffer:bytearray,error:exception,unknown:Mystery)->list[str] {return ["x"];}
-'''
+        source=b"class Box:\n\n    def __init__(self, value: int):\n        self.value = value\n\ndef target(number: int, text: str, data: bytes, ints: list[int], floats: list[float], texts: list[str], blobs: list[bytes], handles: list[exception], box: Box, buffer: bytearray, error: exception, unknown: Mystery) -> list[str]:\n    return ['x']\n"
         report=context(source,'target',contracts=True)
         item=entry(report['contracts'],'target');by_name={value['name']:value for value in item['parameters']}
         for name in ('text','data','ints','floats','texts'):
@@ -62,12 +60,7 @@ fn target(number:int,text:str,data:bytes,ints:list[int],floats:list[float],texts
         for key in ('type_verified','binding_verified','runtime_verified'):self.assertFalse(item['provenance'][key])
 
     def test_shadow_alias_callback_recursive_and_operator_errors_are_unknown(self):
-        source=b'''fn print(value:int)->int {return value;}
-fn target(cb:Callable[[int],int],value:int)->int {let alias=print;return cb(alias(value));}
-fn recursive(value:int)->int {return recursive(value);}
-fn divide(value:int)->int {return 7//value;}
-fn indexed(values:list[int],index:int)->int {return values[index];}
-'''
+        source=b'def print(value: int) -> int:\n    return value\n\ndef target(cb: Callable[[int], int], value: int) -> int:\n    alias = print\n    return cb(alias(value))\n\ndef recursive(value: int) -> int:\n    return recursive(value)\n\ndef divide(value: int) -> int:\n    return 7 // value\n\ndef indexed(values: list[int], index: int) -> int:\n    return values[index]\n'
         for name in ('target','recursive','divide','indexed'):
             item=entry(context(source,name,contracts=True)['contracts'],name)
             self.assertFalse(item['raises']['known'],name)
@@ -75,13 +68,13 @@ fn indexed(values:list[int],index:int)->int {return values[index];}
         report=context(source,'target',contracts=True)['contracts']
         self.assertFalse(entry(report,'cb','unresolved')['effects']['known'])
         self.assertFalse(any(item['kind']=='builtin' and item['name']=='print' for item in report['entries']))
-        root=context(b'const len=7; fn target()->int {return len("x");}','target',contracts=True)['contracts']
+        root=context(b"len = 7\n\ndef target() -> int:\n    return len('x')\n",'target',contracts=True)['contracts']
         self.assertFalse(entry(root,'len','unresolved')['effects']['known'])
-        methods=context(b'struct Box {value:int;} impl Box {fn known(self)->int {return self.value;} fn target(self)->int {return self.known();}}','Box.target',contracts=True)['contracts']
+        methods=context(b'class Box:\n\n    def __init__(self, value: int):\n        self.value = value\n\n    def known(self) -> int:\n        return self.value\n\n    def target(self) -> int:\n        return self.known()\n','Box.target',contracts=True)['contracts']
         self.assertFalse(entry(methods,'Box.target')['effects']['known'])
 
     def test_owned_returns_literals_and_local_cleanup_do_not_claim_no_fatal(self):
-        source=b'fn borrowed(text:str)->str {return text;} fn literal()->str {return "text";} fn cleanup(text:str)->int {let local=text;return 0;} fn wrapper(text:str)->int {borrowed(text);return 0;}'
+        source=b"def borrowed(text: str) -> str:\n    return text\n\ndef literal() -> str:\n    return 'text'\n\ndef cleanup(text: str) -> int:\n    local = text\n    return 0\n\ndef wrapper(text: str) -> int:\n    borrowed(text)\n    return 0\n"
         for name in ('borrowed','literal','cleanup','wrapper'):
             with self.subTest(name=name):
                 item=entry(context(source,name,contracts=True)['contracts'],name)
@@ -89,15 +82,15 @@ fn indexed(values:list[int],index:int)->int {return values[index];}
                 self.assertFalse(item['effects']['known'])
 
     def test_catch_finally_reraise_and_unclassified_calls_are_not_closed_sets(self):
-        source=b'''fn target()->int {try {raise ValueError("x");} except ValueError {missing();raise;} finally {print(1);}return 0;}'''
+        source=b"def target() -> int:\n    try:\n        raise ValueError('x')\n    except ValueError:\n        missing()\n        raise\n    finally:\n        print(1)\n    return 0\n"
         item=entry(context(source,'target',contracts=True)['contracts'],'target')
         self.assertFalse(item['raises']['known']);self.assertIn('ValueError',item['raises']['values'])
         self.assertFalse(item['effects']['known']);self.assertFalse(item['fatal']['known'])
         self.assertFalse(entry(context(source,'target',contracts=True)['contracts'],'missing','unresolved')['signature_known'])
 
     def test_imported_real_bodies_sha_and_invalid_target_context_survive_edit(self):
-        dependency=self.source('fn input(path:str)->bytes {return read_bytes(path);}','library.ail')
-        source=self.source('use library; fn target()->int {return input("path");}')
+        dependency=self.source('from ail import read_bytes\ndef input(path: str) -> bytes:\n    return read_bytes(path)\n','library.ail')
+        source=self.source("from library import *\ndef target() -> int:\n    return input('path')\n")
         rich=context(source.read_bytes(),'target',source_path=source,resolve_imports=True,contracts=True)
         item=entry(rich['contracts'],'input')
         self.assertIn('filesystem_io',item['effects']['values'])
@@ -108,7 +101,7 @@ fn indexed(values:list[int],index:int)->int {return values[index];}
         candidate=self.root/'candidate.ail'
         status,report=self.cli('edit',source,'--symbol','target','--base-sha256',rich['source_sha256'],'--body-text','return 1;','--context',transport,'--library','-o',candidate)
         self.assertEqual(status,0,report);self.assertTrue(candidate.is_file())
-        dependency.write_text('fn input(path:str)->bytes {return b"changed";}',encoding='utf8')
+        dependency.write_text("def input(path: str) -> bytes:\n    return b'changed'\n",encoding='utf8')
         status,report=self.cli('edit',source,'--symbol','target','--base-sha256',rich['source_sha256'],'--body-text','return 2;','--context',transport,'--library','-o',self.root/'stale.ail')
         self.assertNotEqual(status,0,report);self.assertFalse((self.root/'stale.ail').exists())
 
@@ -128,7 +121,7 @@ fn indexed(values:list[int],index:int)->int {return values[index];}
             target=malformed if group=='payload' else malformed['entries'][0]['result'] if group=='result' else malformed['entries'][0]['provenance'] if group=='proof' else malformed['entries'][0]
             target[key]=value
             with self.subTest(group=group,key=key),self.assertRaises(ValueError):validate_contracts(malformed)
-        rich=context(b'fn target()->int {return 1;}','target',contracts=True)
+        rich=context(b'def target() -> int:\n    return 1\n','target',contracts=True)
         rich['contracts']['registry_version']=99
         with self.assertRaises(ValueError):compact_context(rich)
 

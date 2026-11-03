@@ -29,61 +29,7 @@ from ail_testenv import gnu_time
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = r"""
-struct Tally { counts: list[int]; extra: int; }
-fn fail(n: int, why: str) -> void { raise ValueError(f"line {n}: {why}"); }
-fn note(msg: str) -> void { print("note", msg); }
-fn main() {
-    let kinds: dict[str, str] = {"add": "name qty", "del": "name", "many": "a b c d e f g h i j k l m n o p q r s t u v w x y z aa bb cc dd ee ff gg hh"};
-    let keep: list[str] = [];
-    let first: dict[str, str] = {};
-    let order: list[str] = [];
-    let st = Tally([0, 0, 0, 0], 0);
-    let n = 0;
-    for line in sys.stdin {
-        n += 1;
-        let f = line.split();
-        if len(f) == 0 { print(n, "blank", len(line.encode()), len(line)); continue; }
-        let ks = kinds.get(f[0], "").split();
-        st.counts[len(f) % 4] += 1;
-        st.extra += len(line.encode()) - len(line);
-        if f[0] == f[0].upper() { st.counts[0] += 1; }
-        if f[0].lower() == "add" { print("ADD-ish", f[0]); }
-        if "del" != f[0].lower() { st.extra += 1; }
-        keep.append(f[len(f) - 1]);
-        if f[0] not in first { first[f[0]] = f[len(f) - 1]; order.append(f[0]); }
-        if f[0] == "bad" {
-            try { fail(n, f[1]); } except ValueError as e { print("caught", e.message); }
-        }
-        if len(f) > 1 and f[1] != f[1].lower() { note(f[1]); }
-        print(n, len(f), "|".join(f), len(ks), len(line.encode()));
-    }
-    print(len(keep), "|".join(keep));
-    for k in order { print(k, first[k]); }
-    print(st.counts[0], st.counts[1], st.counts[2], st.counts[3], st.extra);
-    let probes = ["", "   ", "  a\tb\n", " x　y z w", "a\x1cb\x1dc\x1ed\x1fe", "\x85q\x85", "é bé é",
-                  " m n o p q", "Â ", "x​y", "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32",
-                  "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 　 34 é"];
-    for s in probes {
-        let p = s.split();
-        print(len(p), "[" + "][".join(p) + "]", len(s.encode()));
-    }
-    let cases = ["abc", "ABC", "Abc", "straße", "STRASSE", "ß", "SS", "İ", "i̇", "ΣΣ", "σς", ""];
-    for a in cases {
-        for b in cases {
-            if a == b.lower() { print("lower", a, b); }
-            if b.upper() == a { print("upper", a, b); }
-            if a != b.upper() and b.lower() != a { st.extra += 1; }
-        }
-    }
-    print(st.extra);
-    let big = "y" * 700;
-    print(f"");
-    print(f"{st.extra:>8}|{big}|\u00e9{len(keep)}");
-    print(f"{big}{big}");
-    print(f"n={n} last={keep[len(keep) - 1]}");
-}
-"""
+SOURCE = 'import sys\n\nclass Tally:\n\n    def __init__(self, counts: list[int], extra: int):\n        self.counts = counts\n        self.extra = extra\n\ndef fail(n: int, why: str) -> None:\n    raise ValueError(f\'line {n}: {why}\')\n\ndef note(msg: str) -> None:\n    print(\'note\', msg)\n\ndef main() -> int:\n    kinds: dict[str, str] = {\'add\': \'name qty\', \'del\': \'name\', \'many\': \'a b c d e f g h i j k l m n o p q r s t u v w x y z aa bb cc dd ee ff gg hh\'}\n    keep: list[str] = []\n    first: dict[str, str] = {}\n    order: list[str] = []\n    st = Tally([0, 0, 0, 0], 0)\n    n = 0\n    for line in sys.stdin:\n        n += 1\n        f = line.split()\n        if len(f) == 0:\n            print(n, \'blank\', len(line.encode()), len(line))\n            continue\n        ks = kinds.get(f[0], \'\').split()\n        st.counts[len(f) % 4] += 1\n        st.extra += len(line.encode()) - len(line)\n        if f[0] == f[0].upper():\n            st.counts[0] += 1\n        if f[0].lower() == \'add\':\n            print(\'ADD-ish\', f[0])\n        if \'del\' != f[0].lower():\n            st.extra += 1\n        keep.append(f[len(f) - 1])\n        if f[0] not in first:\n            first[f[0]] = f[len(f) - 1]\n            order.append(f[0])\n        if f[0] == \'bad\':\n            try:\n                fail(n, f[1])\n            except ValueError as e:\n                print(\'caught\', e.message)\n        if len(f) > 1 and f[1] != f[1].lower():\n            note(f[1])\n        print(n, len(f), \'|\'.join(f), len(ks), len(line.encode()))\n    print(len(keep), \'|\'.join(keep))\n    for k in order:\n        print(k, first[k])\n    print(st.counts[0], st.counts[1], st.counts[2], st.counts[3], st.extra)\n    probes = [\'\', \'   \', \'  a\\tb\\n\', \'\\xa0x\\u3000y\\u2028z\\u2029w\', \'a\\x1cb\\x1dc\\x1ed\\x1fe\', \'\\x85q\\x85\', \'é bé é\', \'\\u1680m\\u2000n\\u200ao\\u202fp\\u205fq\', \'Â\\xa0\', \'x\\u200by\', \'1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32\', \'1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 \\u3000 34 é\']\n    for s in probes:\n        p = s.split()\n        print(len(p), \'[\' + \'][\'.join(p) + \']\', len(s.encode()))\n    cases = [\'abc\', \'ABC\', \'Abc\', \'straße\', \'STRASSE\', \'ß\', \'SS\', \'İ\', \'i̇\', \'ΣΣ\', \'σς\', \'\']\n    for a in cases:\n        for b in cases:\n            if a == b.lower():\n                print(\'lower\', a, b)\n            if b.upper() == a:\n                print(\'upper\', a, b)\n            if a != b.upper() and b.lower() != a:\n                st.extra += 1\n    print(st.extra)\n    big = \'y\' * 700\n    print(f\'\')\n    print(f\'{st.extra:>8}|{big}|é{len(keep)}\')\n    print(f\'{big}{big}\')\n    print(f\'n={n} last={keep[len(keep) - 1]}\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 PYTHON = r'''
 import sys
@@ -151,37 +97,7 @@ INPUT = ("add apple 3\n  DEL   pear\n\nADD Kiwi 9\nbad Reason\nmany " + " ".join
 
 # A ticket-audit-shaped loop written inline: a void error helper, a numeric field list bump, a
 # per-line f-string and `len(line.encode())`, iterating `text.split("\n")`.
-INLINE = r"""
-struct St { seen: list[int]; }
-fn fail(n: int, why: str) -> void { raise ValueError(f"line {n}: {why}"); }
-fn run(text: str) -> int {
-    let st = St([0, 0, 0]);
-    let n = 0;
-    let total = 0;
-    let last = "";
-    for line in text.split("\n") {
-        n += 1;
-        if len(line.encode()) != len(line) { fail(n, "not ascii"); }
-        let f = line.split("|");
-        let key = f"{f[0]}:{len(f)}";
-        if key == "x:1" { fail(n, "x"); }
-        st.seen[len(f) % 3] += 1;
-        total += len(key);
-        last = key;
-    }
-    print(last);
-    return total * 1000 + st.seen[0] * 100 + st.seen[1] * 10 + st.seen[2];
-}
-fn main() {
-    let parts: list[str] = [];
-    for i in range(int(sys.argv[1])) { parts.append(f"a{i % 7}|b|c{i}" if i % 5 else f"q{i}"); }
-    let text = "\n".join(parts);
-    print(run(text));
-    for bad in ["ok|1\né|2", "ok\nx\nz"] {
-        try { print(run(bad)); } except ValueError as e { print(e.message); }
-    }
-}
-"""
+INLINE = 'import sys\n\nclass St:\n\n    def __init__(self, seen: list[int]):\n        self.seen = seen\n\ndef fail(n: int, why: str) -> None:\n    raise ValueError(f\'line {n}: {why}\')\n\ndef run(text: str) -> int:\n    st = St([0, 0, 0])\n    n = 0\n    total = 0\n    last = \'\'\n    for line in text.split(\'\\n\'):\n        n += 1\n        if len(line.encode()) != len(line):\n            fail(n, \'not ascii\')\n        f = line.split(\'|\')\n        key = f\'{f[0]}:{len(f)}\'\n        if key == \'x:1\':\n            fail(n, \'x\')\n        st.seen[len(f) % 3] += 1\n        total += len(key)\n        last = key\n    print(last)\n    return total * 1000 + st.seen[0] * 100 + st.seen[1] * 10 + st.seen[2]\n\ndef main() -> int:\n    parts: list[str] = []\n    for i in range(int(sys.argv[1])):\n        parts.append(f\'a{i % 7}|b|c{i}\' if i % 5 else f\'q{i}\')\n    text = \'\\n\'.join(parts)\n    print(run(text))\n    for bad in [\'ok|1\\né|2\', \'ok\\nx\\nz\']:\n        try:\n            print(run(bad))\n        except ValueError as e:\n            print(e.message)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 INLINE_PY = r'''
 import sys

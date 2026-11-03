@@ -17,69 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-fn emit(out: bytearray, s: bytearray) -> void {
-    let i = len(s) - 1;
-    let col = 0;
-    while i >= 0 {
-        out.append(s[i]);
-        col += 1;
-        if col == 5 { out.append(10); col = 0; }
-        i -= 1;
-    }
-    if col > 0 { out.append(10); }
-}
-
-fn count_pat(seq: bytes, mask: bytearray) -> int {
-    let n = len(seq);
-    let cnt = 0;
-    let i = 0;
-    while i <= n - 3 {
-        let ok = 0;
-        if mask[seq[i]] == 1 {
-            ok = 1;
-            for k in range(1, 3) {
-                if mask[k * 256 + seq[i + k]] == 0 { ok = 0; break; }
-            }
-        }
-        if ok == 1 { cnt += 1; i += 3; } else { i += 1; }
-    }
-    return cnt;
-}
-
-fn main() {
-    let tbl = bytearray();
-    for i in range(0, 256) { tbl.append(i); }
-    let src = b"ACGT";
-    let dst = b"TGCA";
-    for i in range(0, 4) { tbl[src[i]] = dst[i]; }
-    tbl[b"a"[0]] = tbl[65] + 1;
-    let seq = bytearray();
-    let line = b"GATTACAGATTACAGGCCAATT";
-    for b in line { seq.append(tbl[b]); }
-    let out = bytearray();
-    emit(out, seq);
-    out.append(out[0]);
-    out.append(out[-1]);
-    let big = bytearray();
-    big.append(7);
-    for i in range(0, 5000) { big.append(big[i] ^ (i & 255)); }
-    let mask = bytearray();
-    for k in range(0, 768) { mask.append(0); }
-    mask[65] = 1; mask[256 + 71] = 1; mask[512 + 84] = 1;
-    let hay = b"AGTAGTxAGTAGT";
-    print(count_pat(hay, mask), len(out), len(big), big[4999], big[-2], out[3]);
-    let bad = 300;
-    try { out.append(bad); } except ValueError { print("value error"); }
-    try { tbl[3] = bad; } except ValueError { print("value error set"); }
-    try { print(out[len(out)]); } except IndexError { print("index error"); }
-    try { print(seq[-100]); } except IndexError { print("index error neg"); }
-    let total = 0;
-    for i in range(0, len(big)) { total += big[i]; }
-    print(total);
-    write_stdout_bytes(bytes(out));
-}
-"""
+SOURCE = 'from ail import write_stdout_bytes\nimport sys\n\ndef emit(out: bytearray, s: bytearray) -> None:\n    i = len(s) - 1\n    col = 0\n    while i >= 0:\n        out.append(s[i])\n        col += 1\n        if col == 5:\n            out.append(10)\n            col = 0\n        i -= 1\n    if col > 0:\n        out.append(10)\n\ndef count_pat(seq: bytes, mask: bytearray) -> int:\n    n = len(seq)\n    cnt = 0\n    i = 0\n    while i <= n - 3:\n        ok = 0\n        if mask[seq[i]] == 1:\n            ok = 1\n            for k in range(1, 3):\n                if mask[k * 256 + seq[i + k]] == 0:\n                    ok = 0\n                    break\n        if ok == 1:\n            cnt += 1\n            i += 3\n        else:\n            i += 1\n    return cnt\n\ndef main() -> int:\n    tbl = bytearray()\n    for i in range(0, 256):\n        tbl.append(i)\n    src = b\'ACGT\'\n    dst = b\'TGCA\'\n    for i in range(0, 4):\n        tbl[src[i]] = dst[i]\n    tbl[b\'a\'[0]] = tbl[65] + 1\n    seq = bytearray()\n    line = b\'GATTACAGATTACAGGCCAATT\'\n    for b in line:\n        seq.append(tbl[b])\n    out = bytearray()\n    emit(out, seq)\n    out.append(out[0])\n    out.append(out[-1])\n    big = bytearray()\n    big.append(7)\n    for i in range(0, 5000):\n        big.append(big[i] ^ i & 255)\n    mask = bytearray()\n    for k in range(0, 768):\n        mask.append(0)\n    mask[65] = 1\n    mask[256 + 71] = 1\n    mask[512 + 84] = 1\n    hay = b\'AGTAGTxAGTAGT\'\n    print(count_pat(hay, mask), len(out), len(big), big[4999], big[-2], out[3])\n    bad = 300\n    try:\n        out.append(bad)\n    except ValueError:\n        print(\'value error\')\n    try:\n        tbl[3] = bad\n    except ValueError:\n        print(\'value error set\')\n    try:\n        print(out[len(out)])\n    except IndexError:\n        print(\'index error\')\n    try:\n        print(seq[-100])\n    except IndexError:\n        print(\'index error neg\')\n    total = 0\n    for i in range(0, len(big)):\n        total += big[i]\n    print(total)\n    write_stdout_bytes(bytes(out))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 PYTHON = """
 import os

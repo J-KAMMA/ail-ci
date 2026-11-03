@@ -35,22 +35,15 @@ class LibcNameTests(unittest.TestCase):
         self.check_run(self.ail_build('libc_names', source), expected)
 
     def test_libc_named_function_in_library_and_recursion(self):
-        source = '''fn rename(n:int)->int {if n<=0 {return 0;}return n+rename(n-1);}
-fn remove(n:int)->int {return rename(n)*2;}
-fn main()->int {let cb:Callable[[int],int]=remove;print(rename(4),cb(3));return 0;}'''
+        source = 'import sys\n\ndef rename(n: int) -> int:\n    if n <= 0:\n        return 0\n    return n + rename(n - 1)\n\ndef remove(n: int) -> int:\n    return rename(n) * 2\n\ndef main() -> int:\n    cb: Callable[[int], int] = remove\n    print(rename(4), cb(3))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         self.check_run(self.ail_build('libc_recursion', source), '10 12\n')
 
     def test_methods_structs_and_consts_with_libc_names(self):
-        source = '''const remove = 5;
-struct stat { rename:int; }
-impl stat { fn unlink(self, d:int)->int { return self.rename + d; } fn read(self)->int { return self.rename; } }
-fn main()->int { let s = stat(3); print(s.unlink(remove) + s.read()); return 0; }'''
+        source = 'import sys\nremove = 5\n\nclass stat:\n\n    def __init__(self, rename: int):\n        self.rename = rename\n\n    def unlink(self, d: int) -> int:\n        return self.rename + d\n\n    def read(self) -> int:\n        return self.rename\n\ndef main() -> int:\n    s = stat(3)\n    print(s.unlink(remove) + s.read())\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         self.check_run(self.ail_build('libc_members', source), '11\n')
 
     def test_mangled_name_never_meets_a_user_py_name(self):
-        source = '''fn rename(a:int)->int { return a+1; }
-fn py_rename(a:int)->int { return a+100; }
-fn main()->int { print(rename(2), py_rename(2)); return 0; }'''
+        source = 'import sys\n\ndef rename(a: int) -> int:\n    return a + 1\n\ndef py_rename(a: int) -> int:\n    return a + 100\n\ndef main() -> int:\n    print(rename(2), py_rename(2))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         self.check_run(self.ail_build('libc_py_clash', source), '3 102\n')
 
     def test_mangler_only_touches_header_and_runtime_names(self):

@@ -10,28 +10,7 @@ import test_ail_c_objects as support
 from test_ail_map_fields import build
 
 
-SOURCE = r'''struct Node { parent: int; weight: float; name: str; }
-fn scan(nodes: list[Node], start: int) -> int {
-    let i: int = start + 1;
-    while i < len(nodes) and nodes[i].parent >= start { i += 1; }
-    return i;
-}
-fn main() -> int {
-    let nodes: list[Node] = [];
-    for k in range(6) { nodes.append(Node(k // 2, 0.5 * k, "n" + str(k))); }
-    let last: int = -1;
-    print(scan(nodes, 0), scan(nodes, 2), nodes[last].parent, nodes[0].weight, nodes[5].weight);
-    let total: float = 0.0;
-    for k in range(len(nodes)) { total += nodes[k].weight; }
-    print(total);
-    let p: int = nodes[1].parent;
-    nodes = [];
-    print(p, len(nodes));
-    let other: list[Node] = [Node(7, 1.5, "x")];
-    let big: int = 3;
-    try { print(other[big].parent); } except IndexError { print("IndexError"); }
-    return 0;
-}'''
+SOURCE = 'import sys\n\nclass Node:\n\n    def __init__(self, parent: int, weight: float, name: str):\n        self.parent = parent\n        self.weight = weight\n        self.name = name\n\ndef scan(nodes: list[Node], start: int) -> int:\n    i: int = start + 1\n    while i < len(nodes) and nodes[i].parent >= start:\n        i += 1\n    return i\n\ndef main() -> int:\n    nodes: list[Node] = []\n    for k in range(6):\n        nodes.append(Node(k // 2, 0.5 * k, \'n\' + str(k)))\n    last: int = -1\n    print(scan(nodes, 0), scan(nodes, 2), nodes[last].parent, nodes[0].weight, nodes[5].weight)\n    total: float = 0.0\n    for k in range(len(nodes)):\n        total += nodes[k].weight\n    print(total)\n    p: int = nodes[1].parent\n    nodes = []\n    print(p, len(nodes))\n    other: list[Node] = [Node(7, 1.5, \'x\')]\n    big: int = 3\n    try:\n        print(other[big].parent)\n    except IndexError:\n        print(\'IndexError\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 
 class BorrowedElementFieldTests(unittest.TestCase):

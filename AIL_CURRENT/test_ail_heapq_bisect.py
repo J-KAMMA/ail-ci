@@ -19,125 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-struct Rng { s: int; }
-impl Rng {
-    fn next(self, m: int) -> int {
-        self.s = (self.s * 1103515245 + 12345) % 2147483648;
-        return (self.s >> 8) % m;
-    }
-}
-struct Item { t: int; b: str; id: int; }
-struct Box { h: list[int]; items: list[Item]; f: list[float]; }
-impl Box {
-    fn add(self, x: int) -> void { heappush(self.h, x); }
-    fn take(self) -> int { return heappop(self.h); }
-    fn add_item(self, it: Item) -> void { heappush(self.items, it, key=lambda n: (n.t, n.b)); }
-    fn take_item(self) -> Item { return heappop(self.items, key=lambda n: (n.t, n.b)); }
-}
-fn show_i(xs: list[int]) -> str {
-    let parts: list[str] = [];
-    for x in xs { parts.append(str(x)); }
-    return ",".join(parts);
-}
-fn show_f(xs: list[float]) -> str {
-    let parts: list[str] = [];
-    for x in xs { parts.append(f"{x:.3f}"); }
-    return ",".join(parts);
-}
-fn show_items(xs: list[Item]) -> str {
-    let parts: list[str] = [];
-    for it in xs { parts.append(str(it.t) + it.b + str(it.id)); }
-    return ",".join(parts);
-}
-fn main() {
-    let r = Rng(int(sys.argv[1]));
-    let h: list[int] = [];
-    let fl: list[float] = [];
-    let sl: list[str] = [];
-    let bx = Box([], [], []);
-    let sorted_i: list[int] = [];
-    let sorted_s: list[str] = [];
-    let byt: list[Item] = [];
-    for step in range(1500) {
-        let op = r.next(12);
-        let v = r.next(200) - 100;
-        if op < 4 {
-            heappush(h, v);
-            heappush(fl, float(v) / 8.0);
-            heappush(sl, "k" + str(v % 37));
-            bx.add(v);
-            bx.add_item(Item(v % 5, "s" + str(v % 3), step));
-            heappush(bx.f, float(v) * 0.25);
-        } elif op < 7 {
-            if len(h) > 0 {
-                let a = heappop(h);
-                let it = bx.take_item();
-                let tk = bx.take();
-                print("pop", a, f"{heappop(fl):.3f}", heappop(sl), tk, it.t, it.b, it.id, f"{heappop(bx.f):.3f}");
-            } else {
-                try { heappop(h); print("no"); } except IndexError as ie { print("empty", ie.kind); }
-            }
-        } elif op == 7 {
-            if len(h) > 0 {
-                print("pp", heappushpop(h, v), heapreplace(sl, "r" + str(v)), heappushpop(bx.h, v * 2));
-            } else {
-                print("pp0", heappushpop(h, v));
-                try { heapreplace(fl, 1.0); } except IndexError { print("replace empty"); }
-            }
-        } elif op == 8 {
-            let xs: list[int] = [];
-            let k = r.next(30);
-            for i in range(k) { xs.append(r.next(50)); }
-            heapify(xs);
-            let ys: list[str] = [];
-            for x in xs { ys.append(str(x * 7 % 11)); }
-            heapify(ys);
-            let zs: list[Item] = [];
-            for x in xs { zs.append(Item(x % 4, "z" + str(x % 2), x)); }
-            heapify(zs, key=lambda n: (n.t, n.b));
-            print("heapify", show_i(xs), ",".join(ys), show_items(zs));
-        } elif op == 9 {
-            insort(sorted_i, v % 20);
-            insort_left(sorted_s, "w" + str(v % 9));
-            insort_right(sorted_s, "w" + str(v % 4));
-            insort(byt, Item(v % 6, "b", step), key=lambda n: n.t);
-            let lo = r.next(len(sorted_i) + 1);
-            let hi = lo + r.next(len(sorted_i) - lo + 1);
-            print("bis", bisect_left(sorted_i, v % 20), bisect_right(sorted_i, v % 20), bisect(sorted_i, 3),
-                  bisect_left(sorted_i, v % 20, lo, hi), bisect_right(sorted_i, v % 20, lo=lo, hi=hi),
-                  bisect_left(sorted_s, "w5"), bisect_right(sorted_s, "w2", lo),
-                  bisect_left(byt, 3, key=lambda n: n.t), bisect_right(byt, 3, key=lambda n: n.t));
-        } elif op == 10 {
-            let ff = [2.5, 0.5, 1.5];
-            insort(ff, float(v) / 16.0);
-            print("fl", show_f(ff), bisect_left(ff, 0.5), bisect_right(ff, 0.5, 1));
-        } else {
-            print("state", show_i(h), show_f(fl), ",".join(sl), show_i(bx.h), show_items(bx.items));
-        }
-    }
-    print("final", show_i(h), ",".join(sl), show_i(sorted_i), ",".join(sorted_s), show_items(byt));
-    let e: list[int] = [];
-    try { print(bisect_left(e, 1, -1)); } except ValueError as err { print("lo", err.message); }
-    let e2: list[int] = [1, 2, 2, 3];
-    print("bneg", bisect(e2, 2, 0, -1), bisect(e2, 2, 0, -2));
-    try { print("bhi", bisect(e2, 2, 0, 99)); } except IndexError as err { print("bhi", err.message); }
-    try { print("bhi", bisect_left(e2, 2, 0, 99)); } except IndexError as err { print("bhi", err.message); }
-    try { bisect(e2, 2, -1, 3); } except ValueError as err { print("blo", err.message); }
-    let e3: list[int] = [1, 2, 2, 3];
-    try { insort(e3, 2, 0, 99); } except IndexError as err { print("bins", err.message); }
-    let e4: list[int] = [1, 2, 2, 3];
-    insort(e4, 2, 0, -1);
-    print("binsneg", show_i(e4));
-    let e5: list[int] = [1, 2, 2, 3];
-    print("bnone", bisect_left(e5, 2, 0, None), bisect_right(e5, 2, hi=None),
-          bisect_left(e5, 2, lo=1, hi=None), bisect(e5, 9, 0, None));
-    insort_left(e5, 3, 0, None);
-    insort_right(e5, 1, hi=None);
-    insort(e5, 2, lo=0, hi=None);
-    print("binsnone", show_i(e5));
-}
-"""
+SOURCE = 'from ail import heappop, heappush\nimport sys\n\nclass Rng:\n\n    def __init__(self, s: int):\n        self.s = s\n\n    def next(self, m: int) -> int:\n        self.s = (self.s * 1103515245 + 12345) % 2147483648\n        return (self.s >> 8) % m\n\nclass Item:\n\n    def __init__(self, t: int, b: str, id: int):\n        self.t = t\n        self.b = b\n        self.id = id\n\nclass Box:\n\n    def __init__(self, h: list[int], items: list[Item], f: list[float]):\n        self.h = h\n        self.items = items\n        self.f = f\n\n    def add(self, x: int) -> None:\n        heappush(self.h, x)\n\n    def take(self) -> int:\n        return heappop(self.h)\n\n    def add_item(self, it: Item) -> None:\n        heappush(self.items, it, key=lambda n: (n.t, n.b))\n\n    def take_item(self) -> Item:\n        return heappop(self.items, key=lambda n: (n.t, n.b))\n\ndef show_i(xs: list[int]) -> str:\n    parts: list[str] = []\n    for x in xs:\n        parts.append(str(x))\n    return \',\'.join(parts)\n\ndef show_f(xs: list[float]) -> str:\n    parts: list[str] = []\n    for x in xs:\n        parts.append(f\'{x:.3f}\')\n    return \',\'.join(parts)\n\ndef show_items(xs: list[Item]) -> str:\n    parts: list[str] = []\n    for it in xs:\n        parts.append(str(it.t) + it.b + str(it.id))\n    return \',\'.join(parts)\n\ndef main() -> int:\n    r = Rng(int(sys.argv[1]))\n    h: list[int] = []\n    fl: list[float] = []\n    sl: list[str] = []\n    bx = Box([], [], [])\n    sorted_i: list[int] = []\n    sorted_s: list[str] = []\n    byt: list[Item] = []\n    for step in range(1500):\n        op = r.next(12)\n        v = r.next(200) - 100\n        if op < 4:\n            heappush(h, v)\n            heappush(fl, float(v) / 8.0)\n            heappush(sl, \'k\' + str(v % 37))\n            bx.add(v)\n            bx.add_item(Item(v % 5, \'s\' + str(v % 3), step))\n            heappush(bx.f, float(v) * 0.25)\n        elif op < 7:\n            if len(h) > 0:\n                a = heappop(h)\n                it = bx.take_item()\n                tk = bx.take()\n                print(\'pop\', a, f\'{heappop(fl):.3f}\', heappop(sl), tk, it.t, it.b, it.id, f\'{heappop(bx.f):.3f}\')\n            else:\n                try:\n                    heappop(h)\n                    print(\'no\')\n                except IndexError as ie:\n                    print(\'empty\', ie.kind)\n        elif op == 7:\n            if len(h) > 0:\n                print(\'pp\', heappushpop(h, v), heapreplace(sl, \'r\' + str(v)), heappushpop(bx.h, v * 2))\n            else:\n                print(\'pp0\', heappushpop(h, v))\n                try:\n                    heapreplace(fl, 1.0)\n                except IndexError:\n                    print(\'replace empty\')\n        elif op == 8:\n            xs: list[int] = []\n            k = r.next(30)\n            for i in range(k):\n                xs.append(r.next(50))\n            heapify(xs)\n            ys: list[str] = []\n            for x in xs:\n                ys.append(str(x * 7 % 11))\n            heapify(ys)\n            zs: list[Item] = []\n            for x in xs:\n                zs.append(Item(x % 4, \'z\' + str(x % 2), x))\n            heapify(zs, key=lambda n: (n.t, n.b))\n            print(\'heapify\', show_i(xs), \',\'.join(ys), show_items(zs))\n        elif op == 9:\n            insort(sorted_i, v % 20)\n            insort_left(sorted_s, \'w\' + str(v % 9))\n            insort_right(sorted_s, \'w\' + str(v % 4))\n            insort(byt, Item(v % 6, \'b\', step), key=lambda n: n.t)\n            lo = r.next(len(sorted_i) + 1)\n            hi = lo + r.next(len(sorted_i) - lo + 1)\n            print(\'bis\', bisect_left(sorted_i, v % 20), bisect_right(sorted_i, v % 20), bisect(sorted_i, 3), bisect_left(sorted_i, v % 20, lo, hi), bisect_right(sorted_i, v % 20, lo=lo, hi=hi), bisect_left(sorted_s, \'w5\'), bisect_right(sorted_s, \'w2\', lo), bisect_left(byt, 3, key=lambda n: n.t), bisect_right(byt, 3, key=lambda n: n.t))\n        elif op == 10:\n            ff = [2.5, 0.5, 1.5]\n            insort(ff, float(v) / 16.0)\n            print(\'fl\', show_f(ff), bisect_left(ff, 0.5), bisect_right(ff, 0.5, 1))\n        else:\n            print(\'state\', show_i(h), show_f(fl), \',\'.join(sl), show_i(bx.h), show_items(bx.items))\n    print(\'final\', show_i(h), \',\'.join(sl), show_i(sorted_i), \',\'.join(sorted_s), show_items(byt))\n    e: list[int] = []\n    try:\n        print(bisect_left(e, 1, -1))\n    except ValueError as err:\n        print(\'lo\', err.message)\n    e2: list[int] = [1, 2, 2, 3]\n    print(\'bneg\', bisect(e2, 2, 0, -1), bisect(e2, 2, 0, -2))\n    try:\n        print(\'bhi\', bisect(e2, 2, 0, 99))\n    except IndexError as err:\n        print(\'bhi\', err.message)\n    try:\n        print(\'bhi\', bisect_left(e2, 2, 0, 99))\n    except IndexError as err:\n        print(\'bhi\', err.message)\n    try:\n        bisect(e2, 2, -1, 3)\n    except ValueError as err:\n        print(\'blo\', err.message)\n    e3: list[int] = [1, 2, 2, 3]\n    try:\n        insort(e3, 2, 0, 99)\n    except IndexError as err:\n        print(\'bins\', err.message)\n    e4: list[int] = [1, 2, 2, 3]\n    insort(e4, 2, 0, -1)\n    print(\'binsneg\', show_i(e4))\n    e5: list[int] = [1, 2, 2, 3]\n    print(\'bnone\', bisect_left(e5, 2, 0, None), bisect_right(e5, 2, hi=None), bisect_left(e5, 2, lo=1, hi=None), bisect(e5, 9, 0, None))\n    insort_left(e5, 3, 0, None)\n    insort_right(e5, 1, hi=None)\n    insort(e5, 2, lo=0, hi=None)\n    print(\'binsnone\', show_i(e5))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 PYTHON = r'''
 import sys
@@ -323,51 +205,29 @@ except TypeError as err:
 print(keep)
 '''
 
-SHADOW = """
-fn heappush(xs: list[int], x: int) -> int { return len(xs) + x; }
-fn main() {
-    let h: list[int] = [1, 2];
-    print(heappush(h, 10));
-    let q: list[int] = [];
-    heappop_like(q);
-}
-fn heappop_like(q: list[int]) -> void { print(len(q)); }
-"""
+SHADOW = 'from ail import heappush\nimport sys\n\ndef heappush(xs: list[int], x: int) -> int:\n    return len(xs) + x\n\ndef main() -> int:\n    h: list[int] = [1, 2]\n    print(heappush(h, 10))\n    q: list[int] = []\n    heappop_like(q)\n    return 0\n\ndef heappop_like(q: list[int]) -> None:\n    print(len(q))\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
-ORDER = """
-fn main() {
-    let h: list[int] = [];
-    for x in [5, 1, 4] { heappush(h, x); }
-    print(heappop(h), heappop(h), len(h));
-    let total = heappop(h) * 10 + len(h);
-    print(total);
-    heappush(h, 3);
-    heappush(h, heappop(h) + 1);
-    print(h[0]);
-    while len(h) > 0 { let x = heappop(h); print(x); }
-}
-"""
+ORDER = 'from ail import heappop, heappush\nimport sys\n\ndef main() -> int:\n    h: list[int] = []\n    for x in [5, 1, 4]:\n        heappush(h, x)\n    print(heappop(h), heappop(h), len(h))\n    total = heappop(h) * 10 + len(h)\n    print(total)\n    heappush(h, 3)\n    heappush(h, heappop(h) + 1)\n    print(h[0])\n    while len(h) > 0:\n        x = heappop(h)\n        print(x)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 REFUSED = [
     # a list parameter is read-only: the heap has to live in a local or a struct field
-    ('fn f(h: list[int]) -> void { heappush(h, 1); } fn main() { let h: list[int] = []; f(h); }', 'read-only'),
-    ('fn f(h: list[int]) -> int { return heappop(h); } fn main() { let h: list[int] = [1]; print(f(h)); }', 'read-only'),
+    ('from ail import heappush\nimport sys\n\ndef f(h: list[int]) -> None:\n    heappush(h, 1)\n\ndef main() -> int:\n    h: list[int] = []\n    f(h)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'read-only'),
+    ('from ail import heappop\nimport sys\n\ndef f(h: list[int]) -> int:\n    return heappop(h)\n\ndef main() -> int:\n    h: list[int] = [1]\n    print(f(h))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'read-only'),
     # Python evaluates h[0] before the pop
-    ('fn main() { let h: list[int] = [1, 2]; print(h[0], heappop(h)); }', 'bind the result'),
-    ('struct B { h: list[float]; } impl B { fn n(self) -> int { return len(self.h); } }'
-     ' fn main() { let b = B([1.0]); print(b.n(), f"{heappop(b.h):.1f}"); }', 'bind the result'),
+    ('from ail import heappop\nimport sys\n\ndef main() -> int:\n    h: list[int] = [1, 2]\n    print(h[0], heappop(h))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'bind the result'),
+    ('from ail import heappop\nimport sys\n\nclass B:\n\n    def __init__(self, h: list[float]):\n        self.h = h\n\n    def n(self) -> int:\n        return len(self.h)\n\ndef main() -> int:\n    b = B([1.0])\n    print(b.n(), f\'{heappop(b.h):.1f}\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'bind the result'),
     # only evaluated sometimes
-    ('fn main() { let h: list[int] = [1]; let c = 1; let x = 0 if c else heappop(h); print(x); }', 'unconditionally'),
-    ('fn main() { let h: list[int] = [1]; let x = heappush(h, 2); }', 'statement'),
-    ('fn main() { let h: list[int] = []; heappush(h); }', 'heappush(h, x)'),
-    ('fn main() { let h: list[int] = []; heappush(h, 1, reverse=True); }', 'key='),
-    ('struct N { t: int; } fn main() { let h: list[N] = []; heappush(h, N(1), key=3); }', 'key='),
-    ('struct N { t: int; u: int; } fn main() { let h: list[N] = []; print(bisect_left(h, 1, key=lambda n: (n.t, n.u))); }', 'tuple key'),
+    ('from ail import heappop\nimport sys\n\ndef main() -> int:\n    h: list[int] = [1]\n    c = 1\n    x = 0 if c else heappop(h)\n    print(x)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'unconditionally'),
+    ('from ail import heappush\nimport sys\n\ndef main() -> int:\n    h: list[int] = [1]\n    x = heappush(h, 2)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'statement'),
+    ('from ail import heappush\nimport sys\n\ndef main() -> int:\n    h: list[int] = []\n    heappush(h)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'heappush(h, x)'),
+    ('from ail import heappush\nimport sys\n\ndef main() -> int:\n    h: list[int] = []\n    heappush(h, 1, reverse=True)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'key='),
+    ('from ail import heappush\nimport sys\n\nclass N:\n\n    def __init__(self, t: int):\n        self.t = t\n\ndef main() -> int:\n    h: list[N] = []\n    heappush(h, N(1), key=3)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'key='),
+    ('import sys\n\nclass N:\n\n    def __init__(self, t: int, u: int):\n        self.t = t\n        self.u = u\n\ndef main() -> int:\n    h: list[N] = []\n    print(bisect_left(h, 1, key=lambda n: (n.t, n.u)))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'tuple key'),
     # bisect's bounds are ints (CPython reads them as Py_ssize_t); hi may also be None, lo may not
-    ('fn main() { let xs: list[int] = [1]; print(bisect_left(xs, 1, None)); }', 'lo must be an int'),
-    ('fn main() { let xs: list[int] = [1]; let h = 1.5; print(bisect_left(xs, 1, 0, h)); }', 'declared int'),
-    ('fn main() { let xs: list[int] = [1]; print(bisect_right(xs, 1, hi="2")); }', 'declared int'),
-    ('fn main() { let xs: list[int] = [1]; insort_left(xs, 1, 1.5); }', 'declared int'),
+    ('import sys\n\ndef main() -> int:\n    xs: list[int] = [1]\n    print(bisect_left(xs, 1, None))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'lo must be an int'),
+    ('import sys\n\ndef main() -> int:\n    xs: list[int] = [1]\n    h = 1.5\n    print(bisect_left(xs, 1, 0, h))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'declared int'),
+    ('import sys\n\ndef main() -> int:\n    xs: list[int] = [1]\n    print(bisect_right(xs, 1, hi=\'2\'))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'declared int'),
+    ('import sys\n\ndef main() -> int:\n    xs: list[int] = [1]\n    insort_left(xs, 1, 1.5)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 'declared int'),
 ]
 
 
