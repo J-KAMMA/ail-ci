@@ -279,8 +279,18 @@ fn positive(n: int) -> int {
     return n > 0;
 }
 
+fn guarded(n: int) -> int {
+    let ok: bool = n > 0;
+    try {
+        if n == 0 { raise ValueError; }
+    } except ValueError {
+        return False;
+    }
+    return ok;
+}
+
 fn main() -> int {
-    print(positive(2), positive(-1));
+    print(positive(2), positive(-1), guarded(3), guarded(0));
     return 0;
 }
 '''
@@ -294,7 +304,13 @@ fn main() -> int {
     values.append(3);
     let saved = holder.items;
     saved.append(4);
+    let stores: list[list[int]] = [[]];
+    stores[0] = values;
+    let lone = Holder([]);
+    lone.items = values;
+    values.append(5);
     print(len(holder.items), len(values), len(saved));
+    print(len(stores[0]), len(lone.items), len(values));
     return 0;
 }
 '''
@@ -446,6 +462,8 @@ class ConversionTests(unittest.TestCase):
     def test_bool_return_in_int_function_is_wrapped_and_builds_identically(self):
         source, _, converted = self.convert('bool_return', BOOL_RETURN)
         self.assertIn('return int(n > 0)', converted)
+        self.assertIn('return int(ok)', converted)
+        self.assertIn('return int(False)', converted)
         checked = run([sys.executable, '-B', TOOL, str(source), '--check'])
         self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
         self.assertEqual(checked.stdout.strip(), b'identical')
@@ -455,6 +473,8 @@ class ConversionTests(unittest.TestCase):
         _, _, converted = self.convert('container_copy', CONTAINER_COPY)
         self.assertIn('Holder(values.copy())', converted)
         self.assertIn('saved = holder.items.copy()', converted)
+        self.assertIn('stores[0] = values.copy()', converted)
+        self.assertIn('lone.items = values.copy()', converted)
         self._run_ail_and_converted('container_copy', CONTAINER_COPY)
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')

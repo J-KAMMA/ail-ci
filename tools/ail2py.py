@@ -186,13 +186,15 @@ def _annotation_name(node):
     return None
 
 
-def _is_bool_expression(node, bool_functions):
+def _is_bool_expression(node, bool_functions, bool_names=()):
     if isinstance(node, ast.Compare):
         return True
     if isinstance(node, ast.BoolOp):
-        return all(_is_bool_expression(value, bool_functions) for value in node.values)
+        return all(_is_bool_expression(value, bool_functions, bool_names) for value in node.values)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
         return True
+    if isinstance(node, ast.Name):
+        return node.id in bool_names
     if isinstance(node, ast.Constant) and isinstance(node.value, bool):
         return True
     if isinstance(node, ast.Call):
@@ -203,6 +205,40 @@ def _is_bool_expression(node, bool_functions):
     return False
 
 
+def _bool_declarations(tree, bool_functions):
+    """Names known to hold a bool (annotations and assignments of bool expressions)."""
+    names = set()
+    assignments = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for argument in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                if _annotation_name(argument.annotation) in _BOOL_RESULTS:
+                    names.add(argument.arg)
+        elif isinstance(node, ast.AnnAssign):
+            if _annotation_name(node.annotation) in _BOOL_RESULTS \
+                    and isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+            assignments.append(node)
+        elif isinstance(node, ast.Assign):
+            assignments.append(node)
+    changed = True
+    while changed:
+        changed = False
+        for node in assignments:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if not any(isinstance(target, ast.Name) for target in targets):
+                continue
+            if any(isinstance(target, ast.Name) and target.id in names for target in targets):
+                continue
+            if isinstance(node.value, ast.Name) and node.value.id in names \
+                    or _is_bool_expression(node.value, bool_functions, names):
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id not in names:
+                        names.add(target.id)
+                        changed = True
+    return names
+
+
 def _returns_in(body):
     """The ``return`` statements of one function body, not those of a nested function."""
     for node in body:
@@ -211,12 +247,9 @@ def _returns_in(body):
         if isinstance(node, ast.Return):
             yield node
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.stmt):
-                yield from _returns_in([child])
-            elif isinstance(child, (ast.expr,)):
-                for inner in ast.walk(child):
-                    if isinstance(inner, ast.Return):
-                        yield inner
+            if isinstance(child, ast.expr):
+                continue
+            yield from _returns_in([child])
 
 
 def _container_annotation(node):
@@ -412,6 +445,23 @@ def _copy_container_aliases(text, source_path=None, source=None):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             assign_targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(target, (ast.Subscript, ast.Attribute)) for target in assign_targets):
+                if not _container_value(value, names, fields):
+                    continue
+                if isinstance(value, ast.Name):
+                    copy = used_after(value.id, function, node)
+                elif isinstance(value, ast.Call) and isinstance(value.func, ast.Name) \
+                        and value.func.id in _ALIAS_RETURNS[0]:
+                    copy = any(isinstance(argument, ast.Name)
+                               and used_after(argument.id, function, node)
+                               for argument in value.args)
+                elif isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+                    copy = used_after(value.value.id, function, node)
+                else:
+                    copy = False
+                if copy:
+                    targets.append(value)
+                continue
             if not all(isinstance(target, ast.Name) for target in assign_targets):
                 continue
             if isinstance(value, ast.Name) or \
@@ -470,6 +520,7 @@ def _wrap_int_bool_returns(text, source_path=None, source=None):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and _annotation_name(node.returns) in _BOOL_RESULTS
     }
+    bool_names = _bool_declarations(analysis, bool_functions)
     targets = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -478,7 +529,7 @@ def _wrap_int_bool_returns(text, source_path=None, source=None):
             continue
         for statement in _returns_in(node.body):
             value = statement.value
-            if value is not None and _is_bool_expression(value, bool_functions):
+            if value is not None and _is_bool_expression(value, bool_functions, bool_names):
                 targets.append((value.lineno, value.col_offset, value.end_lineno, value.end_col_offset))
     if not targets:
         return text

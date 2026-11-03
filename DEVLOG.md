@@ -1,3 +1,29 @@
+## 2026-11-03 -- onelang s3b: verification of s3 and the remaining return/store boundaries
+
+Re-applied the s3 work commit on the current integ.  Re-running `tools/ail2py_corpus.py` gives the
+same 137-entry report: 14 identical, 46 identical-renamed, 7 differ, 70 both-fail (missing build
+inputs) and 0 py-refused; the committed baseline is unchanged.  The seven `differ` entries still
+print the same output (and `record_report_main` writes the same JSON) from the brace and converted
+binaries on the module inputs.
+
+Two boundary gaps in the s3 rules are fixed.  `_returns_in` now descends into `except` handlers and
+other statement containers instead of only child statements, so a bool-valued `return` inside an
+`except` gets `int(E)`; before, the converted build fell to the general path while the brace build
+was typed.  Bool locals (parameters or `let`/assignment names known to hold a bool) are wrapped as
+well, so `let ok: bool = n > 0; return ok` prints `1`/`0` like brace instead of `True`/`False`.
+A container stored into a subscript or attribute target now gets `.copy()` when the source is still
+live after the store (`xs[0] = values`, `holder.items = values`), matching the brace snapshot;
+read-only attribute reads keep the existing mutation-based rule, so no corpus conversion changes.
+
+Probes `r1_control` (if/elif/except/not/bool call/True/False), `r1_bool_var`, `r1_bool_methods`,
+`r2_assign` (list/dict/set), `r2_struct_list`, `r2_list_literal`, `r2_attr_alias`,
+`r2_list_item_store`, `r2_attr_store`, `r2_list_item_target_mut`, `r2_attr_target_mut`,
+`r2_bytearray_bytes` and `r2_empty` match the brace binary on the default build and the converted
+Python matches CPython on both builds.  `test_ail_ail2py` passes with the new expectations.
+`test_ail_files` and `test_ail_corpus_findings3` pass; `test_ail_safetynet` fails only
+`S4_generators_gc` with truncated general-path output, exactly as `origin/integ` does (verified in a
+separate worktree), so it is a pre-existing base failure rather than an s3 regression.
+
 ## 2026-11-03 -- onelang s3: converter meaning rules and corpus check
 
 `tools/ail2py.py --check` now reports `identical-renamed` when removing the module-name prefixes
