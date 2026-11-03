@@ -75,7 +75,7 @@ def run(command):
 
 class TwinTextTests(unittest.TestCase):
     def test_every_ail_has_a_twin_that_reconverts(self):
-        sources = sorted(EXAMPLES.glob('*.ail'))
+        sources = sorted(EXAMPLES.rglob('*.ail'))
         self.assertTrue(sources)
         for source in sources:
             with self.subTest(source.name):
@@ -84,9 +84,9 @@ class TwinTextTests(unittest.TestCase):
                 self.assertEqual(target.read_text(encoding='utf-8'), twin_text(source))
 
     def test_twin_count_equals_ail_count(self):
-        twins = [path for path in EXAMPLES.glob('*.py')
+        twins = [path for path in EXAMPLES.rglob('*.py')
                  if ail2py._is_twin(path.read_text(encoding='utf-8'))]
-        self.assertEqual(len(twins), len(list(EXAMPLES.glob('*.ail'))))
+        self.assertEqual(len(twins), len(list(EXAMPLES.rglob('*.ail'))))
 
     def test_a_foreign_py_file_is_left_alone(self):
         with tempfile.TemporaryDirectory(prefix='ail-twins-skip-') as directory:
@@ -102,6 +102,29 @@ class TwinTextTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
 class TwinBuildTests(unittest.TestCase):
+    def test_python_source_wins_over_its_generated_twin(self):
+        with tempfile.TemporaryDirectory(prefix='ail-twins-import-') as directory:
+            temp = Path(directory)
+            outputs = {}
+            for label, include_twin in (('twin', True), ('source', False)):
+                work = temp / label
+                work.mkdir()
+                shutil.copyfile(EXAMPLES / 'integer_series.ail', work / 'integer_series.ail')
+                if include_twin:
+                    shutil.copyfile(EXAMPLES / 'integer_series.py', work / 'integer_series.py')
+                entry = work / 'entry.py'
+                entry.write_text('from integer_series import above\nprint(above([3, 1, 2], 2))\n',
+                                 encoding='utf-8')
+                built = run([sys.executable, '-B', str(CLI), 'compile', str(entry),
+                             '--syntax', 'python', '-o', str(work / 'program'), '--strict',
+                             '--debug-dir', str(work / 'debug')])
+                self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+                outputs[label] = (work / 'debug' / 'program.c').read_text(encoding='utf-8')
+                ran = subprocess.run([str(work / 'program')], capture_output=True, text=True)
+                self.assertEqual(ran.returncode, 0, ran.stderr[-3000:])
+                self.assertEqual(ran.stdout, '[2, 3]\n')
+            self.assertEqual(outputs['twin'], outputs['source'])
+
     def test_ten_fixed_twins_build_to_the_same_c(self):
         with tempfile.TemporaryDirectory(prefix='ail-twins-build-') as directory:
             temp = Path(directory)

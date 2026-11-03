@@ -369,13 +369,13 @@ def _is_twin(text):
 
 
 def twins(directory):
-    """Write a ``X.py`` twin beside every ``X.ail`` in ``directory``.
+    """Write a ``X.py`` twin beside every ``X.ail`` under ``directory``.
 
     A brace source is converted; a Python-syntax source is copied.  An existing ``X.py`` that was
     not produced by this tool is left alone and listed.
     """
     directory = Path(directory)
-    sources = sorted(directory.glob('*.ail'))
+    sources = sorted(directory.rglob('*.ail'))
     written = 0
     skipped = []
     for source in sources:
@@ -409,7 +409,7 @@ def main(argv=None):
     parser.add_argument('source', nargs='?', help='AIL brace-syntax source (.ail)')
     parser.add_argument('-o', '--output', help='write the Python text here (default: stdout)')
     parser.add_argument('--twins', metavar='DIR',
-                        help='write a .py twin beside every .ail in DIR')
+                        help='write a .py twin beside every .ail under DIR')
     parser.add_argument('--check', action='store_true',
                         help='compile both forms and compare the generated C')
     parser.add_argument('--flags', default='', help='extra compiler flags for --check')

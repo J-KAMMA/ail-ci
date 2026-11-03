@@ -1,3 +1,22 @@
+## 2026-11-03 -- onelang s5 finish: every source tree file has a twin, and twins do not shadow Python modules
+
+Applied the two s5 commits from `job-onelangs5-11031341` (skipping its worker report) and finished
+the job.  `--twins` now walks the directory tree, so all 268 `.ail` files under
+`AIL_CURRENT/language_examples` have a twin (261 brace sources converted, 7 Python-syntax sources
+copied); the two `c_headers_workflow` sources are covered too.  `test_ail_onelang_twins` checks the
+whole tree and adds a boundary build showing that a generated twin never shadows its Python-syntax
+source.
+
+Finishing the review found a real regression: with `byte_search_core.py` beside the now-Python
+`byte_search_core.ail`, the quickstart's `from byte_search_core import *` was refused as ambiguous
+(`LANGUAGE_QUICKSTART_JA.md:7302`).  `ail_modules.spec` now ignores a generated `.py` twin when a
+Python-syntax `.ail` with the same name exists, so the `.ail` stays the source of truth; a brace
+source still resolves through its twin.  The 10 fixed twins build with identical C (8 `identical`,
+2 `identical-renamed`), all 268 twins re-convert byte for byte, and the Appendix C modules,
+`test_ail_reference_docs`, the required safetynet/files/corpus tests and the manifest check pass.
+The two ASan cases and `test_ail_safetynet` pass without `ulimit -v`; the earlier `S4_generators_gc`
+failure was only the virtual-memory cap.  No compare-lab source or `program.c` changed.
+
 ## 2026-11-03 -- onelang s5: a Python twin beside every `language_examples` source
 
 `tools/ail2py.py --twins DIR` writes a `X.py` twin beside every `X.ail` (brace sources are
