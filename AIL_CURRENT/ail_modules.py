@@ -167,6 +167,8 @@ class Mod:
         self.force_init = set()         # ids of synthetic imports whose module must start when the function runs
         self.init_name = None           # name of the function that runs this module's body (lazy start), if any
         self.hoisted = set()            # ids of the constant assignments placed with the definitions (lazy start)
+        self.modval_names = {}          # module-level name assigned a module value -> Mod
+        self.output_end = None          # index in the merged output just after this module's body
 
 
 class Imp:
@@ -296,6 +298,9 @@ class Program:
         self.getters = {}
         self.after_name = None
         self.uses_after = False
+        self.modval = {}                # Mod used as a value -> the one instance's name
+        self.modval_class = {}          # Mod used as a value -> its class name
+        self.ids = set()                # every identifier in the source, so generated names never clash
 
     def dunder_node(self, mod, name):
         """The value of `__file__` / `__package__` / `__path__` of `mod` as a constant expression, else None.
@@ -308,6 +313,22 @@ class Program:
         if name == '__path__' and mod.kind != 'module' and not mod.entry:
             return ast.List(elts=[ast.Constant(str(d)) for d in mod.dirs], ctx=ast.Load())
         return None
+
+    def module_value_name(self, mod):
+        """The name of the one instance standing for module `mod` when it is used as a value."""
+        name = self.modval.get(mod)
+        if name is None:
+            name = '_ail_modval_' + mod.prefix
+            while name in self.ids or name in self.kept:
+                name += '_'
+            self.ids.add(name)
+            class_name = '_AilMod_' + name[len('_ail_modval_'):]
+            while class_name in self.ids or class_name in self.kept:
+                class_name += '_'
+            self.ids.add(class_name)
+            self.modval[mod] = name
+            self.modval_class[mod] = class_name
+        return name
 
     def find_getters(self, mods):
         """Functions of the form `def f(): import m; return m` (the usual lazy import of a module that is used
@@ -2312,9 +2333,7 @@ class Program:
         found = self.resolve(target, attr, 0, True)
         sub = found[1] if found[0] == 'module' else (self.child(target, attr) if found[0] == 'none' else None)
         if sub is not None:
-            self.refuse(importer, node, "%s.%s is a module, used as a value; this compiler needs a module to be "
-                        "named in the source.\n  write instead: `import %s` in the importing file"
-                        % (target.name, attr, sub.name))
+            return self.module_value_name(sub)
         if found[0] == 'std':
             self.refuse(importer, node, "%s.%s is a standard-library name that %s imported; reading it through %s "
                         "is not supported.\n  write instead: import it in the importing file"
@@ -2502,6 +2521,7 @@ class Rewriter(ast.NodeTransformer):
         self.comp = 0
         self.getter_fn = False        # inside a function of the form `def f(): import m; return m`
         self.ok_calls = set()         # ids of getter calls used as `f().name` or as a statement
+        self.modvars = dict(getattr(mod, 'modval_names', {}))   # name holding a module value -> Mod
 
     def module_level(self, name):
         for position in range(len(self.scopes) - 1, -1, -1):
@@ -2558,11 +2578,36 @@ class Rewriter(ast.NodeTransformer):
                 found = self.program.resolve(self.mod, node.id)
                 if found[0] == 'module':
                     return found[1]
+            if self.module_level(node.id) and node.id in self.modvars:
+                return self.modvars[node.id]
         elif isinstance(node, ast.Attribute):
             base = self.module_ref(node.value)
             if base is not None:
                 return self.module_value(base, node.attr, node)
         elif isinstance(node, ast.Call):
+            return self.getter_of(node)
+        return None
+
+    def value_module(self, node):
+        """The module `node` denotes as a value (a module name, `pkg.m`, or a name holding one), else None."""
+        if isinstance(node, ast.Name):
+            if node.id in self.mod.alias and self.module_level(node.id):
+                found = self.program.resolve(self.mod, node.id)
+                if found[0] == 'module':
+                    return found[1]
+            if self.module_level(node.id):
+                return self.modvars.get(node.id)
+            return None
+        if isinstance(node, ast.Attribute):
+            base = self.module_ref(node.value)
+            if base is not None:
+                found = self.program.resolve(base, node.attr, 0, True)
+                if found[0] == 'module':
+                    return found[1]
+                if found[0] == 'none':
+                    return self.program.child(base, node.attr)
+            return None
+        if isinstance(node, ast.Call):
             return self.getter_of(node)
         return None
 
@@ -2583,6 +2628,24 @@ class Rewriter(ast.NodeTransformer):
         return None if got is None else got[0]
 
     def visit_Call(self, node):
+        if not self.dry:
+            if (isinstance(node.func, ast.Name) and node.func.id in ('getattr', 'setattr', 'delattr')
+                    and len(node.args) >= 2 and not node.keywords):
+                which = self.value_module(node.args[0])
+                name = node.args[1]
+                if which is not None and node.func.id in ('setattr', 'delattr'):
+                    self.program.refuse(self.mod, node, "%s on module %r used as a value: the compiler lowers it "
+                                        "to a plain attribute store, which does not run the module object's "
+                                        "properties.\n  write instead: assign `%s.%s = value` directly"
+                                        % (node.func.id, which.name, ast.unparse(node.args[0]),
+                                           name.value if isinstance(name, ast.Constant) and isinstance(name.value, str)
+                                           else 'name'))
+                if which is not None and not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+                    self.program.refuse(self.mod, node, "getattr on module %r with an attribute name computed at run "
+                                        "time (not a constant string): the module is a value in the merged program, "
+                                        "and its attributes are fixed when the program is built.\n"
+                                        "  write instead: getattr(%s, \"name\") with a constant string, or write "
+                                        "`%s.name`" % (which.name, ast.unparse(node.args[0]), which.name))
         if not self.dry and id(node) not in self.ok_calls:
             target = self.getter_of(node)
             if target is not None:
@@ -2590,6 +2653,13 @@ class Rewriter(ast.NodeTransformer):
                                     "or compared); this compiler needs a module to be named at each use.\n"
                                     "  write instead: use `%s().name` directly, or `import %s` where you use it"
                                     % (target.name, ast.unparse(node.func), target.name))
+            if node.keywords and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+                held = self.modvars.get(node.func.value.id)
+                if held is not None and not self.module_level(node.func.value.id):
+                    self.program.refuse(self.mod, node, "a call with keyword arguments through module %r used as a "
+                                        "value: the generated module object forwards positional arguments only.\n"
+                                        "  write instead: call it with positional arguments, or use "
+                                        "`%s.%s(...)` directly" % (held.name, held.name, node.func.attr))
         self.generic_visit(node)
         return node
 
@@ -2617,9 +2687,8 @@ class Rewriter(ast.NodeTransformer):
         if name in self.mod.alias:
             found = self.program.resolve(self.mod, name)
             if found[0] == 'module':
-                self.program.refuse(self.mod, node, "module %r used as a value (passed, stored or compared); this "
-                                    "compiler needs a module to be named at each use.\n  write instead: use "
-                                    "`%s.name` directly" % (found[1].name, name))
+                self.modvars[name] = found[1]
+                return ast.copy_location(ast.Name(self.program.module_value_name(found[1]), node.ctx), node)
             entry = self.mod.alias[name]
             if not isinstance(node.ctx, ast.Load):
                 self.program.refuse(self.mod, node, "%r is imported from %s and cannot be rebound here.\n"
@@ -2697,10 +2766,9 @@ class Rewriter(ast.NodeTransformer):
             self.program.refuse(self.mod, node, "`%s.%s` inside a class body: CPython mangles a double-underscore "
                                 "name there (to `_Class%s`), so it names a different attribute.\n  write instead: "
                                 "read it outside the class" % (target.name, attr, attr))
-        if self.module_value(target, attr, node) is not None:
-            self.program.refuse(self.mod, node, "%s.%s is a module, used as a value; this compiler needs a module "
-                                "to be named in the source.\n  write instead: use `%s.%s.name` directly"
-                                % (target.name, attr, target.name, attr))
+        sub = self.module_value(target, attr, node)
+        if sub is not None:
+            return ast.copy_location(ast.Name(self.program.module_value_name(sub), ast.Load()), node)
         if stored:
             if self.comp:
                 self.program.refuse(self.mod, node, "`%s.%s` is assigned inside a comprehension.\n"
@@ -2717,7 +2785,30 @@ class Rewriter(ast.NodeTransformer):
         self.check_partial(target, attr, node)
         return ast.copy_location(ast.Name(self.program.export(target, attr, self.mod, node), ast.Load()), node)
 
+    def visit_Assign(self, node):
+        if not self.dry:
+            value = self.value_module(node.value)
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                if value is not None:
+                    self.modvars[target.id] = value
+                    if not self.scopes:
+                        self.mod.modval_names[target.id] = value
+                else:
+                    self.modvars.pop(target.id, None)
+                    if not self.scopes:
+                        self.mod.modval_names.pop(target.id, None)
+        self.generic_visit(node)
+        return node
+
     def visit_AnnAssign(self, node):
+        if not self.dry:
+            value = self.value_module(node.value)
+            if value is not None and isinstance(node.target, ast.Name):
+                self.modvars[node.target.id] = value
+                if not self.scopes:
+                    self.mod.modval_names[node.target.id] = value
         if isinstance(node.target, ast.Attribute) and self.module_ref(node.target.value) is not None:
             self.program.refuse(self.mod, node, "an annotated assignment to a module attribute is not supported.\n"
                                 "  write instead: drop the annotation (`m.x = v`)")
@@ -2883,6 +2974,8 @@ def merge_program(entry_path, entry_text, read=None):
     output, std_seen, future, stack, positions = [], {}, [], [], {}
     program_ids = {getattr(n, f) for m in mods for n in ast.walk(m.tree) for f in ('id', 'name', 'arg', 'attr')
                    if isinstance(getattr(n, f, None), str)}
+    program.ids.update(program_ids)
+    program.ids.update(n for m in mods for n in itertools.chain(m.merged.values(), m.snaps.values()))
 
     def stamp(node, mod):
         for child in ast.walk(node):
@@ -3065,12 +3158,21 @@ def merge_program(entry_path, entry_text, read=None):
         if init_mode:
             define_init(mod, init_body, mod.tree.body[0] if mod.tree.body else mod.tree)
         mod.done = True
+        mod.output_end = len(output)
         stack.pop()
 
     program.after_name = '_ail_after'
     while program.after_name in program_ids or program.after_name in program.kept:
         program.after_name += '_'
     expand(entry)
+    inserted = set()
+    while True:
+        pending = [m for m in program.modval if m not in inserted and not m.entry and m.output_end is not None]
+        if not pending:
+            break
+        for mod in sorted(pending, key=lambda m: m.output_end, reverse=True):
+            output[mod.output_end:mod.output_end] = _modval_nodes(program, mod)
+            inserted.add(mod)
     if program.uses_after:
         helper = ast.parse('def %s(_ail_a, _ail_b):\n    return _ail_b\n' % program.after_name).body[0]
         helper._ail_path = entry.path
@@ -3090,6 +3192,56 @@ def merge_program(entry_path, entry_text, read=None):
         for key, new in mod.snaps.items():
             names[new] = key if mod.entry else '%s.%s' % (mod.name, key)
     return Merged(text, _positions(module, text), program.notes, names, classes)
+
+
+def _modval_nodes(program, mod):
+    """The class and one instance that stand for module `mod` when the program uses it as a value."""
+    class_name = program.modval_class[mod]
+    instance = program.modval[mod]
+    lines = ['class %s:' % class_name]
+    for name, kind in mod.kinds.items():
+        if name in MODULE_DUNDERS or name in ('__name__', '__file__', '__package__', '__repr__'):
+            continue
+        merged = mod.merged.get(name)
+        if merged is None:
+            continue
+        if kind == 'func':
+            lines.append('    def %s(self, *a):' % name)
+            lines.append('        return %s(*a)' % merged)
+        else:
+            lines.append('    @property')
+            lines.append('    def %s(self):' % name)
+            lines.append('        return %s' % merged)
+            lines.append('    @%s.setter' % name)
+            lines.append('    def %s(self, value):' % name)
+            lines.append('        global %s' % merged)
+            lines.append('        %s = value' % merged)
+    for name, entry in mod.alias.items():
+        if entry[0] != 'mod' or name in mod.kinds or name in MODULE_DUNDERS:
+            continue
+        lines.append('    @property')
+        lines.append('    def %s(self):' % name)
+        lines.append('        return %s' % program.module_value_name(entry[1]))
+    lines.append('    @property')
+    lines.append('    def __name__(self):')
+    lines.append('        return %r' % mod.name)
+    lines.append('    @property')
+    lines.append('    def __file__(self):')
+    lines.append('        return %r' % (None if mod.kind == 'namespace' else str(mod.path)))
+    lines.append('    @property')
+    lines.append('    def __package__(self):')
+    lines.append('        return %r' % (None if mod.entry else mod.package))
+    if mod.kind == 'namespace':
+        shown = "<module %r (namespace) from %r>" % (mod.name, [str(d) for d in mod.dirs])
+    else:
+        shown = "<module %r from %r>" % (mod.name, str(mod.path))
+    lines.append('    def __repr__(self):')
+    lines.append('        return %r' % shown)
+    lines.append('%s = %s()' % (instance, class_name))
+    tree = ast.parse('\n'.join(lines) + '\n')
+    for node in tree.body:
+        node._ail_path = mod.path
+    return tree.body
 
 
 def _module_classes(tree):
