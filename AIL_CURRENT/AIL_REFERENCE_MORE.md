@@ -1212,11 +1212,13 @@ slower than typed code), where operator methods dispatch on the run-time class (
   `strict` (default false), `module_path` (directories, passed as `-I`). Unknown keys, wrong types, a missing entry, and a bad name or link are refused
   by name. `ail build` writes `build/NAME` (`build/NAME-debug` with `--debug`), replacing the previous one; `-o` overrides. There is no package registry.
 - **strict.** `strict = true` adds `--strict` to the build: a program the typed path refuses is not built on the slow general path; every blocker is listed with its `write instead:` (exit 3, ail.strict/1 with `--json`). The language server shows those as errors. `link` and `compile --link LIB` are `link("LIB")` of the source (cratebridge), one code path (`Session.extra_libs`).
-- **Language server.** `ail lsp` (stdio, JSON-RPC 2.0, standard library only). Capabilities: open/close sync, `didSave`, hover. On didOpen and didSave it
-  runs `ail check` (schema `ail.check/1`) on the file on disk (a file that does not exist yet is checked from the buffer text). Severity: a source that
-  does not load or parse, or that the build refuses, is an Error; a typed-path blocker that the general path builds is a Warning `runs on the slow general
-  path because <reason>`; `slow_patterns` are Information. The Warning/Error split costs one build of the program (needs a C compiler; remembered per source
-  hash; without a compiler the Warning says it cannot tell). Messages keep the `write instead:` text; hover on a diagnostic shows it as **write instead:**.
+- **Language server.** `ail lsp` (stdio, JSON-RPC 2.0, standard library only). Capabilities: open/close sync, full-sync `didChange`, `didSave`, hover. On
+  didOpen, didChange and didSave it runs `ail check` (schema `ail.check/1`) on the buffer (a saved file with no buffer text is checked on disk; a file that
+  does not exist yet is checked from the buffer text). Severity: a source that does not load or parse, or that the build refuses, is an Error; a typed-path
+  blocker that the general path builds is a Warning `runs on the slow general path because <reason>`; `slow_patterns` are Information. The Warning/Error split
+  costs one build of the program (needs a C compiler; remembered per source hash; without a compiler the Warning says it cannot tell). Messages keep the
+  `write instead:` text; hover on a diagnostic shows it as **write instead:**, and hover on a name shows its type from an annotation or an obvious
+  initialiser, or a function signature.
   The blocker list is `compile --strict --json` (no C compiler needed); the Warning/Error split is the one build. A problem in an imported module is published on that module's file. Classification lives in `lsp.Diagnoser.classify`; when `ail check --strict`
   reports blockers and refusals itself, that is the only place to change.
 - **Debugging.** `ail build --debug` (`compile --debug`, environment `AIL_DEBUG=1`) compiles with `-g -O0`, and writes `#line N "file"` before every C line of every
