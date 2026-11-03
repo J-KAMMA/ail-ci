@@ -1,4 +1,4 @@
-## 2026-11-03 -- codegen: popcount idiom and shared span check (job-spec2-11031052)
+## 2026-11-03 -- codegen: popcount idiom and shared span check (job-spec2-11031052; re-verified job-spec2b-11032017)
 
 Two exact-shape rewrites in `pyfunc._codegen_idioms`, applied once to the final generated C
 (`to_c`), keep every bounds check:
@@ -10,16 +10,37 @@ Two exact-shape rewrites in `pyfunc._codegen_idioms`, applied once to the final 
   share one fast-path bounds check when their counts match, and fall back to the two original
   checked reads otherwise.
 
-Measured with callgrind on `tally_lang`'s compare-lab perf case: 21,658,123,856 -> 20,936,424,948
-instructions (-3.33%); binary 74,648 -> 74,688 bytes; RSS 22,588 -> 22,460 KiB; compile time
-3.96 -> 3.93 s. The other nine compare-lab tasks have identical instruction counts and binary
-bytes; a nine-run compile-time check on the four slowest-to-compile tasks shows no regression.
+Re-measured on the compare-lab perf cases with callgrind (valgrind 3.22 extracted from the
+Ubuntu package under /tmp; this runner has no valgrind and denies `perf_event_open`) against base
+`8c2374a`. Only `tally_lang` changes: 21,658,123,783 -> 20,936,425,206 instructions (-3.332%),
+binary 74,648 -> 74,688 bytes, RSS 1,496 -> 1,496 KiB. Every other task is instruction- and
+binary-byte-identical; their RSS moves only within run noise.
+
+| task | instr before | instr after | delta | binary before -> after | RSS KiB before -> after | compile s before -> after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| berth_sim | 8,383,603,495 | 8,383,603,495 | +0.000% | 64,864 -> 64,864 | 244,980 -> 244,532 | 11.31 -> 10.78 |
+| chain_relax | 1,692,838,109 | 1,692,838,109 | +0.000% | 34,888 -> 34,888 | 3,896 -> 3,896 | 2.78 -> 2.39 |
+| echo_pack | 6,158,280,824 | 6,158,280,824 | +0.000% | 35,896 -> 35,896 | 354,284 -> 354,304 | 4.32 -> 4.41 |
+| ledger_bin | 5,390,483,239 | 5,390,483,239 | +0.000% | 61,016 -> 61,016 | 337,616 -> 340,476 | 4.49 -> 4.49 |
+| rail_transfer | 387,938,152 | 387,938,152 | +0.000% | 64,936 -> 64,936 | 28,748 -> 28,824 | 3.53 -> 3.49 |
+| scar_life | 356,750,942,696 | 356,750,942,696 | +0.000% | 40,432 -> 40,432 | 17,532 -> 17,532 | 3.03 -> 2.89 |
+| tally_lang | 21,658,123,783 | 20,936,425,206 | -3.332% | 74,648 -> 74,688 | 1,496 -> 1,496 | 4.52 -> 4.41 |
+| term_rank | 15,990,360,094 | 15,990,360,094 | +0.000% | 74,392 -> 74,392 | 161,232 -> 162,140 | 3.86 -> 3.86 |
+| ticket_audit | 13,095,520,634 | 13,095,520,634 | +0.000% | 104,248 -> 104,248 | 254,688 -> 254,688 | 5.74 -> 5.55 |
+| tree_fold | 10,362,321,298 | 10,362,321,298 | +0.000% | 86,288 -> 86,288 | 441,236 -> 440,212 | 6.39 -> 6.00 |
+
+The non-`tally_lang` compile times were sampled while two measurement workers shared the runner
+and their generated C is identical, so those few-percent moves are load noise; an alternating
+five-pair build of `tally_lang` alone measured 4.381 s before and 4.330 s after. RSS is the median
+of three timed runs.
+
 `test_ail_span_cache`, `test_ail_numeric_loops`, `test_ail_safetynet`, `test_ail_files` and
-`test_ail_corpus_findings3` pass; all 75 public/hidden tally cases plus its perf case match
-CPython. Probes for empty lists, last index, one past the end, unequal list lengths and popcount
-values through arguments/list items/attributes/dict values match CPython; negative popcount still
-times out on both sides. `perf_event_open` is unavailable on this runner, so instruction counts
-come from callgrind.
+`test_ail_corpus_findings3` pass (31 tests, 1 skipped); all 75 public/hidden tally cases plus its
+perf case (76) match CPython. Probes in `/tmp/probes` match CPython on both the default and
+unified builds for empty lists, the last index, one past the end (still `IndexError`), lists of
+unequal length in one loop, negative list indices, and popcount through an argument, a list item,
+an attribute and a dict value; negative popcount times out identically in CPython and both
+builds, so the retained fallback is unchanged.
 
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
