@@ -1,3 +1,14 @@
+## 2026-11-03 -- onelang s13: LANGUAGE_QUICKSTART_JA.md in Python syntax
+
+`AIL_CURRENT/LANGUAGE_QUICKSTART_JA.md` (7,583 lines) now has no brace code: all 68 code
+fences are Python, the S-expression section and every `use`/`fn`/`let`/`struct`/`impl` rule
+were rewritten or removed, and the Japanese prose is unchanged elsewhere.  `tools/ail2py_docs.py`
+from s12 is the converter; the remaining fragments were hand-converted.  Of the 38 whole-program
+blocks, 26 compile as Python now; the other 12 import a `language_examples` module that is still
+written in brace syntax, call a function supplied by `--object`, or exercise an alias the current
+compiler refuses.  `test_ail_reference_docs` now parses every Python fence in the quickstart and
+rejects `fn `/`let ` spellings; it and `test_ail_quickstart_docs` pass.
+
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class

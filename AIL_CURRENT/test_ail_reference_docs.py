@@ -6,6 +6,7 @@
   or the block's ``# prints ...`` comments.
 - No fenced block may contain the old brace spellings ``fn `` or ``let ``.
 """
+import ast
 import os
 import re
 import subprocess
@@ -16,6 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DOCS = (HERE / 'AIL_REFERENCE.md', HERE / 'AIL_REFERENCE_MORE.md')
+QUICKSTART = HERE / 'LANGUAGE_QUICKSTART_JA.md'
 FENCE = re.compile(r'^```([\w-]*)\n(.*?)^```\n', re.M | re.S)
 
 
@@ -37,6 +39,10 @@ def blocks():
     for doc in DOCS:
         result.extend(doc_blocks(doc))
     return result
+
+
+def quickstart_blocks():
+    return doc_blocks(QUICKSTART)
 
 
 def whole_program(lang, body):
@@ -65,6 +71,14 @@ class ReferenceDocs(unittest.TestCase):
             with self.subTest(line=line, lang=lang):
                 self.assertNotIn('fn ', body, '%s still teaches brace syntax' % line)
                 self.assertNotIn('let ', body, '%s still teaches brace syntax' % line)
+
+    def test_quickstart_blocks_are_python_and_parse(self):
+        for lang, body, line, _ in quickstart_blocks():
+            with self.subTest(line=line, lang=lang):
+                self.assertNotIn('fn ', body, '%s still teaches brace syntax' % line)
+                self.assertNotIn('let ', body, '%s still teaches brace syntax' % line)
+                if lang == 'python' and body.strip():
+                    ast.parse(body)
 
     def test_whole_programs_build_and_print(self):
         examples = [b for b in blocks() if whole_program(b[0], b[1])]
