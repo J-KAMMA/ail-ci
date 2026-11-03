@@ -1,3 +1,22 @@
+## 2026-11-03 -- onelang s6 batch 1: worker conversions kept, additional conversions blocked by meaning differences
+
+Applied the previous run's `worker: uncommitted edits` commit. The 33 Appendix C modules now pass
+with `tools/par_check.py -j 2`, except `test_csv_column_stats_stream_candidate`, which already fails
+on the base because `language_examples/csv_column_stats_stream_candidate_main.ail` is absent. Brace
+`fn main(` lines fell from about 144 to 111; `AIL_CURRENT/onelang_brace_only.txt` now lists every
+remaining brace literal (197 entries) with a reason.
+
+Tried the converter on the remaining literals: all 62 additional conversions changed meaning, so they
+were reverted and listed. The first differing cases are Python float annotations refusing an int that
+the brace front end widens (`test_ail_argument_type_details`), Python's dict-view refusal for
+`ck = c.keys()` (`test_ail_dict_delete`), list-return copy semantics and the borrowed-row refusal
+(`test_ail_pool_row_arguments`), the uncatchable int64 overflow in Python syntax
+(`test_ail_overflow_error`), user `.split()` resolving as the builtin (`test_ail_element_views`), and
+Python imports refusing brace `language_examples` modules (`test_ail_cli_args`,
+`test_csv_column_stats_stream_candidate`, `test_json_query_file`). Conversion of context sources is
+not possible while `ail_source_context.context()` always translates brace text. More than five
+literals need a converter/front-end rule, so the batch stops here as the stop rule requires.
+
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class

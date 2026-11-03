@@ -1,196 +1,197 @@
-test_ail_argument_type_details.py:159 brace-only
-test_ail_argument_type_details.py:163 brace-only
-test_ail_argument_type_details.py:165 brace-only
-test_ail_argument_type_details.py:173 brace-only
-test_ail_argument_type_details.py:174 brace-only
-test_ail_argument_type_details.py:217 brace-only
-test_ail_argument_type_details.py:218 brace-only
-test_ail_argument_type_details.py:219 brace-only
-test_ail_argument_type_details.py:220 brace-only
-test_ail_argument_type_details.py:294 brace-only
-test_ail_argument_type_details.py:306 brace-only
-test_ail_argument_type_details.py:317 brace-only
-test_ail_argument_type_details.py:318 brace-only
-test_ail_argument_type_details.py:388 brace-only
-test_ail_argument_type_details.py:398 brace-only
-test_ail_argument_type_details.py:77 brace-only
-test_ail_binary_cursor_cli.py:110 brace-only
-test_ail_binary_cursor_cli.py:117 brace-only
-test_ail_builder_locals.py:28 brace-only
-test_ail_builder_locals.py:457 brace-only
-test_ail_builder_locals.py:573 brace-only
-test_ail_builder_locals.py:696 brace-only
-test_ail_builder_locals.py:717 brace-only
-test_ail_builder_locals.py:717 brace-only
-test_ail_builder_locals.py:726 brace-only
-test_ail_builtin_syntax_forms.py:54 brace-only
-test_ail_builtin_syntax_forms.py:54 brace-only
-test_ail_builtin_syntax_forms.py:56 brace-only
-test_ail_cli_args.py:29 brace-only
-test_ail_cli_args.py:70 brace-only
-test_ail_context_imports.py:109 brace-only
-test_ail_context_imports.py:113 brace-only
-test_ail_context_imports.py:114 brace-only
-test_ail_context_imports.py:119 brace-only
-test_ail_context_imports.py:128 brace-only
-test_ail_context_imports.py:131 brace-only
-test_ail_context_imports.py:132 brace-only
-test_ail_context_imports.py:133 brace-only
-test_ail_context_imports.py:138 brace-only
-test_ail_context_imports.py:139 brace-only
-test_ail_context_imports.py:142 brace-only
-test_ail_context_imports.py:147 brace-only
-test_ail_context_imports.py:150 brace-only
-test_ail_context_imports.py:155 brace-only
-test_ail_context_imports.py:173 brace-only
-test_ail_context_imports.py:174 brace-only
-test_ail_context_imports.py:183 brace-only
-test_ail_context_imports.py:25 brace-only
-test_ail_context_imports.py:38 brace-only
-test_ail_context_imports.py:39 brace-only
-test_ail_context_imports.py:40 brace-only
-test_ail_context_imports.py:57 brace-only
-test_ail_context_imports.py:58 brace-only
-test_ail_context_imports.py:59 brace-only
-test_ail_context_imports.py:60 brace-only
-test_ail_context_imports.py:68 brace-only
-test_ail_context_imports.py:69 brace-only
-test_ail_context_imports.py:77 brace-only
-test_ail_context_imports.py:78 brace-only
-test_ail_context_imports.py:83 brace-only
-test_ail_context_imports.py:84 brace-only
-test_ail_context_imports.py:86 brace-only
-test_ail_context_imports.py:90 brace-only
-test_ail_context_imports.py:91 brace-only
-test_ail_context_imports.py:94 brace-only
-test_ail_context_imports.py:99 brace-only
-test_ail_ctor_list_args.py:12 brace-only
-test_ail_dict_delete.py:27 brace-only
-test_ail_element_views.py:456 brace-only
-test_ail_exception_values_core.py:129 brace-only
-test_ail_exception_values_core.py:194 brace-only
-test_ail_exception_values_core.py:200 brace-only
-test_ail_exception_values_core.py:22 brace-only
-test_ail_exception_values_core.py:261 brace-only
-test_ail_exception_values_core.py:293 brace-only
-test_ail_exception_values_core.py:296 brace-only
-test_ail_exception_values_core.py:316 brace-only
-test_ail_exception_values_core.py:328 brace-only
-test_ail_exception_values_core.py:37 brace-only
-test_ail_exception_values_core.py:59 brace-only
-test_ail_exception_values_core.py:81 brace-only
-test_ail_exception_values_core.py:84 brace-only
-test_ail_field_str_append.py:16 brace-only
-test_ail_fuzz_findings.py:245 brace-only
-test_ail_handle_lists.py:14 brace-only
-test_ail_handle_lists.py:150 brace-only
-test_ail_handle_lists.py:152 brace-only
-test_ail_handle_lists.py:153 brace-only
-test_ail_handle_lists.py:154 brace-only
-test_ail_handle_lists.py:169 brace-only
-test_ail_handle_lists.py:170 brace-only
-test_ail_handle_lists.py:175 brace-only
-test_ail_handle_lists.py:261 brace-only
-test_ail_handle_lists.py:300 brace-only
-test_ail_handle_lists.py:43 brace-only
-test_ail_handle_lists.py:61 brace-only
-test_ail_handle_lists.py:81 brace-only
-test_ail_handle_lists.py:90 brace-only
-test_ail_integer_codec.py:117 brace-only
-test_ail_integer_codec.py:121 brace-only
-test_ail_integer_codec.py:128 brace-only
-test_ail_integer_codec.py:33 brace-only
-test_ail_integer_codec.py:66 brace-only
-test_ail_ir_cover.py:110 brace-only
-test_ail_ir_cover.py:155 brace-only
-test_ail_ir_cover.py:240 brace-only
-test_ail_overflow_error.py:15 brace-only
-test_ail_pool_row_arguments.py:10 brace-only
-test_ail_pool_row_arguments.py:108 brace-only
-test_ail_pool_row_arguments.py:11 brace-only
-test_ail_pool_row_arguments.py:114 brace-only
-test_ail_pool_row_arguments.py:24 brace-only
-test_ail_pool_row_arguments.py:36 brace-only
-test_ail_pool_row_arguments.py:44 brace-only
-test_ail_pool_row_arguments.py:56 brace-only
-test_ail_pool_row_arguments.py:61 brace-only
-test_ail_pool_row_arguments.py:73 brace-only
-test_ail_pool_row_arguments.py:80 brace-only
-test_ail_pool_row_arguments.py:87 brace-only
-test_ail_pool_row_arguments.py:96 brace-only
-test_ail_pool_row_arguments.py:96 brace-only
-test_ail_pre2.py:78 brace-only
-test_ail_scalar_list_mutations.py:103 brace-only
-test_ail_scalar_list_mutations.py:104 brace-only
-test_ail_scalar_list_mutations.py:105 brace-only
-test_ail_scalar_list_mutations.py:111 brace-only
-test_ail_scalar_list_mutations.py:115 brace-only
-test_ail_scalar_list_mutations.py:138 brace-only
-test_ail_scalar_list_mutations.py:20 brace-only
-test_ail_scalar_list_mutations.py:93 brace-only
-test_ail_scalar_list_mutations.py:96 brace-only
-test_ail_scalar_list_mutations.py:98 brace-only
-test_ail_scan_spec_modes.py:28 brace-only
-test_ail_scan_spec_modes.py:50 brace-only
-test_ail_sort_keys.py:159 brace-only
-test_ail_sort_keys.py:16 brace-only
-test_ail_sort_keys.py:173 brace-only
-test_ail_sort_keys.py:423 brace-only
-test_ail_sort_keys.py:426 brace-only
-test_ail_sort_keys.py:429 brace-only
-test_ail_sort_keys.py:432 brace-only
-test_ail_sort_keys.py:435 brace-only
-test_ail_sort_keys.py:438 brace-only
-test_ail_sort_keys.py:441 brace-only
-test_ail_sort_keys.py:444 brace-only
-test_ail_sort_keys.py:86 brace-only
-test_ail_stdout_mixed.py:11 brace-only
-test_ail_stdout_mixed.py:128 brace-only
-test_ail_stdout_mixed.py:35 brace-only
-test_ail_stdout_mixed.py:39 brace-only
-test_ail_stdout_mixed.py:48 brace-only
-test_ail_stdout_mixed.py:49 brace-only
-test_ail_stdout_mixed.py:59 brace-only
-test_ail_stdout_mixed.py:67 brace-only
-test_ail_stdout_mixed.py:88 brace-only
-test_ail_stdout_mixed.py:89 brace-only
-test_ail_str_adjacent_cat.py:13 brace-only
-test_ail_str_find_alias.py:16 brace-only
-test_ail_str_find_alias.py:17 brace-only
-test_ail_str_find_alias.py:18 brace-only
-test_ail_str_find_alias.py:19 brace-only
-test_ail_str_find_alias.py:20 brace-only
-test_ail_str_find_alias.py:21 brace-only
-test_ail_str_find_alias.py:22 brace-only
-test_ail_str_find_alias.py:23 brace-only
-test_ail_str_find_alias.py:24 brace-only
-test_ail_str_find_alias.py:25 brace-only
-test_ail_str_find_alias.py:26 brace-only
-test_ail_str_find_alias.py:27 brace-only
-test_ail_str_find_alias.py:38 brace-only
-test_ail_str_find_alias.py:39 brace-only
-test_ail_str_find_alias.py:40 brace-only
-test_ail_str_find_alias.py:47 brace-only
-test_ail_str_find_alias.py:48 brace-only
-test_ail_str_find_alias.py:49 brace-only
-test_ail_str_find_alias.py:50 brace-only
-test_ail_str_find_alias.py:51 brace-only
-test_ail_str_find_alias.py:52 brace-only
-test_ail_str_rfind.py:24 brace-only
-test_ail_str_rfind.py:43 brace-only
-test_ail_string_field_mutation.py:117 brace-only
-test_ail_string_field_mutation.py:124 brace-only
-test_ail_string_field_mutation.py:134 brace-only
-test_ail_string_field_mutation.py:160 brace-only
-test_ail_string_field_mutation.py:72 brace-only
-test_ail_tcp_poll.py:115 brace-only
-test_ail_tcp_poll.py:119 brace-only
-test_ail_tcp_poll.py:12 brace-only
-test_ail_tcp_poll.py:120 brace-only
-test_ail_tcp_poll.py:43 brace-only
-test_ail_tcp_poll.py:91 brace-only
-test_ail_tcp_poll.py:95 brace-only
-test_csv_column_stats_stream_candidate.py:67 brace-only
-test_csv_column_stats_stream_candidate.py:77 brace-only
-test_json_pointer_scan.py:14 brace-only
-test_json_query_file.py:116 brace-only
+test_ail_argument_type_details:77 meaning difference
+test_ail_argument_type_details:159 meaning difference
+test_ail_argument_type_details:163 meaning difference
+test_ail_argument_type_details:165 meaning difference
+test_ail_argument_type_details:173 meaning difference
+test_ail_argument_type_details:174 meaning difference
+test_ail_argument_type_details:217 meaning difference
+test_ail_argument_type_details:218 meaning difference
+test_ail_argument_type_details:219 meaning difference
+test_ail_argument_type_details:220 meaning difference
+test_ail_argument_type_details:294 meaning difference
+test_ail_argument_type_details:306 meaning difference
+test_ail_argument_type_details:317 meaning difference
+test_ail_argument_type_details:318 meaning difference
+test_ail_argument_type_details:388 meaning difference
+test_ail_argument_type_details:398 meaning difference
+test_ail_binary_cursor_cli:110 replace pattern
+test_ail_binary_cursor_cli:117 augmented source
+test_ail_builder_locals:28 front-end variable
+test_ail_builder_locals:457 front-end variable
+test_ail_builder_locals:573 front-end variable
+test_ail_builder_locals:696 percent-format
+test_ail_builder_locals:717 front-end variable
+test_ail_builder_locals:717 front-end variable
+test_ail_builder_locals:726 brace-only
+test_ail_builtin_syntax_forms:54 front-end variable
+test_ail_builtin_syntax_forms:54 replace pattern
+test_ail_builtin_syntax_forms:56 augmented source
+test_ail_cli_args:29 imports brace language_example
+test_ail_cli_args:70 imports brace language_example
+test_ail_context_imports:25 front-end context
+test_ail_context_imports:38 front-end context
+test_ail_context_imports:39 front-end context
+test_ail_context_imports:40 front-end context
+test_ail_context_imports:57 front-end context
+test_ail_context_imports:58 front-end context
+test_ail_context_imports:59 front-end context
+test_ail_context_imports:60 front-end context
+test_ail_context_imports:68 front-end context
+test_ail_context_imports:69 front-end context
+test_ail_context_imports:77 front-end context
+test_ail_context_imports:78 front-end context
+test_ail_context_imports:83 front-end context
+test_ail_context_imports:84 front-end context
+test_ail_context_imports:86 front-end context
+test_ail_context_imports:90 front-end context
+test_ail_context_imports:91 front-end context
+test_ail_context_imports:94 front-end context
+test_ail_context_imports:99 front-end context
+test_ail_context_imports:109 front-end context
+test_ail_context_imports:113 front-end context
+test_ail_context_imports:114 front-end context
+test_ail_context_imports:119 front-end context
+test_ail_context_imports:128 front-end context
+test_ail_context_imports:131 front-end context
+test_ail_context_imports:132 front-end context
+test_ail_context_imports:133 front-end context
+test_ail_context_imports:138 front-end context
+test_ail_context_imports:139 front-end context
+test_ail_context_imports:142 front-end context
+test_ail_context_imports:147 front-end context
+test_ail_context_imports:150 front-end context
+test_ail_context_imports:155 front-end context
+test_ail_context_imports:173 front-end context
+test_ail_context_imports:174 front-end context
+test_ail_context_imports:183 front-end context
+test_ail_ctor_list_args:12 front-end variable
+test_ail_dict_delete:27 meaning difference
+test_ail_element_views:456 meaning difference
+test_ail_exception_values_core:22 front-end variable
+test_ail_exception_values_core:37 front-end variable
+test_ail_exception_values_core:59 front-end variable
+test_ail_exception_values_core:81 front-end variable
+test_ail_exception_values_core:84 front-end variable
+test_ail_exception_values_core:129 front-end variable
+test_ail_exception_values_core:194 front-end variable
+test_ail_exception_values_core:200 front-end variable
+test_ail_exception_values_core:261 front-end variable
+test_ail_exception_values_core:293 front-end variable
+test_ail_exception_values_core:296 front-end translate
+test_ail_exception_values_core:316 front-end translate
+test_ail_exception_values_core:328 front-end translate
+test_ail_field_str_append:16 front-end variable
+test_ail_fuzz_findings:245 syntax ail
+test_ail_handle_lists:14 front-end variable
+test_ail_handle_lists:43 front-end variable
+test_ail_handle_lists:61 front-end variable
+test_ail_handle_lists:81 front-end variable
+test_ail_handle_lists:90 front-end variable
+test_ail_handle_lists:150 front-end variable
+test_ail_handle_lists:152 front-end variable
+test_ail_handle_lists:153 front-end variable
+test_ail_handle_lists:154 front-end variable
+test_ail_handle_lists:169 front-end variable
+test_ail_handle_lists:170 augmented source
+test_ail_handle_lists:175 front-end variable
+test_ail_handle_lists:261 f-string
+test_ail_handle_lists:261 f-string
+test_ail_handle_lists:300 front-end variable
+test_ail_integer_codec:33 front-end variable
+test_ail_integer_codec:66 front-end variable
+test_ail_integer_codec:117 front-end variable
+test_ail_integer_codec:121 front-end variable
+test_ail_integer_codec:128 front-end variable
+test_ail_ir_cover:110 front-end variable
+test_ail_ir_cover:155 front-end variable
+test_ail_ir_cover:240 front-end variable
+test_ail_overflow_error:15 meaning difference
+test_ail_pool_row_arguments:10 meaning difference
+test_ail_pool_row_arguments:11 meaning difference
+test_ail_pool_row_arguments:24 meaning difference
+test_ail_pool_row_arguments:36 meaning difference
+test_ail_pool_row_arguments:44 meaning difference
+test_ail_pool_row_arguments:56 meaning difference
+test_ail_pool_row_arguments:61 meaning difference
+test_ail_pool_row_arguments:73 meaning difference
+test_ail_pool_row_arguments:80 meaning difference
+test_ail_pool_row_arguments:87 meaning difference
+test_ail_pool_row_arguments:96 meaning difference
+test_ail_pool_row_arguments:96 meaning difference
+test_ail_pool_row_arguments:108 meaning difference
+test_ail_pool_row_arguments:114 meaning difference
+test_ail_pre2:78 syntax ail
+test_ail_scalar_list_mutations:20 front-end variable
+test_ail_scalar_list_mutations:93 front-end translate
+test_ail_scalar_list_mutations:96 front-end translate
+test_ail_scalar_list_mutations:98 front-end translate
+test_ail_scalar_list_mutations:103 front-end variable
+test_ail_scalar_list_mutations:104 front-end variable
+test_ail_scalar_list_mutations:105 front-end variable
+test_ail_scalar_list_mutations:111 front-end translate
+test_ail_scalar_list_mutations:115 front-end translate
+test_ail_scalar_list_mutations:138 front-end variable
+test_ail_scan_spec_modes:28 front-end variable
+test_ail_scan_spec_modes:50 front-end variable
+test_ail_sort_keys:16 front-end variable
+test_ail_sort_keys:86 front-end variable
+test_ail_sort_keys:159 front-end variable
+test_ail_sort_keys:173 front-end variable
+test_ail_sort_keys:423 refusal assertion
+test_ail_sort_keys:426 refusal assertion
+test_ail_sort_keys:429 refusal assertion
+test_ail_sort_keys:432 refusal assertion
+test_ail_sort_keys:435 refusal assertion
+test_ail_sort_keys:438 refusal assertion
+test_ail_sort_keys:441 refusal assertion
+test_ail_sort_keys:444 refusal assertion
+test_ail_stdout_mixed:11 front-end variable
+test_ail_stdout_mixed:35 front-end variable
+test_ail_stdout_mixed:39 front-end variable
+test_ail_stdout_mixed:48 front-end variable
+test_ail_stdout_mixed:49 front-end variable
+test_ail_stdout_mixed:59 front-end variable
+test_ail_stdout_mixed:67 front-end variable
+test_ail_stdout_mixed:88 front-end variable
+test_ail_stdout_mixed:89 front-end variable
+test_ail_stdout_mixed:128 front-end variable
+test_ail_str_adjacent_cat:13 front-end variable
+test_ail_str_find_alias:16 front-end variable
+test_ail_str_find_alias:17 front-end variable
+test_ail_str_find_alias:18 front-end variable
+test_ail_str_find_alias:19 front-end variable
+test_ail_str_find_alias:20 front-end variable
+test_ail_str_find_alias:21 front-end variable
+test_ail_str_find_alias:22 front-end variable
+test_ail_str_find_alias:23 front-end variable
+test_ail_str_find_alias:24 front-end variable
+test_ail_str_find_alias:25 front-end variable
+test_ail_str_find_alias:26 front-end variable
+test_ail_str_find_alias:27 front-end variable
+test_ail_str_find_alias:38 front-end variable
+test_ail_str_find_alias:39 front-end variable
+test_ail_str_find_alias:40 front-end variable
+test_ail_str_find_alias:47 front-end variable
+test_ail_str_find_alias:48 front-end variable
+test_ail_str_find_alias:49 front-end variable
+test_ail_str_find_alias:50 front-end variable
+test_ail_str_find_alias:51 front-end variable
+test_ail_str_find_alias:52 front-end variable
+test_ail_str_rfind:24 brace-only
+test_ail_str_rfind:43 front-end translate
+test_ail_string_field_mutation:72 front-end variable
+test_ail_string_field_mutation:117 front-end variable
+test_ail_string_field_mutation:124 front-end variable
+test_ail_string_field_mutation:134 front-end translate
+test_ail_string_field_mutation:160 front-end variable
+test_ail_tcp_poll:12 front-end variable
+test_ail_tcp_poll:43 front-end variable
+test_ail_tcp_poll:91 front-end variable
+test_ail_tcp_poll:95 front-end variable
+test_ail_tcp_poll:115 front-end variable
+test_ail_tcp_poll:119 front-end variable
+test_ail_tcp_poll:120 front-end variable
+test_csv_column_stats_stream_candidate:67 imports brace language_example
+test_csv_column_stats_stream_candidate:77 replace pattern
+test_json_pointer_scan:14 front-end variable
+test_json_query_file:116 imports brace language_example
