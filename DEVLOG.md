@@ -1,3 +1,26 @@
+## 2026-11-03 -- rail-s2: finish the stdin split fast paths
+
+Finished the `input().split()` + `int(f[k])` work from the first rail-s2 run (its review produced no
+verdict).  Kept its `ail_utf8_decode` copy-and-classify pass, inline 1..18 digit `ail_str_to_int`,
+ASCII split class path and reused split spine, and finished the hot loop:
+
+- the rebinding `f = line.split()` now writes pieces straight into the destination spine (growing it
+  only when the field count outgrows it) instead of recording starts in a stack array and filling the
+  vector in a second pass;
+- an ASCII field is ended by the first byte below `!` in an 8-byte word (`__builtin_ctzll` picks the
+  position), and an ordinary one-space separator is consumed there;
+- `ail_sarena_keep_roots` skips the four append-slot comparisons when no append buffer is live.
+
+p3.ail on q0.in (180,389 four-int lines), instructions by `tools/icount`'s method through callgrind
+because this runner denies `perf_event_open`: 210.0 M at the exported base, 157.3 M after the first
+run's uncommitted edits, **147.5 M after this change** (about 806 per line against the 1,150 base).
+p0 (no I/O) is 2.18 M; p1 (input only) 80.0 M; p2 (input+split) 110.4 M before this change.
+`test_ail_stdin_split_fast` covers tabs, CRLF, blanks, empty lines, a missing final newline, >32
+fields, U+3000/U+00A0, invalid UTF-8, EOF, the int spellings and the int64/2**70 boundaries on the
+default and forced-general builds; `test_ail_hostile_input`, `test_ail_stdin_list_batch`,
+`test_ail_int64_default`, `test_ail_int64_edges`, `test_ail_splitlines_utf8`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
 `lower_dict_of_lists` now leaves a `d = {}` exactly as written when any nested function or class

@@ -1164,10 +1164,14 @@ static inline void ail_sarena_keep_roots(ail_sarena *A, int64_t mark, ail_str **
                 }
             }
             if (!keep) {
-                for (int t = 0; t < AIL_SARENA_TOPS; t++)
-                    if (A->top[t] == bp) {
-                        A->top[t] = 0; A->tlen[t] = A->tcap[t] = A->trun[t] = 0;
-                    }
+                /* No append-in-place buffer in this loop: skip the four-slot scan that a
+                   string-accumulating loop needs. */
+                if (A->top[0] || A->top[1] || A->top[2] || A->top[3]) {
+                    for (int t = 0; t < AIL_SARENA_TOPS; t++)
+                        if (A->top[t] == bp) {
+                            A->top[t] = 0; A->tlen[t] = A->tcap[t] = A->trun[t] = 0;
+                        }
+                }
                 ail__blk_release(A->blk[mark], be);
                 A->n = mark;
                 A->kmark = mark; A->kn = A->n;
@@ -3192,6 +3196,53 @@ static ail_slist ail__str_split_ws_scan(ail_str s, ail_slist *reuse) {
        being released to the small-vector cache and taken back out for every line. */
     ail_slist r = reuse ? *reuse : (ail_slist){0};
     r.n = 0;
+    if (reuse && s.bytes) {
+        /* The rebinding form over an ASCII line: write each piece straight into the destination
+           spine and grow it only when the field count outgrows it. The general path below records
+           every start in a stack array and fills the vector in a second pass; a stdin loop pays
+           that pass on every line even though the spine already has room for the usual fields. */
+        int64_t i = 0;
+        const int64_t n = s.n;
+        const uint8_t *p = s.p;
+        for (;;) {
+            while (i < n) {
+                uint8_t c = p[i];
+                if (c > 32) break;
+                if (c == 32 || ail__ws_class[c] == 1) { i++; continue; }
+                break;
+            }
+            if (i >= n) break;
+            int64_t start = i++;
+            for (;;) {
+                if (i + 8 <= n) {
+                    uint64_t w;
+                    memcpy(&w, p + i, 8);
+                    uint64_t x = w - 0x2121212121212121ull;
+                    uint64_t m = x & ~w & 0x8080808080808080ull;
+                    if (!m) { i += 8; continue; }
+                    int64_t j = i + (int64_t)(__builtin_ctzll(m) >> 3);
+                    if (p[j] == 32 || ail__ws_class[p[j]] == 1) { i = j; break; }
+                }
+                while (i < n && ail__ws_class[p[i]] != 1) i++;
+                break;
+            }
+            ail_str piece = ail_view(s, start); piece.n = i - start;
+            /* Consume the ordinary one-space separator here; the outer loop still eats any
+               further blanks, tabs or other whitespace before the next field. */
+            if (i < n && p[i] == 32) i++;
+            if (r.n == r.cap) {
+                if (r.cap > INT64_MAX / 2) ail_die("allocation too large");
+                int64_t c = r.cap ? r.cap * 2 : 8;
+                ail__need_elems(c, AIL_ELEM_LIMIT(ail_str));
+                ail_str *q = (ail_str *)realloc(r.p, (size_t)c * sizeof *q);
+                if (!q) ail_die("out of memory");
+                r.p = q; r.cap = c;
+            }
+            r.p[r.n++] = piece;
+        }
+        *reuse = r;
+        return r;
+    }
     {
         int64_t at[64], k = 0, i = 0;
         const uint8_t *p = s.p;
