@@ -44,11 +44,15 @@ jobs:
         env:
           K: ${{ secrets.OPENCODE_API_KEY }}
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+          C: ${{ secrets.COMMAND_CODE_API_KEY }}
         run: |
           umask 077
           printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
           # Qoder CLI token (free DeepSeek V4.1 Flash until 2026-11-01 UTC+8); pipeline.sh reads it, public code only
           [ -n "$Q" ] && printf '%s' "$Q" > "$RUNNER_TEMP/qoder.key" || true
+          # Command Code key (GOAT plan, owner 2026-10-26): pipeline.sh tries it before the paid OpenCode Go model.
+          # The 2026-10-28 two-tasks-per-runner change dropped it by mistake, so no job used Command Code since (2026-11-03).
+          [ -n "$C" ] && printf '%s' "$C" > "$RUNNER_TEMP/cc.key" || true
       - name: OpenCode CLI
         if: inputs.harness == 'oc'
         env:
@@ -134,12 +138,13 @@ jobs:
         env:
           K: ${{ secrets.OPENCODE_API_KEY }}
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+          C: ${{ secrets.COMMAND_CODE_API_KEY }}
         run: |
-          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$RUNNER_TEMP/cc.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
           bad=0
           # scan checkout $1 (commits since the sha in $2); a clean checkout gets the marker file $3 and is pushed
           scan() {
-            for s in "$K" "$Q"; do
+            for s in "$K" "$Q" "$C"; do
               [ -n "$s" ] || continue
               if ( cd "$1" && { grep -rqF -e "$s" --exclude-dir=.git . || git log -p "$(cat "$2")..HEAD" | grep -qF -e "$s"; } ); then
                 echo "key found in results of $1: not pushing"; return 1
