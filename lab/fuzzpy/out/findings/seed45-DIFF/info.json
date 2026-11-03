@@ -1,0 +1,9 @@
+{
+ "seed": 45,
+ "cpython_rc": 1,
+ "ms": 1814,
+ "fallback": false,
+ "ail_rc": 1,
+ "cls": "DIFF",
+ "reason": "stderr last cpython='IndexError: pop from empty list' ail='pop from empty list'"
+}
