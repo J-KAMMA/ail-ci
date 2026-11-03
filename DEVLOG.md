@@ -1,3 +1,27 @@
+## 2026-11-03 -- relwheelfix: macOS SDK export under /var and the Windows tutorial artifact path (job-relwheelfix-11031144)
+
+`ail_sdk.export_sdk` now resolves the export/source root with `os.path.realpath` and checks
+for symlinks or junctions only in the path components at or below that root.  macOS `/var` is
+a symlink to `/private/var` and pip builds the wheel under `/var/folders`, so the old check of
+every ancestor refused the export.  An internal file or directory symlink is still refused.
+`test_ail_sdk` gained both cases: an export reached through a symlinked parent succeeds, and a
+file and a directory symlink inside the tree are refused before any output is written.
+
+`test_ail_tutorial` now runs the built sample through an absolute path joined from the
+temporary work directory instead of `"./" + name + ".bin"`.  On Windows `CreateProcess`
+resolves that relative executable against the parent process's directory, not the `cwd`
+passed to `subprocess.run`, which made 10 samples fail with `FileNotFoundError`.  The helper
+also selects `name.bin.exe` when the platform's C compiler appended the suffix.  The build
+code (`ail_chatgpt.py`) writes exactly `name.bin` for `-o name.bin`, since the requested name
+already has an extension.
+
+No compiler or runtime behaviour changed.  Ran on Linux: `test_ail_tutorial` (15), `test_ail_sdk`
+(31), `test_ail_packaging` (19), `test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped),
+`test_ail_corpus_findings3` (2), and `tools/wheel_check.py` (fresh wheel, installed `ail`, all
+15 tutorial samples) pass.  Probes `/tmp/probes/sdk_symlink_roots.py` and
+`/tmp/probes/tutorial_artifact_abs.py` pass; both are refused by name under `cmp.sh` because
+AIL does not build `importlib`, which is expected for Python-only packaging code.
+
 ## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
 
 Two remaining comment-placement defects in `tools/ail2py.py` are fixed; no compiler file changed.

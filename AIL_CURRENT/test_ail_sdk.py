@@ -873,6 +873,31 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
             exporter(sdk, self.root / 'missing-dependency')
         self.assertFalse((self.root / 'missing-dependency').exists())
 
+    def test_export_root_below_a_symlinked_parent_is_allowed(self):
+        exporter = importlib.import_module('ail_sdk').export_sdk
+        sdk = self.exported()
+        alias = self.root / 'linked-parent'
+        try:
+            alias.symlink_to(self.root, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest('symlinks are not available')
+        copied = exporter(alias / sdk.name, self.root / 'through-alias')
+        self.assertEqual(copied['sha256'], json.loads((sdk / 'MANIFEST.json').read_text(encoding='utf8'))['sha256'])
+
+    def test_symlink_inside_the_export_tree_is_refused(self):
+        exporter = importlib.import_module('ail_sdk').export_sdk
+        sdk = self.exported()
+        source = sdk / 'ailc.py'
+        source.rename(sdk / 'ailc-source.py')
+        try:
+            source.symlink_to(sdk / 'ailc-source.py')
+        except (OSError, NotImplementedError):
+            self.skipTest('symlinks are not available')
+        destination = self.root / 'linked-sdk'
+        with self.assertRaisesRegex(ValueError, 'symlink or junction'):
+            exporter(sdk, destination)
+        self.assertFalse(destination.exists())
+
     def test_stale_standard_api_inventory_refused_before_output(self):
         exporter=importlib.import_module('ail_sdk').export_sdk
         sdk=self.exported();manifest_path=sdk/'MANIFEST.json';original=json.loads(manifest_path.read_text(encoding='utf8'))

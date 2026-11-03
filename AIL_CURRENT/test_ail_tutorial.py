@@ -45,6 +45,14 @@ BLOCKS = re.compile(r"<!--\s*sample:\s*(\S+)([^>]*?)-->|^```(\S*)\n(.*?)^```$", 
 GENERAL = "built on the general path"
 
 
+def artifact(work, name):
+    """The absolute file `compile ... -o name.bin` wrote (Windows may append .exe)."""
+    path = Path(work) / (name + ".bin")
+    if os.name == "nt" and not path.is_file() and Path(str(path) + ".exe").is_file():
+        path = Path(str(path) + ".exe")
+    return path
+
+
 def parse(text):
     """[{name, flags, args, code, output, note, strict, refusal}] in document order."""
     samples = []
@@ -132,7 +140,7 @@ class Tutorial(unittest.TestCase):
             if "stop" in flags:
                 done = self.compile(work, name, extra + ["--strict"], name + ".bin")
                 self.assertEqual(done.returncode, 0, name + ": " + done.stderr)
-                ran = subprocess.run(["./" + name + ".bin"] + sample["args"], cwd=work,
+                ran = subprocess.run([str(artifact(work, name))] + sample["args"], cwd=work,
                                      capture_output=True, text=True, timeout=300)
                 self.assertEqual(ran.stdout, sample["stdout"], name + ": stop stdout")
                 self.assertEqual(ran.returncode, 1, name + ": stop exit status")
@@ -141,7 +149,7 @@ class Tutorial(unittest.TestCase):
             if "exact" in flags:
                 done = self.compile(work, name, extra + ["--exact-int"], name + ".bin")
                 self.assertEqual(done.returncode, 0, name + ": " + done.stderr)
-                ran = subprocess.run(["./" + name + ".bin"] + sample["args"], cwd=work,
+                ran = subprocess.run([str(artifact(work, name))] + sample["args"], cwd=work,
                                      capture_output=True, text=True, timeout=300)
                 self.assertEqual(ran.stdout, oracle.stdout, name + ": exact stdout differs from CPython")
                 self.assertEqual(ran.returncode, oracle.returncode, name + ": exact exit status")
@@ -159,7 +167,7 @@ class Tutorial(unittest.TestCase):
                 done = self.compile(work, name, extra + ["--strict"], name + ".bin")
                 self.assertEqual(done.returncode, 0, name + ": a typed sample must build with --strict\n" + done.stderr)
                 self.assertNotIn(GENERAL, done.stderr, name)
-            ran = subprocess.run(["./" + name + ".bin"] + sample["args"], cwd=work, capture_output=True, text=True, timeout=300)
+            ran = subprocess.run([str(artifact(work, name))] + sample["args"], cwd=work, capture_output=True, text=True, timeout=300)
             self.assertEqual(ran.stdout, oracle.stdout, name + ": AIL stdout differs from CPython")
             self.assertEqual(ran.returncode, oracle.returncode, name)
 
