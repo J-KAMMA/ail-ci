@@ -1,3 +1,26 @@
+## 2026-11-03 -- pyreach s4 review: caught ASCII decode carries CPython's UnicodeDecodeError text
+
+Fixed the review defect in the s4 decode lowering: on the typed path `bytes.decode("ascii")` on a
+byte at or above 0x80 raised a named `UnicodeDecodeError` with an empty message when a handler
+caught it, so `str(e)` was `""` even though the uncaught trap already printed CPython's text.
+`exctext` now has the ASCII twin of `ail_exc_utf8_fail`: a program that reads exception text
+rewrites the ASCII codec's raise to build `UnicodeDecodeError('ascii', data, i, i + 1,
+"ordinal not in range(128)")` through `ail_exception_new_args`, which `ail__exc_unicode_text`
+prints as `'ascii' codec can't decode byte 0xNN in position N: ordinal not in range(128)`; the
+uncaught path still prints the same `UnicodeDecodeError: ...` line, and programs that do not read
+exception text keep their C byte for byte.  Encoding remains UTF-8-only and `errors=` other than
+`strict` is still refused by name.
+
+Probes `p5c` (the review's ValueError/utf-8/UnicodeDecodeError shapes), `p5c_pos2` (position 2,
+clean inputs, subtype `type(e).__name__`), `p5c_after` (uncaught ASCII decode after an unrelated
+caught error), `p5c_uncaught` and `p5c_latin` match CPython on the default and unified builds (the
+`ascii()` builtin used by the latin probe is refused by name on both builds, so that line is
+checked with `repr`/`ord` in `test_ail_pyreach_unpack`); the no-general typed build of `p5c`
+prints CPython's three lines exactly (`unicode 77 False`).
+`test_ail_pyreach_unpack` gains `test_ascii_decode_caught_message` (typed and both builds);
+11 tests pass.  `e.encoding`/`e.start`/`e.reason` remain unsupported on the typed path for every
+decoder (pre-existing; not part of this fix).
+
 ## 2026-11-03 -- pyreach s4: slice/call unpacking, branch kind splits, ASCII/latin-1 decode
 
 `a, b, c = xs[lo:hi]` now unpacks a local list of ints, floats, strs or bytes on the typed path.

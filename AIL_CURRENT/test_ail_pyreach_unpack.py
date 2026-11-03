@@ -156,6 +156,25 @@ DECODE_ASCII_UNCAUGHT = '''def main():
 main()
 '''
 
+DECODE_ASCII_CAUGHT_TEXT = '''def main():
+    try:
+        b"\\xff".decode("ascii")
+    except ValueError as e:
+        print("valueerror", str(e))
+    try:
+        b"ab\\x80cd".decode("ascii")
+    except UnicodeDecodeError as e:
+        print("unicode", str(e))
+
+
+main()
+'''
+
+DECODE_ASCII_CAUGHT_EXPECTED = (
+    "valueerror 'ascii' codec can't decode byte 0xff in position 0: ordinal not in range(128)\n"
+    "unicode 'ascii' codec can't decode byte 0x80 in position 2: ordinal not in range(128)\n"
+)
+
 def _all_bytes_literal():
     return ''.join('\\x%02x' % value for value in range(256))
 
@@ -267,6 +286,10 @@ class PyreachUnpack(unittest.TestCase):
             self.assertEqual(got.returncode, reference.returncode)
             self.assertEqual(got.stdout, 'before\n')
             self.assertIn("can't decode byte 0xff", got.stderr)
+
+    def test_ascii_decode_caught_message(self):
+        self._typed('decode_caught', DECODE_ASCII_CAUGHT_TEXT, DECODE_ASCII_CAUGHT_EXPECTED)
+        self._both('decode_caught', DECODE_ASCII_CAUGHT_TEXT, DECODE_ASCII_CAUGHT_EXPECTED)
 
     def test_latin1_decode_covers_all_bytes(self):
         self._typed('decode_latin1', DECODE_LATIN1, '256\n\x00 \x7f \x80 \xff\n2\nTrue\n')
