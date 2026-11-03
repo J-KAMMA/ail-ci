@@ -1,2 +1,0 @@
-lab/fuzzpy/out/work/22/prog.ail:45:16: int64 constant out of range: 28011385460385661648235251499
-  write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower
