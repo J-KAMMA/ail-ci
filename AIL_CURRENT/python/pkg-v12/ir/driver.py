@@ -661,6 +661,9 @@ def _apply(P, args, kwargs, result, current):
     if ctx.need is not None:
         ctx.need.update(needs['need'])
     extra = {}
+    depth = function.attrs.get('depth')
+    if depth:
+        extra['depth'] = depth
     sharing = getattr(function, 'sharing', None)
     if sharing and any(sharing.values()):
         extra['sharing'] = sharing

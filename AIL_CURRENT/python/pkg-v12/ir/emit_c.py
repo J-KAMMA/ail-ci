@@ -88,7 +88,7 @@ def _decl(ct, name):
     return ct + name if ct.endswith('*') else '%s %s' % (ct, name)
 
 
-def signature(fn, sym=None, linkage=None, byval=False):
+def signature(fn, sym=None, linkage=None, byval=False, extra=None):
     results = fn.results
     if len(results) > 1:
         raise I.IRError('S0 functions return at most one value')
@@ -112,6 +112,8 @@ def signature(fn, sym=None, linkage=None, byval=False):
         # through a buffer the caller owns, the true length as the result
         ret = 'int64_t'
         decls.append('%s *_out, int64_t _cap' % ('double' if fn.attrs['ret_list'] == 'flist' else 'int64_t'))
+    if extra:
+        decls.append(extra)
     params = ', '.join(decls)
     linkage = linkage or fn.attrs.get('linkage', 'extern')
     prefix = LINKAGE_PREFIX.get(linkage)
@@ -229,6 +231,8 @@ class Emitter(TextEmitter):
                                           for i in ops)
         self.frame = any(i.op == 'try' for i in ops)
         self.byval = bool(fn.attrs.get('ret_list')) and not self.is_pending and not self.frame and self.allow_byval
+        # bce s2: a self-recursive function whose depth lives in `ail_d` instead of the global.
+        self.depth = bool(fn.attrs.get('depth_param')) and not self.is_pending and not self.frame and not self.byval
         self.pre = 'fr->' if self.frame else ''
         self.text_init(fn)
         self.cx = _Cx('top', 0, 0)
@@ -385,6 +389,12 @@ class Emitter(TextEmitter):
         fields.append('char _unused;')
         return 'struct %s__fr { %s };\n' % (fn.sym, ' '.join(fields))
 
+    def _depth_call(self, callee, parts):
+        """A self-call of a depth-in-register function goes to the inner `f__d` with ail_d + 1."""
+        if self.depth and callee == self.fn.sym:
+            return callee + '__d', list(parts) + ['ail_d + 1']
+        return callee, parts
+
     def emit(self):
         fn = self.fn
         sig = signature(fn)
@@ -393,6 +403,8 @@ class Emitter(TextEmitter):
         ir_sig = signature(fn, sym + '__ir', 'static') if self.is_pending else sig
         if self.byval:
             ir_sig = signature(fn, sym + '__irl', 'static', byval=True)
+        if self.depth:
+            ir_sig = signature(fn, sym + '__d', 'static', extra='int64_t ail_d')
         if any(t == I.TINT for t in [p.type for p in fn.params] + list(fn.results)) \
                 or any(i.op == 'local.alloc' and i.result.type.pointee == I.TINT
                        for i in I.walk(fn.body)):
@@ -461,6 +473,9 @@ class Emitter(TextEmitter):
             self.line(1, 'ail_cleanup_top = &v__cf;')
         if self.is_pending or self.frame:
             self.parts.add('IREXC')
+        if self.depth:
+            self.parts.add('RECDEPTH')
+            self.line(1, 'if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");')
         self.region(fn.body, 1, None)
         close = '' if self.cx.where is None or not self.cx.debug_lines else '#line %d "%s"\n' % (self.cx.where[1], self.cx.where[0])
         text = '%s {\n%s\n%s}\n' % (ir_sig, '\n'.join(self.cx.lines), close)
@@ -478,6 +493,14 @@ class Emitter(TextEmitter):
                         '    return r;\n' % ('int64_t' if fn.attrs.get('ret_list') else ctype(fn.results[0]), call))
             else:
                 body = '    %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n' % call
+            out += '%s {\n%s}\n' % (sig, body)
+        if self.depth:
+            args = _args_of(fn, False)
+            call = '%s__d(%s)' % (sym, ', '.join([a for a in [args, 'ail_depth + 1'] if a]))
+            if fn.results:
+                body = '    return %s;\n' % call
+            else:
+                body = '    %s;\n    return;\n' % call
             out += '%s {\n%s}\n' % (sig, body)
         if self.cx.where is not None and self.cx.debug_lines:
             # --debug: what follows (runtime helpers, the next function) is not on the user's last line
@@ -881,7 +904,8 @@ class Emitter(TextEmitter):
         if op == 'ba.call':
             self.parts.add('BYTEARRAY')
             checked = ins.attrs['callee'] in self.pending or (ins.attrs['callee'] == self.fn.sym and self.is_pending)
-            text = '%s%s(%s)' % (ins.attrs['callee'], '__ir' if checked else '', ', '.join(o[1:]))
+            callee, parts = self._depth_call(ins.attrs['callee'], o[1:])
+            text = '%s%s(%s)' % (callee, '__ir' if checked else '', ', '.join(parts))
             if checked:
                 self.parts.add('IREXC')
                 self.count += 1
@@ -931,6 +955,7 @@ class Emitter(TextEmitter):
             # any other (legacy, or an IR function that cannot raise) by its own name -- if that is
             # the wrapper of an IR function compiled later, a raise comes back as a legacy raise
             checked = callee in self.pending or (callee == self.fn.sym and self.is_pending)
+            callee, parts = self._depth_call(callee, parts)
             if checked:
                 self.parts.add('IREXC')
             if op == 'obj.call':
@@ -991,8 +1016,12 @@ class Emitter(TextEmitter):
             callee = ins.attrs['callee']
             if callee == 'ail_depth_enter':
                 self.parts.add('RECDEPTH')
-                return self.line(depth, 'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) '
-                                        'ail_die("maximum recursion depth exceeded");')
+                self.line(depth, 'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) '
+                                 'ail_die("maximum recursion depth exceeded");')
+                if self.depth:
+                    self.parts.add('BCEAUDIT')
+                    self.line(depth, 'if (ail_d != ail_depth) ail_bce_audit_fail("%s", -1);' % self.fn.sym)
+                return
             if callee == 'ail_depth_leave':
                 return self.line(depth, 'ail_depth--;')
             return self.emit_rt(ins, depth, o)

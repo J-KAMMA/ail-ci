@@ -34,6 +34,7 @@ from . import flowtypes
 from . import ifadd
 from .lower_text import TextLowering, NotS0
 from .emit_text import allocates_bytes
+from .passes import bce_enabled
 
 BYTES = I.T('bytes')
 TINT = I.TINT
@@ -136,6 +137,9 @@ class Lowering(TextLowering):
         self.kind_places = {}         # tracked name -> {IR type: place} (flowtypes.py)
         self.tracked = set()
         self.flow = None
+        self.depth_param = False     # bce s2: exact recursion depth in a register
+        self.depth_audit = False
+        self.depth_reason = None
 
     def _range_arg_int64(self, node):
         """Whether a range() argument's C storage is int64 in the default int64 build: an int constant,
@@ -291,6 +295,47 @@ class Lowering(TextLowering):
         return self.b.value('const', [], t, {'value': value})
 
     # ------------------------------------------------------------------ entry
+    def _depth_audit(self):
+        return os.environ.get('AIL_BCE_AUDIT', '').strip().lower() not in ('', '0', 'off', 'no', 'false')
+
+    def _depth_choice(self, results):
+        """Why this recursive function cannot keep its depth in `ail_d`, or None when it can.
+
+        The count and its trip point stay identical: only where the count lives changes. The
+        self-call rewrite is exact only when f's cycle is exactly {f}, no other call can reach a
+        guarded function, and f has no try or exception/list entry point of its own."""
+        if not bce_enabled():
+            return 'bce disabled'
+        if os.environ.get('AIL_IR_EXC', 'longjmp').strip().lower() == 'checked':
+            return 'checked exceptions'
+        fn = self.fn
+        if any(isinstance(n, ast.Try) for n in ast.walk(fn)):
+            return 'a try'
+        if results and is_list(results[0]):
+            return 'list return'
+        info = getattr(self.ctx, 'recursion_info', None) or {}
+        scc = (info.get('scc') or {}).get(fn.name)
+        if scc is None:
+            return ('recursion graph unavailable' if not info
+                    else 'cycle is not self-recursive')
+        if scc != frozenset((fn.name,)):
+            return 'cycle is not self-recursive'
+        names = info.get('names') or frozenset()
+        direct = (info.get('direct') or {}).get(fn.name) or frozenset()
+        reach = info.get('reach') or {}
+        recursive = info.get('recursive') or frozenset()
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            g = node.func.id
+            if g not in self.ctx.funcs:
+                continue              # a builtin/runtime helper, not a compiled function
+            if g not in names or g not in direct:
+                return 'unknown callee %s' % g
+            if g != fn.name and (reach.get(g) or frozenset()) & recursive:
+                return 'callee %s can reach a guarded function' % g
+        return None
+
     def run(self):
         P, ctx, fn = self.P, self.ctx, self.fn
         a = fn.args
@@ -526,6 +571,15 @@ class Lowering(TextLowering):
             attrs['abi'] = abi
         if self.recursive:
             attrs['recursive'] = True
+            _reason = self._depth_choice(results)
+            if _reason is None:
+                self.depth_param = True
+                self.depth_audit = self._depth_audit()
+                attrs['depth_param'] = True
+                attrs['depth'] = 'param'
+            else:
+                self.depth_reason = _reason
+                attrs['depth'] = _reason
         if retain:
             attrs['retain'] = retain
         f = I.Function(fn.name, params, param_names, results, I.Region(), attrs)
@@ -582,7 +636,7 @@ class Lowering(TextLowering):
             elif name in self.places:
                 self.b.emit('store', [self.places[name], value])
         self.alloc_end = sum(1 for i in f.body.instrs if i.op == 'local.alloc')
-        if self.recursive:
+        if self.recursive and not (self.depth_param and not self.depth_audit):
             self.b.emit('rt', [], [], {'callee': 'ail_depth_enter'})
         self.stmts(fn.body)
         if not self.b.terminated():
@@ -703,7 +757,7 @@ class Lowering(TextLowering):
         return out - set(gdecl)           # a module variable is a global, not a local place
 
     def leave(self):
-        if self.recursive:
+        if self.recursive and not (self.depth_param and not self.depth_audit):
             self.b.emit('rt', [], [], {'callee': 'ail_depth_leave'})
 
     def fallthrough(self):

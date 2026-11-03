@@ -10,6 +10,7 @@ The one exception is `big_text_index`: `int("9223372036854775808")` stops at int
 (ints are 64-bit) while CPython goes on to the index.  It stays the same stop as today in all three
 builds; the test pins that, rather than pretending it matches CPython.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -143,7 +144,149 @@ fn main() {
     print(xs[k]);
 }
 """),
+    ('depth_49999', r"""
+fn rec(n: int) -> int {
+    if n == 0 { return 0; }
+    return rec(n - 1) + 1;
+}
+fn main() -> int {
+    print(rec(49998));
+    return 0;
+}
+"""),
+    ('depth_50000', r"""
+fn rec(n: int) -> int {
+    if n == 0 { return 0; }
+    return rec(n - 1) + 1;
+}
+fn main() -> int {
+    print(rec(49999));
+    return 0;
+}
+"""),
+    ('depth_50001', r"""
+fn rec(n: int) -> int {
+    if n == 0 { return 0; }
+    return rec(n - 1) + 1;
+}
+fn main() -> int {
+    print(rec(50000));
+    return 0;
+}
+"""),
+    ('depth_from_mutual', r"""
+fn f(n: int) -> int {
+    if n == 0 { return 0; }
+    return f(n - 1) + 1;
+}
+fn g(n: int) -> int {
+    if n == 0 { return f(20); }
+    return h(n - 1);
+}
+fn h(n: int) -> int {
+    if n == 0 { return f(20); }
+    return g(n - 1);
+}
+fn main() -> int {
+    print(g(49990));
+    return 0;
+}
+"""),
+    ('depth_raise_reuse', r"""
+fn f(n: int, mode: int) -> int {
+    if n == 0 {
+        if mode == 1 { raise ValueError("boom"); }
+        return 0;
+    }
+    return f(n - 1, mode) + 1;
+}
+fn main() -> int {
+    let caught = 0;
+    try { print(f(29999, 1)); } except ValueError { caught = 1; }
+    print(caught);
+    print(f(48999, 0));
+    return 0;
+}
+"""),
+    ('depth_helper_ok', r"""
+fn helper(x: int) -> int { return x * 2 + 1; }
+fn f(n: int) -> int {
+    if n == 0 { return helper(3); }
+    return helper(f(n - 1));
+}
+fn main() -> int { print(f(30)); return 0; }
+"""),
+    ('depth_helper_guarded', r"""
+fn other(n: int) -> int {
+    if n == 0 { return 0; }
+    return other(n - 1) + 1;
+}
+fn f(n: int) -> int {
+    if n == 0 { return 0; }
+    return f(n - 1) + other(n);
+}
+fn main() -> int { print(f(30)); return 0; }
+"""),
+    ('tally_like_eval', r"""
+struct Expr {
+    ops: list[int]; left: list[int]; right: list[int]; vals: list[int];
+}
+fn make(e: Expr, op: int, l: int, r: int, v: int) -> int {
+    e.ops.append(op); e.left.append(l); e.right.append(r); e.vals.append(v);
+    return len(e.ops) - 1;
+}
+fn popcnt(x: int) -> int {
+    let c = 0;
+    let v = x;
+    while v != 0 { c += v & 1; v = v >> 1; }
+    return c;
+}
+fn ev(e: Expr, i: int) -> int {
+    let op = e.ops[i];
+    if op == 100 { return e.vals[i]; }
+    if op == 20 { return 0 - ev(e, e.left[i]); }
+    if op == 13 { return popcnt(ev(e, e.left[i])); }
+    let l = ev(e, e.left[i]);
+    let r = ev(e, e.right[i]);
+    if op == 1 { if l > r { return l; } return r; }
+    if op == 2 { if l < r { return l; } return r; }
+    if op == 7 { return (l + r) & 4294967295; }
+    if op == 8 { return (l - r) & 4294967295; }
+    if op == 9 { let p = l * r; return p & 4294967295; }
+    if op == 10 { if r == 0 { raise ValueError("r"); } return l // r; }
+    if op == 11 { if r == 0 { raise ValueError("r"); } return l % r; }
+    return l;
+}
+fn main() -> int {
+    let e = Expr([], [], [], []);
+    let n = 300;
+    let i = 0;
+    let root = 0;
+    while i < n {
+        if i < 10 {
+            root = make(e, 100, 0, 0, i + 1);
+        } else {
+            let l = root;
+            let r = make(e, 100, 0, 0, i % 7);
+            let op = 7 + (i % 3);
+            root = make(e, op, l, r, 0);
+        }
+        i += 1;
+    }
+    print(ev(e, root));
+    return 0;
+}
+"""),
 ]
+
+DEPTH_ORACLE = {
+    'depth_49999', 'depth_50000', 'depth_50001', 'depth_from_mutual',
+    'depth_raise_reuse', 'depth_helper_ok', 'depth_helper_guarded',
+}
+DEPTH_STATS = {
+    'depth_helper_ok': ('f', 'param'),
+    'depth_helper_guarded': ('f', 'callee other can reach a guarded function'),
+}
 
 STOPS = {
     'big_text_index': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
@@ -174,7 +317,7 @@ def _cpython(directory, name, source):
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode, _last_line(done.stderr)
 
 
-def _build_run(directory, name, source, mode):
+def _build_run(directory, name, source, mode, bce=None):
     text, suffix, flags = source, '.ail', []
     if mode == 'force':
         # the forced general path is a Python-surface build; the .ail oracle is the same program
@@ -189,6 +332,8 @@ def _build_run(directory, name, source, mode):
         env['AIL_UNIFIED_FORCE'] = '1'
     elif mode == 'audit':
         env['AIL_BCE_AUDIT'] = '1'
+    if bce is not None:
+        env['AIL_BCE'] = str(bce)
     cmd = [sys.executable, '-B', CHATGPT, 'compile', src.name, '-o', exe.name] + flags
     built = subprocess.run(cmd, cwd=directory, capture_output=True, text=True, timeout=900, env=env)
     if built.returncode != 0:
@@ -196,6 +341,23 @@ def _build_run(directory, name, source, mode):
     got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
     return (got.stdout.replace(b'\r\n', b'\n'), got.returncode, _last_line(got.stderr),
             got.stderr.decode('utf-8', 'replace')), None
+
+
+def _ir_stats(directory, name, source):
+    src = Path(directory) / (name + '_stats.ail')
+    src.write_text(source, encoding='utf-8')
+    stats = Path(directory) / (name + '_stats.jsonl')
+    if stats.exists():
+        stats.unlink()
+    exe = Path(directory) / ('exe_' + name + '_stats')
+    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1', AIL_IR_STATS=str(stats))
+    for key in ('AIL_NO_GENERAL', 'AIL_UNIFIED_FORCE', 'AIL_BCE', 'AIL_BCE_AUDIT'):
+        env.pop(key, None)
+    built = subprocess.run([sys.executable, '-B', CHATGPT, 'compile', src.name, '-o', exe.name],
+                           cwd=directory, capture_output=True, text=True, timeout=900, env=env)
+    if built.returncode != 0:
+        raise AssertionError((built.stdout + built.stderr)[-2000:])
+    return [json.loads(line) for line in stats.read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
 @unittest.skipUnless(HAVE_CC, 'no C compiler')
@@ -223,6 +385,22 @@ class BceProbeTests(unittest.TestCase):
                         self.assertEqual({got[:3] for got in runs.values()}, {runs['default'][:3]}, name)
                         self.assertEqual(runs['default'][2], STOPS[name], name)
                         self.assertEqual(runs['default'][1], 1, name)
+                        continue
+                    if name in DEPTH_ORACLE:
+                        for mode, got in runs.items():
+                            want, err = _build_run(directory, name + '_oracle_' + mode, source,
+                                                   mode, bce=0)
+                            self.assertIsNotNone(want, '%s (%s) AIL_BCE=0 oracle\n%s'
+                                                 % (name, mode, err))
+                            self.assertEqual(got[0], want[0], '%s (%s) stdout' % (name, mode))
+                            self.assertEqual(got[1], want[1], '%s (%s) status' % (name, mode))
+                            self.assertEqual(got[2], want[2], '%s (%s) stderr' % (name, mode))
+                        if name in DEPTH_STATS:
+                            fn, depth = DEPTH_STATS[name]
+                            entries = _ir_stats(directory, name, source)
+                            found = [e for e in entries if e.get('fn') == fn]
+                            self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                            self.assertEqual(found[-1].get('depth'), depth, '%s: %s' % (name, fn))
                         continue
                     want = _cpython(directory, name, source)
                     for mode, got in runs.items():
