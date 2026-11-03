@@ -8,10 +8,70 @@ import re
 import tempfile
 from types import SimpleNamespace
 
-from ail_syntax import SyntaxErrorAIL, translate
+import ast
+
+from ail_syntax import SyntaxErrorAIL, detect, translate
+
+
+def _line_starts(text):
+    return [0, *(index + 1 for index, char in enumerate(text) if char == '\n')]
+
+
+def _char_offset(text, starts, line, column):
+    """The character offset of an ast (line, utf8 byte column) position."""
+    line_text = text[starts[line - 1]:] if line <= len(starts) else ''
+    prefix = line_text.encode('utf8')[:column]
+    return starts[line - 1] + len(prefix.decode('utf8', 'replace'))
+
+
+def _python_body_span(text, starts, node):
+    """The body text as written: from the first statement's line through the last statement.
+
+    A one-line body starts just after the header; a multi-line body includes the indentation of its
+    first line, so a replacement body is the whole indented block."""
+    first = node.body[0]
+    if first.lineno == node.lineno:
+        start = _char_offset(text, starts, first.lineno, first.col_offset)
+    else:
+        start = starts[first.lineno - 1]
+    last = node.body[-1]
+    return start, _char_offset(text, starts, last.end_lineno, last.end_col_offset)
+
+
+def _python_bodies(text):
+    starts = _line_starts(text)
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as error:
+        raise ValueError(str(error)) from error
+    bodies = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            bodies[node.name] = _python_body_span(text, starts, node)
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, ast.FunctionDef):
+                    bodies[node.name + '.' + member.name] = _python_body_span(text, starts, member)
+    return bodies
+
+
+def _python_imports(text):
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as error:
+        raise ValueError(str(error)) from error
+    imports = []
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names if alias.name != 'ail')
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module != 'ail' and not node.level:
+            imports.append(node.module)
+    return imports
 
 
 def _parsed_source(text):
+    if not detect(text):
+        return text, _python_bodies(text), _python_imports(text)
     bodies, imports = {}, []
     try:
         translated = translate(text, module=True, imports=imports, function_bodies=bodies)
@@ -25,7 +85,9 @@ def _parsed_source(text):
 
 def _body_offsets(text):
     _, bodies, _ = _parsed_source(text)
-    starts = [0, *(index+1 for index, char in enumerate(text) if char=='\n')]
+    if not detect(text):
+        return bodies
+    starts = _line_starts(text)
     return {name: (starts[start[0]-1]+start[1], starts[end[0]-1]+end[1])
             for name, (start, end) in bodies.items()}
 
@@ -93,8 +155,10 @@ def run(args, check):
     try:
         source = Path(args.source).resolve(strict=True)
         output = Path(args.output).absolute()
-        if source.suffix.lower()!='.ail' or output.suffix.lower()!='.ail':
-            raise ValueError('source and candidate output must use .ail suffix')
+        if source.suffix.lower() not in ('.ail', '.py') or output.suffix.lower() not in ('.ail', '.py'):
+            raise ValueError('source and candidate output must use .ail or .py suffix')
+        if output.suffix.lower()!=source.suffix.lower():
+            raise ValueError('candidate output must use the source suffix')
         if output.exists() or output.is_symlink():
             raise ValueError('output must be a new candidate file')
         original = source.read_bytes()
@@ -134,7 +198,7 @@ def run(args, check):
         with tempfile.TemporaryDirectory(prefix='ail-body-edit-') as directory:
             staged = Path(directory)/source.name
             staged.write_bytes(candidate)
-            options = SimpleNamespace(source=staged, syntax='ail', library=args.library,
+            options = SimpleNamespace(source=staged, syntax='auto', library=args.library,
                                       module=args.module, object=args.object,
                                       module_path=[source.parent,*args.module_path],
                                       interface=False, symbol=[], types_used=False)

@@ -41,7 +41,7 @@ class ReplaceBodyTests(unittest.TestCase):
         self.assertEqual(replace_body(source, 'Box.value', body, digest(source)), prefix + body + suffix)
 
     def test_stale_unknown_unicode_and_invalid_syntax(self):
-        source = b'fn chosen()->int {return 1;}'
+        source = b'def chosen() -> int:\n    return 1\n'
         cases = [(source, 'chosen', b'return 2;', '0'*64),
                  (source, 'missing', b'return 2;', digest(source)),
                  (source, 'chosen', b'\xff', digest(source)),
@@ -53,7 +53,7 @@ class ReplaceBodyTests(unittest.TestCase):
                 replace_body(*arguments)
 
     def test_balanced_escape_cannot_inject_sibling(self):
-        source = b'fn chosen()->int {return 1;} fn main()->int {return chosen();}'
+        source = b'import sys\n\ndef chosen() -> int:\n    return 1\n\ndef main() -> int:\n    return chosen()\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
         for body in (b'return 2;} fn injected()->int {return 9;} fn decoy()->int {return 3;',
                      b'return 2;} fn injected()->int {return 9;', b'return 2; }'):
             with self.subTest(body=body), self.assertRaises(ValueError):
@@ -68,9 +68,9 @@ class SourceEditCLITests(unittest.TestCase):
         self.source = self.root/'source.ail'
         self.body = self.root/'body.ail'
         self.output = self.root/'edited.ail'
-        self.source.write_bytes(b'fn helper(x:int)->int {return x+1;} fn main()->int {return helper(2);}')
+        self.source.write_bytes(b'import sys\n\ndef helper(x: int) -> int:\n    return x + 1\n\ndef main() -> int:\n    return helper(2)\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
 
-    def edit(self, body=b'return x+2;', *, body_text=None, symbol='helper', output=None, base=None, extra=()):
+    def edit(self, body=b'    return x + 2', *, body_text=None, symbol='helper', output=None, base=None, extra=()):
         if body_text is None:
             self.body.write_bytes(body)
         before = self.source.read_bytes()
@@ -89,7 +89,7 @@ class SourceEditCLITests(unittest.TestCase):
         before = self.source.read_bytes()
         status, report = self.edit()
         self.assertEqual(status, 0, report)
-        self.assertEqual(self.output.read_bytes(), before.replace(b'return x+1;', b'return x+2;'))
+        self.assertEqual(self.output.read_bytes(), before.replace(b'    return x + 1', b'    return x + 2'))
         self.assertFalse(report['link_verified'])
         self.assertFalse(report['runtime_verified'])
 
@@ -123,7 +123,7 @@ class SourceEditCLITests(unittest.TestCase):
                 self.assertFalse(report['runtime_verified'])
 
     def test_body_text_stale_sha_and_invalid_type_refuse_output(self):
-        for body, base in [('return x+2;', '0'*64), ('return "bad";', None)]:
+        for body, base in [('    return x + 2', '0'*64), ('    return "bad"', None)]:
             with self.subTest(body=body, base=base):
                 status, report = self.edit(body_text=body, base=base)
                 self.assertNotEqual(status, 0, report)
@@ -135,7 +135,7 @@ class SourceEditCLITests(unittest.TestCase):
         before = self.source.read_bytes()
         arguments = ['edit', str(self.source), '--symbol', 'helper',
                      '--base-sha256', digest(before), '-o', str(self.output)]
-        for body_options in ([], ['--body', str(self.body), '--body-text', 'return x+2;']):
+        for body_options in ([], ['--body', str(self.body), '--body-text', '    return x + 2']):
             with self.subTest(body_options=body_options), patch.dict(os.environ, {'PATH': ''}), \
                     patch.object(ail_chatgpt.subprocess, 'run', side_effect=AssertionError('no subprocess')), \
                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
@@ -147,12 +147,12 @@ class SourceEditCLITests(unittest.TestCase):
 
     def test_source_changed_during_check_refuses_output(self):
         from types import SimpleNamespace
-        self.body.write_bytes(b'return x+2;')
+        self.body.write_bytes(b'    return x + 2')
         args=SimpleNamespace(source=self.source,body=self.body,output=self.output,symbol='helper',
             base_sha256=digest(self.source.read_bytes()),library=False,module=[],object=[],module_path=[])
         def check(options):
             report=dict(status='passed',source_sha256=digest(options.source.read_bytes()),diagnostics=[])
-            self.source.write_bytes(b'fn main()->int {return 9;}')
+            self.source.write_bytes(b'import sys\n\ndef main() -> int:\n    return 9\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
             print(json.dumps(report))
             return 0
         status,report=run(args,check)
@@ -160,8 +160,8 @@ class SourceEditCLITests(unittest.TestCase):
         self.assertIn('source changed',report['error'])
         self.assertFalse(self.output.exists())
     def test_type_invalid_candidate_and_unselected_function_rejected(self):
-        for source, body in [(b'fn helper(x:int)->int {return x+1;} fn main()->int {return helper(2);}', b'return "bad";'),
-                             (b'fn helper(x:int)->int {return x+1;} fn main()->int {return "bad";}', b'return x+2;')]:
+        for source, body in [(b'import sys\n\ndef helper(x: int) -> int:\n    return x + 1\n\ndef main() -> int:\n    return helper(2)\n\nif __name__ == "__main__":\n    sys.exit(main())\n', b'    return "bad"'),
+                             (b'import sys\n\ndef helper(x: int) -> int:\n    return x + 1\n\ndef main() -> int:\n    return \'bad\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n', b'    return x + 2')]:
             with self.subTest(source=source):
                 self.source.write_bytes(source)
                 status, report = self.edit(body)
@@ -188,11 +188,11 @@ class SourceEditCLITests(unittest.TestCase):
         self.assertEqual(alias.read_bytes(), before)
 
     def test_relative_import_and_library_mode(self):
-        (self.root/'neighbor.ail').write_bytes(b'fn imported(x:int)->int {return x+3;}')
-        self.source.write_bytes(b'use neighbor; fn helper(x:int)->int {return imported(x);}')
-        status, report = self.edit(b'return imported(x)+1;', extra=('--library',))
+        (self.root/'neighbor.ail').write_bytes(b'def imported(x: int) -> int:\n    return x + 3\n')
+        self.source.write_bytes(b'from neighbor import *\ndef helper(x: int) -> int:\n    return imported(x)\n')
+        status, report = self.edit(b'    return imported(x) + 1', extra=('--library',))
         self.assertEqual(status, 0, report)
-        self.assertEqual(self.output.read_bytes(), b'use neighbor; fn helper(x:int)->int {return imported(x)+1;}')
+        self.assertEqual(self.output.read_bytes(), b'from neighbor import *\ndef helper(x: int) -> int:\n    return imported(x) + 1\n')
 
 
 if __name__ == '__main__':

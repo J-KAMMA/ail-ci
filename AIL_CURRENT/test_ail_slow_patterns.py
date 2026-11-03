@@ -24,92 +24,9 @@ sys.path.insert(0, str(ROOT))
 import ail_chatgpt  # noqa: E402
 import ail_slow_patterns  # noqa: E402
 
-BAD = """struct Step { dist: int; node: int; }
-fn main() {
-    let n = int(input());
-    let seen: list[int] = [];
-    for i in range(n) {
-        let x = (i * 7) % 1000;
-        if x not in seen { seen.append(x); }
-    }
-    let q = [0];
-    let order: list[int] = [];
-    while len(q) > 0 {
-        let u = q.pop(0);
-        order.insert(0, u);
-        if u + 1 < n { q.append(u + 1); }
-    }
-    let pending: list[int] = [];
-    let total = 0;
-    for i in range(n) {
-        pending.append((i * 31) % 97);
-        let m = min(pending);
-        total += m;
-    }
-    let src = [0, 0, 1, 2];
-    let dst = [1, 2, 3, 3];
-    let w = [4, 1, 1, 5];
-    let best = [1 << 60] * 4;
-    best[0] = 0;
-    let h: list[Step] = [Step(0, 0)];
-    while len(h) > 0 {
-        let s = heappop(h, key=lambda s: (s.dist, -s.node));
-        if s.dist > best[s.node] { continue; }
-        for e in range(len(src)) {
-            if src[e] == s.node and s.dist + w[e] < best[dst[e]] {
-                best[dst[e]] = s.dist + w[e];
-                heappush(h, Step(best[dst[e]], dst[e]), key=lambda s: (s.dist, -s.node));
-            }
-        }
-    }
-    let pairs = 0;
-    for i in range(len(seen)) {
-        for j in range(i + 1, len(seen)) { if seen[i] + seen[j] == 1000 { pairs += 1; } }
-    }
-    print(len(seen), len(order), total, best[3], pairs);
-}
-"""
+BAD = 'from ail import heappop, heappush\nimport sys\n\nclass Step:\n\n    def __init__(self, dist: int, node: int):\n        self.dist = dist\n        self.node = node\n\ndef main() -> int:\n    n = int(input())\n    seen: list[int] = []\n    for i in range(n):\n        x = i * 7 % 1000\n        if x not in seen:\n            seen.append(x)\n    q = [0]\n    order: list[int] = []\n    while len(q) > 0:\n        u = q.pop(0)\n        order.insert(0, u)\n        if u + 1 < n:\n            q.append(u + 1)\n    pending: list[int] = []\n    total = 0\n    for i in range(n):\n        pending.append(i * 31 % 97)\n        m = min(pending)\n        total += m\n    src = [0, 0, 1, 2]\n    dst = [1, 2, 3, 3]\n    w = [4, 1, 1, 5]\n    best = [1 << 60] * 4\n    best[0] = 0\n    h: list[Step] = [Step(0, 0)]\n    while len(h) > 0:\n        s = heappop(h, key=lambda s: (s.dist, -s.node))\n        if s.dist > best[s.node]:\n            continue\n        for e in range(len(src)):\n            if src[e] == s.node and s.dist + w[e] < best[dst[e]]:\n                best[dst[e]] = s.dist + w[e]\n                heappush(h, Step(best[dst[e]], dst[e]), key=lambda s: (s.dist, -s.node))\n    pairs = 0\n    for i in range(len(seen)):\n        for j in range(i + 1, len(seen)):\n            if seen[i] + seen[j] == 1000:\n                pairs += 1\n    print(len(seen), len(order), total, best[3], pairs)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
-GOOD = """struct Box { rows: list[int]; }
-fn main() {
-    let n = int(input());
-    let seen: set[int] = set();
-    let mark = [False] * 1000;
-    let d: dict[int, int] = {};
-    let names = ["a", "b", "c"];
-    let s = "";
-    let hits = 0;
-    for i in range(n) {
-        let x = (i * 7) % 1000;
-        if x not in seen { seen.add(x); }
-        if not mark[x] { mark[x] = True; }
-        if x in d { d[x] += 1; } else { d[x] = 1; }
-        if str(x % 4) in names { hits += 1; }
-        if "1" in str(x) { hits += 1; }
-        s += str(x % 10);
-    }
-    let q = [0];
-    let head = 0;
-    while head < len(q) {
-        let u = q[head];
-        head += 1;
-        if u + 1 < n { q.append(u + 1); }
-    }
-    let start = [0, 2, 3, 5];
-    let val = [1, 2, 3, 4, 5];
-    let b = Box([]);
-    for g in range(3) {
-        let part: list[int] = [];
-        for k in range(start[g], start[g + 1]) { if val[k] == g { part.append(k); } }
-        part.sort();
-        b.rows.append(len(part));
-        let top = max(part + [0]);
-        hits += top;
-    }
-    for i in range(3) { for j in range(3) { hits += i * j; } }
-    print(len(seen), len(d), hits, len(s), len(q), len(b.rows));
-}
-"""
+GOOD = 'import sys\n\nclass Box:\n\n    def __init__(self, rows: list[int]):\n        self.rows = rows\n\ndef main() -> int:\n    n = int(input())\n    seen: set[int] = set()\n    mark = [False] * 1000\n    d: dict[int, int] = {}\n    names = [\'a\', \'b\', \'c\']\n    s = \'\'\n    hits = 0\n    for i in range(n):\n        x = i * 7 % 1000\n        if x not in seen:\n            seen.add(x)\n        if not mark[x]:\n            mark[x] = True\n        if x in d:\n            d[x] += 1\n        else:\n            d[x] = 1\n        if str(x % 4) in names:\n            hits += 1\n        if \'1\' in str(x):\n            hits += 1\n        s += str(x % 10)\n    q = [0]\n    head = 0\n    while head < len(q):\n        u = q[head]\n        head += 1\n        if u + 1 < n:\n            q.append(u + 1)\n    start = [0, 2, 3, 5]\n    val = [1, 2, 3, 4, 5]\n    b = Box([])\n    for g in range(3):\n        part: list[int] = []\n        for k in range(start[g], start[g + 1]):\n            if val[k] == g:\n                part.append(k)\n        part.sort()\n        b.rows.append(len(part))\n        top = max(part + [0])\n        hits += top\n    for i in range(3):\n        for j in range(3):\n            hits += i * j\n    print(len(seen), len(d), hits, len(s), len(q), len(b.rows))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 
 def scan(source, limit=None):
@@ -135,16 +52,16 @@ def cli(*args, cwd, env=None):
 class SlowPatternTests(unittest.TestCase):
     def test_every_kind_is_found_on_its_line(self):
         found = {(w['line'], w['rank']) for w in scan(BAD, limit=99)}
-        self.assertEqual(found, {(7, 0), (12, 1), (20, 3), (32, 2), (35, 5), (41, 4)})
+        self.assertEqual(found, {(15, 0), (20, 1), (28, 3), (40, 2), (43, 5), (46, 4)})
         more = {w['line']: w['more'] for w in scan(BAD, limit=99)}
-        self.assertEqual(more[12], 1)  # insert(0, x) on line 13 is the second front shift
+        self.assertEqual(more[20], 1)  # insert(0, x) just below is the second front shift
 
     def test_good_shapes_are_silent(self):
         self.assertEqual(scan(GOOD, limit=99), [])
 
     def test_limit_keeps_the_worst_kinds(self):
         lines = [w['line'] for w in scan(BAD)]
-        self.assertEqual(lines, [7, 12, 32])
+        self.assertEqual(lines, [15, 20, 40])
 
     def test_check_and_compile_report_but_never_fail(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -154,7 +71,7 @@ class SlowPatternTests(unittest.TestCase):
             report = json.loads(result.stdout)
             self.assertEqual(report['status'], 'passed')
             self.assertEqual(len(report['slow_patterns']), 3)
-            self.assertTrue(report['slow_patterns'][0].startswith('main.ail:7: slow: `in seen` scans the list'))
+            self.assertTrue(report['slow_patterns'][0].startswith('main.ail:15: slow: `in seen` scans the list'))
             build = cli('compile', 'main.ail', '-o', 'prog', cwd=directory)
             self.assertEqual(build.returncode, 0, build.stderr)
             self.assertEqual(build.stderr.splitlines(), report['slow_patterns'])

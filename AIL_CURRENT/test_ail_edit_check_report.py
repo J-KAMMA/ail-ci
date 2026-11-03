@@ -48,7 +48,7 @@ class EditCheckReportTests(unittest.TestCase):
         self.context_path.write_bytes(data)
         return data
 
-    def options(self, source, symbol='main', body='return 7;', library=False):
+    def options(self, source, symbol='main', body='    return 7', library=False):
         return SimpleNamespace(source=source, symbol=symbol, body_text=body, body=None,
                                base_sha256=digest(source.read_bytes()), output=self.output,
                                context=self.context_path, module=[], object=[], module_path=[],
@@ -60,49 +60,49 @@ class EditCheckReportTests(unittest.TestCase):
             return run(options, checker or ail_chatgpt._source_check)
 
     def test_root_report_unicode_crlf_exact_candidate_and_full_json_digest(self):
-        source = self.source('# 日本語😀\r\nfn main()->int {\r\n return "wrong";\r\n}\r\n', '入力😀.ail')
+        source = self.source('import sys\n\n# 日本語😀\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n', '入力😀.ail')
         original = source.read_bytes()
         container = self.checked(source)
         whole_json = self.save(container)
-        body = '\r\n let label="日本😀";\r\n return 7;\r\n'
+        body = '    label = "日本😀"\n    return 7'
         status, report = self.edit(self.options(source, body=body))
         self.assertEqual(status, 0, report)
         self.assertEqual(report['context_sha256'], digest(whole_json))
         self.assertNotEqual(report['context_sha256'], digest(json.dumps(container['repair_context']).encode()))
-        self.assertEqual(self.output.read_bytes(), original.replace(b'\r\n return "wrong";\r\n', body.encode('utf8')))
+        self.assertEqual(self.output.read_bytes(), original.replace(b"    return 'wrong'", body.encode('utf8')))
         self.assertEqual(source.read_bytes(), original)
         self.assertEqual(report['candidate_check']['status'], 'passed')
         self.assertFalse(report['link_verified'])
         self.assertFalse(report['runtime_verified'])
 
     def test_method_report_handoff_changes_only_selected_body(self):
-        source = self.source('struct Item {value:int;}\nimpl Item {fn bad(self)->int {return "wrong";}}\nfn main()->int {return 0;}')
+        source = self.source('import sys\n\nclass Item:\n\n    def __init__(self, value: int):\n        self.value = value\n\n    def bad(self) -> int:\n        return \'wrong\'\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         original = source.read_bytes()
         self.save(self.checked(source))
-        status, report = self.edit(self.options(source, symbol='Item.bad', body='return self.value;'))
+        status, report = self.edit(self.options(source, symbol='Item.bad', body='        return self.value'))
         self.assertEqual(status, 0, report)
-        self.assertEqual(self.output.read_bytes(), original.replace(b'return "wrong";', b'return self.value;'))
+        self.assertEqual(self.output.read_bytes(), original.replace(b"        return 'wrong'", b'        return self.value'))
         self.assertEqual(source.read_bytes(), original)
 
     def test_imported_target_binds_its_source_and_import_closure(self):
-        helper = self.source('fn value()->int {return 9;}', 'helper.ail')
-        target = self.source('use helper;\nfn bad()->int {return "wrong";}', 'broken.ail')
-        caller = self.source('use broken;\nfn main()->int {return bad();}')
+        helper = self.source('def value() -> int:\n    return 9\n', 'helper.ail')
+        target = self.source("from helper import *\ndef bad() -> int:\n    return 'wrong'\n", 'broken.ail')
+        caller = self.source('from broken import *\nimport sys\n\ndef main() -> int:\n    return bad()\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         before = {path: path.read_bytes() for path in (helper, target, caller)}
         container = self.checked(caller)
         self.assertEqual(container['repair_context']['source_path'], str(target))
         self.save(container)
         # Caller is outside the edited target's import closure.
-        caller.write_bytes(b'fn main()->int {return 0;}')
-        status, report = self.edit(self.options(target, symbol='bad', body='return value();', library=True))
+        caller.write_bytes(b'import sys\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
+        status, report = self.edit(self.options(target, symbol='bad', body='    return value()', library=True))
         self.assertEqual(status, 0, report)
         self.assertEqual(report['dependency_sha256'], {str(helper): digest(before[helper])})
         self.assertEqual(target.read_bytes(), before[target])
         self.assertEqual(helper.read_bytes(), before[helper])
-        self.assertEqual(self.output.read_bytes(), before[target].replace(b'return "wrong";', b'return value();'))
+        self.assertEqual(self.output.read_bytes(), before[target].replace(b"    return 'wrong'", b'    return value()'))
 
     def test_direct_context_remains_compatible(self):
-        source = self.source('fn main()->int {return "wrong";}')
+        source = self.source('import sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         direct = context(source.read_bytes(), 'main', include_body=True, source_path=source, resolve_imports=True)
         data = self.save(direct)
         status, report = self.edit(self.options(source))
@@ -111,7 +111,7 @@ class EditCheckReportTests(unittest.TestCase):
         self.assertEqual(report['dependency_sha256'], {})
 
     def test_malformed_report_refuses_before_checker_or_output(self):
-        source = self.source('fn main()->int {return "wrong";}')
+        source = self.source('import sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         valid = self.checked(source)
         mutations = [('passed', {'status': 'passed'}), ('not_needed', {'repair_context': {'status': 'not_needed'}}),
                      ('unavailable', {'repair_context': {'status': 'unavailable', 'source_path': str(source)}}),
@@ -142,7 +142,7 @@ class EditCheckReportTests(unittest.TestCase):
             checker.assert_not_called()
 
     def test_identical_bytes_in_different_source_refuse_by_path(self):
-        source = self.source('fn main()->int {return "wrong";}')
+        source = self.source('import sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
         other = self.source(source.read_text(encoding='utf8'), 'same_content.ail')
         self.save(self.checked(source))
         checker = Mock(side_effect=AssertionError('wrong source must not check'))
@@ -155,13 +155,13 @@ class EditCheckReportTests(unittest.TestCase):
     def test_stale_source_and_dependency_before_check_refuse(self):
         for changed in ('source', 'dependency'):
             with self.subTest(changed=changed):
-                helper = self.source('fn value()->int {return 1;}', 'helper.ail')
-                source = self.source('use helper; fn main()->int {return "wrong";}')
+                helper = self.source('def value() -> int:\n    return 1\n', 'helper.ail')
+                source = self.source('from helper import *\nimport sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
                 self.save(self.checked(source))
                 if changed == 'source':
                     source.write_bytes(source.read_bytes() + b'\n# changed\n')
                 else:
-                    helper.write_bytes(b'fn value()->int {return 2;}')
+                    helper.write_bytes(b'def value() -> int:\n    return 2\n')
                 checker = Mock(side_effect=AssertionError('stale context must not check'))
                 status, report = self.edit(self.options(source), checker)
                 self.assertEqual(status, 2, report)
@@ -172,10 +172,10 @@ class EditCheckReportTests(unittest.TestCase):
     def test_source_and_dependency_changes_during_candidate_check_refuse(self):
         for changed in ('source', 'dependency'):
             with self.subTest(changed=changed):
-                helper = self.source('fn value()->int {return 1;}', 'helper.ail')
-                source = self.source('use helper; fn main()->int {return "wrong";}')
+                helper = self.source('def value() -> int:\n    return 1\n', 'helper.ail')
+                source = self.source('from helper import *\nimport sys\n\ndef main() -> int:\n    return \'wrong\'\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
                 self.save(self.checked(source))
-                options = self.options(source, body='return value();')
+                options = self.options(source, body='    return value()')
                 def check_and_change(args):
                     status = ail_chatgpt._source_check(args)
                     target = source if changed == 'source' else helper
