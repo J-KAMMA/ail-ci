@@ -26753,8 +26753,13 @@ def _popcount_idiom(text):
     def replace(match):
         x = match.group('x')
         return (match.group('sig')
-                + '    if (%s >= 0LL) return (int64_t)__builtin_popcountll((unsigned long long)%s);\n'
-                  % (x, x)
+                + '    if (%s >= 0LL) {\n' % x
+                + '        uint64_t u = (uint64_t)%s;\n' % x
+                + '        u = u - ((u >> 1) & 0x5555555555555555ULL);\n'
+                + '        u = (u & 0x3333333333333333ULL) + ((u >> 2) & 0x3333333333333333ULL);\n'
+                + '        u = (u + (u >> 4)) & 0x0F0F0F0F0F0F0F0FULL;\n'
+                + '        return (int64_t)((u * 0x0101010101010101ULL) >> 56);\n'
+                + '    }\n'
                 + match.group('body'))
     return _POPCOUNT_RE.sub(replace, text)
 
@@ -37440,7 +37445,7 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
         info['c_units'] = (_codegen_idioms(_range_strip(declarations)),
                            [(unit, _codegen_idioms(_range_strip(body))) for unit, body in bodies])
     if info is not None and 'c_source_regions' in info:
-        info['c_source_regions'] = [(unit, _range_strip(body)) for unit, body in info['c_source_regions']]
+        info['c_source_regions'] = [(unit, _codegen_idioms(_range_strip(body))) for unit, body in info['c_source_regions']]
     if shadow and info is not None:
         if 'c_units' in info:
             declarations, bodies = info['c_units']
