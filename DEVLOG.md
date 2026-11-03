@@ -21,10 +21,11 @@ Warning or Error, so an importable general-path program is a Warning rather than
 path alone; and hover requires a plain `Name` or argument, so an attribute (`obj.x`) or a keyword
 label (`f(x=x)`) gives `null`.
 
-`test_ail_lsp` (29 tests) covers each hover rule, the review probe, a `0555` directory (skipped for
-root), imports and the general path from it, and the diagnostic message. It passes with
-`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`; the manifest check is clean.
-No generated C changes.
+`test_ail_lsp` (32 tests) covers each hover rule, the review probe, a `0555` directory (skipped for
+root), imports and the general path from it, the review's exact read-only probe, and the path
+remapping in both directions (a same-name fallback copy is not duplicated; a differently named
+sibling copy is replaced). It passes with `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`; the manifest check is clean. No generated C changes.
 
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 

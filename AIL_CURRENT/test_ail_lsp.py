@@ -368,6 +368,24 @@ class GeneralPath(LspCase):
         self.assertEqual(item["severity"], 2, item["message"])
         self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
 
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_review_probe_is_a_warning(self):
+        # The review's Probe A: an unused import in a 0555 directory must not turn the blocker into an
+        # Error. Its build needs the same AIL_PATH the check used, or `from dep import value` fails.
+        folder = self.dir / "readonly-review"
+        folder.mkdir()
+        (folder / "dep.py").write_text("def value() -> int:\n    return 7\n", encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        text = "from dep import value\ndef main() -> None:\n    print([b'a'])\nmain()\n"
+        uri = (folder / "main.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": text}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 2, item["message"])
+        self.assertEqual(item["code"], "general-path")
+        self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
+
     def test_strict_project_makes_the_blocker_an_error(self):
         (self.dir / "ail.toml").write_text('entry = "blocker.py"\nstrict = true\n', encoding="utf-8")
         _, uri = self.open("blocker.py", BLOCKER)
@@ -433,6 +451,38 @@ class Classify(unittest.TestCase):
         lsp, _ = self.diagnoser(True)
         self.assertEqual(lsp.rewrite_of("no.\n  write instead: use `x`\n"), "use `x`")
         self.assertIsNone(lsp.rewrite_of("nothing to write"))
+
+
+class Remap(unittest.TestCase):
+    """Buffer diagnostics point at the opened file, never at the temporary copy."""
+
+    def setUp(self):
+        sys.path.insert(0, str(PACKAGING))
+        self.addCleanup(sys.path.remove, str(PACKAGING))
+        from ail_lang import lsp
+        self.lsp = lsp
+
+    def test_a_fallback_with_the_same_base_name_is_not_duplicated(self):
+        # The read-only fallback keeps the opened file's base name; replacing that base name after the
+        # full temp path was remapped used to duplicate the real path (`/ro/helper.py/ro/helper.py`).
+        opened, temporary = Path("/ro/helper.py"), Path("/tmp/ail-lsp-buffer-1/helper.py")
+        problems = [(temporary, 2, 1, 1, "syntax",
+                     "AIL source /tmp/ail-lsp-buffer-1/helper.py: '[' was never closed "
+                     "(/tmp/ail-lsp-buffer-1/helper.py, line 2)")]
+        (where, _, _, _, _, message), = self.lsp._remap_problems(problems, opened, temporary)
+        self.assertEqual(where, opened)
+        self.assertNotIn("ail-lsp-buffer", message)
+        self.assertNotIn(str(opened) + str(opened), message)
+        self.assertEqual(message, "AIL source /ro/helper.py: '[' was never closed (/ro/helper.py, line 2)")
+
+    def test_a_sibling_copy_with_a_different_name_is_remapped(self):
+        opened, temporary = Path("/real/helper.py"), Path("/real/.ail-lsp-abc.py")
+        problems = [(temporary, 2, 1, 1, "syntax",
+                     "AIL source /real/.ail-lsp-abc.py: bad (.ail-lsp-abc.py, line 2)")]
+        (where, _, _, _, _, message), = self.lsp._remap_problems(problems, opened, temporary)
+        self.assertEqual(where, opened)
+        self.assertNotIn(".ail-lsp-", message)
+        self.assertEqual(message, "AIL source /real/helper.py: bad (helper.py, line 2)")
 
 
 if __name__ == "__main__":
