@@ -38008,6 +38008,22 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         head += _class_c_decls(classes)
     if info is not None:
         info['runtime_parts'] = sorted(runtime_parts)
+        if info.get('_want_types'):
+            def _public_kind(kind):
+                if isinstance(kind, tuple):
+                    return [_public_kind(item) for item in kind]
+                return kind
+            local_types = {}
+            bool_locals = {}
+            for name, context in ctxs.items():
+                observed = dict(context.kind)
+                observed.update(context.types)
+                local_types[name] = {local: _public_kind(kind) for local, kind in observed.items()}
+                bool_locals[name] = sorted(context.bool_names)
+            info['local_types'] = local_types
+            info['bool_locals'] = bool_locals
+            info['module_types'] = {name: _public_kind(value[0])
+                                    for name, value in _MODCONSTS.items()}
         info['function_signatures'] = {f.name: sigs[f.name] for f in fns}
         info['readonly_scalar_helpers'] = sorted(readonly_scalar_helpers & {f.name for f in fns})
         info['non_escaping_string_helpers'] = sorted(
