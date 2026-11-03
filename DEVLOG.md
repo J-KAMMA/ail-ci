@@ -1,3 +1,17 @@
+## 2026-11-03 -- hybrid cpyhyb2b: 40 programs match CPython, program.c unchanged
+
+Finished the hybrid job from `66200052` without touching `ail_chatgpt.py` (restored to `integ`), so the
+`--hybrid` CLI rename is dropped and `ail build --cpython SOURCE -o DIR` stays the documented path.  The
+hybrid build now writes `ail.cpython_hybrid/2` and a `<stem>_run.py` beside the unchanged source, and
+`python3 AIL_CURRENT/ail_cpython_hybrid.py SOURCE [-o DIR]` is a standalone entry (default output
+`SOURCE.parent/<stem>_hybrid`) that prints `built DIR: N function(s) accelerated` and the run file.
+
+`lab/hybrid/check.py` builds each program into a fresh directory and compares stdout, exit status and the
+last stderr line against `python3 SOURCE`: the 10 compare-lab tasks on their performance input and the first
+30 corpus programs, 40/40 match.  One function (`reverse_words` in `t079.py`) was
+accelerated; the other candidates stay in Python under the existing `_select`/`_unsafe_body` safety filters,
+listed with their reasons in `lab/hybrid/RESULTS.md`.  `lab/hybrid/measure.py` records wall time and the
+`program.c` comparison; see RESULTS.md for the numbers and the standalone out-of-memory note.
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
