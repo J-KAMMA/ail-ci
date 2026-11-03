@@ -51,7 +51,7 @@
 "seed": 9,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='IndexError: string index out of range' ail last='string index out of range'"
 },
 {
 "seed": 10,
@@ -267,7 +267,7 @@
 "seed": 45,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='IndexError: pop from empty list' ail last='pop from empty list'"
 },
 {
 "seed": 46,
@@ -843,7 +843,7 @@
 "seed": 141,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: float division by zero' ail last='division by zero'"
 },
 {
 "seed": 142,
@@ -897,7 +897,7 @@
 "seed": 150,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: integer modulo by zero' ail last='integer modulo by zero'"
 },
 {
 "seed": 151,
@@ -909,7 +909,7 @@
 "seed": 152,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr last cpython='KeyError: 5' ail='key error'"
 },
 {
 "seed": 153,
@@ -1137,7 +1137,7 @@
 "seed": 190,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: float division by zero' ail last='division by zero'"
 },
 {
 "seed": 191,
@@ -1491,7 +1491,7 @@
 "seed": 249,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: float division by zero' ail last='division by zero'"
 },
 {
 "seed": 250,
@@ -2121,7 +2121,7 @@
 "seed": 354,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='IndexError: list index out of range' ail last='list index out of range'"
 },
 {
 "seed": 355,
@@ -2277,7 +2277,7 @@
 "seed": 380,
 "class": "other",
 "path": "typed",
-"first_diff": ""
+"first_diff": "stderr-only: cpython last='IndexError: string index out of range' ail last='string index out of range'"
 },
 {
 "seed": 381,
