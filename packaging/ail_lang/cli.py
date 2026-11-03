@@ -15,7 +15,7 @@
                                    convert the deprecated brace syntax to annotated Python
 
 Every other SDK command (compile, compile-module, compile-library, compile-c, api, api-builtin,
-context, edit, doctor, integrity, cache, export-sdk) is passed to ail_chatgpt.py unchanged. The
+context, edit, doctor, integrity, cache, export-sdk, convert) is passed to ail_chatgpt.py unchanged. The
 compiler sources live in the `sdk` directory beside this file; they are exactly the files the SDK
 export (ail_sdk.export_sdk) selects, so `ail integrity` verifies them against MANIFEST.json.
 """
@@ -54,7 +54,7 @@ USAGE = """usage: ail <command> ...
   ail cache stats|path|clear    the per-user build cache
   ail --version
 
-Also available, as in ail_chatgpt.py: """ + ", ".join(PASS_THROUGH[:-1]) + """.
+Also available, as in ail_chatgpt.py: """ + ", ".join(name for name in PASS_THROUGH if name != "export-sdk") + """.
 Options before the source file (for example --syntax, -I DIR, --static, --no-cache) go to the compiler;
 everything after the source file of `ail run` goes to the program.
 """

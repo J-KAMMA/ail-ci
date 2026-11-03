@@ -1,3 +1,32 @@
+## 2026-11-03 -- onelang s15 finish: `ail convert`, the brace warning, and the lab migrations
+
+Finished onelang s15 from `job-onelangs15-11032314` (worker and fix commits applied, report
+skipped).  `AIL_CURRENT/ail2py.py` is now the converter core and `tools/ail2py.py` a thin wrapper:
+it also re-exports the twin API (`twin_header`, `_is_twin`, `twins`, `ail_syntax`), which the newer
+`test_ail_onelang_twins` and `test_ail_bce` still import, and `--twins` works through the wrapper.
+`ail convert FILE.ail [-o FILE.py]` is in `ail_chatgpt.py` and the wheel's pass-through list (and
+its usage text); invalid brace input reports `ail2py: ...` instead of a traceback.
+
+A brace or S-expression build prints one warning on the compiler's stderr naming the file and
+`ail convert`; program stdout/stderr are untouched and `AIL_BRACE_WARNING=0` silences it.  The
+stderr-exact tests (`test_ail_slow_patterns`, `test_ail_refusal_hints`, `test_ail_refusal_messages`,
+plus the shared `CObjectTests.command` and SDK/source-check helpers) set `AIL_BRACE_WARNING=0`.
+
+`lab/flags/programs/*` are `.py`; `lab/syntax/score.py` converts a brace attempt before compiling
+it; the 10 compare-lab `main.ail` files are gone and their `typed.py` builds the identical C
+(checked with `--debug-dir`; `chain_relax` is identical without `--exact-int`).  `git ls-files
+'*.ail'` now lists only `lab/syntax/runs/**` (109) and `AIL_CURRENT/language_examples/**` (268).
+
+Probes: converted struct/dict/list/float program printed 12 and `--check` said `identical` (also
+with `--flags=--strict`); the sample caesar conversion ran; warning appeared once for brace and
+S-expression sources, never for `.py` or a Python-text `.ail`, and vanished with
+`AIL_BRACE_WARNING=0`; the four `lab/flags` programs matched CPython in both builds; compare-lab
+`tree_fold` smoke built and matched its cases.  Tests: `test_ail_ail2py`,
+`test_ail_onelang_twins`, `test_ail_bce`, `test_ail_arena1s4`, `test_ail_fz220`,
+`test_ail_slow_patterns`, `test_ail_refusal_hints`, `test_ail_refusal_messages`, `test_ail_sdk`,
+`test_ail_c_objects`, `test_ail_source_check`, `test_ail_server`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` pass; manifest `--check` passes.
+
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
 Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`
