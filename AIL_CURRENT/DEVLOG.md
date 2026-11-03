@@ -1,3 +1,31 @@
+## 2026-11-03 -- arena1 S2: read-only list-field aliases feed sort keys in place (job-arena1s2-11032357)
+
+`let x = o.f` for a `list[int]`, `list[float]` or `list[str]` field normally copies the field
+into a private list.  The new AST pass in `pyfunc.py` drops that copy only when every use between
+the assignment and the last mention is read-only and the value cannot escape: `x` is assigned once,
+`o` is a plain name not rebound in the range, no attribute/element store or mutating method touches
+`x` or `o.f`, every call is borrow-safe, no user function receives `o` or the struct, `x` is not
+returned or aliased, and it is not captured by a non-sort-key lambda.  Sort-key columns now read
+`(v_t)->f_nm` / `f_par` in place.  Every unsafe shape keeps the copy, including `x.append`,
+`x.sort`, `t.f[i] = v`, another field or instance store, passing `x` to a user function, passing
+`t`, returning `x`, aliasing `x`, rebinding `t`, using `x` after a field mutation, and a
+`min(..., key=lambda ...)` capture.
+
+`lab/compare/run_task.py --task tree_fold --langs ail,c,python` still passes all 55 public and
+hidden cases.  At N=3,000,000 the AIL build peaks at 407,424 KiB RSS (down from about 441 MB),
+wall 1,884.4 ms; the C build is 197,984 KiB / 1,060.5 ms and Python 1,176,980 KiB / 15,053.9 ms.
+The generated `do_sort` has no `ail_pslist_snapshot`/`ail_list_snapshot` and reads the key columns
+directly.  AddressSanitizer + UBSan build and run clean on the mixed regression program and on
+`tree_fold`'s example case (leak detection on).
+
+Added `test_ail_readonly_field_alias.py`, registered through
+`tests.d/test_ail_readonly_field_alias.txt`: it checks the elided C, all unsafe shapes, byte-equal
+output against an explicit `.copy()` reference build, and the forced general path with a
+Python-syntax list smoke test (`struct` programs cannot use `AIL_UNIFIED_FORCE=1`).  The new module
+and `test_ail_sort_keys`, `test_ail_struct_list_inplace`, `test_ail_field_views`,
+`test_ail_heapq_bisect`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass; `tools/update_manifest.py --check` passes.
+
 ## 2026-11-02 -- prog29 review 2: typed set/dict sources join the mutation guard (job-prog29-11022055)
 
 Fixed the remaining defect in the set-comprehension guard.  `_setcomp_source_can_change` matched
