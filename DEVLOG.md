@@ -1,3 +1,34 @@
+## 2026-11-03 -- bce s2: exact recursion depth in a register (job-bces2-11040407)
+
+Self-recursive IR functions now carry their exact recursion count in `int64_t ail_d` instead of the
+global `ail_depth`.  `pyfunc.to_c` exposes each recursive function's SCC, reachability and direct
+calls; `ir/lower.py` accepts a function only when its SCC is exactly `{f}`, it has no `try`, list or
+exception entry, its other callees cannot reach a recursive/guarded function, exceptions are not in
+`checked` mode, and `AIL_BCE` is on.  `ir/emit_c.py` emits the inner `f__d(..., int64_t ail_d)` with
+the unchanged `if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded");`, rewrites
+self-calls to `f__d(..., ail_d + 1)`, and keeps today's wrapper `f(...)` calling
+`f__d(..., ail_depth + 1)`.  Non-selected functions keep the global counter.  Under
+`AIL_BCE_AUDIT=1` the inner function also keeps the old increment/leave and asserts
+`ail_d == ail_depth` right after incrementing.
+
+Depth probes (default/force/audit, each compared with the same mode at `AIL_BCE=0`): 49,999 and
+50,000 return normally, 50,001 exits 1 with `recursion depth exceeded`; mutual g/h reaching a
+depth-param `f`, raise-at-29,999 then recurse-to-48,999, a non-recursive helper call, and a guarded
+helper refusal all match.  Stats show `depth=param` for the helper case and
+`callee other can reach a guarded function` for the refusal; audit is clean with no
+`AIL-BCE-AUDIT`.
+
+Census against the job base (`HEAD 5a0cb28`; current `origin/integ` is later and contains unrelated
+merges): only `tally_lang/ail` changes C; the other nine tasks are `same C` in both syntaxes, and
+`tally_lang/python`/`tree_fold/python` keep their pre-existing base build failures.  Tally perf
+input: **21,658,123,714 -> 19,958,091,442 instructions (ratio 0.92151, 7.85% drop)**; stripped
+binary 67,800 -> 67,800 bytes; output identical; compile phase medians 0.11 total and 1.25 vs 1.24
+gcc CPU seconds (within 3%).  Codegen pins unchanged.  `par_check -j 2` passes `test_ail_bce`,
+`test_ail_ir_s1/s2/s3`, `test_ail_range_checks`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.  No recursion-specific test module exists in the tree.  The mandatory
+`cmp.sh` probes pass in default and forced general mode; the IR depth behavior is covered by
+`test_ail_bce`.
+
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
 Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`
