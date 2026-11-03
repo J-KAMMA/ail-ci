@@ -1,6 +1,7 @@
 """Export a pinned, relocatable AIL source compiler snapshot."""
 import hashlib
 import json
+import os
 from pathlib import Path
 
 
@@ -647,14 +648,29 @@ def _sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def _no_links(path):
-    for part in (path, *path.parents):
+def _no_links(path, root=None):
+    """Refuse a link at or below `root` (default: the path itself).
+
+    The root is resolved first, so a system prefix above it is never inspected: on macOS
+    /var is a symlink to /private/var, and pip builds the wheel under /var/folders.  Only
+    the components AIL creates or walks inside the root must be real directories/files.
+    """
+    path = Path(path)
+    root = Path(os.path.realpath(root if root is not None else path))
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        parts = (path,)
+    else:
+        parts = (root, *(root.joinpath(*relative.parts[:index])
+                         for index in range(1, len(relative.parts) + 1)))
+    for part in parts:
         if part.is_symlink() or getattr(part, 'is_junction', lambda: False)():
             raise ValueError(f'symlink or junction is not allowed: {part}')
 
 
 def _local_file(root, path):
-    _no_links(path)
+    _no_links(path, root)
     resolved = path.resolve(strict=True)
     if not resolved.is_relative_to(root) or not resolved.is_file():
         raise ValueError(f'not a local regular file: {path}')
@@ -713,7 +729,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
     import ail_manifest
     manifest_path = _local_file(root, root / 'MANIFEST.json')
     if (root / ail_manifest.SHARD_DIR).exists():
-        _no_links(root / ail_manifest.SHARD_DIR)
+        _no_links(root / ail_manifest.SHARD_DIR, root)
     manifest_hash = ail_manifest.fingerprint(root)   # MANIFEST.json plus its pin shards (a plain file's own SHA-256 without shards)
     source_manifest = ail_manifest.load(root)
     pins = source_manifest.get('sha256')
@@ -742,7 +758,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         compiler = root / 'python' / 'pkg-v12'
         examples = root / 'language_examples'
         for directory in (compiler, examples):
-            _no_links(directory)
+            _no_links(directory, root)
             if not directory.is_dir():
                 raise ValueError(f'missing source directory: {directory}')
         selected.update(p for p in compiler.iterdir() if p.suffix in ('.py', '.h'))
@@ -755,7 +771,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         selected.update(p for p in examples.iterdir() if p.suffix in ('.ail', '.c', '.h', '.S', '.s', '.json'))
         # bundled standard modules written in AIL over the C FFI (G5a): stdlib/zlib.py and its C glue
         if (root / 'stdlib').is_dir() and any(name.startswith('stdlib/') for name in pins):
-            _no_links(root / 'stdlib')
+            _no_links(root / 'stdlib', root)
             selected.update(p for p in (root / 'stdlib').iterdir() if p.suffix in ('.py', '.c', '.h'))
 
     # A selected C interface must include its full declared input closure.
@@ -818,7 +834,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         for name, data in payloads.items():
             target = output / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            _no_links(target)
+            _no_links(target, output)
             with target.open('xb') as stream:
                 stream.write(data)
             if _sha(target.read_bytes()) != hashes[name]:
