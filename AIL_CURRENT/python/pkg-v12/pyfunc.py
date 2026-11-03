@@ -28200,6 +28200,35 @@ def _for_inner_impl(node, ctx, ind):
                 head = '%sfor (%s = %s.n - 1; %s >= 0; %s--) {\n%s    %s = %s.p[%s];\n' % (
                     pad, idx, c, idx, idx, pad, v, c, idx)
                 return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+            if _is_str_expr(arg, ctx) and not _is_slist_expr(arg, ctx):
+                # `for c in reversed(s)`: walk the UTF-8 bytes backwards, one code point per step,
+                # exactly the forward `for c in s` walk in reverse.  The iterable is evaluated once.
+                ctx.parts.add('STR')
+                stmp, _ = ctx.temp(STR)
+                v = ctx.declare(node.target.id, STR)
+                start, _ = ctx.temp(INT)
+                sval = _str_value(arg, ctx)
+                pre = _flush(ctx, pad)
+                pre += '%s%s = %s;\n' % (pad, stmp, sval)
+                if ctx.rebound is not None and node.target.id not in ctx.rebound:
+                    ctx.onecp.add(node.target.id)
+                head = ('%sfor (%s = %s.n; %s > 0; ) {\n'
+                        '%s    %s = ail_str_prev_unit(%s, %s);\n'
+                        '%s    %s = (ail_str){%s.p + %s, %s - %s, %s.p[%s] < 0x80};\n'
+                        '%s    %s = %s;\n' % (
+                            pad, idx, stmp, idx,
+                            pad, start, stmp, idx,
+                            pad, v, stmp, start, idx, start, stmp, start,
+                            pad, idx, start))
+                _saved = set(ctx.len1_names)
+                ctx.len1_names.add(node.target.id)
+                for _s in node.body:
+                    for _n in ast.walk(_s):
+                        if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
+                            ctx.len1_names.add(_n.id)
+                _body = _loop_stmts(node.body, ctx, ind + 1)
+                ctx.len1_names = _saved
+                return pre + head + _body + pad + '}\n'
             if _seq_yields_handles(arg, ctx):
                 raise Unsupported('reversed() of a nested container; elements are handles, not '
                                   'numbers')
@@ -29493,6 +29522,18 @@ def _promote_floats(fn, ctx):
                 # counterpart of the bound-SLIST-name branch above (same reason, same fix).
                 ctx.bind(n.target.id, STR)
                 continue
+            if (isinstance(n.iter, ast.Call) and isinstance(n.iter.func, ast.Name)
+                    and n.iter.func.id == 'reversed' and len(n.iter.args) == 1
+                    and not n.iter.keywords):
+                # `for c in reversed(s)`: the target inherits the element kind of the reversed
+                # sequence, the same pre-binding the str/slist branches around this one do.
+                arg = n.iter.args[0]
+                if _is_str_expr(arg, ctx):
+                    ctx.bind(n.target.id, STR)
+                    continue
+                if _is_bytes_expr(arg, ctx):
+                    ctx.bind(n.target.id, BYTES)
+                    continue
             if _is_str_expr(n.iter, ctx):
                 # `for c in line:` -- AIL_TASK_p3idioms_20260916.md idiom 8: iterating a str binds
                 # a one-code-point STR, not an int, the same pre-binding fix the SLIST/sys.stdin
@@ -35485,6 +35526,22 @@ class _ListLowering:
         if not isinstance(func, ast.Attribute) or call.keywords:
             return None
         receiver = func.value
+        import sys as _d; print('METHOD_STMT', func.attr, self.pure(receiver), self.evidence.is_list(receiver), type(call.args[0]).__name__ if call.args else None, file=_d.stderr)
+        if (func.attr == 'extend' and len(call.args) == 1
+                and 'extend' not in self.evidence.methods and self.pure(receiver)
+                and self.evidence.is_list(receiver)):
+            source = call.args[0]
+            if (isinstance(source, ast.Call) and isinstance(source.func, ast.Name)
+                    and source.func.id == 'reversed'
+                    and source.func.id not in self.evidence.functions
+                    and source.func.id not in self.evidence.classes
+                    and len(source.args) == 1 and not source.keywords):
+                # `xs.extend(reversed(src))`: the same loop `for v in reversed(src): xs.append(v)`
+                # writes, so the reversed() call is no longer evaluated as a value.
+                out, _ = self.build('for $v in reversed(__S):\n    __R.append($v)', node,
+                                    S=source.args[0], R=receiver)
+                self.changed = True
+                return out
         if func.attr == 'insert' and len(call.args) == 2 and 'insert' not in self.evidence.methods:
             if not self.pure(receiver):
                 return None
