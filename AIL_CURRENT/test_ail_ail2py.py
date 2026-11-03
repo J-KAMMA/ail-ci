@@ -192,7 +192,22 @@ REBIND_PROGRAMS = {
     'except': "from ail import wrapping_add as w\ntry:\n    raise ValueError('x')\n"
               "except ValueError as w:\n    print(w)\n",
     'match': 'from ail import wrapping_add as w\nmatch 1:\n    case w:\n        print(w)\n',
+    'second_alias': 'from ail import wrapping_add as w\nprint(w(1, 2))\n'
+                    'from ail import wrapping_mul as w\nprint(w(3, 4))\n',
 }
+
+REPEAT_ALIAS_PROGRAM = '''
+from ail import wrapping_add as w
+
+print(w(1, 2))
+from ail import wrapping_add as w
+print(w(3, 4))
+'''
+
+REPEAT_BARE_PROGRAM = '''
+print(wrapping_add(1, 2))
+print(wrapping_add(3, 4))
+'''
 
 HEAP_AIL = '''
 struct Item { d: int; b: int; n: int; }
@@ -322,7 +337,8 @@ class ConversionTests(unittest.TestCase):
     def test_ail_import_builds_like_the_bare_program(self):
         built = {}
         for name, text in (('imported', AIL_IMPORT_PROGRAM), ('alias', ALIAS_IMPORT_PROGRAM),
-                           ('bare', BARE_IMPORT_PROGRAM)):
+                           ('bare', BARE_IMPORT_PROGRAM), ('repeat', REPEAT_ALIAS_PROGRAM),
+                           ('repeat_bare', REPEAT_BARE_PROGRAM)):
             source = Path(self.tmp) / (name + '.py')
             source.write_text(text, encoding='utf-8')
             debug = Path(self.tmp) / ('debug-' + name)
@@ -333,6 +349,7 @@ class ConversionTests(unittest.TestCase):
             built[name] = (debug / 'program.c').read_bytes()
         self.assertEqual(built['imported'], built['bare'])
         self.assertEqual(built['alias'], built['bare'])
+        self.assertEqual(built['repeat'], built['repeat_bare'])
 
     def test_ail_import_alias_rebinding_is_refused_by_name(self):
         for name, text in REBIND_PROGRAMS.items():

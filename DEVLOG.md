@@ -1,3 +1,17 @@
+## 2026-11-02 -- onelang s2 review 4: a repeated `from ail import ... as Y` alias is refused
+
+A second top-level `from ail import X as Y` whose source name differs from the first is now a named
+compile-time refusal (`ail import alias Y is rebound`).  Previously the later source silently
+overwrote the alias map, so loads before it were rewritten to the later built-in and the program
+printed the wrong values (`alias_rebind_same_import.py`: `2`/`12` instead of CPython's `3`/`12`).
+Repeating the same source name under the same alias stays allowed, since both bindings denote the
+same built-in.
+
+Probes `alias_rebind_same_import`, `alias_rebind_same_import3` and `alias_rebind_mixed` refuse by
+name in the default and unified builds; `alias_repeat_same_source` and `alias_valid_nested` still
+match CPython and build `program.c` identical to the bare program.  `test_ail_ail2py` now covers
+both the differing-source refusal and the same-source repeat.
+
 ## 2026-11-02 -- onelang s2 review 3: aliased `ail` imports refuse import/`except`/`match` rebinding
 
 `from ail import X as Y` now detects every binding of `Y` that is not the import declaration, not

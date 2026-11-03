@@ -4131,6 +4131,9 @@ def _ail_imports(source):
                     raise SyntaxErrorAIL('ail has no ' + alias.name,
                                          lineno=node.lineno, offset=node.col_offset + 1)
                 if alias.asname and alias.asname != alias.name:
+                    if alias.asname in from_aliases and from_aliases[alias.asname] != alias.name:
+                        raise SyntaxErrorAIL('ail import alias ' + alias.asname + ' is rebound',
+                                             lineno=node.lineno, offset=node.col_offset + 1)
                     from_aliases[alias.asname] = alias.name
             dropped.append(node)
         elif isinstance(node, ast.Import) and all(alias.name == 'ail' for alias in node.names):
