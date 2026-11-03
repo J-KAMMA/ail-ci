@@ -15,10 +15,16 @@ directory first on `AIL_PATH`, so diagnostics are published there and imports st
 diagnostics now replace both the temp file's full path and its base name in the message text, so no
 `.ail-lsp-XXXX.py` name leaks to the editor.
 
-`test_ail_lsp` (27 tests) covers each hover rule, the review probe, a `0555` directory (skipped for
-root), imports from it, and the diagnostic message. It passes with `test_ail_safetynet`,
-`test_ail_files` and `test_ail_corpus_findings3`; the manifest check is clean. No generated C
-changes.
+Review fixes: the read-only fallback now passes the same `AIL_PATH` to the build that chooses
+Warning or Error, so an importable general-path program is a Warning rather than a false Error;
+`_remap_problems` replaces the full temp path before the base name and leaves an already-correct
+path alone; and hover requires a plain `Name` or argument, so an attribute (`obj.x`) or a keyword
+label (`f(x=x)`) gives `null`.
+
+`test_ail_lsp` (29 tests) covers each hover rule, the review probe, a `0555` directory (skipped for
+root), imports and the general path from it, and the diagnostic message. It passes with
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`; the manifest check is clean.
+No generated C changes.
 
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
