@@ -6125,6 +6125,18 @@ def _is_file_chunks_iterator(node):
             and node.func.id == 'file_chunks')
 
 
+def _open_mode_kind(call):
+    """`'text'`/`'bin'` for an `open(path[, mode])` call, None when it is not that shape."""
+    if not _is_open_call(call) or call.keywords:
+        return None
+    if len(call.args) == 1:
+        return 'text'
+    mode = call.args[1] if len(call.args) == 2 else None
+    if _is_strlit(mode) and mode.value in ('r', 'rb'):
+        return 'bin' if mode.value == 'rb' else 'text'
+    return None
+
+
 def _ail_file_handle_kinds(fn):
     """The names bound to a file handle by filelower's `_ail_open_text`/`_ail_open_bin`
     prelude, and whether it is a text (`'text'`) or binary (`'bin'`) handle. Used by the
@@ -6133,19 +6145,41 @@ def _ail_file_handle_kinds(fn):
     for n in ast.walk(fn):
         if (isinstance(n, ast.Assign) and len(n.targets) == 1
                 and isinstance(n.targets[0], ast.Name)
-                and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)):
-            if n.value.func.id == '_ail_open_text':
-                kinds[n.targets[0].id] = 'text'
-            elif n.value.func.id == '_ail_open_bin':
-                kinds[n.targets[0].id] = 'bin'
+                and isinstance(n.value, ast.Call)):
+            value = n.value
+            if isinstance(value.func, ast.Name):
+                if value.func.id == '_ail_open_text':
+                    kinds[n.targets[0].id] = 'text'
+                elif value.func.id == '_ail_open_bin':
+                    kinds[n.targets[0].id] = 'bin'
+                else:
+                    kind = _open_mode_kind(value)
+                    if kind is not None:
+                        kinds[n.targets[0].id] = kind
+        elif isinstance(n, ast.With):
+            for item in n.items:
+                if isinstance(item.optional_vars, ast.Name):
+                    kind = _open_mode_kind(item.context_expr)
+                    if kind is not None:
+                        kinds[item.optional_vars.id] = kind
     return kinds
 
 
 def _ail_file_read_kind(node, handles):
-    """`'text'`/`'bin'` when `node` is `handle.read(...)` on one of `handles`, else None."""
+    """`'text'`/`'bin'` when `node` is `handle.read(...)` on one of `handles`, else None.
+
+    A `with open(path) as f: data = f.read()` body is lowered to a direct
+    `data = open(path).read()` by the time this pre-pass runs (the handle temporary
+    and its close are gone), so the whole-file shape has to be recognised here too;
+    the text build is `_is_open_read_call`'s own str path."""
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr == 'read' and isinstance(node.func.value, ast.Name)):
         return handles.get(node.func.value.id)
+    if _is_open_read_call(node):
+        call = node.func.value
+        if len(call.args) == 2 and _is_strlit(call.args[1]) and call.args[1].value == 'rb':
+            return None
+        return 'text'
     return None
 
 
@@ -11744,6 +11778,21 @@ def _iter_plan(node, ctx):
             return '0', count, 'ail_range_value(%s, %s, @)' % (start, step), pre
         lo, hi = bounds
         return lo, hi, '@', pre
+    if isinstance(node, ast.Name) and node.id in ctx.blist:
+        # `[int(x) for x in raw]` where `raw` is a list of bytes -- the BLIST counterpart of the
+        # SLIST branch just below: the element handed to the comprehension is the bytes value the
+        # pool slot names, read exactly as `_for` reads one.
+        ctx.parts.update(('BLIST', 'BYTES'))
+        c = ctx.cname(node.id)
+        return '0', '(%s)->n' % c, 'ail_blist_get(&%s, %s, @)' % (ctx.barena(), c), pre
+    if _is_bytes_split_call(node, ctx):
+        # `[int(x) for x in read_stdin_bytes(...).split()]` -- an INLINE bytes split walked by a
+        # comprehension, `sum()`, `len()` or a generator; builds the same private BLIST temp the
+        # bound-name branch above reads.
+        ctx.parts.update(('BLIST', 'BYTES'))
+        c, _logical = _bytes_split_temp(node, ctx)
+        pre.extend(ctx.pre); ctx.pre = []
+        return '0', '(%s)->n' % c, 'ail_blist_get(&%s, %s, @)' % (ctx.barena(), c), pre
     if isinstance(node, ast.Name) and ctx.type_of(node.id) == SLIST:
         # `[int(p) for p in parts]` -- AIL_TASK_p3idioms_20260916.md idiom 5, the comprehension/
         # `sum()`/`len()`/generator counterpart of `_for`'s own bound-SLIST-name branch: each
@@ -18789,6 +18838,8 @@ def _iter_elem_kind(node, ctx):
         base = base.value
     if _iter_elem_is_str(base, ctx):
         return STR
+    if _is_bytes_split_call(base, ctx):
+        return BYTES
     if isinstance(base, ast.Name) and ctx.type_of(base.id) == BLIST:
         return BYTES
     if _is_flist_name(base, ctx):
@@ -20044,7 +20095,9 @@ def _listcomp_kind(node, ctx):
         if _is_hlist_kind(source_kind):
             raise Unsupported('handle list comprehension folds are unsupported')
         struct_source = _is_olist_kind(source_kind)
-        element = (OBJ, source_kind[1]) if struct_source else STR if _iter_elem_is_str(source, ctx) else FLT if _etype(source, ctx) == FLIST else INT
+        elem_kind = _iter_elem_kind(g.iter, ctx)
+        element = ((OBJ, source_kind[1]) if struct_source
+                   else elem_kind if elem_kind in (STR, FLT, BYTES) else INT)
         name = g.target.id
     types, kinds = dict(ctx.types), dict(ctx.kind)
     try:
@@ -20149,6 +20202,7 @@ def _listcomp_into_temp(node, ctx):
     # exactly the one wrapper (a slice) `_iter_plan`'s own SLIST branches recurse through. The
     # The result's scalar kind is inferred independently from the source element.
     elem_is_str = _iter_elem_is_str(g.iter, ctx)
+    elem_is_bytes = _iter_elem_kind(g.iter, ctx) == BYTES
     source = g.iter
     while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
         source = source.value
@@ -20161,7 +20215,8 @@ def _listcomp_into_temp(node, ctx):
     cv = bound if struct_source else '_comp_element%d' % ctx.tmp
     ctx.comprehension_cnames = {**old_cnames, g.target.id: cv}
     ctx.kind.pop(g.target.id, None)
-    ctx.types[g.target.id] = (OBJ, source_kind[1]) if struct_source else STR if elem_is_str else FLT if elem_is_float else INT
+    ctx.types[g.target.id] = ((OBJ, source_kind[1]) if struct_source else STR if elem_is_str
+                              else FLT if elem_is_float else BYTES if elem_is_bytes else INT)
     if struct_source:
         ctx.kind[g.target.id] = ctx.types[g.target.id]
     if string_source:
@@ -20193,7 +20248,8 @@ def _listcomp_into_temp(node, ctx):
             '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)
     if pre:
         head = '%s %s' % (' '.join(pre), head)
-    element_ctype = 'ail_str' if elem_is_str else 'double' if elem_is_float else 'int64_t'
+    element_ctype = ('ail_str' if elem_is_str else 'double' if elem_is_float
+                     else 'ail_bytes' if elem_is_bytes else 'int64_t')
     bind = (_obj_store(cv, elem.replace('@', '_i'), (OBJ, source_kind[1]), ctx) + ';' if struct_source
             else '%s %s = %s;' % (element_ctype, cv, elem.replace('@', '_i')))
     lines = [head, bind]
@@ -29590,6 +29646,40 @@ def _promote_floats(fn, ctx):
         if not grew:
             break
 
+    # Names that ever hold an element read out of a bytes list (`for x in raw`, a tuple
+    # unpack from `parts[1:]`, or a slice of a `.split()` result). Python gives each local one
+    # kind; this pre-pass must not claim one of these INT just because a later, unrelated branch
+    # or loop rebinds the same name, or a `%` annotation on a helper that takes it as bytes would
+    # be refused before codegen's own kind-split can separate the two regions.
+    bytes_element_names = set()
+    for n in nodes:
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Tuple)):
+            src = n.value
+            if isinstance(src, ast.Subscript) and isinstance(src.slice, ast.Slice):
+                src = src.value
+            try:
+                if ((isinstance(src, ast.Name) and src.id in ctx.blist)
+                        or _is_bytes_split_call(src, ctx)):
+                    bytes_element_names.update(e.id for e in n.targets[0].elts
+                                               if isinstance(e, ast.Name))
+            except Unsupported:
+                pass
+        elif isinstance(n, ast.Assign) and len(n.targets) == 1 \
+                and isinstance(n.targets[0], ast.Name):
+            try:
+                if _is_bytes_expr(n.value, ctx):
+                    bytes_element_names.add(n.targets[0].id)
+            except Unsupported:
+                pass
+        elif isinstance(n, ast.For) and isinstance(n.target, ast.Name):
+            try:
+                if (_is_bytes_split_call(n.iter, ctx)
+                        or (isinstance(n.iter, ast.Name) and n.iter.id in ctx.blist)):
+                    bytes_element_names.add(n.target.id)
+            except Unsupported:
+                pass
+
     for n in nodes:
         if isinstance(n, ast.Assign):
             if (isinstance(n.targets[0], ast.Name) and n.targets[0].id in untyped_sets):
@@ -29695,7 +29785,7 @@ def _promote_floats(fn, ctx):
                                      # one's later, correct `ctx.declare(name, STR)`
             for t in n.targets:
                 if isinstance(t, ast.Name):
-                    if t.id in nsum_names:
+                    if t.id in nsum_names or t.id in bytes_element_names:
                         continue
                     ctx.bind(t.id, INT)
                 elif isinstance(t, ast.Tuple):
@@ -29810,6 +29900,8 @@ def _promote_floats(fn, ctx):
                 # correct `ctx.declare(c, STR)` must not fight a stale INT default from here).
                 ctx.bind(n.target.id, STR)
                 continue
+            if n.target.id in bytes_element_names:
+                continue            # the target also reads bytes elements elsewhere
             ctx.bind(n.target.id, INT)
     has_list_pop = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                        and n.func.attr == 'pop' for n in nodes)
