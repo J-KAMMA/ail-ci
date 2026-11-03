@@ -45,6 +45,12 @@ def state_prefix(body, name):
     return ''.join(f'#define {state} {name}_ail_state_{state}\n' for state in dict.fromkeys(states))
 
 
+FATAL_TAIL = (
+    '    {\n        const char *name = ail_exc_pyname(w);\n        fflush(stdout);\n'
+    '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
+    '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n')
+
+
 def rewrite_uncaught(body, trap_name):
     """Replace exactly the owning-exception terminal boundary, leaving active handlers intact."""
     if not isinstance(trap_name,str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',trap_name):
@@ -77,14 +83,11 @@ def object_prefix(body, name):
     """Redirect generated runtime state, fatal paths and resource management."""
     validate_namespace(name)
     trap = name + '_ail_bridge_trap'
-    replacements = {
-        'fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);':
-            f'{trap}(ail_exc_kind_of(w) ? ail_exc_kind_of(w) : 8, w);',
-    }
-    for old, new in replacements.items():
-        body, count = re.subn(r'^    ' + re.escape(old) + '$', '    ' + new, body, flags=re.MULTILINE)
-        if count != int('static void ail_die(' in body):
-            raise Unsupported('C API dependency fatal boundary marker changed')
+    definitions = int('static void ail_die(' in body)
+    body, count = re.subn(re.escape(FATAL_TAIL),
+                          f'    {trap}(ail_exc_kind_of(w) ? ail_exc_kind_of(w) : 8, w);\n', body)
+    if count != definitions:
+        raise Unsupported('C API dependency fatal boundary marker changed')
     if 'static void ail_die(' in body:
         body = rewrite_uncaught(body, trap)
     body = body.replace('    ail_str_write(s, stderr);\n    fputc(10, stderr);\n    _Exit(1);',

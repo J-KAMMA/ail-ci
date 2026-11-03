@@ -2,6 +2,7 @@
 import hashlib
 import importlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -33,12 +34,20 @@ class BuildReportTests(unittest.TestCase):
         row=next(r for r in generated[0]['functions'] if r['function']=='double');self.assertTrue(row['mapped'])
         loc=row['source_location'];self.assertEqual((loc['path'],loc['line'],loc['function'],loc['location_kind']),(str(neighbor),2,'double','function_declaration'))
         self.assertEqual(loc['source_sha256'],hashlib.sha256(neighbor.read_bytes()).hexdigest());self.assertEqual(data['dependency_sha256'][str(neighbor)],loc['source_sha256'])
-        previous=sys.path[:]
+        previous=sys.path[:];previous_map=os.environ.get('AIL_LINE_MAP')
         try:
             sys.path.insert(0,str(support.ROOT/'python/pkg-v12'));pyc=importlib.import_module('pyc');info={'_checked_arrays':True}
-            baseline=pyc.to_c(ail_chatgpt._load_sources(source)[0],strict=True,info=info)
+            source_map={}
+            text=ail_chatgpt._load_sources(source,source_map=source_map)[0]
+            line_map=self.root/'lines.json'
+            line_map.write_text(json.dumps({str(key):[value[0],value[1]] for key,value in source_map.items()}),encoding='utf-8')
+            os.environ['AIL_LINE_MAP']=str(line_map)
+            baseline=pyc.to_c(text,strict=True,info=info)
             baseline+=pyc._io_main_for(info) if info.get('io') or info.get('ret')==pyc.NORET else pyc._main_for(info)
-        finally:sys.path[:]=previous
+        finally:
+            sys.path[:]=previous
+            if previous_map is None:os.environ.pop('AIL_LINE_MAP',None)
+            else:os.environ['AIL_LINE_MAP']=previous_map
         self.assertEqual(hashlib.sha256(actual.decode().replace('\r\n','\n').encode()).hexdigest(),hashlib.sha256(baseline.encode()).hexdigest())
         self.assertEqual(json.loads((debug/'ail_build.json').read_bytes()),data)
         before={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in debug.iterdir()}

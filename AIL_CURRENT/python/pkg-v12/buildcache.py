@@ -372,12 +372,22 @@ def toolchain(compiler):
 
 def build_env():
     """Environment variables that can change a build: AIL_* and PIPE_* (except the cache's own)
-    and the ones a C compiler reads itself."""
+    and the ones a C compiler reads itself.  AIL_LINE_MAP names a temporary file whose path changes
+    on every build; its contents, not its path, are what the compiler reads, so hash those."""
     names = sorted(k for k in os.environ
                    if (k.startswith('AIL_') or k.startswith('PIPE_')) and not k.startswith('AIL_CACHE')
                    and k != 'AIL_NO_CACHE')
     names += [k for k in CC_ENV if k in os.environ]
-    return ['%s=%s' % (k, os.environ[k]) for k in names]
+    values = []
+    for k in names:
+        value = os.environ[k]
+        if k == 'AIL_LINE_MAP':
+            try:
+                value = hashlib.sha256(Path(value).read_bytes()).hexdigest()
+            except OSError:
+                pass
+        values.append('%s=%s' % (k, value))
+    return values
 
 
 def frontend_key(package, *parts):
