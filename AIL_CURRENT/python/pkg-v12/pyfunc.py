@@ -19779,7 +19779,7 @@ def _borrowed_callback_helper(summary, ctx):
               if recursive else '')
     guard = ('ail_cleanup_frame _borrowed_frame = {ail_cleanup_top, %s_unwind, NULL}; '
              'ail_cleanup_top = &_borrowed_frame; '
-             'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded"); ' % symbol
+             'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded"); ' % symbol
              if recursive else '')
     if recursive:
         private.parts.update(('DIE', 'RECDEPTH'))
@@ -40221,7 +40221,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # The guard sits after every local's declaration (C89-safe: no statement precedes it) and
     # before the first line of the translated body, so it runs exactly once per call, before any
     # of this call's own work -- including before the recursive calls the body below might make.
-    guard = ('    if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded");\n'
+    guard = ('    if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");\n'
              if recursive else '')
     sig = signature(ctx.params, ctx, cname, ret)
     # A leaf whose whole body is one `return <expression>` is asked to be inlined by name.

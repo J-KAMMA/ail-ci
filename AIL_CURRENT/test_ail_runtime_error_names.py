@@ -35,14 +35,14 @@ main()
     n = 0
     print(10 // n)
 main()
-''', "print(10 // n)", "ZeroDivisionError", "integer division by zero",
+''', "print(10 // n)", "ZeroDivisionError", "integer division or modulo by zero",
      "integer division or modulo by zero"),
     "recursion": ('''def f(n: int) -> int:
     return f(n + 1)
 def main():
     print(f(0))
 main()
-''', "return f(n + 1)", "RecursionError", "recursion depth exceeded", None),
+''', "return f(n + 1)", "RecursionError", "maximum recursion depth exceeded", None),
     "pop": ('''def main():
     xs: list[int] = []
     print(xs.pop())
@@ -118,7 +118,7 @@ class RuntimeErrorNames(unittest.TestCase):
                     # CPython's last traceback line: the name always, the whole line where AIL's
                     # trap message has the same wording (IndexError, pop, an explicit raise).
                     self.assertTrue(self.last_line(done.stderr).startswith(kind + ": "))
-                    if name in ("index", "pop", "explicit") or unified:
+                    if name in ("index", "pop", "explicit", "zero", "recursion") or unified:
                         self.assertEqual(self.last_line(done.stderr), cpython_last)
 
     def test_a_caught_exception_prints_nothing(self):

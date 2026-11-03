@@ -582,7 +582,8 @@ static const char *ail_exc_pyname(const char *w) {
     case AIL_EXC_RUNTIME: return "RuntimeError";
     case AIL_EXC_UNICODE_DECODE: return "UnicodeDecodeError";
     }
-    if (!strcmp(w, "recursion depth exceeded")) return "RecursionError";
+    if (!strcmp(w, "maximum recursion depth exceeded")
+        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";
     if (!strcmp(w, "out of memory")) return "MemoryError";
     return NULL;
 }
