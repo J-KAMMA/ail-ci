@@ -3,6 +3,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / 'lab/compare')); import run_task
 for t in sys.argv[1:] or 'berth_sim chain_relax echo_pack ledger_bin rail_transfer scar_life tally_lang term_rank ticket_audit tree_fold'.split():
+    work = Path(tempfile.mkdtemp(prefix='a2p-'))
     conv = REPO / f'lab/compare/src/{t}/typed.py'
     if not conv.is_file():
         continue

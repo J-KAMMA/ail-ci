@@ -1,3 +1,16 @@
+## 2026-11-03 -- onelang s15 review fixes: warning-exact tests, the CPython checker and `--flags`
+
+Fixed the three review defects.  `test_ail_lang_gaps` now sets `AIL_BRACE_WARNING=0` for its
+brace-refusal subtests, so the compiler stderr still starts with the refusal position instead of
+the deprecation warning.  `tools/ail2py_cpython_check.py` restores the per-task temporary work
+directory that its `typed.py` run and output path need (the `NameError` is gone; `chain_relax`
+reports the same 32 cases / 21 mismatches as base).  `ail_chatgpt.py main` folds a separate
+`--flags VALUE` into `--flags=VALUE` before parsing, so
+`ail convert FILE --check --flags --strict` prints `identical` like the `tools/ail2py.py` wrapper;
+`test_ail_ail2py` covers the CLI form.  Probes: the three review commands above plus the wrapper,
+all pass; `test_ail_lang_gaps`, `test_ail_ail2py`, `test_ail_c_objects`, `test_ail_build_reports`,
+`test_ail_onelang_twins`, `test_ail_bce`, and the required safety/file/corpus modules pass.
+
 ## 2026-11-03 -- onelang s15 finish: `ail convert`, the brace warning, and the lab migrations
 
 Finished onelang s15 from `job-onelangs15-11032314` (worker and fix commits applied, report

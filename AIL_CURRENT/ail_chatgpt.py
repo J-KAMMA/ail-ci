@@ -6042,6 +6042,12 @@ def _compile_freestanding(args, parser, native_build):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    for index in range(len(argv) - 1):
+        if argv[index] == '--flags':
+            argv[index] = '--flags=' + argv[index + 1]
+            del argv[index + 1]
+            break
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     check_cmd = sub.add_parser('check', help='strict source/type check without a C build; exit 0 passed, 1 source error, 2 configuration/I/O/dependency')

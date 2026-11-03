@@ -406,6 +406,14 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(cli_output.read_text(encoding='utf-8'), output.read_text(encoding='utf-8'))
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+    def test_cli_convert_check_accepts_a_separate_flags_value(self):
+        source, _, _ = self.convert('cli-flags', PROGRAMS['void_function'])
+        checked = run([sys.executable, '-B', CLI, 'convert', str(source), '--check',
+                       '--flags', '--strict'])
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        self.assertEqual(checked.stdout.strip(), b'identical')
+
+    @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_brace_warning_is_printed_once_and_can_be_silenced(self):
         source = Path(self.tmp) / 'warn.ail'
         source.write_text(WARN_PROGRAM, encoding='utf-8')

@@ -20,6 +20,7 @@
 * sorting empty lists never calls qsort(NULL, 0, ...); every program here also runs clean under
   ASan+UBSan.
 """
+import os
 import re
 import shutil
 import subprocess
@@ -696,7 +697,8 @@ class LangGapTests(unittest.TestCase):
                 Path(tmp, "prog.ail").write_text(source + "\n", encoding="utf-8")
                 proc = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile",
                                        "prog.ail", "-o", "prog"], cwd=tmp, capture_output=True,
-                                      text=True, timeout=300)
+                                      text=True, timeout=300,
+                                      env=dict(os.environ, AIL_BRACE_WARNING="0"))
                 self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
                 self.assertTrue(proc.stderr.startswith(where), proc.stderr)
                 self.assertIn(hint, proc.stderr)
