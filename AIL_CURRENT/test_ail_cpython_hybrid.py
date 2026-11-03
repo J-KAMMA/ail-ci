@@ -1,7 +1,6 @@
-"""`ail build --cpython`: typed functions in a CPython extension, everything else in CPython.
-
-The hybrid is explicit (the flag is new; the standalone build is untouched).  For a program whose
-functions are typed-compilable, the generated extension is loaded and the Python module output must
+"""`ail build --hybrid`: typed functions in a CPython extension, everything else in CPython.
+`--cpython` is kept as an alias for the prototype.  The hybrid is explicit (the standalone build
+is untouched).  For a program whose functions are typed-compilable, the generated extension is loaded and the Python module output must
 equal CPython byte for byte, including the cases that must abandon the native call: an int outside
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
 (default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
@@ -108,7 +107,7 @@ class CPythonHybrid(unittest.TestCase):
         src.write_text(text, encoding='utf-8')
         out = Path(tmp) / 'out'
         env = dict(os.environ, AIL_NO_CACHE='1')
-        built = run([sys.executable, '-B', CLI, 'build', '--cpython', str(src), '-o', str(out)], tmp)
+        built = run([sys.executable, '-B', CLI, 'build', '--hybrid', str(src), '-o', str(out)], tmp)
         self.assertEqual(built.returncode, 0, built.stderr[-3000:])
         report = json.loads((out / 'build.json').read_text(encoding='utf-8'))
         return src, out, report
@@ -129,6 +128,7 @@ class CPythonHybrid(unittest.TestCase):
             self.assertEqual(got.returncode, want.returncode)
             # the launcher needs a CPython at run time, and the original is kept beside the hybrid copy
             self.assertTrue((out / 'prog.orig.py').is_file())
+            self.assertTrue((out / 'prog_run.py').is_file())
             self.assertTrue((out / 'prog.py').is_file())
 
     def test_unanalysable_program_runs_in_cpython(self):

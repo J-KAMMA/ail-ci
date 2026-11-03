@@ -6176,9 +6176,10 @@ def main(argv=None):
     build = sub.add_parser('build'); build.add_argument('--project')
     build.add_argument('--out', '-o'); build.add_argument('--candidate-patch')
     build.add_argument('--mode', choices=['original','balanced','speed','memory'], default='original')
-    build.add_argument('--cpython', metavar='SOURCE',
+    build.add_argument('--hybrid', '--cpython', dest='hybrid', metavar='SOURCE',
                        help='build a CPython hybrid: typed functions become an extension module, everything else '
-                            'runs in CPython (explicit flag; the standalone build is unchanged)')
+                            'runs in CPython (explicit flag; the standalone build is unchanged); --cpython is an '
+                            'alias kept for the prototype')
     args = parser.parse_args(argv)
     if getattr(args, 'no_cache', False):
         os.environ['AIL_NO_CACHE'] = '1'
@@ -6616,20 +6617,21 @@ def main(argv=None):
                                                        line, text), file=sys.stderr)
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
                 'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
-    if args.command == 'build' and getattr(args, 'cpython', None):
-        if not args.out:
-            parser.error('build --cpython needs -o/--out DIRECTORY')
+    if args.command == 'build' and getattr(args, 'hybrid', None):
+        source = Path(args.hybrid)
+        output = Path(args.out) if args.out else source.parent / (source.stem + '_hybrid')
         import ail_cpython_hybrid
-        report = ail_cpython_hybrid.build(Path(args.cpython), Path(args.out))
+        report = ail_cpython_hybrid.build(source, output)
         if not getattr(args, 'json', False):
             print('built %s: %d function(s) accelerated%s' % (
-                args.out, len(report.get('accelerated') or []),
+                output, len(report.get('accelerated') or []),
                 '' if report.get('accelerated') else ' (the program runs in CPython)'))
+            print('run %s' % (output / report['run_file']))
         else:
             print(json.dumps(report, ensure_ascii=False))
         return 0
     if args.command == 'build' and (not args.project or not args.out):
-        parser.error('build needs --project PROJECT --out OUTPUT, or --cpython SOURCE -o DIRECTORY')
+        parser.error('build needs --project PROJECT --out OUTPUT, or --hybrid SOURCE [-o DIRECTORY]')
     project = ROOT/'example' if args.command == 'selftest' else Path(args.project).resolve()
     output = Path(args.out).resolve()
     command = [sys.executable,'-B',str(ROOT/'workflow/vibe/vibe.py'),'build',
