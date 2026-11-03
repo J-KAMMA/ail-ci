@@ -1,3 +1,34 @@
+## 2026-11-03 -- rel-rterr follow-up (job-relrterr2-11031503): verified the exception name and source line
+
+Cherry-picked the first run's work commit (`job relrterr: name uncaught runtime errors and report
+their source line`); implementation unchanged apart from regenerating the manifest.  Probes in
+`/tmp/probes` cover list/str index (positive, negative, empty), list pop through a list value and
+through an alias, dict key through a variable/argument/dict value, int and float division by zero
+through locals, a list item, an attribute and an argument, recursion, an explicit `raise`, and a
+caught `IndexError`; both builds print the CPython name (and the default build the `raised near
+file:line` line) with CPython's stdout and exit status.  The known `AIL_UNIFIED_FORCE=1` recursion
+segfault is unchanged and the test still skips that probe.
+
+Site strings: 5-38% of the emitted site literals repeat a `file:line` already present in the same
+program, but the C compiler already merges those identical constants (the built binaries contain
+no duplicate site strings), so a per-line emitter dedup would change no output or size.  A
+line-number table would save some `.rodata` but needs a second global store per statement and a
+different print path, so it was left out as neither simple nor free of instruction-count risk.
+
+Binary size growth on the ten `lab/compare` tasks is unchanged from the first run, measured here
+against `aa0ea8a` (before -> after bytes): berth_sim 64864 -> 73296, chain_relax 34888 -> 39224,
+echo_pack 35896 -> 40232, ledger_bin 61016 -> 69360, rail_transfer 64936 -> 81560, scar_life
+40432 -> 48632, tally_lang 74648 -> 95280, term_rank 74392 -> 82816, ticket_audit 104248 ->
+124880, tree_fold 86288 -> 102912.  Instruction counts could not be measured: `perf_event_open`
+is denied (`kernel.perf_event_paranoid=4`) and valgrind/callgrind is not installed.
+
+Gate modules, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, the two codegen
+pin modules and `test_ail_runtime_error_names` pass.  Message expectations updated by this change
+are in `test_ail_debug` (three crash-text assertions), `test_ail_debug_lines` (release/debug C
+comparison), `test_ail_exception_context` (assert traps now report their line),
+`test_ail_exception_values_core` (forwarded raise), and the pin hashes in
+`test_ail_numeric_bindings` and `test_ail_record_initializers`.
+
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
 Converted `language_examples/byte_search_core.ail` to Python syntax, so the quickstart's
