@@ -1,4 +1,5 @@
 """Refusals of constructs LLM-written programs guess say where and what to write instead."""
+import os
 import subprocess
 import sys
 import tempfile
@@ -22,7 +23,8 @@ class RefusalHints(unittest.TestCase):
                 Path(tmp, 'prog.ail').write_text(source + '\n', encoding='utf-8')
                 proc = subprocess.run([sys.executable, '-B', str(HERE / 'ail_chatgpt.py'), 'compile',
                                        'prog.ail', '-o', 'prog'], cwd=tmp, capture_output=True,
-                                      text=True, timeout=300)
+                                      text=True, timeout=300,
+                                      env=dict(os.environ, AIL_BRACE_WARNING='0'))
                 self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
                 self.assertTrue(proc.stderr.startswith(where), proc.stderr)
                 self.assertIn(hint, proc.stderr)

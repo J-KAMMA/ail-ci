@@ -84,7 +84,7 @@ def main():
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--out', default=str(HERE / 'verify.json'))
     args = parser.parse_args()
-    cases = [(path, None) for path in sorted(COMPARE.glob('*/main.ail'))]
+    cases = [(path, 'python') for path in sorted(COMPARE.glob('*/typed.py'))]
     if args.corpus:
         corpus = sorted(CORPUS.glob('*/*.py'))
         if args.limit:

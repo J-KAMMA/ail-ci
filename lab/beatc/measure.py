@@ -62,7 +62,7 @@ def build_ail(task, work):
     env.pop('AIL_STRICT', None); env.pop('PYTHONDONTWRITEBYTECODE', None)
     dbg = work / 'dbg'
     shutil.rmtree(dbg, ignore_errors=True)
-    cmd = [sys.executable, '-B', str(AIL), 'compile', str(COMPARE / 'src' / task / 'main.ail'), '-o', str(out),
+    cmd = [sys.executable, '-B', str(AIL), 'compile', str(COMPARE / 'src' / task / 'typed.py'), '--syntax', 'python', '-o', str(out),
            '--debug-dir', str(dbg)]
     t0 = time.perf_counter()
     p = subprocess.run(cmd, cwd=str(work), env=env, capture_output=True)

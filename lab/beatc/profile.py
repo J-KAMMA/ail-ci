@@ -89,8 +89,8 @@ def profile_task(task, runs, root):
     shutil.rmtree(dbg, ignore_errors=True)
     prog = work / 'prog-ail'
     env = dict(os.environ, AIL_CACHE=str(work / 'cache'), TMPDIR=str(work / 'tmp'), AIL_NO_CACHE='1')
-    p = subprocess.run([sys.executable, '-B', str(AIL), 'compile', str(COMPARE / 'src' / task / 'main.ail'),
-                        '-o', str(prog), '--debug-dir', str(dbg)], cwd=str(work), env=env, capture_output=True)
+    p = subprocess.run([sys.executable, '-B', str(AIL), 'compile', str(COMPARE / 'src' / task / 'typed.py'),
+                        '--syntax', 'python', '-o', str(prog), '--debug-dir', str(dbg)], cwd=str(work), env=env, capture_output=True)
     if p.returncode != 0:
         return dict(task=task, error='AIL build failed: ' + p.stderr.decode('utf8', 'replace')[-1000:])
     pg = work / 'prog-pg'

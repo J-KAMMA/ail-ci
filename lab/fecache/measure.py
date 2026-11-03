@@ -96,6 +96,8 @@ def build(source, out, work, tag, fe=False, server_dir=None, save_c=None, cc_cac
 
 
 def edit_body(text, number):
+    if text.find('def ') >= 0:
+        return text + '\nprint("fe-probe-%d")\n' % number
     marker = text.find('fn ')
     brace = text.find('{', marker) if marker >= 0 else -1
     if brace < 0:
@@ -109,10 +111,10 @@ def write_source(path, text):
 
 
 def step1_task(task, runs, root):
-    source_text = (TASKS_ROOT / task / 'main.ail').read_text(encoding='utf-8')
+    source_text = (TASKS_ROOT / task / 'typed.py').read_text(encoding='utf-8')
     work = root / ('step1-' + task)
     work.mkdir(parents=True)
-    source = work / 'main.ail'
+    source = work / 'main.py'
     result = {'task': task, 'runs': runs, 'cases': {}}
 
     write_source(source, source_text)
@@ -162,7 +164,7 @@ def step1_synthetic(runs, root):
 
 
 def step4_task(task, runs, root, cc_cache=False):
-    source_text = (TASKS_ROOT / task / 'main.ail').read_text(encoding='utf-8')
+    source_text = (TASKS_ROOT / task / 'typed.py').read_text(encoding='utf-8')
     result = {'task': task, 'runs': runs, 'cc_cache': cc_cache, 'server': {}}
     for server in (False, True):
         label = 'on' if server else 'off'
@@ -170,7 +172,7 @@ def step4_task(task, runs, root, cc_cache=False):
         for i in range(runs):
             work = root / ('step4-%s-%s-%d' % (task, label, i))
             work.mkdir(parents=True)
-            source = work / 'main.ail'
+            source = work / 'main.py'
             write_source(source, source_text)
             server_dir = work / 'server' if server else None
             rows['cold'].append(build(source, work / 'cold', work, 'cold',

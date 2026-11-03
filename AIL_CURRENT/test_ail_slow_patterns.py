@@ -148,6 +148,7 @@ class SlowPatternTests(unittest.TestCase):
 
     def test_check_and_compile_report_but_never_fail(self):
         with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, 'AIL_BRACE_WARNING': '0'}
             Path(directory, 'main.ail').write_text(BAD, encoding='utf-8')
             result = cli('check', 'main.ail', cwd=directory)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -155,7 +156,7 @@ class SlowPatternTests(unittest.TestCase):
             self.assertEqual(report['status'], 'passed')
             self.assertEqual(len(report['slow_patterns']), 3)
             self.assertTrue(report['slow_patterns'][0].startswith('main.ail:7: slow: `in seen` scans the list'))
-            build = cli('compile', 'main.ail', '-o', 'prog', cwd=directory)
+            build = cli('compile', 'main.ail', '-o', 'prog', cwd=directory, env=env)
             self.assertEqual(build.returncode, 0, build.stderr)
             self.assertEqual(build.stderr.splitlines(), report['slow_patterns'])
             run = subprocess.run([str(Path(directory, 'prog'))], input='50\n', capture_output=True,
@@ -164,7 +165,7 @@ class SlowPatternTests(unittest.TestCase):
             quiet = cli('check', 'main.ail', cwd=directory, env={**os.environ, 'AIL_NO_SLOW_HINTS': '1'})
             self.assertNotIn('slow_patterns', json.loads(quiet.stdout))
             Path(directory, 'good.ail').write_text(GOOD, encoding='utf-8')
-            clean = cli('compile', 'good.ail', '-o', 'good', cwd=directory)
+            clean = cli('compile', 'good.ail', '-o', 'good', cwd=directory, env=env)
             self.assertEqual((clean.returncode, clean.stderr), (0, ''))
 
     def test_llm_corpus_is_almost_silent(self):

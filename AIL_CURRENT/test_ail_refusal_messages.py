@@ -154,7 +154,7 @@ CASES = [
 def compile_case(directory, syntax, source):
     path = Path(directory, 'prog.ail')
     path.write_text(source, encoding='utf-8')
-    env = dict(os.environ, AIL_NO_GENERAL='1')
+    env = dict(os.environ, AIL_NO_GENERAL='1', AIL_BRACE_WARNING='0')
     return subprocess.run([sys.executable, '-B', str(HERE / 'ail_chatgpt.py'), 'compile', 'prog.ail',
                            '--syntax', syntax, '-o', 'prog'], cwd=directory, capture_output=True,
                           text=True, timeout=600, env=env)
