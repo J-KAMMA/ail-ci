@@ -14,7 +14,7 @@ from test_ail_callable_values import oracle_source
 
 
 def reference(source, *, cells=False):
-    source=oracle_source(source).replace(".message",".args[0]")
+    source=oracle_source(translate(source)).replace(".message",".args[0]")
     if cells:
         class Slots(ast.NodeTransformer):
             def visit_Assign(self,node):
@@ -48,9 +48,46 @@ def slot_extend(owner,field,source):
     return result.stdout.replace(b'\r\n',b'\n')
 
 
-WHOLE='from ail import write_stdout_bytes\nimport sys\n\ndef integers(n: int) -> list[int]:\n    print(\'i\', n)\n    return [n, n + 1]\n\ndef floating(n: int) -> list[float]:\n    print(\'f\', n)\n    return [float(n), float(n) + 0.5]\n\ndef strings(n: int) -> list[str]:\n    print(\'s\', n)\n    return [\'日本😀\' + str(n), \'end\']\n\ndef blobs(n: int) -> list[bytes]:\n    print(\'b\', n)\n    return [b\'\\x00\\xff\', bytes([n])]\n\ndef fail() -> list[int]:\n    scratch = [4, 5]\n    raise ValueError(\'source\')\n    return scratch\n\ndef main() -> int:\n    ints = [7]\n    floats = [7.5]\n    texts = [\'seed\']\n    binary: list[bytes] = [b\'x\']\n    ci: Callable[[int], list[int]] = integers\n    cf: Callable[[int], list[float]] = floating\n    cs: Callable[[int], list[str]] = strings\n    cb: Callable[[int], list[bytes]] = blobs\n    ints.extend(integers(1))\n    floats.extend(floating(1))\n    texts.extend(strings(1))\n    binary.extend(blobs(1))\n    ints.extend(ci(2))\n    floats.extend(cf(2))\n    texts.extend(cs(2))\n    binary.extend(cb(2))\n    ints.extend(integers(3) if True else integers(4))\n    floats.extend(floating(3) if False else floating(4))\n    texts.extend(strings(3) if True else strings(4))\n    binary.extend(blobs(3) if False else blobs(4))\n    ints.extend(ints[::-2])\n    floats.extend(floats[:2])\n    texts.extend(texts[::-2])\n    binary.extend(binary[:2])\n    ints.extend(ints)\n    floats.extend(floats)\n    texts.extend(texts)\n    binary.extend(binary)\n    try:\n        texts.extend(texts[::0])\n    except ValueError:\n        print(\'zero-step\')\n    ints.extend(ints[::-9223372036854775808])\n    floats.extend(floats[::-9223372036854775808])\n    texts.extend(texts[::-9223372036854775808])\n    binary.extend(binary[::-9223372036854775808])\n    try:\n        ints.extend(fail())\n    except ValueError as e:\n        print(e.message)\n    finally:\n        print(\'cleanup\')\n    try:\n        ints.extend([int(\'1\'), int(\'bad\')])\n    except ValueError:\n        print(\'partial\')\n    for i in ints:\n        print(i)\n    for f in floats:\n        print(f)\n    for s in texts:\n        print(s)\n    for b in binary:\n        write_stdout_bytes(b)\n        write_stdout_bytes(b\'|\')\n    print()\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+WHOLE='''fn integers(n:int)->list[int] {print("i",n);return [n,n+1];}
+fn floating(n:int)->list[float] {print("f",n);return [float(n),float(n)+0.5];}
+fn strings(n:int)->list[str] {print("s",n);return ["日本😀"+str(n),"end"] ;}
+fn blobs(n:int)->list[bytes] {print("b",n);return [b"\\x00\\xff",bytes([n])];}
+fn fail()->list[int] {let scratch=[4,5];raise ValueError("source");return scratch;}
+fn main()->int {
+ let ints=[7]; let floats=[7.5]; let texts=["seed"]; let binary:list[bytes]=[b"x"];
+ let ci:Callable[[int],list[int]]=integers; let cf:Callable[[int],list[float]]=floating;
+ let cs:Callable[[int],list[str]]=strings; let cb:Callable[[int],list[bytes]]=blobs;
+ ints.extend(integers(1)); floats.extend(floating(1));texts.extend(strings(1));binary.extend(blobs(1));
+ ints.extend(ci(2));floats.extend(cf(2));texts.extend(cs(2));binary.extend(cb(2));
+ ints.extend(integers(3) if true else integers(4));floats.extend(floating(3) if false else floating(4));
+ texts.extend(strings(3) if true else strings(4));binary.extend(blobs(3) if false else blobs(4));
+ ints.extend(ints[::-2]);floats.extend(floats[:2]);texts.extend(texts[::-2]);binary.extend(binary[:2]);
+ ints.extend(ints);floats.extend(floats);texts.extend(texts);binary.extend(binary);
+ try {texts.extend(texts[::0]);} except ValueError {print("zero-step");}
+ ints.extend(ints[::-9223372036854775808]);floats.extend(floats[::-9223372036854775808]);
+ texts.extend(texts[::-9223372036854775808]);binary.extend(binary[::-9223372036854775808]);
+ try {ints.extend(fail());} except ValueError as e {print(e.message);} finally {print("cleanup");}
+ try {ints.extend([int("1"),int("bad")]);} except ValueError {print("partial");}
+ for i in ints {print(i);} for f in floats {print(f);} for s in texts {print(s);}
+ for b in binary {write_stdout_bytes(b);write_stdout_bytes(b"|");} print();
+ return 0;
+}'''
 
-FIELDS='from ail import write_stdout_bytes\nimport sys\n\nclass Box:\n\n    def __init__(self, ints: list[int], floats: list[float], binary: list[bytes], strings: list[str]):\n        self.ints = ints\n        self.floats = floats\n        self.binary = binary\n        self.strings = strings\n\ndef owner(box: Box) -> Box:\n    print(\'receiver\')\n    return box\n\ndef changed_i(box: Box) -> list[int]:\n    print(\'source\')\n    box.ints = [20, 21]\n    return box.ints\n\ndef changed_f(box: Box) -> list[float]:\n    print(\'source-f\')\n    for index in range(17):\n        box.floats.append(float(index) + 0.5)\n    return box.floats\n\ndef changed_b(box: Box) -> list[bytes]:\n    print(\'source-b\')\n    box.binary = [b\'new\']\n    return [b\'tail\']\n\ndef main() -> int:\n    box = Box([1], [1.5], [b\'old\'], [\'snapshot\'])\n    owner(box).ints.extend(changed_i(box))\n    owner(box).floats.extend(changed_f(box))\n    old = box.binary\n    owner(box).binary.extend(changed_b(box))\n    text: list[str] = box.strings\n    text.extend([\'local\'])\n    for i in box.ints:\n        print(i)\n    for f in box.floats:\n        print(f)\n    for b in old:\n        write_stdout_bytes(b)\n        write_stdout_bytes(b\'|\')\n    print()\n    for b in box.binary:\n        write_stdout_bytes(b)\n        write_stdout_bytes(b\'|\')\n    print()\n    for s in box.strings:\n        print(s)\n    for s in text:\n        print(s)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+FIELDS='''struct Box {ints:list[int];floats:list[float];binary:list[bytes];strings:list[str];}
+fn owner(box:Box)->Box {print("receiver");return box;}
+fn changed_i(box:Box)->list[int] {print("source");box.ints=[20,21];return box.ints;}
+fn changed_f(box:Box)->list[float] {print("source-f");for index in range(17) {box.floats.append(float(index)+0.5);}return box.floats;}
+fn changed_b(box:Box)->list[bytes] {print("source-b");box.binary=[b"new"];return [b"tail"] ;}
+fn main()->int {
+ let box=Box([1],[1.5],[b"old"],["snapshot"]);
+ owner(box).ints.extend(changed_i(box));owner(box).floats.extend(changed_f(box));
+ let old=box.binary;owner(box).binary.extend(changed_b(box));
+ let text:list[str]=box.strings;text.extend(["local"]);
+ for i in box.ints {print(i);} for f in box.floats {print(f);}
+ for b in old {write_stdout_bytes(b);write_stdout_bytes(b"|");}print();
+ for b in box.binary {write_stdout_bytes(b);write_stdout_bytes(b"|");}print();
+ for s in box.strings {print(s);} for s in text {print(s);}return 0;
+}'''
 
 
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),'installed C compiler required')
@@ -75,8 +112,27 @@ class ListExpressionExtendTests(unittest.TestCase):
         self.assert_run(FIELDS,cells=True)
 
     def test_source_free_owned_callback_returns_for_four_list_types(self):
-        provider=self.ail_build('provider',"def ints() -> list[int]:\n    return [1, 2]\n\ndef floats() -> list[float]:\n    return [1.5, 2.5]\n\ndef texts() -> list[str]:\n    return ['日本😀', 'text']\n\ndef binary() -> list[bytes]:\n    return [b'\\x00\\xff', b'b']\n\ndef ci() -> Callable[[], list[int]]:\n    return ints\n\ndef cf() -> Callable[[], list[float]]:\n    return floats\n\ndef cs() -> Callable[[], list[str]]:\n    return texts\n\ndef cb() -> Callable[[], list[bytes]]:\n    return binary\n\ndef keep_text(values: list[str]) -> list[str]:\n    return values\n\ndef keep_binary(values: list[bytes]) -> list[bytes]:\n    return values\n\ndef cts() -> Callable[[list[str]], list[str]]:\n    return keep_text\n\ndef cbs() -> Callable[[list[bytes]], list[bytes]]:\n    return keep_binary\n",library=True)
-        consumer='from ail import write_stdout_bytes\nimport sys\n\ndef main() -> int:\n    i: list[int] = []\n    f: list[float] = []\n    s: list[str] = []\n    b: list[bytes] = []\n    fi = ci()\n    ff = cf()\n    fs = cs()\n    fb = cb()\n    i.extend(fi())\n    f.extend(ff())\n    s.extend(fs())\n    b.extend(fb())\n    ts = cts()\n    bs = cbs()\n    s.extend(ts(s))\n    b.extend(bs(b))\n    saved_s = ts(s)\n    saved_b = bs(b)\n    s.clear()\n    s = [\'replacement\']\n    b = [b\'replacement\']\n    s.extend(saved_s)\n    b.extend(saved_b)\n    for xi in i:\n        print(xi)\n    for xf in f:\n        print(xf)\n    for xs in s:\n        print(xs)\n    for xb in b:\n        write_stdout_bytes(xb)\n        write_stdout_bytes(b\'|\')\n    print()\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        provider=self.ail_build('provider','''fn ints()->list[int] {return [1,2];}
+fn floats()->list[float] {return [1.5,2.5];}
+fn texts()->list[str] {return ["日本😀","text"];}
+fn binary()->list[bytes] {return [b"\\x00\\xff",b"b"];}
+fn ci()->Callable[[],list[int]] {return ints;}
+fn cf()->Callable[[],list[float]] {return floats;}
+fn cs()->Callable[[],list[str]] {return texts;}
+fn cb()->Callable[[],list[bytes]] {return binary;}
+fn keep_text(values:list[str])->list[str] {return values;}
+fn keep_binary(values:list[bytes])->list[bytes] {return values;}
+fn cts()->Callable[[list[str]],list[str]] {return keep_text;}
+fn cbs()->Callable[[list[bytes]],list[bytes]] {return keep_binary;}''',library=True)
+        consumer='''fn main()->int {
+ let i:list[int]=[];let f:list[float]=[];let s:list[str]=[];let b:list[bytes]=[];
+ let fi=ci();let ff=cf();let fs=cs();let fb=cb();
+ i.extend(fi());f.extend(ff());s.extend(fs());b.extend(fb());
+ let ts=cts();let bs=cbs();s.extend(ts(s));b.extend(bs(b));
+ let saved_s=ts(s);let saved_b=bs(b);s.clear();s=["replacement"];b=[b"replacement"];
+ s.extend(saved_s);b.extend(saved_b);
+ for xi in i {print(xi);}for xf in f {print(xf);}for xs in s {print(xs);}for xb in b {write_stdout_bytes(xb);write_stdout_bytes(b"|");}print();return 0;
+}'''
         binary=self.ail_build('consumer',consumer,provider)
         result=subprocess.run([str(binary)],capture_output=True,timeout=30)
         self.assertEqual((result.returncode,result.stdout.replace(b'\r\n',b'\n'),result.stderr),(0,'1\n2\n1.5\n2.5\nreplacement\n日本😀\ntext\n日本😀\ntext\n'.encode()+b'replacement|\x00\xff|b|\x00\xff|b|\n',b''))
@@ -140,10 +196,10 @@ class ListExpressionExtendTypeTests(unittest.TestCase):
     check=checks.SourceCheckTests.check
 
     def test_readonly_parameters_snapshot_fields_and_wrong_widths_stay_refused(self):
-        cases=('import sys\n\ndef bad(values: list[float]) -> int:\n    values.extend([1.5])\n    return 0\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-               'import sys\n\ndef bad(values: list[str]) -> int:\n    values.extend([\'a\'])\n    return 0\n\ndef main() -> int:\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-               'import sys\n\ndef main() -> int:\n    values: list[int] = []\n    values.extend([1.5])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-               'import sys\n\ndef main() -> int:\n    values: list[float] = []\n    values.extend([1])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
+        cases=('fn bad(values:list[float])->int {values.extend([1.5]);return 0;} fn main()->int {return 0;}',
+               'fn bad(values:list[str])->int {values.extend(["a"]);return 0;} fn main()->int {return 0;}',
+               'fn main()->int {let values:list[int]=[];values.extend([1.5]);return 0;}',
+               'fn main()->int {let values:list[float]=[];values.extend([1]);return 0;}')
         for text in cases:
             with self.subTest(text=text):
                 status,report=self.check(self.source(text))

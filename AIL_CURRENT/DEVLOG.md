@@ -1,3 +1,27 @@
+## 2026-11-03 -- onelang s9 batch 4: embedded brace sources in test modules (job-onelangs9-11031344 / job-onelangs9b-11032051)
+
+Finished the interrupted batch-4 conversion.  Applied the existing worker commit and checked every
+one of the 33 Appendix C modules with `tools/par_check.py -j 2`.  Fifteen modules keep their
+converted Python literals; the other eighteen were restored to their brace sources after the
+converted program differed from the test's oracle or the compiler refused the Python shape.  The
+restored groups are: constructor/map/list move and alias semantics (`ctor_move`,
+`map_field_moves`, `map_fields`, `list_expression_extend`, `range_checks`, `swap_rebinding`,
+`bytes_list_fields`); forward class annotations that CPython evaluates to `NameError`
+(`field_views`, `instruction_gap`, `optional_structs`); Python class modules that
+`compile-module` refuses (`exception_aggregate_objects`, `method_object_contracts`,
+`grid_calls`); tests whose `oracle()`/`context()`/`generate()` helper calls `translate()` on the
+source (`api_contracts`, `bytearray_decimal`, `record_initializers`); dynamic brace text built
+by concatenation (`api_profiles`, `list_ops`, `heapq_bisect` refusals); and a source that imports
+the still-brace module `utf8_stream` (`csv_group_scan`).  `test_ail_parallel_for` keeps its
+converted refusal cases but its link-unit and alias programs stay brace.
+
+Measured with `grep -c "fn main("` on the 33 modules: 144 before, 113 now.  Every remaining source
+is listed, one line per `fn main(`, in `AIL_CURRENT/onelang_brace_only.txt` (113 entries) with a
+`pin` or `meaning` tag and the reason.  No expected output was edited.  All 33 modules pass, as do
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`; `tools/update_manifest.py
+--check` exits 0.  The codegen-pin module (`record_initializers`) was restored to brace, so no pin
+changed.
+
 ## 2026-11-02 -- prog29 review 2: typed set/dict sources join the mutation guard (job-prog29-11022055)
 
 Fixed the remaining defect in the set-comprehension guard.  `_setcomp_source_can_change` matched

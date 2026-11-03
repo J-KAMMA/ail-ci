@@ -128,9 +128,46 @@ REFUSED = {
 }
 
 
-ALIAS = 'from ail import par_range\nimport sys\n\ndef main() -> int:\n    a = bytearray(100)\n    b = a\n    for i in par_range(0, 100):\n        a[i] = i\n        t = b[i]\n    print(a[5])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+ALIAS = """
+fn main() {
+    let a = bytearray(100);
+    let b = a;
+    parallel for i in range(0, 100) {
+        a[i] = i;
+        let t = b[i];
+    }
+    print(a[5]);
+}
+"""
 
-UNITS = 'from ail import par_range\nimport sys\n\ndef cell(i: int, j: int) -> float:\n    return 1.0 / float(i + j + 1)\n\ndef rows(v: list[float], n: int) -> list[float]:\n    r = [0.0] * n\n    for i in par_range(0, n):\n        s = 0.0\n        for j in range(0, n):\n            s += cell(i, j) * v[j]\n        r[i] = s\n    return r\n\ndef cols(v: list[float], n: int) -> list[float]:\n    r = [0.0] * n\n    for i in par_range(0, n):\n        s = 0.0\n        for j in range(0, n):\n            s += cell(j, i) * v[j]\n        r[i] = s\n    return r\n\ndef main() -> int:\n    n = 300\n    v: list[float] = []\n    for i in range(0, n):\n        v.append(1.0 + float(i % 4))\n    w = cols(rows(v, n), n)\n    print(w[0], w[n - 1])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+UNITS = """
+fn cell(i: int, j: int) -> float { return 1.0 / float(i + j + 1); }
+fn rows(v: list[float], n: int) -> list[float] {
+    let r = [0.0] * n;
+    parallel for i in range(0, n) {
+        let s = 0.0;
+        for j in range(0, n) { s += cell(i, j) * v[j]; }
+        r[i] = s;
+    }
+    return r;
+}
+fn cols(v: list[float], n: int) -> list[float] {
+    let r = [0.0] * n;
+    parallel for i in range(0, n) {
+        let s = 0.0;
+        for j in range(0, n) { s += cell(j, i) * v[j]; }
+        r[i] = s;
+    }
+    return r;
+}
+fn main() {
+    let n = 300;
+    let v: list[float] = [];
+    for i in range(0, n) { v.append(1.0 + float(i % 4)); }
+    let w = cols(rows(v, n), n);
+    print(w[0], w[n - 1]);
+}
+"""
 
 
 def build(directory, name, source):
@@ -205,7 +242,7 @@ class ParallelForTests(unittest.TestCase):
             from ail_syntax import translate
             with tempfile.TemporaryDirectory() as directory:
                 exe = Path(directory, "units")
-                pyc.build_link_units(UNITS, exe, {"rows": 1, "cols": 2, "cell": 0})
+                pyc.build_link_units(translate(UNITS), exe, {"rows": 1, "cols": 2, "cell": 0})
                 built, whole, _ = build(directory, "whole", UNITS)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 expected = run(whole, 1)

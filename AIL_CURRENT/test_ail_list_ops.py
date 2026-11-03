@@ -84,7 +84,7 @@ def ail_source(kind, field):
     t = kind.annotation
     target = 'box.items' if field else 'xs'
     seeds = ', '.join(kind.seed_source(s) for s in kind.seed)
-    setup = 'class P:\n\n    def __init__(self, v: int):\n        self.v = v\n' if kind.name == 'struct' else ''
+    setup = 'struct P { v: int; }\n' if kind.name == 'struct' else ''
     if field:
         setup += 'struct Box { items: list[%s]; }\n' % t
     declare = 'let box = Box([]);' if field else 'let xs: list[%s] = [];' % t
@@ -218,7 +218,22 @@ def reference(kind, script):
 
 TEXT_PIECES = ['a', 'b', 'é', 'ß', '日', '本', '😀', 'x', 'z', '́', 'Ω', '1']
 
-TEXT_SOURCE = 'from ail import read_bytes\nimport sys\n\ndef main() -> int:\n    text = read_bytes(sys.argv[1]).decode()\n    for line in text.splitlines():\n        p = line.split(\' \')\n        s = p[0]\n        b = s.encode()\n        lo = int(p[1])\n        hi = int(p[2])\n        st = int(p[3])\n        try:\n            a1 = s[lo:hi:st]\n            a2 = s[lo::st]\n            a3 = s[:hi:st]\n            a4 = s[::st]\n            b1 = b[lo:hi:st]\n            b2 = b[lo::st]\n            b3 = b[:hi:st]\n            b4 = b[::st]\n            print(a1 + \'|\' + a2 + \'|\' + a3 + \'|\' + a4 + \'|\' + str(len(a4)) + \'|\' + b1.hex() + \'|\' + b2.hex() + \'|\' + b3.hex() + \'|\' + b4.hex() + \'|\' + s[::-1] + \'|\' + b[::-1].hex())\n        except ValueError:\n            print(\'VE\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+TEXT_SOURCE = r'''fn main() -> int {
+    let text = read_bytes(sys.argv[1]).decode();
+    for line in text.splitlines() {
+        let p = line.split(" ");
+        let s = p[0];
+        let b = s.encode();
+        let lo = int(p[1]); let hi = int(p[2]); let st = int(p[3]);
+        try {
+            let a1 = s[lo:hi:st]; let a2 = s[lo::st]; let a3 = s[:hi:st]; let a4 = s[::st];
+            let b1 = b[lo:hi:st]; let b2 = b[lo::st]; let b3 = b[:hi:st]; let b4 = b[::st];
+            print(a1 + "|" + a2 + "|" + a3 + "|" + a4 + "|" + str(len(a4)) + "|" + b1.hex() + "|" + b2.hex()
+                  + "|" + b3.hex() + "|" + b4.hex() + "|" + s[::-1] + "|" + b[::-1].hex());
+        } except ValueError { print("VE"); }
+    }
+    return 0;
+}'''
 
 
 def text_reference(lines):
@@ -306,7 +321,33 @@ class ListOpsTests(unittest.TestCase):
         self.assertEqual(self.run_program(program, '\n'.join(lines) + '\n'), text_reference(lines))
 
     def test_operations_in_expression_positions(self):
-        source = 'import sys\n\ndef cat(a: list[int], b: list[int]) -> list[int]:\n    return a + b\n\ndef rev(a: list[int]) -> list[int]:\n    return a[::-1]\n\ndef idx(a: list[int], v: int) -> int:\n    return a.index(v) + a.count(v)\n\ndef main() -> int:\n    xs = [1, 2, 3]\n    ys = cat(xs, rev(xs))\n    print(len(ys), ys[3], idx(ys, 3), len(cat(ys, ys)), sum(ys + ys))\n    total = 0\n    for x in xs + ys:\n        total += x\n    print(total, f\'{len(xs + ys)}|{xs.index(2)}\')\n    n = 0\n    zs = [3, 1, 2]\n    while zs.index(2) < 5 and n < 3:\n        n += 1\n        zs.insert(0, 9)\n    print(n, len(zs))\n    ws = [3, 1, 2]\n    m = 0\n    for i in range(3):\n        ws = ws + [i]\n        ws.insert(0, i)\n        m += ws.count(i)\n    print(m, len(ws), (xs + xs)[::-1][0], sorted(xs + [0])[0], max(xs[::-1]), len(xs[::2] + xs[1::2]))\n    words = \'a b c\'.split()\n    words.insert(0, \'z\')\n    print(words[0], words.index(\'c\'), len(words + words), len(words[::-1]), words[::-1][0])\n    e: list[int] = []\n    print(len(xs + e), len(e + xs), len(e + e))\n    ws.remove(ws[0])\n    print(len(ws))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = r'''fn cat(a: list[int], b: list[int]) -> list[int] { return a + b; }
+fn rev(a: list[int]) -> list[int] { return a[::-1]; }
+fn idx(a: list[int], v: int) -> int { return a.index(v) + a.count(v); }
+fn main() -> int {
+    let xs = [1, 2, 3];
+    let ys = cat(xs, rev(xs));
+    print(len(ys), ys[3], idx(ys, 3), len(cat(ys, ys)), sum(ys + ys));
+    let total = 0;
+    for x in xs + ys { total += x; }
+    print(total, f"{len(xs + ys)}|{xs.index(2)}");
+    let n = 0;
+    let zs = [3, 1, 2];
+    while zs.index(2) < 5 and n < 3 { n += 1; zs.insert(0, 9); }
+    print(n, len(zs));
+    let ws = [3, 1, 2];
+    let m = 0;
+    for i in range(3) { ws = ws + [i]; ws.insert(0, i); m += ws.count(i); }
+    print(m, len(ws), (xs + xs)[::-1][0], sorted(xs + [0])[0], max(xs[::-1]), len(xs[::2] + xs[1::2]));
+    let words = "a b c".split();
+    words.insert(0, "z");
+    print(words[0], words.index("c"), len(words + words), len(words[::-1]), words[::-1][0]);
+    let e: list[int] = [];
+    print(len(xs + e), len(e + xs), len(e + e));
+    ws.remove(ws[0]);
+    print(len(ws));
+    return 0;
+}'''
         program = build(self, 'positions', source)
         result = subprocess.run([str(program)], capture_output=True, timeout=60)
         xs = [1, 2, 3]
@@ -347,7 +388,15 @@ class AssertTests(unittest.TestCase):
         return subprocess.run([str(program), *args], capture_output=True, timeout=60)
 
     def test_passing_assert_is_silent_and_failure_exits_one(self):
-        source = 'import sys\n\ndef main() -> int:\n    x = 3\n    assert x == 3\n    assert x > 0, \'positive\'\n    print(\'before\')\n    assert x == 4, \'x is \' + str(x)\n    print(\'after\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = '''fn main() -> int {
+    let x = 3;
+    assert x == 3;
+    assert x > 0, "positive";
+    print("before");
+    assert x == 4, "x is " + str(x);
+    print("after");
+    return 0;
+}'''
         result = self.run_source('assert_fail', source)
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (1, b'before\n', b'AssertionError: x is 3\n'))
@@ -362,7 +411,19 @@ class AssertTests(unittest.TestCase):
                 self.assertEqual((result.returncode, result.stdout, result.stderr), (1, b'', message))
 
     def test_assert_is_catchable_as_assertion_error_only(self):
-        source = 'import sys\n\ndef check(n: int) -> int:\n    assert n >= 0, \'negative: \' + str(n)\n    return n\n\ndef main() -> int:\n    seen = 0\n    try:\n        check(-5)\n    except AssertionError as e:\n        print(e.kind, e.message)\n        seen += 1\n    try:\n        assert 1 == 2\n    except AssertionError as e:\n        print(e.kind, \'[\' + e.message + \']\')\n        seen += 1\n    try:\n        try:\n            check(-1)\n        except ValueError:\n            print(\'wrong handler\')\n    except (KeyError, AssertionError) as e:\n        print(\'outer\', e.message)\n        seen += 1\n    try:\n        raise AssertionError(\'raised\')\n    except AssertionError as e:\n        print(e.message)\n        seen += 1\n    try:\n        assert True, \'never evaluated \' + str([1][3])\n    except IndexError:\n        print(\'evaluated\')\n    print(check(7), seen)\n    assert seen == 99, \'seen was \' + str(seen)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = '''fn check(n: int) -> int { assert n >= 0, "negative: " + str(n); return n; }
+fn main() -> int {
+    let seen = 0;
+    try { check(-5); } except AssertionError as e { print(e.kind, e.message); seen += 1; }
+    try { assert 1 == 2; } except AssertionError as e { print(e.kind, "[" + e.message + "]"); seen += 1; }
+    try { try { check(-1); } except ValueError { print("wrong handler"); } }
+    except (KeyError, AssertionError) as e { print("outer", e.message); seen += 1; }
+    try { raise AssertionError("raised"); } except AssertionError as e { print(e.message); seen += 1; }
+    try { assert true, "never evaluated " + str([1][3]); } except IndexError { print("evaluated"); }
+    print(check(7), seen);
+    assert seen == 99, "seen was " + str(seen);
+    return 0;
+}'''
         result = self.run_source('assert_catch', source)
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (1, b'AssertionError negative: -5\nAssertionError []\nouter negative: -1\nraised\n7 4\n',

@@ -24,7 +24,103 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = 'import sys\n\nclass Rd:\n\n    def __init__(self, data: bytes, pos: int):\n        self.data = data\n        self.pos = pos\n\n    def next(self) -> int:\n        d = self.data\n        p = self.pos\n        n = len(d)\n        while p < n and (d[p] < 48 or d[p] > 57):\n            p += 1\n        v = 0\n        while p < n and d[p] >= 48 and (d[p] <= 57):\n            v = v * 10 + (d[p] - 48)\n            p += 1\n        self.pos = p\n        return v\n\n    def head(self) -> bytes:\n        return self.data[0:3]\n\nclass Box:\n\n    def __init__(self, data: bytes, tag: str):\n        self.data = data\n        self.tag = tag\n\n    def replaced_by_call(self) -> bytes:\n        d = self.data\n        swap_in(self, b\'zzzz\')\n        return d + self.data\n\n    def replaced_here(self) -> bytes:\n        d = self.data\n        self.data = b\'yy\'\n        return d + self.data\n\n    def replaced_alias(self, other: Box) -> bytes:\n        d = self.data\n        other.data = b\'ww\'\n        return d + self.data\n\n    def whole(self) -> bytes:\n        return self.data\n\ndef swap_in(b: Box, x: bytes) -> None:\n    b.data = x\n\ndef via_callback(b: Box, cb: Callable[[Box], int]) -> bytes:\n    d = b.data\n    cb(b)\n    return d + b.data\n\ndef clobber(b: Box) -> int:\n    b.data = b\'cb\'\n    return 0\n\nclass Rt:\n\n    def __init__(self, stack: list[int], sp: int, names: list[str]):\n        self.stack = stack\n        self.sp = sp\n        self.names = names\n\ndef top(r: Rt) -> int:\n    return r.stack[r.sp - 1]\n\ndef below(r: Rt) -> int:\n    return r.stack[r.sp - 2] * 10 + r.stack[-r.sp]\n\ndef name_at(r: Rt, i: int) -> str:\n    return r.names[i]\n\ndef keep_then_change(r: Rt) -> str:\n    k = r.names[r.sp - 1]\n    r.names[r.sp - 1] = \'changed\'\n    j = r.names[0]\n    r.names.clear()\n    return k + \'/\' + j + \'/\' + str(len(r.names))\n\ndef main() -> int:\n    rd = Rd(b\'12 x345,6 789\', 0)\n    total = 0\n    for i in range(4):\n        total = total * 1000 + rd.next()\n    print(total, rd.pos, rd.head().decode())\n    b = Box(b\'abc\', \'t\')\n    print(b.replaced_by_call().decode())\n    b = Box(b\'abc\', \'t\')\n    print(b.replaced_here().decode())\n    b = Box(b\'abc\', \'t\')\n    print(b.replaced_alias(b).decode())\n    b = Box(b\'abc\', \'t\')\n    print(via_callback(b, clobber).decode())\n    w = b.whole()\n    b.data = b\'new\'\n    print(w.decode(), b.whole().decode())\n    r = Rt([4, 5, 6], 3, [\'a\', \'\', \'ccc\'])\n    print(top(r), below(r), name_at(r, 2), len(name_at(r, -2)))\n    r.sp = 1\n    print(top(r), name_at(r, 0))\n    try:\n        r.sp = 5\n        print(top(r))\n    except IndexError:\n        print(\'index error\')\n    r.sp = 3\n    names: list[str] = []\n    for i in range(300):\n        r.names.append(\'k\' + str(i))\n        if i % 7 == 0:\n            r.names.append(\'\')\n        if i % 50 == 0:\n            r.names.append(r.names[0] + r.names[i])\n        if i % 97 == 0:\n            r.names.append(\'é中\' + str(i))\n        if i == 150:\n            r.names[3] = \'three\'\n            r.names.sort()\n        if i == 200:\n            r.names.pop()\n            r.names.reverse()\n    joined = \'\'\n    for i in range(len(r.names)):\n        joined = joined + name_at(r, i) + \',\'\n    print(len(r.names), len(joined), joined[0:60], joined[len(joined) - 60:len(joined)])\n    r.sp = 2\n    print(keep_then_change(r))\n    for i in range(5):\n        r.names.append(str(i * i))\n    print(name_at(r, 4), len(r.names))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+SOURCE = """
+struct Rd { data: bytes; pos: int; }
+impl Rd {
+    fn next(self) -> int {
+        let d = self.data;
+        let p = self.pos;
+        let n = len(d);
+        while p < n and (d[p] < 48 or d[p] > 57) { p += 1; }
+        let v = 0;
+        while p < n and d[p] >= 48 and d[p] <= 57 { v = v * 10 + (d[p] - 48); p += 1; }
+        self.pos = p;
+        return v;
+    }
+    fn head(self) -> bytes { return self.data[0:3]; }
+}
+
+struct Box { data: bytes; tag: str; }
+fn swap_in(b: Box, x: bytes) -> void { b.data = x; }
+impl Box {
+    fn replaced_by_call(self) -> bytes {
+        let d = self.data;
+        swap_in(self, b"zzzz");
+        return d + self.data;
+    }
+    fn replaced_here(self) -> bytes {
+        let d = self.data;
+        self.data = b"yy";
+        return d + self.data;
+    }
+    fn replaced_alias(self, other: Box) -> bytes {
+        let d = self.data;
+        other.data = b"ww";
+        return d + self.data;
+    }
+    fn whole(self) -> bytes { return self.data; }
+}
+fn via_callback(b: Box, cb: Callable[[Box], int]) -> bytes {
+    let d = b.data;
+    cb(b);
+    return d + b.data;
+}
+fn clobber(b: Box) -> int { b.data = b"cb"; return 0; }
+
+struct Rt { stack: list[int]; sp: int; names: list[str]; }
+fn top(r: Rt) -> int { return r.stack[r.sp - 1]; }
+fn below(r: Rt) -> int { return r.stack[r.sp - 2] * 10 + r.stack[-r.sp]; }
+fn name_at(r: Rt, i: int) -> str { return r.names[i]; }
+fn keep_then_change(r: Rt) -> str {
+    let k = r.names[r.sp - 1];
+    r.names[r.sp - 1] = "changed";
+    let j = r.names[0];
+    r.names.clear();
+    return k + "/" + j + "/" + str(len(r.names));
+}
+
+fn main() {
+    let rd = Rd(b"12 x345,6 789", 0);
+    let total = 0;
+    for i in range(4) { total = total * 1000 + rd.next(); }
+    print(total, rd.pos, rd.head().decode());
+
+    let b = Box(b"abc", "t");
+    print(b.replaced_by_call().decode());
+    b = Box(b"abc", "t");
+    print(b.replaced_here().decode());
+    b = Box(b"abc", "t");
+    print(b.replaced_alias(b).decode());
+    b = Box(b"abc", "t");
+    print(via_callback(b, clobber).decode());
+    let w = b.whole();
+    b.data = b"new";
+    print(w.decode(), b.whole().decode());
+
+    let r = Rt([4, 5, 6], 3, ["a", "", "ccc"]);
+    print(top(r), below(r), name_at(r, 2), len(name_at(r, -2)));
+    r.sp = 1;
+    print(top(r), name_at(r, 0));
+    try { r.sp = 5; print(top(r)); } except IndexError { print("index error"); }
+    r.sp = 3;
+    let names: list[str] = [];
+    for i in range(300) {
+        r.names.append("k" + str(i));
+        if i % 7 == 0 { r.names.append(""); }
+        if i % 50 == 0 { r.names.append(r.names[0] + r.names[i]); }
+        if i % 97 == 0 { r.names.append("é中" + str(i)); }
+        if i == 150 { r.names[3] = "three"; r.names.sort(); }
+        if i == 200 { r.names.pop(); r.names.reverse(); }
+    }
+    let joined = "";
+    for i in range(len(r.names)) { joined = joined + name_at(r, i) + ","; }
+    print(len(r.names), len(joined), joined[0:60], joined[len(joined) - 60:len(joined)]);
+    r.sp = 2;
+    print(keep_then_change(r));
+    for i in range(5) { r.names.append(str(i * i)); }
+    print(name_at(r, 4), len(r.names));
+}
+"""
 
 PYTHON = """
 class Rd:

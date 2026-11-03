@@ -15,7 +15,7 @@ class ApiProfileTypeTests(unittest.TestCase):
         for expression,kind in cases:
             for body in ('let result:'+kind+'='+expression+';return 0;',expression+';return 0;'):
                 with self.subTest(expression=expression,body=body),self.assertRaises(Unsupported):
-                    to_c('fn main()->int {'+body+'}',strict=True)
+                    to_c(translate('fn main()->int {'+body+'}'),strict=True)
 
     def test_context_catalog_separates_syntax_only_from_callable_shapes(self):
         payload=api.query();entries={e['symbol']:e for e in payload['entries']}

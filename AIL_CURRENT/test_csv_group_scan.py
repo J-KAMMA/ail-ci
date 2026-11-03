@@ -12,7 +12,68 @@ from test_ail_map_fields import build
 
 MODULES = ['utf8_stream', 'csv_stream', 'csv_group', 'checked_integer', 'json_text', 'csv_group_scan']
 
-SOURCE = 'from utf8_stream import *\nfrom csv_stream import *\nfrom csv_group import *\nfrom csv_group_scan import *\nfrom ail import file_chunks, read_bytes\nimport sys\n\ndef old_group(path: str, key_column: int, value_column: int, size: int) -> str:\n    if size <= 0 or key_column < 0 or value_column < 0:\n        raise ValueError\n    utf8 = utf8_decoder_new()\n    csv = csv_decoder_new()\n    groups = csv_groups_new()\n    for chunk in file_chunks(path, size):\n        rows = csv_decode_feed(csv, utf8_decode_feed(utf8, chunk))\n        csv_groups_add(groups, rows, key_column, value_column)\n    tail = csv_decode_feed(csv, utf8_decode_finish(utf8))\n    csv_groups_add(groups, tail, key_column, value_column)\n    final = csv_decode_finish(csv)\n    csv_groups_add(groups, final, key_column, value_column)\n    return csv_groups_render(groups)\n\ndef run_old(path: str, kc: int, vc: int, size: int) -> str:\n    try:\n        return old_group(path, kc, vc, size)\n    except ValueError:\n        return \'!ValueError\'\n    except UnicodeDecodeError:\n        return \'!UnicodeDecodeError\'\n    except OSError:\n        return \'!OSError\'\n\ndef run_new(path: str, kc: int, vc: int, size: int) -> str:\n    try:\n        return csv_table_group_scan(path, kc, vc, size)\n    except ValueError:\n        return \'!ValueError\'\n    except UnicodeDecodeError:\n        return \'!UnicodeDecodeError\'\n    except OSError:\n        return \'!OSError\'\n\ndef main() -> int:\n    manifest: str = read_bytes(sys.argv[1]).decode(\'utf-8\')\n    bad: int = 0\n    total: int = 0\n    rendered: int = 0\n    errors: int = 0\n    for line in manifest.split(\'\\n\'):\n        if line == \'\':\n            continue\n        parts: list[str] = line.split(\'\\t\')\n        path: str = parts[0]\n        kc: int = int(parts[1])\n        vc: int = int(parts[2])\n        size: int = int(parts[3])\n        old: str = run_old(path, kc, vc, size)\n        fresh: str = run_new(path, kc, vc, size)\n        total += 1\n        if old == fresh:\n            if old[0:1] == \'!\':\n                errors += 1\n            else:\n                rendered += 1\n        else:\n            bad += 1\n            print(\'MISMATCH \' + line + \' old=\' + old + \' new=\' + fresh)\n    print(\'cases=\' + str(total) + \' rendered=\' + str(rendered) + \' errors=\' + str(errors) + \' bad=\' + str(bad))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+SOURCE = r'''use utf8_stream;
+use csv_stream;
+use csv_group;
+use csv_group_scan;
+
+fn old_group(path: str, key_column: int, value_column: int, size: int) -> str {
+    if size <= 0 or key_column < 0 or value_column < 0 { raise ValueError; }
+    let utf8 = utf8_decoder_new();
+    let csv = csv_decoder_new();
+    let groups = csv_groups_new();
+    for chunk in file_chunks(path, size) {
+        let rows = csv_decode_feed(csv, utf8_decode_feed(utf8, chunk));
+        csv_groups_add(groups, rows, key_column, value_column);
+    }
+    let tail = csv_decode_feed(csv, utf8_decode_finish(utf8));
+    csv_groups_add(groups, tail, key_column, value_column);
+    let final = csv_decode_finish(csv);
+    csv_groups_add(groups, final, key_column, value_column);
+    return csv_groups_render(groups);
+}
+
+fn run_old(path: str, kc: int, vc: int, size: int) -> str {
+    try { return old_group(path, kc, vc, size); }
+    except ValueError { return "!ValueError"; }
+    except UnicodeDecodeError { return "!UnicodeDecodeError"; }
+    except OSError { return "!OSError"; }
+}
+
+fn run_new(path: str, kc: int, vc: int, size: int) -> str {
+    try { return csv_table_group_scan(path, kc, vc, size); }
+    except ValueError { return "!ValueError"; }
+    except UnicodeDecodeError { return "!UnicodeDecodeError"; }
+    except OSError { return "!OSError"; }
+}
+
+fn main() -> int {
+    let manifest: str = read_bytes(sys.argv[1]).decode("utf-8");
+    let bad: int = 0;
+    let total: int = 0;
+    let rendered: int = 0;
+    let errors: int = 0;
+    for line in manifest.split("\n") {
+        if line == "" { continue; }
+        let parts: list[str] = line.split("\t");
+        let path: str = parts[0];
+        let kc: int = int(parts[1]);
+        let vc: int = int(parts[2]);
+        let size: int = int(parts[3]);
+        let old: str = run_old(path, kc, vc, size);
+        let fresh: str = run_new(path, kc, vc, size);
+        total += 1;
+        if old == fresh {
+            if old[0:1] == "!" { errors += 1; } else { rendered += 1; }
+        } else {
+            bad += 1;
+            print("MISMATCH " + line + " old=" + old + " new=" + fresh);
+        }
+    }
+    print("cases=" + str(total) + " rendered=" + str(rendered) + " errors=" + str(errors) + " bad=" + str(bad));
+    return 0;
+}
+'''
 
 SIZES = [1, 2, 3, 5, 7, 13, 64, 65536]
 WORDS = ['a', 'b', 'c', 'key', 'Alpha', 'x y', '', '東京', 'Zürich', '日本語😀', 'é', '😀', 'q', 'same', '0']

@@ -1,0 +1,116 @@
+# Brace-syntax sources still embedded in the batch-4 test modules.
+# One line per remaining `fn main(` source; reason after the location.
+# pin: a codegen hash that would change; meaning: a converted program behaves differently.
+test_ail_api_contracts.py:33: meaning: context()/translate() consumes the brace source
+test_ail_api_profiles.py:18: meaning: brace text is built dynamically
+test_ail_api_profiles.py:68: meaning: brace text is built dynamically
+test_ail_api_profiles.py:91: meaning: brace text is built dynamically
+test_ail_api_profiles.py:95: meaning: brace text is built dynamically
+test_ail_argv_slices.py:22: meaning: brace text is built dynamically
+test_ail_bytearray_decimal.py:83: meaning: oracle() calls translate() on the source
+test_ail_bytearray_decimal.py:116: meaning: oracle() calls translate() on the source
+test_ail_bytearray_decimal.py:139: meaning: oracle() calls translate() on the source
+test_ail_bytes_list_fields.py:34: meaning: alias/move semantics differ
+test_ail_bytes_list_fields.py:120: meaning: alias/move semantics differ
+test_ail_bytes_list_fields.py:152: meaning: alias/move semantics differ
+test_ail_bytes_list_fields.py:154: meaning: alias/move semantics differ
+test_ail_ctor_move.py:60: meaning: constructor move semantics differ
+test_ail_exception_aggregate_objects.py:53: meaning: Python class module is refused by compile-module
+test_ail_exception_aggregate_objects.py:145: meaning: Python class module is refused by compile-module
+test_ail_exception_aggregate_objects.py:168: meaning: Python class module is refused by compile-module
+test_ail_field_views.py:82: meaning: forward class annotation: CPython NameError
+test_ail_grid_calls.py:16: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:59: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:66: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:106: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:153: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:170: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:175: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:187: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:190: meaning: Python struct module refused; brace text built dynamically
+test_ail_grid_calls.py:193: meaning: Python struct module refused; brace text built dynamically
+test_ail_heapq_bisect.py:53: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:328: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:338: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:353: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:354: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:356: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:358: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:360: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:361: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:362: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:363: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:364: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:365: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:367: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:368: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:369: meaning: misuse refusals differ on the Python front end
+test_ail_heapq_bisect.py:370: meaning: misuse refusals differ on the Python front end
+test_ail_instruction_gap.py:139: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:264: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:334: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:412: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:500: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:544: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:624: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:713: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:738: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:765: meaning: forward class annotation and brace body spans
+test_ail_instruction_gap.py:799: meaning: forward class annotation and brace body spans
+test_ail_libc_names.py:20: meaning: brace text is built dynamically
+test_ail_list_expression_extend.py:56: meaning: receiver/move semantics differ
+test_ail_list_expression_extend.py:81: meaning: receiver/move semantics differ
+test_ail_list_expression_extend.py:127: meaning: receiver/move semantics differ
+test_ail_list_expression_extend.py:199: meaning: receiver/move semantics differ
+test_ail_list_expression_extend.py:200: meaning: receiver/move semantics differ
+test_ail_list_expression_extend.py:201: meaning: receiver/move semantics differ
+test_ail_list_expression_extend.py:202: meaning: receiver/move semantics differ
+test_ail_list_expression_extend.py:211: meaning: receiver/move semantics differ
+test_ail_list_ops.py:105: meaning: brace text is built dynamically by ail_source()
+test_ail_list_ops.py:221: meaning: brace text is built dynamically by ail_source()
+test_ail_list_ops.py:327: meaning: brace text is built dynamically by ail_source()
+test_ail_list_ops.py:391: meaning: brace text is built dynamically by ail_source()
+test_ail_list_ops.py:410: meaning: brace text is built dynamically by ail_source()
+test_ail_list_ops.py:415: meaning: brace text is built dynamically by ail_source()
+test_ail_map_field_moves.py:45: meaning: map move semantics differ
+test_ail_map_fields.py:31: meaning: alias sharing semantics differ
+test_ail_map_fields.py:78: meaning: alias sharing semantics differ
+test_ail_method_object_contracts.py:22: meaning: Python class module is refused by compile-module
+test_ail_method_object_contracts.py:105: meaning: Python class module is refused by compile-module
+test_ail_method_object_contracts.py:118: meaning: Python class module is refused by compile-module
+test_ail_optional_structs.py:62: meaning: forward class annotation: CPython NameError
+test_ail_optional_structs.py:186: meaning: forward class annotation: CPython NameError
+test_ail_optional_structs.py:253: meaning: forward class annotation: CPython NameError
+test_ail_optional_structs.py:271: meaning: forward class annotation: CPython NameError
+test_ail_optional_structs.py:376: meaning: forward class annotation: CPython NameError
+test_ail_optional_structs.py:384: meaning: forward class annotation: CPython NameError
+test_ail_optional_structs.py:385: meaning: forward class annotation: CPython NameError
+test_ail_parallel_for.py:33: meaning: UNITS/ALIAS need the brace front end
+test_ail_parallel_for.py:92: meaning: UNITS/ALIAS need the brace front end
+test_ail_parallel_for.py:132: meaning: UNITS/ALIAS need the brace front end
+test_ail_parallel_for.py:163: meaning: UNITS/ALIAS need the brace front end
+test_ail_range_checks.py:284: meaning: int64 overflow semantics differ
+test_ail_range_checks.py:324: meaning: int64 overflow semantics differ
+test_ail_range_checks.py:350: meaning: int64 overflow semantics differ
+test_ail_record_initializers.py:12: pin: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:18: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:43: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:51: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:52: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:53: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:54: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:55: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:56: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:61: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:62: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_record_initializers.py:63: meaning: generated() mixes dynamic brace text with codegen pins
+test_ail_server.py:236: meaning: brace text is built dynamically
+test_ail_swap_rebinding.py:44: meaning: refusal/move semantics differ
+test_ail_swap_rebinding.py:168: meaning: refusal/move semantics differ
+test_ail_swap_rebinding.py:206: meaning: refusal/move semantics differ
+test_ail_swap_rebinding.py:255: meaning: refusal/move semantics differ
+test_ail_swap_rebinding.py:258: meaning: refusal/move semantics differ
+test_ail_swap_rebinding.py:260: meaning: refusal/move semantics differ
+test_ail_swap_rebinding.py:261: meaning: refusal/move semantics differ
+test_ail_swap_rebinding.py:341: meaning: refusal/move semantics differ
+test_csv_group_scan.py:50: meaning: imports the brace module utf8_stream

@@ -47,7 +47,117 @@ def run(exe, *args, stdin=None):
                           input=stdin)
 
 
-GUARDED = 'import sys\n\ndef flip(n: int, k: int) -> int:\n    p = [0] * 8\n    for i in range(0, n):\n        p[i] = i * 3 + 1\n    lo = 0\n    hi = k\n    while lo < hi:\n        t = p[lo]\n        p[lo] = p[hi]\n        p[hi] = t\n        lo += 1\n        hi -= 1\n    s = 0\n    for i in range(0, n):\n        s = (s * 7 + p[i]) % 100003\n    return s\n\ndef shifted(n: int) -> int:\n    a = [0] * 8\n    for i in range(0, 8):\n        a[i] = i + n\n    for i in range(0, 7):\n        a[i] = a[i + 1] * 2 - a[i]\n    for i in range(1, 8):\n        a[i] = a[i] + a[i - 1]\n    t = 0\n    for i in range(0, 8):\n        t += a[i] * (i + 1)\n    return t\n\ndef wrapped(lo: int, hi: int) -> int:\n    a = [0] * 8\n    for i in range(0, 8):\n        a[i] = i * i\n    s = 0\n    for i in range(lo, hi):\n        s += a[i] * 3 + a[i + 1]\n    return s\n\ndef stepped(k: int) -> int:\n    a = [0] * 9\n    for i in range(0, 9):\n        a[i] = i + 1\n    lo = 0\n    hi = k\n    s = 0\n    while lo < hi:\n        s += a[lo] * 10 + a[hi]\n        lo += 2\n        hi -= 3\n    return s\n\ndef skippy(n: int) -> int:\n    a = [0] * 6\n    for i in range(0, 6):\n        a[i] = i + 2\n    s = 0\n    for i in range(0, n):\n        if a[i] == 5:\n            continue\n        if a[i] > 6:\n            break\n        s += a[i]\n    return s\n\ndef growing(n: int) -> int:\n    xs: list[int] = []\n    s = 0\n    for i in range(0, n):\n        xs.append(i * 2)\n        s += xs[i]\n    return s\n\ndef twice(n: int) -> int:\n    a = [0] * 6\n    lo = 0\n    hi = n\n    s = 0\n    while lo < hi:\n        lo += 1\n        s += a[lo]\n        lo += 1\n    return s\n\ndef show(label: str, v: int) -> None:\n    print(label + \' \' + str(v))\n\ndef main() -> int:\n    show(\'flip\', flip(8, 7))\n    show(\'flip\', flip(5, 4))\n    show(\'flip\', flip(8, 0))\n    show(\'shifted\', shifted(3))\n    show(\'wrapped\', wrapped(0, 7))\n    show(\'wrapped\', wrapped(-3, 5))\n    show(\'wrapped\', wrapped(-2, 0))\n    show(\'stepped\', stepped(8))\n    show(\'stepped\', stepped(5))\n    show(\'skippy\', skippy(6))\n    show(\'growing\', growing(20))\n    show(\'twice\', twice(5))\n    try:\n        show(\'flip\', flip(9, 2))\n    except IndexError:\n        print(\'flip n=9: index error\')\n    try:\n        show(\'flip\', flip(8, 8))\n    except IndexError:\n        print(\'flip hi=8: index error\')\n    try:\n        show(\'wrapped\', wrapped(0, 8))\n    except IndexError:\n        print(\'wrapped 8: index error\')\n    try:\n        show(\'wrapped\', wrapped(-9, 0))\n    except IndexError:\n        print(\'wrapped -9: index error\')\n    try:\n        show(\'skippy\', skippy(7))\n    except IndexError:\n        print(\'skippy 7: index error\')\n    try:\n        show(\'stepped\', stepped(12))\n    except IndexError:\n        print(\'stepped 12: index error\')\n    try:\n        show(\'twice\', twice(7))\n    except IndexError:\n        print(\'twice 7: index error\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+GUARDED = """
+fn flip(n: int, k: int) -> int {
+    let p = [0] * 8;
+    for i in range(0, n) { p[i] = i * 3 + 1; }
+    let lo = 0;
+    let hi = k;
+    while lo < hi {
+        let t = p[lo];
+        p[lo] = p[hi];
+        p[hi] = t;
+        lo += 1;
+        hi -= 1;
+    }
+    let s = 0;
+    for i in range(0, n) { s = (s * 7 + p[i]) % 100003; }
+    return s;
+}
+
+fn shifted(n: int) -> int {
+    let a = [0] * 8;
+    for i in range(0, 8) { a[i] = i + n; }
+    for i in range(0, 7) { a[i] = a[i + 1] * 2 - a[i]; }
+    for i in range(1, 8) { a[i] = a[i] + a[i - 1]; }
+    let t = 0;
+    for i in range(0, 8) { t += a[i] * (i + 1); }
+    return t;
+}
+
+fn wrapped(lo: int, hi: int) -> int {
+    let a = [0] * 8;
+    for i in range(0, 8) { a[i] = i * i; }
+    let s = 0;
+    for i in range(lo, hi) { s += a[i] * 3 + a[i + 1]; }
+    return s;
+}
+
+fn stepped(k: int) -> int {
+    let a = [0] * 9;
+    for i in range(0, 9) { a[i] = i + 1; }
+    let lo = 0;
+    let hi = k;
+    let s = 0;
+    while lo < hi {
+        s += a[lo] * 10 + a[hi];
+        lo += 2;
+        hi -= 3;
+    }
+    return s;
+}
+
+fn skippy(n: int) -> int {
+    let a = [0] * 6;
+    for i in range(0, 6) { a[i] = i + 2; }
+    let s = 0;
+    for i in range(0, n) {
+        if a[i] == 5 { continue; }
+        if a[i] > 6 { break; }
+        s += a[i];
+    }
+    return s;
+}
+
+fn growing(n: int) -> int {
+    let xs: list[int] = [];
+    let s = 0;
+    for i in range(0, n) {
+        xs.append(i * 2);
+        s += xs[i];
+    }
+    return s;
+}
+
+fn twice(n: int) -> int {
+    let a = [0] * 6;
+    let lo = 0;
+    let hi = n;
+    let s = 0;
+    while lo < hi {
+        lo += 1;
+        s += a[lo];
+        lo += 1;
+    }
+    return s;
+}
+
+fn show(label: str, v: int) -> void {
+    print(label + " " + str(v));
+}
+
+fn main() {
+    show("flip", flip(8, 7));
+    show("flip", flip(5, 4));
+    show("flip", flip(8, 0));
+    show("shifted", shifted(3));
+    show("wrapped", wrapped(0, 7));
+    show("wrapped", wrapped(-3, 5));
+    show("wrapped", wrapped(-2, 0));
+    show("stepped", stepped(8));
+    show("stepped", stepped(5));
+    show("skippy", skippy(6));
+    show("growing", growing(20));
+    show("twice", twice(5));
+    try { show("flip", flip(9, 2)); } except IndexError { print("flip n=9: index error"); }
+    try { show("flip", flip(8, 8)); } except IndexError { print("flip hi=8: index error"); }
+    try { show("wrapped", wrapped(0, 8)); } except IndexError { print("wrapped 8: index error"); }
+    try { show("wrapped", wrapped(-9, 0)); } except IndexError { print("wrapped -9: index error"); }
+    try { show("skippy", skippy(7)); } except IndexError { print("skippy 7: index error"); }
+    try { show("stepped", stepped(12)); } except IndexError { print("stepped 12: index error"); }
+    try { show("twice", twice(7)); } except IndexError { print("twice 7: index error"); }
+}
+"""
 
 GUARDED_PY = """
 def flip(n, k):
@@ -150,7 +260,27 @@ class GuardedLoops(unittest.TestCase):
                 self.assertNotIn('->p[', function_body(program, 'twice'))
 
     def test_swap_loop_runs_without_bounds_checks(self):
-        source = 'import sys\n\ndef main() -> int:\n    n = int(sys.argv[1])\n    p = [0] * 16\n    for i in range(0, 16):\n        p[i] = i\n    total = 0\n    for r in range(0, n):\n        lo = 0\n        hi = 15\n        while lo < hi:\n            t = p[lo]\n            p[lo] = p[hi]\n            p[hi] = t\n            lo += 1\n            hi -= 1\n        total += p[r % 16]\n    print(total)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+fn main() {
+    let n = int(sys.argv[1]);
+    let p = [0] * 16;
+    for i in range(0, 16) { p[i] = i; }
+    let total = 0;
+    for r in range(0, n) {
+        let lo = 0;
+        let hi = 15;
+        while lo < hi {
+            let t = p[lo];
+            p[lo] = p[hi];
+            p[hi] = t;
+            lo += 1;
+            hi -= 1;
+        }
+        total += p[r % 16];
+    }
+    print(total);
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, program = build(source, directory)
             ran = run(exe, 1001)
@@ -162,7 +292,60 @@ class GuardedLoops(unittest.TestCase):
             self.assertIn('->p[', program)
 
     def test_bytes_and_bytearray_reads(self):
-        source = 'import sys\n\ndef scan(data: bytes, lo: int, hi: int) -> int:\n    s = 0\n    for i in range(lo, hi):\n        s = (s * 31 + data[i]) % 1000003\n    return s\n\ndef rolling(ba: bytearray, k: int) -> int:\n    key = 0\n    hits = 0\n    for i in range(0, len(ba)):\n        key = (key << 2 | ba[i] & 3) & 1023\n        if i >= k - 1 and key == 77:\n            hits += 1\n    return hits\n\ndef keep(data: bytes) -> bytearray:\n    out = bytearray()\n    for i in range(0, len(data)):\n        if data[i] != 13:\n            out.append(data[i])\n    return out\n\ndef alias() -> int:\n    a = bytearray(b\'abc\')\n    b = a\n    for i in range(0, 3):\n        b.append(a[i])\n    return len(a)\n\ndef walk(ba: bytearray, n: int) -> int:\n    i = 0\n    s = 0\n    while i < n:\n        s = (s * 31 + ba[i]) % 1000003\n        i += 1\n    return s\n\ndef main() -> int:\n    print(scan(b\'hello, world\', 0, 12))\n    print(scan(b\'hello, world\', 3, 9))\n    print(scan(b\'hello, world\', -4, 0))\n    ba = bytearray(b\'ACGTTGCAACGTAC\')\n    print(rolling(ba, 2))\n    print(len(keep(b\'a\\r\\nb\\r\\n\')))\n    print(alias())\n    try:\n        print(scan(b\'abc\', 0, 4))\n    except IndexError:\n        print(\'bytes index error\')\n    try:\n        print(scan(b\'abc\', -5, 0))\n    except IndexError:\n        print(\'bytes negative error\')\n    print(walk(ba, 14))\n    print(walk(ba, 0))\n    try:\n        print(walk(ba, 15))\n    except IndexError:\n        print(\'walk error\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+fn scan(data: bytes, lo: int, hi: int) -> int {
+    let s = 0;
+    for i in range(lo, hi) { s = (s * 31 + data[i]) % 1000003; }
+    return s;
+}
+
+fn rolling(ba: bytearray, k: int) -> int {
+    let key = 0;
+    let hits = 0;
+    for i in range(0, len(ba)) {
+        key = ((key << 2) | (ba[i] & 3)) & 1023;
+        if i >= k - 1 and key == 77 { hits += 1; }
+    }
+    return hits;
+}
+
+fn keep(data: bytes) -> bytearray {
+    let out = bytearray();
+    for i in range(0, len(data)) {
+        if data[i] != 13 { out.append(data[i]); }
+    }
+    return out;
+}
+
+fn alias() -> int {
+    let a = bytearray(b"abc");
+    let b = a;
+    for i in range(0, 3) { b.append(a[i]); }
+    return len(a);
+}
+
+fn walk(ba: bytearray, n: int) -> int {
+    let i = 0;
+    let s = 0;
+    while i < n { s = (s * 31 + ba[i]) % 1000003; i += 1; }
+    return s;
+}
+
+fn main() {
+    print(scan(b"hello, world", 0, 12));
+    print(scan(b"hello, world", 3, 9));
+    print(scan(b"hello, world", -4, 0));
+    let ba = bytearray(b"ACGTTGCAACGTAC");
+    print(rolling(ba, 2));
+    print(len(keep(b"a\\r\\nb\\r\\n")));
+    print(alias());
+    try { print(scan(b"abc", 0, 4)); } except IndexError { print("bytes index error"); }
+    try { print(scan(b"abc", -5, 0)); } except IndexError { print("bytes negative error"); }
+    print(walk(ba, 14));
+    print(walk(ba, 0));
+    try { print(walk(ba, 15)); } except IndexError { print("walk error"); }
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, program = build(source, directory)
             ran = run(exe)
@@ -194,7 +377,50 @@ class GuardedLoops(unittest.TestCase):
                 self.assertNotIn('->refs &&', function_body(program, 'alias'))
 
     def test_struct_field_lists_and_list_parameters(self):
-        source = 'import sys\n\nclass Big:\n\n    def __init__(self, d: list[int]):\n        self.d = d\n\ndef addmul(a: Big, b: list[int], m: int) -> int:\n    n = len(a.d)\n    for i in range(0, n):\n        a.d[i] = a.d[i] * m + b[i]\n    s = 0\n    for i in range(0, n):\n        s = (s * 3 + a.d[i]) % 1000003\n    return s\n\ndef prefix(a: Big) -> int:\n    for i in range(1, len(a.d)):\n        a.d[i] = a.d[i] + a.d[i - 1]\n    return a.d[len(a.d) - 1]\n\ndef grow(a: Big, b: list[int]) -> int:\n    for i in range(0, 3):\n        a.d.append(a.d[i] + b[i])\n    return len(a.d)\n\ndef selfgrow(x: Big, y: Big) -> int:\n    for i in range(0, 3):\n        x.d.append(y.d[i])\n    return len(x.d) * 100 + x.d[5]\n\ndef make(n: int) -> Big:\n    l: list[int] = []\n    for i in range(0, n):\n        l.append(i + 1)\n    return Big(l)\n\ndef main() -> int:\n    b = make(5)\n    c: list[int] = [10, 20, 30, 40, 50]\n    print(addmul(b, c, 3))\n    print(prefix(make(6)))\n    print(grow(make(4), c))\n    z = make(3)\n    print(selfgrow(z, z))\n    try:\n        print(addmul(make(6), c, 2))\n    except IndexError:\n        print(\'short parameter\')\n    try:\n        print(prefix(make(0)))\n    except IndexError:\n        print(\'empty\')\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+struct Big { d: list[int]; }
+
+fn addmul(a: Big, b: list[int], m: int) -> int {
+    let n = len(a.d);
+    for i in range(0, n) { a.d[i] = a.d[i] * m + b[i]; }
+    let s = 0;
+    for i in range(0, n) { s = (s * 3 + a.d[i]) % 1000003; }
+    return s;
+}
+
+fn prefix(a: Big) -> int {
+    for i in range(1, len(a.d)) { a.d[i] = a.d[i] + a.d[i - 1]; }
+    return a.d[len(a.d) - 1];
+}
+
+fn grow(a: Big, b: list[int]) -> int {
+    for i in range(0, 3) { a.d.append(a.d[i] + b[i]); }
+    return len(a.d);
+}
+
+fn selfgrow(x: Big, y: Big) -> int {
+    for i in range(0, 3) { x.d.append(y.d[i]); }
+    return len(x.d) * 100 + x.d[5];
+}
+
+fn make(n: int) -> Big {
+    let l: list[int] = [];
+    for i in range(0, n) { l.append(i + 1); }
+    return Big(l);
+}
+
+fn main() {
+    let b = make(5);
+    let c: list[int] = [10, 20, 30, 40, 50];
+    print(addmul(b, c, 3));
+    print(prefix(make(6)));
+    print(grow(make(4), c));
+    let z = make(3);
+    print(selfgrow(z, z));
+    try { print(addmul(make(6), c, 2)); } except IndexError { print("short parameter"); }
+    try { print(prefix(make(0))); } except IndexError { print("empty"); }
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, program = build(source, directory)
             ran = run(exe)
@@ -229,7 +455,62 @@ class GuardedLoops(unittest.TestCase):
                 self.assertNotIn('->f_d.p[', function_body(program, 'selfgrow'))
 
 
-POOL = 'import sys\n\nclass Node:\n\n    def __init__(self, left: Node | None, right: Node | None):\n        self.left = left\n        self.right = right\n\nclass Cell:\n\n    def __init__(self, value: int, next: Cell | None):\n        self.value = value\n        self.next = next\n\nclass Wide:\n\n    def __init__(self, a0: int, a1: int, a2: int, a3: int, a4: int, a5: int, a6: int, a7: int, a8: int, a9: int, b0: int, b1: int, b2: int, b3: int, b4: int, b5: int, b6: int, b7: int, b8: int, b9: int, c0: int, c1: int, c2: int, c3: int, c4: int, c5: int, c6: int, c7: int, c8: int, c9: int):\n        self.a0 = a0\n        self.a1 = a1\n        self.a2 = a2\n        self.a3 = a3\n        self.a4 = a4\n        self.a5 = a5\n        self.a6 = a6\n        self.a7 = a7\n        self.a8 = a8\n        self.a9 = a9\n        self.b0 = b0\n        self.b1 = b1\n        self.b2 = b2\n        self.b3 = b3\n        self.b4 = b4\n        self.b5 = b5\n        self.b6 = b6\n        self.b7 = b7\n        self.b8 = b8\n        self.b9 = b9\n        self.c0 = c0\n        self.c1 = c1\n        self.c2 = c2\n        self.c3 = c3\n        self.c4 = c4\n        self.c5 = c5\n        self.c6 = c6\n        self.c7 = c7\n        self.c8 = c8\n        self.c9 = c9\n\ndef make(d: int) -> Node:\n    if d == 0:\n        return Node(None, None)\n    return Node(make(d - 1), make(d - 1))\n\ndef check(t: Node | None) -> int:\n    if t is None:\n        return 0\n    return 1 + check(t.left) + check(t.right)\n\ndef chain(n: int) -> Cell | None:\n    head: Cell | None = None\n    for i in range(0, n):\n        head = Cell(i, head)\n    return head\n\ndef walk(c: Cell | None) -> int:\n    s = 0\n    cur = c\n    while cur is not None:\n        s += cur.value\n        cur = cur.next\n    return s\n\ndef wide(n: int) -> int:\n    s = 0\n    for i in range(0, n):\n        w = Wide(i, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, i)\n        s += w.a0 + w.c9\n    return s\n\ndef main() -> int:\n    total = 0\n    for r in range(0, 30):\n        t = make(10)\n        total += check(t)\n    print(total)\n    keep = make(12)\n    for r in range(0, 20):\n        total += check(make(9))\n    print(total + check(keep))\n    print(walk(chain(300000)))\n    print(wide(1000))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+POOL = """
+struct Node { left: Node | None; right: Node | None; }
+struct Cell { value: int; next: Cell | None; }
+struct Wide { a0: int; a1: int; a2: int; a3: int; a4: int; a5: int; a6: int; a7: int; a8: int; a9: int;
+              b0: int; b1: int; b2: int; b3: int; b4: int; b5: int; b6: int; b7: int; b8: int; b9: int;
+              c0: int; c1: int; c2: int; c3: int; c4: int; c5: int; c6: int; c7: int; c8: int; c9: int; }
+
+fn make(d: int) -> Node {
+    if d == 0 { return Node(None, None); }
+    return Node(make(d - 1), make(d - 1));
+}
+
+fn check(t: Node | None) -> int {
+    if t is None { return 0; }
+    return 1 + check(t.left) + check(t.right);
+}
+
+fn chain(n: int) -> Cell | None {
+    let head: Cell | None = None;
+    for i in range(0, n) { head = Cell(i, head); }
+    return head;
+}
+
+fn walk(c: Cell | None) -> int {
+    let s = 0;
+    let cur = c;
+    while cur is not None {
+        s += cur.value;
+        cur = cur.next;
+    }
+    return s;
+}
+
+fn wide(n: int) -> int {
+    let s = 0;
+    for i in range(0, n) {
+        let w = Wide(i, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, i);
+        s += w.a0 + w.c9;
+    }
+    return s;
+}
+
+fn main() {
+    let total = 0;
+    for r in range(0, 30) {
+        let t = make(10);
+        total += check(t);
+    }
+    print(total);
+    let keep = make(12);
+    for r in range(0, 20) { total += check(make(9)); }
+    print(total + check(keep));
+    print(walk(chain(300000)));
+    print(wide(1000));
+}
+"""
 
 
 class ObjectPool(unittest.TestCase):
@@ -250,7 +531,22 @@ class ObjectPool(unittest.TestCase):
             self.assertEqual(again.stdout, ran.stdout)
 
     def test_peak_memory_does_not_grow_with_repeated_builds(self):
-        source = 'import sys\n\nclass Node:\n\n    def __init__(self, left: Node | None, right: Node | None):\n        self.left = left\n        self.right = right\n\ndef make(d: int) -> Node:\n    if d == 0:\n        return Node(None, None)\n    return Node(make(d - 1), make(d - 1))\n\ndef check(t: Node | None) -> int:\n    if t is None:\n        return 0\n    return 1 + check(t.left) + check(t.right)\n\ndef main() -> int:\n    total = 0\n    for r in range(0, 400):\n        total += check(make(12))\n    print(total)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+struct Node { left: Node | None; right: Node | None; }
+fn make(d: int) -> Node {
+    if d == 0 { return Node(None, None); }
+    return Node(make(d - 1), make(d - 1));
+}
+fn check(t: Node | None) -> int {
+    if t is None { return 0; }
+    return 1 + check(t.left) + check(t.right);
+}
+fn main() {
+    let total = 0;
+    for r in range(0, 400) { total += check(make(12)); }
+    print(total);
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, _ = build(source, directory)
             measure = ('import resource, subprocess, sys\n'
@@ -265,7 +561,72 @@ class ObjectPool(unittest.TestCase):
             self.assertEqual(ran.stdout.strip(), str(400 * 8191))
 
 
-LOOP_LOCALS = 'import sys\n\nclass Node:\n\n    def __init__(self, left: Node | None, right: Node | None, v: int):\n        self.left = left\n        self.right = right\n        self.v = v\n\ndef make(d: int, v: int) -> Node:\n    if d == 0:\n        return Node(None, None, v)\n    return Node(make(d - 1, v + 1), make(d - 1, v + 2), v)\n\ndef total(t: Node | None) -> int:\n    if t is None:\n        return 0\n    return t.v + total(t.left) + total(t.right)\n\ndef loops() -> int:\n    keep: list[Node] = []\n    s = 0\n    for i in range(0, 6):\n        t = make(3, i)\n        if i == 2:\n            continue\n        s += total(t)\n        if i % 2 == 0:\n            keep.append(t)\n        u = t\n        s += total(u)\n    for k in keep:\n        s += total(k) * 3\n    w = 0\n    while w < 3:\n        a = make(2, w)\n        b = make(2, w + 10)\n        s += total(a) + total(b)\n        w += 1\n        if w == 2:\n            break\n    return s\n\ndef guarded() -> int:\n    s = 0\n    for i in range(0, 4):\n        t = make(2, i)\n        try:\n            if i == 2:\n                raise ValueError()\n            s += total(t)\n        except ValueError:\n            s += 100\n    return s\n\ndef carried() -> int:\n    t = make(1, 5)\n    s = 0\n    for i in range(0, 3):\n        s += total(t)\n        t = make(1, i)\n    return s + total(t)\n\ndef main() -> int:\n    print(loops())\n    print(guarded())\n    print(carried())\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+LOOP_LOCALS = """
+struct Node { left: Node | None; right: Node | None; v: int; }
+
+fn make(d: int, v: int) -> Node {
+    if d == 0 { return Node(None, None, v); }
+    return Node(make(d - 1, v + 1), make(d - 1, v + 2), v);
+}
+
+fn total(t: Node | None) -> int {
+    if t is None { return 0; }
+    return t.v + total(t.left) + total(t.right);
+}
+
+fn loops() -> int {
+    let keep: list[Node] = [];
+    let s = 0;
+    for i in range(0, 6) {
+        let t = make(3, i);
+        if i == 2 { continue; }
+        s += total(t);
+        if i % 2 == 0 { keep.append(t); }
+        let u = t;
+        s += total(u);
+    }
+    for k in keep { s += total(k) * 3; }
+    let w = 0;
+    while w < 3 {
+        let a = make(2, w);
+        let b = make(2, w + 10);
+        s += total(a) + total(b);
+        w += 1;
+        if w == 2 { break; }
+    }
+    return s;
+}
+
+fn guarded() -> int {
+    let s = 0;
+    for i in range(0, 4) {
+        let t = make(2, i);
+        try {
+            if i == 2 { raise ValueError(); }
+            s += total(t);
+        } except ValueError {
+            s += 100;
+        }
+    }
+    return s;
+}
+
+fn carried() -> int {
+    let t = make(1, 5);
+    let s = 0;
+    for i in range(0, 3) {
+        s += total(t);
+        t = make(1, i);
+    }
+    return s + total(t);
+}
+
+fn main() {
+    print(loops());
+    print(guarded());
+    print(carried());
+}
+"""
 
 LOOP_LOCALS_PY = """
 class Node:
@@ -339,7 +700,25 @@ class LoopLocalRelease(unittest.TestCase):
             self.assertEqual(run(plain).stdout, ran.stdout)
 
     def test_tree_built_per_iteration_is_gone_before_the_next_is_built(self):
-        source = 'import sys\n\nclass Node:\n\n    def __init__(self, left: Node | None, right: Node | None):\n        self.left = left\n        self.right = right\n\ndef make(d: int) -> Node:\n    if d == 0:\n        return Node(None, None)\n    return Node(make(d - 1), make(d - 1))\n\ndef check(t: Node | None) -> int:\n    if t is None:\n        return 0\n    return 1 + check(t.left) + check(t.right)\n\ndef main() -> int:\n    total = 0\n    for i in range(0, 6):\n        t = make(18)\n        total += check(t)\n    print(total)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+struct Node { left: Node | None; right: Node | None; }
+fn make(d: int) -> Node {
+    if d == 0 { return Node(None, None); }
+    return Node(make(d - 1), make(d - 1));
+}
+fn check(t: Node | None) -> int {
+    if t is None { return 0; }
+    return 1 + check(t.left) + check(t.right);
+}
+fn main() {
+    let total = 0;
+    for i in range(0, 6) {
+        let t = make(18);
+        total += check(t);
+    }
+    print(total);
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, _ = build(source, directory)
             measure = ('import resource, subprocess, sys\n'
@@ -355,7 +734,14 @@ class LoopLocalRelease(unittest.TestCase):
 
 class ShiftByLiteral(unittest.TestCase):
     def test_boundaries_match_the_general_shift(self):
-        source = 'import sys\n\ndef main() -> int:\n    v = int(sys.argv[1])\n    print(v << 2)\n    print(v << 0)\n    print(v << 62)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+fn main() {
+    let v = int(sys.argv[1]);
+    print(v << 2);
+    print(v << 0);
+    print(v << 62);
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, program = build(source, directory)
             self.assertIn('ck_shlk(', program)
@@ -375,7 +761,12 @@ class ShiftByLiteral(unittest.TestCase):
                 self.assertIn('integer overflow', ran.stderr, v)
 
     def test_last_representable_values(self):
-        source = 'import sys\n\ndef main() -> int:\n    v = int(sys.argv[1])\n    print(v << 3)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+fn main() {
+    let v = int(sys.argv[1]);
+    print(v << 3);
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, _ = build(source, directory)
             for v in (2 ** 60 - 1, -2 ** 60):
@@ -389,7 +780,33 @@ class ShiftByLiteral(unittest.TestCase):
 
 class AppendOfCall(unittest.TestCase):
     def test_append_of_a_call_needs_no_receiver_retain(self):
-        source = 'import sys\n\ndef code(c: int) -> int:\n    u = c & 223\n    if u == 65:\n        return 0\n    if u == 67:\n        return 1\n    return 3\n\ndef bad(c: int) -> int:\n    return c * 100\n\ndef build(data: bytes) -> bytearray:\n    out = bytearray()\n    for i in range(0, len(data)):\n        out.append(code(data[i]))\n    return out\n\ndef main() -> int:\n    ba = build(b\'ACGTacgt\')\n    s = 0\n    for i in range(0, len(ba)):\n        s = s * 4 + ba[i]\n    print(s)\n    out = bytearray()\n    try:\n        out.append(bad(3))\n    except ValueError:\n        print(\'value error\')\n    out.append(bad(2))\n    print(len(out))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source = """
+fn code(c: int) -> int {
+    let u = c & 223;
+    if u == 65 { return 0; }
+    if u == 67 { return 1; }
+    return 3;
+}
+
+fn bad(c: int) -> int { return c * 100; }
+
+fn build(data: bytes) -> bytearray {
+    let out = bytearray();
+    for i in range(0, len(data)) { out.append(code(data[i])); }
+    return out;
+}
+
+fn main() {
+    let ba = build(b"ACGTacgt");
+    let s = 0;
+    for i in range(0, len(ba)) { s = s * 4 + ba[i]; }
+    print(s);
+    let out = bytearray();
+    try { out.append(bad(3)); } except ValueError { print("value error"); }
+    out.append(bad(2));
+    print(len(out));
+}
+"""
         with tempfile.TemporaryDirectory() as directory:
             exe, program = build(source, directory)
             ran = run(exe)

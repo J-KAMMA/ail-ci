@@ -9,14 +9,28 @@ from pyfront import Unsupported
 from test_ail_callable_values import oracle_source
 from test_ail_text_find_search import HEADERS
 
-SCALAR_BASELINE_SHA256={'import sys\n\ndef main() -> int:\n    xs: list[int] = [1, 2]\n    xs.reverse()\n    print(xs[0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n': '8817d39ae35084b6469180bbf1a234d8c851dcbe3b10463ba94d8bb7ff6a1245', 'import sys\n\ndef main() -> int:\n    xs: list[float] = [1.5, 2.5]\n    xs.reverse()\n    print(xs[0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n': 'b5344c52c8a0f2d4b6a19e54bf820883f5323bf5d0dd2be786ee294964c56347', 'import sys\n\nclass Box:\n\n    def __init__(self, ints: list[int], floats: list[float]):\n        self.ints = ints\n        self.floats = floats\n\ndef main() -> int:\n    b = Box([1], [1.5])\n    b.ints = [2]\n    b.floats = [2.5]\n    print(b.ints[0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n': '353fcbe79dbba6495c26c061082725e1bda82c8a80162cbceca8eb5fe4297b96'}
+SCALAR_BASELINE_SHA256={'fn main()->int {let xs:list[int]=[1,2];xs.reverse();print(xs[0]);return 0;}': '8817d39ae35084b6469180bbf1a234d8c851dcbe3b10463ba94d8bb7ff6a1245', 'fn main()->int {let xs:list[float]=[1.5,2.5];xs.reverse();print(xs[0]);return 0;}': 'b5344c52c8a0f2d4b6a19e54bf820883f5323bf5d0dd2be786ee294964c56347', 'struct Box {ints:list[int];floats:list[float];} fn main()->int {let b=Box([1],[1.5]);b.ints=[2];b.floats=[2.5];print(b.ints[0]);return 0;}': '353fcbe79dbba6495c26c061082725e1bda82c8a80162cbceca8eb5fe4297b96'}
 
-WHOLE='import sys\n\nclass Source:\n\n    def __init__(self, count: int, ratio: float, data: bytes):\n        self.count = count\n        self.ratio = ratio\n        self.data = data\n\ndef choose(value: int=7) -> int:\n    return value\n\ndef inspect(rows: list[tuple[int, int]]) -> int:\n    return rows[0][0] + rows[0][1]\n\ndef main() -> int:\n    source = Source(9223372036854775807, 2.5, b\'\\x00x\')\n    ints: list[tuple[int, int]] = [(source.count, -1), (choose(), 5)]\n    print(len(ints))\n    print(ints[0][0])\n    print(inspect(ints))\n    ints = [(ints[-1][0], 8)]\n    copy: list[tuple[int, int]] = list(ints)\n    ints = []\n    print(copy[0][1])\n    floats: list[tuple[float, float]] = [(1.5, source.ratio), (0.0, -0.0)]\n    print(floats[0][1])\n    floats = []\n    floats.append((3.5, 4.5))\n    print(len(floats))\n    blobs: list[tuple[int, bytes]] = [(choose(), source.data)]\n    print(len(blobs[0][1]))\n    blobs = [(blobs[0][0], blobs[0][1] + b\'x\')]\n    print(len(blobs[0][1]))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+WHOLE=r'''
+struct Source {count:int;ratio:float;data:bytes;}
+fn choose(value:int=7)->int {return value;}
+fn inspect(rows:list[tuple[int,int]])->int {return rows[0][0]+rows[0][1];}
+fn main()->int {
+ let source=Source(9223372036854775807,2.5,b"\0x");
+ let ints:list[tuple[int,int]]=[(source.count,-1),(choose(),5)];
+ print(len(ints));print(ints[0][0]);print(inspect(ints));
+ ints=[(ints[-1][0],8)];let copy:list[tuple[int,int]]=list(ints);ints=[];print(copy[0][1]);
+ let floats:list[tuple[float,float]]=[(1.5,source.ratio),(0.0,-0.0)];print(floats[0][1]);
+ floats=[];floats.append((3.5,4.5));print(len(floats));
+ let blobs:list[tuple[int,bytes]]=[(choose(),source.data)];print(len(blobs[0][1]));
+ blobs=[(blobs[0][0],blobs[0][1]+b"x")];print(len(blobs[0][1]));return 0;
+}
+'''
 
 def generated(source):
  # (the C the legacy emitter writes: pinned and inspected here whatever AIL_IR says)
  saved=os.environ.get('AIL_IR');os.environ['AIL_IR']='0'
- try:return candidate.to_c(source,name='run',strict=True)
+ try:return candidate.to_c(translate(source),name='run',strict=True)
  finally:
   if saved is None:os.environ.pop('AIL_IR',None)
   else:os.environ['AIL_IR']=saved
@@ -34,26 +48,26 @@ class RecordInitializerTypeTests(unittest.TestCase):
  def test_defaults_fields_local_copy_access_and_replacement(self):generated(WHOLE)
  def test_scalar_tuple_conflicts_and_unimplemented_record_fields_refused(self):
   for source in [
-   'import sys\n\ndef main() -> int:\n    xs: list[int] = [(1, 2)]\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-   'import sys\n\ndef main() -> int:\n    xs: list[float] = [(1.5, 2.5)]\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-   'import sys\n\ndef main() -> int:\n    rows: list[tuple[int, int]] = [(1, 2, 3)]\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-   'import sys\n\ndef main() -> int:\n    rows: list[tuple[int, int]] = [(1, 2.5)]\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-   'import sys\n\ndef main() -> int:\n    rows: list[tuple[int, bytes]] = [(1, \'x\')]\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
+   'fn main()->int {let xs:list[int]=[(1,2)];return 0;}',
+   'fn main()->int {let xs:list[float]=[(1.5,2.5)];return 0;}',
+   'fn main()->int {let rows:list[tuple[int,int]]=[(1,2,3)];return 0;}',
+   'fn main()->int {let rows:list[tuple[int,int]]=[(1,2.5)];return 0;}',
+   'fn main()->int {let rows:list[tuple[int,bytes]]=[(1,"x")];return 0;}',
    'struct Box {rows:list[tuple[int,int]];} fn main()->int {return 0;}',
   ]:
    with self.subTest(source=source),self.assertRaises((Unsupported,SyntaxErrorAIL)):generated(source)
  def test_existing_scalar_full_c_unchanged(self):
   for source in [
-   'import sys\n\ndef main() -> int:\n    xs: list[int] = [1, 2]\n    xs.reverse()\n    print(xs[0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-   'import sys\n\ndef main() -> int:\n    xs: list[float] = [1.5, 2.5]\n    xs.reverse()\n    print(xs[0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
-   'import sys\n\nclass Box:\n\n    def __init__(self, ints: list[int], floats: list[float]):\n        self.ints = ints\n        self.floats = floats\n\ndef main() -> int:\n    b = Box([1], [1.5])\n    b.ints = [2]\n    b.floats = [2.5]\n    print(b.ints[0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',
+   'fn main()->int {let xs:list[int]=[1,2];xs.reverse();print(xs[0]);return 0;}',
+   'fn main()->int {let xs:list[float]=[1.5,2.5];xs.reverse();print(xs[0]);return 0;}',
+   'struct Box {ints:list[int];floats:list[float];} fn main()->int {let b=Box([1],[1.5]);b.ints=[2];b.floats=[2.5];print(b.ints[0]);return 0;}',
   ]:
    self.assertEqual(hashlib.sha256(generated(source).encode('utf8')).hexdigest(),SCALAR_BASELINE_SHA256[source])
 
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),'installed C compiler required')
 class RecordInitializerNativeTests(unittest.TestCase):
  def test_whole_output_independent_python(self):
-  expected=subprocess.run([sys.executable,'-X','utf8','-B','-c',oracle_source(WHOLE)],capture_output=True,timeout=30)
+  expected=subprocess.run([sys.executable,'-X','utf8','-B','-c',oracle_source(translate(WHOLE))],capture_output=True,timeout=30)
   self.assertEqual(expected.returncode,0,expected.stderr.decode(errors='replace'))
   with tempfile.TemporaryDirectory(prefix='ail-record-r821-') as directory:
    path=Path(directory)/'records.c';path.write_text(HEADERS+generated(WHOLE)+'\nint main(void){return (int)run();}\n',encoding='utf8')

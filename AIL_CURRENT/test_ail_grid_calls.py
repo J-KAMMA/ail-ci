@@ -8,8 +8,27 @@ import unittest
 import test_ail_c_objects as support
 from test_ail_grid_return import GRID
 
-LIBRARY=GRID+'def relay(rows: int, cols: int) -> list[list[int]]:\n    result = grid(rows, cols)\n    return result\n\ndef fail_grid() -> list[list[int]]:\n    raise ValueError\n    return []\n\ndef mark(value: int) -> int:\n    print(value)\n    return value\n'
-ENTRY='import sys\n\ndef main() -> int:\n    rows = int(sys.argv[1])\n    cols = int(sys.argv[2])\n    g = relay(cols=mark(cols), rows=mark(rows))\n    try:\n        g = fail_grid()\n    except ValueError:\n        print(\'caught\')\n    print(len(g))\n    for row in g:\n        parts: list[str] = []\n        for value in row:\n            parts.append(str(value))\n        print(\' \'.join(parts))\n    if len(g) > 0 and cols > 0:\n        row = g[0]\n        row.append(123)\n        g = grid(65, 0)\n        print(row[-1])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+LIBRARY=GRID+'''
+fn relay(rows:int,cols:int)->list[list[int]] {let result=grid(rows,cols);return result;}
+fn fail_grid()->list[list[int]] {raise ValueError;return [];}
+fn mark(value:int)->int {print(value);return value;}
+'''
+ENTRY='''fn main()->int {
+ let rows=int(sys.argv[1]); let cols=int(sys.argv[2]);
+ let g=relay(cols=mark(cols),rows=mark(rows));
+ try {g=fail_grid();} except ValueError {print("caught");}
+ print(len(g));
+ for row in g {
+  let parts:list[str]=[];
+  for value in row {parts.append(str(value));}
+  print(" ".join(parts));
+ }
+ if len(g)>0 and cols>0 {
+  let row=g[0]; row.append(123);
+  g=grid(65,0); print(row[-1]);
+ }
+ return 0;
+}'''
 
 class GridCallTests(unittest.TestCase):
     setUp=support.CObjectTests.setUp
@@ -21,7 +40,7 @@ class GridCallTests(unittest.TestCase):
     def test_ordinary_and_separate_full_values_empty_rows_and_unwind(self):
         ordinary=self.ail_build('grid_calls',LIBRARY+ENTRY)
         library=self.write('grid_provider.ail',LIBRARY)
-        source=self.write('grid_client.ail','from grid_provider import *\n'+ENTRY)
+        source=self.write('grid_client.ail','use grid_provider;\n'+ENTRY)
         separate=self.root/'grid_separate'
         result=self.command('compile',source,'--separate','-o',separate)
         self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace')[:2500])
@@ -35,10 +54,21 @@ class GridCallTests(unittest.TestCase):
                     self.check_run(executable,expected,rows,cols)
 
     def test_value_copy_rows_are_independent_across_function_boundary(self):
-        program='import sys\n\ndef duplicate() -> list[list[int]]:\n    row = []\n    row.append(1)\n    result = []\n    result.append(row)\n    result.append(row)\n    return result\n\ndef main() -> int:\n    g = duplicate()\n    first = g[0]\n    first.append(7)\n    print(len(g[0]))\n    print(len(g[1]))\n    print(g[1][0])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        program='''fn duplicate()->list[list[int]] {
+ let row=[];row.append(1);let result=[];result.append(row);result.append(row);return result;
+}fn main()->int {
+ let g=duplicate();let first=g[0];first.append(7);
+ print(len(g[0]));print(len(g[1]));print(g[1][0]);return 0;
+}'''
         self.check_run(self.ail_build('grid_value_copy',program),'2\n1\n1\n')
     def test_row_replacement_uses_handles_and_value_before_index(self):
-        program=GRID+'import sys\n\ndef mark(value: int) -> int:\n    print(value)\n    return value\n\ndef main() -> int:\n    g = grid(2, 2)\n    g[mark(1)] = g[mark(0)]\n    row = g[0]\n    row.append(77)\n    print(g[1][-1])\n    g[-1] = []\n    print(len(g[1]))\n    print(len(row))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        program=GRID+'''fn mark(value:int)->int {print(value);return value;}
+fn main()->int {
+ let g=grid(2,2);
+ g[mark(1)]=g[mark(0)];
+ let row=g[0];row.append(77);print(g[1][-1]);
+ g[-1]=[];print(len(g[1]));print(len(row));return 0;
+}'''
         self.check_run(self.ail_build('grid_row_replace',program),'0\n1\n77\n0\n3\n')
     def test_internal_grid_sizes_refused_before_allocation_or_access(self):
         path=support.ROOT/'python/pkg-v12/cruntime.py'
@@ -71,7 +101,17 @@ class GridCallTests(unittest.TestCase):
                 self.assertEqual(result.stdout,b'')
                 self.assertIn(b'grid size' if case<7 else b'pool too large',result.stderr)
     def test_reserved_loop_bound_once_and_exception_preserves_prefix(self):
-        program='import sys\n\ndef limit() -> int:\n    print(\'limit\')\n    return 17\n\ndef item(value: int) -> int:\n    print(value)\n    if value == 2:\n        raise ValueError\n    return value\n\ndef main() -> int:\n    row = []\n    grid = []\n    for index in range(limit()):\n        row.append(index)\n    grid.append(row)\n    print(len(grid[0]))\n    print(grid[0][-1])\n    partial = []\n    results = []\n    try:\n        for index in range(4):\n            partial.append(item(index))\n    except ValueError:\n        print(\'caught\')\n    results.append(partial)\n    print(len(results[0]))\n    print(results[0][-1])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        program='''fn limit()->int {print("limit");return 17;}
+fn item(value:int)->int {print(value);if value==2 {raise ValueError;}return value;}
+fn main()->int {
+ let row=[];let grid=[];
+ for index in range(limit()) {row.append(index);}
+ grid.append(row);print(len(grid[0]));print(grid[0][-1]);
+ let partial=[];let results=[];
+ try {for index in range(4) {partial.append(item(index));}}
+ except ValueError {print("caught");}
+ results.append(partial);print(len(results[0]));print(results[0][-1]);return 0;
+}'''
         self.check_run(self.ail_build('reserve_effects',program),'limit\n17\n16\n0\n1\n2\ncaught\n2\n1\n')
     def test_optional_reservation_failure_errno_and_capacity_limits(self):
         spec=importlib.util.spec_from_file_location('reserve_runtime',support.ROOT/'python/pkg-v12/cruntime.py')
@@ -127,12 +167,12 @@ class GridExtendTypeTests(unittest.TestCase):
             from pyfront import Unsupported
             for statement in ('g.extend([1]);','let flat=[1,2];g.extend(flat);'):
                 with self.subTest(statement=statement),self.assertRaises(Unsupported) as caught:
-                    to_c(GRID+'fn main()->int {let g=grid(2,2);'+statement+'return 0;}',name='run',strict=True)
+                    to_c(translate(GRID+'fn main()->int {let g=grid(2,2);'+statement+'return 0;}'),name='run',strict=True)
                 self.assertFalse(hasattr(caught.exception,'type_details'))
                 self.assertIn("has no method 'extend'",str(caught.exception))
             for statement in ('g.extend([[1,2]]);','g.extend([[1],[2,3]]);','g.extend([[(1,2)]]);','g.extend([]);','let rows=grid(1,2);g.extend(rows);','let rows=grid(1,3);g.extend(rows);','g.extend(g);'):
                 with self.subTest(statement=statement),self.assertRaises(Unsupported):
-                    to_c(GRID+'fn main()->int {let g=grid(2,2);'+statement+'return 0;}',name='run',strict=True)
+                    to_c(translate(GRID+'fn main()->int {let g=grid(2,2);'+statement+'return 0;}'),name='run',strict=True)
         finally:
             sys.path.pop(0)
 
@@ -144,14 +184,14 @@ class GridExtendTypeTests(unittest.TestCase):
             from pyfunc import to_c
             for statement in ('g.append(g[0]);','g.append([]);','let row=g[0];g[1]=row;','g=grid(0,2);'):
                 with self.subTest(statement=statement):
-                    to_c(GRID+'fn main()->int {let g=grid(2,2);'+statement+'return 0;}',name='run',strict=True)
+                    to_c(translate(GRID+'fn main()->int {let g=grid(2,2);'+statement+'return 0;}'),name='run',strict=True)
             from pyfront import Unsupported
             with self.assertRaises(Unsupported):
-                to_c('import sys\n\ndef main() -> int:\n    records = [(1, 2)]\n    records.extend([1])\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n',name='run',strict=True)
+                to_c(translate('fn main()->int {let records=[(1,2)];records.extend([1]);return 0;}'),name='run',strict=True)
             for kind,literal in [('int','[1]'),('float','[1.5]'),('str','["text"]'),('bytes','[b"data"]')]:
                 with self.subTest(kind=kind):
                     text='fn values()->list['+kind+'] {return '+literal+';} fn main()->int {let items='+literal+';items.extend(values());return 0;}'
-                    to_c(text,name='run',strict=True)
+                    to_c(translate(text),name='run',strict=True)
         finally:
             sys.path.pop(0)
 

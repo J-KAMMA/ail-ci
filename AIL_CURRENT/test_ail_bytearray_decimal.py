@@ -9,10 +9,59 @@ import test_ail_c_objects as support
 from test_ail_bytearray_receiver import oracle
 from test_ail_map_fields import build
 
-SOURCE = "from ail import write_stdout_bytes\nclass Box:\n\n    def __init__(self, data: bytearray, trace: str, calls: int):\n        self.data = data\n        self.trace = trace\n        self.calls = calls\n\ndef receiver(box: Box) -> bytearray:\n    box.trace += 'R'\n    return box.data\n\ndef argument(box: Box, action: int) -> int:\n    box.trace += 'A'\n    box.calls += 1\n    if action == 0:\n        box.data = bytearray(b'new')\n    elif action == 1:\n        box.data.clear()\n    else:\n        raise ValueError\n    return -9223372036854775808\n\ndef run(n: int) -> int:\n    output = bytearray()\n    values: list[int] = [0, 1, -1, 9, -9, 10, -10, 99, -99, 100, -100, 999, -999, 1000, -1000, 999999999999999999, -999999999999999999, 1000000000000000000, -1000000000000000000, 9223372036854775807, -9223372036854775808]\n    for value in values:\n        output.extend(str(value).encode(encoding='UTF_8', errors='strict'))\n        output.append(44)\n    power: int = 1\n    for digit in range(19):\n        output.extend(str(power - 1).encode())\n        output.append(44)\n        output.extend(str(power).encode())\n        output.append(44)\n        output.extend(str(-power).encode())\n        output.append(44)\n        if digit < 18:\n            power *= 10\n    for i in range(n):\n        value: int = i * 1000003 - 123456789\n        output.extend(str(value).encode('utf8', 'strict'))\n        output.append(44)\n    write_stdout_bytes(bytes(output))\n    for action in range(3):\n        box = Box(bytearray(b'old'), '', 0)\n        held = box.data\n        try:\n            receiver(box).extend(str(argument(box, action)).encode())\n        except ValueError:\n            write_stdout_bytes(b'caught')\n        write_stdout_bytes(box.trace.encode())\n        write_stdout_bytes(str(box.calls).encode())\n        write_stdout_bytes(bytes(held))\n        write_stdout_bytes(bytes(box.data))\n    write_stdout_bytes(b':continued')\n    return 0\n"
-SHADOW = "from ail import write_stdout_bytes\ndef str(value: int) -> str:\n    return 'shadow'\n\ndef run(n: int) -> int:\n    output = bytearray()\n    output.extend(str(n).encode())\n    write_stdout_bytes(bytes(output))\n    return 0\n"
-CALLABLE = "from ail import write_stdout_bytes\ndef format(value: int) -> str:\n    return 'callable'\n\ndef run(n: int) -> int:\n    str: Callable[[int], str] = format\n    output = bytearray()\n    output.extend(str(n).encode())\n    write_stdout_bytes(bytes(output))\n    return 0\n"
-FLOAT = 'from ail import write_stdout_bytes\ndef run(n: int) -> int:\n    output = bytearray()\n    output.extend(str(1.5).encode())\n    write_stdout_bytes(bytes(output))\n    return 0\n'
+SOURCE = r'''
+struct Box { data:bytearray; trace:str; calls:int; }
+fn receiver(box:Box)->bytearray { box.trace+="R"; return box.data; }
+fn argument(box:Box,action:int)->int {
+ box.trace+="A"; box.calls+=1;
+ if action==0 { box.data=bytearray(b"new"); }
+ elif action==1 { box.data.clear(); }
+ else { raise ValueError; }
+ return -9223372036854775808;
+}
+fn run(n:int)->int {
+ let output=bytearray();
+ let values:list[int]=[0,1,-1,9,-9,10,-10,99,-99,100,-100,999,-999,
+  1000,-1000,999999999999999999,-999999999999999999,
+  1000000000000000000,-1000000000000000000,
+  9223372036854775807,-9223372036854775808];
+ for value in values { output.extend(str(value).encode(encoding="UTF_8",errors="strict")); output.append(44); }
+ let power:int=1;
+ for digit in range(19) {
+  output.extend(str(power-1).encode()); output.append(44);
+  output.extend(str(power).encode()); output.append(44);
+  output.extend(str(-power).encode()); output.append(44);
+  if digit<18 { power*=10; }
+ }
+ for i in range(n) {
+  let value:int=i*1000003-123456789;
+  output.extend(str(value).encode("utf8","strict")); output.append(44);
+ }
+ write_stdout_bytes(bytes(output));
+ for action in range(3) {
+  let box=Box(bytearray(b"old"),"",0); let held=box.data;
+  try { receiver(box).extend(str(argument(box,action)).encode()); }
+  except ValueError { write_stdout_bytes(b"caught"); }
+  write_stdout_bytes(box.trace.encode()); write_stdout_bytes(str(box.calls).encode());
+  write_stdout_bytes(bytes(held)); write_stdout_bytes(bytes(box.data));
+ }
+ write_stdout_bytes(b":continued"); return 0;
+}
+'''
+SHADOW = r'''
+fn str(value:int)->str { return "shadow"; }
+fn run(n:int)->int { let output=bytearray(); output.extend(str(n).encode()); write_stdout_bytes(bytes(output)); return 0; }
+'''
+CALLABLE = r'''
+fn format(value:int)->str { return "callable"; }
+fn run(n:int)->int {
+ let str:Callable[[int],str]=format; let output=bytearray();
+ output.extend(str(n).encode()); write_stdout_bytes(bytes(output)); return 0;
+}
+'''
+FLOAT = r'''
+fn run(n:int)->int { let output=bytearray(); output.extend(str(1.5).encode()); write_stdout_bytes(bytes(output)); return 0; }
+'''
 
 class BytearrayDecimalTests(unittest.TestCase):
     setUp=support.CObjectTests.setUp
@@ -31,7 +80,7 @@ class BytearrayDecimalTests(unittest.TestCase):
                       f'sha256={hashlib.sha256(result.stdout).hexdigest()}/{hashlib.sha256(expected).hexdigest()}')
 
     def test_decimal_boundaries_many_values_receiver_effect_order_and_continuation(self):
-        executable=build(self,'decimal',SOURCE+'import sys\n\ndef main() -> int:\n    return run(int(sys.argv[1]))\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
+        executable=build(self,'decimal',SOURCE+'fn main()->int { return run(int(sys.argv[1])); }')
         for n in (0,1,8193):
             with self.subTest(n=n): self.compare(executable,SOURCE,n)
 
@@ -48,7 +97,7 @@ class BytearrayDecimalTests(unittest.TestCase):
                 for method in (namespace['_bytearray_method'],original):
                     pyfunc._bytearray_method=method
                     try:
-                        pyfunc.to_c(source,name='run',strict=True)
+                        pyfunc.to_c(translate(source,module=True,imports=[]),name='run',strict=True)
                     except pyfunc.Unsupported as error:
                         messages.append(str(error))
                     else:
@@ -64,7 +113,7 @@ class BytearrayDecimalTests(unittest.TestCase):
         for name,source in (('shadow',SHADOW),('float',FLOAT)):
             with self.subTest(name=name):
                 if not self.supported_by_baseline_and_candidate(source): continue
-                executable=build(self,name,source+'import sys\n\ndef main() -> int:\n    return run(int(sys.argv[1]))\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
+                executable=build(self,name,source+'fn main()->int { return run(int(sys.argv[1])); }')
                 self.compare(executable,source,17)
 
     def test_strict_codec_errors(self):
@@ -81,13 +130,13 @@ class BytearrayDecimalTests(unittest.TestCase):
             for source in sources:
                 with self.subTest(source=source):
                     with self.assertRaises(Unsupported):
-                        to_c(source,name='run',strict=True)
+                        to_c(translate(source,module=True,imports=[]),name='run',strict=True)
         finally:
             sys.path.pop(0)
 
     def test_callable_str_shadow_or_equal_existing_refusal(self):
         if not self.supported_by_baseline_and_candidate(CALLABLE): return
-        executable=build(self,'callable',CALLABLE+'import sys\n\ndef main() -> int:\n    return run(int(sys.argv[1]))\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
+        executable=build(self,'callable',CALLABLE+'fn main()->int { return run(int(sys.argv[1])); }')
         self.compare(executable,CALLABLE,17)
 
 if __name__=='__main__':

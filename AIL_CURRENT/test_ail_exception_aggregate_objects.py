@@ -10,10 +10,47 @@ import unittest
 from ail_syntax import translate
 import test_ail_c_objects as support
 
-PROVIDER = "class FaultBox:\n\n    def __init__(self, fault: exception, faults: list[exception]):\n        self.fault = fault\n        self.faults = faults\n\nclass NestedFault:\n\n    def __init__(self, box: FaultBox):\n        self.box = box\n\ndef make(text: str) -> exception:\n    return ValueError(text)\n\ndef boxed(fault: exception, faults: list[exception]) -> FaultBox:\n    return FaultBox(fault, faults)\n\ndef nested(box: FaultBox) -> NestedFault:\n    return NestedFault(box)\n\ndef keep(value: exception) -> exception:\n    return value\n\ndef listed(values: list[exception]) -> list[exception]:\n    return values\n\ndef caught(text: str) -> FaultBox:\n    try:\n        raise make(text)\n    except ValueError as e:\n        return boxed(e, [e])\n    finally:\n        print('finally', text)\n    return boxed(RuntimeError(), [])\n"
-RELAY = 'def replace(box: FaultBox, value: exception) -> None:\n    box.fault = value\n\ndef replace_list(box: FaultBox, values: list[exception]) -> None:\n    box.faults = values\n\ndef message(owner: NestedFault) -> str:\n    return owner.box.fault.message\n\ndef tail(values: list[exception]) -> exception:\n    return values.pop()\n'
-ENTRY = "def side(values: list[exception], text: str) -> exception:\n    value = make(text)\n    values.append(value)\n    print('side', text)\n    return value\n\ndef run(n: int) -> None:\n    values: list[exception] = []\n    box = boxed(side(values, 'first'), listed(values))\n    owner = nested(box)\n    alias = box\n    held = box.fault\n    copied = message(owner)\n    box.fault = box.fault\n    box.faults = box.faults\n    replace(alias, make('replacement'))\n    replace_list(box, [])\n    print(copied, held.kind, held.message, message(owner), len(values), len(box.faults))\n    for i in range(n):\n        values.append(make('日本😀' + str(i)))\n    if n > 0:\n        print(values[-1].message)\n    popped = tail(values)\n    values.clear()\n    print(popped.message, len(values))\n    values.append(popped)\n    values[0] = values[0]\n    values[-1] = held\n    print(values[0].message)\n    returned = caught('escaped' + str(n))\n    escaped = returned.faults[0]\n    text = escaped.message\n    returned.fault = make('new')\n    returned.faults.clear()\n    returned = boxed(make('gone'), [])\n    for i in range(257):\n        churn = caught('churn' + str(i))\n    print(text, escaped.kind, escaped.message, copied)\n"
-CLIENT='import sys\n\ndef main() -> int:\n    run(int(sys.argv[1]))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+PROVIDER = '''struct FaultBox { fault:exception; faults:list[exception]; }
+struct NestedFault { box:FaultBox; }
+fn make(text:str)->exception { return ValueError(text); }
+fn boxed(fault:exception,faults:list[exception])->FaultBox { return FaultBox(fault,faults); }
+fn nested(box:FaultBox)->NestedFault { return NestedFault(box); }
+fn keep(value:exception)->exception { return value; }
+fn listed(values:list[exception])->list[exception] { return values; }
+fn caught(text:str)->FaultBox {
+ try { raise make(text); } except ValueError as e { return boxed(e,[e]); }
+ finally { print("finally",text); }
+ return boxed(RuntimeError(),[]);
+}
+'''
+RELAY = '''fn replace(box:FaultBox,value:exception)->void { box.fault=value; }
+fn replace_list(box:FaultBox,values:list[exception])->void { box.faults=values; }
+fn message(owner:NestedFault)->str { return owner.box.fault.message; }
+fn tail(values:list[exception])->exception { return values.pop(); }
+'''
+ENTRY = '''fn side(values:list[exception],text:str)->exception {
+ let value=make(text); values.append(value); print("side",text); return value;
+}
+fn run(n:int)->void {
+ let values:list[exception]=[];
+ let box=boxed(side(values,"first"),listed(values));
+ let owner=nested(box); let alias=box; let held=box.fault;
+ let copied=message(owner); box.fault=box.fault; box.faults=box.faults;
+ replace(alias,make("replacement")); replace_list(box,[]);
+ print(copied,held.kind,held.message,message(owner),len(values),len(box.faults));
+ for i in range(n) { values.append(make("日本😀"+str(i))); }
+ if n>0 { print(values[-1].message); }
+ let popped=tail(values); values.clear(); print(popped.message,len(values));
+ values.append(popped); values[0]=values[0]; values[-1]=held;
+ print(values[0].message);
+ let returned=caught("escaped"+str(n)); let escaped=returned.faults[0];
+ let text=escaped.message; returned.fault=make("new"); returned.faults.clear();
+ returned=boxed(make("gone"),[]);
+ for i in range(257) { let churn=caught("churn"+str(i)); }
+ print(text,escaped.kind,escaped.message,copied);
+}
+'''
+CLIENT='fn main()->int { run(int(sys.argv[1])); return 0; }'
 
 
 def expected(n):
@@ -47,7 +84,7 @@ class ExceptionAggregateObjectTests(unittest.TestCase):
         try:
             import module_object as module
             specs={}
-            _,exports,_=module.typed_module(PROVIDER+RELAY,
+            _,exports,_=module.typed_module(translate(PROVIDER+RELAY,module=True,imports=[]),
                                            integer_lists=True,structs=specs)
             self.assertEqual(module.ABI_VERSION,11)
             self.assertEqual(specs['FaultBox']['fields'],[['fault','exception'],['faults','handle_list:exception']])
@@ -105,7 +142,19 @@ class ExceptionAggregateObjectTests(unittest.TestCase):
 
     def test_object_list_empty_index_width_and_type_boundaries(self):
         provider=self.ail_build('bounds_provider',PROVIDER,library=True)
-        source='import sys\n\ndef main() -> int:\n    values: list[exception] = []\n    try:\n        values.pop()\n    except IndexError:\n        print(\'empty pop\')\n    try:\n        print(values[0].message)\n    except IndexError:\n        print(\'empty get\')\n    try:\n        values[0] = make(\'bad\')\n    except IndexError:\n        print(\'empty store\')\n    values.append(make(\'held\'))\n    for index in [-2, 1, 9223372036854775807]:\n        try:\n            print(values[index].message)\n        except IndexError:\n            print(\'get bounds\')\n        try:\n            values[index] = make(\'bad\')\n        except IndexError:\n            print(\'store bounds\')\n    print(values[-1].message)\n    values.clear()\n    values.clear()\n    print(len(values))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+        source='''fn main()->int {
+ let values:list[exception]=[];
+ try { values.pop(); } except IndexError { print("empty pop"); }
+ try { print(values[0].message); } except IndexError { print("empty get"); }
+ try { values[0]=make("bad"); } except IndexError { print("empty store"); }
+ values.append(make("held"));
+ for index in [-2,1,9223372036854775807] {
+  try { print(values[index].message); } except IndexError { print("get bounds"); }
+  try { values[index]=make("bad"); } except IndexError { print("store bounds"); }
+ }
+ print(values[-1].message); values.clear(); values.clear(); print(len(values));
+ return 0;
+}'''
         exe=self.ail_build('bounds',source,provider)
         result=subprocess.run([str(exe)],capture_output=True,timeout=30)
         self.assertEqual((result.returncode,result.stderr),(0,b''))

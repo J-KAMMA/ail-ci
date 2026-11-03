@@ -26,7 +26,79 @@ from ail_testenv import ASAN_DETECT_LEAKS
 
 ROOT = Path(__file__).resolve().parent
 
-SWAPS = 'import sys\n\nclass P:\n\n    def __init__(self, x: int, name: str, xs: list[int]):\n        self.x = x\n        self.name = name\n        self.xs = xs\n\nclass S:\n\n    def __init__(self, a: list[int], b: list[int], n: int, m: int):\n        self.a = a\n        self.b = b\n        self.n = n\n        self.m = m\n\ndef show(xs: list[int]) -> str:\n    return \',\'.join([str(v) for v in xs])\n\ndef showf(xs: list[float]) -> str:\n    return \',\'.join([str(v) for v in xs])\n\ndef evolve(n: int) -> int:\n    cur = [0 for i in range(n)]\n    nxt = [0 for i in range(n)]\n    for g in range(5):\n        for x in range(n):\n            nxt[x] = cur[x] + x\n        cur, nxt = (nxt, cur)\n    tmp = cur\n    cur = nxt\n    nxt = tmp\n    return cur[n - 1] + nxt[1]\n\ndef main() -> int:\n    print(evolve(6))\n    a: list[int] = [1, 2, 3]\n    b = [4, 5]\n    c: list[int] = [6]\n    for g in range(4):\n        a, b = (b, a)\n        a.append(g)\n        a, b, c = (b, c, a)\n    print(show(a), show(b), show(c))\n    fa: list[float] = [1.5]\n    fb: list[float] = [2.5, 3.5]\n    for g in range(3):\n        fa, fb = (fb, fa)\n        fa.append(0.25)\n    print(showf(fa), showf(fb))\n    sa: list[str] = [\'x\', \'y\']\n    sb: list[str] = [\'z\']\n    for g in range(3):\n        sa, sb = (sb, sa)\n        sa.append(\'w\' + str(g))\n    print(\',\'.join(sa), \',\'.join(sb))\n    ba: list[bytes] = [b\'p\']\n    bb: list[bytes] = [b\'q\', b\'r\']\n    for g in range(3):\n        ba, bb = (bb, ba)\n        ba.append(b\'s\')\n    print(len(ba), len(bb), ba[0].decode(), bb[0].decode())\n    x = b\'hi\'\n    y = b\'yo\'\n    for g in range(3):\n        x, y = (y, x + b\'!\')\n    print(x.decode(), y.decode())\n    s = \'s\'\n    t = \'t\'\n    for g in range(3):\n        s, t = (t, s + str(g))\n    print(s, t)\n    d: dict[str, int] = {\'k\': 1}\n    e: dict[str, int] = {}\n    di: dict[int, int] = {1: 2}\n    dj: dict[int, int] = {}\n    st: set[int] = {1, 2}\n    su: set[int] = set()\n    for g in range(3):\n        d, e = (e, d)\n        d[\'n\' + str(g)] = g\n        di, dj = (dj, di)\n        di[g] = g\n        st, su = (su, st)\n        st.add(10 + g)\n    print(len(d), len(e), d[\'n2\'], len(di), len(dj), len(st), len(su))\n    p = P(1, \'a\', [1])\n    q = P(2, \'b\', [2, 3])\n    ps: list[P] = [p]\n    qs: list[P] = [q, p]\n    for g in range(3):\n        p, q = (q, p)\n        p.xs.append(g)\n        ps, qs = (qs, ps)\n        ps.append(P(g, \'c\', []))\n    print(p.x, p.name, show(p.xs), q.x, show(q.xs), len(ps), len(qs), ps[0].x)\n    fib0: list[int] = [0]\n    fib1: list[int] = [1]\n    for g in range(4):\n        fib0, fib1 = (fib1, fib0 + fib1)\n    print(show(fib0), show(fib1))\n    w = S([1], [2, 3], 1, 2)\n    for g in range(3):\n        w.a, w.b = (w.b, w.a)\n        w.a.append(g)\n    w.n, w.m = (w.m, w.n)\n    loose: list[int] = [7]\n    loose, w.a = (w.a, loose)\n    print(show(w.a), show(w.b), w.n, w.m, show(loose))\n    m = 0\n    k = 1\n    for i in range(10):\n        m, k = (k, m + k)\n    v, z = ([i * i for i in range(4)], \'z\')\n    print(m, k, show(v), z)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+SWAPS = """
+struct P { x: int; name: str; xs: list[int]; }
+struct S { a: list[int]; b: list[int]; n: int; m: int; }
+fn show(xs: list[int]) -> str { return ",".join([str(v) for v in xs]); }
+fn showf(xs: list[float]) -> str { return ",".join([str(v) for v in xs]); }
+fn evolve(n: int) -> int {
+    let cur = [0 for i in range(n)];
+    let nxt = [0 for i in range(n)];
+    for g in range(5) {
+        for x in range(n) { nxt[x] = cur[x] + x; }
+        cur, nxt = nxt, cur;
+    }
+    let tmp = cur; cur = nxt; nxt = tmp;
+    return cur[n - 1] + nxt[1];
+}
+fn main() {
+    print(evolve(6));
+    let a: list[int] = [1, 2, 3];
+    let b = [4, 5];
+    let c: list[int] = [6];
+    for g in range(4) { a, b = b, a; a.append(g); a, b, c = b, c, a; }
+    print(show(a), show(b), show(c));
+    let fa: list[float] = [1.5];
+    let fb: list[float] = [2.5, 3.5];
+    for g in range(3) { fa, fb = fb, fa; fa.append(0.25); }
+    print(showf(fa), showf(fb));
+    let sa: list[str] = ["x", "y"];
+    let sb: list[str] = ["z"];
+    for g in range(3) { sa, sb = sb, sa; sa.append("w" + str(g)); }
+    print(",".join(sa), ",".join(sb));
+    let ba: list[bytes] = [b"p"];
+    let bb: list[bytes] = [b"q", b"r"];
+    for g in range(3) { ba, bb = bb, ba; ba.append(b"s"); }
+    print(len(ba), len(bb), ba[0].decode(), bb[0].decode());
+    let x = b"hi";
+    let y = b"yo";
+    for g in range(3) { x, y = y, x + b"!"; }
+    print(x.decode(), y.decode());
+    let s = "s";
+    let t = "t";
+    for g in range(3) { s, t = t, s + str(g); }
+    print(s, t);
+    let d: dict[str, int] = {"k": 1};
+    let e: dict[str, int] = {};
+    let di: dict[int, int] = {1: 2};
+    let dj: dict[int, int] = {};
+    let st: set[int] = {1, 2};
+    let su: set[int] = set();
+    for g in range(3) { d, e = e, d; d["n" + str(g)] = g; di, dj = dj, di; di[g] = g; st, su = su, st; st.add(10 + g); }
+    print(len(d), len(e), d["n2"], len(di), len(dj), len(st), len(su));
+    let p = P(1, "a", [1]);
+    let q = P(2, "b", [2, 3]);
+    let ps: list[P] = [p];
+    let qs: list[P] = [q, p];
+    for g in range(3) { p, q = q, p; p.xs.append(g); ps, qs = qs, ps; ps.append(P(g, "c", [])); }
+    print(p.x, p.name, show(p.xs), q.x, show(q.xs), len(ps), len(qs), ps[0].x);
+    let fib0: list[int] = [0];
+    let fib1: list[int] = [1];
+    for g in range(4) { fib0, fib1 = fib1, fib0 + fib1; }
+    print(show(fib0), show(fib1));
+    let w = S([1], [2, 3], 1, 2);
+    for g in range(3) { w.a, w.b = w.b, w.a; w.a.append(g); }
+    w.n, w.m = w.m, w.n;
+    let loose: list[int] = [7];
+    loose, w.a = w.a, loose;
+    print(show(w.a), show(w.b), w.n, w.m, show(loose));
+    let m = 0;
+    let k = 1;
+    for i in range(10) { m, k = k, m + k; }
+    v, z = [i * i for i in range(4)], "z";
+    print(m, k, show(v), z);
+}
+"""
 
 SWAPS_PY = """
 class P:
@@ -92,7 +164,25 @@ v, z = [i * i for i in range(4)], "z"
 print(m, k, show(v), z)
 """
 
-TRY_SWAP = 'import sys\n\ndef main() -> int:\n    a: list[int] = [1, 2]\n    b = [5]\n    d: dict[str, int] = {\'x\': 1}\n    e: dict[str, int] = {}\n    for g in range(3):\n        try:\n            a, b = (b, a)\n            d, e = (e, d)\n            a.append(int(\'7\') + g)\n            if g == 1:\n                z = int(\'q\')\n                print(z)\n        except ValueError as err:\n            print(\'bad\', g)\n    print(len(a), len(b), a[0], len(d), len(e))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+TRY_SWAP = """
+fn main() {
+    let a: list[int] = [1, 2];
+    let b = [5];
+    let d: dict[str, int] = {"x": 1};
+    let e: dict[str, int] = {};
+    for g in range(3) {
+        try {
+            a, b = b, a;
+            d, e = e, d;
+            a.append(int("7") + g);
+            if g == 1 { let z = int("q"); print(z); }
+        } except ValueError as err {
+            print("bad", g);
+        }
+    }
+    print(len(a), len(b), a[0], len(d), len(e));
+}
+"""
 
 TRY_SWAP_PY = """
 a = [1, 2]; b = [5]; d = {"x": 1}; e = {}
@@ -108,7 +198,29 @@ for g in range(3):
 print(len(a), len(b), a[0], len(d), len(e))
 """
 
-REBIND = 'import sys\n\ndef count(e: int) -> int:\n    try:\n        v = int(\'x\')\n        return v\n    except ValueError as e:\n        print(\'handler\')\n    return 0\n\ndef main() -> int:\n    nums = [3, 1, 2]\n    words = \'a bb ccc\'.split()\n    total = 0\n    for x in nums:\n        total += x\n    for x in words:\n        print(x, len(x))\n    for i in range(2):\n        print(i)\n    for i in words:\n        print(i + \'!\')\n    fl = [0.5, 1.5]\n    for x in fl:\n        print(x * 2.0)\n    e = 5\n    for e2 in nums:\n        e = e + e2\n    print(e, total, count(4))\n    try:\n        y = int(\'q\')\n        print(y)\n    except ValueError as e:\n        print(\'bad\')\n    e = 3\n    print(e)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+REBIND = """
+fn count(e: int) -> int {
+    try { let v = int("x"); return v; } except ValueError as e { print("handler"); }
+    return 0;
+}
+fn main() {
+    let nums = [3, 1, 2];
+    let words = "a bb ccc".split();
+    let total = 0;
+    for x in nums { total += x; }
+    for x in words { print(x, len(x)); }
+    for i in range(2) { print(i); }
+    for i in words { print(i + "!"); }
+    let fl = [0.5, 1.5];
+    for x in fl { print(x * 2.0); }
+    let e = 5;
+    for e2 in nums { e = e + e2; }
+    print(e, total, count(4));
+    try { let y = int("q"); print(y); } except ValueError as e { print("bad"); }
+    e = 3;
+    print(e);
+}
+"""
 
 REBIND_PY = """
 def count(e):
@@ -140,11 +252,14 @@ print(e)
 # (source, location line, words the refusal must contain)
 REFUSED = [
     # Python unbinds `e` after the handler, so the later read would fail there
-    ('import sys\n\ndef main() -> int:\n    e = 5\n    try:\n        x = int(\'q\')\n        print(x)\n    except ValueError as e:\n        print(1)\n    print(e)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 3, ['print(e)', 'after this handler', 'as e2']),
+    ('fn main() {\n    let e = 5;\n    try { let x = int("q"); print(x); } except ValueError as e { print(1); }\n'
+     '    print(e);\n}\n', 3, ['print(e)', 'after this handler', 'as e2']),
     # Python keeps the second loop's last value in `x`; the first loop has to be renamed
-    ('import sys\n\ndef main() -> int:\n    w = \'a b\'.split()\n    for x in [1, 2]:\n        print(x)\n    for x in w:\n        print(x)\n    print(x)\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 3, ['print(x)', 'after this loop', 'for x2 in']),
-    ('import sys\n\ndef main() -> int:\n    b = b\'ab\'\n    print(str(b))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 3, ['b.decode()']),
-    ('import sys\n\ndef main() -> int:\n    a: dict[str, int] = {\'k\': 1}\n    b: dict[str, int] = {}\n    a, b = (b, {\'z\': 2})\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n', 4, ['swap or rotate']),
+    ('fn main() {\n    let w = "a b".split();\n    for x in [1, 2] { print(x); }\n'
+     '    for x in w { print(x); }\n    print(x);\n}\n', 3, ['print(x)', 'after this loop', 'for x2 in']),
+    ('fn main() {\n    let b = b"ab";\n    print(str(b));\n}\n', 3, ['b.decode()']),
+    ('fn main() {\n    let a: dict[str, int] = {"k": 1};\n    let b: dict[str, int] = {};\n'
+     '    a, b = b, {"z": 2};\n}\n', 4, ['swap or rotate']),
 ]
 
 
@@ -223,7 +338,9 @@ class SwapTests(unittest.TestCase):
                     self.assertLess(len(message), 400, message)
 
     def test_unrelated_refusal_carries_no_sort_prefix(self):
-        text = ('import sys\n\ndef main() -> int:\n    tot = [3, 1, 2]\n    nm = [\'a\', \'b\', \'c\']\n    o: list[int] = [0, 1, 2]\n    o.sort(key=lambda i: (-tot[i], nm[i]))\n    b = b\'xy\'\n    print(o[0], str(b))\n    return 0\n\nif __name__ == "__main__":\n    sys.exit(main())\n')
+        text = ('fn main() {\n    let tot = [3, 1, 2];\n    let nm = ["a", "b", "c"];\n'
+                '    let o: list[int] = [0, 1, 2];\n    o.sort(key=lambda i: (-tot[i], nm[i]));\n'
+                '    let b = b"xy";\n    print(o[0], str(b));\n}\n')
         with tempfile.TemporaryDirectory() as directory:
             built, _, _ = build(directory, text)
             message = built.stdout + built.stderr
