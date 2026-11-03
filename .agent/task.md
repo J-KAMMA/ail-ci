@@ -1,3 +1,70 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode/deepseek-v4.1-flash-free]
+**What the change really does.** Re-lands the rbpyreach1 front-end work on integ (Python-surface features: `sys.argv` as str, Optional helper return inference, dict-of-lists lowering, owned unannotated bytes helpers, bytearray-as-bytes-view args, loop-body nested defs, `m.groups()` loops, script entry after generated helpers), plus the cycle guard, the standalone-only `setdefault(...).append(...)` restriction, and the new `ast.Expr`/call span equality check that leaves parenthesized forms untouched.
+
+**Checks run.** `date` at start 06:34; `test_ail_pytyped_reach` + `test_ail_safetynet` pass (`0 failed`); `update_manifest.py --check` exits 0; all ten `lab/compare/src/*/main.ail` codegen hashes and the five codegen pins are identical to `work`; `echo_pack` is `typed`, all 57 cases plus perf correct. Probes `p_dl_paren`, `p_dl_paren_if`, `r_dl_bool`, `r_dl_float`, `r_dl_kind_str`, `r_dl_kind_none`, `r_dl_mixed`, `r_cycle_attr`, `r_alias_guard`, `r_ba_slice`, `r_ba_file`, `r_ba_realloc` match CPython on HEAD; the two below do not and match on `/tmp/base`.
+
+**Report claims.** Verified: span-equality paren fix; committed paren probes; manifest check; echo_pack typed and correct; .ail C/pins unchanged. Unverified: "all 11 gate modules" (only the two required modules were run), and the icount ratio (`instructions: None`; wall ratio is 4608/1155 = 3.99x, not the stated 2.82x icount).
+
+**Unverified.** Other nine lab `.py` tasks, non-paren dict shapes beyond the probes above, async/class nesting, speed in instruction counts.
+
+**Pre-existing.** None found for the probes that differ.
+
+VERDICT: FIX
+1. `lower_dict_of_lists` skips nested `def` bodies when collecting uses of `d`, so a nested helper's `d.get(k)` is not lowered while `d` is rewritten into the slot dict; it then subscripts an int and crashes. Probe `r_dl_nested_read.py`:
+```
+def main():
+    d = {}
+    def show():
+        row = d.get("k")
+        if row:
+            print("inner", row[0])
+    d.setdefault("k", []).append(7)
+    show()
+    row = d.get("k")
+    if row:
+        print("outer", row[0])
+main()
+```
+Expected (CPython, and both builds on `/tmp/base`): `inner 7\nouter 7\n`, exit 0. Actual (default and `AIL_UNIFIED_FORCE=1`): empty stdout, exit 1, `TypeError: 'int' object is not subscriptable`.
+2. Passing a bytearray to a `bytes` parameter returns a read-only view/copy, but CPython returns the bytearray object itself, so later mutation is visible through the result. Probe `r_ba_store.py`:
+```
+import sys
+
+def keep(data: bytes) -> bytes:
+    return data
+
+def main():
+    a = bytearray(b"abc")
+    x = keep(a)
+    box = [x]
+    a[0] = 90
+    a.extend(b"def")
+    sys.stdout.buffer.write(box[0]); sys.stdout.buffer.write(b"|")
+    sys.stdout.buffer.write(x); sys.stdout.buffer.write(b"\n")
+main()
+```
+Expected (CPython, and both builds on `/tmp/base`): `Zbcdef|Zbcdef`, exit 0. Actual (default build): `abc|abc`, exit 0. (`r_ba_alias.py` shows the same: expected `ZBCDE\xe7`, actual `ABCDE`.)
+[cost $0.0000, opencode tokens {"total": 1261290, "input": 46474, "output": 5375, "reasoning": 16481, "cache.write": 0, "cache.read": 1192960}]
+    tool time: bash 10.8 min
+        218s bash   date; cd /home/runner/work/ail-ci/ail-ci && timeout 900 python3 lab/compare/run_task.py --task echo_pack --lan
+        182s bash   date; cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 900 python3 ../tools/par_check.py -j 2 test_ai
+         45s bash   cd /home/runner/work/ail-ci/ail-ci && for p in r_alias_guard r_ba_alias r_ba_file r_ba_slice r_cycle_attr r_dl
+         45s bash   cd /tmp/base && for p in r_ba_alias r_ba_file r_ba_slice; do echo "######## $p"; timeout 300 bash ~/tools/cmp.
+         44s bash   cd /home/runner/work/ail-ci/ail-ci && args=(); for f in lab/compare/src/*/main.ail; do args+=(--source "$(cat 
+         43s bash   cd /home/runner/work/ail-ci/ail-ci && args=(); for f in lab/compare/src/*/main.ail; do args+=(--source "$(cat 
+         30s bash   cd /home/runner/work/ail-ci/ail-ci && grep -rn "_collect_direct_nested_defs" --include=*.py . | head; cd /tmp/
+         21s bash   cd /home/runner/work/ail-ci/ail-ci && for p in r_ba_store r_ba_realloc p_dl_paren p_dl_paren_if; do echo "####
+
+
+--- ORIGINAL TASK ---
 Lane: pyreach
 
 # pyreach s1: re-land rbpyreach1 with its two review fixes
