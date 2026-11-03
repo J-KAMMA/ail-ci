@@ -1,3 +1,20 @@
+## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
+
+The daily fuzzer (seed 2076011178) printed `round((1e10 * 1e10))`.  On today's tree the seed already
+classifies as the declared `overflow` (fz2 replaced the old uncatchable `round() result does not fit`
+text), but `cmp.sh` still showed AIL stopping at the int64 boundary where CPython prints
+`100000000000000000000`.  The pre54 refusal (`_refuse_round_at_int64_boundary`) only folded a float
+literal with unary signs, so the generated arithmetic expression was not seen as a constant.
+
+The refusal now folds constant numeric expressions (`+ - * / // % **`, unary signs, literals) with a
+depth cap, an integer-size cap and no calls or names, and refuses when the rounded value is at or
+outside int64.  In-range expressions, NaN/Infinity and zero division keep CPython's answers and
+exceptions; runtime values (argument, list item, attribute, dict value) keep the declared overflow
+contract.  With `--exact-int` the wide constants match CPython.  The fuzz seed now classifies as
+`refused` in both default and IR modes; `/tmp/probes/fz220_min.py`, `fz220_neg.py`, `fz220_div.py`,
+`fz220_in.py`, `fz220_bounds.py`, `fz220_edge.py` and `fz220_routes.py` match CPython or are refused
+by name.  Added `test_ail_fz220.py` and registered it in `tests.d`.
+
 ## 2026-11-02 -- prog29 review 2: typed set/dict sources join the mutation guard (job-prog29-11022055)
 
 Fixed the remaining defect in the set-comprehension guard.  `_setcomp_source_can_change` matched
