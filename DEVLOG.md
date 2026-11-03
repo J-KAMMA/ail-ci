@@ -1,3 +1,27 @@
+## 2026-11-04 -- pyreach s5: dicts of record lists and dicts of sets
+
+A local `d = {}` whose stores are record lists (`d[k] = [name, balance, open]`) now lowers to the
+same key -> slot form as the dict-of-lists work: `d` maps a key to a slot and one typed list per
+position holds the fields.  `r = d.get(k)` / `r = d[k]` followed by `r[i] += x`, `d[k][i] += x`, a
+bool position printing `True`/`False`, `d.values()` / `d.items()` in insertion order,
+`for k, (a, b, s) in d.items()`, `sorted(d.items(), key=lambda kv: ...)`, `len(d)`, `k in d` and
+`del d[k]` (an alias keeps the row alive) all match CPython.  `setdefault(k, set()).add(v)`,
+`setdefault(k, [0, 0, 0])` and `get(k, [0, 0, 0])` use the same slot form; a set position is a
+one-field `_AilRowSet` box so the set object is shared.  Any unlisted use leaves the source on the
+old route.
+
+The lowering runs before the tuple/bool passes, so generated field lists get their annotations and
+`sorted(items())` still reaches the tuple lowering.  A one-argument `d.get(k)` tested with `is None`
+is refused by name until s8, and `--exact-int` refuses a record int field fed from a non-literal
+rather than demoting it to int64.  `pyfunc._explain_dict_of_containers` now names the one-argument
+`get` instead of the generic dict-of-containers message.
+
+Probes: `test_ail_pyreach_dictrows.py` (alias/`d[k][1] +=`, values sum, sorted items and unpack,
+dict of sets with duplicates, counters and missing defaults, big input default/exact, alias after
+`del`, one-argument get refusal).  It passes on the default, `AIL_UNIFIED_FORCE=1` and `--strict`
+builds; `test_ail_pytyped_reach`, `test_ail_collections`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.  `.ail` codegen pins are byte-identical to the base.
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`

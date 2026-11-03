@@ -6,10 +6,14 @@ R1  `d[k] = [name, balance, open]` lowers to a key -> slot dict plus one typed l
 R2  `d.values()` keeps insertion order, so `sum(a[1] for a in d.values() if a[2])` is exact.
 R3  `sorted(d.items(), key=lambda kv: (-kv[1][1], kv[0]))` and
     `for k, (a, b, s) in d.items()` read the record rows.
-R4  a balance beyond int64 read from input is loud on the default build (OverflowError), and
+R4  `d.setdefault(k, set()).add(v)` lowers to a set box per slot; duplicates collapse,
+    `len(d[k])` / `v in d[k]` / iteration over `d[k]` match CPython.
+R5  `setdefault(k, [0, 0, 0])` counters and `get(k, [0, 0, 0])` missing rows keep CPython's
+    value and insertion-order semantics.
+R6  a balance beyond int64 read from input is loud on the default build (OverflowError), and
     with `--exact-int` it is exact or refused by name -- never wrapped.
-R5  an alias kept after `del d[k]` still points at the row (the field lists keep it alive).
-R6  a one-argument `d.get(k)` whose result is tested with `is None` is still refused until s8.
+R7  an alias kept after `del d[k]` still points at the row (the field lists keep it alive).
+R8  a one-argument `d.get(k)` whose result is tested with `is None` is still refused until s8.
 """
 import os
 import shutil
@@ -66,7 +70,43 @@ ITEMS_SORTED = '''def main():
 main()
 '''
 
+SETS = '''def main():
+    groups = {}
+    groups.setdefault("a", set()).add(1)
+    groups.setdefault("a", set()).add(1)
+    groups.setdefault("a", set()).add(4)
+    groups.setdefault("b", set()).add(2)
+    print(len(groups["a"]), 1 in groups["a"], 3 in groups["a"])
+    for v in groups["a"]:
+        print("v", v)
+    total = 0
+    for key in groups:
+        for v in groups[key]:
+            total += v
+    print(total)
+    print(len(groups), "a" in groups, "z" in groups)
 
+
+main()
+'''
+
+COUNTERS = '''def main():
+    per = {}
+    p = per.setdefault("a", [0, 0, 0])
+    p[0] += 1
+    p[1] += 2
+    p[2] += 3
+    q = per.get("b", [0, 0, 0])
+    q[0] += 7
+    print(per["a"][0], per["a"][1], per["a"][2])
+    print(q[0], q[1], q[2])
+    print(len(per), "b" in per)
+    for key, (a, b, c) in per.items():
+        print(key, a, b, c)
+
+
+main()
+'''
 
 BIG_BALANCE = '''import sys
 
@@ -172,6 +212,16 @@ class PyreachDictRows(unittest.TestCase):
         self._typed('items_sorted', ITEMS_SORTED,
                     '2 b 9 False\n5 a 3 True\n7 c 1 True\n'
                     '5 a 3 True\n2 b 9 False\n7 c 1 True\n')
+
+    def test_dict_of_sets(self):
+        self._typed('sets', SETS, '2 True False\nv 1\nv 4\n7\n2 True False\n')
+        self._both('sets', SETS, '2 True False\nv 1\nv 4\n7\n2 True False\n')
+
+    def test_setdefault_counters_and_missing_default(self):
+        self._typed('counters', COUNTERS,
+                    '1 2 3\n7 0 0\n1 False\na 1 2 3\n')
+        self._both('counters', COUNTERS,
+                   '1 2 3\n7 0 0\n1 False\na 1 2 3\n')
 
     def test_big_balance_is_loud_or_exact(self):
         huge = '9223372036854775808123'
