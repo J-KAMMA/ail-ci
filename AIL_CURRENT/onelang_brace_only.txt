@@ -1,7 +1,10 @@
+test_ail_build_reports.py:26: brace module fixture (`neighbor.ail`) built by the report
 test_ail_build_reports.py:27: brace compile-report fixture: --separate module split and source-line report
 test_ail_build_reports.py:58: brace compile-report fixture: --separate module split and source-line report
 test_ail_build_reports.py:61: brace compile-report fixture: --separate module split and source-line report
 test_ail_build_reports.py:66: brace compile-report fixture: --separate module split and source-line report
+test_ail_builtin_maps.py:28: dynamic brace probe fragment generated at run time
+test_ail_builtin_maps.py:118: dynamic brace check functions generated at run time
 test_ail_builtin_maps.py:136: brace source generated at run time; pyfunc.to_c pin
 test_ail_builtin_shadowing.py:67: refusal line numbers and messages keep brace spellings
 test_ail_builtin_shadowing.py:174: refusal line numbers and messages keep brace spellings
@@ -14,14 +17,15 @@ test_ail_builtin_shadowing.py:212: refusal line numbers and messages keep brace 
 test_ail_builtin_shadowing.py:213: refusal line numbers and messages keep brace spellings
 test_ail_builtin_shadowing.py:214: refusal line numbers and messages keep brace spellings
 test_ail_builtin_shadowing.py:215: refusal line numbers and messages keep brace spellings
+test_ail_c_keyword_functions.py:30: dynamic brace keyword-name source built in the test
+test_ail_c_objects.py:333: source rewritten at run time from a brace example
 test_ail_cargo.py:247: cargo fixture embeds a non-program brace fragment
 test_ail_csv_rewrite_stream.py:41: Python import cannot reach the brace language_examples module
+test_ail_csv_rewrite_stream.py:62: brace consumer fragment built with the provider
 test_ail_csv_rewrite_stream.py:66: Python import cannot reach the brace language_examples module
 test_ail_csv_rewrite_stream.py:221: Python import cannot reach the brace language_examples module
-test_ail_field_store_cost.py:41: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
-test_ail_field_store_cost.py:176: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
-test_ail_field_store_cost.py:196: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
-test_ail_field_store_cost.py:235: meaning difference: expected `2000 1000 5`/`20 1000`, converted prints `1048 48 5`/`20 48`
+test_ail_field_store_cost.py:269: meaning difference: brace prints `1048 48 5`/`20 48`, converted prints `2000 1000 5`/`20 1000`; first differing line 2: `1048 48 5` vs `2000 1000 5`
+test_ail_filesystem_mutation.py:214: dynamic invalid-statement brace fragment
 test_ail_frontend_speed.py:71: same source is both brace input and the translate() reference
 test_ail_frontend_speed.py:105: same source is both brace input and the translate() reference
 test_ail_ir_rulex.py:33: brace value-semantics IR subject
@@ -76,12 +80,14 @@ test_ail_owned_type_details.py:142: diagnostics built from brace fragments; expe
 test_ail_owned_type_details.py:143: diagnostics built from brace fragments; expectations quote brace text
 test_ail_owned_type_details.py:144: diagnostics built from brace fragments; expectations quote brace text
 test_ail_owned_type_details.py:145: diagnostics built from brace fragments; expectations quote brace text
+test_ail_pool_iter_capture.py:6: dynamic brace prefix fragment (CHOOSE)
 test_ail_pool_iter_capture.py:16: dynamic brace fragments and --separate module split
 test_ail_pool_iter_capture.py:38: dynamic brace fragments and --separate module split
 test_ail_pool_iter_capture.py:48: dynamic brace fragments and --separate module split
 test_ail_pool_iter_capture.py:60: dynamic brace fragments and --separate module split
 test_ail_pool_iter_capture.py:64: dynamic brace fragments and --separate module split
 test_ail_pool_iter_capture.py:76: dynamic brace fragments and --separate module split
+test_ail_pool_iter_capture.py:79: brace library fragment for the --separate split
 test_ail_pool_iter_capture.py:82: dynamic brace fragments and --separate module split
 test_ail_pool_iter_capture.py:89: dynamic brace fragments and --separate module split
 test_ail_pre171.py:161: brace vs Python build comparison subject
@@ -89,14 +95,14 @@ test_ail_splitlines_utf8.py:20: invalid brace fragment (truncated unicode escape
 test_ail_stdin_list_batch.py:262: refused brace fragments (list[list[bytes]], dict[bytes,int])
 test_ail_stdin_list_batch.py:293: refused brace fragments (list[list[bytes]], dict[bytes,int])
 test_ail_stdin_list_batch.py:295: refused brace fragments (list[list[bytes]], dict[bytes,int])
+test_ail_str_predicates.py:52: brace predicate functions built into the generated source
 test_ail_str_predicates.py:64: test appends generated brace fragments to the source
+test_ail_tcp_listener.py:321: dynamic invalid-statement brace fragment
+test_ail_typed_locals.py:9: brace library fragment built with the entry source
 test_ail_typed_locals.py:16: --separate module split with a brace module
 test_ail_typed_locals.py:156: --separate module split with a brace module
+test_ail_typed_locals.py:160: brace conflict source fragment built for the refusal cases
 test_ail_utf8_stream_fuzz.py:19: Python import cannot reach the brace utf8_stream module
 test_integer_row_stream.py:13: prefix `use` plus a brace language_examples module
 test_integer_row_stream.py:116: prefix `use` plus a brace language_examples module
 test_json_pointer_batch.py:18: Python import cannot reach the brace language_examples module
-test_ail_c_keyword_functions.py:30: dynamic brace keyword-name source built in the test
-test_ail_c_objects.py:333: source rewritten at run time from a brace example
-test_ail_filesystem_mutation.py:214: dynamic invalid-statement brace fragment
-test_ail_tcp_listener.py:321: dynamic invalid-statement brace fragment

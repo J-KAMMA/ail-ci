@@ -23,84 +23,97 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-SOURCE = """
-struct Rng { s: int; }
-impl Rng {
-    fn next(self, m: int) -> int {
-        self.s = (self.s * 1103515245 + 12345) % 2147483648;
-        return (self.s >> 8) % m;
-    }
-}
-struct T { name: list[str]; w: list[int]; }
-fn word(r: Rng, k: int) -> str {
-    let n = r.next(k);
-    let parts: list[str] = [];
-    for i in range(n) { parts.append(chr(97 + r.next(26))); }
-    return "".join(parts);
-}
-fn main() {
-    let r = Rng(int(sys.argv[1]));
-    let t = T([], []);
-    for i in range(20) { t.name.append(word(r, 6)); t.w.append(i); }
-    let kept: list[str] = [];
-    let seen: dict[str, int] = {};
-    let errors = 0;
-    for step in range(3000) {
-        let op = r.next(14);
-        let n = len(t.name);
-        if op < 4 and n > 0 {
-            let i = r.next(n);
-            let big = r.next(10) == 0;
-            t.name[i] = word(r, 300 if big else 8);
-        } elif op == 4 and n > 0 {
-            let i = r.next(n);
-            t.name[i] += word(r, 5);
-        } elif op == 5 {
-            t.name.append(word(r, 12));
-        } elif op == 6 and n > 0 {
-            let i = r.next(n);
-            kept.append(t.name[i]);
-            seen[t.name[i]] = step;
-            t.name[i] = "x" + t.name[(i + 1) % n];
-        } elif op == 7 and n > 2 {
-            let p = t.name.pop(r.next(n));
-            kept.append(p);
-        } elif op == 8 and n > 2 {
-            let x = t.name.pop();
-            kept.append(x);
-        } elif op == 9 and n > 3 {
-            let a = r.next(n);
-            let b = a + r.next(n - a);
-            t.name[a:b] = [word(r, 4), word(r, 40)];
-        } elif op == 10 and n > 4 {
-            del t.name[r.next(n)];
-        } elif op == 11 {
-            try {
-                t.name[n + r.next(3)] = "never";
-                print("stored");
-            } except IndexError {
-                errors += 1;
-            }
-        } elif op == 12 and n > 1 {
-            t.name.extend([word(r, 6), "", word(r, 20)]);
-        } elif n > 0 {
-            let i = r.next(n);
-            t.name[i] = t.name[i];
-            t.name[-1] = t.name[0] + "/" + t.name[-1];
-        }
-        if step % 97 == 0 {
-            print(step, len(t.name), ",".join(t.name));
-        }
-        if len(t.name) > 60 { t.name = t.name[10:]; }
-    }
-    print("final", ",".join(t.name));
-    print("kept", len(kept), ",".join(kept));
-    let ks: list[str] = [];
-    for k in seen.keys() { ks.append(k); }
-    ks.sort();
-    for k in ks { print(k, seen[k]); }
-    print("errors", errors);
-}
+SOURCE = r"""import sys
+
+class Rng:
+
+    def __init__(self, s: int):
+        self.s = s
+
+    def next(self, m: int) -> int:
+        self.s = (self.s * 1103515245 + 12345) % 2147483648
+        return (self.s >> 8) % m
+
+class T:
+
+    def __init__(self, name: list[str], w: list[int]):
+        self.name = name
+        self.w = w
+
+def word(r: Rng, k: int) -> str:
+    n = r.next(k)
+    parts: list[str] = []
+    for i in range(n):
+        parts.append(chr(97 + r.next(26)))
+    return ''.join(parts)
+
+def main() -> int:
+    r = Rng(int(sys.argv[1]))
+    t = T([], [])
+    for i in range(20):
+        t.name.append(word(r, 6))
+        t.w.append(i)
+    kept: list[str] = []
+    seen: dict[str, int] = {}
+    errors = 0
+    for step in range(3000):
+        op = r.next(14)
+        n = len(t.name)
+        if op < 4 and n > 0:
+            i = r.next(n)
+            big = r.next(10) == 0
+            t.name[i] = word(r, 300 if big else 8)
+        elif op == 4 and n > 0:
+            i = r.next(n)
+            t.name[i] += word(r, 5)
+        elif op == 5:
+            t.name.append(word(r, 12))
+        elif op == 6 and n > 0:
+            i = r.next(n)
+            kept.append(t.name[i])
+            seen[t.name[i]] = step
+            t.name[i] = 'x' + t.name[(i + 1) % n]
+        elif op == 7 and n > 2:
+            p = t.name.pop(r.next(n))
+            kept.append(p)
+        elif op == 8 and n > 2:
+            x = t.name.pop()
+            kept.append(x)
+        elif op == 9 and n > 3:
+            a = r.next(n)
+            b = a + r.next(n - a)
+            t.name[a:b] = [word(r, 4), word(r, 40)]
+        elif op == 10 and n > 4:
+            del t.name[r.next(n)]
+        elif op == 11:
+            try:
+                t.name[n + r.next(3)] = 'never'
+                print('stored')
+            except IndexError:
+                errors += 1
+        elif op == 12 and n > 1:
+            t.name.extend([word(r, 6), '', word(r, 20)])
+        elif n > 0:
+            i = r.next(n)
+            t.name[i] = t.name[i]
+            t.name[-1] = t.name[0] + '/' + t.name[-1]
+        if step % 97 == 0:
+            print(step, len(t.name), ','.join(t.name))
+        if len(t.name) > 60:
+            t.name = t.name[10:]
+    print('final', ','.join(t.name))
+    print('kept', len(kept), ','.join(kept))
+    ks: list[str] = []
+    for k in seen.keys():
+        ks.append(k)
+    ks.sort()
+    for k in ks:
+        print(k, seen[k])
+    print('errors', errors)
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 PYTHON = r'''
@@ -171,35 +184,56 @@ main()
 '''
 
 # Many stores into a large field: quadratic before (every store repacked all 200k strings).
-STORES = """
-struct T { name: list[str]; }
-fn main() {
-    let n = int(sys.argv[1]);
-    let t = T([]);
-    for i in range(n) { t.name.append("n" + str(i)); }
-    let total = 0;
-    for k in range(int(sys.argv[2])) {
-        let i = (k * 7919) % n;
-        t.name[i] = t.name[i] + "+" + str(k % 10);
-        if k % 3 == 0 { t.name[(i + 1) % n] = ""; }
-        total += len(t.name[i]);
-    }
-    print(total, len(t.name), t.name[0], t.name[n - 1]);
-}
+STORES = r"""import sys
+
+class T:
+
+    def __init__(self, name: list[str]):
+        self.name = name
+
+def main() -> int:
+    n = int(sys.argv[1])
+    t = T([])
+    for i in range(n):
+        t.name.append('n' + str(i))
+    total = 0
+    for k in range(int(sys.argv[2])):
+        i = k * 7919 % n
+        t.name[i] = t.name[i] + '+' + str(k % 10)
+        if k % 3 == 0:
+            t.name[(i + 1) % n] = ''
+        total += len(t.name[i])
+    print(total, len(t.name), t.name[0], t.name[n - 1])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 # A small field rewritten with long strings over and over: garbage must not pile up. The store is
 # in its own function so the concatenation's arena is released per call.
-CHURN = """
-struct T { name: list[str]; }
-fn put(t: T, k: int, chunk: str) -> void { t.name[k % 100] = chunk + str(k); }
-fn main() {
-    let t = T([]);
-    for i in range(100) { t.name.append(""); }
-    let chunk = "abcdefghij" * 20;
-    for k in range(int(sys.argv[1])) { put(t, k, chunk); }
-    print(len(t.name[7]), t.name[99]);
-}
+CHURN = r"""import sys
+
+class T:
+
+    def __init__(self, name: list[str]):
+        self.name = name
+
+def put(t: T, k: int, chunk: str) -> None:
+    t.name[k % 100] = chunk + str(k)
+
+def main() -> int:
+    t = T([])
+    for i in range(100):
+        t.name.append('')
+    chunk = 'abcdefghij' * 20
+    for k in range(int(sys.argv[1])):
+        put(t, k, chunk)
+    print(len(t.name[7]), t.name[99])
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 SWAP = """

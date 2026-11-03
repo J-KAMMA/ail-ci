@@ -1,3 +1,18 @@
+## 2026-11-03 -- onelang s7 review fix: convert the field-store cost literals, complete the list
+
+Converted `test_ail_field_store_cost.py` SOURCE, STORES and CHURN to annotated Python (their C is
+byte-identical to the brace sources: 271852 / 223347 / 222201 bytes).  Only SWAP stays brace: brace
+prints `1048 48 5` / `20 48` where the converted program follows CPython and prints
+`2000 1000 5` / `20 1000`; the first differing line is 2, `1048 48 5` vs `2000 1000 5`.  The
+`onelang_brace_only.txt` row now records those values in that order.  Added the remaining brace
+fragments that the batch modules still build (`test_ail_build_reports.py:26`,
+`test_ail_builtin_maps.py:28`/`:118`, `test_ail_csv_rewrite_stream.py:62`,
+`test_ail_pool_iter_capture.py:6`/`:79`, `test_ail_str_predicates.py:52`,
+`test_ail_typed_locals.py:9`/`:160`) with reasons; the list has 108 rows and the batch keeps 103
+`fn main(` occurrences in 102 listed sources.  Targeted modules, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; probes `p_store`, `p_churn`, `p_swap` match
+CPython on both builds.
+
 ## 2026-11-03 -- onelang s7 finish: batch 2 re-verified after the hung review
 
 Applied `e971249` on `job-onelangs7b` and kept both DEVLOG entries.  All 33 Appendix C modules pass
