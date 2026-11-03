@@ -53,15 +53,30 @@ class StrFindAliasTypeTests(unittest.TestCase):
         ]:
             with self.subTest(source=source),self.assertRaises(Unsupported):
                 to_c(translate(source,module=True),name='probe',library=True,strict=True)
-WHOLE='''
-fn search(source:str,needle:str)->int {let first=source;let receiver:str=first;let result:int=receiver.find(needle);return result;}
-fn main()->int {
- print(search("a😀b\\0c😀","😀"));print(search("a😀b\\0c😀","\\0c"));
- print(search("a😀b\\0c😀","missing"));print(search("a😀b\\0c😀",""));
- print(search("",""));print(search("","x"));
- let source="old";let alias=source;source="new";print(alias.find("old"));
- print(b"a\\0b".find(b"\\0"));return 0;
-}
+WHOLE='''import sys
+
+def search(source: str, needle: str) -> int:
+    first = source
+    receiver: str = first
+    result: int = receiver.find(needle)
+    return result
+
+def main() -> int:
+    print(search(\'a😀b\\x00c😀\', \'😀\'))
+    print(search(\'a😀b\\x00c😀\', \'\\x00c\'))
+    print(search(\'a😀b\\x00c😀\', \'missing\'))
+    print(search(\'a😀b\\x00c😀\', \'\'))
+    print(search(\'\', \'\'))
+    print(search(\'\', \'x\'))
+    source = \'old\'
+    alias = source
+    source = \'new\'
+    print(alias.find(\'old\'))
+    print(b\'a\\x00b\'.find(b\'\\x00\'))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 '''
 
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),'installed C compiler required')
@@ -76,12 +91,24 @@ class StrFindAliasNativeTests(unittest.TestCase):
         self.check_run(self.ail_build('str_find_alias',WHOLE),'1\n3\n-1\n0\n0\n-1\n0\n1\n')
 
     def test_source_free_owned_string_callback_alias(self):
-        provider=self.ail_build('find_provider','fn provided()->str {return "a😀b\\0c😀";}',library=True)
-        consumer='''
-fn locate(callback:Callable[[],str],needle:str)->int {
- let source=callback();let alias=source;let result=alias.find(needle);return result;
-}
-fn main()->int {print(locate(provided,"\\0c"));print(locate(provided,"😀"));return 0;}
+        provider=self.ail_build('find_provider','''def provided() -> str:
+    return \'a😀b\\x00c😀\'
+''',library=True)
+        consumer='''import sys
+
+def locate(callback: Callable[[], str], needle: str) -> int:
+    source = callback()
+    alias = source
+    result = alias.find(needle)
+    return result
+
+def main() -> int:
+    print(locate(provided, \'\\x00c\'))
+    print(locate(provided, \'😀\'))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 '''
         self.check_run(self.ail_build('find_consumer',consumer,provider),'3\n1\n')
 if __name__=='__main__':unittest.main()

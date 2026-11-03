@@ -14,62 +14,71 @@ import unittest
 from test_ail_element_views import run_pair
 from test_ail_text_views import body_of
 
-HEAP_SOURCE = r"""
-struct It { d: int; w: float; n: int; }
-struct Q { h: list[It]; }
+HEAP_SOURCE = """from ail import heappop, heappush
+import sys
 
-fn drain(q: Q) -> int {
-    let t = 0;
-    while len(q.h) > 0 {
-        let z = heappop(q.h, key=lambda z: z.d);
-        t = (t * 13 + z.n + 1) % 1000000007;
-    }
-    return t;
-}
+class It:
 
-fn main() {
-    let n = int(sys.argv[1]);
-    let h: list[It] = [];
-    let q = Q([]);
-    let seed = 12345;
-    let out = 0;
-    let empties = 0;
-    for step in range(n) {
-        seed = (seed * 1103515245 + 12345) % 2147483648;
-        let r = seed % 10;
-        if r < 6 {
-            heappush(h, It(seed % 7 - 3, float(seed % 5) * 0.5 - 1.0, step), key=lambda it: (it.d, it.w));
-            heappush(q.h, It(seed % 4, 0.0, step), key=lambda z: z.d);
-        } else {
-            if len(h) > 0 {
-                let it = heappop(h, key=lambda it: (it.d, it.w));
-                out = (out * 31 + it.n + 7) % 1000000007;
-                if step % 97 == 0 { print("pop", it.d, it.n); }
-            }
-            try {
-                let z = heappop(q.h, key=lambda z: z.d);
-                out = (out * 17 + z.n) % 1000000007;
-            } except IndexError as ie {
-                empties += 1;
-            }
-        }
-    }
-    let zs: list[It] = [];
-    for i in range(60) {
-        let w = 0.0;
-        if i % 3 == 0 { w = -0.0; }
-        if i % 5 == 0 { w = 1.5; }
-        zs.append(It((i * 37) % 11 - 5, w, i % 4));
-    }
-    heapify(zs, key=lambda e: (e.d, e.w, e.n));
-    let order: list[str] = [];
-    while len(zs) > 0 {
-        let e = heappop(zs, key=lambda e: (e.d, e.w, e.n));
-        order.append(str(e.d * 10 + e.n));
-    }
-    print(" ".join(order));
-    print(out, empties, len(h), drain(q));
-}
+    def __init__(self, d: int, w: float, n: int):
+        self.d = d
+        self.w = w
+        self.n = n
+
+class Q:
+
+    def __init__(self, h: list[It]):
+        self.h = h
+
+def drain(q: Q) -> int:
+    t = 0
+    while len(q.h) > 0:
+        z = heappop(q.h, key=lambda z: z.d)
+        t = (t * 13 + z.n + 1) % 1000000007
+    return t
+
+def main() -> int:
+    n = int(sys.argv[1])
+    h: list[It] = []
+    q = Q([])
+    seed = 12345
+    out = 0
+    empties = 0
+    for step in range(n):
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        r = seed % 10
+        if r < 6:
+            heappush(h, It(seed % 7 - 3, float(seed % 5) * 0.5 - 1.0, step), key=lambda it: (it.d, it.w))
+            heappush(q.h, It(seed % 4, 0.0, step), key=lambda z: z.d)
+        else:
+            if len(h) > 0:
+                it = heappop(h, key=lambda it: (it.d, it.w))
+                out = (out * 31 + it.n + 7) % 1000000007
+                if step % 97 == 0:
+                    print('pop', it.d, it.n)
+            try:
+                z = heappop(q.h, key=lambda z: z.d)
+                out = (out * 17 + z.n) % 1000000007
+            except IndexError as ie:
+                empties += 1
+    zs: list[It] = []
+    for i in range(60):
+        w = 0.0
+        if i % 3 == 0:
+            w = -0.0
+        if i % 5 == 0:
+            w = 1.5
+        zs.append(It(i * 37 % 11 - 5, w, i % 4))
+    heapify(zs, key=lambda e: (e.d, e.w, e.n))
+    order: list[str] = []
+    while len(zs) > 0:
+        e = heappop(zs, key=lambda e: (e.d, e.w, e.n))
+        order.append(str(e.d * 10 + e.n))
+    print(' '.join(order))
+    print(out, empties, len(h), drain(q))
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 HEAP_PYTHON = r"""
@@ -132,42 +141,53 @@ def main():
 main()
 """
 
-DICT_SOURCE = r"""
-fn look(d: dict[int, int], k: int) -> int {
-    let p = -1;
-    if k in d { p = d[k]; }
-    return p;
-}
+DICT_SOURCE = """import sys
 
-fn main() {
-    let n = int(sys.argv[1]);
-    let d: dict[int, int] = {};
-    let acc = 0;
-    let misses = 0;
-    let p = -1;
-    for i in range(n) {
-        let k = (i * 7919) % 5003 * 1000003;
-        if k in d { p = d[k]; }
-        acc = (acc * 3 + p) % 1000000007;
-        d[k] = i;
-        let j = k + 1000003;
-        if i % 7 == 0 and j in d { d.pop(j); }
-        if i % 11 == 0 {
-            try { acc = (acc + d[k * 3 + 1]) % 1000000007; }
-            except KeyError { misses += 1; }
-        }
-        if i % 13 == 0 { d[k] = d[k] + 5; }
-        acc = (acc + look(d, j) + look(d, k)) % 1000000007;
-    }
-    let small: dict[int, int] = {};
-    for i in range(50) { small[i % 9] = i; }
-    let q = 7;
-    if 3 in small { q = small[3]; }
-    if 30 in small { q = small[30]; }
-    let s = 0;
-    for k, v in d.items() { s = (s * 7 + k % 1000 + v) % 1000000007; }
-    print(acc, misses, len(d), s, p, q);
-}
+def look(d: dict[int, int], k: int) -> int:
+    p = -1
+    if k in d:
+        p = d[k]
+    return p
+
+def main() -> int:
+    n = int(sys.argv[1])
+    d: dict[int, int] = {}
+    acc = 0
+    misses = 0
+    p = -1
+    for i in range(n):
+        k = i * 7919 % 5003 * 1000003
+        if k in d:
+            p = d[k]
+        acc = (acc * 3 + p) % 1000000007
+        d[k] = i
+        j = k + 1000003
+        if i % 7 == 0 and j in d:
+            d.pop(j)
+        if i % 11 == 0:
+            try:
+                acc = (acc + d[k * 3 + 1]) % 1000000007
+            except KeyError:
+                misses += 1
+        if i % 13 == 0:
+            d[k] = d[k] + 5
+        acc = (acc + look(d, j) + look(d, k)) % 1000000007
+    small: dict[int, int] = {}
+    for i in range(50):
+        small[i % 9] = i
+    q = 7
+    if 3 in small:
+        q = small[3]
+    if 30 in small:
+        q = small[30]
+    s = 0
+    for k, v in d.items():
+        s = (s * 7 + k % 1000 + v) % 1000000007
+    print(acc, misses, len(d), s, p, q)
+    return 0
+
+if __name__ == \"__main__\":
+    sys.exit(main())
 """
 
 DICT_PYTHON = r"""
