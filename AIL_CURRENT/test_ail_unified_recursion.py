@@ -10,6 +10,8 @@ program with a recursive function; without that the stack would run out before c
 T1  49,999 calls succeed on the default build and with AIL_UNIFIED_FORCE=1
 T2  50,001 calls stop with "recursion depth exceeded", exit 1, on both
 T3  100,000 calls stop the same way on the unified path (no SIGSEGV)
+T4  recursion through a local alias, a list item, a dict value or an attribute stops
+    the same way on the unified path (all four used to segfault there)
 """
 import os
 import shutil
@@ -40,6 +42,50 @@ DEEP = '''def f(n):
 
 print(f(100000))
 '''
+
+VIA_VALUE = {
+    'alias': '''def f(n):
+    if n <= 0:
+        return 0
+    g = f
+    return g(n - 1) + 1
+
+
+print(f(100000))
+''',
+    'list': '''def f(n):
+    if n <= 0:
+        return 0
+    fs = [f]
+    return fs[0](n - 1) + 1
+
+
+print(f(100000))
+''',
+    'dict': '''def f(n):
+    if n <= 0:
+        return 0
+    d = {"f": f}
+    return d["f"](n - 1) + 1
+
+
+print(f(100000))
+''',
+    'attr': '''class H:
+    pass
+
+
+def f(n):
+    if n <= 0:
+        return 0
+    h = H()
+    h.f = f
+    return h.f(n - 1) + 1
+
+
+print(f(100000))
+''',
+}
 
 
 def build(directory, text, name, unified):
@@ -82,6 +128,16 @@ class UnifiedRecursion(unittest.TestCase):
             code, out, err = run(exe)
             self.assertEqual((code, out), (1, ''), (out, err))
             self.assertEqual(err, 'recursion depth exceeded\n')
+
+
+    def test_recursion_through_a_value_does_not_segfault(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name, text in VIA_VALUE.items():
+                res, exe = build(directory, text, 'via_' + name, True)
+                self.assertEqual(res.returncode, 0, name + '\n' + res.stdout + res.stderr)
+                code, out, err = run(exe)
+                self.assertEqual((code, out), (1, ''), (name, out, err))
+                self.assertEqual(err, 'recursion depth exceeded\n', (name, err))
 
 
 if __name__ == '__main__':

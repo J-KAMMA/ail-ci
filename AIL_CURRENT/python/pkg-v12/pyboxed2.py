@@ -895,9 +895,11 @@ _RECURSION_SUPPORT = r'''
    messages are deliberately the typed path's: bare "recursion depth exceeded", exit 1.
 
    A unified frame is larger than a typed one (the boxed frame's slot array), so the
-   default 8-16 MiB stack can run out before call 50,000.  Raise the soft stack limit for
+   default 8-16 MiB stack can run out before call 50,000; a call through a function value
+   uses even more (the value machinery is on the C stack too).  Raise the soft stack limit for
    a program that actually has a recursive function; the stack is only faulted in as it
-   is used, so the larger limit costs no memory by itself.
+   is used, so the larger limit costs no memory by itself.  256 MiB covers the measured
+   deepest shape (a self-call through a list item) at 50,000 calls.
    =================================================================================== */
 #define AIL2_MAX_RECURSION_DEPTH 50000
 static int64_t ail2_depth = 0;
@@ -906,7 +908,7 @@ static int64_t ail2_depth = 0;
 static inline void ail2_raise_stack_limit(void) {
     struct rlimit lim;
     if (getrlimit(RLIMIT_STACK, &lim) != 0) return;
-    rlim_t want = (rlim_t)64 * 1024 * 1024;
+    rlim_t want = (rlim_t)256 * 1024 * 1024;
     if (lim.rlim_cur != RLIM_INFINITY && lim.rlim_cur < want) {
         lim.rlim_cur = (lim.rlim_max == RLIM_INFINITY || lim.rlim_max > want) ? want : lim.rlim_max;
         (void)setrlimit(RLIMIT_STACK, &lim);
@@ -4138,10 +4140,12 @@ class Compiler(boxclosure.ClosureMixin):
     def _recursive_function_keys(self):
         """Keys ((owner_class + '.')? + name) of the functions that can reach themselves.
 
-        Only direct calls are followed (a bare name, `self.method()`, `Class.method()`),
-        which is exactly the shape a self-recursive user function takes.  A function
-        reached through a value or a callback may still recurse, but the typed path does
-        not count that either, and this guard must fire at the typed path's depth."""
+        Calls (a bare name, `self.method()`, `Class.method()`) and every loaded mention of
+        a function's name are followed -- `g = f; g(...)` is the same recursion as `f(...)`,
+        and the typed path counts it, so a unified frame must be guarded too.  A function
+        reached only through an unrelated value (a list item, a dict value) may still
+        recurse; the name it was stored from is mentioned in the body, so that mention is
+        an edge as well and covers the common shapes."""
         nodes, owners = {}, {}
         for name, info in self.functions.items():
             nodes[name] = info['node']
@@ -4154,6 +4158,8 @@ class Compiler(boxclosure.ClosureMixin):
         for key, node in nodes.items():
             targets = set()
             for n in ast.walk(node):
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in self.functions:
+                    targets.add(n.id)
                 if not isinstance(n, ast.Call):
                     continue
                 f = n.func

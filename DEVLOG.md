@@ -1,25 +1,31 @@
-## 2026-11-03 -- unified deep recursion raises at the typed path's depth (job-unifrec-11031522)
+## 2026-11-03 -- unified deep recursion raises at the typed path's depth (job-unifrecb-11032052)
 
 `AIL_UNIFIED_FORCE=1` had no recursion depth counter on the general path, so
 `def f(n): ... f(n - 1)` past 50,000 calls ran the C stack off its end: the 100,000-call probe
 exited 139 (SIGSEGV).  A unified frame is also larger than a typed one (the boxed frame slots),
-about 400 bytes per call against 8, so the runner's 16 MiB soft stack would fail near call 40,000
-even with a counter.  `pyboxed2.py` now finds the functions that are self-reachable through direct
-calls (bare names, `Class.method()`, `self.method()`) and emits the typed path's guard in those
-bodies only: `++ail2_depth > 50000` raises the bare `recursion depth exceeded` and exit 1, and every
-frame leave decrements.  The generated `main` raises the soft `RLIMIT_STACK` to 64 MiB when the
-program has such a function.  The generic boxed wrapper is not guarded when a unified specialised
-body exists, so a call is counted once.
+so the default 8-16 MiB stack can fail before call 50,000 even with a counter.  `pyboxed2.py` now
+finds the functions that can reach themselves -- direct calls (bare names, `Class.method()`,
+`self.method()`) plus every loaded mention of a function name, so `g = f; g(...)` and a call
+through a list item, dict value or attribute are covered -- and emits the typed path's guard in
+those bodies only: `++ail2_depth > 50000` raises the bare `recursion depth exceeded` and every
+frame leave decrements.  The generated `main` raises the soft `RLIMIT_STACK` to 256 MiB when the
+program has such a function; 64 MiB was not enough for a self-call through a list item.  The
+generic boxed wrapper is not guarded when a unified specialised body exists, so a call is counted
+once.
 
-The default build still exits 1 with `recursion depth exceeded`; its generated C for the 100,000-call
-probe is byte-identical before and after.  `f(49,999)` prints `49999` and `f(50,001)` raises on both
-builds, as do mutual recursion, method recursion, 100,000 calls, a caught deep `ValueError` followed
-by another depth-49,999 run (the counter is restored), and argument values reaching the function
-through a literal, variable, list item, attribute and dict value.  `tools/icount.c` cannot run on
-this runner (`perf_event_open: Permission denied`, `perf_event_paranoid=4`, no sudo/valgrind), so
-instruction counts are unavailable; the byte-identical default `program.c` is the default-path
-evidence.  Added `test_ail_unified_recursion`; `test_ail_unified`, `test_ail_callable_values`,
-`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on the final state.
+The default build's typed path is untouched: generated C is byte-identical before and after for
+all ten `lab/compare` `typed.py` default builds, including the two `--exact-int` tasks
+(berth_sim, chain_relax, echo_pack, ledger_bin, rail_transfer, scar_life, tally_lang, term_rank,
+ticket_audit, tree_fold).  `f(49,999)` prints `49999` and `f(50,001)` raises on both builds; the
+100,000-call probe, mutual recursion, method recursion, and recursion through an alias, a list
+item, a dict value and an attribute all stop with `recursion depth exceeded`, exit 1, on the
+unified path instead of SIGSEGV.  `tools/icount.c` cannot run on this runner (`perf_event_open:
+Permission denied`, `perf_event_paranoid=4`, no valgrind, `sudo` denied), so instruction counts
+are unavailable; the byte-identical default `program.c` hashes are the default-path evidence.
+Added `test_ail_unified_recursion` (49,999/50,001/100,000 and the four value shapes).  relrterr's
+`test_ail_runtime_error_names` is not present in this tree, so there was no skipped case to
+un-skip.  Required modules: `test_ail_unified_recursion`, `test_ail_unified`,
+`test_ail_callable_values`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 
 ## 2026-11-03 -- pyreach s1 review 1: nested dict-of-lists reads and bytearray aliasing
 
