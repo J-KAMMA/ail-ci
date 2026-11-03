@@ -35783,6 +35783,19 @@ class _ListLowering:
                     '%s(%s, ...) changes %r, a list parameter, which is read-only; keep the heap in a '
                     'local (`let h: list[int] = [];`) or a struct field (`heappush(self.h, x)`, '
                     '`heappush(s.h, x)`) and pass the struct') % (f, receiver.id, receiver.id))
+            computed = receiver
+            while isinstance(computed, ast.Attribute):
+                computed = computed.value
+            if isinstance(computed, ast.Subscript) and not isinstance(computed.slice, ast.Slice):
+                # `heappush(free[cls[b]], x)`: the receiver is a list of int lists indexed by a
+                # computed value (a nested-list element lowers to its `.v` field first).  The
+                # subscript must be evaluated once, as Python does, but binding the WHOLE receiver
+                # to a name would copy the inner list header and lose the sharing this heap needs.
+                # Bind only the index, then let the ordinary templates read and mutate the row's
+                # own list in place.
+                out, tag = self.build('$i = __I', call, I=computed.slice)
+                prelude.extend(out)
+                computed.slice = self.result(tag + 'i', call)
             if not self.pure(receiver):
                 return self.heapq_refuse(call, '%s(): the list must be a local name or a struct field '
                                               '(`h`, `self.h`, `s.h`), not a computed value' % f)
