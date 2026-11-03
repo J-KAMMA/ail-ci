@@ -1,10 +1,10 @@
 """`ail lsp` (packaging/ail_lang/lsp.py): the language server over stdio, driven by a scripted LSP client.
 
-* initialize advertises open/close sync, save notifications and hover;
-* didOpen / didSave publish diagnostics from `ail check`: a source that does not load is an Error with its
-  "write instead:" text; a typed-path blocker the general path builds is a Warning "runs on the slow general
-  path because ..."; `strict = true` in ail.toml makes the blocker an Error; a clean file publishes none;
-* hover on a diagnostic shows the rewrite;
+* initialize advertises open/close sync, didChange, save notifications and hover;
+* didOpen / didChange / didSave publish diagnostics from `ail check`: a source that does not load is an Error
+  with its "write instead:" text; a typed-path blocker the general path builds is a Warning "runs on the slow
+  general path because ..."; `strict = true` in ail.toml makes it an Error; a clean file publishes none;
+* hover on a diagnostic shows the rewrite, and elsewhere shows an inferred type or a signature;
 * didClose clears, unknown requests get -32601, shutdown + exit end the process with status 0.
 
 The warning/error split builds the program once, so those cases need a C compiler and are skipped without one.
@@ -32,6 +32,10 @@ BLOCKER = ("def find(d: dict[int, int], k: int) -> int | None:\n    return d.get
 # refused outright: main() is never called
 REFUSED = "def main() -> None:\n    print('hi')\n"
 BROKEN = "def main() -> None:\n    x = [1, 2\n    print(x)\nmain()\n"
+# a real front-end type error: the annotation and the value disagree
+TYPE_ERROR = 'def main() -> None:\n    x: int = "hi"\n    print(x)\n\n\nmain()\n'
+TYPED = ("def total() -> int:\n    value: int = 3\n    result = value + 4\n    return result\n\n\n"
+         "def main() -> None:\n    print(total())\n\n\nmain()\n")
 
 
 def setUpModule():
@@ -172,6 +176,51 @@ class Protocol(LspCase):
                                                          "position": {"line": 40, "character": 0}})
         self.assertIsNone(far["result"])
 
+    def test_did_change_rechecks_the_buffer_without_writing_the_file(self):
+        path, uri = self.open("change.py", CLEAN)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        self.client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": BROKEN}]})
+        self.assertEqual(self.client.diagnostics(uri)[0]["severity"], 1)
+        self.assertEqual(path.read_text(encoding="utf-8"), CLEAN)
+        self.client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 3},
+            "contentChanges": [{"text": CLEAN}]})
+        self.assertEqual(self.client.diagnostics(uri), [])
+
+    def test_an_incremental_did_change_uses_its_range(self):
+        path, uri = self.open("incremental.py", CLEAN)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        self.client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"range": {"start": {"line": 1, "character": 10},
+                                          "end": {"line": 1, "character": 15}}, "text": "1 +"}]})
+        self.assertEqual(len(self.client.diagnostics(uri)), 1)
+        self.assertEqual(path.read_text(encoding="utf-8"), CLEAN)
+
+    def test_hover_shows_an_inferred_type_and_a_signature(self):
+        _, uri = self.open("types.py", TYPED)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        result = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 2, "character": 5}})
+        self.assertIn("`result`: `int`", result["result"]["contents"]["value"])
+        annotated = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 1, "character": 5}})
+        self.assertIn("`value`: `int`", annotated["result"]["contents"]["value"])
+        signature = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 0, "character": 4}})
+        self.assertIn("def total() -> int", signature["result"]["contents"]["value"])
+
+    def test_a_type_error_in_a_strict_project_is_an_error(self):
+        (self.dir / "strict").mkdir()
+        (self.dir / "strict" / "ail.toml").write_text('entry = "type_error.py"\nstrict = true\n', encoding="utf-8")
+        _, uri = self.open("strict/type_error.py", TYPE_ERROR)
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 1)
+        self.assertEqual(item["range"]["start"]["line"], 1)
+        self.assertIn("declared int", item["message"])
+
     def test_save_republishes_and_close_clears(self):
         path, uri = self.open("edit.py", BROKEN)
         self.assertEqual(self.client.diagnostics(uri)[0]["severity"], 1)
@@ -212,6 +261,20 @@ class GeneralPath(LspCase):
         self.assertEqual(item["severity"], 1)
         self.assertNotIn("slow general path", item["message"])
         self.assertIn("write instead:", item["message"])
+
+
+    def test_scripted_session_on_clean_type_error_and_fallback_files(self):
+        _, clean = self.open("clean.py", CLEAN)
+        self.assertEqual(self.client.diagnostics(clean), [])
+        (self.dir / "strict").mkdir()
+        (self.dir / "strict" / "ail.toml").write_text('entry = "type_error.py"\nstrict = true\n', encoding="utf-8")
+        _, type_error = self.open("strict/type_error.py", TYPE_ERROR)
+        self.assertEqual(self.client.diagnostics(type_error)[0]["severity"], 1)
+        _, fallback = self.open("blocker.py", BLOCKER)
+        (item,) = self.client.diagnostics(fallback)
+        self.assertEqual(item["severity"], 2)
+        self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
+        self.assertIn("int | None", item["message"])
 
 
 class Classify(unittest.TestCase):

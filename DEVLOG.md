@@ -1,3 +1,24 @@
+## 2026-11-03 -- lsp: didChange, hover types, and setup docs
+
+`ail lsp` now advertises full-sync `textDocument/didChange` and checks the edited buffer through the
+same `ail check` front end as `ail build` (a sibling temporary file keeps the project, local imports
+and relative paths intact). `didSave` without text still checks the file on disk. Hover now falls
+back from a diagnostic rewrite to the type of the name under the cursor: annotations, obvious
+initialisers (`x = 1`, `names = ["a"]`, `total = value + 4`), loop elements, and function
+signatures. The Warning/Error split and blocker list are unchanged.
+
+Also fixed the strict blocker path resolution: `compile --strict --json` reports blocker paths
+relative to the process directory, not the source directory, so a nested file (for example
+`strict/type_error.py`) is now published on its own URI instead of a doubled path.
+
+Added a scripted three-file LSP session (clean, strict type error, general-path fallback),
+didChange full and incremental tests, hover type/signature tests, and `docs/LSP.md` with a minimal
+VS Code generic client and Neovim `vim.lsp.start` setup. No generated C changes.
+
+Probes `/tmp/probes/lsp_{clean,type_error,fallback}.py` match CPython or are refused by name in both
+builds; `test_ail_lsp` (20 tests) passes, as do `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-11-03 -- onelang s2 review 5: every top-level `from ail` binding is an alias
 
 `from ail import X as Y` now records the binding even when `Y == X`, so an alias spelled with the
