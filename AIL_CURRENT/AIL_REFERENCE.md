@@ -2,7 +2,7 @@
 
 AIL compiles typed Python 3.12 to C. It prints what CPython would, or the compiler refuses a construct
 with `file:line:col` and what to write instead. This card is enough for most
-programs: compile, and open MORE only for a refusal or a missing feature.
+programs: compile, and open MORE for a refusal or a missing feature.
 In AIL_CURRENT/: `python3 ail_chatgpt.py compile p.ail -o p` (`check p.ail`: types only).
 
 ```python
@@ -69,4 +69,4 @@ sys.exit(main())
   `itertools`, `functools`, `random` (after `random.seed(n)`).
 - Speed: fix `slow:` hints (`x in list`, `.pop(0)`: set, deque).
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-48, Text I/O 50-88, Bytes 90-153, Syntax 155-169, Local names 171-196, Numbers 198-217, Structs 219-254, Trees 256-299, Lists 301-314, Sort keys 316-323, Nested lists 325-342, Dicts 344-353, Sets 355-373, Strings 375-401, Regex 403-460, Collections 462-542, Tuples, lambdas (Python syntax) 544-603, Libraries 605-708, Heaps 710-725, Loops 727-735, Exceptions 737-752, Refused 754-795, Word count 797-829, Dijkstra 831-873, BFS 875-919, Modules 921-949, Speed 951-970, Parallel 972-1125, Export 1128-1160.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 9-49, Text I/O 51-98, Bytes 100-173, Syntax 175-188, Local names 190-225, Numbers 227-247, Classes 249-309, Trees 311-382, Lists 384-397, Sort keys 399-406, Nested lists 408-425, Dicts 427-436, Sets 438-456, Strings 458-491, Regex 493-550, Collections 552-632, Tuples, lambdas (Python syntax) 634-693, Libraries 695-798, Heaps 800-815, Loops 817-825, Exceptions 827-841, Refused 843-883, Word count 885-933, Dijkstra 935-989, BFS 991-1051, Modules 1053-1086, Speed 1088-1107, Parallel 1109-1270, Export 1273-1305.
