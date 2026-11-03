@@ -1,0 +1,8 @@
+{
+ "seed": 22,
+ "cpython_rc": 0,
+ "ms": 203,
+ "fallback": false,
+ "cls": "crash",
+ "reason": "compiler rc=2:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+}
