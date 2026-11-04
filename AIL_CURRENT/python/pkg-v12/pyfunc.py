@@ -32506,6 +32506,27 @@ def _override_from_site(site):
     return override, arity_seed
 
 
+def _site_override(fn, override, classes=None):
+    """Drop a STR claim on a parameter whose own annotation says something else.
+
+    A str claim is call-site evidence for INFERRING an unannotated parameter's kind (section 26's
+    str half, `_infer_strparam_pass`); it is never a structural claim that may outvote a real
+    annotation. Letting it reach `_param_kinds` turned an ordinary wrong-type call into a
+    declaration-level signature-override refusal, which stole the argument metadata and the
+    caller's own location from the call guard (sections 212/213). Dropping the claim here leaves
+    the declared parameter kind in place, so the call still compiles down to the guard and is
+    refused there, by name, with operation="argument".
+    """
+    kept = {}
+    for pname, text in override.items():
+        if text == STR and any(a.arg == pname and a.annotation is not None
+                               and _annotation_kind(a.annotation, classes or ()) != STR
+                               for a in fn.args.args):
+            continue
+        kept[pname] = text
+    return kept
+
+
 def _explicit_annotation_conflicts(fn, override, classes=None):
     """True if `override` (a `{pname: kind_text}` dict about to be handed to `_param_kinds`)
     genuinely contradicts a REAL annotation written in `fn`'s own source, as opposed to merely
@@ -32571,6 +32592,7 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
             continue                             # disagreement -- left for `_plan_clones`
         site = {pname: next(iter(s)) for pname, s in per_param.items()}
         override, arity_seed = _override_from_site(site)
+        override = _site_override(by_name[g], override, classes)
         try:
             new_params = _param_kinds(by_name[g], classes or {}, override or None,
                                       {name: sig[1] for name, sig in sigs.items()}, allow_widening=True)
@@ -33000,6 +33022,7 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
         variants = {}
         for idx, (key, site) in enumerate(uniq.items()):
             override, arity_seed = _override_from_site(site)
+            override = _site_override(by_name[g], override, classes)
             try:
                 new_params = _param_kinds(by_name[g], classes or {}, override or None,
                                           {name: sig[1] for name, sig in sigs.items()}, allow_widening=True)
