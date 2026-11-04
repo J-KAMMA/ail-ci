@@ -1,3 +1,22 @@
+## 2026-11-04 -- infer s1: GPT-2 inference in AIL against llama.cpp
+
+Added `lab/infer/`: `fetch.sh`, `export_f32.py`, `ref.py`, `gpt2.py`, `tokens.txt`, `prompt.txt`, `README.md` and
+`RESULTS.md`. The model is zenz-v3.2-small (GPT-2 small, 12x768, vocab 6000). The safetensors repo answers 401, so
+the public `-gguf` sibling was used: its only file is Q5_K_M, dequantized once to F32 so AIL, `ref.py` and llama.cpp
+read identical values. Upstream llama.cpp rejects `tokenizer.ggml.pre = gpt2-small-japanese-char`, so the pinned
+`azooKey/llama.cpp` fork is required. No compiler file changed. `gpt2.py` uses plain `list[float]` (`ail_array` f32 is
+still stage T3 and 2-D is stage T6) and `--strict` accepts it without a new blocker.
+
+Greedy ids after the fixed 64-token prompt are equal for AIL, `ref.py` and llama.cpp, and all top-5 values match; the
+1-token and 1024-token boundary prompts also match `ref.py`. One thread: prefill 8.52 s vs llama 0.150 s (56.7x),
+decode 130.6 ms/token vs 12.93 ms/token (10.1x), total 11.43 s vs 0.40 s (28.6x), peak RSS 1.06 GiB vs 417 MiB,
+binary 94,544 B vs 1,898,560 B, AIL compile 8.32 s. Findings: prefill is unbatched, the matmul inner loop is scalar
+with `ail_flist_view_get` bounds checks and `ck_add`/`ck_mul` overflow checks, and every `linear()` call snapshots its
+list arguments (`list[list[float]]` indexing); arithmetic is f64. `perf` is denied on the runner, so these come from
+the generated C. Details in `lab/infer/RESULTS.md`.
+
+Tests: `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass. No weights are committed.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
