@@ -32526,6 +32526,11 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
             if a.arg == pname and a.annotation is not None:
                 given = _sig_override_kind(fn, pname, text)
                 expected = _annotation_kind(a.annotation, classes or ())
+                # A text argument is reported by the per-call argument guard in the CALLER's
+                # context (operation='argument'), not as a callee signature override; dropping the
+                # claim here leaves that guard to raise the better-located diagnostic.
+                if given == STR:
+                    continue
                 if given != expected and not (expected == FLT and given == INT):
                     return True
     return False
