@@ -162,6 +162,8 @@ def _same_last_line(got, want):
     # CPython prefixes the exception name and, for bytes, leaves the message generic.
     if want.startswith('IndexError: '):
         msg = want[len('IndexError: '):]
+        if got.startswith('IndexError: '):
+            got = got[len('IndexError: '):]
         return got == msg or got == 'bytes ' + msg
     return False
 

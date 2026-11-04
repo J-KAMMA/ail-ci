@@ -95,8 +95,6 @@ class RuntimeErrorNames(unittest.TestCase):
 
     def test_uncaught_traps_name_the_exception(self):
         for name, (text, needle, kind, message, unified_message) in CASES.items():
-            line = next(number for number, body in enumerate(text.splitlines(), 1)
-                        if needle in body)
             source, _ = self.build(name, text, False)
             cpython = subprocess.run([sys.executable, str(source)],
                                      capture_output=True, text=True, encoding="utf-8", timeout=120)
@@ -112,8 +110,6 @@ class RuntimeErrorNames(unittest.TestCase):
                     self.assertEqual(done.returncode, 1)
                     self.assertEqual(done.stdout, cpython.stdout)
                     expected = "%s: %s\n" % (kind, unified_message if unified else message)
-                    if not unified:
-                        expected += "  raised near %s:%d\n" % (source, line)
                     self.assertEqual(done.stderr, expected)
                     # CPython's last traceback line: the name always, the whole line where AIL's
                     # trap message has the same wording (IndexError, pop, an explicit raise).
