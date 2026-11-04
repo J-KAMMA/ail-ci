@@ -41,9 +41,9 @@ git -C "$SRC" fetch -q --depth 1 origin "$LLAMA_REV"
 git -C "$SRC" checkout -q --detach FETCH_HEAD
 cmake -S "$SRC" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=ON \
     -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=ON
-cmake --build "$SRC/build" -j 4 --target llama-cli llama-quantize llama-tokenize llama-simple
+cmake --build "$SRC/build" -j 2 --target llama-cli llama-quantize llama-tokenize llama-simple
 
-"$SRC/build/bin/llama-quantize" --allow-requantize --pure "$MODEL_Q5" "$MODEL_F32" F32 4
+"$SRC/build/bin/llama-quantize" --allow-requantize --pure "$MODEL_Q5" "$MODEL_F32" F32 2
 python3 "$HERE/export_f32.py" "$MODEL_F32" "$DEST/exported"
 
 echo "ready: $DEST"

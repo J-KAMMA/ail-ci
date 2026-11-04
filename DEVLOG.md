@@ -7,13 +7,18 @@ read identical values. Upstream llama.cpp rejects `tokenizer.ggml.pre = gpt2-sma
 `azooKey/llama.cpp` fork is required. No compiler file changed. `gpt2.py` uses plain `list[float]` (`ail_array` f32 is
 still stage T3 and 2-D is stage T6) and `--strict` accepts it without a new blocker.
 
-Greedy ids after the fixed 64-token prompt are equal for AIL, `ref.py` and llama.cpp, and all top-5 values match; the
-1-token and 1024-token boundary prompts also match `ref.py`. One thread: prefill 8.52 s vs llama 0.150 s (56.7x),
-decode 130.6 ms/token vs 12.93 ms/token (10.1x), total 11.43 s vs 0.40 s (28.6x), peak RSS 1.06 GiB vs 417 MiB,
-binary 94,544 B vs 1,898,560 B, AIL compile 8.32 s. Findings: prefill is unbatched, the matmul inner loop is scalar
-with `ail_flist_view_get` bounds checks and `ck_add`/`ck_mul` overflow checks, and every `linear()` call snapshots its
-list arguments (`list[list[float]]` indexing); arithmetic is f64. `perf` is denied on the runner, so these come from
-the generated C. Details in `lab/infer/RESULTS.md`.
+Greedy ids after the fixed 64-token prompt are equal for AIL, `ref.py` and llama.cpp; the 1-token and 1024-token
+boundary prompts match `ref.py` top-5 and greedy ids as well (1024 with `STEPS=0`, which is committed as
+`tokens1024.txt`, the 64 ids repeated 16 times; without `STEPS=0` the program prints the top-5 and then refuses by
+name with exit 2). llama.cpp prints no logits, so its top-5 is not compared, and no 1024-token llama run was made.
+One thread: prefill 8.52 s vs llama-cli 0.150 s (56.7x), decode 130.6 ms/token vs 12.93 ms/token (10.1x), total
+11.43 s vs 0.40 s (28.6x); `llama-simple` uses its default 4 threads, so it is not a one-thread comparison. Peak RSS
+1.06 GiB vs 417 MiB, binary 106,816 B vs 1,898,560 B, AIL compile 8.34 s.
+Findings: prefill is unbatched, the matmul inner loop is scalar with `ail_flist_view_get` bounds checks and
+`ck_add`/`ck_mul` overflow checks, and the four per-layer `linear()` calls snapshot their weight lists
+(`list[list[float]]` indexing; the final head call does not); arithmetic is f64. The copies are 7,087,872 doubles
+(54.07 MiB) per layer-token, about 40.6 GiB for the 64-token prefill. `perf` is denied on the runner, so these come
+from the generated C. Details in `lab/infer/RESULTS.md`.
 
 Tests: `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass. No weights are committed.
 

@@ -1,11 +1,14 @@
 """GPT-2 inference in AIL: zenz-v3.2-small, f32 weights, float64 arithmetic.
 
 Build: python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/infer/gpt2.py -o gpt2 --strict
-Run:   ./gpt2 DATA_DIR TOKENS_FILE
+Run:   ./gpt2 DATA_DIR TOKENS_FILE [STEPS]
 
 DATA_DIR is the directory made by export_f32.py (one little-endian f32 file per
 tensor).  This program decodes those bytes itself, so it does not rely on an
-f32 array type in the compiler.
+f32 array type in the compiler.  STEPS is the number of greedy tokens to decode
+after the prompt (default 16).  A prompt at the context length needs STEPS=0;
+otherwise the program prints the prompt's top-5 and then refuses the decode with
+a named context error.
 """
 import sys
 import math
@@ -148,6 +151,11 @@ def main() -> int:
     for word in token_text.split():
         prompt.append(int(word))
 
+    if len(prompt) > N_CTX:
+        print("refused: prompt has " + str(len(prompt)) + " tokens, context length is "
+              + str(N_CTX), file=sys.stderr)
+        return 2
+
     last_logits = [0.0] * VOCAB
     seq = list(prompt)
     pos = 0
@@ -248,6 +256,13 @@ def main() -> int:
     steps = 16
     if len(sys.argv) > 3:
         steps = int(sys.argv[3])
+    if steps < 0:
+        steps = 0
+    if len(seq) + steps > N_CTX:
+        print("refused: " + str(len(seq)) + "-token prompt plus " + str(steps)
+              + " decode steps exceeds context length " + str(N_CTX)
+              + "; pass STEPS=0 after TOKENS_FILE to stop at the prompt", file=sys.stderr)
+        return 2
     generated = []
     step = 0
     while step < steps:

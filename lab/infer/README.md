@@ -52,6 +52,9 @@ python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/infer/gpt2.py -o /tmp/gpt2 --s
 ulimit -v 3000000
 /tmp/gpt2 /tmp/ail-infer/exported tokens.txt
 
+# AIL at exactly the 1024-token context length: check the prompt's top-5 and stop
+/tmp/gpt2 /tmp/ail-infer/exported tokens1024.txt 0
+
 # llama.cpp, one thread
 /tmp/ail-infer/llama-azoo/build/bin/llama-cli \
     -m /tmp/ail-infer/zenz-f32.gguf -p "$(cat lab/infer/prompt.txt)" \
@@ -60,7 +63,13 @@ ulimit -v 3000000
 
 `tokens.txt` is the first 64 token ids of `prompt.txt` (the model's tokenizer,
 via `llama-tokenize`). It is committed so the three programs see exactly the
-same ids. `RESULTS.md` has the timing table.
+same ids. `tokens1024.txt` is `tokens.txt` repeated 16 times, the 1024-token
+context length, so the boundary probe is reproducible. The AIL program takes an
+optional third argument, `STEPS` (default 16), the number of greedy tokens to
+decode after the prompt. At a prompt of exactly 1024 ids there is no room for
+those steps, so pass `0`; without it the program still prints the prompt's top-5
+and then refuses the decode with a named context error on stderr (exit 2).
+`RESULTS.md` has the timing table.
 
 ## AIL source shape
 

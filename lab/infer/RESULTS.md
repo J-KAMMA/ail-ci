@@ -16,7 +16,18 @@ values.
 | AIL greedy 16 == llama.cpp greedy 16 | yes (exact ids) |
 | AIL top-5 ids/values == `ref.py` | yes (ids equal, 9 printed significant digits equal) |
 | 1-token prompt, AIL vs `ref.py` | top-5 and 16 greedy ids equal |
-| 1024-token prompt, AIL vs `ref.py` | top-5 ids/values equal |
+| 1-token prompt, AIL vs llama.cpp | 16 greedy ids equal (reviewer-confirmed) |
+| 1024-token prompt, AIL vs `ref.py` | top-5 ids/values equal (`STEPS=0`) |
+
+llama.cpp prints no logits, so its top-5 is not compared for any prompt; only the
+greedy ids are checked against it (64-token and 1-token prompts). No 1024-token
+llama.cpp run was made.
+
+`tokens1024.txt` is `tokens.txt` repeated 16 times (1024 ids, exactly the context
+length). The default 16 decode steps do not fit there, so with no third argument
+the program prints the prompt's top-5 and then refuses with a named context error
+on stderr (exit 2); `STEPS=0` stops after the top-5. The 1-token prompt was also
+run as the same `gpt2.py` program under CPython and matched the compiled output.
 
 Greedy ids (all three programs):
 `244 249 248 172 120 202 435 354 280 386 259 623 241 435 354 280`.
@@ -39,11 +50,17 @@ llama.cpp numbers are its own report lines (`prompt eval time`, `eval time`).
 report has 15 eval runs for 16 generated tokens. The per-token row is the fair
 decode comparison.
 
+The llama.cpp column is the `llama-cli` report with `-t 1`. `llama-simple` has no
+thread option and uses ggml's default of 4 threads, so its report here (73 ms
+prompt eval, 10.1 ms/token over 15 evals) is not a one-thread comparison and is
+not used in the table. The ratio depends on the harness and the thread count; the
+AIL numbers do not change.
+
 | resource | AIL | llama.cpp |
 | --- | ---: | ---: |
 | peak RSS (decode run) | 1,108,044 KiB (1.06 GiB) | 427,444 KiB (417 MiB) |
-| binary size | 94,544 B (`gpt2`) | 1,898,560 B (`llama-cli`); 27,120 B (`llama-simple`) |
-| AIL compile time | 8.32 s (`--strict`, warm C compiler cache) | n/a |
+| binary size | 106,816 B (`gpt2`) | 1,898,560 B (`llama-cli`); 27,120 B (`llama-simple`) |
+| AIL compile time | 8.34 s (`--strict`, warm C compiler cache) | n/a |
 
 ## Where the time goes (findings)
 
@@ -62,12 +79,16 @@ this is from the generated C (`--debug-dir`), which is enough to name the causes
    and every index add/multiply is `ck_add`/`ck_mul`, which checks int64
    overflow. There is one `double` multiply-add per branch, no SIMD, no loop
    unrolling. `-O2` cannot vectorize the call-per-element loop.
-3. **Every `linear()` call snapshots its list arguments.** The generated call site
-   is `ail_flist_snapshot(...)` for `qkv_w[layer]`, `o_w[layer]`, `up_w[layer]`,
-   `down_w[layer]`, etc. That is ~7.1M doubles (57 MiB) copied per layer-token
-   triplet, or ~3.6 GiB of copying for the 64-token prefill, on top of the
-   arithmetic. Nested `list[list[float]]` indexing triggers the copy; a flat
-   weight list indexed with an explicit base offset would avoid it.
+3. **The per-layer `linear()` calls snapshot their list arguments.** The generated
+   call sites take an `ail_flist_snapshot(...)` copy of every list argument: per
+   layer the four weight matrices `qkv_w[layer]`, `o_w[layer]`, `up_w[layer]` and
+   `down_w[layer]`, their four bias lists, and the four `attn_norm` / `ffn_norm`
+   weight and bias lists. That is 7,087,872 doubles (54.07 MiB, 56.7 MB) copied
+   per layer-token, or ~40.6 GiB (43.5 GB) for the 12-layer x 64-token prefill, on
+   top of the arithmetic. Nested `list[list[float]]` indexing triggers the copy; a
+   flat weight list indexed with an explicit base offset would avoid it. The final
+   head call passes `head_w`/`zero_bias` directly, so it is not part of this copy
+   volume.
 4. **All arithmetic is float64**, while llama.cpp uses float32 and FMA. This is
    not the main cost (AIL is not memory-bandwidth bound), but it doubles the
    bytes moved and prevents the compiler from using FMA in the same way.
