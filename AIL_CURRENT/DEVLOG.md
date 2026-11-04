@@ -1,3 +1,19 @@
+## 2026-11-04 -- modval2 finish: module values verified on integ (job-modval2b-11041013)
+
+Cherry-picked the modval2 work from `job-modval2-11040508` (commit `2ef3541`, after the export) onto
+current `integ`, refreshed the manifest, and re-ran the original measurements.  All 8 module-value
+probes match CPython in the default and `AIL_UNIFIED_FORCE=1` builds; probe09 stays refused and the
+message still names `pkg.util`, says the name is computed at run time and gives the `write instead`
+line.  The ten `lab/compare/src/*/main.ail` builds produce byte-identical `program.c` against the
+integ export, as do eight extra no-module programs (plain/package/from/relative/`TYPE_CHECKING`/
+cycle/local import).  Extra probes for an argument, a list item, a dict value, an object attribute,
+a cross-module re-export, namespace packages, globals and dunder reads match CPython in both builds.
+Targeted tests pass: `test_ail_modules` (66), `test_ail_modules3` (9), `test_ail_lib_modules` (15),
+`test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped), `test_ail_corpus_findings3` (2), and
+`test_ail_modules_values` (2).  The ASan test and `S4_generators_gc` only fail under a 1.5 GB
+`ulimit -v`; both pass without it (an ASan shadow mapping and a large generator case need more
+address space).
+
 ## 2026-11-03 -- modval2: a local module can be used as a value (job-modval2-11040508)
 
 `ail_modules.py` used to refuse every local module used as a value (`m = pkg.util`, `[pkg.a,
@@ -21,7 +37,6 @@ probe09 refusal.  `test_ail_modules`, `test_ail_modules3`, `test_ail_lib_modules
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass; the ten
 `lab/compare/src/*/main.ail` builds keep byte-identical `program.c` against the integ export.
 
-
 ## 2026-11-03 -- rails3: element-bounded range counters stay int64 (job-rails3-11040144)
 
 `for j in range(a[s], a[s + 1])` used to give `j` a tagged `ail_tint` in the default int64 build,
@@ -40,6 +55,7 @@ default and unified builds; the overflow probe stops loudly on both int64 paths 
 `--exact-int`, and the >2**64 list-element probe stays exact.  Added
 `test_ail_range_element_bounds.py` and registered it in `tests.d`; the targeted modules,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on the final commit.
+
 ## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
 
 The daily fuzzer (seed 2076011178) printed `round((1e10 * 1e10))`.  On today's tree the seed already
