@@ -23,40 +23,66 @@ Layout:
     python3 lab/compare_cand/run.py --task csv_rollup --out /tmp/r.json
 
 The last command checks every public and hidden case in every column and then measures the perf
-input (4,000,000 rows). Build the table with:
+input (4,000,000 rows, 89 MB). Wrap it in `ulimit -v 1500000`: the `ail-py` column peaks near
+640 MB and CPython near 450 MB. Build the table with:
 
     python3 lab/compare/merge.py /tmp/cand-results --json /tmp/cand.json
 
 ## Reusing `lab/compare/run_task.py`
 
-`run_task.py` binds `HERE` at import time:
+`run_task.py` binds its paths at import time, on line 41:
 
     HERE = Path(__file__).resolve().parent
 
-`run.py` therefore loads it with `importlib`, sets `module.HERE` to `lab/compare_cand` **before**
-calling `main()`, and also re-sets the derived `REPO` and `AIL` paths. `REPO` and `AIL` happen to be
-correct already because `lab/compare_cand` and `lab/compare` are at the same depth, but they are
-reassigned explicitly. No file under `lab/compare/` is edited.
+so it cannot be pointed at another directory by changing the working directory. `run.py` loads it
+with `importlib`, sets `module.HERE = lab/compare_cand` **before** calling `main()`, and also
+re-sets the derived `REPO` and `AIL`. `REPO` and `AIL` would be correct anyway because
+`lab/compare_cand` and `lab/compare` sit at the same depth, but they are reassigned explicitly.
+Everything else in `run_task.py` that depends on the directory (`load_task`, `make_case`,
+`make_check_cases`, `reference_outputs` and `read_pins`) reads `HERE` at call time. No file under
+`lab/compare/` is edited.
 
 ## AIL paths and probes
 
-`typed.py` builds on the typed path (`compile --strict` accepts it). `main.py` is the plain CPython
-source used for the `python` column and for `ail-py`; its AIL build falls back to the general path
-with this note:
+`typed.py` builds on the **typed** path (`compile --strict` accepts it). `main.py` is the plain
+CPython source used for the `python` column and for `ail-py`; its AIL build falls back to the
+**general** path with this note:
 
-    note: .../main.py:11:9: built on the general path (about 20x slower) because 'NAME' is read before it is assigned
+    note: lab/compare_cand/src/csv_rollup/main.py:29:9: built on the general path (about 20x slower)
+    because the constant None; this language has no null value, so nothing holds one ...
+    run with --strict to see why
 
-Only the spelling differs between `main.py` and `typed.py` (annotations, string group keys, and a
-manual byte scan instead of `bytes.split`/tuples); the algorithm is the same one-pass hash map and
-sort.
+Both files run the same one-pass algorithm (scan the bytes, hash map keyed by the pair, sort the
+groups); they differ only in spelling:
 
-`qty * price` beyond int64 was probed in a throwaway `/tmp/probes/overflow_int64.py` with the
-values `1000000000000 * 10000000000` (outside the task's ranges): CPython prints the exact big
-integer `10000000000000000000000`, while AIL stops loudly in both the default build and with
-`AIL_UNIFIED_FORCE=1`:
+- `typed.py` is annotated (`dict[str, int]`, `list[int]`, `bytes`, `-> int`) and uses `ail`'s
+  `read_stdin_bytes`/`write_stdout_bytes`, string group keys (`region + ' ' + product`), and
+  parallel index lists for the groups and regions.
+- `main.py` is unannotated, uses `sys.stdin.buffer.read()`/`sys.stdout.write`, a dict keyed by
+  `(region, product)` byte tuples, and `None` for a failed number parse (the cause of the general
+  path).
 
-    OverflowError: integer overflow in * (ints are 64-bit; --exact-int gives exact ints)
+Both scan the input with an index loop instead of `bytes.split` / `bytes.find`. That is a memory
+and speed fix, not an algorithm change: `bytes.split(b'\n')` on the 4M-row perf input made the
+compiled `ail-py` build peak at 1.39 GB and die with `AIL internal error: out of memory` under a
+1.5 GB limit, and `bytes.find` in the compiled typed build is quadratic in the buffer (10k rows
+0.32 s, 40k rows 5.37 s, 160k rows never finished), while the index scan is linear (40k rows
+0.02 s, 400k rows 0.27 s, 4M rows 3.9 s).
 
-The probe is not part of the cases. With the task's own validation, a 30-digit out-of-range field
-is counted bad before any multiplication (checked against `reference.py`), so the task programs
-never reach that overflow.
+## Integer probes (not part of the cases)
+
+`qty * price` and the sums stay inside int64 for every input the spec allows (|qty| <= 1000,
+price <= 10^7, and the perf input's sums are bounded). Beyond int64, AIL stops loudly in both the
+default build and with `AIL_UNIFIED_FORCE=1`; it never prints a wrong number:
+
+| probe (in `/tmp/probes/`) | CPython | AIL default | AIL `AIL_UNIFIED_FORCE=1` |
+|---|---|---|---|
+| `overflow_int64.py` (`4000...000 + 4000...000`, `* 4`) | prints 8000000000000000000 / 16000000000000000000, exit 0 | compile error: `int64 constant expression out of range`, exit 1 | same compile error, exit 1 |
+| `overflow_argv.py` (args `4000000000000000000 4`) | prints both lines, exit 0 | prints the sum, then `OverflowError: integer overflow in *`, exit 1 | same, exit 1 |
+| `overflow_parse.py` (`int('99999999999999999999')`) | prints the big value, exit 0 | compile error: `int64 constant expression out of range`, exit 1 | same, exit 1 |
+| `parse_argv.py` (`int(argv[1])` with a 20-digit value) | prints the big value, exit 0 | `OverflowError: integer overflow in int()`, exit 1, no stdout | same, exit 1 |
+
+The comparisons were run with `bash ~/tools/cmp.sh` (which passes no arguments, so the constant
+forms) and by compiling `overflow_argv.py` / `parse_argv.py` with `ail_chatgpt.py compile --syntax
+python` once per build. The task's own validation turns every out-of-range field into a bad line
+before any multiplication, so the task programs never reach the overflow.
