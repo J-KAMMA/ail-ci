@@ -1,3 +1,50 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I've finished checking. Here's the review.
+
+**What the change really does:** adds a self-containted audit lane — `lab/diffixed/audit.py` (list `fixed` rows of `DIFFERENCES.md` that cite no test/lab file, build one probe per row in both builds, write `AUDIT.md`, exit 1 on a difference), 34 probe programs, `AIL_CURRENT/test_ail_diffixed.py` + registration, and two manifest pins. No compiler/runtime file is touched (probe `plain.py`: generated C from HEAD vs `/tmp/base` is byte-identical except the embedded source path).
+
+**Claims checked**
+- 34 probes, `AUDIT.md`, test module, `tests.d` line, 2 manifest shards, only allowed paths: **verified** (`git diff --name-only work..HEAD`; `update_manifest.py --check` rc=0).
+- `test_ail_diffixed` passes at 223 s: **verified** — 229.0 s solo (`-j 1`), 0 failures; 293 s only under `-j 2` contention with safetynet.
+- `test_ail_safetynet` passes: **verified** (0 failed, `-j 2` run).
+- `test_ail_files` / `test_ail_corpus_findings3` pass: **unverified** (not run, not required by this review).
+- 33/34 probes match CPython in both builds: **verified** (AUDIT table + test pass; `pre26` is the one exclusion).
+- Finding `C?-job-pre26-10240859-1`: **verified** — exact probe on HEAD gives `d: 3.0 3.0 '3.0' 3.0` vs CPython `3.0 3.0 3.0 3.0`, `g` matches. Trigger is a repeated `e.args[0]` *expression*; binding it to a local (`a = e.args[0]`) matches, so "same element twice" is imprecise but the finding is real and correctly attributed to the row.
+- "`--run` emits 4 verdicts / no-repro lines / RC=1": **unverified end-to-end** (code path read; the differing outputs reproduced directly). `audited_rows()` on HEAD yields exactly 34.
+- "finds 34 rows ... including `C?-job-fuzz65-10231438-1`": **FALSE** — see defect 1.
+
+**My probes** (`/tmp/rprobes`, `bash ~/tools/cmp.sh`): `exact.py` d-differs (finding above), g-matches; `min1.py` (`print("{!r}".format(e.args[0]), e.args[0])`) d-differs, `min2.py` (local binding) matches; `pre166b.py` (genexp via argument/list/dict/attribute), `c168b.py` (`None` bounds via attribute), `pre70b.py` (`None` sep via attribute/argument) all match both builds; `fuzz65.py`, `pre101.py`, `pre104.py` match both builds; `plain.py` C unchanged. **Pre-existing:** only the recorded `pre26` default-build bug (identical on base; no compiler code changed).
+
+**Defect 1 — the audit silently drops `fixed` rows whose status is not the last cell.**
+`audited_rows()` takes `cells[-1]` as the status. Three rows put `fixed` in the third cell with the description fourth, so they are missing from `AUDIT.md`, have no probe and no verdict — including the row the report says it found:
+- `C?-job-fuzz65-10231438-1` (line 357), `C?-job-pre101-10242138-1` (365), `C?-job-pre104-10242140-1` (366).
+
+Reproducer / expected vs actual:
+```
+$ python3 lab/diffixed/audit.py | grep -E 'fuzz65|pre101|pre104'
+# expected: 3 lines;  actual: no output (exit 1 from grep)
+```
+Synthetic fixture confirming the parser, not the file, is at fault: row `| B-2 | malformed | fixed | a description after the status |` is skipped while the other three rows are selected. Probes I wrote for those three rows (`/tmp/rprobes/fuzz65.py`, `pre101.py`, `pre104.py`) match CPython in both builds, so no hidden regression is being masked, but the lane is incomplete (34 of the 37 `fixed`, no-test rows) and the report's fuzz65 claim is false.
+
+Minor, non-blocking: four probes exceed the 5–30-line limit (37/36/36/36 lines).
+
+Unverified: `--run` end-to-end including the no-repro line and RC=1; `test_ail_files`/`test_ail_corpus_findings3`; CI shards (cannot push/run here).
+
+VERDICT: FIX
+
+1. `lab/diffixed/audit.py` `audited_rows()` uses `cells[-1]` as the status, so the three `fixed`, test-less rows `C?-job-fuzz65-10231438-1`, `C?-job-pre101-10242138-1` and `C?-job-pre104-10242140-1` (status in the third cell, description in the fourth) get no probe and no verdict. Expected: 37 rows listed with probes; actual: 34, and `python3 lab/diffixed/audit.py | grep -E 'fuzz65|pre101|pre104'` prints nothing. The report's claim that fuzz65 is found is false.
+[commandcode stop=end_turn turns=34 out_tokens=33469]
+
+
+--- ORIGINAL TASK ---
 Lane: diffixed
 
 # diffixed1: re-check the `fixed` rows of DIFFERENCES.md that cite no test, each with a probe that becomes a regression test
