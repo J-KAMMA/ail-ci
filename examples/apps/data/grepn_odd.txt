@@ -1,0 +1,4 @@
+café line
+plain line
+résumé
+last without newline
