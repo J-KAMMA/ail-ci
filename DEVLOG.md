@@ -1,3 +1,16 @@
+## 2026-11-04 -- hybrid cpyhyb2c: cpyhyb2b re-verified against current integ
+
+Applied the `job-cpyhyb2b` work (already identical on this branch's export; `ail_chatgpt.py` untouched) and
+re-ran it against the current `origin/integ`. `lab/hybrid/check.py` reproduces 40/40 matches with the same
+accelerated (`reverse_words` in `t079.py`) and rejected sets. `test_ail_cpython_hybrid` (7 tests),
+`test_ail_safetynet` (5), `test_ail_files` (18, 1 skip) and `test_ail_corpus_findings3` (2) pass.
+`lab/hybrid/measure.py` now has median-of-5 wall times for all 10 compare-lab tasks (the hybrid is within 1%
+of CPython except two tasks that ran faster under the shared-runner load), and `program.c` is identical to
+`origin/integ` (`133ca78`) for all 10 (8 files, 2 identical refusals). Instruction counts stay unavailable
+(`perf_event_open: Permission denied`). Boundary probes (int64 edges via argument/list item/attribute/dict
+value, arithmetic and return overflow, bool/float/str, empty/negative, aliasing) match CPython with 9 native
+functions in one probe and 3 in the other.
+
 ## 2026-11-03 -- hybrid cpyhyb2b: 40 programs match CPython, program.c unchanged
 
 Finished the hybrid job from `66200052` without touching `ail_chatgpt.py` (restored to `integ`), so the

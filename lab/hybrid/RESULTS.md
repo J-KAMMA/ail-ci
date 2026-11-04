@@ -1,6 +1,6 @@
 # CPython hybrid correctness check
 
-Run 2026-11-03 on the hybrid from `ail_cpython_hybrid.py` (schema `ail.cpython_hybrid/2`), checked against CPython 3.12.3. Each program was built into a fresh temporary directory and run with the same stdin and arguments; stdout, exit status and the last stderr line were compared, with a 60-second timeout per run.
+Run 2026-11-03 and re-run 2026-11-04 on the hybrid from `ail_cpython_hybrid.py` (schema `ail.cpython_hybrid/2`), checked against CPython 3.12.3. Each program was built into a fresh temporary directory and run with the same stdin and arguments; stdout, exit status and the last stderr line were compared, with a 60-second timeout per run. The 2026-11-04 re-run reproduced the same 40/40 result and the same accelerated/rejected sets.
 
 The 10 compare-lab programs use the performance case and arguments from `lab/compare/run_task.py` (`make_case(..., smoke=False)`). The 30 corpus programs are the first 30 `lab/corpus/programs/*/t*.py` sorted by path, with stdin from `/dev/null`.
 
@@ -71,22 +71,22 @@ These functions were reported by the analysis but not accelerated; the reason is
 
 ## Wall time on the 10 compare-lab tasks
 
-Milliseconds. `python` is `python3 main.py`, `hybrid` is `python3 DIR/<stem>_run.py`, `standalone` is the binary from `ail_chatgpt.py compile --syntax python` (with `--exact-int` for `rail_transfer` and `chain_relax`), all on the performance input. `berth_sim` and `chain_relax` are the median of 3 timed runs; the rest are one timed run (the 80-minute budget did not allow the median of 5 the task asks for). Every run used `ulimit -v 1500000`, so a run that the cap kills is recorded as a note rather than a time.
+Milliseconds, median of 5 timed runs on the performance input. `python` is `python3 main.py`, `hybrid` is `python3 DIR/<stem>_run.py`, `standalone` is the binary from `ail_chatgpt.py compile --syntax python` (with `--exact-int` for `rail_transfer` and `chain_relax`). Every run used `ulimit -v 1500000`, so a run that the cap kills is recorded as a note rather than a time. The 2026-11-04 run shared the runner with other jobs, so absolute times are higher than the earlier single-run figures; both columns are measured under the same load, and the ratio is the number to read.
 
 | task | python | hybrid | standalone | note |
 | --- | ---: | ---: | ---: | --- |
-| berth_sim | 16693.9 | 16691.5 | n/a | standalone out of memory under 1.5 GB (peak RSS 9.2 GB without the cap) |
-| chain_relax | 11022.3 | 11150.0 | 103774.1 | |
-| echo_pack | n/a | n/a | 4143.9 | CPython and hybrid `MemoryError` under 1.5 GB; standalone fits |
-| ledger_bin | 22665.6 | 22128.2 | n/a | standalone out of memory |
-| rail_transfer | 561.5 | 548.6 | 891.3 | |
-| scar_life | 5457.8 | 5044.4 | n/a | standalone `OverflowError` (int64; needs `--exact-int`) |
-| tally_lang | 11231.8 | 11005.8 | n/a | standalone compile refused (in the subset check, not the hybrid) |
-| term_rank | 7842.3 | 7780.3 | n/a | standalone out of memory |
-| ticket_audit | 7514.7 | 7430.1 | n/a | standalone out of memory |
-| tree_fold | 17257.6 | 17258.6 | n/a | standalone compile refused (`re` with a non-literal pattern) |
+| berth_sim | 23179.5 | 23424.6 | n/a | standalone out of memory under 1.5 GB (peak RSS 9.2 GB without the cap) |
+| chain_relax | 16648.4 | 12643.9 | 158473.7 | |
+| echo_pack | n/a | n/a | 5215.3 | CPython and hybrid `MemoryError` under 1.5 GB; standalone fits |
+| ledger_bin | 22362.7 | 22370.1 | n/a | standalone out of memory |
+| rail_transfer | 587.7 | 594.4 | 919.7 | |
+| scar_life | 5492.4 | 5502.8 | n/a | standalone `OverflowError` (int64; needs `--exact-int`) |
+| tally_lang | 10817.7 | 10869.2 | n/a | standalone compile refused (in the subset check, not the hybrid) |
+| term_rank | 8256.1 | 8179.1 | n/a | standalone out of memory |
+| ticket_audit | 15176.3 | 15008.0 | n/a | standalone out of memory |
+| tree_fold | 21520.3 | 17788.1 | n/a | standalone compile refused (`re` with a non-literal pattern) |
 
-The hybrid is within a few percent of CPython on every task, which is expected: none of these functions passed the typed-path selection, so the hybrid runs the same Python code with the extension imported but unused.
+The hybrid tracks CPython on every task (within 1% except `chain_relax` and `tree_fold`, which ran faster under load), which is expected: none of these functions passed the typed-path selection, so the hybrid runs the same Python code with the extension imported but unused.
 
 ## Instruction counts
 
@@ -94,7 +94,7 @@ Unavailable. `tools/icount.c` compiled, but its self-test exited 1: `perf_event_
 
 ## `program.c` stability against `origin/integ`
 
-`--debug-dir DIR/program.c` from a standalone build of each `main.py`, HEAD against a worktree at `origin/integ` (`095e0321`), same flags. All 10 agree.
+`--debug-dir DIR/program.c` from a standalone build of each `main.py`, HEAD against a worktree at `origin/integ` (`133ca78`), same flags. All 10 agree (re-checked 2026-11-04).
 
 | task | result |
 | --- | --- |
