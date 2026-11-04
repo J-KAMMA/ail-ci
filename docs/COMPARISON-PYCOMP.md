@@ -16,9 +16,12 @@ and hidden case of its task and its stdout and exit code were compared byte for 
 
 Instruction counts are user-space Ir from valgrind callgrind: `perf_event_open` is not permitted on the
 runner, so `--icount auto` selects callgrind (`icount_method` is `callgrind`), and the workflow installs
-valgrind. The table below counts the same perf input as the other metrics. `not counted` means the
-callgrind run did not fit in this job's budget; `build failed` is the build error above. For mypyc the
-count includes CPython, which the extension still needs at run time.
+valgrind. Each run records the count in its result JSON (`instructions`, same perf input as the other
+metrics) and a `chain_relax` smoke run was checked to return numeric Ir for all four columns. Callgrind
+on the full perf inputs did not fit this job's budget (the Nuitka binaries alone take more than ten times
+their 16-70 s wall time under it), so the tables below report the other metrics and this document makes
+no instruction-count comparison. For mypyc the count, when present, includes CPython, which the
+extension still needs at run time.
 
 ## Correctness against the CPython reference
 
@@ -125,4 +128,5 @@ Lower is better.
 - **Binary size.** AIL wins on every task: 35-104 KiB against 179-1,156 KiB for Codon, 307-482 KiB for mypyc and about 4.5 MiB for Nuitka.
 - **Build disk.** AIL wins on 7 of 8 tasks (geometric mean 0.38x of the best); Codon is smaller on `berth_sim` (200 vs 228 KiB). Codon otherwise needs 184-1,144 KiB, mypyc 3.5-4.5 MiB and Nuitka about 46 MiB.
 - **Peak RSS.** AIL has the lowest peak RSS on 7 of 8 tasks (geometric mean 0.54x of the best); Nuitka is lower on `term_rank` (156.4 vs 158.1 MiB). Codon and mypyc are consistently higher (Codon up to 6.7x and mypyc up to 8.3x, both on `tally_lang`), and mypyc carries CPython with it.
+- **Instructions.** Not compared here: the runner records user-space Ir in each result JSON, but callgrind on the perf inputs did not fit the job budget (see the method note above). The smoke check confirmed numeric Ir for all four columns.
 - **Not measured:** `scar_life` and `tree_fold` did not finish inside this job: mypyc ran more than 25 minutes of CPU on `scar_life`'s perf input before the task was stopped, and Codon ran more than 10 minutes on `tree_fold`'s. Both count as losses for the tool that did not finish; the other columns for those two tasks are missing from these tables, not from the lab.

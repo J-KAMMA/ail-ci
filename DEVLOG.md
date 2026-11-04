@@ -1,10 +1,30 @@
+## 2026-11-04 -- bench finish: verify the Codon/mypyc/Nuitka comparison end to end
+
+Finished the exported pycomp comparison without touching the compiler. On this ubuntu-24.04 runner I
+installed the pins from `lab/compare/toolchains.env` (Codon 0.20.6 from the checksummed tarball, mypy
+2.4.1 compiled, Nuitka 4.3.4, valgrind 3.22.0), ran `check_tools.py --langs python,codon,mypyc,nuitka`
+(ok) and re-ran `run_task.py` smoke checks. `chain_relax`: AIL 2.36 s / 34,888 B / 144 KiB, Codon 9.21 s
+/ 174,904 B, mypyc 4.14 s / 314,352 B / 3,568 KiB, Nuitka 59.6 s / 4,507,864 B / 46,600 KiB, each matching
+CPython on all 32 public+hidden cases. `rail_transfer`: AIL, mypyc and CPython match 24/24, Codon still
+fails to build with the generic-realization error the document records. `merge.py --langs
+ail,ail-py,c,rust,go,nim,python,codon,mypyc,nuitka` now says "Best-other covers ... Codon, mypyc and
+Nuitka" and "3 for the Python compilers"; instruction counts come back as `icount_method: callgrind`
+with numeric Ir. Corrected the comparison's method note: each run records the count in its result JSON,
+but a full callgrind pass on the perf inputs did not fit this job's budget, so the document no longer
+promises an Ir table it never carried and states that per metric.
+
+Tests: test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (25 tests, OK, 1 skipped: no zig
+for `--target windows`), test_compare_publish (14 tests, OK). No new files; `tools/update_manifest.py
+--check` is clean.
+
 ## 2026-11-03 -- bench review: callgrind Ir for the Python compilers, merge method text
 
 Fixed the two review defects in the Codon/mypyc/Nuitka comparison. The compare-lab runner installs
 valgrind (`compare-lab.yml`), so `run_task.py --icount auto` selects callgrind; a smoke run of
 `chain_relax` with `--langs ail,codon,mypyc,nuitka` now records `icount_method: callgrind` and numeric
 user-space Ir for all four columns. `docs/COMPARISON-PYCOMP.md` no longer claims instruction counts are
-unavailable; it gains an Ir table measured with callgrind. `merge.py` now derives the best-other list
+unavailable; it documents the callgrind method and leaves the per-run counts in the result JSON (the
+full-input Ir table did not fit the job budget). `merge.py` now derives the best-other list
 and the "3 runs for the Python compilers" wording from the selected columns instead of hard-coding
 "C, Rust, Go, Nim and Python" and "median of 5". No compiler change.
 
