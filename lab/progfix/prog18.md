@@ -84,6 +84,24 @@ The generated C of the ten `lab/compare` tasks is byte-identical to the base com
 with C, compared with `--debug-dir`; the four `main.py` variants that the general path already
 refuses fail with the same message and emit no C).
 
+## Review fixes (bool is not an int here)
+
+A bool is an `int64_t` 0/1 in C, so `_etype()` says INT for it -- but CPython does not treat it as
+an int in either of the two new places:
+
+5. `_fmt_width_c` now also refuses a bool width: `f"{9:>{flag}}"` with `flag: bool` was rendered
+   as `[9]` on the default build, where CPython raises
+   `ValueError: Invalid format specifier '>True' for object of type 'int'`.  The refusal is
+   `the nested format-spec field has to be an int (it stands for the width); got bool` (the same
+   through a parameter or an attribute).
+
+6. Both `max`/`min` default folds now refuse a bool default: `max(xs, default=True)` was folded to
+   `1` (and `min(..., default=False)` to `0`) on the default build, where CPython returns the bool
+   itself and prints `True`/`False`.  The refusal is
+   `max()/min() with default= of bool where the elements are an int; only a default of the same
+   kind is built`.  `_is_bool_expr` (boolkind.py) is the test in both places.
+
+
 ## Following up (not fixed here)
 
 - `t391`: methods with optional parameters (`Random.randrange(self, start, stop=None, step=1)` and

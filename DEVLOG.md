@@ -1,3 +1,20 @@
+## 2026-11-04 -- prog18_rr1 review fixes: a bool is not an int in a width or a default
+
+Two escape hatches let a bool through where CPython refuses it or keeps it a bool (both only on the
+default build; the forced-general build was correct):
+
+- `f"{9:>{flag}}"` with `flag: bool` was rendered `[9]`; CPython raises
+  `ValueError: Invalid format specifier '>True' for object of type 'int'`.  `_fmt_width_c` now
+  refuses a bool width by name (also through a parameter or an attribute).
+- `max(xs, default=True)` / `min(xs, default=False)` folded the bool to `1`/`0`; CPython returns
+  the bool itself and prints `True`/`False`.  Both `max`/`min` default folds now refuse a bool
+  default by name.
+
+`_etype()` says INT for a bool (it is an int64 0/1 in C); `_is_bool_expr` (boolkind.py) is the
+extra test in the two places.  Probes p10/p13/p19/p20/p21 in `/tmp/probes/` match CPython on both
+builds, and `test_ail_prog18.py` gains two named-refusal tests plus a whole-program bool-edges
+test (12 tests).
+
 ## 2026-11-04 -- prog18_rr1: typed reach of the eight prog18 hot functions (job-prog18_rr1-11050044)
 
 Profiled the eight programs (CPython 3.12, cProfile own time, largest input; `lab/progfix/prog18.md`

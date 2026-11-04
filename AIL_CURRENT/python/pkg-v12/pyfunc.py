@@ -8937,9 +8937,13 @@ def _fmt_width_c(width_node, ctx, kind):
     `abs(w)`; for a str a sign is a ValueError ("Sign not allowed in string format specifier"),
     raised here with the same class. The field stands for the width only, so it has to be an int.
     """
-    if _etype(width_node, ctx) != INT:
+    width_kind = _etype(width_node, ctx)
+    # A bool is an int64 0/1 in C but not an int to CPython's str.format: it refuses the spec
+    # ("Invalid format specifier '>True' for object of type 'int'"). It must not be spliced in.
+    if width_kind != INT or _is_bool_expr(width_node, ctx):
         raise Unsupported('the nested format-spec field has to be an int (it stands for the '
-                          'width); got %s' % _a(_etype(width_node, ctx)))
+                          'width); got %s'
+                          % ('bool' if width_kind == INT else _a(width_kind)))
     saved = len(ctx.pre)
     expr = _expr(width_node, ctx)
     pre = ctx.pre[saved:]
@@ -18623,10 +18627,12 @@ def _struct_fold(f, var, elt_node, conds, src, ctx, eager, default=None):
                 raise Unsupported('%s() takes no default=' % f)
             want = FLT if ct == 'double' else INT
             got = _etype(default, ctx)
-            if got != want:
+            # CPython returns the bool itself (prints True/False), which an int64 accumulator
+            # cannot carry -- do not fold it into an int default.
+            if got != want or _is_bool_expr(default, ctx):
                 raise Unsupported('max()/min() with default= of %s where the elements are %s; '
                                   'only a default of the same kind is built'
-                                  % (_a(got), _a(want)))
+                                  % ('bool' if got == want else _a(got), _a(want)))
             saved = len(ctx.pre)
             default_c = _expr(default, ctx)
             default_pre = ctx.pre[saved:]
@@ -18863,10 +18869,10 @@ def _inline_fold_inner(f, arg, ctx, default=None):
             raise Unsupported('%s() takes no default=' % f)
         want = FLT if ct == 'double' else INT
         got = _etype(default, ctx)
-        if got != want:
+        if got != want or _is_bool_expr(default, ctx):
             raise Unsupported('max()/min() with default= of %s where the elements are %s; only a '
                               'default of the same kind is built'
-                              % (_a(got), _a(want)))
+                              % ('bool' if got == want else _a(got), _a(want)))
         saved = len(ctx.pre)
         default_c = _expr(default, ctx)
         default_pre = ctx.pre[saved:]

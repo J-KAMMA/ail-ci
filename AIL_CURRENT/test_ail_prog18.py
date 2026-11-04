@@ -222,6 +222,52 @@ if __name__ == "__main__":
 '''
 
 
+BOOL_EDGES = '''
+class Box:
+    def __init__(self, w: bool):
+        self.w = w
+
+
+def pad(v: int, w: bool) -> str:
+    return f"[{v:>{w}}]"
+
+
+def pick(xs: list[int], d: bool) -> bool:
+    return max(xs, default=d)
+
+
+def main() -> None:
+    flag: bool = True
+    try:
+        print(f"[{9:>{flag}}]")
+    except ValueError as e:
+        print("VE", e)
+    try:
+        print(pad(9, True))
+    except ValueError as e:
+        print("VE", e)
+    box = Box(False)
+    try:
+        print(f"[{9:>{box.w}}]")
+    except ValueError as e:
+        print("VE", e)
+    xs: list[int] = []
+    ys: list[int] = [1, 2]
+    print(max(xs, default=True))
+    print(min(xs, default=False))
+    print(max(xs, default=bool(0)))
+    b: bool = True
+    print(min(xs, default=b))
+    print(pick(xs, False))
+    print(pick(ys, True))
+    print(max(xs, default=(1 == 2)))
+    print(max(xs, default=5), min(xs, default=-2))
+
+
+main()
+'''
+
+
 @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
 class Prog18(unittest.TestCase):
     @classmethod
@@ -299,6 +345,25 @@ class Prog18(unittest.TestCase):
         res, _, _ = compile_default(self.tmp, 'def main() -> None:\n'
                                     '    print(f"[{9:>{2.5}}]")\n\n\nmain()\n', 'refuse_width')
         self.assertIn('nested format-spec field has to be an int', res.stderr)
+
+    def test_bool_width_refused_by_name(self):
+        res, _, _ = compile_default(self.tmp, 'def main() -> None:\n'
+                                    '    flag: bool = True\n'
+                                    '    print(f"[{9:>{flag}}]")\n\n\nmain()\n', 'refuse_bool_width')
+        self.assertIn('nested format-spec field has to be an int', res.stderr)
+        self.assertIn('bool', res.stderr)
+
+    def test_bool_default_refused_by_name(self):
+        res, _, _ = compile_default(self.tmp, 'def main() -> None:\n'
+                                    '    xs: list[int] = []\n'
+                                    '    print(max(xs, default=True))\n'
+                                    '    print(min(xs, default=False))\n\n\nmain()\n',
+                                    'refuse_bool_default')
+        self.assertIn('max()/min() with default= of bool', res.stderr)
+
+    def test_bool_width_and_default_match_cpython(self):
+        exe, source = self.build(BOOL_EDGES, 'bool_edges', expect_typed=None)
+        self.same(exe, source)
 
     def test_report(self):
         path = self.lab('progfix', 'prog18.md')
