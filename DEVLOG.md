@@ -1,3 +1,17 @@
+## 2026-11-04 -- crate1 re-applied: ail_cargo reads cargo's real target directory (job-rbcrate1-11042159)
+
+Re-applied the accepted `job-crate1-11041927` change on this tree (it added the three
+`examples/crate` Rust examples and their test).  The origin bug was that each example is built
+with `CARGO_TARGET_DIR` pointing at a temporary directory, while `ail_cargo._artifact` looked in
+the crate-local `target/release`; the tool now asks `cargo metadata --no-deps` for
+`target_directory` (honouring `CARGO_TARGET_DIR`, relative values and a workspace's shared
+`target/`) and reads the cdylib and staticlib from there.  The default `crate/target` case is
+unchanged.  Files: `.github/workflows/agent-worker.yml` (GH Models token removed), `ail_cargo.py`,
+`test_ail_examples_crate.py`, `tests.d/test_ail_examples_crate.txt`, `examples/crate/**` (three
+crates plus README).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run.  Final-state tests: test_ail_examples_crate, test_ail_cargo, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
