@@ -264,12 +264,12 @@ class Prog16(unittest.TestCase):
                 self.assertNotIn('Traceback', built.stderr)
                 self.assertIn('enumerate() with other than (iterable[, start])', built.stderr)
 
-    def test_pair_forms_not_built_are_refused_by_name_and_general_matches(self):
-        for text, name, needle in (
-                (PAIR_START, 'pairstart', ('enumerate() with a start inside a comprehension or a fold',)),):
-            path = self.inline(text, name)
-            self.refused_typed(path, *needle)
-            self.same(path, '', typed=False, name=name)
+    def test_pair_start_in_comprehension_is_typed(self):
+        # prog17: the pair plan now evaluates an `enumerate` start once (after the iterable) and
+        # adds it with the overflow-checked `ck_add`, so this shape is built instead of refused.
+        path = self.inline(PAIR_START, 'pairstart')
+        self.same(path, '', name='pairstart')
+        self.same(path, '', typed=False, name='pairstart_default')
 
     def test_pair_comprehension_over_floats_is_typed(self):
         path = self.inline(PAIR_FLOAT, 'pairfloat')

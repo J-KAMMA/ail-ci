@@ -42,6 +42,9 @@ No program file was edited.
    start once (after the iterable, CPython's order) into a temp and adds it with the overflow-
    checked `ck_add`; `_listcomp_srows_into_temp` builds one `ail_srow` per element with the field
    kinds the destination annotation settled. This is what makes `t374` fully typed.
+   A probe of the same path found a pre-existing gcc error in
+   `sum(i for i, w in enumerate(<list[str]>))` (`int64_t v_w = ail_str`): `_inline_pair_fold`
+   hardcoded `int64_t` for both pair bindings; it now uses the key/value kinds from `_pair_plan`.
 
 ## Follow-ups (large features, left as exact messages)
 

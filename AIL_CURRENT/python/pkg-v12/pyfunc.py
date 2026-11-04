@@ -18922,9 +18922,15 @@ def _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager=None):
     ctx.tmp += 1
     tag = ctx.tmp
     acc, idx, seen = '_a%d' % tag, '_i%d' % tag, '_s%d' % tag
-    for nm in pair:
-        ctx.bind(nm, INT)
+    key_kind = _pair_key_kind(src, ctx)
+    value_kind = _pair_value_kind(src, ctx)
+    for nm, kind in zip(pair, (key_kind, value_kind)):
+        ctx.bind(nm, kind)
     ck, cv = ctx.cname(pair[0]), ctx.cname(pair[1])
+    key_ctype = ('ail_str' if key_kind == STR else 'double' if key_kind == FLT
+                 else 'ail_bytes' if key_kind == BYTES else 'int64_t')
+    value_ctype = ('ail_str' if value_kind == STR else 'double' if value_kind == FLT
+                   else 'ail_bytes' if value_kind == BYTES else 'int64_t')
     ct = 'double' if _etype(elt_node, ctx) == FLT else 'int64_t'
 
     if f in FOLD_INIT:
@@ -18938,8 +18944,8 @@ def _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager=None):
     if pre:
         head = '%s %s' % (' '.join(pre), head)
     body = ['for (int64_t %s = %s; %s < %s; %s++) {' % (idx, lo, idx, n, idx),
-            'int64_t %s = %s;' % (ck, kexpr.replace('@', idx)),
-            'int64_t %s = %s;' % (cv, vexpr.replace('@', idx))]
+            '%s %s = %s;' % (key_ctype, ck, kexpr.replace('@', idx)),
+            '%s %s = %s;' % (value_ctype, cv, vexpr.replace('@', idx))]
     for c in conds:
         cc = _cond(c, ctx)
         body.extend(ctx.pre); ctx.pre = []

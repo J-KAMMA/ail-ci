@@ -1,3 +1,23 @@
+## 2026-11-04 -- prog17: reversed(str) and str-field row comprehensions typed (job-prog17_rr1-11050046)
+
+Re-run of prog17 (the original GitHub run was lost).  cProfile on the eight programs and strict
+per-function reasons are in `lab/progfix/prog17.md`.  Two compiler changes:
+
+* `for c in reversed(s)` over a plain str: `_for`'s `reversed()` branch captured the source once
+  and walks it with `ail_str_prev_unit` (one-code-point views, same as the forward str door);
+  `_promote_floats` binds such a loop target STR rather than the INT default.  `gdev/g02_016` is
+  now fully typed (was `.upper() on a str is not built.` -- the real gap was the str iterable).
+* `enumerate(..., start=...)` inside a pair comprehension/fold, and a
+  `list[tuple[..., str, ...]]` annotation filled by a pair comprehension:
+  `_pair_plan` evaluates the start once after the iterable and adds it with `ck_add`;
+  `_listcomp_srows_into_temp` pushes one `ail_srow` per element.  `dev/t374` is fully typed.
+  The same probe surfaced a pre-existing `sum(i for i, w in enumerate(<list[str]>))` gcc error
+  (`int64_t v_w = ail_str`); `_inline_pair_fold` now types both pair bindings.
+
+`AIL_CURRENT/test_ail_prog17.py` (registered through `tests.d/test_ail_prog17.txt`) covers both
+shapes and the two programs; `test_ail_prog16`'s old "start is refused" case now checks it is
+built.  Probes in `/tmp/probes`: every one matches CPython on both `cmp.sh` builds.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda
