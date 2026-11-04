@@ -1,3 +1,70 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review
+
+**What the change really does.** In `ail_modules.py` the merge step now, for each local module used as a value, emits a generated class plus one instance (`_AilMod_pkg__util` / `_ail_modval_pkg__util`) with a `*a` method per function, a property per global, properties for module aliases and for `__name__/__file__/__package__/__path__/__loader__/__spec__/__cached__`, and rewrites module occurrences to that instance. It also adds a name-tracking map (`modvars`/`visit_Assign`/`visit_AnnAssign`) that folds `m.attr` wherever `m` was assigned a module value, and adds refusals (unknown store, `setattr`/`delattr`, dynamic `getattr`, keyword call through a runtime-held value). The report itself is empty; the DEVLOG claims were checked.
+
+**Claims checked.** 8 probes + 2 named refusals match CPython in both builds (test_ail_modules_values passed; probes re-run directly). 10/10 `lab/compare/src/*` C files byte-identical to base (verified: all ten). `test_ail_modules, modules3, lib_modules, safetynet, modules_values` pass. `manifest --check` clean. The `m.NEW = 5` KeyError is now a named refusal. Dunder reads through a value work for the tested paths (direct `pkg.__spec__` stays a named refusal).
+
+**Defects (all are programs the base refused by name, so the change caused them):**
+
+1. **Last module assignment wins, ignoring the branch condition.** `main.py`:
+```python
+import pkg.a
+import pkg.b
+if input() == "a":
+    m = pkg.a
+else:
+    m = pkg.b
+m.run()
+```
+stdin `a`: CPython prints `a.run`; HEAD (both builds) prints `b.run`. Same with `if 1: m = pkg.a else: m = pkg.b` (`a.run` vs `b.run`). `visit_Assign` records both assignments in AST order and `m.run()` is folded to the last one.
+
+2. **A local module assignment inside a nested function leaks to the enclosing scope.** `main.py`:
+```python
+import pkg.a
+import pkg.b
+m = pkg.a
+def outer():
+    def inner():
+        m = pkg.b
+        return m.run()
+    print(m.run())
+    inner()
+outer()
+```
+CPython `a.run` / `None` / `b.run`; HEAD (both builds) `b.run` / `None` / `b.run`. The one flat `modvars` dict is not scope-aware.
+
+3. **Reading a name re-exported into a module through a module value crashes.** `pkg/base.py: X = 7`, `pkg/util.py: from pkg.base import X` + `def getx(): return X`; `main.py`:
+```python
+import pkg.util
+mods = [pkg.util]
+m = mods[0]
+print(m.X)
+print(m.getx())
+```
+CPython `7` / `7`; HEAD (both builds) `AttributeError: '_AilMod_pkg__util' object has no attribute 'X'`, exit 1. `_modval_nodes` skips alias entries whose kind is not `mod`, so the generated class has no property. A named refusal would be acceptable; a crash is not.
+
+4. **A function read as a value through a module value crashes.** `def f(mod): return (mod is pkg.util, mod.double is pkg.util.double)` — CPython `(True, True)`; HEAD `AttributeError: '_AilMod_pkg__util' object has no attribute 'double'`, exit 1. (Reading a bound method as a value also fails for a plain hand-written class on the base, so the underlying gap is pre-existing, but this feature compiles it instead of refusing by name.)
+
+Named refusals observed for keyword calls via a parameter/list item/dict/getattr (`double() called with an unknown keyword argument x`), `mod.Thing(...)`, dynamic getattr, `setattr`, `delattr`, unknown-name store, `__doc__`, and `__spec__.has_location` are acceptable.
+
+**Pre-existing / not defects.** int64 width limits (`r06_widths`), `p15`'s refusal, and the plain-class method-value crash (`p19`) are identical on base.
+
+**Unverified.** Speed: not applicable, the change is merge-time only (no runtime/hot-path code). Namespace-package value probes not run; two module-value shapes with `global` inside a function not run.
+
+VERDICT: FIX
+[commandcode stop=end_turn turns=45 out_tokens=35304]
+
+
+--- ORIGINAL TASK ---
 Lane: modules
 
 **Finish modval2 from its existing work; do not redo it.** The run on branch `job-modval2-11040508` did the work, then ended ERROR because the pipeline's review step crashed (a bug in the job runner, now fixed; not your work's fault), so it got no verdict.
