@@ -1,0 +1,112 @@
+{
+  "a-dict-view-kept-in-a-name-field-item-or-container": {
+    "bucket": "a dict view kept in a name, field, item or container",
+    "build_rc": 3,
+    "cpython_rc": 0,
+    "cpython_stdout": "[('a', 1), ('b', 2)]\nok\n",
+    "first_reason": "main.py:2:1: not in the subset: a dict view kept in a name, field, item or container (`x = d.items()`, line 2): a view follows its dict in CPython, but here it is a snapshot, so it would show old contents and a loop over it would not raise \"dictionary changed size during iteration\"; call `d.items()` where it is used, or keep `list(d.items())` for a snapshot",
+    "flags": [],
+    "normalised": "a dict view kept in a name, field, item or container",
+    "ok": true,
+    "refused": true
+  },
+  "import-of-a-local-module-or-package-below-the-top-level": {
+    "bucket": "import of a local module or package below the top level",
+    "build_rc": 2,
+    "cpython_rc": 0,
+    "cpython_stdout": "ok\n",
+    "first_reason": "_repro_localpkg/user.py:2:5: import of a local module or package below the top level (inside a class body) is not supported: CPython runs it when that code runs, and the program is built before it runs.",
+    "flags": [],
+    "normalised": "import of a local module or package below the top level",
+    "ok": true,
+    "refused": true
+  },
+  "module-x-has-no-top-level-name-y": {
+    "bucket": "module 'X' has no top-level name 'Y'",
+    "build_rc": 2,
+    "cpython_rc": 0,
+    "cpython_stdout": "<built-in function compressobj>\nok\n",
+    "first_reason": "main.py:2:7: module 'zlib' has no top-level name 'compressobj' (it defines: DEFLATED, DEF_BUF_SIZE, DEF_MEM_LEVEL, MAX_WBITS, Z_BEST_COMPRESSION, Z_BEST_SPEED, Z_BLOCK, Z_DEFAULT_COMPRESSION, Z_DEFAULT_STRATEGY, Z_FILTERED, Z_FINISH, Z_FIXED, Z_FULL_FLUSH, Z_HUFFMAN_ONLY, Z_NO_COMPRESSION, Z_NO_FLUSH, Z_PARTIAL_FLUSH, Z_RLE, Z_SYNC_FLUSH, Z_TREES, adler32, compress, crc32, decompress, ffi_put_3c1db0, ffi_widen_3c1db0, zglue_deflate, zglue_errmsg, zglue_inflate, zglue_size, zglue_take, zlib_adler32, zlib_crc32).",
+    "flags": [],
+    "normalised": "module 'X' has no top-level name 'Y'",
+    "ok": true,
+    "refused": true
+  },
+  "name-x-is-bound-by-two-imports": {
+    "bucket": "name 'X' is bound by two imports",
+    "build_rc": 2,
+    "cpython_rc": 0,
+    "cpython_stdout": "1\nok\n",
+    "first_reason": "_repro_name_binding_helper.py:2:1: 'm' is bound to two different imports in _repro_name_binding_helper.py.",
+    "flags": [],
+    "normalised": "name 'X' is bound by two imports",
+    "ok": true,
+    "refused": true
+  },
+  "name-x-is-not-defined": {
+    "bucket": "name 'X' is not defined",
+    "build_rc": 3,
+    "cpython_rc": 0,
+    "cpython_stdout": "ok\n",
+    "first_reason": "main.py:2:5: not in the subset: name 'WindowsError' is not defined",
+    "flags": [],
+    "normalised": "name 'X' is not defined",
+    "ok": true,
+    "refused": true
+  },
+  "os-x-is-not-built": {
+    "bucket": "os.X is not built",
+    "build_rc": 3,
+    "cpython_rc": 0,
+    "cpython_stdout": "ok\n",
+    "first_reason": "main.py:2:1: not in the subset: os.system is not built. Built: os.getcwd chdir listdir mkdir makedirs remove unlink rmdir rename replace getenv environ walk, os.sep linesep name curdir, and os.path join exists isfile isdir islink getsize basename dirname split splitext abspath normpath isabs relpath",
+    "flags": [],
+    "normalised": "os.X is not built",
+    "ok": true,
+    "refused": true
+  },
+  "the-name-x-is-not-a-known-function-class-builtin-did-you-mean-x": {
+    "bucket": "the name 'X' is not a known function/class/builtin; did you mean 'X'?",
+    "build_rc": 3,
+    "cpython_rc": 0,
+    "cpython_stdout": "True\nok\n",
+    "first_reason": "main.py:1:1: not in the subset: the name 'object' is not a known function/class/builtin; did you mean 'object'?",
+    "flags": [],
+    "normalised": "the name 'X' is not a known function/class/builtin; did you mean 'X'?",
+    "ok": true,
+    "refused": true
+  },
+  "x-is-imported-and-also-assigned-or-defined-again": {
+    "bucket": "'X' is imported and also assigned or defined again",
+    "build_rc": 2,
+    "cpython_rc": 0,
+    "cpython_stdout": "1\nok\n",
+    "first_reason": "_repro_import_assign_helper.py:1:1: 're' is imported and also assigned or defined again in _repro_import_assign_helper.py; this compiler does not guess which binding a reader meant.",
+    "flags": [],
+    "normalised": "'X' is imported and also assigned or defined again",
+    "ok": true,
+    "refused": true
+  },
+  "x-not-yet-published-in-names-library-json": {
+    "bucket": "X (not yet published in NAMES_library.json)",
+    "build_rc": 3,
+    "cpython_rc": 0,
+    "cpython_stdout": "ok\n",
+    "first_reason": "main.py:2:1: not in the subset: codeop.CommandCompiler (not yet published in NAMES_library.json)",
+    "flags": [],
+    "normalised": "X (not yet published in NAMES_library.json)",
+    "ok": true,
+    "refused": true
+  },
+  "x-used-here-is-not-built": {
+    "bucket": "X used here is not built",
+    "build_rc": 3,
+    "cpython_rc": 0,
+    "cpython_stdout": "8192\nok\n",
+    "first_reason": "main.py:2:1: not in the subset: io used here is not built. Built: os.getcwd chdir listdir mkdir makedirs remove unlink rmdir rename replace getenv environ walk, os.sep linesep name curdir, and the os.path functions join exists isfile isdir islink getsize basename dirname split splitext abspath normpath isabs relpath",
+    "flags": [],
+    "normalised": "X used here is not built",
+    "ok": true,
+    "refused": true
+  }
+}
