@@ -1,25 +1,6 @@
-**Typed reach: make the hot functions of these 8 real programs compile on the typed path.** With the CPython hybrid (docs/design/CPYTHON_HYBRID.md) only typed functions are accelerated; the rest runs in CPython. So what matters is that the functions where time is spent compile typed.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_typed_blockers.
 
-> Re-run of prog17, whose GitHub run was lost (no verdict 62.4 h after dispatch). If its branch job-prog17-* has work commits, cherry-pick them first and continue; otherwise do the task from scratch on origin/integ. Commit and push after every sub-step, so a cancel does not lose the work again.
-
-Read `git log --oneline -40` first so you do not redo what another task just did.
-
-- `lab/census/programs/gdev/g15_030.py`
-- `lab/census/programs/dev/t374.py`
-- `lab/census/programs/gdev/g21_016.py`
-- `lab/census/programs/gdev/g02_016.py`
-- `lab/census/programs/gdev/g03_032.py`
-- `lab/corpus/programs/deepseek-v4.1-flash-free/t394.py`
-- `lab/census/programs/gdev/g05_010.py`
-- `lab/census/programs/dev/t100.py`
-
-1. Run each program under CPython 3.12 with cProfile and list its functions by own time. Take the functions that together hold 80% of the time.
-2. For each such function, record whether AIL compiles it on the typed path (mixed mode lets one function be typed while others are general), and if not, the first reason. Write the table in `lab/progfix/prog17.md`.
-3. Fix the reasons in the compiler, starting with the one that blocks the most hot functions; never edit the programs. A reason that needs a big new feature: leave it and record it as a follow-up with the exact message.
-4. Default ints are int64 and overflow stops loudly; never wrap silently. Output must match CPython. The generated C of the 10 lab/compare tasks must stay byte-identical.
-5. Add `AIL_CURRENT/test_ail_prog17.py`, registered in tests.d, compiling each newly typed function and comparing the program with CPython.
-
-Run `python3 tools/update_manifest.py`, then only the new test module, the test modules of the files you touched, and `test_ail_safetynet`. Then commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
