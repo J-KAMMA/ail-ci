@@ -15,7 +15,7 @@ def main():
     print("setgid only", stat.filemode(0o102000))
     print("sticky only", stat.filemode(0o41000))
     print("sticky without exec", stat.filemode(0o41644))
-    print("setuid without exec", stat.filemode(0o10644))
+    print("setuid without exec", stat.filemode(0o104644))
     print("setgid without exec", stat.filemode(0o102644))
     print("done")
 

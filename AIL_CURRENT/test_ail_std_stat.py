@@ -9,6 +9,8 @@ Every passing program is compiled with the default command and with AIL_UNIFIED_
 beside `python3` on the same source; stdout and the exit status must agree.  09_beyond_int64.py
 builds typed but stops loudly when the runtime int64 overflow is reached, so it is not compared
 (see lab/stdlib/stat/RESULTS.md).  The default and --strict builds must reach the typed path.
+CPython's C _stat takes no keyword arguments, and a keyword `mode=` call here is refused by name
+(and raises TypeError when the module is imported directly under python3).
 
 A pure-Python check compares the bundled filemode(m) with CPython's for every m in
 range(0, 0o200000), and every mode-taking function at the domain edges (negative and above
@@ -89,6 +91,17 @@ class StdlibStatPureTests(unittest.TestCase):
                 self.assertEqual(outcome(ours, mode), outcome(theirs, mode),
                                  "%s(%d)" % (named, mode))
 
+    def test_keyword_mode_is_refused(self):
+        spec = importlib.util.spec_from_file_location("ail_bundled_stat_keyword",
+                                                      ROOT / "stdlib" / "stat.py")
+        bundled = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bundled)
+        for named in ["filemode", "S_IMODE", "S_IFMT", "S_ISDIR", "S_ISREG", "S_ISSOCK"]:
+            with self.assertRaises(TypeError, msg=named):
+                getattr(bundled, named)(mode=0o100644)
+            with self.assertRaises(TypeError, msg=named):
+                getattr(cpython_stat, named)(mode=0o100644)
+
 
 @unittest.skipUnless(CC, "installed C compiler required")
 class StdlibStatBuildTests(unittest.TestCase):
@@ -149,6 +162,14 @@ class StdlibStatBuildTests(unittest.TestCase):
                 built, _program, _exe = self.build(source, source.stem, strict=True)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 self.assertNotIn("built on the general path", built.stderr)
+
+    def test_keyword_mode_call_is_refused(self):
+        source = self.dir / "keyword_mode.py"
+        source.write_text("import stat\n\nprint(stat.filemode(mode=0o100644))\n")
+        built, _program, exe = self.build(source, "keyword_mode")
+        self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+        self.assertIn("unknown keyword argument mode", built.stderr)
+        self.assertFalse(exe.exists())
 
 
 if __name__ == "__main__":

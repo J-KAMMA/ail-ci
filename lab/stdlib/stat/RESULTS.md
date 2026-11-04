@@ -121,3 +121,33 @@ the same (`_check_mode`). The pure-Python fallbacks in `Lib/stat.py` would inste
 negative int and print `-` for an unknown type; they are not what CPython exposes. Everything is
 checked against CPython for `range(0, 0o200000)` and at the domain edges by
 `AIL_CURRENT/test_ail_std_stat.py`.
+
+## Keyword arguments (follow-up: compiler change)
+
+CPython's C functions take no keyword arguments: `stat.filemode(mode=0o100644)` raises
+`TypeError`. The typed path has no positional-only parameters, so the parameter is named `_mode`
+here: a `mode=` keyword call is refused by name (`stat.filemode() called with an unknown keyword
+argument mode`) instead of silently returning a value. Only the unnatural `_mode=` spelling could
+still bind.
+
+Spelling the parameters positional-only changes the situation but is refused by the typed path.
+A minimal module with `def filemode(mode: int, /)` gives, in the default build:
+
+```
+note: stat.py:54:1: built on the general path (about 20x slower) because the function must take
+plain positional arguments: *args, **kwargs, positional-only and keyword-only parameters are
+refused, and a method may not take a default. write instead: list every parameter by name
+(`def f(a: int, b: int)`); pass a list for a variable number of values; run with --strict to see
+why
+```
+
+Supporting `/` on the typed path (in `python/pkg-v12/pyfunc.py`, `_one_function`) would let this
+module spell every mode parameter positional-only and then refuse any keyword, matching the C
+`_stat`. That file is owned by another lane, so it is recorded here rather than edited.
+
+## Lab-program corrections
+
+`10_filemode_expected.py` now carries CPython's real strings for the prescribed modes:
+`filemode(0o10644)` is `prw-r--r--` (`0o10644` is `S_IFIFO | 0o644`, not a special-bit mode) and
+`filemode(0)` is `?---------` (unknown type). `04_special_bits.py` now prints
+`filemode(0o104644)` for "setuid without exec" (`-rwSr--r--`), which the old line mislabelled.

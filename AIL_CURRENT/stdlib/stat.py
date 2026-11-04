@@ -19,6 +19,12 @@ print `-` there, but `_stat` is what CPython 3.12 exposes.  Every mode-taking fu
 the C unsigned 32-bit mode, so a negative mode or one above 0xFFFFFFFF raises the same
 OverflowError CPython's C functions do (the Python fallbacks would compute instead).
 A mode beyond int64 stops loudly (an OverflowError), as ints are int64.
+
+CPython's C functions take no keyword arguments.  AIL's typed path refuses positional-only
+parameters (`/`), so the mode parameter is named `_mode` instead: a `mode=` keyword call is
+refused by name on the typed path rather than silently answered.  Only the unnatural `_mode=`
+spelling could still bind.  Full positional-only enforcement needs a compiler change, which
+this module records in lab/stdlib/stat/RESULTS.md.
 """
 
 # Indices for stat struct members in the tuple returned by os.stat()
@@ -45,20 +51,20 @@ def _check_mode(mode: int) -> None:
         raise OverflowError("mode out of range")
 
 
-def S_IMODE(mode: int) -> int:
+def S_IMODE(_mode: int) -> int:
     """Return the portion of the file's mode that can be set by
     os.chmod().
     """
-    _check_mode(mode)
-    return mode & 0o7777
+    _check_mode(_mode)
+    return _mode & 0o7777
 
 
-def S_IFMT(mode: int) -> int:
+def S_IFMT(_mode: int) -> int:
     """Return the portion of the file's mode that describes the
     file type.
     """
-    _check_mode(mode)
-    return mode & 0o170000
+    _check_mode(_mode)
+    return _mode & 0o170000
 
 
 # Constants used as S_IFMT() for various file types
@@ -79,56 +85,56 @@ S_IFWHT = 0
 
 # Functions to test for each file type
 
-def S_ISDIR(mode: int) -> bool:
+def S_ISDIR(_mode: int) -> bool:
     """Return True if mode is from a directory."""
-    return S_IFMT(mode) == S_IFDIR
+    return S_IFMT(_mode) == S_IFDIR
 
 
-def S_ISCHR(mode: int) -> bool:
+def S_ISCHR(_mode: int) -> bool:
     """Return True if mode is from a character special device file."""
-    return S_IFMT(mode) == S_IFCHR
+    return S_IFMT(_mode) == S_IFCHR
 
 
-def S_ISBLK(mode: int) -> bool:
+def S_ISBLK(_mode: int) -> bool:
     """Return True if mode is from a block special device file."""
-    return S_IFMT(mode) == S_IFBLK
+    return S_IFMT(_mode) == S_IFBLK
 
 
-def S_ISREG(mode: int) -> bool:
+def S_ISREG(_mode: int) -> bool:
     """Return True if mode is from a regular file."""
-    return S_IFMT(mode) == S_IFREG
+    return S_IFMT(_mode) == S_IFREG
 
 
-def S_ISFIFO(mode: int) -> bool:
+def S_ISFIFO(_mode: int) -> bool:
     """Return True if mode is from a FIFO (named pipe)."""
-    return S_IFMT(mode) == S_IFIFO
+    return S_IFMT(_mode) == S_IFIFO
 
 
-def S_ISLNK(mode: int) -> bool:
+def S_ISLNK(_mode: int) -> bool:
     """Return True if mode is from a symbolic link."""
-    return S_IFMT(mode) == S_IFLNK
+    return S_IFMT(_mode) == S_IFLNK
 
 
-def S_ISSOCK(mode: int) -> bool:
+def S_ISSOCK(_mode: int) -> bool:
     """Return True if mode is from a socket."""
-    return S_IFMT(mode) == S_IFSOCK
+    return S_IFMT(_mode) == S_IFSOCK
 
 
-def S_ISDOOR(mode: int) -> bool:
+def S_ISDOOR(_mode: int) -> bool:
     """Return True if mode is from a door."""
-    _check_mode(mode)
+    _check_mode(_mode)
     return False
 
 
-def S_ISPORT(mode: int) -> bool:
+def S_ISPORT(_mode: int) -> bool:
     """Return True if mode is from an event port."""
-    _check_mode(mode)
+    _check_mode(_mode)
     return False
 
 
-def S_ISWHT(mode: int) -> bool:
+def S_ISWHT(_mode: int) -> bool:
     """Return True if mode is from a whiteout."""
-    _check_mode(mode)
+    _check_mode(_mode)
     return False
 
 
@@ -171,11 +177,11 @@ SF_NOUNLINK = 0x00100000    # file may not be renamed or deleted
 SF_SNAPSHOT = 0x00200000    # file is a snapshot file
 
 
-def filemode(mode: int) -> str:
+def filemode(_mode: int) -> str:
     """Convert a file's mode to a string of the form '-rwxrwxrwx'."""
-    _check_mode(mode)
+    _check_mode(_mode)
     perm = ""
-    fmt = S_IFMT(mode)
+    fmt = S_IFMT(_mode)
     if fmt == S_IFLNK:
         perm = perm + "l"
     elif fmt == S_IFSOCK:
@@ -192,51 +198,51 @@ def filemode(mode: int) -> str:
         perm = perm + "p"
     else:
         perm = perm + "?"
-    if (mode & S_IRUSR) == S_IRUSR:
+    if (_mode & S_IRUSR) == S_IRUSR:
         perm = perm + "r"
     else:
         perm = perm + "-"
-    if (mode & S_IWUSR) == S_IWUSR:
+    if (_mode & S_IWUSR) == S_IWUSR:
         perm = perm + "w"
     else:
         perm = perm + "-"
-    if (mode & (S_IXUSR | S_ISUID)) == (S_IXUSR | S_ISUID):
+    if (_mode & (S_IXUSR | S_ISUID)) == (S_IXUSR | S_ISUID):
         perm = perm + "s"
-    elif (mode & S_ISUID) == S_ISUID:
+    elif (_mode & S_ISUID) == S_ISUID:
         perm = perm + "S"
-    elif (mode & S_IXUSR) == S_IXUSR:
+    elif (_mode & S_IXUSR) == S_IXUSR:
         perm = perm + "x"
     else:
         perm = perm + "-"
-    if (mode & S_IRGRP) == S_IRGRP:
+    if (_mode & S_IRGRP) == S_IRGRP:
         perm = perm + "r"
     else:
         perm = perm + "-"
-    if (mode & S_IWGRP) == S_IWGRP:
+    if (_mode & S_IWGRP) == S_IWGRP:
         perm = perm + "w"
     else:
         perm = perm + "-"
-    if (mode & (S_IXGRP | S_ISGID)) == (S_IXGRP | S_ISGID):
+    if (_mode & (S_IXGRP | S_ISGID)) == (S_IXGRP | S_ISGID):
         perm = perm + "s"
-    elif (mode & S_ISGID) == S_ISGID:
+    elif (_mode & S_ISGID) == S_ISGID:
         perm = perm + "S"
-    elif (mode & S_IXGRP) == S_IXGRP:
+    elif (_mode & S_IXGRP) == S_IXGRP:
         perm = perm + "x"
     else:
         perm = perm + "-"
-    if (mode & S_IROTH) == S_IROTH:
+    if (_mode & S_IROTH) == S_IROTH:
         perm = perm + "r"
     else:
         perm = perm + "-"
-    if (mode & S_IWOTH) == S_IWOTH:
+    if (_mode & S_IWOTH) == S_IWOTH:
         perm = perm + "w"
     else:
         perm = perm + "-"
-    if (mode & (S_IXOTH | S_ISVTX)) == (S_IXOTH | S_ISVTX):
+    if (_mode & (S_IXOTH | S_ISVTX)) == (S_IXOTH | S_ISVTX):
         perm = perm + "t"
-    elif (mode & S_ISVTX) == S_ISVTX:
+    elif (_mode & S_ISVTX) == S_ISVTX:
         perm = perm + "T"
-    elif (mode & S_IXOTH) == S_IXOTH:
+    elif (_mode & S_IXOTH) == S_IXOTH:
         perm = perm + "x"
     else:
         perm = perm + "-"
