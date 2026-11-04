@@ -11,8 +11,9 @@ The algorithms follow CPython 3.12's `Lib/difflib.py`: `SequenceMatcher` (with
 Rewrites for the AIL compiler, with the behaviour kept:
 
 * `Match` is a small class with `a`, `b`, `size`, iteration, indexing, equality,
-  hashing and CPython's repr, instead of `collections.namedtuple`, which the
-  compiler does not build here.
+  ordering, hashing and CPython's repr, instead of `collections.namedtuple`,
+  which the compiler does not build here.  The compiler refuses tuple
+  subclasses, so `isinstance(match, tuple)` is False where CPython's is True.
 * `SequenceMatcher.set_seq2` calls `_chain_b` directly instead of the private
   name-mangled `__chain_b`.
 * `get_matching_blocks` builds the `Match` objects with a loop instead of
@@ -39,10 +40,8 @@ Behaviour differences:
 
 * `diff_bytes` decodes and re-encodes with `latin-1` instead of CPython's
   `ascii` + `surrogateescape`.  For byte strings whose bytes are unchanged by
-  that round trip (the usual case) the output is identical.  It also dispatches
-  to the bundled `unified_diff`/`context_diff` directly instead of calling an
-  arbitrary `dfunc` value, because the general path cannot call a function
-  passed through a parameter; passing a different callable is not supported.
+  that round trip (the usual case) the output is identical.  It calls the given
+  `dfunc` with the decoded lines, as CPython does, so a custom `dfunc` works.
 * `HtmlDiff` and `_mdiff` are not included, so `difflib.HtmlDiff` is still
   refused by name.
 
@@ -97,6 +96,37 @@ class Match:
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def _other_tuple(self, other):
+        if isinstance(other, Match):
+            return (other.a, other.b, other.size)
+        if isinstance(other, tuple) and len(other) == 3:
+            return (other[0], other[1], other[2])
+        return None
+
+    def __lt__(self, other):
+        t = self._other_tuple(other)
+        if t is None:
+            return NotImplemented
+        return (self.a, self.b, self.size) < t
+
+    def __le__(self, other):
+        t = self._other_tuple(other)
+        if t is None:
+            return NotImplemented
+        return (self.a, self.b, self.size) <= t
+
+    def __gt__(self, other):
+        t = self._other_tuple(other)
+        if t is None:
+            return NotImplemented
+        return (self.a, self.b, self.size) > t
+
+    def __ge__(self, other):
+        t = self._other_tuple(other)
+        if t is None:
+            return NotImplemented
+        return (self.a, self.b, self.size) >= t
 
     def __hash__(self):
         return hash((self.a, self.b, self.size))
@@ -679,10 +709,7 @@ def diff_bytes(dfunc, a, b, fromfile=b'', tofile=b'', fromfiledate=b'', tofileda
     fromfiledate = _decode_bytes(fromfiledate)
     tofiledate = _decode_bytes(tofiledate)
     lineterm = _decode_bytes(lineterm)
-    if dfunc is context_diff:
-        lines = _context_diff(new_a, new_b, fromfile, tofile, fromfiledate, tofiledate, n, lineterm)
-    else:
-        lines = _unified_diff(new_a, new_b, fromfile, tofile, fromfiledate, tofiledate, n, lineterm)
+    lines = dfunc(new_a, new_b, fromfile, tofile, fromfiledate, tofiledate, n, lineterm)
     for line in lines:
         yield line.encode('latin-1')
 
