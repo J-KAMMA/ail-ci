@@ -1,3 +1,27 @@
+## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
+
+`test_ail_cpython_hybrid`, `test_ail_prog2` and `test_ail_prog21` went red when pyreachs3c
+(805ce9ba, #371) merged.  The cause was not the new declaration-level annotation/caller refusal
+(that one is sdkdiag1's lane; its numeric-only `_explicit_annotation_conflicts` fix is already in
+integ, and `test_ail_collections` is green on the base): `_owned_unannotated_str_fns` marks every
+unannotated, terminating, str-returning helper as an owned-str function so a caller can adopt the
+value.  `to_c`'s entry check then saw that INFERRED ownership and raised "the entry function
+cannot return checked str" for each such helper when the hybrid analyses it as a standalone unit,
+so pymix dropped `join`, `state_at`, `label` and `fmt` from the mix units entirely.
+
+`to_c` now drops inferred ownership for the entry function only (`returns is None`); the entry
+and every call site in that compilation then agree on the legacy out-parameter str ABI, exactly
+as before pyreachs3c.  An explicit `-> str` entry (rewritten to `__ail_checked_str__`) is still
+refused, because there the source itself asked for the owned ABI.
+
+Counts, module by module (before = 805ce9ba^ 7a3b4522, after = this branch): hybrid 7/7 -> 7/7
+(6/7 on integ), prog2 9/9 -> 9/9 (8/9), prog21 8/8 -> 8/8 (5/8), collections 13/13 -> 13/13.
+`test_ail_pyreach_infer` 10/10, `test_ail_safetynet` 5/5, `test_ail_files` 18 (1 skip),
+`test_ail_corpus_findings3` 2/2, `test_ail_argument_type_details` 16/16, and
+`python3 -m compileall -q -j 0 AIL_CURRENT tools` clean.  Nine probes under `/tmp/probes/`
+(unannotated str helper through concat, default, list/dict/attribute, argument, `%`, identity,
+branches, int widths, script entry) match CPython on both builds.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda
