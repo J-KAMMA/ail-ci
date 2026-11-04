@@ -1,0 +1,3002 @@
+[
+{
+"seed": 1,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:46:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 2,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:12:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 3,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 4,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 5,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 6,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 22: cpython='5 5 0' ail='<end>'"
+},
+{
+"seed": 7,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 1: cpython='1' ail='<end>'"
+},
+{
+"seed": 8,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 9,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='IndexError: string index out of range' ail last='string index out of range'"
+},
+{
+"seed": 10,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 11,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:22:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 12,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 13,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 14,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 15,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 16,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 17,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 18,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 19,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 20,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 21,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 22,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:45:16: int64 constant out of range: 28011385460385661648235251499"
+},
+{
+"seed": 23,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 24,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 25,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 26,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 27,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 28,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 29,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:79:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 30,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 31,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 32,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 33,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 34,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 35,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 36,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:77:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 37,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:79:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 38,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 39,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 40,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:75:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 41,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:62:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 42,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:49:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 43,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 44,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.count() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 45,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='IndexError: pop from empty list' ail last='pop from empty list'"
+},
+{
+"seed": 46,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 47,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 48,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 49,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:56:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 50,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 51,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 52,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 53,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:36:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 54,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 55,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 56,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 57,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 58,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:103:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 59,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 60,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 272: cpython='6.80564733841877e+37' ail='<end>'"
+},
+{
+"seed": 61,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 62,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 63,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 64,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 65,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 12: cpython='5 9223372036854775794' ail='<end>'"
+},
+{
+"seed": 66,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:41:9: not in the subset: line 41: `al6 = v4` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; thi"
+},
+{
+"seed": 67,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 68,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 3: cpython='9223372036854775985' ail='<end>'"
+},
+{
+"seed": 69,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 70,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 71,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:65:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 72,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:22:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 73,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 5: cpython='a,b12' ail='<end>'"
+},
+{
+"seed": 74,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 75,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 76,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:130:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 77,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 78,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 79,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 80,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 81,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 8: cpython='-5' ail='<end>'"
+},
+{
+"seed": 82,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 83,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 84,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 85,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 86,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 87,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 2: cpython='46' ail='<end>'"
+},
+{
+"seed": 88,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 89,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 90,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 91,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 92,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 93,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 94,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 95,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:66:9: not in the subset: line 66: `al11 = v9` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
+},
+{
+"seed": 96,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 97,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:7:5: not in the subset: line 7: `al4 = v3` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; this "
+},
+{
+"seed": 98,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 99,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 100,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 101,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 5: cpython='248' ail='<end>'"
+},
+{
+"seed": 102,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 103,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:174:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 104,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:82:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 105,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:101:13: not in the subset: line 101: `al18 = v15` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there"
+},
+{
+"seed": 106,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:67:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 107,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 1: cpython='.5' ail='<end>'"
+},
+{
+"seed": 108,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 109,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 110,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 11: cpython='224' ail='<end>'"
+},
+{
+"seed": 111,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 17: cpython='False 2 False' ail='<end>'"
+},
+{
+"seed": 112,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 113,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 114,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 115,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:47:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 116,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 117,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 118,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:112:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 119,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:71:9: not in the subset: line 71: `al14 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
+},
+{
+"seed": 120,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 121,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 122,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:62:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 123,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:137:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 124,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 4: cpython='158' ail='<end>'"
+},
+{
+"seed": 125,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 126,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 127,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:91:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 128,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 129,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 130,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 131,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 132,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 133,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 134,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 135,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 136,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:57:9: not in the subset: line 57: `al14 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
+},
+{
+"seed": 137,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 138,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 139,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 140,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:56:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 141,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: float division by zero' ail last='division by zero'"
+},
+{
+"seed": 142,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 30: cpython='0' ail='<end>'"
+},
+{
+"seed": 143,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:37:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 144,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:75:18: int64 constant out of range: 21267647932558653966460912964485513216"
+},
+{
+"seed": 145,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 146,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:81:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 147,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 148,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 149,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 150,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: integer modulo by zero' ail last='integer modulo by zero'"
+},
+{
+"seed": 151,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:97:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 152,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr last cpython='KeyError: 5' ail='key error'"
+},
+{
+"seed": 153,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 154,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 155,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 156,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 3: cpython='16' ail='<end>'"
+},
+{
+"seed": 157,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 158,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:74:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 159,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 160,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 161,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 162,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 163,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:80:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 164,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:61:17: not in the subset: line 61: `al9 = v8` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
+},
+{
+"seed": 165,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 166,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 167,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 168,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 169,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 170,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 171,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 172,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 173,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 174,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 175,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 176,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 177,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 178,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 179,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 180,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 181,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.index() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 182,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 183,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 184,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 185,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 186,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 187,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 188,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:30:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 189,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 190,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: float division by zero' ail last='division by zero'"
+},
+{
+"seed": 191,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 192,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 193,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:61:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 194,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:108:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 195,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 196,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 197,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 6: cpython='1 1 0' ail='<end>'"
+},
+{
+"seed": 198,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 199,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 200,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 201,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 202,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 203,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 11: cpython='66 False  ' ail='<end>'"
+},
+{
+"seed": 204,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 205,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:15:5: not in the subset: line 15: `al4 = v3` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; thi"
+},
+{
+"seed": 206,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:57:46: int64 constant out of range: 21267647932558653966460912964485513216"
+},
+{
+"seed": 207,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 208,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 209,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 210,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:89:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 211,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 212,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.index() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 213,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 2: cpython='1' ail='<end>'"
+},
+{
+"seed": 214,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 215,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 216,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:109:9: not in the subset: line 109: `al22 = v21` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there;"
+},
+{
+"seed": 217,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:101:9: not in the subset: line 101: `al21 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there;"
+},
+{
+"seed": 218,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 219,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 220,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 221,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 222,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 223,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:40:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 224,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 225,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 226,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 227,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 228,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 229,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.count() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 230,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 231,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 232,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 233,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 234,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 235,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:30:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 236,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 237,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:21:5: not in the subset: line 21: `al5 = v1` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; thi"
+},
+{
+"seed": 238,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:167:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 239,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 240,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.count() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 241,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:88:20: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
+},
+{
+"seed": 242,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:50:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 243,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 244,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 245,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 246,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 247,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 5: cpython='-196.0' ail='<end>'"
+},
+{
+"seed": 248,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:109:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 249,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='ZeroDivisionError: float division by zero' ail last='division by zero'"
+},
+{
+"seed": 250,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:86:26: int64 constant expression out of range: 1175979934698983915520"
+},
+{
+"seed": 251,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:120:9: not in the subset: line 120: `al23 = v21` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there;"
+},
+{
+"seed": 252,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 253,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 254,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 255,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 256,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:51:32: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
+},
+{
+"seed": 257,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:103:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 258,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 259,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 260,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 261,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 262,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 263,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 264,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 265,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:40:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 266,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 267,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 268,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 269,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 270,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 271,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 272,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 273,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 274,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 275,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 94: cpython='2 54' ail='<end>'"
+},
+{
+"seed": 276,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:136:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 277,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 278,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 7: cpython='38' ail='<end>'"
+},
+{
+"seed": 279,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 280,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 281,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:99:23: int64 constant out of range: 85070591730234615847396907784232501249"
+},
+{
+"seed": 282,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:35:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 283,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 284,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 285,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 286,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:113:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 287,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:116:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 288,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 289,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 290,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 291,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 292,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 293,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 294,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 5: cpython='65080123499441429260816' ail='<end>'"
+},
+{
+"seed": 295,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 12: cpython='-18446744073709551550' ail='<end>'"
+},
+{
+"seed": 296,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:22:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 297,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 298,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 299,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 300,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 301,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 302,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 303,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 304,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 305,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 306,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 307,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 308,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 309,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 310,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 311,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 312,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 313,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:76:9: not in the subset: line 76: `al17 = v6` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
+},
+{
+"seed": 314,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 315,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 316,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:37:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 317,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:80:19: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
+},
+{
+"seed": 318,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 319,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 320,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 321,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 322,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:58:9: not in the subset: line 58: `al18 = v17` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
+},
+{
+"seed": 323,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:44:13: not in the subset: line 44: `al7 = v1` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
+},
+{
+"seed": 324,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 325,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 326,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:132:13: not in the subset: round() of a constant float expression at the int64 boundary is refused: the rounded value is at or outside the signed 64-bit range, so abs(), unary - and * -1 cann"
+},
+{
+"seed": 327,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:170:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 328,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 329,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:105:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 330,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 331,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 7: cpython='-86' ail='<end>'"
+},
+{
+"seed": 332,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 333,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 334,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.index() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 335,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 336,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 337,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:121:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 338,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 339,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 340,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:85:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 341,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 342,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 343,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 344,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 345,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 346,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 347,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:75:21: int64 constant out of range: 85070591730234615847396907784232501249"
+},
+{
+"seed": 348,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 349,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 6: cpython='-35' ail='<end>'"
+},
+{
+"seed": 350,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 351,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 352,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 353,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 354,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='IndexError: list index out of range' ail last='list index out of range'"
+},
+{
+"seed": 355,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 356,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 357,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 358,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 359,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 360,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 361,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 362,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 363,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:107:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 364,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 365,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 366,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.count() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 367,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 368,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:38:5: not in the subset: line 38: `al12 = v10` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
+},
+{
+"seed": 369,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 370,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 371,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:106:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 372,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:91:9: not in the subset: line 91: `al19 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
+},
+{
+"seed": 373,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 374,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 375,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.count() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 376,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 377,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 378,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 379,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 380,
+"class": "other",
+"path": "typed",
+"first_diff": "stderr-only: cpython last='IndexError: string index out of range' ail last='string index out of range'"
+},
+{
+"seed": 381,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 382,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 383,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:40:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 384,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 385,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:20:9: not in the subset: round() of a constant float expression at the int64 boundary is refused: the rounded value is at or outside the signed 64-bit range, so abs(), unary - and * -1 cannot"
+},
+{
+"seed": 386,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 387,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:70:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 388,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 389,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:53:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 390,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 391,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 392,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 393,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 394,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 395,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 396,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:96:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 397,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 18: cpython='10 -50 100.75 -7 0' ail='<end>'"
+},
+{
+"seed": 398,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:72:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 399,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 400,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 401,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 402,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 403,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 404,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 405,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 406,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 407,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:75:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 408,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 409,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 410,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 6: cpython='1 1 0' ail='<end>'"
+},
+{
+"seed": 411,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:88:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 412,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 413,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 414,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 415,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 416,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 3: cpython='21267647932558653966460912964485513216' ail='<end>'"
+},
+{
+"seed": 417,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 418,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 419,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 420,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 421,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 422,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 423,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 424,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 7: cpython='4 -18446744073709551600' ail='<end>'"
+},
+{
+"seed": 425,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 426,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:116:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 427,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 1: cpython='-1' ail='<end>'"
+},
+{
+"seed": 428,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:77:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 429,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 430,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:124:92: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
+},
+{
+"seed": 431,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 432,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 433,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 434,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 435,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 436,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 437,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 438,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:69:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
+},
+{
+"seed": 439,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 8: cpython='0 1 1e-07 hello 0' ail='<end>'"
+},
+{
+"seed": 440,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 441,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 442,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 443,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 444,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 445,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 446,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:91:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 447,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 448,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 449,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 450,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:8:19: int64 constant out of range: 98079714615416886934934209737619787751599303819750539264"
+},
+{
+"seed": 451,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 452,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 453,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 454,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 455,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 456,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:83:18: int64 constant out of range: 21267647932558653966460912964485513216"
+},
+{
+"seed": 457,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 458,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 459,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 460,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 461,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:90:21: not in the subset: line 90: `al11 = v4` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
+},
+{
+"seed": 462,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 463,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 464,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 465,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:105:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 466,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:73:18: int64 constant expression out of range: 4500234302529411178327296421785899316072100"
+},
+{
+"seed": 467,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 468,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 469,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:49:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 470,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 471,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 472,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 473,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 474,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 475,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "line 4: cpython='False False' ail='<end>'"
+},
+{
+"seed": 476,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 477,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 478,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 479,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.count() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 480,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 481,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 482,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:43:9: not in the subset: line 43: `al10 = v3` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
+},
+{
+"seed": 483,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 484,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 485,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 486,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 487,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 488,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 489,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 490,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:131:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
+},
+{
+"seed": 491,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 492,
+"class": "refused",
+"path": "typed",
+"first_diff": "prog.ail:19:13: not in the subset: line 19: `al6 = v4` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
+},
+{
+"seed": 493,
+"class": "other",
+"path": "typed",
+"first_diff": ""
+},
+{
+"seed": 494,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 495,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 496,
+"class": "loud-ok",
+"path": "typed",
+"first_diff": "compile-time int64 stop: prog.ail:41:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
+},
+{
+"seed": 497,
+"class": "other",
+"path": "general",
+"first_diff": ""
+},
+{
+"seed": 498,
+"class": "loud-ok",
+"path": "general",
+"first_diff": "line 5: cpython='5 5 0' ail='<end>'"
+},
+{
+"seed": 499,
+"class": "refused",
+"path": "typed",
+"first_diff": "not in the subset: list.count() after a part of this statement that Python evaluates first may raise or run code; bind the earlier part to a name first, or move the method call before it (the general "
+},
+{
+"seed": 500,
+"class": "other",
+"path": "general",
+"first_diff": ""
+}
+]
