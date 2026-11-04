@@ -18,14 +18,13 @@ def main() -> None:
             else:
                 cells.append("    ")
             index += 2
-        hexpart = " ".join(cells)
         text = ""
         for byte in chunk:
             if 0x20 <= byte <= 0x7e:
                 text += chr(byte)
             else:
                 text += "."
-        print("%08x  %s  %s" % (offset, hexpart, text))
+        print("%08x  %s  %s" % (offset, " ".join(cells), text))
         offset += 16
 
 
