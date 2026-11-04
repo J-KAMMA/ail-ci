@@ -17,7 +17,7 @@ path; eight fall back to the general path; none is refused.
 | nbody | general | yes | n/a | n/a | n/a | 1.288 | 1.796 |
 | nqueens | general | yes | n/a | n/a | n/a | 1.787 | 2.725 |
 | raytrace | general | yes | n/a | n/a | n/a | 1.201 | 1.137 |
-| richards | general | yes | n/a | n/a | n/a | 1.486 | 1.272 |
+| richards | general | yes | n/a | n/a | n/a | 1.532 | 1.258 |
 | scimark_fft | general | yes | n/a | n/a | n/a | 0.967 | 2.004 |
 | scimark_sor | general | yes | n/a | n/a | n/a | 1.067 | 4.366 |
 | spectral_norm | general | yes | n/a | n/a | n/a | 2.053 | 0.866 |
@@ -31,7 +31,7 @@ Wall time is the median of three runs of each binary at the default size.
 is 4), so the instruction columns and the geomean instruction ratio are not
 available.  Per the task's stop rule the measurement is wall time only.
 
-**Geomean wall ratio CPython/AIL over the ten matching programs: 1.353**
+**Geomean wall ratio CPython/AIL over the ten matching programs: 1.359**
 (AIL is 1.35x faster overall; 27x on the typed fannkuch, 0.24x on the general
 scimark_sor).
 

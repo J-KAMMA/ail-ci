@@ -1,32 +1,23 @@
 """Richards: the classic scheduling benchmark built from task control blocks.
 
-A scheduler keeps a circular run queue ordered by priority.  One idle task, one
-worker, two handlers and four device tasks communicate through packets: a
-device queues a packet at a handler, a handler consumes it and holds itself,
-and the idle task releases a device after every fixed number of dispatches.
-The program prints the handler dispatch count, the packet count and the hold
-count for the whole run.
+A priority-ordered run queue holds one idle task, one worker, two handlers and
+four device tasks.  Devices and the worker queue packets at the handlers, a
+handler consumes one and holds itself every eighth time, and the idle task
+releases a device on every dispatch and stops when no queue is left.  The
+program prints the handler dispatch count, the queue and hold counts and a
+checksum.
 """
 import sys
 
-ID_IDLE = 0
-ID_WORKER = 1
-ID_HANDLER_A = 2
-ID_HANDLER_B = 3
-ID_DEVICE_A = 4
-ID_DEVICE_B = 5
-ID_DEVICE_C = 6
-ID_DEVICE_D = 7
-
-PRIORITY_IDLE = 1000
-PRIORITY_WORKER = 2000
-PRIORITY_HANDLER = 3000
-PRIORITY_DEVICE = 4000
+ID_IDLE, ID_WORKER, ID_HANDLER_A, ID_HANDLER_B = 0, 1, 2, 3
+ID_DEVICE_A, ID_DEVICE_B, ID_DEVICE_C, ID_DEVICE_D = 4, 5, 6, 7
+PRIORITY_IDLE, PRIORITY_WORKER = 1000, 2000
+PRIORITY_HANDLER, PRIORITY_DEVICE = 3000, 4000
 
 
 class Packet:
-    def __init__(self, link, ident, kind):
-        self.link = link
+    def __init__(self, ident, kind):
+        self.link = None
         self.ident = ident
         self.kind = kind
 
@@ -49,7 +40,6 @@ class TaskControlBlock:
         self.scheduler = None
         self.scheduled = False
         self.handled = 0
-        self.checksum = 0
 
     def add_input(self, packet):
         packet.link = None
@@ -94,9 +84,7 @@ class TaskControlBlock:
             return
         packet = self.take_input()
         self.scheduler.checksum += packet.ident
-        target = self.scheduler.handlers[packet.ident & 1]
-        packet.kind = 1
-        target.add_input(packet)
+        self.scheduler.handlers[packet.ident & 1].add_input(packet)
         self.scheduler.hold_self()
 
     def device_run(self):
@@ -105,8 +93,7 @@ class TaskControlBlock:
             return
         packet = self.take_input()
         self.scheduler.checksum += packet.ident * 3
-        target = self.scheduler.handlers[(self.ident - ID_DEVICE_A) & 1]
-        target.add_input(packet)
+        self.scheduler.handlers[(self.ident - ID_DEVICE_A) & 1].add_input(packet)
         self.scheduler.hold_self()
 
     def handler_run(self):
@@ -115,7 +102,6 @@ class TaskControlBlock:
             return
         packet = self.take_input()
         self.handled += 1
-        self.checksum += packet.ident
         self.scheduler.checksum += packet.ident * 2
         if self.handled % 8 == 0:
             self.scheduler.hold_self()
@@ -124,57 +110,34 @@ class TaskControlBlock:
 
 
 class Scheduler:
-    def __init__(self, limit, packets):
+    def __init__(self, packets):
         self.queue = []
         self.current = None
         self.idle_count = 0
-        self.limit = limit
         self.queue_count = 0
         self.hold_count = 0
         self.checksum = 0
-        self.tasks = []
-        self.handlers = []
-        self.devices = []
-        self.worker = None
-        self._build(packets)
-
-    def _build(self, packets):
-        self.tasks.append(TaskControlBlock(ID_IDLE, PRIORITY_IDLE))
+        self.tasks = [TaskControlBlock(ID_IDLE, PRIORITY_IDLE)]
         self.worker = TaskControlBlock(ID_WORKER, PRIORITY_WORKER)
         self.tasks.append(self.worker)
-        i = 0
-        while i < 2:
-            task = TaskControlBlock(ID_HANDLER_A + i, PRIORITY_HANDLER)
-            self.handlers.append(task)
-            self.tasks.append(task)
-            i += 1
-        i = 0
-        while i < 4:
-            task = TaskControlBlock(ID_DEVICE_A + i, PRIORITY_DEVICE)
-            self.devices.append(task)
-            self.tasks.append(task)
-            i += 1
-        i = 0
-        while i < len(self.tasks):
-            self.tasks[i].scheduler = self
-            i += 1
-        i = 0
-        while i < len(self.devices):
-            j = 0
-            while j < packets:
-                self.devices[i].add_input(Packet(None, (i * packets + j) & 255, 0))
-                j += 1
-            i += 1
+        self.handlers = [TaskControlBlock(ID_HANDLER_A + i, PRIORITY_HANDLER)
+                         for i in range(2)]
+        self.devices = [TaskControlBlock(ID_DEVICE_A + i, PRIORITY_DEVICE)
+                        for i in range(4)]
+        self.tasks += self.handlers + self.devices
+        for task in self.tasks:
+            task.scheduler = self
+        for i, device in enumerate(self.devices):
+            for j in range(packets):
+                device.add_input(Packet((i * packets + j) & 255, 0))
         tail = None
-        i = 0
-        while i < packets:
-            packet = Packet(None, i & 255, 0)
+        for i in range(packets):
+            packet = Packet(i & 255, 0)
             if tail is None:
                 self.worker.queue = packet
             else:
                 tail.link = packet
             tail = packet
-            i += 1
         self.worker.queue_tail = tail
         self.worker.state.packet_pending = True
 
@@ -195,16 +158,9 @@ class Scheduler:
     def work_left(self):
         if self.worker.queue is not None:
             return True
-        i = 0
-        while i < len(self.devices):
-            if self.devices[i].queue is not None:
+        for task in self.devices + self.handlers:
+            if task.queue is not None:
                 return True
-            i += 1
-        i = 0
-        while i < len(self.handlers):
-            if self.handlers[i].queue is not None:
-                return True
-            i += 1
         return False
 
     def queue_task(self, task):
@@ -227,25 +183,17 @@ class Scheduler:
             task.run()
 
 
-def run_once(limit, packets):
-    scheduler = Scheduler(limit, packets)
-    i = 0
-    while i < len(scheduler.tasks):
-        scheduler.release(scheduler.tasks[i])
-        i += 1
-    scheduler.run()
-    handled = 0
-    i = 0
-    while i < len(scheduler.handlers):
-        handled += scheduler.handlers[i].handled
-        i += 1
-    return handled, scheduler.queue_count, scheduler.hold_count, scheduler.checksum
-
-
 def main():
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 250000
-    handled, queued, held, checksum = run_once(1 << 60, n)
-    print("richards %d %d %d %d" % (handled, queued, held, checksum))
+    scheduler = Scheduler(n)
+    for task in scheduler.tasks:
+        scheduler.release(task)
+    scheduler.run()
+    handled = 0
+    for handler in scheduler.handlers:
+        handled += handler.handled
+    print("richards %d %d %d %d" % (handled, scheduler.queue_count,
+                                    scheduler.hold_count, scheduler.checksum))
 
 
 main()
