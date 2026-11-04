@@ -1,3 +1,30 @@
+## 2026-11-04 -- binascii2_rr1 suite fix: the five reported modules already pass; boundaries pinned (job-rbbinascii2_rr1-11050728)
+
+The task named `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_std_binascii`, `test_ail_unified`
+and `test_ail_virtual_dispatch` as failing with this change on today's integ. None reproduces on this
+branch: each module passes (a) as `python3 -m unittest -q <module>`, (b) under the suite's environment
+(`AIL_NO_CACHE=1`, `AIL_EXTRA_CFLAGS=-Werror=incompatible-pointer-types`, `PYTHONUTF8=1`, `PIPE_CC=gcc`),
+(c) through `tools/par_check.py -j 4` (5 modules, 292 s, 0 failed) and (d) all five in one
+`unittest` process (31 tests, 668 s). The change was also re-applied alone on today's integ
+(`f1d3ae4a`: `stdlib/binascii.py`, the test, its `tests.d` registration and the twelve lab programs
+copied into a detached `/tmp/integ` worktree) and the same five modules pass there. The previous
+job's full suite likewise reported "no new failures" at 22:02. The only ways the five share a
+mechanism are compile-heavy builds, so the failures are consistent with resource pressure in the
+full-suite run rather than a behaviour difference; no compiler or test change is warranted.
+
+The modules' behaviour that this change can affect (the bundled `binascii`) is now pinned beyond the
+twelve lab programs: `test_ail_std_binascii.py` gains `test_edge_values_match_cpython`, which
+compiles an embedded program in the default and `AIL_UNIFIED_FORCE=1` builds and compares stdout and
+exit status with CPython. It covers empty input, `bytes_per_sep` 0/negative/int32 edges (and the
+loud refusal at 2**31), a non-buffer and a float width, a `bytearray` mutated after `hexlify` /
+`b2a_base64` / `crc32`, a seed of 2**63-1 and -1, `crc_hqx` with 70000 and -1, `newline=False` and
+`strict_mode`, and values reaching the call through an argument, a list item, an attribute and a
+dict value. Probes in `/tmp/probes` (`p_hex`, `p_unhex`, `p_b64`, `p_crc`, `p_misc`) run through
+`bash ~/tools/cmp.sh`; all five match CPython ("same stdout", same exit) in both builds.
+
+`test_ail_std_binascii` now 4 tests (20 s for the new one). Final-commit tests: the five named
+modules, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-04 -- binascii2_rr1 re-applied: bundled `binascii` (job-rbbinascii2_rr1-11050501)
 
 Re-applied the accepted `binascii2_rr1` change (base `2adbd4e`, `git fetch ... job-binascii2_rr1-11050251`)
