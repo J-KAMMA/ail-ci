@@ -749,8 +749,7 @@ class Basics(unittest.TestCase):
             ta.array(['a'], ta.f64)
         with self.assertRaisesRegex(ValueError, 'not a multiple of 4'):
             ta.frombytes(b'\0' * 7, ta.f32)
-        with self.assertRaisesRegex(ValueError, 'stage T6'):
-            ta.zeros((2, 3), ta.f32)
+        self.assertEqual(ta.zeros((2, 3), ta.f32).shape, (2, 3))
         with self.assertRaisesRegex(ValueError, '1-D and 2-D'):
             ta.zeros((2, 3, 4), ta.f32)
         with self.assertRaises(TypeError):
