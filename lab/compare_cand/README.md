@@ -50,8 +50,13 @@ Only the spelling differs between `main.py` and `typed.py` (annotations, string 
 manual byte scan instead of `bytes.split`/tuples); the algorithm is the same one-pass hash map and
 sort.
 
-`qty * price` beyond int64 was probed outside the task's ranges (with the range checks removed in a
-throwaway /tmp program): CPython prints the exact big integer, while the AIL build stops loudly on
-int64 overflow instead of printing a wrong number. The probe is not part of the cases. With the
-task's own validation, out-of-range fields are counted bad before any multiplication, so the task
-programs never reach that overflow.
+`qty * price` beyond int64 was probed in a throwaway `/tmp/probes/overflow_int64.py` with the
+values `1000000000000 * 10000000000` (outside the task's ranges): CPython prints the exact big
+integer `10000000000000000000000`, while AIL stops loudly in both the default build and with
+`AIL_UNIFIED_FORCE=1`:
+
+    OverflowError: integer overflow in * (ints are 64-bit; --exact-int gives exact ints)
+
+The probe is not part of the cases. With the task's own validation, a 30-digit out-of-range field
+is counted bad before any multiplication (checked against `reference.py`), so the task programs
+never reach that overflow.
