@@ -50,6 +50,87 @@ module imports, outside the five files this lane may edit, so the .md ends with 
 Tests: `test_ail_fe_cache`, `test_ail_files` and `test_ail_corpus_findings3` pass under
 `ulimit -v 1500000`; `test_ail_safetynet` passes without the cap (the known `S4_generators_gc`
 virtual-memory failure appears only with it).  `update_manifest.py --check` passes.
+## 2026-11-04 -- pyreach s3 review fix: an owned-str helper must terminate
+
+The review found one wrong-output defect: `_owned_unannotated_str_fns` gave the owned-str ABI to
+an unannotated helper whose settle pass saw a str `return` even when another path falls off the
+end. CPython returns `None` there and raises (`TypeError` on `"a" + maybe(0)`, on `len(maybe(0))`);
+the typed build fabricated an empty str and exited 0.
+
+- `_terminates(stmts)` (also used by the bytes helper, which had its own copy) now gates
+  `_owned_unannotated_str_fns`: a helper that can fall off the end is not owned-str.
+- `_signatures` refuses such a helper by name under `--strict` ("returns a str on one path but can
+  fall off the end"): the typed path has no `Optional[str]`. The default/unified build keeps the
+  general path and matches CPython.
+- `ir/lower.py`: a str return that is not owned by the caller now falls back to the legacy emitter
+  instead of emitting the owned ABI.
+- Reverted the s3 widening of mixed int/str call sites: a str claim on a parameter another site
+  supplies a non-str for is dropped, so the helper keeps the task's by-name refusal under
+  `--strict` (general path still matches CPython).
+
+Probes (`bash ~/tools/cmp.sh`, default + unified): `p_falloff`, `p_falloff_len`, `p_falloff_flag`
+all exit 1 with empty stdout and the CPython `TypeError`; `p_mixed` matches CPython on the general
+path and refuses "passing str where show() wants int" under `--strict`. Ten-source strict lists
+are unchanged against `b02d2195`; `chain_relax` 5->3, `ticket_audit` 6->7 with its three named
+blockers gone and `rail_transfer`'s tuple-element note gone against `ba982841`. `.ail` C
+byte-identical for all ten twins and the five codegen pins. Tests: `test_ail_pyreach_infer`,
+`test_ail_pyreach_unpack`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass.
+
+## 2026-11-04 -- pyreach s3 finish: re-applied on the current export and re-verified
+
+Re-applied the s3 branch (`b2f90979`, `c969e4ff`, `85d06f83`) on the current export; only the
+DEVLOG conflicted. Re-ran the ten-source strict measurement: the after lists are identical to the
+branch tip's. `ticket_audit` loses its three named blockers, `chain_relax` its two str/number
+concatenations and `rail_transfer` its five tuple-element notes; later chain blockers appear as
+expected and `echo_pack` stays typed. `.ail` C is byte-identical for all ten twins and the five
+codegen pins. Probes: open rb/text with empty and no-final-newline files, agreeing helper params
+with negative/zero/large ints, `%`-format negative zero, str-list with `%` tuple appends, loop
+rebind with zero iterations, fold over a bytes list (general path matches CPython, strict refuses
+by name), and `list(map(int, split()))` beyond int64 (loud OverflowError on the default build,
+exact with `--exact-int`). Tests: `test_ail_pyreach_infer` (9), `test_ail_pyreach_unpack` (12),
+`test_ail_safetynet` (5), `test_ail_files` (18, 1 skip) and `test_ail_corpus_findings3` (2).
+
+## 2026-11-03 -- pyreach s3: local kind inference for plain Python sources
+
+Six inference rules let the typed path read the shapes the lab tasks write without annotations,
+each checked at every use (a disagreeing use is still a refusal by name, never a coercion):
+
+1. `with open(path, 'rb') as f: data = f.read()` (also inside `try:`) makes `data` bytes, so
+   `data.split(b'\n')` is a list of bytes and each element is bytes; no mode or `'r'` is str.
+   `_open_mode_kind` recognises the handle at the pre-pass stage as well as after filelower.
+2. An unannotated helper parameter takes its kind from the call sites (`fail(1, 'header')`,
+   `fail(ln, 'syntax')` give `n: int, cat: str`). A str argument is now a `_claim`, which the
+   clone plan turns into variants; a disagreement across sites monomorphises rather than
+   refusing (s4's clone pass was already in the base -- the base refused only because str
+   arguments were not claims at all).
+3. A helper whose return the fixed point settles to str, with no annotation, is an owned-str
+   helper (`_owned_unannotated_str_fns`), so `"sum " + fmt(total)` and `"..." % v` after
+   `s = s[1:]` reassignments work.
+4. `_mark_str_lists` already accepted `%` formats; the tuple right side and `"a" + str_helper(x)`
+   now count as str appends, so `out = []` with only those appends is a list of str.
+5. `list(map(int, X.split()))` is an int LIST (`_is_map_int_blist_call`, `_map_int_blist_value`),
+   a `bytes.split()` result is byteish, a `for` over it binds bytes, and a list comprehension over
+   it builds a BYTES element (the comprehension ctype and kind include BYTES).
+6. `_promote_floats` leaves a name alone when it also reads bytes elements elsewhere, and the
+   unbound pass treats a constant `if` test as one branch, so `sl = st_lines[s]` before a loop and
+   `sl = st_lines[u]` inside it no longer produce the `_ail_set_sl or _ail_unbound_sl(...)`
+   ternary.
+
+Strict ten-source measurement (base `addbf5ea` -> this tree): in `ticket_audit` the three named
+blockers (`'s'` annotated bytes but the caller supplies int, `CODES[cat]` needs a str key,
+`'out'` appended both a str and a non-str) are gone; its first remaining blocker is the F3
+dict-of-containers at line 101. `chain_relax` loses both "concatenating a number with a str"
+blockers and keeps only two `return None` and the `18446744073709551615` literal (F2/F8).
+`rail_transfer` loses all five "cannot tell the type of element 0 of this tuple" notes and keeps
+its None / `get(k)` / `del` / tuple-target blockers. Probes `p1`-`p9` (open rb/text + split +
+regex, agreeing and mixed helper parameters, `%.9f` helper, str list, `list(map(int, split()))`
+with a beyond-int64 value, loop-rebound name, bytes walk) build typed and match CPython on the
+default and unified builds; the beyond-int64 value is a loud `OverflowError` on the default build
+and exact under `--exact-int`. The ten `.ail` twins generate byte-identical C.
+
+Tests: `test_ail_pyreach_infer` (9 tests, registered through `tests.d`), `test_ail_pyreach_unpack`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
