@@ -11,7 +11,8 @@ builds typed but stops loudly when the runtime int64 overflow is reached, so it 
 (see lab/stdlib/stat/RESULTS.md).  The default and --strict builds must reach the typed path.
 
 A pure-Python check compares the bundled filemode(m) with CPython's for every m in
-range(0, 0o200000).
+range(0, 0o200000), and every mode-taking function at the domain edges (negative and above
+0xFFFFFFFF raise the same OverflowError CPython's C _stat raises).
 """
 import importlib.util
 import os
@@ -57,8 +58,36 @@ class StdlibStatPureTests(unittest.TestCase):
             if bundled.filemode(mode) != cpython_stat.filemode(mode):
                 self.fail("filemode(%d): %r != %r"
                           % (mode, bundled.filemode(mode), cpython_stat.filemode(mode)))
-        self.assertEqual(bundled.S_IFMT(0o104755), cpython_stat.S_IFMT(0o104755))
-        self.assertEqual(bundled.S_IMODE(0o104755), cpython_stat.S_IMODE(0o104755))
+        names = ["S_IMODE", "S_IFMT", "S_ISDIR", "S_ISREG", "S_ISLNK", "S_ISCHR",
+                 "S_ISBLK", "S_ISFIFO", "S_ISSOCK", "S_ISDOOR", "S_ISPORT", "S_ISWHT"]
+        for named in names:
+            ours = getattr(bundled, named)
+            theirs = getattr(cpython_stat, named)
+            for mode in range(0, 0o200000):
+                self.assertEqual(ours(mode), theirs(mode), "%s(%d)" % (named, mode))
+
+    def test_mode_domain_matches_cpython(self):
+        spec = importlib.util.spec_from_file_location("ail_bundled_stat_domain",
+                                                      ROOT / "stdlib" / "stat.py")
+        bundled = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bundled)
+        names = ["S_IMODE", "S_IFMT", "S_ISDIR", "S_ISREG", "S_ISLNK", "S_ISCHR",
+                 "S_ISBLK", "S_ISFIFO", "S_ISSOCK", "S_ISDOOR", "S_ISPORT", "S_ISWHT",
+                 "filemode"]
+
+        def outcome(fn, mode):
+            try:
+                return ("ok", fn(mode))
+            except Exception as error:
+                return (type(error).__name__, str(error))
+
+        for named in names:
+            ours = getattr(bundled, named)
+            theirs = getattr(cpython_stat, named)
+            for mode in [-1, -2, -4096, 0, 1, 0o104755, 0xFFFFFFFF,
+                         0x100000000, 2 ** 31, 2 ** 40]:
+                self.assertEqual(outcome(ours, mode), outcome(theirs, mode),
+                                 "%s(%d)" % (named, mode))
 
 
 @unittest.skipUnless(CC, "installed C compiler required")

@@ -15,8 +15,10 @@ The typed path refuses a module-level table holding non-numbers, so `filemode` h
 if chain over the same bits.  Its output is identical for every mode.  Like CPython's shipped C
 `_stat.filemode` (which replaces the Python function at import time), the type character is chosen
 from `S_IFMT(mode)` and an unrecognised type prints `?`; the Python fallback in Lib/stat.py would
-print `-` there, but `_stat` is what CPython 3.12 exposes.  A mode beyond int64 stops loudly (an
-OverflowError), as ints are int64.
+print `-` there, but `_stat` is what CPython 3.12 exposes.  Every mode-taking function here takes
+the C unsigned 32-bit mode, so a negative mode or one above 0xFFFFFFFF raises the same
+OverflowError CPython's C functions do (the Python fallbacks would compute instead).
+A mode beyond int64 stops loudly (an OverflowError), as ints are int64.
 """
 
 # Indices for stat struct members in the tuple returned by os.stat()
@@ -35,10 +37,19 @@ ST_CTIME = 9
 
 # Extract bits from the mode
 
+def _check_mode(mode: int) -> None:
+    """CPython's C _stat takes the mode as an unsigned 32-bit int."""
+    if mode < 0:
+        raise OverflowError("can't convert negative value to unsigned int")
+    if mode > 0xFFFFFFFF:
+        raise OverflowError("mode out of range")
+
+
 def S_IMODE(mode: int) -> int:
     """Return the portion of the file's mode that can be set by
     os.chmod().
     """
+    _check_mode(mode)
     return mode & 0o7777
 
 
@@ -46,6 +57,7 @@ def S_IFMT(mode: int) -> int:
     """Return the portion of the file's mode that describes the
     file type.
     """
+    _check_mode(mode)
     return mode & 0o170000
 
 
@@ -104,16 +116,19 @@ def S_ISSOCK(mode: int) -> bool:
 
 def S_ISDOOR(mode: int) -> bool:
     """Return True if mode is from a door."""
+    _check_mode(mode)
     return False
 
 
 def S_ISPORT(mode: int) -> bool:
     """Return True if mode is from an event port."""
+    _check_mode(mode)
     return False
 
 
 def S_ISWHT(mode: int) -> bool:
     """Return True if mode is from a whiteout."""
+    _check_mode(mode)
     return False
 
 
@@ -158,6 +173,7 @@ SF_SNAPSHOT = 0x00200000    # file is a snapshot file
 
 def filemode(mode: int) -> str:
     """Convert a file's mode to a string of the form '-rwxrwxrwx'."""
+    _check_mode(mode)
     perm = ""
     fmt = S_IFMT(mode)
     if fmt == S_IFLNK:

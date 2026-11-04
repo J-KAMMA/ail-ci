@@ -113,3 +113,11 @@ CPython's `_filemode_table` is a module-level tuple of tuples of (int, str); the
 that ("module-level list of non-numbers"), which is why the stdlib census built `stat` on the
 general path. `filemode` is rewritten as an explicit `if` chain over the same bits, so no table of
 mixed values exists at module scope. The output is identical for every mode.
+
+CPython 3.12's `stat` is the C `_stat` module (`from _stat import *`); its `S_IMODE`, `S_IFMT`,
+`S_IS*` and `filemode` take the mode as an unsigned 32-bit int, so a negative mode or one above
+`0xFFFFFFFF` raises `OverflowError` and an unknown file type prints `?`. The bundled functions do
+the same (`_check_mode`). The pure-Python fallbacks in `Lib/stat.py` would instead compute on a
+negative int and print `-` for an unknown type; they are not what CPython exposes. Everything is
+checked against CPython for `range(0, 0o200000)` and at the domain edges by
+`AIL_CURRENT/test_ail_std_stat.py`.
