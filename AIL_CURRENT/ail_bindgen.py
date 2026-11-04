@@ -23,7 +23,10 @@ an error code (--check NAME=KIND[:EXC] and --errno NAME do it from the command l
 """
 import argparse
 import keyword
+import os
 import re
+import shutil
+import subprocess
 import sys
 
 INTS = {
@@ -40,12 +43,77 @@ INTS = {
 OTHERS = {'float': 'c_float', 'double': 'c_double', 'bool': 'c_bool', '_Bool': 'c_bool'}
 LENGTH_NAMES = re.compile(r'^(n|len|length|size|count|num|nbytes|nmemb|cap|capacity|buflen|bufsize)$|(_len|_n|_size|_count|_cap|len|size)$',
                           re.I)
+COUNT_NAMES = re.compile(r'^(nitems|nmemb|count|num|n)$|(_nitems|_nmemb|_count|_num)$', re.I)
 LENGTH_TYPES = ('c_size_t', 'c_ssize_t', 'c_int', 'c_uint', 'c_long', 'c_ulong', 'c_int32', 'c_uint32', 'c_int64', 'c_uint64')
-QUALIFIERS = {'const', 'volatile', 'restrict', '__restrict', '__restrict__', 'register'}
+QUALIFIERS = {'const', 'volatile', 'restrict', '__restrict', '__restrict__', 'register', '__extension__',
+              '_Nonnull', '_Nullable', '_Null_unspecified', '__THROW', '__THROWNL', '__nonnull', '__wur',
+              '__attribute_pure__', '__attribute_const__', '__attribute_malloc__', '__nothrow__'}
 
 
 class Skip(Exception):
     pass
+
+
+def preprocess(path, includes=(), defines=(), compiler=None, flags=()):
+    """The C text of `path` after `cc -E`, restricted to the header and the headers it includes directly.
+
+    The `# N "file"` markers name the file each run of lines comes from. A header's own declarations
+    may sit in a header it includes directly (`math.h` expands `__MATHCALL` inside `bits/mathcalls.h`),
+    so the target and its direct includes are kept; headers reached through those (the whole of
+    `sys/types.h` behind `zconf.h`) are dropped, which keeps other libraries' prototypes out.
+    """
+    cc = compiler or os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc')
+    if not cc:
+        raise SystemExit('--cpp needs a C compiler (set PIPE_CC)')
+    base = [cc, *flags, *('-I' + d for d in includes), *('-D' + d for d in defines)]
+    tree = subprocess.run([*base, '-E', '-H', str(path), '-o', os.devnull], capture_output=True, text=True)
+    if tree.returncode:
+        raise SystemExit('cc -E -H failed: ' + (tree.stderr or tree.stdout)[-2000:])
+    direct = {os.path.realpath(line[2:].strip()) for line in tree.stderr.splitlines() if line.startswith('. ')}
+    # a line at depth one is itself an include of the file at depth one above it, so only the first
+    # `. ` run (the target's own includes) is the direct set; gcc repeats a header included twice
+    done = subprocess.run([*base, '-E', str(path)], capture_output=True, text=True)
+    if done.returncode:
+        raise SystemExit('cc -E failed: ' + (done.stderr or done.stdout)[-2000:])
+    keep = direct | {os.path.realpath(str(path))}
+    marker = re.compile(r'^#\s+\d+\s+"([^"]*)"')
+    current, lines = None, []
+    for line in done.stdout.splitlines():
+        match = marker.match(line)
+        if match:
+            current = os.path.realpath(match.group(1))
+            continue
+        if line.startswith('#'):
+            continue
+        if current in keep:
+            lines.append(line)
+    return '\n'.join(lines)
+
+
+def strip_balanced(text, keywords):
+    """Drop `keyword (...)` with balanced parentheses, so nested `__attribute__ ((__nonnull__ (1, 2)))` goes whole.
+
+    The old non-greedy pattern stopped at the first `))`, which left a stray `)` behind and silently
+    lost the statement (`ceil`, `fabs`, `floor` in math.h carry `__attribute__ ((__const__))`).
+    """
+    pattern = re.compile(r'\b(?:%s)\s*\(' % '|'.join(keywords))
+    out, index = [], 0
+    while True:
+        match = pattern.search(text, index)
+        if not match:
+            out.append(text[index:])
+            return ''.join(out)
+        out.append(text[index:match.start()])
+        depth, at = 0, match.end() - 1
+        while at < len(text):
+            if text[at] == '(':
+                depth += 1
+            elif text[at] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            at += 1
+        index = at + 1
 
 
 def strip_source(text):
@@ -54,8 +122,7 @@ def strip_source(text):
     text = re.sub(r'//[^\n]*', ' ', text)
     text = re.sub(r'(?m)^\s*#.*$', ' ', text)
     text = re.sub(r'extern\s+"C"\s*\{', ' ', text)
-    text = re.sub(r'__attribute__\s*\(\(.*?\)\)', ' ', text)
-    text = re.sub(r'__declspec\s*\([^)]*\)', ' ', text)
+    text = strip_balanced(text, ('__attribute__', '__attribute', '__declspec', '__asm__', '__asm'))
     out, depth, last = [], 0, ''
     for ch in text:
         if ch == '{':
@@ -97,7 +164,45 @@ class Typ:
         self.base, self.stars, self.const, self.name = base, stars, const, name
 
 
-def parse_type(text, typedefs, want_name):
+def expand_aliases(text, aliases, depth=0):
+    """Replace typedef names by their definition's text, so `Bytef *` reads as `unsigned char *`."""
+    if depth > 8:
+        return text
+    changed = False
+    for name, base in aliases.items():
+        pattern = r'\b%s\b' % re.escape(name)
+        if re.search(pattern, text):
+            text = re.sub(pattern, lambda _m, base=base: base, text)
+            changed = True
+    return expand_aliases(text, aliases, depth + 1) if changed else text
+
+
+def collect_typedefs(body):
+    """name -> definition text, from the `typedef` statements of the (preprocessed) header.
+
+    `typedef struct gzFile_s *gzFile;` gives `struct gzFile_s *`; a function pointer typedef is left
+    out because a callback is still skipped by name.
+    """
+    aliases = {}
+    for statement in body.split(';'):
+        statement = ' '.join(statement.split())
+        if not statement.startswith('typedef'):
+            continue
+        rest = statement[len('typedef'):].strip()
+        if re.search(r'\(\s*\*', rest) or not rest:
+            continue
+        match = re.match(r'^(.*?)\s*([A-Za-z_]\w*)\s*(\[[^\]]*\])?$', rest)
+        if not match:
+            continue
+        base = (match.group(1) or '').strip()
+        if not base or base.split()[-1] in ('struct', 'union', 'enum'):
+            continue
+        aliases[match.group(2)] = base + (' *' if match.group(3) else '')
+    return aliases
+
+
+def parse_type(text, typedefs, want_name, aliases=None):
+    text = expand_aliases(text, aliases or {})
     text = re.sub(r'\b(struct|union|enum)\s+(\w+)', lambda m: ('ENUM_' if m.group(1) == 'enum' else 'STRUCT_') + m.group(2), text)
     if re.search(r'\(\s*\*', text):
         raise Skip('function pointer (callback)')
@@ -128,7 +233,7 @@ def scalar(base, typedefs):
     return None
 
 
-def convert_param(t, nxt, typedefs):
+def convert_param(t, nxt, typedefs, str_result=False):
     """(annotation text, trusted?, the length parameter's C type or None)"""
     if t.stars == 0:
         if t.base == 'void':
@@ -146,7 +251,7 @@ def convert_param(t, nxt, typedefs):
         return 'ptr(c_void_p)', True, None
     c = scalar(t.base, typedefs)
     if t.base == 'char':
-        if length and not t.const:
+        if length and not t.const and not str_result:
             return 'bytearray', False, length
         return ('c_char_p' if t.const else 'c_mut_char_p'), False, None
     if t.base == 'void':
@@ -179,9 +284,26 @@ def pyname(name):
     return name + '_' if keyword.iskeyword(name) or name in ('None', 'True', 'False') else name
 
 
-def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs=None):
+def declared_names(text):
+    """The function names the header declares, read the same way generate() reads them."""
+    names = set()
+    for statement in strip_source(text).split(';'):
+        statement = ' '.join(statement.split())
+        if not statement or '(' not in statement or re.match(r'(typedef|struct\s|union\s|enum\s)', statement):
+            continue
+        match = re.search(r'([A-Za-z_]\w*)\s*$', statement.partition('(')[0])
+        if match:
+            names.add(match.group(1))
+    return names
+
+
+def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs=None, visible=None, cpp=False):
     checks, typedefs = checks or {}, typedefs or {}
     body = strip_source(text)
+    # typedef resolution reads the whole preprocessed header. Without --cpp the text is the raw
+    # header, where a `typedef struct ... *name;` alias would smuggle a macro-decorated result type
+    # past the parser (gzgets read as `-> c_void_p`); the default path keeps the old behaviour.
+    aliases = collect_typedefs(body) if cpp else {}
     out, skipped, seen = [], [], set()
     for statement in body.split(';'):
         statement = ' '.join(statement.split())
@@ -199,27 +321,47 @@ def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs
         name, ret_text = m.group(1), head[:m.start()].strip()
         arg_text = rest[:rest.rindex(')')] if ')' in rest else rest
         try:
+            if cpp and name.startswith('__'):
+                raise Skip('a name reserved for the C implementation')
+            if visible is not None and name not in visible:
+                raise Skip('the header does not declare it under -std=c11, the mode the prototype check is compiled in')
             if not ret_text:
                 raise Skip('no result type')
             args = [] if arg_text.strip() in ('', 'void') else split_top(arg_text)
             if any(a == '...' for a in args):
                 raise Skip('variadic')
-            types = [parse_type(a, typedefs, True) for a in args]
+            types = [parse_type(a, typedefs, True, aliases) for a in args]
             for index, t in enumerate(types):
                 if t.name is None:
                     t.name = 'a%d' % index
-            result, trusted = convert_result(parse_type(ret_text, typedefs, False), typedefs)
+            result, trusted = convert_result(parse_type(ret_text, typedefs, False, aliases), typedefs)
             params, index = [], 0
             while index < len(types):
                 t = types[index]
                 nxt = types[index + 1] if index + 1 < len(types) else None
-                annotation, t_trusted, length = convert_param(t, nxt, typedefs)
+                after = types[index + 2] if index + 2 < len(types) else None
+                if (cpp and t.stars == 1 and nxt is not None and after is not None
+                        and nxt.stars == 0 and nxt.name and LENGTH_NAMES.search(nxt.name)
+                        and scalar(nxt.base, typedefs) in LENGTH_TYPES
+                        and after.stars == 0 and after.name and COUNT_NAMES.search(after.name)
+                        and scalar(after.base, typedefs) in LENGTH_TYPES):
+                    # fread/gzfread shape: C's byte count is size * nitems, but length("buf") would
+                    # pass len(buf) as `size`, so the library reads size*nitems bytes from a shorter
+                    # buffer (an out-of-bounds write for gzfwrite).
+                    raise Skip('the buffer length is %s * %s, not len(buf), which length() cannot express'
+                               % (nxt.name, after.name))
+                annotation, t_trusted, length = convert_param(t, nxt, typedefs,
+                                                             cpp and result in ('c_char_p', 'c_mut_char_p'))
                 trusted = trusted or t_trusted
                 params.append('%s: %s' % (pyname(t.name), annotation))
                 if length:
                     params.append('%s: length(%r%s)' % (pyname(nxt.name), pyname(t.name), '' if length == 'c_size_t' else ', ' + length))
                     index += 1
                 index += 1
+            if result in ('c_char_p', 'c_mut_char_p') and any(
+                    a == 'bytearray' or a == 'c_mut_void_p' or a.startswith('ptr(') for _, a in
+                    (p.split(': ', 1) for p in params)):
+                raise Skip('a str result together with a bytearray parameter is refused by ail_ffi')
         except Skip as why:
             skipped.append('# skipped %s: %s' % (name, why))
             continue
@@ -261,14 +403,26 @@ def main(argv=None):
     ap.add_argument('--check', action='append', default=[], help='FUNC=KIND[:EXC] (negative nonzero null minus1 allones)')
     ap.add_argument('--errno', action='append', default=[], help='FUNC: read errno on failure (needs --check)')
     ap.add_argument('--typedef', action='append', default=[], help='NAME=c_type for an unknown typedef')
+    ap.add_argument('--cpp', action='store_true', help='preprocess the header with $PIPE_CC -E first (expands ZEXTERN, OF(...), __MATHCALL)')
+    ap.add_argument('-I', '--include', action='append', default=[], help='include directory for --cpp')
+    ap.add_argument('-D', '--define', action='append', default=[], help='macro for --cpp')
     ap.add_argument('-o', '--output')
     args = ap.parse_args(argv)
-    with open(args.header, encoding='utf-8') as stream:
-        text = stream.read()
+    if args.cpp:
+        text = preprocess(args.header, args.include, args.define)
+    else:
+        with open(args.header, encoding='utf-8') as stream:
+            text = stream.read()
     name = args.header_name or args.header.replace('\\', '/').rsplit('/', 1)[-1]
     checks = dict(c.split('=', 1) for c in args.check)
     typedefs = dict(t.split('=', 1) for t in args.typedef)
-    result = generate(text, name, lib=args.lib, link=args.link, checks=checks, errnos=set(args.errno), typedefs=typedefs)
+    visible = None
+    if args.cpp:
+        # the FFI adapter that checks a stub is compiled with -std=c11 (c_object.py), where glibc hides
+        # its __USE_MISC declarations; a stub for a function the header does not declare there cannot build
+        visible = declared_names(preprocess(args.header, args.include, args.define, flags=('-std=c11',)))
+    result = generate(text, name, lib=args.lib, link=args.link, checks=checks, errnos=set(args.errno),
+                      typedefs=typedefs, visible=visible, cpp=args.cpp)
     if args.output:
         with open(args.output, 'w', encoding='utf-8', newline='\n') as stream:
             stream.write(result)
