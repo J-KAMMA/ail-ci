@@ -5,11 +5,14 @@ references, the entities tables and a small tag stripper the way ordinary code d
 compiled with the default command and run beside `python3` on the same source; stdout and the
 exit status must agree.  The escape-only programs must build with no general-path note.
 
-The html5 table keeps CPython's 133 non-BMP values exactly.  html/__init__.py builds those
-with chr() (no non-BMP constant), so escape and unescape stay typed and exact.  A program
-that reaches `html.entities` is compiled on the 16-bit general path (its int-keyed tables
-force it there), which refuses the non-BMP constants by name, so those programs (08, 09, 12)
-are expected to be refused with that message rather than to produce a wrong character.
+The html5 table keeps CPython's 133 non-BMP values exactly.  Neither module holds a non-BMP
+string constant: html/__init__.py keeps them in parallel lists and builds them with chr() on
+lookup, and html/entities.py stores its tables compactly and rebuilds html5 as a mapping
+that does the same.  The escape and unescape programs therefore stay exact, and a program
+that reaches `html.entities` builds in both modes (the entities tables put it on the general
+path) and matches CPython for every BMP value.  Looking up an astral name there stops with
+the named limit "AIL limit: chr_non_bmp" instead of returning a wrong character; the lab
+programs do not do that.
 """
 import os
 import shutil
@@ -25,12 +28,6 @@ PROGRAMS = ROOT.parent / "lab" / "stdlib" / "html"
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc")
 
 ESCAPE_ONLY = ("01_escape_quote_true.py", "02_escape_quote_false.py", "03_escape_alias.py")
-
-# Programs whose entities tables force the 16-bit general path; they refuse the non-BMP
-# html5 values by name instead of returning a wrong character.
-ENTITIES = ("08_entities_tables.py", "09_entities_html5.py", "12_mixed.py")
-
-NON_BMP = "non-BMP string literal in the 16-bit v2 runtime"
 
 
 def run_cpython(path):
@@ -74,7 +71,10 @@ class StdlibHtmlTests(unittest.TestCase):
         return work, program, exe, built
 
     def test_programs_match_cpython(self):
-        base = dict(os.environ, AIL_NO_CACHE="1")
+        # The compiler's own cache is left on: the build-time numbers in RESULTS.md are
+        # measured separately with AIL_NO_CACHE=1, and without the cache the 2231-entry
+        # table is rebuilt for every program (a minute each on the 16-bit path).
+        base = dict(os.environ)
         base.pop("PYTHONPATH", None)
         modes = [("default", base), ("unified", dict(base, AIL_UNIFIED_FORCE="1"))]
         for label, env in modes:
@@ -82,11 +82,6 @@ class StdlibHtmlTests(unittest.TestCase):
                 with self.subTest(program=source.name, build=label):
                     _, program, exe, built = self._build(source, env)
                     message = built.stdout + built.stderr
-                    if source.name in ENTITIES:
-                        self.assertIn(built.returncode, (2, 3), message)
-                        self.assertIn(NON_BMP, message)
-                        self.assertFalse(exe.exists(), message)
-                        continue
                     self.assertEqual(built.returncode, 0, message)
                     expected = run_cpython(program)
                     ran = subprocess.run([str(exe)], cwd=exe.parent, capture_output=True,

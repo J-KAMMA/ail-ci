@@ -8,7 +8,9 @@
 
 `html` is a bundled package in this tree, so html.unescape and `from html import *` are now
 supported rather than refused; the refusal wording for a bad escape call comes from the
-package's own `escape` definition.
+package's own `escape` definition.  Binding `esc = html.escape` now names the function as a
+first-class value (it has a default), so the alias case is kept as a refusal rather than
+dropped: the guard still covers the aliasing form, now with the message the package produces.
 """
 import html
 import os
@@ -107,6 +109,8 @@ class CompiledProgram(unittest.TestCase):
 class Refusals(unittest.TestCase):
     CASES = {
         "entities": ("import html\nprint(html.entities.name2codepoint['lt'])\n", "html.entities"),
+        "escape alias": ("import html\nesc = html.escape\nprint(esc('<'))\n",
+                         "using function html.escape as a first-class value"),
         "module as value": ("import html\nm = html\nprint(m.escape('<'))\n", "used as a value"),
         "escape keyword": ("import html\nprint(html.escape('<', flag=1))\n",
                            "unknown keyword argument flag"),
