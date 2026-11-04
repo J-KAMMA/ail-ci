@@ -257,16 +257,15 @@ def _flag_is(direct, recursive, parts, flag):
 
 def _flag_unset_all(direct, recursive, parts):
     key = _join_key(parts)
-    prefix = key + "\u0000"
     doomed = []
     for k in direct.keys():
-        if k == key or k.startswith(prefix):
+        if k.startswith(key):
             doomed.append(k)
     for k in doomed:
         del direct[k]
     doomed = []
     for k in recursive.keys():
-        if k == key or k.startswith(prefix):
+        if k.startswith(key):
             doomed.append(k)
     for k in doomed:
         del recursive[k]
@@ -860,9 +859,8 @@ def _join_prefix(parts, n):
     out = ""
     i = 0
     while i < n:
-        if i:
-            out += "\u0000"
-        out += parts[i]
+        part = parts[i]
+        out += str(len(part)) + ":" + part
         i += 1
     return out
 
