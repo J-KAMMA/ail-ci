@@ -1,3 +1,13 @@
+## 2026-11-04 -- prog18: refresh the stale nested-format-spec refusal case
+
+`test_ail_refusal_messages` still listed `f"{x:{w}.2f}"` as a refusal, but prog18's typed path now
+builds a single nested width field (including a precision/type suffix) and matches CPython; the
+refusal module's cases track the current refusals, not which programs are accepted.  The case now
+uses `f"{x:{w}.{p}f}"` (a runtime width *and* precision, two nested fields), which the typed path
+still refuses by name with the `write instead: a literal spec` hint.  `test_ail_refusal_messages`
+3 OK and `test_ail_prog18` 16 OK on the final tree.
+
+## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 
 `test_ail_cpython_hybrid`, `test_ail_prog2` and `test_ail_prog21` went red when pyreachs3c
