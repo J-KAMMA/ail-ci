@@ -1,3 +1,25 @@
+## 2026-11-04 -- re-apply accepted modval2b on the current tree (job-rbmodval2b-11041645)
+
+Re-applied the accepted `job-modval2b-11041417` change (a local module used as a value becomes one
+generated class and instance, with module dunders, the branch/nested-scope/re-export fixes and the
+named refusals) on top of this export. The code applied cleanly: `ail_modules.py`,
+`test_ail_modules.py`, the new `test_ail_modules_values.py` and `tests.d` registration, and the
+`tests/modval` probes 01-17. Only the record files conflicted, and both sides' entries are kept;
+the row id is `C?-job-rbmodval2b-11041645-1` in `DIFFERENCES.md` and `docs/spec/DIFFERENCES.md`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` refreshed the manifest
+and `--check` passes.
+
+Probes: 13 multi-file trees under `/tmp/probes` (module values need local modules, so `cmp.sh`,
+which copies one file, cannot host them; `run_cmp_dir.sh` does the same CPython + default +
+`AIL_UNIFIED_FORCE=1` comparison). Eight match CPython on both builds: alias identity/global write/
+negative and zero arguments, an empty module, argument/list/dict/tuple/attribute delivery, package
+and module dunders, namespace-package dunders, folded keyword calls and int64 boundaries, an
+if/else conditional binding, and int64 min/max through a module function. Five are refused by name
+on both builds: a keyword call through a run-time module value, a store of an undefined name, a
+dynamic `getattr`, a function read through a value, and a loop assignment. Existing tests pass:
+test_ail_modules_values (2), test_ail_modules (66), test_ail_modules3 (9), test_ail_lib_modules
+(15), test_ail_safetynet (5), test_ail_files (18, 1 skipped) and test_ail_corpus_findings3 (2).
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
@@ -199,6 +221,27 @@ the typed path's uncaught-trap text (no `IndexError:`/`ZeroDivisionError:` prefi
 also loses the key), reduced to `lab/fuzzpy/findings/001.py`-`005.py`. The raw `seed22`
 finding is a compile-time int64 constant refusal, counted as loud-ok and not filed.
 `lab/fuzzpy/REPORT.md` has the numbers.
+
+## 2026-11-04 -- modval2b: branch, nested-scope and re-export fixes for module values
+
+Fixed the four defects from the review of the module-as-value merge. A `if c: m = pkg.a / else: m = pkg.b`
+is rewritten to `m = pkg.a if c else pkg.b` (the shape the compiler builds exactly); any other module
+assignment under a branch, loop or handler is now a named refusal instead of the last-assignment-wins
+result. `modvars` is saved and restored around every function, class and comprehension, so a nested
+function's local module no longer leaks to its enclosing scope. The generated module class now has
+properties for names re-exported with `from m import x` (previously an `AttributeError` at run time).
+Reading a function as a value through a module value (for example `mod.double is pkg.util.double`) is
+refused by name, both for a module passed as a parameter and for one held in a list/dict/attribute;
+calling it and the statically named `pkg.util.double` still work.
+
+Probes: the four review programs now match CPython on both builds (the branch case) or are refused by
+name with the module and the replacement named (the function-value case). The new `tests/modval`
+probes 12-17 cover the branch, nested scope, re-export, loop refusal, parameter function-value refusal
+and list function-value refusal; all module-value probes pass in both builds. Ten `lab/compare/src`
+`typed.py` C files and eight `main.py` ones are byte-identical to the previous commit (the other two
+`main.py` files are refused by both).
+Tests: `test_ail_modules_values`, `test_ail_modules`, `test_ail_modules3`, `test_ail_lib_modules`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
 
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 

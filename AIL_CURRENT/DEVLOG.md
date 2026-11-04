@@ -1,3 +1,25 @@
+## 2026-11-04 -- re-apply accepted modval2b on the current tree (job-rbmodval2b-11041645)
+
+Re-applied the accepted `job-modval2b-11041417` change (a local module used as a value becomes one
+generated class and instance, with module dunders, the branch/nested-scope/re-export fixes and the
+named refusals) on top of this export. The code applied cleanly: `ail_modules.py`,
+`test_ail_modules.py`, the new `test_ail_modules_values.py` and `tests.d` registration, and the
+`tests/modval` probes 01-17. Only the record files conflicted, and both sides' entries are kept;
+the row id is `C?-job-rbmodval2b-11041645-1` in `DIFFERENCES.md` and `docs/spec/DIFFERENCES.md`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` refreshed the manifest
+and `--check` passes.
+
+Probes: 13 multi-file trees under `/tmp/probes` (module values need local modules, so `cmp.sh`,
+which copies one file, cannot host them; `run_cmp_dir.sh` does the same CPython + default +
+`AIL_UNIFIED_FORCE=1` comparison). Eight match CPython on both builds: alias identity/global write/
+negative and zero arguments, an empty module, argument/list/dict/tuple/attribute delivery, package
+and module dunders, namespace-package dunders, folded keyword calls and int64 boundaries, an
+if/else conditional binding, and int64 min/max through a module function. Five are refused by name
+on both builds: a keyword call through a run-time module value, a store of an undefined name, a
+dynamic `getattr`, a function read through a value, and a loop assignment. Existing tests pass:
+test_ail_modules_values (2), test_ail_modules (66), test_ail_modules3 (9), test_ail_lib_modules
+(15), test_ail_safetynet (5), test_ail_files (18, 1 skipped) and test_ail_corpus_findings3 (2).
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
@@ -15,6 +37,62 @@ in `tests.d`; added DIFFERENCES row `C?-job-fz226-11041145-1`.  The load-time re
 which `lab/fuzz/run.py` currently classes as `crash` (it only counts exit 3 as `refused`); that
 is a fuzzer-classification issue, not a silent language difference.  Final-state tests:
 test_ail_fz226, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
+## 2026-11-04 -- modval2 review fixes: module-value dunders and unknown stores (job-modval2b-11041013)
+
+Fixed the two defects the review found.  A store through a module value to a name the module does
+not define (`m.NEW = 5` after `m = pkg.a`) used to crash the compiler with `KeyError: 'NEW'`; it is
+now refused by name, naming the module and the direct `pkg.a.NEW = value` form, which still creates
+the name.  The generated module object now also models `__path__` (packages), `__spec__` (with
+`name`, `origin`, `parent`, `cached`, `loader` and `submodule_search_locations`), `__loader__`
+(`name` and `path`) and `__cached__` (the build-time `cache_from_source` path), so reading them
+through a value (an argument, a list item, a dict value or an object attribute) returns CPython's
+values instead of raising `AttributeError`; a namespace package's `__cached__` stays absent as in
+CPython.  Direct `pkg.__spec__` and friends keep their existing named refusals.
+
+Added `probe10_dunders_through_value` and `probe11_new_attribute_refused` under `tests/modval/`
+(ten matching probes and two named refusals) and taught `test_ail_modules_values` to run both
+refusals.  Both builds match CPython on all ten probes; the ten compare tasks' `program.c` stay
+byte-identical to `origin/integ`.
+
+## 2026-11-04 -- modval2 finish: module values verified on integ (job-modval2b-11041013)
+
+Cherry-picked the modval2 work from `job-modval2-11040508` (commit `2ef3541`, after the export) onto
+current `integ`, refreshed the manifest, and re-ran the original measurements.  All 8 module-value
+probes match CPython in the default and `AIL_UNIFIED_FORCE=1` builds; probe09 stays refused and the
+message still names `pkg.util`, says the name is computed at run time and gives the `write instead`
+line.  The ten `lab/compare/src/*/main.ail` builds produce byte-identical `program.c` against the
+integ export, as do eight extra no-module programs (plain/package/from/relative/`TYPE_CHECKING`/
+cycle/local import).  Extra probes for an argument, a list item, a dict value, an object attribute,
+a cross-module re-export, namespace packages, globals and dunder reads match CPython in both builds.
+Targeted tests pass: `test_ail_modules` (66), `test_ail_modules3` (9), `test_ail_lib_modules` (15),
+`test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped), `test_ail_corpus_findings3` (2), and
+`test_ail_modules_values` (2).  The ASan test and `S4_generators_gc` only fail under a 1.5 GB
+`ulimit -v`; both pass without it (an ASan shadow mapping and a large generator case need more
+address space).
+
+## 2026-11-03 -- modval2: a local module can be used as a value (job-modval2-11040508)
+
+`ail_modules.py` used to refuse every local module used as a value (`m = pkg.util`, `[pkg.a,
+pkg.b]`, `getattr(m, "f")`).  The merge step now gives each such module one generated class and one
+instance, spliced in right after the module's body: a method per top-level function forwards its
+positional arguments to the merged function, a property per module global reads and writes the one
+merged variable, module aliases become properties, and `__name__`, `__file__`, `__package__` and
+`repr` return CPython's values.  Rewriting `pkg.util`, `pkg.util.attr`-as-value and a bare module
+name yields that instance, so `m is pkg.util` is true and `pkg.util.COUNT` after `m.COUNT = 5` sees
+the write.  A `getattr`/`setattr` with a run-time attribute name, a keyword call through the module
+value and a module returned by a getter stay refused by name.
+
+A module name bound directly (`m = pkg.util`) is folded to the merged names, so calls (keywords
+included), classes and function identity match CPython; a module chosen at run time keeps the
+instance.  `setattr` / `delattr` on a module value are refused by name because the compiler lowers
+them to a plain store that cannot run the generated properties.
+
+The nine probes live under `AIL_CURRENT/tests/modval/`; `test_ail_modules_values.py` (registered in
+`tests.d/`) runs 1-8 against CPython in the default and `AIL_UNIFIED_FORCE=1` builds and checks the
+probe09 refusal.  `test_ail_modules`, `test_ail_modules3`, `test_ail_lib_modules`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass; the ten
+`lab/compare/src/*/main.ail` builds keep byte-identical `program.c` against the integ export.
 
 ## 2026-11-03 -- rails3: element-bounded range counters stay int64 (job-rails3-11040144)
 
