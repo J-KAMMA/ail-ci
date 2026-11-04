@@ -7,6 +7,7 @@ choose, and `third_party/typeshed/VERSION.md` must name a full commit and ship i
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -32,6 +33,25 @@ class StubSigsTest(unittest.TestCase):
         self.assertEqual(stubsigs.lookup("math.isclose")[0], "bool")
         self.assertEqual(stubsigs.lookup("heapq.heappop")[0], "obj")
         self.assertIsNone(stubsigs.lookup("no.such"))
+
+    def test_constructor_params(self):
+        # typeshed puts these constructors in `__new__`; params must not be empty.
+        self.assertEqual(
+            stubsigs.lookup("datetime.date")[1],
+            (("year", "kw", "SupportsIndex"),
+             ("month", "kw", "SupportsIndex"),
+             ("day", "kw", "SupportsIndex")))
+        self.assertIn("iterable", [p[0] for p in stubsigs.lookup("collections.deque")[1]])
+
+    def test_aliased_import_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "alias.py"
+            source.write_text("import math as m\nm.sqrt(4)\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(REPO / "tools" / "typeshed_reach.py"), str(source), "--list"],
+                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("math.sqrt float", result.stdout)
 
     def test_vendor_record(self):
         version = (REPO / "third_party" / "typeshed" / "VERSION.md").read_text(encoding="utf-8")

@@ -75,7 +75,7 @@ def imports_of(tree, rebound):
                     continue
                 local = alias.asname or top
                 if local not in rebound:
-                    found[local] = local if alias.asname else top
+                    found[local] = alias.name if alias.asname else top
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             top = node.module.split(".")[0]
             if top not in MODULES:

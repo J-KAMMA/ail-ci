@@ -7,8 +7,11 @@ commit `bd58d637aaa73ec8d7a9ec5e2ad8809a5dd86272`, CPython 3.12 on Linux).
 
 No compiler file imports `stubsigs` yet, so the generated C and the compile time of every program are unchanged.
 The counter counts calls whose callee resolves to a vendored module: `mod.f(...)`, `from mod import f; f(...)`,
-class constructors (`mod.Class(...)`), and methods of a returned object (`re.compile(...).match`) as total but
-unknown.
+`import mod as alias; alias.f(...)`, class constructors (`mod.Class(...)`), and methods of a returned object
+(`re.compile(...).match`) as total but unknown. A class's constructor signature comes from `__init__` when the stub
+has one, else from `__new__` (typeshed uses `__new__` for immutable classes such as `datetime.date`, `Decimal`,
+`Fraction`); between overloads the converter keeps the one with the most parameters, so `datetime.date(year, month,
+day)` and `deque(iterable, maxlen=...)` carry their parameters rather than an empty tuple.
 
 ### `lab/census/programs/` (686 programs)
 
@@ -44,14 +47,13 @@ unknown.
 
 ### `lab/stdlib/` (252 programs)
 
-`total known scalar` = **1479 1350 197** — known / total = **91.3 %**.
+`total known scalar` = **1479 1360 204** — known / total = **91.9 %**.
 
 | module | total | known | scalar |
 |---|---:|---:|---:|
 | array | 41 | 39 | 0 |
 | base64 | 112 | 100 | 0 |
-| bisect | 70 | 70 | 58 |
-| bs (local module) | 10 | 0 | 0 |
+| bisect | 80 | 80 | 65 |
 | collections | 51 | 49 | 0 |
 | csv | 41 | 40 | 5 |
 | datetime | 85 | 81 | 0 |
@@ -73,6 +75,9 @@ unknown.
 | statistics | 66 | 66 | 14 |
 | string | 26 | 22 | 0 |
 | sys | 3 | 0 | 0 |
+
+`import bisect as bs` in `lab/stdlib/bisect/alias_import.py` used to surface as a spurious `bs (local module)`
+row; aliased imports now resolve to `bisect.*` and those 10 sites are counted under `bisect`.
 
 ### The most frequent unknown call sites (`lab/census/programs/`)
 
@@ -103,9 +108,9 @@ All of these are outside the scalar path: a `typeshed2` unboxing pass can only u
 `python3 -X importtime -c "import stubsigs; stubsigs.lookup('math.gcd')"` from `AIL_CURRENT/python/pkg-v12`:
 
 ```
-import time:       189 |        189 | stubsigs
-import time:      1389 |       1389 | stubsigs_table
+import time:       191 |        191 | stubsigs
+import time:      1448 |       1448 | stubsigs_table
 ```
 
-**~1.58 ms** for the first lookup (under the 10 ms target). `stubsigs_table` is imported lazily on that first
+**~1.64 ms** for the first lookup (under the 10 ms target). `stubsigs_table` is imported lazily on that first
 call; importing `stubsigs` alone costs ~0.19 ms.
