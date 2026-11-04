@@ -137,8 +137,8 @@ class Base(unittest.TestCase):
         env.update(extra)
         return env
 
-    def compile(self, text, name='prog', extra=(), **env):
-        source = self.dir / (name + '.ail')
+    def compile(self, text, name='prog', extra=(), source_name=None, **env):
+        source = self.dir / ((source_name or name) + '.ail')
         source.write_text(text, encoding='utf-8')
         exe = self.dir / (name + '_exe')
         if exe.exists():
@@ -234,7 +234,10 @@ class StrictBuilds(Base):
         reference = default_exe.read_bytes()
         for label, extra, env in (('flag', ('--strict',), {}), ('env', (), {'AIL_STRICT': '1'}),
                                   ('no_general', (), {'AIL_NO_GENERAL': '1'})):
-            result, exe = self.compile(TYPED, name='built_' + label, extra=extra, **env)
+            # the source name is embedded in the uncaught-exception site strings, so all four
+            # builds must use the same source file for the bytes to be comparable
+            result, exe = self.compile(TYPED, name='built_' + label, source_name='plain',
+                                       extra=extra, **env)
             self.assertEqual((result.returncode, result.stderr), (0, ''), label)
             self.assertEqual(exe.read_bytes(), reference, label)
         ran = subprocess.run([str(default_exe)], capture_output=True, text=True, timeout=60)

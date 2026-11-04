@@ -88,7 +88,9 @@ class Fixed(unittest.TestCase):
                 self.assertEqual(res.returncode, 0, res.stderr[-2000:])
                 got = run_exe(exe)
                 self.assertEqual((got.returncode, got.stdout), (1, want.stdout))
-                self.assertEqual(got.stderr.strip().splitlines()[-1], 'RuntimeError: bad number: q')
+                lines = [line for line in got.stderr.strip().splitlines()
+                         if not line.startswith('  raised near ')]
+                self.assertEqual(lines[-1], 'RuntimeError: bad number: q')
             res, exe = build_general(tmp, FIXED, 'fixed')
             self.assertEqual(res.returncode, 0, res.stderr[-2000:])
             got = run_exe(exe)

@@ -1,3 +1,170 @@
+## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
+
+The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
+and recorded `DIFF|cpython='9223372036854775810' ail='287'`: the int64 run stopped at the
+subtraction after the `finally` had printed 287, so stdout was not a prefix of CPython's.
+
+On this tree the constant expression is already refused by name at compile time
+(`int64 constant out of range` / `int64 constant expression out of range`), so the silent DIFF
+does not reproduce and no compiler change was needed.  In-range neighbours match CPython on the
+default and `AIL_IR=1` builds.  A value that reaches the subtraction through an argument, a list
+item, an attribute or a dict value cannot be folded: it keeps the declared int64 overflow
+contract (exit 1, `integer overflow`, stdout a prefix of CPython's), and `--exact-int` matches
+CPython.  Added `test_ail_fz226.py` (6 tests, default and IR, plus exact-int) and registered it
+in `tests.d`; added DIFFERENCES row `C?-job-fz226-11041145-1`.  The load-time refusal exits 2,
+which `lab/fuzz/run.py` currently classes as `crash` (it only counts exit 3 as `refused`); that
+is a fuzzer-classification issue, not a silent language difference.  Final-state tests:
+test_ail_fz226, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
+## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
+
+Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
+zlib, libm, libc and sqlite3, each running through the ctypes shim under `python3` and compiling with
+`ail_chatgpt.py compile`. The stdout and exit status are identical on the default and `AIL_UNIFIED_FORCE=1`
+builds. `AIL_CURRENT/test_ail_ffi_examples.py` repeats the comparison and skips an example with the missing system
+header or library named. No FFI defect was hit, so `ail_ffi.py` and `ail_ffi_lower.py` are unchanged.
+`docs/FFI.md` documents the four examples, the build command and the docstring limits; tutorial section 6 links it.
+
+Probes: the four examples under `/tmp/probes/ffi` matched CPython on both builds (zlib checksums and round trip;
+libm with `-0.0`, `inf` and a subnormal; libc int64 edge, base 16/36 parsing and `ERANGE`; sqlite count/sum).
+Tests: `test_ail_ffi_examples`, `test_ail_ffi`, `test_ail_ffi_handles`, `test_ail_ffi_f3a`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`.
+
+## 2026-11-03 -- rel-rterr3b review fix: DIFFERENCES row no longer lists fixed `//`/recursion wording
+
+The reviewer's only defect was `DIFFERENCES.md`: the uncaught-trap row still claimed `//` and
+recursion printed the old `integer division by zero` / `recursion depth exceeded` text.  Probes
+`p19` (`x // 0`) and `p9` (recursion) print `ZeroDivisionError: integer division or modulo by
+zero` / `RecursionError: maximum recursion depth exceeded` in the default build, matching CPython;
+only the `KeyError` payload wording (`key error` vs `'key'`) remains.  The row is corrected and
+`test_ail_build_reports` is now named as the extra edited baseline in the finish entry below.
+Re-ran the gate modules, `test_ail_safetynet` (unlimited address space), `test_ail_files` and
+`test_ail_corpus_findings3`: all pass; `tools/update_manifest.py --check` is clean.
+
+## 2026-11-03 -- rel-rterr finish (job-relrterr3b-11040718): applied relrterr3 work on current integ and re-verified
+
+Cherry-picked, in order, the work commits after `job relrterr3: export of staging:integ + task`
+(`job relrterr`, `job relrterr2` verify and fix, `job relrterr3` finish, and its `fix: uncommitted
+edits`), skipping the worker report.  The conflicts were generated manifest rows and DEVLOG order;
+`tools/update_manifest.py` regenerated the rows and `--check` passes.  This also brings the review's
+two defects: `//` by zero is now `integer division or modulo by zero` and recursion is
+`maximum recursion depth exceeded`, both equal to CPython's last traceback line.
+
+Probes (`/tmp/probes`, 25 programs, both builds): list/str/bytes/tuple index (positive, negative,
+empty, int64), pop through a variable and an alias, dict keys through a variable, argument, list
+item, attribute and dict value, `//`, `%` and float `/` through locals, argument, list item,
+attribute and dict value, recursion, explicit `raise`, a caught `IndexError`, leading blank lines,
+and a list reached through an attribute.  Every one matches CPython's stdout and exit status (or is
+the known `AIL_UNIFIED_FORCE=1` recursion segfault, which the test skips with a comment); the
+default typed build adds `Name: message` plus `  raised near file:line`, the general path keeps its
+existing text without a line.
+
+Binary sizes of the ten `lab/compare/src/*/main.ail` inputs against `737c2a2` (before -> after):
+berth_sim 64864 -> 73296, chain_relax 34888 -> 39224, echo_pack 35896 -> 40232, ledger_bin 61016
+-> 69360, rail_transfer 64936 -> 81560, scar_life 40432 -> 48632, tally_lang 74648 -> 95280,
+term_rank 74392 -> 82816, ticket_audit 104248 -> 124880, tree_fold 86336 -> 102960 (+4,336 to
++20,632 bytes, the expected per-statement site string).  The compiler merges repeated `file:line`
+literals (tally_lang has 188 unique sites and no duplicate constant in the binary), so no per-line
+dedup was added.  Instruction counts cannot be measured here: `tools/icount.c` builds, but
+`perf_event_open` returns EPERM (`perf_event_paranoid=4`) and valgrind is not installed.
+
+Gate modules, the changed expectation modules, `test_ail_bigint`, `test_ail_build_reports`,
+`test_ail_debug_flush`, the two pin modules, `test_ail_build_cache`, `test_ail_fe_cache`,
+`test_ail_c_export`, `test_c_api_bridge`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (the ASan and `S4_generators_gc` cases only fail under the 1.5 GB
+virtual-memory cap).  Message expectations updated by this change remain the ones listed in the
+three rel-rterr entries below; `test_ail_build_reports` is also edited, but only its in-process C
+baseline (it now sets `AIL_LINE_MAP` so the release C matches the CLI), not a message assertion.
+
+## 2026-11-03 -- rel-rterr follow-up review: C API tail, cache key and build-report baseline
+
+Fixed the three review defects in the cherry-picked runtime-error work.
+
+* `c_api.py` and `c_api_bridge.py` matched the pre-change one-line `ail_die` tail, so library and
+  separately compiled object exports raised `Unsupported`; both now match the multi-line tail
+  through the shared `FATAL_TAIL` constant.  `compile --lib edge` exits 0 again, and
+  `test_c_api_bridge` / `test_ail_c_export` pass.
+* `buildcache.build_env()` keyed the front-end and C compile caches on the `AIL_LINE_MAP` temporary
+  path, which changes every build.  It now hashes that file's contents, so two builds with the same
+  map hit even when the path differs; `test_ail_fe_cache` and `test_ail_build_cache` pass.
+* `test_ail_build_reports`'s in-process C baseline now loads the same source map and sets
+  `AIL_LINE_MAP`, so its release C contains the same `AIL_DBG_SITE` stores as the CLI output.
+
+Probes: the default and unified builds still match CPython's stdout and exit status for index, key,
+zero-division, recursion, pop, string index, caught `IndexError`, and argument/dict-value sites;
+the default build still names the exception and prints the source line, the unified build names it
+without the line (or segfaults on recursion, as before).  Library export and the two-path fe-cache
+probe were re-run directly.  The 20 shard gate is left to CI; instruction counts remain
+unmeasurable here (`perf_event_open` denied).
+
+## 2026-11-03 -- rel-rterr finish (job-relrterr3-11040001): cherry-picked, re-measured, one test expectation fixed
+
+Cherry-picked the first two runs' work (`job relrterr: name uncaught runtime errors and report
+their source line`, `job relrterr2: verify exception names and source lines`, `job relrterr2: fix C
+API tail, cache key and build-report baseline`), excluding the worker reports, and regenerated the
+manifest.  Re-ran 26 probes against CPython on both builds: list/str/bytes/tuple indexes (positive,
+negative, empty, int64), pop through a variable and an alias, dict keys through a variable, an
+argument, a list item and a dict value, int/mod/float division through locals, a list item, an
+attribute and an argument, recursion (default only), explicit and custom raises, a caught
+`IndexError`, and source lines after leading blank lines, across functions and through a class
+attribute.  Every probe matched CPython's stdout and exit code or was refused by name; the default
+build printed the expected `Name: message` line, and the unified build the expected existing text.
+The unified recursion probe still segfaults; the test skips it with that comment.
+
+One boundary is pre-existing and deliberately unchanged: the site is the last statement that
+*began* to run, so a trap in the caller after a callee returns reports the callee's last line (e.g.
+line 3 instead of the trap's line 8).  The base `--debug` build already did this; changing it would
+change `--debug` output and add save/restore instructions, so it is left as the documented
+"last statement" semantics.
+
+`test_ail_debug_flush` assumed a release build never prints `raised near`; the default release now
+does, so its assertion now checks absence only on the general release path (and presence on the
+default path where `site=True`).  The other updated expectations are the first run's:
+`test_ail_debug`, `test_ail_debug_lines`, `test_ail_exception_context`,
+`test_ail_exception_values_core`, `test_ail_numeric_bindings`, `test_ail_record_initializers`.
+
+Binary sizes on the ten `lab/compare/src/*/main.ail` tasks re-measured against `727b91e` are
+identical to the first run: berth_sim 64864 -> 73296, chain_relax 34888 -> 39224, echo_pack 35896
+-> 40232, ledger_bin 61016 -> 69360, rail_transfer 64936 -> 81560, scar_life 40432 -> 48632,
+tally_lang 74648 -> 95280, term_rank 74392 -> 82816, ticket_audit 104248 -> 124880, tree_fold
+86288 -> 102912 (+4,336 to +20,632 bytes).  Instruction counts still cannot be measured here:
+`tools/icount.c` builds but `perf_event_open` returns EPERM (`perf_event_paranoid=4`) and valgrind
+is not installed.  Site literals repeat a source line 5-38% in the generated C (tree_fold 379
+sites / 270 unique, tally_lang 304 / 280, berth_sim 163 / 100), but the compiler merges the
+identical constants: the built binaries contain no duplicate `file:line` literal, so a per-line
+emitter change would save nothing; a line-number table would add a second global store and a
+different print path, so it was not done.
+
+## 2026-11-03 -- rel-rterr follow-up (job-relrterr2-11031503): verified the exception name and source line
+
+Cherry-picked the first run's work commit (`job relrterr: name uncaught runtime errors and report
+their source line`); implementation unchanged apart from regenerating the manifest.  Probes in
+`/tmp/probes` cover list/str index (positive, negative, empty), list pop through a list value and
+through an alias, dict key through a variable/argument/dict value, int and float division by zero
+through locals, a list item, an attribute and an argument, recursion, an explicit `raise`, and a
+caught `IndexError`; both builds print the CPython name (and the default build the `raised near
+file:line` line) with CPython's stdout and exit status.  The known `AIL_UNIFIED_FORCE=1` recursion
+segfault is unchanged and the test still skips that probe.
+
+Site strings: 5-38% of the emitted site literals repeat a `file:line` already present in the same
+program, but the C compiler already merges those identical constants (the built binaries contain
+no duplicate site strings), so a per-line emitter dedup would change no output or size.  A
+line-number table would save some `.rodata` but needs a second global store per statement and a
+different print path, so it was left out as neither simple nor free of instruction-count risk.
+
+Binary size growth on the ten `lab/compare` tasks is unchanged from the first run, measured here
+against `aa0ea8a` (before -> after bytes): berth_sim 64864 -> 73296, chain_relax 34888 -> 39224,
+echo_pack 35896 -> 40232, ledger_bin 61016 -> 69360, rail_transfer 64936 -> 81560, scar_life
+40432 -> 48632, tally_lang 74648 -> 95280, term_rank 74392 -> 82816, ticket_audit 104248 ->
+124880, tree_fold 86288 -> 102912.  Instruction counts could not be measured: `perf_event_open`
+is denied (`kernel.perf_event_paranoid=4`) and valgrind/callgrind is not installed.
+
+Gate modules, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, the two codegen
+pin modules and `test_ail_runtime_error_names` pass.  Message expectations updated by this change
+are in `test_ail_debug` (three crash-text assertions), `test_ail_debug_lines` (release/debug C
+comparison), `test_ail_exception_context` (assert traps now report their line),
+`test_ail_exception_values_core` (forwarded raise), and the pin hashes in
+`test_ail_numeric_bindings` and `test_ail_record_initializers`.
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
 Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`
@@ -74,6 +241,103 @@ seed 64 before the 80-minute stop, with **0 audit stops**/`AIL-BCE-AUDIT` lines 
 `test_ail_mixed_bounds`, `test_ail_ir_s1`, `test_ail_ir_s3`, `test_ail_files`,
 `test_ail_corpus_findings3` pass (the range/mixed/s3 modules need ASan's shadow mapping, so no
 `ulimit -v` for them); `test_ail_safetynet` keeps the pre-existing `S4_generators_gc` failure.
+## 2026-11-03 -- arena1 S4 fix: a repeated field store keeps the spine
+
+The packed-local marker accepted `o.nm = nm` as the local's last mention even when the store sat in
+a `for`/`while` body.  `ail_pslist_move` zeroes the local, so every iteration after the first stored
+an empty column (`build(t, 3)` gave `0` / empty instead of `1` / `a` on the typed path).  The marker
+now rejects any whole-field store that has a loop ancestor, so that shape stays `ail_slist` and
+matches CPython.  Stores outside loops, including after an append loop, still move.
+`test_ail_arena1s4` now covers repeated `for` and `while` stores.
+
+## 2026-11-03 -- arena1 S4: packed append-only list[str] locals (job-arena1s4-11040050)
+
+A local `list[str]` that starts as `[]`, is only appended to and measured with `len`, and is stored
+once into a `list[str]` field as its last mention now lives as a dense `ail_pslist` for its whole
+lifetime (`_mark_packed_str_lists`).  Appends use `ail_pslist_push`, builders and field elements are
+pushed directly without an sarena copy, the final store uses the new `ail_pslist_move`, and
+declaration/cleanup/unwind use `ail_pslist_free`.  Step 3's reserve now covers these locals,
+including loops with `if`/`continue`, with the field text length as the hint when every append reads
+the same field.  `cruntime.py` also gained `ail_pslist_reserve`.
+
+`tree_fold`, N = 3M, actual perf input: 440,188 -> 414,220 KiB peak RSS, wall 1.75 -> 1.42 s, minor
+faults 194,030 -> 135,599.  The sort phase drops 429.8 -> 404.5 MiB.  This is **not landed**: the
+runner peak is still above the 350 MB bar.  The generated `do_sort` still has S2's
+`ail_slist_snapshot` for `let nm = t.nm` (about 83 MB including text) despite the task saying steps
+1-3 are merged, so the S2 residual is the blocker; see `docs/design/ARENA1.md`.  All ten
+`lab/compare` tasks and all public+hidden cases match, every task stays on the typed path, and
+other tasks are flat within noise.  `AIL_CURRENT/test_ail_arena1s4.py` is registered by
+`tests.d/test_ail_arena1s4.txt` (8 tests: packed shapes, builder/field views, same-field append,
+empty, non-ASCII, stays-slist cases, unwind, ASan/UBSan).  Modules run on the final tree:
+`test_ail_arena1s4`, `test_ail_slist_reserve`, `test_ail_element_views`, `test_ail_field_views`,
+`test_ail_string_field_mutation`, `test_ail_str_comprehension_move`, `test_ail_ir_s3`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`; `par_check -j 2` green.
+Probe `/tmp/probes/arena1s4.py` matched CPython on both builds.  No new DIFFERENCES row: output is
+unchanged.
+## 2026-11-03 -- pyreach s4 review: no branch kind split across an `except ... as` binding
+
+Fixed the review defect in `rebinding._branch_kind_split`: it counted only `ast.Name` stores, so a
+branch containing `except E as x` looked like it did not bind `x`.  The chain was split anyway, the
+branch's `x = b"aa"` and the read after the handler were renamed together, and the handler's
+runtime unbinding of `x` was hidden (`/tmp/probes/r21min.py` printed `aa`, exit 0, instead of
+CPython's `UnboundLocalError`, exit 1).  A branch now blocks the chain when it binds the name
+through anything but a plain `Name` store: `ExceptHandler.name`, `import ... as`, a nested
+`def`/`class` name, or `global`/`nonlocal`; such a chain keeps the old refusal by name.  The plain
+if/elif kind split from s4 is unchanged.
+
+`test_ail_pyreach_unpack` gains `test_kind_split_refuses_except_binding_in_branch`; the strict
+build refuses with "exception handler binding 'x' conflicts ...", and the default and unified
+builds both match CPython's exit 1, empty stdout and `UnboundLocalError` text.
+
+## 2026-11-03 -- pyreach s4 review: caught ASCII decode carries CPython's UnicodeDecodeError text
+
+Fixed the review defect in the s4 decode lowering: on the typed path `bytes.decode("ascii")` on a
+byte at or above 0x80 raised a named `UnicodeDecodeError` with an empty message when a handler
+caught it, so `str(e)` was `""` even though the uncaught trap already printed CPython's text.
+`exctext` now has the ASCII twin of `ail_exc_utf8_fail`: a program that reads exception text
+rewrites the ASCII codec's raise to build `UnicodeDecodeError('ascii', data, i, i + 1,
+"ordinal not in range(128)")` through `ail_exception_new_args`, which `ail__exc_unicode_text`
+prints as `'ascii' codec can't decode byte 0xNN in position N: ordinal not in range(128)`; the
+uncaught path still prints the same `UnicodeDecodeError: ...` line, and programs that do not read
+exception text keep their C byte for byte.  Encoding remains UTF-8-only and `errors=` other than
+`strict` is still refused by name.
+
+Probes `p5c` (the review's ValueError/utf-8/UnicodeDecodeError shapes), `p5c_pos2` (position 2,
+clean inputs, subtype `type(e).__name__`), `p5c_after` (uncaught ASCII decode after an unrelated
+caught error), `p5c_uncaught` and `p5c_latin` match CPython on the default and unified builds (the
+`ascii()` builtin used by the latin probe is refused by name on both builds, so that line is
+checked with `repr`/`ord` in `test_ail_pyreach_unpack`); the no-general typed build of `p5c`
+prints CPython's three lines exactly (`unicode 77 False`).
+`test_ail_pyreach_unpack` gains `test_ascii_decode_caught_message` (typed and both builds);
+11 tests pass.  `e.encoding`/`e.start`/`e.reason` remain unsupported on the typed path for every
+decoder (pre-existing; not part of this fix).
+
+## 2026-11-03 -- pyreach s4: slice/call unpacking, branch kind splits, ASCII/latin-1 decode
+
+`a, b, c = xs[lo:hi]` now unpacks a local list of ints, floats, strs or bytes on the typed path.
+The slice follows CPython's clamping (negative bounds wrap, out-of-range bounds clamp, an empty
+slice is length 0) and the length check is the same catchable `ValueError` the whole-list unpack
+already used; each name then takes a bounds-checked element.  `a, b = helper()` also unpacks a
+fixed-arity numeric tuple return through the existing `ail_slot`/`_return_tuple` ABI, with the
+same arity check.  `bytes.decode("ascii")` and `bytes.decode("latin-1")` join `"utf-8"` on the
+typed path: ASCII raises the catchable UnicodeDecodeError above 0x80 (and prints CPython's
+`can't decode byte 0xNN in position N` when uncaught), latin-1 maps every byte to U+0000..U+00FF.
+Encoding remains UTF-8-only, and other codecs are still refused by name.
+
+`rebinding.split` now also handles the `cents` shape from ticket_audit: a local bound to different
+kinds in two branches of one if/elif chain, never read after or between the branches, is split
+into one local per branch (fresh `<name>__b<line>_<branch>` names, source positions unchanged).
+A read after the chain, a read in a branch that does not bind it, a parameter, a global/nonlocal
+or a nested-scope mention still refuses; the existing for/except regions keep priority.
+
+Probes `s4_slice`, `s4_call`, `s4_kind`, `s4_decode`, `s4_ascii_edge`, `s4_ascii_uncaught`,
+`s4_reuse_after`, `s4_encode_latin` match CPython (or are refused by name) on the default,
+unified and strict/no-general builds.  `test_ail_pyreach_unpack` (10 tests),
+`test_ail_pytyped_reach`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.  On ticket_audit the `cents` kind conflict is gone; its other
+blockers (regex-helper `s` annotation, typed-dict key, `t`, `events`, `out`, `per`) remain, and
+the ten-lab before/after typed gate is not reachable in this tree because pyreach s2/s3 are not
+present.
 
 ## 2026-11-03 -- onelang s13 review 1: byte_search_core, env_int, contract prose
 
@@ -261,6 +525,34 @@ No compiler or runtime behaviour changed.  Ran on Linux: `test_ail_tutorial` (15
 15 tutorial samples) pass.  Probes `/tmp/probes/sdk_symlink_roots.py` and
 `/tmp/probes/tutorial_artifact_abs.py` pass; both are refused by name under `cmp.sh` because
 AIL does not build `importlib`, which is expected for Python-only packaging code.
+## 2026-11-02 -- rel-rterr: uncaught typed runtime errors name the exception and the source line (job-relrterr-11030727)
+
+Owner decision: the default build carries the CPython exception name and the source line in its
+uncaught runtime errors.  `ail_exc_pyname` maps the typed runtime's trap messages to `IndexError`,
+`KeyError`, `ZeroDivisionError`, `ValueError`, `RuntimeError`, `UnicodeDecodeError`,
+`RecursionError` and `MemoryError`; `ail_die` prefixes the name and leaves the exit status, stdout
+flush and `--debug` "raised near" line unchanged.  A message that already starts with `Name: ` is
+not prefixed twice.  The typed emitter now stores the current statement's `file:line` in every
+build (the `#line` directives stay debug-only), so the default build can print `  raised near
+file:line`; the forced general path keeps the unified runtime's text without a line.
+
+`test_ail_runtime_error_names` covers index, key, division, recursion, pop, an explicit raise and a
+caught `IndexError`, in the default build and with `AIL_UNIFIED_FORCE=1` (the unified recursion
+probe is skipped: that path still segfaults, a separate bug).  The gate modules
+(`test_ail_exception_context`, `test_ail_exception_values_core`, `test_ail_overflow_error`,
+`test_ail_finally`, `test_ail_reraise`, `test_ail_parallel_for`, `test_ail_debug`,
+`test_ail_debug_lines`, `test_ail_fuzz_findings`), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_numeric_bindings` and `test_ail_record_initializers` pass.
+
+Binary size on the ten `lab/compare/src/*/main.ail` tasks, before -> after (bytes): berth_sim
+64864 -> 73296 (+8432), chain_relax 34888 -> 39224 (+4336), echo_pack 35896 -> 40232 (+4336),
+ledger_bin 61016 -> 69360 (+8344), rail_transfer 64936 -> 81560 (+16624), scar_life
+40432 -> 48632 (+8200), tally_lang 74648 -> 95280 (+20632), term_rank 74392 -> 82816 (+8424),
+ticket_audit 104248 -> 124880 (+20632), tree_fold 86288 -> 102912 (+16624).  The growth is above
+the original 512-byte budget because every statement now carries its site string; this is the
+owner-decided line-number cost.  Instruction counts could not be measured on this runner:
+`perf_event_open` is denied (`kernel.perf_event_paranoid=4`) and valgrind/callgrind is not
+installed, so the 10 before/after icounts are not available here.
 
 ## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
 
@@ -2115,6 +2407,55 @@ expects the named general round text, and `test_ail_pre429` expects
 passes. Final-state tests: test_ail_i64edge1, test_ail_int64_default, test_ail_pre429,
 test_ail_bigint, test_ail_python_syntax, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
+## 2026-11-01 -- std_re review: match tuple receiver evaluated once, manifest pins (job-std_re-11011833)
+
+Review follow-up.  `m.span(...)` and `m.group(a, b)` lowered to a tuple of `start`/`end`/`group` calls on a
+copy of the receiver, so a receiver with side effects (`get().group(1, 2)`, `get().span()`) was evaluated
+once per tuple element: CPython says one call, the old lowering said four and two.  The tuple is now the
+body of an immediately-invoked lambda with the receiver bound as its argument, so the receiver is
+evaluated exactly once; each element still returns `None` for a group that did not take part.
+
+Also refreshed the manifest shards: `test_ail_std_re.py` and `tests.d/test_ail_std_re.txt` were not pinned
+on the previous commit, so `python3 tools/update_manifest.py --check` exited 1.  It now exits 0.
+
+Probes in `/tmp/probes` (review's side-effect program plus `span(i)`, `span(name)`, mixed `group(0, 1, 2)` /
+`group("x", 2)`, receiver through a call / list item / attribute / dict value / function argument, empty
+subject, unmatched group, `None` receiver, negative constant refused by name, and findall/split/subn) all
+match CPython 3.12 stdout and exit code on `AIL_IR=0` and `AIL_IR=1`.  All 10 `lab/compare/src` C files
+stay byte-identical to base.  Tests on the final commit: test_ail_std_re, test_ail_re, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
+Follow-up after review 2: the `_ail_re_any` receiver change landed without a manifest update, so
+`update_manifest.py --check` still failed.  The shards for `ail_syntax.py`, `python/pkg-v12/relib.py` and
+`test_ail_std_re.py` are now regenerated; `--check` exits 0.  The stale inline comment that called the
+helper parameter `object` is corrected.
+
+## 2026-11-01 -- std_re: findall tuples, split groups, subn templates and match tuple values (job-std_re-11011833)
+
+Added 12 real `re` programs in `lab/stdlib/re/` (log parsing, validation, templating, CSV fields,
+tokenizing, phone/date normalisation, redaction and URL rewriting).  Before the fixes 8 were refused;
+now 11 build on the typed path and every one matches CPython 3.12 stdout and exit code on both
+`AIL_IR=0` and `AIL_IR=1`.  `log_summary.py` stays a named refusal because it uses `m.groupdict()`
+(a dict result with `None` for a group that did not take part), recorded as a follow-up with its exact
+message in `lab/stdlib/re/RESULTS.md`.
+
+The four reasons fixed, most blocking first: `re.findall` with several groups now returns a list of
+tuples (`""` for a group that did not take part); `re.subn` accepts a replacement template with a
+backslash (the template helper has a counted form); `re.split` with groups inserts each group's text
+between the pieces (`None` when it did not take part); and `m.span()` / `m.group(1, 2)` used as values
+lower to tuples of `m.start` / `m.end` / `m.group` calls (`None` for a group that did not take part).
+The stale refusal entries in `test_ail_re` for findall-with-groups, split-with-groups and subn
+templates were removed.
+
+Probes in `/tmp/probes` (`re_findall_tuples`, `re_split_groups`, `re_subn_templates`,
+`re_span_group_values`) cover str and bytes, empty subjects, optional and three-group patterns,
+maxsplit/count, compiled patterns, values through a function argument, a list item, an attribute and
+a dict value; all match CPython on both builds.  All 10 `lab/compare/src/*/main.ail` generated
+`program.c` files are byte-identical to base.  Added `AIL_CURRENT/test_ail_std_re.py`, registered
+through `AIL_CURRENT/tests.d/test_ail_std_re.txt`; it compares the 11 built programs with CPython on
+both IR builds.  Final-state tests: test_ail_std_re, test_ail_re, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use

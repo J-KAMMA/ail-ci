@@ -255,7 +255,7 @@ class Built(object):
 
 
 def last_line(text_):
-    lines = text_.strip().splitlines()
+    lines = [line for line in text_.strip().splitlines() if not line.startswith('  raised near ')]
     return lines[-1] if lines else ''
 
 

@@ -8001,7 +8001,22 @@ def _unused_decode_locals(fn):
     from collections import Counter
     return {name for name, count in Counter(stores).items() if count == 1} - excluded
 
-def _check_utf8_codec_args(node):
+_CODEC_UTF8_NAMES = frozenset(('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4'))
+_CODEC_ASCII_NAMES = frozenset((
+    'ascii', 'us_ascii', '646', 'us', 'ansi_x3.4_1968', 'ansi_x3.4_1986', 'ansi_x3_4_1968',
+    'cp367', 'csascii', 'ibm367', 'iso646_us', 'iso_646.irv_1991', 'iso_ir_6'))
+_CODEC_LATIN1_NAMES = frozenset((
+    'latin_1', 'latin1', 'iso_8859_1', 'iso8859_1', '8859', 'cp819', 'l1', 'latin',
+    'iso_ir_100', 'csisolatin1', 'ibm819', 'iso8859', 'iso_8859_1_1987'))
+
+
+def _check_utf8_codec_args(node, decode=False):
+    """The encoding name a bytes.decode()/str.encode() call uses: 'utf-8', 'ascii' or 'latin-1'.
+
+    Only strict errors are built. The caller uses the returned name to pick the exact C helper;
+    the function keeps its original name because every existing call site already relied on it
+    for validation, and UTF-8 remains its default. `decode=True` is the only door that admits
+    the new ASCII and latin-1 codecs; encoding stays UTF-8-only."""
     if len(node.args) > 2:
         raise Unsupported('UTF-8 conversion accepts only encoding and errors')
     values = dict(zip(('encoding', 'errors'), node.args))
@@ -8010,13 +8025,26 @@ def _check_utf8_codec_args(node):
             raise Unsupported('invalid or duplicate UTF-8 conversion argument')
         values[keyword.arg] = keyword.value
     import safetyrt
+    encoding = 'utf-8'
     for name, value in values.items():
         if not _is_strlit(value):
             raise Unsupported('UTF-8 encoding and errors must be string literals')
         norm = safetyrt.normalize_encoding_name(value.value)
-        if (name == 'encoding' and norm not in ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')
-                or name == 'errors' and value.value != 'strict'):
-            raise Unsupported('only UTF-8 with strict errors is supported')
+        if name == 'encoding':
+            if norm in _CODEC_UTF8_NAMES:
+                encoding = 'utf-8'
+            elif norm in _CODEC_ASCII_NAMES:
+                encoding = 'ascii'
+            elif norm in _CODEC_LATIN1_NAMES:
+                encoding = 'latin-1'
+            else:
+                raise Unsupported('only the UTF-8, ASCII and latin-1 codecs are supported')
+        elif value.value != 'strict':
+            raise Unsupported('only strict codec errors are supported')
+    if not decode and encoding != 'utf-8':
+        raise Unsupported('only UTF-8 encoding is supported (decoding also accepts ASCII and '
+                          'latin-1)')
+    return encoding
 
 
 def _is_str_expr(node, ctx):
@@ -8291,9 +8319,16 @@ def _str_value(node, ctx, *, owned_join_return=False):
         finally:
             ctx.pre = saved
     if _is_utf8_codec_call(node, ctx, 'decode'):
-        _check_utf8_codec_args(node)
-        ctx.parts.add('UTF8CODEC')
+        encoding = _check_utf8_codec_args(node, decode=True)
         source = node.func.value
+        if encoding == 'ascii':
+            ctx.has_try = True
+            ctx.parts.add('ASCIICODEC')
+            return 'ail_bytes_decode_ascii(&%s, %s)' % (ctx.sarena(), _bytes_value(source, ctx))
+        if encoding == 'latin-1':
+            ctx.parts.add('LATIN1CODEC')
+            return 'ail_bytes_decode_latin1(&%s, %s)' % (ctx.sarena(), _bytes_value(source, ctx))
+        ctx.parts.add('UTF8CODEC')
         fresh_read = (_is_read_bytes_call(source, ctx)
                       and all(source.func.id not in getattr(ctx, attr, {})
                               for attr in ('kind', 'types', 'classes', 'modconsts')))
@@ -15828,6 +15863,10 @@ def _attr_assign_inner(target, value, ctx, ind):
     elif ft in MAPS:
         value_slot, _ = ctx.temp(ft)
         capture_value = '({ const ail_%s *_source = %s; ail_%s_replace(&%s, ail_%s_copy(_source)); })' % (ft, v, ft, value_slot, ft)
+    elif ft == SLIST and isinstance(value, ast.Name) and value.id in getattr(ctx, 'packed_slist', ()):
+        # `o.f = xs` with `xs` a packed `ail_pslist` local: the field takes the local's storage
+        # whole (ail_pslist_move), so the column is never copied a second time.
+        value_slot, capture_value = ctx.cname(value.id), '(void)0'
     elif (ft == SLIST and isinstance(value, ast.Name) and value.id in ctx.locals
           and ctx.type_of(value.id) == SLIST and isinstance(target.value, ast.Name)):
         # `o.f = xs` with `xs` a local list[str] and `o` a name: reading `o` runs nothing, and
@@ -15878,6 +15917,8 @@ def _attr_assign_inner(target, value, ctx, ind):
         return pre + '%s%s(&%s->f_%s, %s, 0);\n' % (pad, _olist_helper(ft, 'store'), owner, target.attr, value_slot)
     if _is_obj_kind(ft):
         return pre + '%sail_obj_store_%s(&%s->f_%s, %s, 0);\n' % (pad, ft[1], owner, target.attr, value_slot)
+    if ft == SLIST and isinstance(value, ast.Name) and value.id in getattr(ctx, 'packed_slist', ()):
+        return pre + '%sail_pslist_move(&%s->f_%s, &%s);\n' % (pad, owner, target.attr, value_slot)
     if ft == SLIST:
         return pre + '%sail_obj_field_slist(&%s->f_%s, %s);\n' % (pad, owner, target.attr, value_slot)
     if ft in (LIST, FLIST):
@@ -16351,7 +16392,7 @@ def _refuse_int_in_float_slot(node, where):
 
 
 def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dynamic=None, owned_result=False, grid_result=False,
-                    proven_self=False):
+                    proven_self=False, tuple_result=False, tuple_out=None):
     """The C for calling another compiled function (or method, under its mangled name) by name,
     with `arg_nodes` the Python AST nodes at the call site, ALREADY resolved to one node per
     PARAMETER, in parameter order -- `_call`'s plain `f(...)` dispatch gets this from
@@ -16371,7 +16412,7 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
     pattern (`print`/`.pop()` already have one; CPython would hand back `None` here and this
     language has no `None`)."""
     params, ret = ctx.funcs[fname] if dynamic is None else dynamic[:2]
-    if _is_tuple_ret(ret):
+    if _is_tuple_ret(ret) and not tuple_result:
         raise Unsupported('calling %s(), which returns a tuple, as a value' % fname)
     if ret == NORET and not as_stmt:
         raise Unsupported('calling %s(), which never returns a value, as a value; CPython would '
@@ -16817,6 +16858,9 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
     if ret == BYTES and (owned_result or fname in getattr(ctx, 'owned_bytes_fns', ())):
         ctx.parts.add('BYTESRET')
         return ordered('%s(%s)' % (symbol, ', '.join(out)))
+    if _is_tuple_ret(ret) and tuple_result:
+        ctx.parts.add('TUPRET')
+        return ordered('%s(%s)' % (symbol, ', '.join(out + [tuple_out, str(len(ret[1]))])))
     call = ordered('%s(%s)' % (symbol, ', '.join(out)))
     if ret == INT and _tint_ret:
         ctx.parts.add('TINTT')
@@ -19332,6 +19376,15 @@ def _method(node, ctx, *, as_stmt=False):
         # append branch above makes against its own promoted kind.
         if not _is_str_expr(a[0], ctx):
             raise Unsupported('%r holds str; appending a non-str value would mix types' % name)
+        if name in getattr(ctx, 'packed_slist', ()):
+            # `ail_pslist_push` copies the text immediately, so a builder buffer or a field
+            # element can be pushed as a borrowed view: no arena copy is left behind.
+            if isinstance(a[0], ast.Name) and a[0].id in getattr(ctx, 'builders', ()):
+                ctx.bl_views.add(id(a[0]))
+            for element in _slist_field_elements(a[0], ctx):
+                ctx.field_element_views.add(id(element))
+            ctx.parts.add('PSLIST')
+            return 'ail_pslist_push(&%s, %s)' % (c, _str_value(a[0], ctx))
         if _slist_local_field_view(name, a[0], ctx):
             ctx.field_element_views.add(id(a[0]))
         ctx.parts.add('SLIST')
@@ -19726,7 +19779,7 @@ def _borrowed_callback_helper(summary, ctx):
               if recursive else '')
     guard = ('ail_cleanup_frame _borrowed_frame = {ail_cleanup_top, %s_unwind, NULL}; '
              'ail_cleanup_top = &_borrowed_frame; '
-             'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded"); ' % symbol
+             'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded"); ' % symbol
              if recursive else '')
     if recursive:
         private.parts.update(('DIE', 'RECDEPTH'))
@@ -21079,7 +21132,8 @@ def _loop_local_releases(statement, ctx, ind):
                                                 ctx.cname(name), ctx.cname(name)))
         elif kind in (LIST, FLIST, SLIST):
             # these free helpers zero the struct, so a later last-use/return free is harmless
-            out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, kind, ctx.cname(name)))
+            helper = 'pslist' if name in getattr(ctx, 'packed_slist', ()) else kind
+            out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, helper, ctx.cname(name)))
     return ''.join(out)
 
 
@@ -21096,7 +21150,8 @@ def _last_use_frees(statements, ctx, ind):
                 continue
             kind = ctx.types.get(name)
             if kind in (LIST, FLIST, SLIST):
-                out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, kind, ctx.cname(name)))
+                helper = 'pslist' if name in getattr(ctx, 'packed_slist', ()) else kind
+                out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, helper, ctx.cname(name)))
             elif kind == BYTES and _bytes_local_releasable(name, ctx):
                 out.append('%s{ ail_barena_release(&%s, %s.p); %s = (ail_bytes){0}; }\n'
                            % ('    ' * ind, ctx.barena(), ctx.cname(name), ctx.cname(name)))
@@ -21152,6 +21207,10 @@ _DEBUG_LINE_MAPS = {}
 _REWRITE_LINES = {}
 
 
+_REWRITE_SITE_LINES = {}
+_ACTIVE_SITE_LINES = {}
+
+
 def debug_snapshot_lines(tree):
     """`--debug`: pyc's script rewrite unparses its tree, and the text parsed again numbers its lines afresh
     (one blank line between functions, a synthesised `def`), so a `#line` taken from it would be wrong from
@@ -21182,10 +21241,8 @@ def debug_restore_lines(tree, source):
 
 
 def _debug_where(node):
-    """`ail build --debug` (AIL_DEBUG=1 and AIL_LINE_MAP=<json {combined line: [path, line]}>): the (file name,
-    line) a statement maps back to, or None (always, and no file is read, in every other build)."""
-    if os.environ.get('AIL_DEBUG') != '1':
-        return None
+    """AIL_LINE_MAP=<json {combined line: [path, line]}>: the (file name, line) a statement maps back
+    to, or None (and no file is read) when the build has no source map."""
     path = os.environ.get('AIL_LINE_MAP')
     if not path:
         return None
@@ -21197,22 +21254,27 @@ def _debug_where(node):
         except (OSError, ValueError):
             table = {}
         _DEBUG_LINE_MAPS[path] = table
-    where = table.get(getattr(node, 'lineno', None))
+    lineno = getattr(node, 'lineno', None)
+    mapped = _ACTIVE_SITE_LINES.get(lineno)
+    where = table.get(mapped if mapped is not None else lineno)
     if not where:
         return None
     return str(where[0]).replace(chr(92), '/').replace('"', chr(92) + '"'), where[1]
 
 
 def _debug_site(node, ind):
-    """The C lines that point gdb at the source line of a statement (`#line`) and record it for the
-    uncaught-exception report (AIL_DBG_SITE). Empty in every build but `--debug`. The IR emitter
-    (ir/emit_c.py) writes the same two lines from `_debug_where`."""
+    """The C lines that record a statement's source line for the uncaught-exception report
+    (AIL_DBG_SITE); `--debug` also points gdb at it with `#line`. Empty when the build has no
+    source map. The IR emitter (ir/emit_c.py) writes the same lines from `_debug_where`."""
     where = _debug_where(node)
     if not where:
         return ''
     name, line = where
+    site = '%sAIL_DBG_SITE("%s:%d");\n' % ('    ' * ind, name, line)
+    if os.environ.get('AIL_DEBUG') != '1':
+        return site
     # a directive numbers the line AFTER it: one before the site store, one before the statement's first C line
-    return '#line %d "%s"\n%sAIL_DBG_SITE("%s:%d");\n#line %d "%s"\n' % (line, name, '    ' * ind, name, line, line, name)
+    return '#line %d "%s"\n%s#line %d "%s"\n' % (line, name, site, line, name)
 
 
 def _emptied_name(stmt):
@@ -21270,31 +21332,92 @@ def _append_loop_reserve(previous, node, ctx, ind):
         for child in ast.walk(stmt):
             for sub in ast.iter_child_nodes(child):
                 parents[sub] = child
-    appended = set()
-    for stmt in node.body:
-        for n in ast.walk(stmt):
-            if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                return ''
-            if isinstance(n, _APPEND_LOOP_SKIPS):
-                return ''
-            if not (isinstance(n, ast.Name) and n.id in names):
-                continue
-            attr = parents.get(n)
-            call = parents.get(attr) if attr is not None else None
-            if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
-                    and isinstance(call, ast.Call) and call.func is attr
-                    and isinstance(parents.get(call), ast.Expr)):
-                return ''
-            appended.add(n.id)
+    padded = list(getattr(ctx, 'packed_slist', ()))
+    packed = [name for name in names if name in padded]
+    plain = [name for name in names if name not in padded]
     trip = hi if len(it.args) == 1 else '(%s) - (%s)' % (hi, lo)
     limit = _LIST_RESERVE_LIMIT
     if trip.isdigit() and int(trip) <= limit:
         sized = trip
     else:
         sized = '(%s) < %d ? (%s) : %d' % (trip, limit, trip, limit)
-    return ''.join('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
-                                                    ctx.cname(name), sized)
-                   for name in names if name in appended)
+    out = []
+    if packed:
+        # A packed local only has `.append()` and `len()` uses, so control flow in the loop
+        # (an `if` around an append, a `continue`) can only make the trip count an upper bound,
+        # never make an append unsound; reserving the full range is still the right shape.
+        appended, hints, ok = set(), {}, True
+        for stmt in node.body:
+            for n in ast.walk(stmt):
+                if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    ok = False
+                    break
+                if not (isinstance(n, ast.Name) and n.id in packed):
+                    continue
+                attr = parents.get(n)
+                call = parents.get(attr) if attr is not None else None
+                if (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
+                        and isinstance(call, ast.Call) and call.func is attr
+                        and isinstance(parents.get(call), ast.Expr)):
+                    appended.add(n.id)
+                    arg = call.args[0] if len(call.args) == 1 else None
+                    hint = '0'
+                    if (isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Attribute)
+                            and isinstance(arg.value.value, ast.Name)
+                            and (arg.value.value.id in ctx.locals or arg.value.value.id in ctx.kind)):
+                        try:
+                            if _field_kind(arg.value, ctx) == SLIST:
+                                hint = '(%s)->f_%s.tn' % (ctx.cname(arg.value.value.id), arg.value.attr)
+                        except Unsupported:
+                            hint = '0'
+                    hints.setdefault(n.id, []).append(hint)
+                    continue
+                if (isinstance(parents.get(n), ast.Call)
+                        and len(parents[n].args) == 1 and parents[n].args[0] is n
+                        and isinstance(parents[n].func, ast.Name) and parents[n].func.id == 'len'
+                        and parents[n].func.id not in ctx.funcs and parents[n].func.id not in ctx.classes):
+                    continue
+                ok = False
+                break
+            if not ok:
+                break
+        if ok:
+            for name in packed:
+                if name not in appended:
+                    continue
+                found = hints.get(name, ['0'])
+                text_hint = found[0] if all(hint == found[0] for hint in found) else '0'
+                out.append('%sail_pslist_reserve(&%s, %s, %s);\n'
+                           % ('    ' * ind, ctx.cname(name), sized, text_hint))
+    if plain:
+        appended = set()
+        ok = True
+        for stmt in node.body:
+            for n in ast.walk(stmt):
+                if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    ok = False
+                    break
+                if isinstance(n, _APPEND_LOOP_SKIPS):
+                    ok = False
+                    break
+                if not (isinstance(n, ast.Name) and n.id in plain):
+                    continue
+                attr = parents.get(n)
+                call = parents.get(attr) if attr is not None else None
+                if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
+                        and isinstance(call, ast.Call) and call.func is attr
+                        and isinstance(parents.get(call), ast.Expr)):
+                    ok = False
+                    break
+                appended.add(n.id)
+            if not ok:
+                break
+        if ok:
+            for name in plain:
+                if name in appended:
+                    out.append('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
+                                                                 ctx.cname(name), sized))
+    return ''.join(out)
 
 
 def _stmts(body, ctx, ind):
@@ -21596,6 +21719,82 @@ def _numeric_assign(node,ctx,ind):
     return _flush(ctx,pad)+pad+token+';\n'
 
 
+def _unpack_from_list_slice(t, node, ctx, pad):
+    """`a, b, c = xs[i:]` / `xs[i:j]` where `xs` names a list of int, float, str or bytes.
+
+    The slice is evaluated with CPython's clamping rules, its length is checked against the
+    number of names (a run-time ValueError, catchable, exactly like the existing whole-list
+    unpack), and each name then reads one bounds-checked element. Returns the C text, or None
+    when the shape is not one this branch handles (the caller's generic refusal then names it)."""
+    if not (isinstance(node.value, ast.Subscript) and isinstance(node.value.slice, ast.Slice)
+            and isinstance(node.value.value, ast.Name)
+            and node.value.slice.step is None):
+        return None
+    source = node.value.value.id
+    kind = _etype(node.value.value, ctx)
+    if kind == LIST and source in ctx.blist:
+        kind = BLIST
+    if kind not in (LIST, FLIST, SLIST, BLIST):
+        return None
+    if kind == LIST and (source in ctx.tstride or source in ctx.rowof or source in ctx.nlist
+                         or source in ctx.handles or source in ctx.strlist
+                         or source in ctx.srowtypes):
+        return None
+    bounds = []
+    for bound, default in ((node.value.slice.lower, '0'), (node.value.slice.upper, None)):
+        if bound is not None:
+            if _etype(bound, ctx) != INT:
+                raise Unsupported('list slice bounds in a tuple assignment must be integers')
+            bounds.append(_expr(bound, ctx))
+        else:
+            bounds.append(default)
+    pre = _flush(ctx, pad)
+    ctx.tmp += 1
+    tag = '_ail_u%d' % ctx.tmp
+    src = ctx.cname(source)
+    if kind == BLIST:
+        ctx.parts.update(('BLIST', 'BYTES'))
+        ctype = 'ail_blist *'
+        count = '%s->n' % src
+        get = 'ail_blist_get(&%s, %s, %%s)' % (ctx.barena(), src)
+    else:
+        ctype = {LIST: 'ail_list', FLIST: 'ail_flist', SLIST: 'ail_slist'}[kind]
+        ctx.parts.add(kind)
+        count = '%s.n' % src
+        get = {LIST: 'ail_list_get(&%s, %%s)', FLIST: 'ail_flist_get(&%s, %%s)',
+               SLIST: 'ail_slist_get(&%s, %%s)'}[kind] % (tag + '_src')
+    lo, hi = bounds
+    if hi is None:
+        hi = tag + '_n'
+    k = len(t.elts)
+    ctx.has_try = True
+    if exctext.ACTIVE:
+        _exc_text_parts(ctx)
+        check = 'if (%s_len != %d) ail_raise_unpack(%s_len, %d);' % (tag, k, tag, k)
+    else:
+        check = 'if (%s_len != %d) ail_raise_named(AIL_EXC_VALUE);' % (tag, k)
+    out = pre + '%s{\n' % pad
+    out += '%s    %s %s_src = %s;\n' % (pad, ctype, tag, src)
+    out += '%s    int64_t %s_n = %s;\n' % (pad, tag, count)
+    out += '%s    int64_t %s_lo = %s;\n' % (pad, tag, lo)
+    out += '%s    int64_t %s_hi = %s;\n' % (pad, tag, hi)
+    out += ('%s    if (%s_lo < 0) { %s_lo += %s_n; if (%s_lo < 0) %s_lo = 0; } '
+            'else if (%s_lo > %s_n) %s_lo = %s_n;\n'
+            % (pad, tag, tag, tag, tag, tag, tag, tag, tag, tag))
+    out += ('%s    if (%s_hi < 0) { %s_hi += %s_n; if (%s_hi < 0) %s_hi = 0; } '
+            'else if (%s_hi > %s_n) %s_hi = %s_n;\n'
+            % (pad, tag, tag, tag, tag, tag, tag, tag, tag, tag))
+    out += '%s    int64_t %s_len = %s_hi - %s_lo; if (%s_len < 0) %s_len = 0;\n' % (
+        pad, tag, tag, tag, tag, tag)
+    out += '%s    %s\n' % (pad, check)
+    kinds = {LIST: INT, FLIST: FLT, SLIST: STR, BLIST: BYTES}
+    for i, e in enumerate(t.elts):
+        name = ctx.declare(e.id, kinds[kind])
+        out += '%s    %s = %s;\n' % (pad, name, get % ('%s_lo + %d' % (tag, i)))
+    out += '%s}\n' % pad
+    return out
+
+
 def _stmt_inner(node, ctx, ind):
     if (isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)) and isinstance(node.value, ast.Name)
             and node.value.id in ctx.modconsts and ctx.modconsts[node.value.id][0] == SLIST
@@ -21759,6 +21958,42 @@ def _stmt_inner(node, ctx, ind):
                     out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
                 ctx.parts.add('SROW')
                 return pre + out
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in ctx.funcs
+                    and _is_tuple_ret(ctx.funcs[node.value.func.id][1])):
+                # `a, b, c = f(...)` where `f` returns a fixed-arity tuple of numbers. The call
+                # fills a private `ail_slot` array (the same ABI `_return_tuple` uses), then the
+                # true arity is checked exactly as a slice/list unpack is, and each name takes
+                # its own typed member.
+                fname = node.value.func.id
+                fkinds = ctx.funcs[fname][1][1]
+                if len(t.elts) != len(fkinds):
+                    raise Unsupported('%s() returns a %d-tuple; unpacking it into %d names would '
+                                      'not match' % (fname, len(fkinds), len(t.elts)))
+                args = _bind_call_args(fname, node.value, ctx)
+                ctx.tmp += 1
+                tmp = '_ail_tup%d' % ctx.tmp
+                ctx.parts.add('TUPRET')
+                call = _call_user_func(fname, args, ctx, tuple_result=True, tuple_out=tmp)
+                pre = _flush(ctx, pad)
+                ctx.has_try = True
+                if exctext.ACTIVE:
+                    _exc_text_parts(ctx)
+                    check = ('if (_ail_arity != %d) ail_raise_unpack(_ail_arity, %d);'
+                             % (len(fkinds), len(fkinds)))
+                else:
+                    check = ('if (_ail_arity != %d) ail_raise_named(AIL_EXC_VALUE);'
+                             % len(fkinds))
+                out = pre + '%s{\n' % pad
+                out += '%s    ail_slot %s[%d];\n' % (pad, tmp, len(fkinds))
+                out += '%s    int64_t _ail_arity = %s;\n' % (pad, call)
+                out += '%s    %s\n' % (pad, check)
+                names = [ctx.declare(e.id, fk) for e, fk in zip(t.elts, fkinds)]
+                for j, (nm, fk) in enumerate(zip(names, fkinds)):
+                    out += '%s    %s = %s[%d].%s;\n' % (pad, nm, tmp, j,
+                                                          'd' if fk == FLT else 'i')
+                out += '%s}\n' % pad
+                return out
             if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                     and node.value.func.id == 'map' and len(node.value.args) == 2
                     and not node.value.keywords
@@ -21940,6 +22175,9 @@ def _stmt_inner(node, ctx, ind):
                 names = [ctx.declare(e.id, kind) for e in t.elts]
                 return pre + ''.join('%s%s = %s;\n' % (pad, name, value)
                                      for name, value in zip(names, vals))
+            lowered = _unpack_from_list_slice(t, node, ctx, pad)
+            if lowered is not None:
+                return lowered
             if not isinstance(node.value, ast.Tuple) or len(node.value.elts) != len(t.elts):
                 raise Unsupported('tuple assignment from %s; the right-hand side has to be a '
                                   'literal tuple of the same length, or a NAME already bound to a '
@@ -22092,6 +22330,13 @@ def _stmt_inner(node, ctx, ind):
             return _flush(ctx, pad) + ('%s(void)%s;\n%sail_slist_free(&%s); %s = %s; %s = (ail_slist){0};\n'
                                       % (pad, expression, pad, destination, destination, temporary, temporary))
         if isinstance(node.value, ast.List) and (known == SLIST or _etype(node.value, ctx) == SLIST):
+            if t.id in getattr(ctx, 'packed_slist', ()):
+                if node.value.elts:
+                    raise Unsupported('a packed list[str] local must start empty')
+                destination = ctx.declare(t.id, SLIST)
+                ctx.parts.add('PSLIST')
+                return (_flush(ctx, pad) + '%sail_pslist_free(&%s); %s = (ail_pslist){0};\n'
+                        % (pad, destination, destination))
             temporary, _ = ctx.temp(SLIST)
             ctx.parts.add('SLIST')
             out = _flush(ctx, pad) + '%sail_slist_clear(&%s);\n' % (pad, temporary)
@@ -22342,8 +22587,8 @@ def _stmt_inner(node, ctx, ind):
         if (t.id in getattr(ctx, 'unused_decode_locals', ())
                 and _is_utf8_codec_call(node.value, ctx, 'decode')
                 and isinstance(node.value.func.value, ast.Name)
-                and ctx.type_of(node.value.func.value.id) == BYTES):
-            _check_utf8_codec_args(node.value)
+                and ctx.type_of(node.value.func.value.id) == BYTES
+                and _check_utf8_codec_args(node.value, decode=True) == 'utf-8'):
             ctx.declare(t.id, STR)  # Retain annotation/parameter/type-conflict checks.
             ctx.parts.add('UTF8LINES')
             value = _bytes_value(node.value.func.value, ctx)
@@ -22694,9 +22939,12 @@ def _stmt_inner(node, ctx, ind):
             # time it is COMPILED -- reading `ctx.types` alone would say "not rebound yet" and emit
             # nothing, which is exactly the bug. Outside any loop, only an actual rebinding needs it.
             rebound = ctx.types.get(t.id) == kind or ctx.loopdepth > 0
+            packed = kind == SLIST and t.id in getattr(ctx, 'packed_slist', ())
             c = ctx.declare(t.id, kind)
             ctx.parts.add('LIST' if kind == LIST else 'FLIST' if kind == FLIST
                           else 'SLIST' if kind == SLIST else 'SROW' if kind == SROWS else 'TAB')
+            if packed:
+                ctx.parts.add('PSLIST')
             # Compiler bug #7, fixed 2026-09-14: this statement used to emit nothing when the name
             # already held a container, because the declaration is hoisted to the top of the
             # function. `ys = []` inside a loop therefore kept the previous iteration's contents
@@ -22706,6 +22954,7 @@ def _stmt_inner(node, ctx, ind):
             if rebound:
                 clear = ('%sail_list_clear(&%s);' % (pad, c) if kind == LIST
                          else '%sail_flist_clear(&%s);' % (pad, c) if kind == FLIST
+                         else '%sail_pslist_free(&%s); %s = (ail_pslist){0};' % (pad, c, c) if packed
                          else '%sail_slist_clear(&%s);' % (pad, c) if kind == SLIST
                          else '%sail_srows_clear(&%s);' % (pad, c) if kind == SROWS
                          else '%sail_btab_clear(&%s);' % (pad, c) if t.id in ctx.bkeys
@@ -29697,6 +29946,119 @@ def _mark_str_lists(fn, ctx, exclude):
     return strs
 
 
+def _inside_loop(node, parents):
+    """True when a statement has a `for`/`while` ancestor, so it may execute more than once."""
+    cur = parents.get(node)
+    while cur is not None:
+        if isinstance(cur, (ast.For, ast.AsyncFor, ast.While)):
+            return True
+        cur = parents.get(cur)
+    return False
+
+
+def _mark_packed_str_lists(fn, ctx):
+    """Which `list[str]` locals can be a dense `ail_pslist` instead of an `ail_slist`.
+
+    A local qualifies only when its whole life is the append-only column shape: one initial `= []`,
+    `.append(str)` and `len(x)` uses, and exactly one final whole-field store `o.f = x` into a
+    `list[str]` field, which is also x's last mention. The store must run exactly once: `ail_pslist_move`
+    zeroes the local, so a store inside a loop would hand the field an empty column on every later
+    iteration. There must be no element read, iteration, slice, sort, call argument, return, alias or
+    rebinding, and no lambda or nested function may see the name. Everything else keeps `ail_slist`,
+    so a view into the packed text can never outlive the append that reallocates it.
+    """
+    candidates = set(ctx.strlist) - set(ctx.kind) - set(getattr(ctx, 'modconsts', {}))
+    candidates -= set(ctx.flist) | set(ctx.tstride) | set(ctx.nlist) | set(ctx.handles)
+    candidates -= set(getattr(ctx, 'local_records', {}))
+    if not candidates:
+        return set()
+    parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    captured = set()
+    for node in ast.walk(fn):
+        if node is fn or not isinstance(node, (ast.Lambda, ast.FunctionDef,
+                                               ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Name):
+                captured.add(inner.id)
+            elif isinstance(inner, ast.arg):
+                captured.add(inner.arg)
+    mentions = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Name) and node.id in candidates:
+            mentions.setdefault(node.id, []).append(node)
+    packed = set()
+    for name, nodes in mentions.items():
+        if name in captured or name in ctx.modconsts:
+            continue
+        stores = [n for n in nodes if isinstance(n.ctx, (ast.Store, ast.Del))]
+        if len(stores) != 1:
+            continue
+        definition = stores[0]
+        owner = parents.get(definition)
+        if isinstance(owner, ast.AnnAssign):
+            if owner.target is not definition or owner.value is None:
+                continue
+            initial = owner.value
+        elif isinstance(owner, ast.Assign):
+            if len(owner.targets) != 1 or owner.targets[0] is not definition:
+                continue
+            initial = owner.value
+        else:
+            continue
+        if not (isinstance(initial, ast.List) and not initial.elts):
+            continue
+        field_stores = []
+        ok = True
+        for node in nodes:
+            if node is definition:
+                continue
+            if not isinstance(node.ctx, ast.Load):
+                ok = False
+                break
+            parent = parents.get(node)
+            if (isinstance(parent, ast.Attribute) and parent.value is node
+                    and parent.attr == 'append'):
+                call = parents.get(parent)
+                if not (isinstance(call, ast.Call) and call.func is parent
+                        and len(call.args) == 1 and not call.keywords):
+                    ok = False
+                    break
+                continue
+            if (isinstance(parent, ast.Call) and len(parent.args) == 1
+                    and parent.args[0] is node and not parent.keywords
+                    and isinstance(parent.func, ast.Name) and parent.func.id == 'len'
+                    and parent.func.id not in ctx.funcs and parent.func.id not in ctx.classes
+                    and parent.func.id not in ctx.kind and parent.func.id not in ctx.types):
+                continue
+            if (isinstance(parent, ast.Assign) and parent.value is node
+                    and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Attribute)):
+                try:
+                    field_kind = _field_kind(parent.targets[0], ctx)
+                except Unsupported:
+                    field_kind = None
+                if field_kind == SLIST:
+                    field_stores.append(node)
+                    continue
+            ok = False
+            break
+        if not ok or len(field_stores) != 1:
+            continue
+        store = field_stores[0]
+        if _inside_loop(store, parents):
+            # The move zeroes the local, so a store that repeats would write an empty column after
+            # the first pass; only a store executed once can move.
+            continue
+        key = max((n.lineno, n.col_offset) for n in nodes)
+        if (store.lineno, store.col_offset) != key:
+            continue
+        packed.add(name)
+    return packed
+
+
 def _mark_float_lists(fn, ctx, exclude):
     """Which `name = []` locals are a list of floats (FLIST) rather than a list of ints (LIST).
 
@@ -36653,6 +37015,8 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     reference Python resolves to it (shadowing.py), so no name-keyed built-in dispatch anywhere in
     the compiler can capture a call that belongs to the user. Refusals and the per-function unit
     names in `info` are reported under the user's own spelling."""
+    global _ACTIVE_SITE_LINES
+    _ACTIVE_SITE_LINES = _REWRITE_SITE_LINES.get(source.strip(), {})
     _view = _dict_view_escape(source)
     if _view is not None:
         raise Unsupported(_view)
@@ -36688,6 +37052,8 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     except Unsupported as error:
         shadowing.restore_error(error, shadow)
         raise
+    finally:
+        _ACTIVE_SITE_LINES = {}
     # range-proof markers left by code compiled outside a function body (struct constructors, ...)
     # are plain comments in still-checked calls; drop them so that C is byte-for-byte as before
     if isinstance(result, str):
@@ -39404,6 +39770,10 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # above, decided the identical way and at the identical point -- before a line of the body is
     # compiled, so `words = []` emits an `ail_slist`, not an `ail_list`, the first time it is seen.
     ctx.strlist = _mark_str_lists(fn, ctx, exclude=ctx.nlist | ctx.handles) | {n for n, k in ctx.local_annotations.items() if k == SLIST}
+    # arena1 S4: a list[str] local that is only built by `.append`, measured by `len`, and moved
+    # once into a list[str] field is a dense `ail_pslist` local, not an `ail_slist` spine. Same
+    # point as every other container kind: decided before a line of the body is compiled.
+    ctx.packed_slist = _mark_packed_str_lists(fn, ctx)
     # AIL_TASK_p3idioms2_20260916.md idiom 8: a str-field row list, decided here -- AFTER
     # `_promote_floats` has settled `ctx.slist_names` (`rows.append((parts[0], int(parts[1])))`
     # needs `parts[0]` already known str, which is exactly the fact `_promote_floats` exposes,
@@ -39560,7 +39930,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         if ctx.types[v] == FLIST:
             return 'ail_flist_free'
         if ctx.types[v] == SLIST:
-            return 'ail_slist_free'
+            return 'ail_pslist_free' if v in getattr(ctx, 'packed_slist', ()) else 'ail_slist_free'
         if ctx.types[v] == SROWS:
             return 'ail_srows_free'
         # A bytes-keyed set/dict is an `ail_btab`, not an `ail_tab` (cruntime.BTAB), and a
@@ -39743,7 +40113,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         if ctx.exc_frame and _frame_ptr_kind(t) and v not in plain_cells:
             ct = ('ail_str' if t == STR else 'ail_bytes' if t == BYTES
                   else 'ail_nsum' if t == NSUM
-                  else 'ail_flist' if t == FLIST else 'ail_slist' if t == SLIST else 'ail_%s' % t if t in MAPS
+                  else 'ail_flist' if t == FLIST else 'ail_pslist' if t == SLIST and v in getattr(ctx, 'packed_slist', ()) else 'ail_slist' if t == SLIST else 'ail_%s' % t if t in MAPS
                   else 'ail_srows' if t == SROWS else 'ail_srow' if t == SROW
                   else 'ail_list' if t == LIST else tab_struct)
             decls += frame_cell(ct, 'v_' + v)
@@ -39763,6 +40133,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   # traps in `ail_pool_at` instead of silently aliasing whatever sits at index 0.
                   else '    %sint64_t %s = -1;\n' % (qual(ctx.cname(v), v), ctx.cname(v)) if t == HANDLE
                   else '    ail_flist %s = {0};\n' % ctx.cname(v) if t == FLIST
+                  else '    ail_pslist %s = {0};\n' % ctx.cname(v) if t == SLIST and v in getattr(ctx, 'packed_slist', ())
                   else '    ail_slist %s = {0};\n' % ctx.cname(v) if t == SLIST
                   else '    ail_%s %s = {0};\n' % (t, ctx.cname(v)) if t in MAPS
                   else '    ail_srows %s = {0};\n' % ctx.cname(v) if t == SROWS
@@ -39850,7 +40221,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # The guard sits after every local's declaration (C89-safe: no statement precedes it) and
     # before the first line of the translated body, so it runs exactly once per call, before any
     # of this call's own work -- including before the recursive calls the body below might make.
-    guard = ('    if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded");\n'
+    guard = ('    if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");\n'
              if recursive else '')
     sig = signature(ctx.params, ctx, cname, ret)
     # A leaf whose whole body is one `return <expression>` is asked to be inlined by name.

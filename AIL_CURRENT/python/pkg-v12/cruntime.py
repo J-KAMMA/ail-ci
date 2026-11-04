@@ -311,18 +311,16 @@ static double ail_fsqrt(double x) {
 '''
 
 DIE = r'''
-/* `ail build --debug` (AIL_DEBUG=1 adds -DAIL_DEBUG_SITE=1): each statement stores "file:line" in ail_dbg_site, and
-   an uncaught exception or fatal trap names the last one on a line after its message. Without the flag the hook
-   is empty. The fatal tails (ail_die, ail_exception_uncaught) print the site themselves and leave through the same
-   flush-and-_Exit as a release build, so every drain spliced in before them (boxed buffer, open files) runs in both. */
-#ifdef AIL_DEBUG_SITE
+/* Every build stores the current statement's "file:line" in ail_dbg_site, and an uncaught exception
+   or fatal trap names the last one on a line after its message. `ail build --debug` also adds `#line`
+   directives and builds at -O0 for gdb; the site store itself is not debug-only, because the default
+   build's runtime errors carry the source line too. The fatal tails (ail_die, ail_exception_uncaught)
+   print the site themselves and leave through the same flush-and-_Exit as before, so every drain
+   spliced in before them (boxed buffer, open files) runs in both. */
 #undef AIL_DBG_SITE
 AIL_LINK_STATE(const char *, ail_dbg_site, = NULL);
 #define AIL_DBG_SITE(s) (ail_dbg_site = (s))
 #define AIL_DBG_UNCAUGHT() do { if (ail_dbg_site) { fputs("\n  raised near ", stderr); fputs(ail_dbg_site, stderr); } } while (0)
-#else
-#define AIL_DBG_UNCAUGHT() ((void)0)
-#endif
 /* Use MinGW's C jump to avoid Windows SEH stack unwinding after explicit ail_exc_unwind.
    This does not provide C++ exception unwinding. */
 #if defined(__MINGW32__) && defined(__x86_64__) && !defined(__USE_MINGW_SETJMP_NON_SEH)
@@ -560,6 +558,35 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_UNICODE_DECODE;
     return 0;
 }
+/* The CPython exception name an uncaught ail_die() trap is reported under.  NULL means the
+   message already carries a name (`raise ValueError(...)`, `"OverflowError: ..."`) or is an
+   internal invariant that has no Python spelling. */
+static const char *ail_exc_pyname(const char *w) {
+    static const char *const named[] = {
+        "ValueError", "ZeroDivisionError", "IndexError", "KeyError", "EOFError", "OSError",
+        "RuntimeError", "UnicodeDecodeError", "AssertionError", "OverflowError", "MemoryError",
+        "RecursionError", "TypeError", "NameError", "StopIteration"
+    };
+    size_t i;
+    for (i = 0; i < sizeof named / sizeof named[0]; ++i) {
+        size_t n = strlen(named[i]);
+        if (!strncmp(w, named[i], n) && w[n] == ':' && w[n + 1] == ' ') return NULL;
+    }
+    switch (ail_exc_kind_of(w)) {
+    case AIL_EXC_VALUE: return "ValueError";
+    case AIL_EXC_ZERODIV: return "ZeroDivisionError";
+    case AIL_EXC_INDEX: return "IndexError";
+    case AIL_EXC_KEY: return "KeyError";
+    case AIL_EXC_EOF: return "EOFError";
+    case AIL_EXC_OS: return "OSError";
+    case AIL_EXC_RUNTIME: return "RuntimeError";
+    case AIL_EXC_UNICODE_DECODE: return "UnicodeDecodeError";
+    }
+    if (!strcmp(w, "maximum recursion depth exceeded")
+        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";
+    if (!strcmp(w, "out of memory")) return "MemoryError";
+    return NULL;
+}
 static void ail_die(const char *w) {
     /* Unchanged for every program that never opens a `try`: ail_exc_top stays -1 for the whole
        run, this branch is never taken, and everything below is byte-for-byte what pkg-v6 already
@@ -581,7 +608,13 @@ static void ail_die(const char *w) {
        (and uncaught) path only -- never reached by a program that does not trap, so it is
        invisible to every speed measurement in this tree (see APP_WEIGHT_AND_SPEED_20260913.md;
        none of it runs a trap). Destination and exit status are unchanged: stderr, then _Exit(1). */
-    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);
+    {
+        const char *name = ail_exc_pyname(w);
+        fflush(stdout);
+        if (name) { fputs(name, stderr); fputs(": ", stderr); }
+        fputs(w, stderr);
+    }
+    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);
 }
 /* Large buffers (whole files, decoded arrays) take one page fault per 4 KiB on first touch; on
    Linux with THP in "madvise" mode (the common default) asking for huge pages makes that one fault
@@ -4154,6 +4187,36 @@ static void ail_pslist_assign(ail_pslist *slot, ail_slist value) {
     }
     ail_pslist_free(slot);
     *slot = r;
+}
+/* `o.f = xs` with `xs` a packed local list[str]: the field frees its old storage and takes the
+   local's, so the whole column is never copied a second time. The local is zeroed; it owns nothing
+   afterwards (its return/unwind free is a no-op, exactly like a moved ail_list). */
+static void ail_pslist_move(ail_pslist *slot, ail_pslist *local) {
+    if (slot == local) return;
+    ail_pslist_free(slot);
+    *slot = *local;
+    *local = (ail_pslist){0};
+}
+/* Exact reservation before an append loop with a known trip count: `extra` more elements, and
+   `text_hint` total text bytes when the loop reads a field of the same shape (0 when unknown).
+   Reserving both removes the realloc doubling holes that stayed resident in glibc's brk heap. */
+static void ail_pslist_reserve(ail_pslist *L, int64_t extra, int64_t text_hint) {
+    if (!L || extra <= 0 || L->n < 0 || L->wide) return;
+    if (extra > INT64_MAX - L->n) ail_die("string field too long");
+    int64_t need = L->n + extra;
+    if (need > L->cap) {
+        ail__need_elems(need + 1, AIL_ELEM_LIMIT(int64_t));
+        int64_t *q = (int64_t *)realloc(L->e, (size_t)(need + 1) * sizeof *q);
+        if (!q) ail_die("out of memory");
+        if (!L->e) q[0] = 0;
+        L->e = q; L->cap = need;
+    }
+    if (text_hint > L->tcap) {
+        ail__need_elems(text_hint, AIL_STR_LIMIT);
+        uint8_t *q = (uint8_t *)realloc(L->t, (size_t)text_hint);
+        if (!q) ail_die("out of memory");
+        L->t = q; L->tcap = text_hint;
+    }
 }
 /* An independent copy of a field (a whole-field read): one arena block holds every text and one
    vector holds the views, as ail_slist_snapshot does. */
@@ -26926,6 +26989,58 @@ static ail_bytes ail_str_encode_utf8(ail_barena *A, ail_str s) {
 ORDER.insert(ORDER.index('BYTES') + 1, 'UTF8CODEC')
 SOURCE['UTF8CODEC'] = UTF8CODEC
 REQUIRES['UTF8CODEC'] = ['STR', 'BYTES']
+
+ASCIICODEC = r'''
+/* `bytes.decode("ascii")`: every byte below 0x80, so the bytes are already the str. A byte at or
+   above 0x80 raises UnicodeDecodeError (catchable), exactly as CPython's ascii codec does. */
+static ail_str ail_bytes_decode_ascii(ail_sarena *A, ail_bytes b) {
+    for (int64_t i = 0; i < b.n; ++i) {
+        if (b.p[i] >= 0x80) {
+            if (ail_exc_top >= 0) ail_raise_named(AIL_EXC_UNICODE_DECODE);
+            char msg[160];
+            snprintf(msg, sizeof msg,
+                     "UnicodeDecodeError: 'ascii' codec can't decode byte 0x%02x in position %lld: "
+                     "ordinal not in range(128)", (unsigned)b.p[i], (long long)i);
+            ail_die(msg);
+            return (ail_str){0, 0, 0};
+        }
+    }
+    if (b.n < 0 || (uintmax_t)b.n > SIZE_MAX - 1) ail_die("ASCII result too long");
+    uint8_t *q = ail_sarena_alloc(A, b.n + 1);
+    if (b.n) memcpy(q, b.p, (size_t)b.n);
+    q[b.n] = 0;
+    return (ail_str){q, b.n, 1};
+}
+'''
+ORDER.insert(ORDER.index('UTF8CODEC') + 1, 'ASCIICODEC')
+SOURCE['ASCIICODEC'] = ASCIICODEC
+REQUIRES['ASCIICODEC'] = ['STR', 'BYTES']
+
+LATIN1CODEC = r'''
+/* `bytes.decode("latin-1")`: byte i is code point U+00ii, encoded into this runtime's UTF-8 str
+   as one byte below 0x80 or two bytes (0xC2/0xC3 + low six bits) above it. Total: no error. */
+static ail_str ail_bytes_decode_latin1(ail_sarena *A, ail_bytes b) {
+    if (b.n < 0 || (uintmax_t)b.n > (SIZE_MAX - 1) / 2) ail_die("latin-1 result too long");
+    int64_t want = b.n * 2 + 1;
+    uint8_t *q = ail_sarena_alloc(A, want);
+    int64_t o = 0;
+    _Bool ascii = 1;
+    for (int64_t i = 0; i < b.n; ++i) {
+        uint32_t c = b.p[i];
+        if (c < 0x80) q[o++] = (uint8_t)c;
+        else {
+            ascii = 0;
+            q[o++] = (uint8_t)(0xC0 | (c >> 6));
+            q[o++] = (uint8_t)(0x80 | (c & 0x3F));
+        }
+    }
+    q[o] = 0;
+    return (ail_str){q, o, ascii};
+}
+'''
+ORDER.insert(ORDER.index('UTF8CODEC') + 1, 'LATIN1CODEC')
+SOURCE['LATIN1CODEC'] = LATIN1CODEC
+REQUIRES['LATIN1CODEC'] = ['STR', 'BYTES']
 
 BYTEARRAY = r'''
 /* Mutable octets have their own shared identity, independent of object headers. */
