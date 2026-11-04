@@ -16,6 +16,40 @@ which `lab/fuzz/run.py` currently classes as `crash` (it only counts exit 3 as `
 is a fuzzer-classification issue, not a silent language difference.  Final-state tests:
 test_ail_fz226, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 
+## 2026-11-04 -- ctimeprofb finish: direct `_load_sources` timing and a full rerun
+
+Applied the two ctimeprofb commits (skipping the worker report) and finished the lane.  The parent
+`_load_sources` estimate was inflated: it came from a profiled parent scaled by the profiled wall.
+`lab/profile/run.py` now wraps `_load_sources` with a timer in the real parent build, so the table's
+load row is a real subset of the parent.  Reran all ten tasks, median of 3, and regenerated
+`CTIME_2026-11.json` and `CTIME_2026-11.md`: chain_relax cold 2.198 s, hit 0.862 s (60.5% saved,
+below the 1.5 s target); ticket_audit hit 2.712 s.  The remaining hit cost is gcc (61% of the chain
+hit, 82% of the ticket hit) and child imports, outside the five files this lane may edit, so no cut
+was made and no `program.c` changed.
+
+Tests on the final commit: `test_ail_fe_cache`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (safetynet without the `ulimit -v` cap; the known `S4_generators_gc`
+failure appears only with it).  `update_manifest.py --check` passes.
+## 2026-11-03 -- ctimeprofb: fixed the cache-hit harness, phase table for 10/10 tasks
+
+The ctimeprof harness from `job-ctimeprof-11032049` never actually hit: each "warm" run got its
+own `AIL_FE_CACHE_DIR`, so the raw JSON logged `miss` on every hit row.  It also set
+`PYTHONDONTWRITEBYTECODE=1`, which makes `_compiler_python()` pass `-B` and recompiles pyc/pyfunc
+on every child.  `lab/profile/run.py` now shares the cache directory within each pair, asserts the
+log starts with `hit`, leaves bytecode to the compiler child, and records parent/child times plus
+a hit profile.
+
+`lab/profile/CTIME_2026-11.md` now has the phase table for all ten compare tasks (parent Python,
+`_load_sources`, child import, child lowering, child C emission, gcc read/codegen, link), the cold
+vs hit table, and the hit-path top-10.  On this runner chain_relax cold is 1.81 s and its hit
+0.82 s (was 1.82 s with the old harness); the old 3.99 s "hit" was a miss plus no-bytecode imports.
+No code cut was made: the remaining hit cost is in `ail_chatgpt.py`/`pyc.py` `_load_sources` and
+module imports, outside the five files this lane may edit, so the .md ends with "Next cuts".  No
+`program.c` changed.
+
+Tests: `test_ail_fe_cache`, `test_ail_files` and `test_ail_corpus_findings3` pass under
+`ulimit -v 1500000`; `test_ail_safetynet` passes without the cap (the known `S4_generators_gc`
+virtual-memory failure appears only with it).  `update_manifest.py --check` passes.
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
