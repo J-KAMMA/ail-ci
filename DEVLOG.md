@@ -1,3 +1,28 @@
+## 2026-11-04 -- pyreach s6: bytes as dict/set keys and bytes dict values
+
+The typed path now has `BTAB`, a content-hashing table with owned keys (`ail_btab_upsert`, `put_b`,
+`put_s`, `get_b`, `get_s`, `need_b`, `need_s`), so `d[k]`/`s.add(k)`/`k in d` work for bytes
+values from literals, `split`, concatenation and aliases.  `_mark_bytes_containers` decides
+`blist`, `bkeys` and each bytes-keyed dict's value kind (int/str/bytes) before codegen; iteration,
+`.items()`, `.keys()`, `.values()`, `.get`, `.pop`, `sorted(d)`/`list(d)` and `.discard` all follow
+that kind.  Keys are copied at first insert, so rebinding the source list or data name afterwards
+leaves the dict intact.
+
+Two bugs fixed along the way: `T->val[ail_btab_upsert(T, k)] = v` read the NULL `val` pointer
+before `upsert` initialised the table (segfault on the first store), and a read assigned inside
+`if True:` -- the shape `ail_syntax` emits for a binary `with open` -- left `data.split(...)` as a
+plain int list, so `t = parts[0]` was pre-bound int.  `_is_bytes_split_struct` now recognises both
+branches of the `_ail_set_data` conditional.
+
+Probes (`/tmp/probes/bk_words`, `bk_sorted`, `bk_alias`, `bk_set`, `bk_values`, `bk_loop1`,
+`bk_t3`, `bk_t5`, `bk_t6`, `bk_t7`) matched CPython on the default, `AIL_UNIFIED_FORCE=1` and
+`--strict` builds, with stdin containing 0x00 and 0xff.  `ticket_audit` no longer has the
+`t = parts[0]` blocker; its remaining five are the pre-existing str/bytes regex annotation,
+`sys.exit(CODES[cat])`'s str-keyed dict, and the s5 dict-of-containers cases.
+
+Tests: `test_ail_pyreach_byteskeys`, `test_ail_pyreach_unpack`, `test_ail_pytyped_reach`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against

@@ -6545,22 +6545,33 @@ BTAB = r'''
    but different addresses -- `b"x" + b"@y"` computed twice, in two different loop iterations -- are
    the SAME key in Python, and a table keyed by pool handle (identity) would put them in different
    slots and silently fail to dedupe, which is exactly the failure content hashing exists to avoid.
-   The key array holds `ail_bytes` VIEWS directly; nothing here owns the bytes they point at, the
-   same ownership rule BYTES and BPOOL already state -- a key that came from this call's arena is
-   freed by that arena, once, at the same point this table is freed, and a key that is a string
-   literal is never freed at all. */
+
+   Each key is COPIED into a buffer this table owns, once, at first insertion, and freed exactly
+   once -- at `del`, `clear`, or `free`. The source of a key is often a `split()` view into a
+   buffer that the program may rebind or let die before the table does; keeping the view would
+   leave every key dangling. A value is a view into the caller's arena (int values are inline), so
+   the table owns no value storage and never frees one. */
 static uint64_t ail_bhash(ail_bytes b) {
     /* FNV-1a, 64-bit. Any reasonable content hash would do; this one needs no table and no seed. */
     uint64_t h = 0xcbf29ce484222325ull;
     for (int64_t i = 0; i < b.n; i++) { h ^= (uint64_t)b.p[i]; h *= 0x100000001b3ull; }
     return h;
 }
-typedef struct { ail_bytes *key; int64_t *val; unsigned char *used;
+typedef union { int64_t i; ail_bytes b; ail_str s; } ail_btab_val;
+typedef struct { ail_bytes *key; ail_btab_val *val; unsigned char *used;
                  ail_bytes *order; int64_t n, fill, cap; } ail_btab;
+static ail_bytes ail_btab_key_dup(ail_bytes k) {
+    if (k.n < 0 || (k.n && !k.p) || (uintmax_t)k.n > (uintmax_t)SIZE_MAX)
+        ail_die("invalid bytes table key");
+    if (!k.n) return (ail_bytes){NULL, 0};
+    unsigned char *q = (unsigned char *)ail_alloc_raw((size_t)k.n);
+    memcpy(q, k.p, (size_t)k.n);
+    return (ail_bytes){q, k.n};
+}
 static void ail_btab_init(ail_btab *T) {
     T->cap = 16; T->n = 0; T->fill = 0;
     T->key = (ail_bytes *)ail_alloc((size_t)T->cap * sizeof *T->key);
-    T->val = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->val);
+    T->val = (ail_btab_val *)ail_alloc((size_t)T->cap * sizeof *T->val);
     T->used = (unsigned char *)ail_alloc((size_t)T->cap);
     T->order = (ail_bytes *)ail_alloc((size_t)T->cap * sizeof *T->order);
 }
@@ -6587,6 +6598,7 @@ static void ail_btab_del(ail_btab *T, ail_bytes k) {
     T->used[i] = 2;
     for (int64_t j = 0; j < T->n; j++) {
         if (ail_bytes_eq(T->order[j], k)) {
+            free((void *)T->order[j].p);
             for (int64_t q = j; q + 1 < T->n; q++) T->order[q] = T->order[q + 1];
             break;
         }
@@ -6598,28 +6610,42 @@ static void ail_btab_grow(ail_btab *T) {
     T->cap = (old.n + 1) * 4 > old.cap * 3 ? old.cap * 2 : old.cap;
     T->n = 0; T->fill = 0;
     T->key = (ail_bytes *)ail_alloc((size_t)T->cap * sizeof *T->key);
-    T->val = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->val);
+    T->val = (ail_btab_val *)ail_alloc((size_t)T->cap * sizeof *T->val);
     T->used = (unsigned char *)ail_alloc((size_t)T->cap);
     T->order = (ail_bytes *)ail_alloc((size_t)T->cap * sizeof *T->order);
     for (int64_t j = 0; j < old.n; j++) {
         ail_bytes k = old.order[j];
         int64_t oi = ail_btab_slot(&old, k);
-        int64_t v = old.val[oi];
+        ail_btab_val v = old.val[oi];
         int64_t i = ail_btab_free_slot(T, k);
         T->used[i] = 1; T->key[i] = k; T->val[i] = v;
         T->order[T->n++] = k; T->fill++;
     }
     free(old.key); free(old.val); free(old.used); free(old.order);
 }
-static void ail_btab_put(ail_btab *T, ail_bytes k, int64_t v) {
+/* The slot holding `k`, inserting an owned copy of the key when it is new. */
+static int64_t ail_btab_upsert(ail_btab *T, ail_bytes k) {
     if (!T->cap) ail_btab_init(T);
     if ((T->fill + 1) * 4 > T->cap * 3) ail_btab_grow(T);
     int64_t i = ail_btab_free_slot(T, k);
     if (T->used[i] != 1) {
         if (!T->used[i]) T->fill++;
-        T->used[i] = 1; T->key[i] = k; T->order[T->n++] = k;
+        ail_bytes owned = ail_btab_key_dup(k);
+        T->used[i] = 1; T->key[i] = owned; T->order[T->n++] = owned;
     }
-    T->val[i] = v;
+    return i;
+}
+static void ail_btab_put(ail_btab *T, ail_bytes k, int64_t v) {
+    int64_t i = ail_btab_upsert(T, k);
+    T->val[i].i = v;
+}
+static void ail_btab_put_b(ail_btab *T, ail_bytes k, ail_bytes v) {
+    int64_t i = ail_btab_upsert(T, k);
+    T->val[i].b = v;
+}
+static void ail_btab_put_s(ail_btab *T, ail_bytes k, ail_str v) {
+    int64_t i = ail_btab_upsert(T, k);
+    T->val[i].s = v;
 }
 static int64_t ail_btab_has(const ail_btab *T, ail_bytes k) {
     if (!T->cap) return 0;
@@ -6628,19 +6654,43 @@ static int64_t ail_btab_has(const ail_btab *T, ail_bytes k) {
 static int64_t ail_btab_get(const ail_btab *T, ail_bytes k, int64_t dflt) {
     if (!T->cap) return dflt;
     int64_t i = ail_btab_slot(T, k);
-    return T->used[i] == 1 ? T->val[i] : dflt;
+    return T->used[i] == 1 ? T->val[i].i : dflt;
+}
+static ail_bytes ail_btab_get_b(const ail_btab *T, ail_bytes k, ail_bytes dflt) {
+    if (!T->cap) return dflt;
+    int64_t i = ail_btab_slot(T, k);
+    return T->used[i] == 1 ? T->val[i].b : dflt;
+}
+static ail_str ail_btab_get_s(const ail_btab *T, ail_bytes k, ail_str dflt) {
+    if (!T->cap) return dflt;
+    int64_t i = ail_btab_slot(T, k);
+    return T->used[i] == 1 ? T->val[i].s : dflt;
 }
 static int64_t ail_btab_need(const ail_btab *T, ail_bytes k) {
     if (!T->cap) ail_die("key error");
     int64_t i = ail_btab_slot(T, k);
     if (T->used[i] != 1) ail_die("key error");
-    return T->val[i];
+    return T->val[i].i;
+}
+static ail_bytes ail_btab_need_b(const ail_btab *T, ail_bytes k) {
+    if (!T->cap) ail_die("key error");
+    int64_t i = ail_btab_slot(T, k);
+    if (T->used[i] != 1) ail_die("key error");
+    return T->val[i].b;
+}
+static ail_str ail_btab_need_s(const ail_btab *T, ail_bytes k) {
+    if (!T->cap) ail_die("key error");
+    int64_t i = ail_btab_slot(T, k);
+    if (T->used[i] != 1) ail_die("key error");
+    return T->val[i].s;
 }
 static void ail_btab_clear(ail_btab *T) {
+    for (int64_t j = 0; j < T->n; j++) free((void *)T->order[j].p);
     for (int64_t i = 0; i < T->cap; i++) T->used[i] = 0;
     T->n = T->fill = 0;
 }
 static void ail_btab_free(ail_btab *T) {
+    for (int64_t j = 0; j < T->n; j++) free((void *)T->order[j].p);
     free(T->key); free(T->val); free(T->used); free(T->order);
     T->key = T->order = 0; T->val = 0; T->used = 0; T->n = T->fill = T->cap = 0;
 }
