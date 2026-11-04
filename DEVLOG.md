@@ -160,6 +160,48 @@ green.  relrterr3b's modules pass: test_ail_debug (10), test_ail_debug_flush (13
 test_ail_debug_lines (9), test_ail_exception_context (6), test_ail_exception_values_core (14),
 test_ail_list_ops (15), test_ail_build_reports (4), test_ail_bigint (67),
 test_ail_runtime_error_names (2).  `python3 -m compileall -q -j 0 AIL_CURRENT tools` is clean.
+## 2026-11-04 -- full-suite fix: text arguments stay call-site diagnostics (job-rbcrate1-11042159)
+
+The exported tree predated the checker change that keeps a `str` call argument a per-call
+diagnostic: `_override_from_site` turned the call-site `str` claim into a declaration-level
+`sig_override`, so `take("wrong")` was reported against `take`'s declaration as `operation:
+"parameter"` instead of against the caller as `operation: "argument"`.  Ported that change from
+`origin/integ`: `_override_from_site(site, fn, classes)` drops a `str` claim when the parameter
+carries an explicit non-str annotation (the call-site guard names the offending call and keeps
+the position), and `_explicit_annotation_conflicts` raises only numeric claims, dropping
+text/bytes/list claims to the call itself.  Restores `test_ail_argument_type_details`,
+`test_ail_source_check`, `test_ail_check_repair_context` and `test_ail_collections`; the
+accompanying `test_text_argument_keeps_the_call_site_statement_location` case is included.
+`tools/diff_ids.py` is absent on this tree; `tools/update_manifest.py` was run and `--check`
+passes.  The crate1 fix and its test are unchanged.
+
+## 2026-11-04 -- review fix: keep this tree's GitHub Models key wiring (job-rbcrate1-11042159)
+
+The re-apply above also took the fetched diff's `.github/workflows/agent-worker.yml` hunk, which
+deleted the GitHub Models token wiring that this tree gained after the old branch (dd5cd07).
+`.agent/pipeline.sh` still gates `run_ghm` on `$RUNNER_TEMP/ghm.key` and scans keys before push,
+so the deletion left the free-model path dead and stopped `GH_MODELS_TOKEN` from being
+leak-scanned.  The workflow is restored byte-for-byte to dd5cd07: `GH_MODELS_TOKEN` is passed to
+the Key file and Key scan steps (count 2), `$RUNNER_TEMP/ghm.key` is written from `$G`, the scan
+loop includes `$G`, and cleanup removes `ghm.key`; no other file changes.  Verified with
+`/tmp/probes/workflow_ghm.py` (5 checks), `/tmp/probes/crate_targets.py` (10 checks) and
+`rle_language.py` / `textstat_language.py` through `cmp.sh` (both builds match CPython).  Final
+tests: test_ail_examples_crate, test_ail_cargo, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
+## 2026-11-04 -- crate1 re-applied: ail_cargo reads cargo's real target directory (job-rbcrate1-11042159)
+
+Re-applied the accepted `job-crate1-11041927` change on this tree (it added the three
+`examples/crate` Rust examples and their test).  The origin bug was that each example is built
+with `CARGO_TARGET_DIR` pointing at a temporary directory, while `ail_cargo._artifact` looked in
+the crate-local `target/release`; the tool now asks `cargo metadata --no-deps` for
+`target_directory` (honouring `CARGO_TARGET_DIR`, relative values and a workspace's shared
+`target/`) and reads the cdylib and staticlib from there.  The default `crate/target` case is
+unchanged.  Files: `ail_cargo.py`,
+`test_ail_examples_crate.py`, `tests.d/test_ail_examples_crate.txt`, `examples/crate/**` (three
+crates plus README).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run.  Final-state tests: test_ail_examples_crate, test_ail_cargo, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
