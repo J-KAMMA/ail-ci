@@ -1,35 +1,41 @@
-## 2026-11-03 -- bce s2: exact recursion depth in a register (job-bces2-11040407)
+## 2026-11-04 -- bce s2 finish: exact recursion depth in a register (job-bces2c-11042316)
 
-Self-recursive IR functions now carry their exact recursion count in `int64_t ail_d` instead of the
-global `ail_depth`.  `pyfunc.to_c` exposes each recursive function's SCC, reachability and direct
-calls; `ir/lower.py` accepts a function only when its SCC is exactly `{f}`, it has no `try`, list or
-exception entry, its other callees cannot reach a recursive/guarded function, exceptions are not in
-`checked` mode, and `AIL_BCE` is on.  `ir/emit_c.py` emits the inner `f__d(..., int64_t ail_d)` with
-the unchanged `if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded");`, rewrites
+Finished bces2 from its branch work (imported from `job-bces2-11040407`; the runner's review step
+had crashed, so it had no verdict).  Self-recursive IR functions now carry their exact recursion
+count in `int64_t ail_d` instead of the global `ail_depth`.  `pyfunc.to_c` exposes each recursive
+function's SCC, reachability and direct calls; `ir/lower.py` accepts a function only when its SCC
+is exactly `{f}`, it has no `try`, list or exception entry, its other callees cannot reach a
+recursive/guarded function, exceptions are not in `checked` mode, and `AIL_BCE` is on.  Any
+attribute/computed call is treated as an unresolved callee and keeps the global counter, so a
+recursive method cannot slip past the reachability rule.  `ir/emit_c.py` emits the inner
+`f__d(..., int64_t ail_d)` with the unchanged
+`if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");`, rewrites
 self-calls to `f__d(..., ail_d + 1)`, and keeps today's wrapper `f(...)` calling
 `f__d(..., ail_depth + 1)`.  Non-selected functions keep the global counter.  Under
 `AIL_BCE_AUDIT=1` the inner function also keeps the old increment/leave and asserts
 `ail_d == ail_depth` right after incrementing.  A user function already owning the generated
-inner symbol `f__d` keeps the global counter (stats reason `inner symbol f__d is taken`), so a
-legal program naming a function `f__d` still builds and runs.
+inner symbol `f__d` keeps the global counter (stats reason `inner symbol f__d is taken`).
 
 Depth probes (default/force/audit, each compared with the same mode at `AIL_BCE=0`): 49,999 and
-50,000 return normally, 50,001 exits 1 with `recursion depth exceeded`; mutual g/h reaching a
-depth-param `f`, raise-at-29,999 then recurse-to-48,999, a non-recursive helper call, and a guarded
-helper refusal all match.  Stats show `depth=param` for the helper case and
+50,000 return normally, 50,001 exits 1 with `maximum recursion depth exceeded`; mutual g/h reaching
+a depth-param `f`, raise-at-29,999 then recurse-to-48,999, a non-recursive helper call, and a
+guarded helper refusal all match.  Stats show `depth=param` for the helper case and
 `callee other can reach a guarded function` for the refusal; audit is clean with no
-`AIL-BCE-AUDIT`.
+`AIL-BCE-AUDIT`.  The probe oracle now reuses the head build's source name so its `raised near`
+diagnostic matches, and `_last_line` skips that continuation.
 
-Census against the job base (`HEAD 5a0cb28`; current `origin/integ` is later and contains unrelated
-merges): only `tally_lang/ail` changes C; the other nine tasks are `same C` in both syntaxes, and
-`tally_lang/python`/`tree_fold/python` keep their pre-existing base build failures.  Tally perf
-input: **21,658,123,714 -> 19,958,091,442 instructions (ratio 0.92151, 7.85% drop)**; stripped
-binary 67,800 -> 67,800 bytes; output identical; compile phase medians 0.11 total and 1.25 vs 1.24
-gcc CPU seconds (within 3%).  Codegen pins unchanged.  `par_check -j 2` passes `test_ail_bce`,
-`test_ail_ir_s1/s2/s3`, `test_ail_range_checks`, `test_ail_safetynet`, `test_ail_files` and
-`test_ail_corpus_findings3`.  No recursion-specific test module exists in the tree.  The mandatory
-`cmp.sh` probes pass in default and forced general mode; the IR depth behavior is covered by
-`test_ail_bce`.
+Census against `/tmp/base` (the run's starting export of `staging:integ`): only `tally_lang/ail`
+changes C; the other 17 task/syntax pairs are `same C`, while `tally_lang/python` and
+`tree_fold/python` keep their pre-existing build failures in **both** trees (same message).
+`bce_census.check` now builds the base from the head tree's source path: every build records the
+absolute source path in `AIL_DBG_SITE`, so the two worktrees otherwise differ on every task and
+the stripped size carries the path length.  Tally perf input under callgrind (perf_event is denied
+on the runner): **29,542,790,615 -> 26,575,248,821 instructions (ratio 0.89955, 10.05% drop)**;
+stripped binary 88,280 -> 88,280 bytes (unchanged); output identical.  `par_check -j 2` passes
+`test_ail_bce`, `test_ail_ir_s1/s2/s3`, `test_ail_range_checks`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` (8 modules, 0 failed).  No recursion-specific test
+module exists in the tree.  The mandatory `cmp.sh` probes pass in default and forced general mode;
+the IR depth behavior is covered by `test_ail_bce`.
 
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
