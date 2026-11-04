@@ -32972,6 +32972,19 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
 
     clones = {}
     for g, sites in site_lists.items():
+        # A str claim is new in s3 and is NOT grounds for monomorphising a helper: the task
+        # keeps the by-name refusal when call sites disagree about a parameter (int at one site,
+        # str at another). Only drop the str-claiming sites of such a conflict; non-str clones
+        # that already existed keep working.
+        per_param = {}
+        for site in sites:
+            for pname, claim in site.items():
+                per_param.setdefault(pname, set()).add(claim)
+        conflicting = {pname for pname, claims in per_param.items()
+                       if STR in claims and any(claim != STR for claim in claims)}
+        if conflicting:
+            sites = [site for site in sites
+                     if not any(site.get(pname) == STR for pname in conflicting)]
         uniq = {}
         for site in sites:
             uniq.setdefault(_claim_key(site), site)
@@ -32997,15 +33010,37 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
     return clones
 
 
+def _terminates(stmts):
+    """True when every path through `stmts` ends in `return` or `raise`, so the function can never
+    fall off the end and produce CPython's implicit `None`."""
+    if not stmts:
+        return False
+    last = stmts[-1]
+    if isinstance(last, (ast.Return, ast.Raise)):
+        return True
+    if isinstance(last, ast.If):
+        return _terminates(last.body) and bool(last.orelse) and _terminates(last.orelse)
+    if isinstance(last, ast.Try):
+        if last.finalbody and _terminates(last.finalbody):
+            return True
+        body_ok = _terminates(last.body) and all(_terminates(h.body) for h in last.handlers)
+        return body_ok and (not last.orelse or _terminates(last.orelse))
+    return False
+
+
 def _owned_unannotated_str_fns(fns, sigs):
     """Python-syntax helpers whose RETURN KIND the fixed point already settled to str, and whose
     author wrote no annotation: their value is owned by the caller exactly like an explicit
-    `-> str`, so `"sum " + fmt(total)` can adopt it. Gated to the Python surface, like the bytes
-    helper below: a brace-syntax function keeps its existing inferred-return ABI."""
+    `-> str`, so `"sum " + fmt(total)` can adopt it.  Like the bytes helper below, the function must
+    never fall off the end: an implicit `None` return is not a str, and claiming it is would turn
+    CPython's `TypeError` into a fabricated empty string.  Gated to the Python surface: a
+    brace-syntax function keeps its existing inferred-return ABI."""
     if os.environ.get('AIL_SURFACE') != 'python':
         return set()
-    return {f.name for f in fns
-            if f.returns is None and sigs.get(f.name, (None, None))[1] == STR}
+    out = {f.name for f in fns
+            if f.returns is None and not f.decorator_list and _terminates(f.body)
+            and sigs.get(f.name, (None, None))[1] == STR}
+    return out
 
 
 def _owned_unannotated_bytes_fns(fns):
@@ -33016,24 +33051,9 @@ def _owned_unannotated_bytes_fns(fns):
     if os.environ.get('AIL_SURFACE') != 'python':
         return set()
 
-    def terminates(stmts):
-        if not stmts:
-            return False
-        last = stmts[-1]
-        if isinstance(last, (ast.Return, ast.Raise)):
-            return True
-        if isinstance(last, ast.If):
-            return terminates(last.body) and bool(last.orelse) and terminates(last.orelse)
-        if isinstance(last, ast.Try):
-            if last.finalbody and terminates(last.finalbody):
-                return True
-            body_ok = terminates(last.body) and all(terminates(h.body) for h in last.handlers)
-            return body_ok and (not last.orelse or terminates(last.orelse))
-        return False
-
     out = set()
     for f in fns:
-        if f.returns is not None or f.decorator_list or not terminates(f.body):
+        if f.returns is not None or f.decorator_list or not _terminates(f.body):
             continue
         if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
                for st in f.body for n in ast.walk(st)):
@@ -33283,6 +33303,13 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
                 raise _return_type_error('%s() return annotation %s disagrees with inferred %s'
                                          % (f.name, expected, actual), f.name, expected, actual, f)
 
+    if os.environ.get('AIL_SURFACE') == 'python':
+        for f in fns:
+            if (f.returns is None and not _terminates(f.body)
+                    and sigs.get(f.name, (None, None))[1] == STR):
+                raise Unsupported('%s() returns a str on one path but can fall off the end '
+                                  '(CPython returns None there); the typed path has no '
+                                  'Optional[str]' % f.name)
     owned_str_fns |= _owned_unannotated_str_fns(fns, sigs)
     clones = _plan_clones(fns, sigs, arity_seeds, recursive, classes, owned_str_fns, owned_bytes_fns)
     if any(sigs[name] != signature for name, signature in fixed_external.items()):

@@ -116,6 +116,40 @@ def main():
 sys.exit(main())
 '''
 
+FALLOFF_CONCAT = '''import sys
+
+
+def maybe(flag):
+    if flag:
+        return "yes"
+
+
+def main():
+    x = "a" + maybe(0)
+    sys.stdout.write(x + "\\n")
+    return 0
+
+
+sys.exit(main())
+'''
+
+FALLOFF_LEN = '''import sys
+
+
+def maybe(flag):
+    if flag:
+        return "yes"
+
+
+def main():
+    n = len(maybe(0))
+    sys.stdout.write("%d\\n" % n)
+    return 0
+
+
+sys.exit(main())
+'''
+
 FMT_HELPER = '''import sys
 
 
@@ -264,23 +298,14 @@ class PyreachInfer(unittest.TestCase):
         self._typed('params_c', PARAMS_AGREE, 'line 100: value\n', args=('c',))
 
     def test_helper_params_mixed_call_sites(self):
-        # The base refused this ("passing str where show() wants int").  With local kind inference
-        # a str argument is a call-site claim too, so the clone plan (section 26, already in the
-        # base) monomorphises the helper instead of choosing one kind; a named refusal is also an
-        # acceptable answer, but whatever is built must match CPython on both builds.
+        # Disagreeing call sites keep the by-name refusal under --strict (the task's own gate);
+        # the general path still matches CPython for both arguments.
         with tempfile.TemporaryDirectory(prefix='ail-s3-') as tmp:
             source = Path(tmp) / 'mixed.py'
             source.write_text(PARAMS_MIXED, encoding='utf8')
             result, exe = build_source(tmp, 'mixed', source)
-            if result.returncode == 0:
-                for arg in ('i', 's'):
-                    reference = subprocess.run([sys.executable, str(source), arg],
-                                               capture_output=True, text=True, timeout=120)
-                    got = run(exe, (arg,))
-                    self.assertEqual(got.returncode, reference.returncode, arg)
-                    self.assertEqual(got.stdout, reference.stdout, arg)
-            else:
-                self.assertIn('passing str', result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('passing str', result.stderr)
             for unified in (False, True):
                 result, exe = build_probe(tmp, 'mixed', source, unified)
                 self.assertEqual(result.returncode, 0, (unified, result.stderr[-3000:]))
@@ -290,6 +315,29 @@ class PyreachInfer(unittest.TestCase):
                     got = run(exe, (arg,))
                     self.assertEqual(got.returncode, reference.returncode, (unified, arg))
                     self.assertEqual(got.stdout, reference.stdout, (unified, arg))
+
+    def test_str_helper_that_can_fall_off_end(self):
+        # A helper with a str return on one path and an implicit None on another is Optional[str],
+        # which the typed path does not have.  It must be refused by name under --strict, never
+        # compiled as an owned str (CPython raises TypeError on the fall-through value); the
+        # default and unified builds match CPython.
+        for name, text in (('falloff_concat', FALLOFF_CONCAT), ('falloff_len', FALLOFF_LEN)):
+            with tempfile.TemporaryDirectory(prefix='ail-s3-') as tmp:
+                source = Path(tmp) / (name + '.py')
+                source.write_text(text, encoding='utf8')
+                reference = subprocess.run([sys.executable, str(source)], capture_output=True,
+                                           text=True, timeout=120)
+                self.assertEqual(reference.returncode, 1, name)
+                self.assertEqual(reference.stdout, '', name)
+                result, exe = build_source(tmp, name, source)
+                self.assertNotEqual(result.returncode, 0, name)
+                self.assertIn('can fall off the end', result.stderr, name)
+                for unified in (False, True):
+                    result, exe = build_probe(tmp, name, source, unified)
+                    self.assertEqual(result.returncode, 0, (name, unified, result.stderr[-3000:]))
+                    got = run(exe)
+                    self.assertEqual(got.returncode, reference.returncode, (name, unified))
+                    self.assertEqual(got.stdout, reference.stdout, (name, unified))
 
     def test_percent_format_helper_returns_str(self):
         self._typed('fmt_helper', FMT_HELPER, 'sum 0.000000000 energy 3.250000000\n')

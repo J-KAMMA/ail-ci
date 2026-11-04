@@ -1,3 +1,29 @@
+## 2026-11-04 -- pyreach s3 review fix: an owned-str helper must terminate
+
+The review found one wrong-output defect: `_owned_unannotated_str_fns` gave the owned-str ABI to
+an unannotated helper whose settle pass saw a str `return` even when another path falls off the
+end. CPython returns `None` there and raises (`TypeError` on `"a" + maybe(0)`, on `len(maybe(0))`);
+the typed build fabricated an empty str and exited 0.
+
+- `_terminates(stmts)` (also used by the bytes helper, which had its own copy) now gates
+  `_owned_unannotated_str_fns`: a helper that can fall off the end is not owned-str.
+- `_signatures` refuses such a helper by name under `--strict` ("returns a str on one path but can
+  fall off the end"): the typed path has no `Optional[str]`. The default/unified build keeps the
+  general path and matches CPython.
+- `ir/lower.py`: a str return that is not owned by the caller now falls back to the legacy emitter
+  instead of emitting the owned ABI.
+- Reverted the s3 widening of mixed int/str call sites: a str claim on a parameter another site
+  supplies a non-str for is dropped, so the helper keeps the task's by-name refusal under
+  `--strict` (general path still matches CPython).
+
+Probes (`bash ~/tools/cmp.sh`, default + unified): `p_falloff`, `p_falloff_len`, `p_falloff_flag`
+all exit 1 with empty stdout and the CPython `TypeError`; `p_mixed` matches CPython on the general
+path and refuses "passing str where show() wants int" under `--strict`. Ten-source strict lists
+are unchanged against `b02d2195`; `chain_relax` 5->3, `ticket_audit` 6->7 with its three named
+blockers gone and `rail_transfer`'s tuple-element note gone against `ba982841`. `.ail` C
+byte-identical for all ten twins and the five codegen pins. Tests: `test_ail_pyreach_infer`,
+`test_ail_pyreach_unpack`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass.
+
 ## 2026-11-04 -- pyreach s3 finish: re-applied on the current export and re-verified
 
 Re-applied the s3 branch (`b2f90979`, `c969e4ff`, `85d06f83`) on the current export; only the
