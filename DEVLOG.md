@@ -1,3 +1,14 @@
+## 2026-11-04 -- binascii2_rr1 re-applied: bundled `binascii` (job-rbbinascii2_rr1-11050501)
+
+Re-applied the accepted `binascii2_rr1` change (base `2adbd4e`, `git fetch ... job-binascii2_rr1-11050251`)
+on this tree; it applied without conflicts, so both sides' fixes are kept. Added
+`AIL_CURRENT/stdlib/binascii.py` (`hexlify`/`b2a_hex` with `sep`/`bytes_per_sep`, `unhexlify`/`a2b_hex`,
+`b2a_base64` with `newline`, `a2b_base64` with `strict_mode`, `crc32`, `crc_hqx`), its twelve lab
+programs under `lab/stdlib/binascii/`, `test_ail_std_binascii.py` and the `tests.d` registration.
+The six touched test modules plus `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass. Four probes (`hex`, `unhex`, `base64`, `crc32`/`crc_hqx`) covering
+empty/negative/width/argument/list/attribute/dict cases match CPython in both builds.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda
