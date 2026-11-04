@@ -37,24 +37,30 @@ class TOMLDecodeError(ValueError):
         super().__init__(msg + " (at " + coord_repr + ")")
 
 
-def load(fp, parse_float=0):
+_PARSE_FLOAT_DEFAULT = "DEFAULT"
+
+
+def load(fp, *, parse_float=_PARSE_FLOAT_DEFAULT):
     """Parse TOML from a binary file object."""
     b = getattr(fp, "read")()
     if isinstance(b, bytes):
-        return loads(b.decode(), parse_float)
+        return loads(b.decode(), parse_float=parse_float)
+    if isinstance(b, bytearray):
+        return loads(b.decode(), parse_float=parse_float)
     raise TypeError(
         "File must be opened in binary mode, e.g. use `open('foo.toml', 'rb')`"
     )
 
 
-def loads(s, parse_float=0):
+def loads(s, *, parse_float=_PARSE_FLOAT_DEFAULT):
     """Parse TOML from a string."""
     src = s.replace("\r\n", "\n")
     pos = 0
     root = {}
     header = []
-    declared = {}
-    implicit = {}
+    direct = {}
+    recursive = {}
+    pending = []
 
     while True:
         pos = _skip_chars(src, pos, WS)
@@ -67,7 +73,8 @@ def loads(s, parse_float=0):
         if char == "#":
             pos = _skip_comment(src, pos)
         elif char == "[":
-            r = _table_header(src, pos, root, declared, implicit)
+            pending = _finalize_pending(direct, recursive, pending)
+            r = _table_header(src, pos, root, direct, recursive)
             pos = r[0]
             header = r[1]
             pos = _skip_chars(src, pos, WS)
@@ -75,7 +82,9 @@ def loads(s, parse_float=0):
             table = _table_at(root, header)
             if table is None:
                 raise TOMLDecodeError("Cannot overwrite a value", src, pos)
-            pos = _key_value(src, pos, table, parse_float, header, implicit)
+            pos = _key_value(
+                src, pos, table, parse_float, header, direct, recursive, pending
+            )
             pos = _skip_chars(src, pos, WS)
         else:
             raise TOMLDecodeError("Invalid statement", src, pos)
@@ -90,7 +99,7 @@ def loads(s, parse_float=0):
     return root
 
 
-def _table_header(src, pos, root, declared, implicit):
+def _table_header(src, pos, root, direct, recursive):
     is_list = 0
     if src.startswith("[[", pos):
         is_list = 1
@@ -102,53 +111,161 @@ def _table_header(src, pos, root, declared, implicit):
     pos = r[0]
     parts = r[1]
 
-    joined = _join_key(parts)
-    if joined in implicit:
-        raise TOMLDecodeError("Cannot declare " + _key_repr(parts) + " twice", src, pos)
-    for key in implicit.keys():
-        declared[key] = 1
-    implicit.clear()
     if is_list:
-        if joined in declared:
-            del declared[joined]
-    elif joined in declared:
-        raise TOMLDecodeError("Cannot declare " + _key_repr(parts) + " twice", src, pos)
-    declared[joined] = 1
-
-    if is_list:
+        if _flag_is(direct, recursive, parts, 1):
+            raise TOMLDecodeError(
+                "Cannot mutate immutable namespace " + _key_repr(parts), src, pos
+            )
+        _flag_unset_all(direct, recursive, parts)
+        _flag_set(direct, recursive, parts, 2, 0)
+        _append_table(root, parts, src, pos)
         if not src.startswith("]]", pos):
             raise TOMLDecodeError(
                 "Expected ']]' at the end of an array declaration", src, pos
             )
-        _append_table(root, parts, src, pos)
         return [pos + 2, parts]
 
+    if _flag_is(direct, recursive, parts, 2) or _flag_is(direct, recursive, parts, 1):
+        raise TOMLDecodeError("Cannot declare " + _key_repr(parts) + " twice", src, pos)
+    _flag_set(direct, recursive, parts, 2, 0)
+    _navigate(root, parts, 1, src, pos)
     if not src.startswith("]", pos):
         raise TOMLDecodeError("Expected ']' at the end of a table declaration", src, pos)
-    _navigate(root, parts, 1, src, pos)
     return [pos + 1, parts]
 
 
-def _key_value(src, pos, table, parse_float, header, implicit):
+def _key_value(src, pos, table, parse_float, header, direct, recursive, pending):
     r = _parse_key_value_pair(src, pos, parse_float)
     pos = r[0]
     parts = r[1]
-    if len(parts) > 1:
-        i = 1
-        while i < len(parts):
-            prefix = []
-            j = 0
-            while j < len(header):
-                prefix.append(header[j])
-                j += 1
-            j = 0
-            while j < i:
-                prefix.append(parts[j])
-                j += 1
-            implicit[_join_key(prefix)] = 1
-            i += 1
-    _set_value(table, parts, r[2], src, pos, 0)
+    value = r[2]
+
+    i = 1
+    while i < len(parts):
+        cont = []
+        j = 0
+        while j < len(header):
+            cont.append(header[j])
+            j += 1
+        j = 0
+        while j < i:
+            cont.append(parts[j])
+            j += 1
+        if _flag_is(direct, recursive, cont, 2):
+            raise TOMLDecodeError(
+                "Cannot redefine namespace " + _key_repr(cont), src, pos
+            )
+        pending.append(_join_key(cont))
+        i += 1
+
+    parent = []
+    j = 0
+    while j < len(header):
+        parent.append(header[j])
+        j += 1
+    j = 0
+    while j < len(parts) - 1:
+        parent.append(parts[j])
+        j += 1
+    if _flag_is(direct, recursive, parent, 1):
+        raise TOMLDecodeError(
+            "Cannot mutate immutable namespace " + _key_repr(parent), src, pos
+        )
+
+    local = []
+    j = 0
+    while j < len(parts) - 1:
+        local.append(parts[j])
+        j += 1
+    node = table
+    i = 0
+    while i < len(local):
+        k = local[i]
+        if k in node:
+            v = node[k]
+            if isinstance(v, dict):
+                node = v
+            elif isinstance(v, list):
+                if len(v) == 0:
+                    raise TOMLDecodeError("Cannot overwrite a value", src, pos)
+                node = v[len(v) - 1]
+            else:
+                raise TOMLDecodeError("Cannot overwrite a value", src, pos)
+        else:
+            child = {}
+            node[k] = child
+            node = child
+        i += 1
+
+    last = parts[len(parts) - 1]
+    if last in node:
+        raise TOMLDecodeError("Cannot overwrite a value", src, pos)
+    if isinstance(value, dict) or isinstance(value, list):
+        full = []
+        j = 0
+        while j < len(header):
+            full.append(header[j])
+            j += 1
+        j = 0
+        while j < len(parts):
+            full.append(parts[j])
+            j += 1
+        _flag_set(direct, recursive, full, 1, 1)
+    node[last] = value
     return pos
+
+
+def _finalize_pending(direct, recursive, pending):
+    i = 0
+    while i < len(pending):
+        key = pending[i]
+        direct[key] = direct.get(key, 0) | 2
+        i += 1
+    return []
+
+
+def _flag_set(direct, recursive, parts, flag, rec):
+    if rec:
+        key = _join_key(parts)
+        recursive[key] = recursive.get(key, 0) | flag
+    else:
+        key = _join_key(parts)
+        direct[key] = direct.get(key, 0) | flag
+
+
+def _flag_is(direct, recursive, parts, flag):
+    n = len(parts)
+    if n == 0:
+        return 0
+    i = 1
+    while i < n:
+        key = _join_prefix(parts, i)
+        if key in recursive and (recursive[key] & flag):
+            return 1
+        i += 1
+    key = _join_key(parts)
+    if key in direct and (direct[key] & flag):
+        return 1
+    if key in recursive and (recursive[key] & flag):
+        return 1
+    return 0
+
+
+def _flag_unset_all(direct, recursive, parts):
+    key = _join_key(parts)
+    prefix = key + "\u0000"
+    doomed = []
+    for k in direct.keys():
+        if k == key or k.startswith(prefix):
+            doomed.append(k)
+    for k in doomed:
+        del direct[k]
+    doomed = []
+    for k in recursive.keys():
+        if k == key or k.startswith(prefix):
+            doomed.append(k)
+    for k in doomed:
+        del recursive[k]
 
 
 def _parse_key_value_pair(src, pos, parse_float):
@@ -160,32 +277,6 @@ def _parse_key_value_pair(src, pos, parse_float):
     pos = _skip_chars(src, pos + 1, WS)
     r = _parse_value(src, pos, parse_float)
     return [r[0], parts, r[1]]
-
-
-def _set_value(table, parts, value, src, pos, inline):
-    node = table
-    i = 0
-    while i < len(parts) - 1:
-        k = parts[i]
-        if k in node:
-            v = node[k]
-            if isinstance(v, dict):
-                node = v
-            elif isinstance(v, list):
-                node = v[len(v) - 1]
-            else:
-                raise TOMLDecodeError("Cannot overwrite a value", src, pos)
-        else:
-            child = {}
-            node[k] = child
-            node = child
-        i += 1
-    last = parts[len(parts) - 1]
-    if last in node:
-        if inline:
-            raise TOMLDecodeError("Duplicate inline table key " + repr(last), src, pos)
-        raise TOMLDecodeError("Cannot overwrite a value", src, pos)
-    node[last] = value
 
 
 def _parse_key(src, pos):
@@ -244,18 +335,48 @@ def _parse_array(src, pos, parse_float):
 def _parse_inline_table(src, pos, parse_float):
     pos += 1
     table = {}
+    direct = {}
+    recursive = {}
     pos = _skip_chars(src, pos, WS)
     if pos < len(src) and src[pos] == "}":
         return [pos + 1, table]
     while True:
         r = _parse_key_value_pair(src, pos, parse_float)
         pos = r[0]
-        _set_value(table, r[1], r[2], src, pos, 1)
+        parts = r[1]
+        value = r[2]
+        if _flag_is(direct, recursive, parts, 1):
+            raise TOMLDecodeError(
+                "Cannot mutate immutable namespace " + _key_repr(parts), src, pos
+            )
+        node = table
+        i = 0
+        while i < len(parts) - 1:
+            k = parts[i]
+            if k in node:
+                v = node[k]
+                if isinstance(v, dict):
+                    node = v
+                else:
+                    raise TOMLDecodeError("Cannot overwrite a value", src, pos)
+            else:
+                child = {}
+                node[k] = child
+                node = child
+            i += 1
+        last = parts[len(parts) - 1]
+        if last in node:
+            raise TOMLDecodeError(
+                "Duplicate inline table key " + repr(last), src, pos
+            )
+        node[last] = value
         pos = _skip_chars(src, pos, WS)
         if pos < len(src) and src[pos] == "}":
             return [pos + 1, table]
         if pos >= len(src) or src[pos] != ",":
             raise TOMLDecodeError("Unclosed inline table", src, pos)
+        if isinstance(value, dict) or isinstance(value, list):
+            _flag_set(direct, recursive, parts, 1, 1)
         pos += 1
         pos = _skip_chars(src, pos, WS)
 
@@ -514,18 +635,18 @@ def _scan_time(src, pos):
     end = pos + 8
     micro = 0
     if end < len(src) and src[end] == ".":
-        end += 1
+        frac = end + 1
         digits = 0
-        while end < len(src) and src[end] in DIGITS:
+        while frac < len(src) and src[frac] in DIGITS:
             if digits < 6:
-                micro = micro * 10 + (ord(src[end]) - 48)
+                micro = micro * 10 + (ord(src[frac]) - 48)
             digits += 1
-            end += 1
-        if digits == 0:
-            return [0, 0, 0, 0, 0]
-        while digits < 6:
-            micro = micro * 10
-            digits += 1
+            frac += 1
+        if digits > 0:
+            end = frac
+            while digits < 6:
+                micro = micro * 10
+                digits += 1
     return [end, hour, minute, second, micro]
 
 
@@ -570,9 +691,8 @@ def _scan_number(src, pos, parse_float):
                 base = 8
             start = pos + 2
             end = _scan_digit_run(src, start, allowed)
-            if end == start:
-                return [0, pos, 0]
-            return [1, end, int(src[start:end], base)]
+            if end > start:
+                return [1, end, int(src[start:end], base)]
 
     i = pos
     sign = ""
@@ -629,7 +749,7 @@ def _scan_digit_run(src, pos, allowed):
 
 
 def _to_float(text, parse_float):
-    if parse_float == 0:
+    if parse_float == _PARSE_FLOAT_DEFAULT:
         return float(text)
     value = parse_float(text)
     if isinstance(value, dict) or isinstance(value, list):
@@ -732,15 +852,19 @@ def _table_at(root, parts):
     return node
 
 
-def _join_key(parts):
+def _join_prefix(parts, n):
     out = ""
     i = 0
-    while i < len(parts):
+    while i < n:
         if i:
             out += "\u0000"
         out += parts[i]
         i += 1
     return out
+
+
+def _join_key(parts):
+    return _join_prefix(parts, len(parts))
 
 
 def _key_repr(parts):

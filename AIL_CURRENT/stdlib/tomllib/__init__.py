@@ -38,14 +38,19 @@ rewritten around them.  Each rewrite and the refusal it answers:
    dict / set, or passed to a method, cannot be followed by the Optional
    rewrite; use a sentinel value there``.  Rewrite: no ``None`` is ever
    stored in a container and ``loads``'s ``parse_float`` default is the
-   integer sentinel ``0`` (``0`` means the built-in ``float``).
+   string sentinel ``_PARSE_FLOAT_DEFAULT``; only that sentinel means the
+   built-in ``float``, so a literal ``0`` is called and fails exactly as
+   CPython's does (``'int' object is not callable``).
 
 6. Required keyword-only parameters.  Refusal: ``not in the subset: a
    required keyword-only parameter recursive in def set (this cut requires
-   every keyword-only parameter to have a default)``.  Rewrite: ``loads``
-   and ``load`` take ``parse_float`` positionally with the ``0`` default,
-   and the ``recursive`` / ``access_lists`` / ``multiline`` flags are plain
-   positional parameters.
+   every keyword-only parameter to have a default)``.  Rewrite: the
+   keyword-only parameters that were required (``recursive`` in
+   ``Flags.set``, ``access_lists``, ``multiline``) are plain positional
+   parameters.  ``loads``/``load`` keep CPython's keyword-only
+   ``parse_float`` (a keyword-only parameter *with* a default is built); a
+   positional second argument is a named compile-time refusal, ``not in
+   the subset: loads() called with too many positional arguments``.
 
 7. ``datetime.time`` and ``datetime.timezone(...)`` used as values in
    annotations.  ``datetime.time`` is refused by the compiler (``not in the
@@ -62,12 +67,16 @@ rewritten around them.  Each rewrite and the refusal it answers:
    ``set[tuple[Key, int]]`` pending flags).  Refusals: ``not in the
    subset: a required keyword-only parameter ...`` for ``Flags.set`` and
    ``None stored in a list / tuple / dict / set ...`` for the nested
-   dictionaries.  Rewrite: two plain dicts in ``loads`` -- ``declared`` for
-   explicit ``[table]`` declarations and ``implicit`` for namespaces opened
-   by dotted keys -- both keyed by the key path joined with ``\\x00``.  A
-   table header checks both and then finalizes the implicit names, which is
-   what makes ``a.b = 1`` followed by ``[a]`` the same
-   ``Cannot declare ('a',) twice`` error as CPython.
+   dictionaries.  Rewrite: the same two flags -- ``FROZEN`` (bit 1, an
+   inline table or array namespace) and ``EXPLICIT_NEST`` (bit 2, a
+   declared table namespace) -- live in two ``dict[str, int]`` bitmasks,
+   ``direct`` and ``recursive``, keyed by the key path joined with
+   ``\\x00`` (``_flag_set`` / ``_flag_is`` / ``_flag_unset_all``).  Pending
+   dotted-key containers are a list of joined paths finalized before each
+   table header.  This reproduces CPython's ``Cannot mutate immutable
+   namespace ...``, ``Cannot redefine namespace ...`` and ``Cannot declare
+   ... twice`` errors, positions included, and never walks a list holding a
+   non-dict (which used to raise ``TypeError``).
 """
 
 __all__ = ("loads", "load", "TOMLDecodeError")
