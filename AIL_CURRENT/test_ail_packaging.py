@@ -36,12 +36,16 @@ CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc") or s
 
 wheel_dir = None
 wheel_path = None
+backend = None
 
 
 def setUpModule():
-    global wheel_dir, wheel_path
+    global wheel_dir, wheel_path, backend
     if not (REPO / "pyproject.toml").is_file() or not BACKEND.is_file():
         raise unittest.SkipTest("repository root with pyproject.toml is not beside AIL_CURRENT")
+    sys.path.insert(0, str(REPO / "packaging"))
+    import ail_wheel_backend
+    backend = ail_wheel_backend
     wheel_dir = tempfile.mkdtemp(prefix="ail-wheel-test-")
     done = subprocess.run(
         [sys.executable, "-c",
@@ -72,7 +76,8 @@ class WheelContents(unittest.TestCase):
         self.names = set(self.zip.namelist())
 
     def test_file_list_is_the_sdk_selection(self):
-        sdk = {"ail_lang/sdk/" + name for name in self.manifest["sdk_files"]}
+        sdk = {"ail_lang/sdk/" + name for name in self.manifest["sdk_files"]
+               if not backend.unused_sdk_file(name)}
         sdk |= {"ail_lang/sdk/MANIFEST.json", "ail_lang/sdk/SDK_README_JA.md"}
         sdk |= {"ail_lang/sdk/" + name for name in LICENSE_FILES}
         package = {"ail_lang/" + name for name in PACKAGE_FILES}
@@ -109,11 +114,23 @@ class WheelContents(unittest.TestCase):
     def test_sdk_files_carry_their_pins(self):
         pins = self.manifest["sha256"]
         for name in self.manifest["sdk_files"]:
+            if backend.unused_sdk_file(name):
+                continue
             data = self.zip.read("ail_lang/sdk/" + name)
             self.assertEqual(hashlib.sha256(data).hexdigest(), pins[name], name)
         sdk_manifest = json.loads(self.zip.read("ail_lang/sdk/MANIFEST.json"))
         self.assertEqual(sdk_manifest["kind"], "ail_language_sdk")
-        self.assertEqual(sorted(sdk_manifest["sdk_files"]), sorted(self.manifest["sdk_files"] + list(LICENSE_FILES)))
+        selected = [name for name in self.manifest["sdk_files"] if not backend.unused_sdk_file(name)]
+        self.assertEqual(sorted(sdk_manifest["sdk_files"]), sorted(selected + list(LICENSE_FILES)))
+
+    def test_unused_files_are_absent_from_the_wheel(self):
+        unused = [name for name in self.manifest["sdk_files"] if backend.unused_sdk_file(name)]
+        self.assertTrue(unused, "the size check found nothing to leave out")
+        sdk_manifest = json.loads(self.zip.read("ail_lang/sdk/MANIFEST.json"))
+        for name in unused:
+            self.assertNotIn("ail_lang/sdk/" + name, self.names)
+            self.assertNotIn(name, sdk_manifest["sdk_files"])
+            self.assertNotIn(name, sdk_manifest["sha256"])
 
     def test_record_matches(self):
         info = "ailc-%s.dist-info/" % source_version()
@@ -249,6 +266,18 @@ def main() -> None:
 
 main()
 '''
+
+
+@unittest.skipUnless(CC, "no C compiler on this machine")
+class WheelCheck(unittest.TestCase):
+    def test_wheel_check_still_passes(self):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("AIL_CACHE", "AIL_NO_CACHE", "PYTHONPATH", "XDG_CACHE_HOME", "AIL_EXTRA_CFLAGS")}
+        env.update(PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
+        done = subprocess.run([sys.executable, str(REPO / "tools" / "wheel_check.py")], cwd=REPO, env=env,
+                              capture_output=True, text=True, timeout=900)
+        self.assertEqual(done.returncode, 0, done.stdout[-3000:] + done.stderr[-3000:])
+        self.assertIn("wheel check passed", done.stdout)
 
 
 @unittest.skipUnless(CC, "no C compiler on this machine")

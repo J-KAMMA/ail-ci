@@ -3,10 +3,12 @@
 The wheel holds three things:
 
 * ail_lang/{__init__,__main__,cli,project,lsp}.py   the `ail` command (packaging/ail_lang/)
-* ail_lang/sdk/...                      exactly what AIL_CURRENT/ail_sdk.py export_sdk() writes: the
+* ail_lang/sdk/...                      what AIL_CURRENT/ail_sdk.py export_sdk() writes: the
                                         MANIFEST.json "sdk_files" list with its SHA-256 pins, plus
-                                        the SDK's own MANIFEST.json and SDK_README_JA.md. There is no
-                                        second file list here: whatever the SDK export refuses or
+                                        the SDK's own MANIFEST.json and SDK_README_JA.md, minus the
+                                        files a user never needs at run time (the compiler's own test
+                                        programs and the language_examples reference/host/baseline C
+                                        files; see unused_sdk_file). Whatever the SDK export refuses or
                                         leaves out (experiments/, docs/design, tasks-novel, evidence/ ...)
                                         cannot get into the wheel.
 * ailc-<version>.dist-info/             METADATA, WHEEL, entry_points.txt, RECORD,
@@ -20,6 +22,7 @@ import csv
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import re
 import sys
@@ -50,6 +53,37 @@ def version():
     return found.group(1)
 
 
+def unused_sdk_file(name):
+    """A selected SDK file that no run-time reader uses (proved by tools/wheel_same_c.py and wheel_check.py).
+
+    The compiler's own test programs and the C reference/host/baseline files under language_examples are
+    read only by tests and documentation. They stay in the SDK export and in the source tree; the wheel
+    leaves them out and the SDK MANIFEST.json in the wheel no longer pins them.
+    """
+    if name in ("python/pkg-v12/test_all.py", "python/pkg-v12/test_pipeline.py"):
+        return True
+    if name.startswith("language_examples/") and name.endswith(".c"):
+        base = name.rsplit("/", 1)[1]
+        return base.endswith(".baseline.c") or base.endswith("_host.c") or "_reference" in base
+    return False
+
+
+def _drop_unused_sdk_files(files):
+    """Remove unused_sdk_file entries and their pins from the exported SDK's MANIFEST.json."""
+    removed = {name for name in files if unused_sdk_file(name)}
+    if not removed:
+        return files
+    kept = {name: data for name, data in files.items() if name not in removed}
+    manifest = json.loads(kept["MANIFEST.json"])
+    manifest["sdk_files"] = [name for name in manifest.get("sdk_files", []) if name not in removed]
+    for name in removed:
+        manifest.get("sha256", {}).pop(name, None)
+    manifest["filecount"] = manifest.get("filecount", 0) - len(removed)
+    manifest["bytes"] = manifest.get("bytes", 0) - sum(len(files[name]) for name in removed)
+    kept["MANIFEST.json"] = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    return kept
+
+
 def sdk_files(work):
     """Run the SDK export into work/sdk and return {relative path: bytes}."""
     # ail_sdk imports its sibling modules (ail_manifest ...) by name; under pip the build runs from a
@@ -66,7 +100,7 @@ def sdk_files(work):
     files = {}
     for path in sorted(p for p in output.rglob("*") if p.is_file()):
         files[path.relative_to(output).as_posix()] = path.read_bytes()
-    return files
+    return _drop_unused_sdk_files(files)
 
 
 def metadata_text():
