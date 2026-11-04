@@ -1,3 +1,83 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I have enough evidence. Writing the report.
+
+## What the change really does
+
+Adds `_elide_readonly_field_aliases` in `pyfunc.py` — an AST pass run in `_to_c_once` before `sortkeys.rewrite` (and on the staged probes) that replaces every load of a single-assignment `x = o.f` (`list[int|float|str]` field) with `o.f` and deletes the assignment when a syntactic read-only/escape analysis holds, plus a lambda-parameter-shadow guard and an `Unsupported`-only recompile-without-rewrite fallback. This matches the report (the report describes only the last sub-fix; the diff is the whole S2 feature).
+
+## Probes (`bash ~/tools/cmp.sh <p> $PWD`, both builds; base = `/tmp/base` at `work`)
+
+| probe | HEAD | base | note |
+|---|---|---|---|
+| p01 dead alias in an `if` (empty block after removal) | same | same | no crash |
+| p02 `match` capture rebinds `o` | same | same | copy kept (`v_x` snapshot in C) |
+| p03 mutation via another alias `y = t.par` | same | same | |
+| p04 user fn mutating the list arg | same | same | |
+| p05 sort key `(par[i], nm[i], i)`, empty/negative | same | same | C reads `f_par`/`f_nm` in place |
+| p06 dict value / list item / slice / user-call escape | same | same | |
+| p07 `sum/min/max/sorted/count/index` | same | same | |
+| p08 no feature used | same | same | generated C **byte-identical** to base |
+| p09/p09b nested `def` reads `x` (after/before) | same | same | |
+| p10 `global g; g = t.par` then read in `main` | **DIFF** | same | see defect |
+| p11 nested def default captures `x` | same | same | |
+| p12 nested def mutates `t.par` | same | same | |
+| p13 `y = x; y.append` | same | same | |
+| p14 sort key lambda param shadows `o` | same | same | copy kept (`ail_list_snapshot`) |
+| p15/p16 `Bag(t.par)` / `ident(t.par)` moves | same | same | |
+| p17 `nonlocal x` store | same | same | |
+
+No "pre-existing" differences found.
+
+## Measurements
+
+- tree_fold N=3M, default build, same input (`gen.cases(Random(1))` perf), stdout identical (md5 `c8788eee…`): peak RSS HEAD 367,404 KiB median (367,328–367,508; 5 runs) vs base 415,468 KiB (414,248–415,940). **≤415 MB target met** (−11.6%).
+- Wall (5 interleaved pairs): HEAD 0.97–0.99 s (median 0.98) vs base 0.94–0.96 s (median 0.95); minor faults HEAD ~152k vs base ~149k. Small (≈3%) but consistently in the wrong direction on this runner; the DEVLOG's own fault numbers also rose.
+- Tests `-j 2` on HEAD: `test_ail_readonly_field_alias`, `test_ail_safetynet` — 0 failed (127 s).
+
+## Claims
+
+1. Lambda-shadow defect fixed; copy kept — **verified** (code guard, test module, p14 C keeps `ail_list_snapshot`).
+2. Three negative shadow tests compared with CPython — **verified** (present in `SHADOW_NEGATIVES`/negatives, tests pass).
+3. `tests.d` registration + DEVLOG + manifest — **verified** (`update_manifest.py --check` clean).
+4. Worker's named probes (`p01`–`p06`, `p_shadow_*`, `p_listparam_*`) — **unverified** (not in the tree; equivalent shapes I wrote pass).
+5. vararg/kwarg/default/posonly-shadow probes refused by name — **unverified**.
+6. `match`-shadow probe matches CPython, copy kept — **verified** (p02).
+7. `do_sort` still elides both snapshots — **verified** (no snapshot call in `do_sort`; reads `f_nm`/`f_par`).
+8. Four test modules 0 failed — **partially verified** (I reran the changed module + safetynet).
+9. tree_fold RSS 367.4 vs 414.3 MB, identical stdout — **verified**; "wall within noise" — **not reproduced** (see above).
+10. "Fixed build byte-identical to pre-fix HEAD binary (sha 9dcb9ce4…)" — **unverified**.
+
+VERDICT: FIX
+
+1. **A store to a `global` name is elided, so the global is never updated.** The pass checks `Global`/`Nonlocal` declarations only for `o` and only inside the alias's live range; the declaration normally sits *before* the first statement of the range, so the single `x = o.f` store to a global is removed. `/tmp/rprobes/p10_global.py`:
+   ```python
+   class T:
+       nm: list[str]
+       par: list[int]
+       def __init__(self, nm: list[str], par: list[int]) -> None:
+           self.nm = nm; self.par = par
+   g: list[int] = [1]
+   def f(t: T) -> int:
+       global g
+       g = t.par
+       return len(g)
+   def main() -> int:
+       print(f(T(["a"], [1, 2]))); print(len(g)); return 0
+   main()
+   ```
+   CPython and base default build: `2\n2`. HEAD default build: `2\n1` (generated `f` is `return span_len((v_t)->f_par);` with no store to the global slot; `AIL_UNIFIED_FORCE=1` is correct). Expected fix: treat any `global`/`nonlocal`-declared name as ineligible for the elision (or scan those declarations function-wide).
+[commandcode stop=end_turn turns=52 out_tokens=71808]
+
+
+--- ORIGINAL TASK ---
 Lane: arena
 
 **Finish arena1s2b from its existing work; do not redo it.** The run on branch `job-arena1s2b-11040443` did the work, then ended ERROR because the pipeline's review step crashed (a bug in the job runner, now fixed; not your work's fault), so it got no verdict.
