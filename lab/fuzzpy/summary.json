@@ -3,13 +3,13 @@
 "seed": 1,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:46:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 2,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:12:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 3,
@@ -63,7 +63,7 @@
 "seed": 11,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:22:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 12,
@@ -129,7 +129,7 @@
 "seed": 22,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:45:16: int64 constant out of range: 28011385460385661648235251499"
 },
 {
 "seed": 23,
@@ -171,7 +171,7 @@
 "seed": 29,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:79:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 30,
@@ -213,13 +213,13 @@
 "seed": 36,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:77:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 37,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:79:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 38,
@@ -237,19 +237,19 @@
 "seed": 40,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:75:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 41,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:62:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 42,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:49:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 43,
@@ -291,7 +291,7 @@
 "seed": 49,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:56:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 50,
@@ -315,7 +315,7 @@
 "seed": 53,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:36:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 54,
@@ -345,7 +345,7 @@
 "seed": 58,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:103:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 59,
@@ -393,7 +393,7 @@
 "seed": 66,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al6 = v4.copy()` for a copy (or list(v4) / dict(v4) / set(v4)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:41:9: not in the subset: line 41: `al6 = v4` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; thi"
 },
 {
 "seed": 67,
@@ -423,13 +423,13 @@
 "seed": 71,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:65:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 72,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:22:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 73,
@@ -453,7 +453,7 @@
 "seed": 76,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:130:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 77,
@@ -567,7 +567,7 @@
 "seed": 95,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al11 = v9.copy()` for a copy (or list(v9) / dict(v9) / set(v9)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:66:9: not in the subset: line 66: `al11 = v9` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
 },
 {
 "seed": 96,
@@ -579,7 +579,7 @@
 "seed": 97,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al4 = v3.copy()` for a copy (or list(v3) / dict(v3) / set(v3)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:7:5: not in the subset: line 7: `al4 = v3` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; this "
 },
 {
 "seed": 98,
@@ -615,25 +615,25 @@
 "seed": 103,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:174:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 104,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:82:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 105,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al18 = v15.copy()` for a copy (or list(v15) / dict(v15) / set(v15)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:101:13: not in the subset: line 101: `al18 = v15` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there"
 },
 {
 "seed": 106,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:67:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 107,
@@ -687,7 +687,7 @@
 "seed": 115,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:47:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 116,
@@ -705,13 +705,13 @@
 "seed": 118,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:112:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 119,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al14 = v13.copy()` for a copy (or list(v13) / dict(v13) / set(v13)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:71:9: not in the subset: line 71: `al14 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
 },
 {
 "seed": 120,
@@ -729,13 +729,13 @@
 "seed": 122,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:62:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 123,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:137:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 124,
@@ -759,7 +759,7 @@
 "seed": 127,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:91:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 128,
@@ -813,7 +813,7 @@
 "seed": 136,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al14 = v13.copy()` for a copy (or list(v13) / dict(v13) / set(v13)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:57:9: not in the subset: line 57: `al14 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
 },
 {
 "seed": 137,
@@ -837,7 +837,7 @@
 "seed": 140,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:56:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 141,
@@ -855,13 +855,13 @@
 "seed": 143,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:37:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 144,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:75:18: int64 constant out of range: 21267647932558653966460912964485513216"
 },
 {
 "seed": 145,
@@ -873,7 +873,7 @@
 "seed": 146,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:81:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 147,
@@ -903,7 +903,7 @@
 "seed": 151,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:97:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 152,
@@ -945,7 +945,7 @@
 "seed": 158,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:74:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 159,
@@ -975,13 +975,13 @@
 "seed": 163,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:80:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 164,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al9 = v8.copy()` for a copy (or list(v8) / dict(v8) / set(v8)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:61:17: not in the subset: line 61: `al9 = v8` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
 },
 {
 "seed": 165,
@@ -1125,7 +1125,7 @@
 "seed": 188,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:30:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 189,
@@ -1155,13 +1155,13 @@
 "seed": 193,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:61:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 194,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:108:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 195,
@@ -1227,13 +1227,13 @@
 "seed": 205,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al4 = v3.copy()` for a copy (or list(v3) / dict(v3) / set(v3)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:15:5: not in the subset: line 15: `al4 = v3` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; thi"
 },
 {
 "seed": 206,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:57:46: int64 constant out of range: 21267647932558653966460912964485513216"
 },
 {
 "seed": 207,
@@ -1257,7 +1257,7 @@
 "seed": 210,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:89:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 211,
@@ -1293,13 +1293,13 @@
 "seed": 216,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al22 = v21.copy()` for a copy (or list(v21) / dict(v21) / set(v21)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:109:9: not in the subset: line 109: `al22 = v21` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there;"
 },
 {
 "seed": 217,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al21 = v13.copy()` for a copy (or list(v13) / dict(v13) / set(v13)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:101:9: not in the subset: line 101: `al21 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there;"
 },
 {
 "seed": 218,
@@ -1335,7 +1335,7 @@
 "seed": 223,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:40:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 224,
@@ -1407,7 +1407,7 @@
 "seed": 235,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:30:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 236,
@@ -1419,13 +1419,13 @@
 "seed": 237,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al5 = v1.copy()` for a copy (or list(v1) / dict(v1) / set(v1)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:21:5: not in the subset: line 21: `al5 = v1` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; thi"
 },
 {
 "seed": 238,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:167:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 239,
@@ -1443,13 +1443,13 @@
 "seed": 241,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:88:20: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
 },
 {
 "seed": 242,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:50:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 243,
@@ -1485,7 +1485,7 @@
 "seed": 248,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:109:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 249,
@@ -1497,13 +1497,13 @@
 "seed": 250,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:86:26: int64 constant expression out of range: 1175979934698983915520"
 },
 {
 "seed": 251,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al23 = v21.copy()` for a copy (or list(v21) / dict(v21) / set(v21)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:120:9: not in the subset: line 120: `al23 = v21` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there;"
 },
 {
 "seed": 252,
@@ -1533,13 +1533,13 @@
 "seed": 256,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:51:32: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
 },
 {
 "seed": 257,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:103:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 258,
@@ -1587,7 +1587,7 @@
 "seed": 265,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:40:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 266,
@@ -1653,7 +1653,7 @@
 "seed": 276,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:136:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 277,
@@ -1683,13 +1683,13 @@
 "seed": 281,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:99:23: int64 constant out of range: 85070591730234615847396907784232501249"
 },
 {
 "seed": 282,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:35:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 283,
@@ -1713,13 +1713,13 @@
 "seed": 286,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:113:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 287,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:116:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 288,
@@ -1773,7 +1773,7 @@
 "seed": 296,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:22:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 297,
@@ -1875,7 +1875,7 @@
 "seed": 313,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al17 = v6.copy()` for a copy (or list(v6) / dict(v6) / set(v6)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:76:9: not in the subset: line 76: `al17 = v6` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
 },
 {
 "seed": 314,
@@ -1893,13 +1893,13 @@
 "seed": 316,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:37:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 317,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:80:19: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
 },
 {
 "seed": 318,
@@ -1929,13 +1929,13 @@
 "seed": 322,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al18 = v17.copy()` for a copy (or list(v17) / dict(v17) / set(v17)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:58:9: not in the subset: line 58: `al18 = v17` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
 },
 {
 "seed": 323,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al7 = v1.copy()` for a copy (or list(v1) / dict(v1) / set(v1)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:44:13: not in the subset: line 44: `al7 = v1` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
 },
 {
 "seed": 324,
@@ -1953,13 +1953,13 @@
 "seed": 326,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value a float and call abs() on that, or use a value whose absolute value is below 2**63"
+"first_diff": "compile-time int64 stop: prog.ail:132:13: not in the subset: round() of a constant float expression at the int64 boundary is refused: the rounded value is at or outside the signed 64-bit range, so abs(), unary - and * -1 cann"
 },
 {
 "seed": 327,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:170:13: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 328,
@@ -1971,7 +1971,7 @@
 "seed": 329,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:105:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 330,
@@ -2019,7 +2019,7 @@
 "seed": 337,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:121:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 338,
@@ -2037,7 +2037,7 @@
 "seed": 340,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:85:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 341,
@@ -2079,7 +2079,7 @@
 "seed": 347,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:75:21: int64 constant out of range: 85070591730234615847396907784232501249"
 },
 {
 "seed": 348,
@@ -2175,7 +2175,7 @@
 "seed": 363,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:107:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 364,
@@ -2205,7 +2205,7 @@
 "seed": 368,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al12 = v10.copy()` for a copy (or list(v10) / dict(v10) / set(v10)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:38:5: not in the subset: line 38: `al12 = v10` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
 },
 {
 "seed": 369,
@@ -2223,13 +2223,13 @@
 "seed": 371,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:106:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 372,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al19 = v13.copy()` for a copy (or list(v13) / dict(v13) / set(v13)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:91:9: not in the subset: line 91: `al19 = v13` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
 },
 {
 "seed": 373,
@@ -2295,7 +2295,7 @@
 "seed": 383,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:40:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 384,
@@ -2307,7 +2307,7 @@
 "seed": 385,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value a float and call abs() on that, or use a value whose absolute value is below 2**63"
+"first_diff": "compile-time int64 stop: prog.ail:20:9: not in the subset: round() of a constant float expression at the int64 boundary is refused: the rounded value is at or outside the signed 64-bit range, so abs(), unary - and * -1 cannot"
 },
 {
 "seed": 386,
@@ -2319,7 +2319,7 @@
 "seed": 387,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:70:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 388,
@@ -2331,7 +2331,7 @@
 "seed": 389,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:53:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 390,
@@ -2373,7 +2373,7 @@
 "seed": 396,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:96:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 397,
@@ -2385,7 +2385,7 @@
 "seed": 398,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:72:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 399,
@@ -2439,7 +2439,7 @@
 "seed": 407,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:75:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 408,
@@ -2463,7 +2463,7 @@
 "seed": 411,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:88:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 412,
@@ -2553,7 +2553,7 @@
 "seed": 426,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:116:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 427,
@@ -2565,7 +2565,7 @@
 "seed": 428,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:77:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 429,
@@ -2577,7 +2577,7 @@
 "seed": 430,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:124:92: int64 constant out of range: 784637716923335095224261902710254454442933591094742482943"
 },
 {
 "seed": 431,
@@ -2625,7 +2625,7 @@
 "seed": 438,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:69:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it ex"
 },
 {
 "seed": 439,
@@ -2673,7 +2673,7 @@
 "seed": 446,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:91:5: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 447,
@@ -2697,7 +2697,7 @@
 "seed": 450,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:8:19: int64 constant out of range: 98079714615416886934934209737619787751599303819750539264"
 },
 {
 "seed": 451,
@@ -2733,7 +2733,7 @@
 "seed": 456,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:83:18: int64 constant out of range: 21267647932558653966460912964485513216"
 },
 {
 "seed": 457,
@@ -2763,7 +2763,7 @@
 "seed": 461,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al11 = v4.copy()` for a copy (or list(v4) / dict(v4) / set(v4)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:90:21: not in the subset: line 90: `al11 = v4` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; t"
 },
 {
 "seed": 462,
@@ -2787,13 +2787,13 @@
 "seed": 465,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:105:17: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 466,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:73:18: int64 constant expression out of range: 4500234302529411178327296421785899316072100"
 },
 {
 "seed": 467,
@@ -2811,7 +2811,7 @@
 "seed": 469,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:49:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 470,
@@ -2889,7 +2889,7 @@
 "seed": 482,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al10 = v3.copy()` for a copy (or list(v3) / dict(v3) / set(v3)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:43:9: not in the subset: line 43: `al10 = v3` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
 },
 {
 "seed": 483,
@@ -2937,7 +2937,7 @@
 "seed": 490,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:131:21: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it e"
 },
 {
 "seed": 491,
@@ -2949,7 +2949,7 @@
 "seed": 492,
 "class": "refused",
 "path": "typed",
-"first_diff": "  write instead: `al6 = v4.copy()` for a copy (or list(v4) / dict(v4) / set(v4)); to share, keep a single name or pass the container to a function"
+"first_diff": "prog.ail:19:13: not in the subset: line 19: `al6 = v4` makes a second name for the same container, and one of the two is written while the other is read afterwards. CPython shares the object there; th"
 },
 {
 "seed": 493,
@@ -2973,7 +2973,7 @@
 "seed": 496,
 "class": "loud-ok",
 "path": "typed",
-"first_diff": "compile-time int64 stop:   write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower"
+"first_diff": "compile-time int64 stop: prog.ail:41:9: not in the subset: a constant integer expression overflows int64: its exact value is outside the signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes it exa"
 },
 {
 "seed": 497,

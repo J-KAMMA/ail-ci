@@ -60,6 +60,15 @@ def first_diff(a, b):
     return 'no line difference'
 
 
+def detail_line(msg):
+    """Pick the line that names the refusal, not the trailing 'write instead' advice."""
+    lines = [l.strip() for l in msg.strip().splitlines() if l.strip()]
+    for l in lines:
+        if 'not in the subset' in l or 'int64' in l or 'out of range' in l:
+            return l[:200]
+    return (lines[0] if lines else '')[:200]
+
+
 def classify(cpy, ail):
     c_rc, c_out, c_err, _ = cpy
     a_rc, a_out, a_err, a_to = ail
@@ -113,14 +122,13 @@ def one_seed(seed, args, modes):
         [sys.executable, '-B', str(args.ail), 'compile', str(ail_src), '--syntax', 'python', '-o', str(exe)],
         args.compile_timeout, env=env)
     rec = {'seed': seed, 'cpython_rc': cpy[0], 'ms': 0}
-    msg = text(cerr or cout)
+    msg = text(cerr or cout).replace(str(ail_src), 'prog.ail')
     rec['fallback'] = 'built on the general path' in msg
     if cto:
         rec.update(cls='timeout', reason='compiler timed out')
         ail = None
     elif crc == 3:
-        lines = [l for l in msg.strip().splitlines() if l.strip()]
-        detail = (lines[-1] if lines else '')[:200]
+        detail = detail_line(msg)
         low = msg.lower()
         if 'int64' in low or 'overflow' in low or 'does not fit' in low:
             rec.update(cls='overflow', reason='compile-time int64 stop: ' + detail)
@@ -128,8 +136,7 @@ def one_seed(seed, args, modes):
             rec.update(cls='refused', reason=detail)
         ail = None
     elif crc != 0:
-        lines = [l for l in msg.strip().splitlines() if l.strip()]
-        detail = lines[-1][:200] if lines else ''
+        detail = detail_line(msg)
         low = msg.lower()
         if 'int64' in low or 'overflow' in low or 'does not fit' in low:
             rec.update(cls='overflow', reason='compile-time int64 stop: ' + detail)
@@ -224,7 +231,8 @@ def summarize(records, args, elapsed):
     for c in names:
         lines.append('| %s | %d |' % (c, sum(1 for r in records if r['cls'] == c)))
     diffs = [r for r in records if r['cls'] == 'DIFF']
-    silent = [r for r in diffs if not r.get('reason', '').startswith('stderr-only')]
+    silent = [r for r in diffs if r.get('stdout_diff')
+              and r.get('cpython_rc') == 0 and r.get('ail_rc') == 0]
     lines += ['', 'DIFF: %d (silent stdout/exit: %d; stderr-only: %d)' % (
         len(diffs), len(silent), len(diffs) - len(silent)), '',
         'built: %d; typed path: %d (%.1f%%); general path: %d' % (
