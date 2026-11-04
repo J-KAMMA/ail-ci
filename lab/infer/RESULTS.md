@@ -17,7 +17,7 @@ values.
 | AIL top-5 ids/values == `ref.py` | yes (ids equal, 9 printed significant digits equal) |
 | 1-token prompt, AIL vs `ref.py` | top-5 and 16 greedy ids equal |
 | 1-token prompt, AIL vs llama.cpp | 16 greedy ids equal (reviewer-confirmed) |
-| 1024-token prompt, AIL vs `ref.py` | top-5 ids/values equal (`STEPS=0`) |
+| 1024-token prompt, AIL vs `ref.py` | top-5 ids/values equal (`STEPS=0`); both refuse a decode past the context by name, exit 2 |
 
 llama.cpp prints no logits, so its top-5 is not compared for any prompt; only the
 greedy ids are checked against it (64-token and 1-token prompts). No 1024-token
@@ -60,7 +60,7 @@ AIL numbers do not change.
 | --- | ---: | ---: |
 | peak RSS (decode run) | 1,108,044 KiB (1.06 GiB) | 427,444 KiB (417 MiB) |
 | binary size | 106,816 B (`gpt2`) | 1,898,560 B (`llama-cli`); 27,120 B (`llama-simple`) |
-| AIL compile time | 8.34 s (`--strict`, warm C compiler cache) | n/a |
+| AIL compile time | 8.34 s (`--strict`, `AIL_NO_CACHE=1`; 0.57 s warm) | n/a |
 
 ## Where the time goes (findings)
 

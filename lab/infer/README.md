@@ -42,7 +42,7 @@ pre-tokenizer; it is pinned above.
 python3 -m pip install numpy gguf
 bash lab/infer/fetch.sh /tmp/ail-infer          # model + llama.cpp + F32 GGUF + exported tensors
 
-# reference (numpy float64)
+# reference (numpy float64); optional STEPS defaults to 16, like gpt2.py
 cd lab/infer
 ulimit -v 3000000
 python3 ref.py /tmp/ail-infer/exported tokens.txt
@@ -64,12 +64,13 @@ ulimit -v 3000000
 `tokens.txt` is the first 64 token ids of `prompt.txt` (the model's tokenizer,
 via `llama-tokenize`). It is committed so the three programs see exactly the
 same ids. `tokens1024.txt` is `tokens.txt` repeated 16 times, the 1024-token
-context length, so the boundary probe is reproducible. The AIL program takes an
-optional third argument, `STEPS` (default 16), the number of greedy tokens to
-decode after the prompt. At a prompt of exactly 1024 ids there is no room for
-those steps, so pass `0`; without it the program still prints the prompt's top-5
-and then refuses the decode with a named context error on stderr (exit 2).
-`RESULTS.md` has the timing table.
+context length, so the boundary probe is reproducible. Both `gpt2.py` and
+`ref.py` take an optional third argument, `STEPS` (default 16), the number of
+greedy tokens to decode after the prompt. At a prompt of exactly 1024 ids there
+is no room for those steps, so pass `0`; without it both programs still print
+the prompt's top-5 and then refuse the decode with the same named context error
+on stderr (exit 2). `export_f32.py` refuses a quantized GGUF by name instead of
+writing its raw block bytes as f32. `RESULTS.md` has the timing table.
 
 ## AIL source shape
 

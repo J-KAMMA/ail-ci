@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """GPT-2 forward pass in numpy float64, the oracle for lab/infer/gpt2.py.
 
-Usage: python3 ref.py DATA_DIR TOKENS_FILE
-Prints the last prompt position's top-5 (id value) and 16 greedy tokens.
+Usage: python3 ref.py DATA_DIR TOKENS_FILE [STEPS]
+Prints the last prompt position's top-5 (id value) and STEPS greedy tokens
+(default 16).  A prompt longer than the context is refused, and so is a decode
+that would pass the context: the top-5 is printed first, then the program exits
+2 with a named error, matching gpt2.py.
 The KV cache is deliberately not used: every generated step runs the whole
 sequence again, so an error in the AIL cache cannot hide in both programs.
 """
@@ -87,15 +90,27 @@ def layernorm(x, w, b):
 def main():
     data_dir = sys.argv[1] if len(sys.argv) > 1 else "exported"
     tokens_file = sys.argv[2] if len(sys.argv) > 2 else str(Path(__file__).with_name("tokens.txt"))
-    model = Model(data_dir)
+    steps = int(sys.argv[3]) if len(sys.argv) > 3 else 16
+    if steps < 0:
+        steps = 0
     tokens = [int(s) for s in Path(tokens_file).read_text().split()]
+    if len(tokens) > N_CTX:
+        print("refused: prompt has " + str(len(tokens)) + " tokens, context length is "
+              + str(N_CTX), file=sys.stderr)
+        return 2
+    model = Model(data_dir)
     logits = model.forward(tokens)[-1]
     top = np.argsort(logits)[::-1][:5]
     for i in top:
         print("top5 %d %.9g" % (i, logits[i]))
+    if len(tokens) + steps > N_CTX:
+        print("refused: " + str(len(tokens)) + "-token prompt plus " + str(steps)
+              + " decode steps exceeds context length " + str(N_CTX)
+              + "; pass STEPS=0 after TOKENS_FILE to stop at the prompt", file=sys.stderr)
+        return 2
     generated = []
     seq = list(tokens)
-    for _ in range(16):
+    for _ in range(steps):
         logits = model.forward(seq)[-1]
         nxt = int(np.argmax(logits))
         generated.append(nxt)

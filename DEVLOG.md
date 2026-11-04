@@ -1,3 +1,13 @@
+## 2026-11-04 -- infer s1 fix: ref.py context guard and quantized export refusal
+
+`ref.py` now takes the same optional `STEPS` third argument as `gpt2.py`. It refuses a prompt longer than 1024 tokens
+by name, and after printing the prompt's top-5 it refuses a decode that would pass the context by name with exit 2,
+instead of raising numpy's broadcast `ValueError` on the 1024-token probe. `export_f32.py` refuses a quantized GGUF by
+name, because the reader's data for those tensors is raw block bytes; the documented F32/F16 path is unchanged.
+`RESULTS.md` no longer calls the 8.34 s compile time "warm": it is the `AIL_NO_CACHE=1` time, with 0.57 s warm.
+Re-ran `test_ail_modules` (passes; the reported full-suite failure was not reproducible), `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`. No compiler file changed and no weights are committed.
+
 ## 2026-11-04 -- infer s1: GPT-2 inference in AIL against llama.cpp
 
 Added `lab/infer/`: `fetch.sh`, `export_f32.py`, `ref.py`, `gpt2.py`, `tokens.txt`, `prompt.txt`, `README.md` and
