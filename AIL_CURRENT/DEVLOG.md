@@ -1,3 +1,30 @@
+## 2026-11-04 -- rbdifflib2: bundled `difflib` re-applied on the current tree (job-rbdifflib2-11050254)
+
+Job `difflib2` was accepted against `327abd3`, and its diff no longer applied here. Re-applied
+with `git apply`, keeping both sides where they conflicted:
+
+* `AIL_CURRENT/python/pkg-v12/pyfunc.py`: the accepted hunk added `_site_override`, which dropped
+  a `str` call-site claim on a parameter whose own annotation says something else. This tree
+  already carries the same fix in a newer shape -- `_drop_text_overrides` before the claim is
+  recorded, plus the same guard inside `_override_from_site` -- so the hunk was not added and the
+  newer code stands unchanged.
+* `AIL_CURRENT/manifest.d/*.txt` are generated; they were regenerated with
+  `tools/update_manifest.py` instead of patched.
+
+The change itself is the bundled `AIL_CURRENT/stdlib/difflib.py` (SequenceMatcher, Match,
+get_close_matches, Differ, ndiff, restore, unified_diff, context_diff, diff_bytes, IS_LINE_JUNK,
+IS_CHARACTER_JUNK), the twelve `lab/stdlib/difflib/` programs with their RESULTS.md and bench,
+and `test_ail_std_difflib.py` registered through `tests.d/`. Ten of the twelve programs match
+CPython 3.12 in the default and `AIL_UNIFIED_FORCE=1` builds; 04 uses a `**kwargs` call argument
+and 12 uses `HtmlDiff`, both refused by name. See DIFFERENCES `C?-job-rbdifflib2-11050254-1`.
+
+`test_ail_std_difflib.py` 2/2, `test_ail_safetynet.py` 5/5, `test_ail_files.py` 18/18
+(one skip) and `test_ail_corpus_findings3.py` 2/2 pass. Six probes under `/tmp/probes/`
+(matched blocks/opcodes/grouped opcodes/ratios, unified/context/ndiff/restore/diff_bytes and a
+custom `dfunc`, `get_close_matches` and the junk predicates with values reaching them through
+arguments, list items, attributes and dict values, empty/bytes/negative edges): five match
+CPython on stdout and exit status in both builds, `HtmlDiff` is refused by name.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda
