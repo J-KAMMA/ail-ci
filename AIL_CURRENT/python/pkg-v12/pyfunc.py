@@ -33029,12 +33029,23 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     refuses several such mismatches too, e.g. an inferred sequence against a caller's `int` claim),
     and is dropped rather than raised, so propagation can never turn an already-working,
     unannotated program into a refusal it did not have before.
+
+    A `str` claim is the one kind deliberately NOT raised here. `_call_user_func`'s own argument
+    guards already refuse a str handed to a non-str parameter, by name and at the CALL, and the
+    argument-details contract (`test_ail_argument_type_details.py`,
+    `test_ail_source_check.py`) reports that call-site form -- `passing str where take() wants
+    int` -- rather than a declaration-site `signature_override` one. Raising here would reach
+    the parameter first, since `_signatures` runs before any body compile. Other kinds
+    (int/float, and a str ANNOTATION contradicted by a non-str claim) keep the declaration-site
+    refusal; only the str actual is left for the call-site guard that can name the call.
     """
     for pname, text in override.items():
         for a in fn.args.args:
             if a.arg == pname and a.annotation is not None:
                 given = _sig_override_kind(fn, pname, text)
                 expected = _annotation_kind(a.annotation, classes or ())
+                if given == STR and expected != STR:
+                    continue
                 if given != expected and not (expected == FLT and given == INT):
                     return True
     return False

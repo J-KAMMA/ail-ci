@@ -1,3 +1,24 @@
+## 2026-11-04 -- str argument mismatches report at the call, not the declaration (job-rbarena1s2c-11042050)
+
+Four modules in the full suite (`test_ail_argument_type_details`, `test_ail_check_repair_context`,
+`test_ail_collections`, `test_ail_source_check`) expected a str handed to an `int`/`list[str]`
+parameter to be refused at the CALL (`passing str where take() wants int`, `operation:
+argument`), but `_signatures` runs before any body compile and `_propagate_signatures_pass`'s
+explicit-annotation check raised the declaration-site `signature_override` refusal first.
+
+`_explicit_annotation_conflicts` now leaves a `str` actual for `_call_user_func`'s own argument
+guards, which name the call. Every other kind keeps the declaration-site refusal (a float actual
+against an `int` annotation, and a str ANNOTATION contradicted by a non-str claim, still report
+`operation: parameter`). The change is one condition in `pyfunc.py`.
+
+Probes (both builds): an int parameter given a str literal, a str from `.split()` indexed in a
+local, and a `list[str]` parameter given a str all match CPython or are refused by name with the
+call in the message; a valid `str` parameter and read-only list-field aliases (`list[int]` and
+`list[str]`, including the mutation shapes) still match CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds. `test_ail_argument_type_details`, `test_ail_check_repair_context`,
+`test_ail_collections`, `test_ail_source_check`, `test_ail_readonly_field_alias`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass at `-j 2` (8/8).
+
 ## 2026-11-04 -- arena1 S2 re-applied on the integ tree (job-rbarena1s2c-11041649)
 
 Re-applied the accepted `job-arena1s2c-11041356` change (read-only list-field alias elision in
