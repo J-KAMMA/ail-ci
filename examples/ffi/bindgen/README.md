@@ -32,7 +32,9 @@ python3 examples/ffi/bindgen/measure.py --cpp    # preprocess the header first
 
 ## Before
 
-The default parser at commit `83767b0` (`strip_source` drops every preprocessor line):
+The default parser at commit `83767b0` (`strip_source` drops every preprocessor line); the current
+default path (no `--cpp`) prints the same table, byte for byte — every new parsing rule below is
+gated on `--cpp`:
 
 | library | denominator | emitted | accepted | share |
 |---|---|---|---|---|
@@ -63,14 +65,15 @@ balanced parentheses):
 
 | library | denominator | emitted | accepted | share |
 |---|---|---|---|---|
-| zlib | 81 | 77 | 77 | 95.1% |
+| zlib | 81 | 75 | 75 | 92.6% |
 | libm | 52 | 44 | 44 | 84.6% |
 
 Skip reasons, largest first:
 
 ```
-zlib: 4 skip reasons
+zlib: 6 skip reasons
   skipped    2  unknown or struct-by-value type '...' (use --typedef NAME=c_type)
+  skipped    2  the buffer length is size * nitems, not len(buf), which length() cannot express
   skipped    1  variadic
   skipped    1  a str result together with a bytearray parameter is refused by ail_ffi
 libm: 333 skip reasons, 68 stubs written outside the denominator (the float and long double variants)
@@ -102,7 +105,10 @@ What is still missing, exactly:
 
 - zlib: `gzprintf` (variadic), `gzvprintf` (variadic, `va_list`), `inflateBack` (takes the `in_func`
   callback typedef); `gzerror` is refused by `ail_ffi` because it returns a `str` and takes a
-  `bytearray` output parameter (Finding 2). 77 of 81 is the whole rest.
+  `bytearray` output parameter (Finding 2); `gzfread` and `gzfwrite` are skipped because the C byte
+  count is `size * nitems`, which `length("buf")` cannot express — binding `size` to `len(buf)`
+  passed an 8-byte buffer with `nitems=4` as 32 bytes, and the compiled `gzfread` stub aborted with
+  `double free or corruption` (exit 134), so no stub is written for either. 75 of 81 is the whole rest.
 - libm: `drem`, `gamma`, `j0`, `j1`, `scalb`, `significand`, `y0`, `y1` are the eight double
   functions `math.h` declares only under `__USE_MISC`, which a `-std=c11` compile does not reach
   (Finding 1). Against the 44 double functions the check can see, the share is 100%.

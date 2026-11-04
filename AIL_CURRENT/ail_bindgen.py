@@ -43,6 +43,7 @@ INTS = {
 OTHERS = {'float': 'c_float', 'double': 'c_double', 'bool': 'c_bool', '_Bool': 'c_bool'}
 LENGTH_NAMES = re.compile(r'^(n|len|length|size|count|num|nbytes|nmemb|cap|capacity|buflen|bufsize)$|(_len|_n|_size|_count|_cap|len|size)$',
                           re.I)
+COUNT_NAMES = re.compile(r'^(nitems|nmemb|count|num|n)$|(_nitems|_nmemb|_count|_num)$', re.I)
 LENGTH_TYPES = ('c_size_t', 'c_ssize_t', 'c_int', 'c_uint', 'c_long', 'c_ulong', 'c_int32', 'c_uint32', 'c_int64', 'c_uint64')
 QUALIFIERS = {'const', 'volatile', 'restrict', '__restrict', '__restrict__', 'register', '__extension__',
               '_Nonnull', '_Nullable', '_Null_unspecified', '__THROW', '__THROWNL', '__nonnull', '__wur',
@@ -296,10 +297,13 @@ def declared_names(text):
     return names
 
 
-def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs=None, visible=None):
+def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs=None, visible=None, cpp=False):
     checks, typedefs = checks or {}, typedefs or {}
     body = strip_source(text)
-    aliases = collect_typedefs(body)
+    # typedef resolution reads the whole preprocessed header. Without --cpp the text is the raw
+    # header, where a `typedef struct ... *name;` alias would smuggle a macro-decorated result type
+    # past the parser (gzgets read as `-> c_void_p`); the default path keeps the old behaviour.
+    aliases = collect_typedefs(body) if cpp else {}
     out, skipped, seen = [], [], set()
     for statement in body.split(';'):
         statement = ' '.join(statement.split())
@@ -317,7 +321,7 @@ def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs
         name, ret_text = m.group(1), head[:m.start()].strip()
         arg_text = rest[:rest.rindex(')')] if ')' in rest else rest
         try:
-            if name.startswith('__'):
+            if cpp and name.startswith('__'):
                 raise Skip('a name reserved for the C implementation')
             if visible is not None and name not in visible:
                 raise Skip('the header does not declare it under -std=c11, the mode the prototype check is compiled in')
@@ -335,8 +339,19 @@ def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs
             while index < len(types):
                 t = types[index]
                 nxt = types[index + 1] if index + 1 < len(types) else None
+                after = types[index + 2] if index + 2 < len(types) else None
+                if (cpp and t.stars == 1 and nxt is not None and after is not None
+                        and nxt.stars == 0 and nxt.name and LENGTH_NAMES.search(nxt.name)
+                        and scalar(nxt.base, typedefs) in LENGTH_TYPES
+                        and after.stars == 0 and after.name and COUNT_NAMES.search(after.name)
+                        and scalar(after.base, typedefs) in LENGTH_TYPES):
+                    # fread/gzfread shape: C's byte count is size * nitems, but length("buf") would
+                    # pass len(buf) as `size`, so the library reads size*nitems bytes from a shorter
+                    # buffer (an out-of-bounds write for gzfwrite).
+                    raise Skip('the buffer length is %s * %s, not len(buf), which length() cannot express'
+                               % (nxt.name, after.name))
                 annotation, t_trusted, length = convert_param(t, nxt, typedefs,
-                                                             result in ('c_char_p', 'c_mut_char_p'))
+                                                             cpp and result in ('c_char_p', 'c_mut_char_p'))
                 trusted = trusted or t_trusted
                 params.append('%s: %s' % (pyname(t.name), annotation))
                 if length:
@@ -407,7 +422,7 @@ def main(argv=None):
         # its __USE_MISC declarations; a stub for a function the header does not declare there cannot build
         visible = declared_names(preprocess(args.header, args.include, args.define, flags=('-std=c11',)))
     result = generate(text, name, lib=args.lib, link=args.link, checks=checks, errnos=set(args.errno),
-                      typedefs=typedefs, visible=visible)
+                      typedefs=typedefs, visible=visible, cpp=args.cpp)
     if args.output:
         with open(args.output, 'w', encoding='utf-8', newline='\n') as stream:
             stream.write(result)
