@@ -1,3 +1,41 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: diffaudit1
+
+**What the change really does:** adds `lab/diffaudit/audit.py` (parser + build/run harness), 20 probe programs and `AUDIT.md` recording verdicts for the 27 eligible DIFFERENCES rows; marks 3 stale `open` rows `fixed;…`; registers `test_ail_diffaudit`. No compiler/runtime files touched, so no program C can change (confirmed: `git diff --stat work..HEAD` is only the permitted lab/test/doc/manifest files).
+
+**Claims checked**
+- Base parser counts 27 selected (open 10, refused 4, declared 13), final tree 24 → **verified** (independent parse).
+- `audit.py --run`: all 20 verdicts match `AUDIT.md`; findings pre138 and pre90 only → **verified**.
+- 3 DIFFERENCES lines changed, status cell only; all three probes now-matches in both builds → **verified**.
+- `test_ail_diffaudit` + `test_ail_safetynet` under `par_check -j 2`: **0 failed**.
+- `update_manifest.py --check`: **passes**; file scope clean.
+- "`d1 | d2` now works and prints `{1:'a',2:'b'}` on both builds, but `d1 |= d2` still raises" → **FALSE** (see defect 1).
+- "The pre138 probe is the row's own fused-closure form" → **FALSE** (see defect 2).
+- Report's note that `test_ail_safetynet` S4 fails only under `ulimit -v 1500000` → **unverified** (I ran it without the limit; it passed).
+- 20 shards → **unverified** (not run per instructions).
+- Speed: N/A — no compiler/runtime change.
+
+**Pre-existing (identical on `/tmp/base`, not blocking):** `reversed(d)` yields a plain `iterator`; and in a program that also contains `d1 |= d2`, the `d1 | d2` expression compiles to a runtime `TypeError`.
+
+### Defects
+1. **`AUDIT.md` and the worker report misstate the dict-operator result.** Probe `lab/diffaudit/C__job_rbrbfuzz4_10262129_5.py` (same for `…rbfuzz4_10240913_5.py`). Expected per the note: after `iterator`/`2`, `d1 | d2` prints `{1: 'a', 2: 'b'}`, then `d1 |= d2` raises. Actual (both builds): lines 1–2 then `TypeError: unsupported operand type(s) for |: 'dict' and 'dict'`, rc 1 — it dies on `d1 | d2` and never reaches `|=`. The `still-differs` verdict is right; the explanation is wrong.
+2. **The pre138 probe is not the row's example and the row's stated behaviour now matches.** The row says `%` by zero "inside a lambda" ends the process; a lambda program (`/tmp/rprobes/r_pre138_lambda.py`) matches CPython in both builds on HEAD *and* on base (`caught integer modulo by zero`, twice, rc 0). Only a bare single-expression pipeline program (`sum(1 % x for x in xs)` fed `[1,0]`) shows the `ail_die` exit 1. `AUDIT.md` calling that "the row's own fused-closure form" is false; the stated form is `now-matches`, so the row is not audited as the task requires.
+
+VERDICT: FIX
+1. `lab/diffaudit/C__job_rbrbfuzz4_10262129_5.py` / `C__job_rbfuzz4_10240913_5.py`: expected (AUDIT note) `d1 | d2` prints `{1: 'a', 2: 'b'}` and `d1 |= d2` raises; actual AIL stops at `d1 | d2` with `TypeError: unsupported operand type(s) for |: 'dict' and 'dict'`, rc 1. Correct the note (verdict stays `still-differs`).
+2. `lab/diffaudit/C__job_pre138_10250109_2.py`: the row's own lambda example (`f = lambda x: 1 % x; try: print(f(0)) except ZeroDivisionError`) is `now-matches` in both builds, on HEAD and on base; the probe uses a pipeline program instead. Re-record the row honestly (lambda now-matches; the pipeline program is the residual difference) rather than claiming the probe is "the row's own fused-closure form".
+[commandcode stop=end_turn turns=29 out_tokens=21051]
+
+
+--- ORIGINAL TASK ---
 Lane: diffaudit
 
 # diffaudit1: re-check every open entry of DIFFERENCES.md on today's integ, each with a probe program
