@@ -32487,6 +32487,24 @@ def _call_site_signature(args, callee_params, ctx):
     return site
 
 
+def _drop_annotated_str_claims(fn, site):
+    """A call site's `str` claim never overrides a parameter that has a source annotation.
+
+    `_infer_strparam_pass` already refuses to move an annotated parameter on call-site str
+    evidence, because a str argument to an annotated int/float/list parameter is an ordinary
+    argument error: the call-site check names it (`passing str where take() wants int`) and the
+    declaration stays as written.  Propagation must apply the same rule, or the str claim reaches
+    `_param_kinds` and is reported as a `signature_override` conflict at the declaration instead.
+    Non-str claims (int/float/bytes) are still folded exactly as before, so `take(1.5)` against an
+    annotated int parameter keeps its signature-override diagnosis.
+    """
+    annotated = {a.arg for a in fn.args.args if a.annotation is not None}
+    if not annotated:
+        return site
+    return {pname: claim for pname, claim in site.items()
+            if not (claim == STR and pname in annotated)}
+
+
 def _claim_key(site):
     return tuple(sorted(site.items()))
 
@@ -32562,7 +32580,8 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
             gparams = sigs[g][0]
             if len(n.args) != len(gparams):
                 continue
-            site = _call_site_signature(n.args, gparams, caller_ctx)
+            site = _drop_annotated_str_claims(by_name[g],
+                                              _call_site_signature(n.args, gparams, caller_ctx))
             for pname, c in site.items():
                 claims.setdefault(g, {}).setdefault(pname, set()).add(c)
     changed = False
@@ -32974,7 +32993,8 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
             gparams = sigs[g][0]
             if len(n.args) != len(gparams):
                 continue
-            site = _call_site_signature(n.args, gparams, caller_ctx)
+            site = _drop_annotated_str_claims(by_name[g],
+                                              _call_site_signature(n.args, gparams, caller_ctx))
             site_lists.setdefault(g, []).append(site)
 
     clones = {}
