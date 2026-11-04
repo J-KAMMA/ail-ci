@@ -1,3 +1,20 @@
+## 2026-11-04 -- modval2 review fixes: module-value dunders and unknown stores (job-modval2b-11041013)
+
+Fixed the two defects the review found.  A store through a module value to a name the module does
+not define (`m.NEW = 5` after `m = pkg.a`) used to crash the compiler with `KeyError: 'NEW'`; it is
+now refused by name, naming the module and the direct `pkg.a.NEW = value` form, which still creates
+the name.  The generated module object now also models `__path__` (packages), `__spec__` (with
+`name`, `origin`, `parent`, `cached`, `loader` and `submodule_search_locations`), `__loader__`
+(`name` and `path`) and `__cached__` (the build-time `cache_from_source` path), so reading them
+through a value (an argument, a list item, a dict value or an object attribute) returns CPython's
+values instead of raising `AttributeError`; a namespace package's `__cached__` stays absent as in
+CPython.  Direct `pkg.__spec__` and friends keep their existing named refusals.
+
+Added `probe10_dunders_through_value` and `probe11_new_attribute_refused` under `tests/modval/`
+(ten matching probes and two named refusals) and taught `test_ail_modules_values` to run both
+refusals.  Both builds match CPython on all ten probes; the ten compare tasks' `program.c` stay
+byte-identical to `origin/integ`.
+
 ## 2026-11-04 -- modval2 finish: module values verified on integ (job-modval2b-11041013)
 
 Cherry-picked the modval2 work from `job-modval2-11040508` (commit `2ef3541`, after the export) onto

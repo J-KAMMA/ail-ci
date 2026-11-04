@@ -1,10 +1,11 @@
-"""Modules used as values (modval2): eight probes compared with CPython, and one named refusal.
+"""Modules used as values (modval2): ten probes compared with CPython, and two named refusals.
 
 Each probe is a small program under `tests/modval/`. The merged program gives a module that is used
 as a value one generated class and one instance: `m is pkg.util` stays true, `m.name` and
-`m.name = value` reach the module's names, and `repr(m)`, `__name__`, `__file__` and `__package__`
-have CPython's values. Both the default build and `AIL_UNIFIED_FORCE=1` must match CPython. A
-`getattr(m, name)` whose name is not a constant string is still refused by name.
+`m.name = value` reach the module's names, and `repr(m)`, `__name__`, `__file__`, `__package__`,
+`__path__`, `__spec__`, `__loader__` and `__cached__` have CPython's values. Both the default build
+and `AIL_UNIFIED_FORCE=1` must match CPython. A `getattr(m, name)` whose name is not a constant
+string, and a store of a name the module does not define, are still refused by name.
 """
 import os
 import shutil
@@ -48,7 +49,7 @@ class ModuleValues(unittest.TestCase):
 
     def test_probes_match_cpython_in_both_builds(self):
         for name in sorted(p.name for p in PROBES.iterdir() if p.is_dir()):
-            if name.startswith("probe09"):
+            if name.endswith("_refused"):
                 continue
             with self.subTest(probe=name):
                 directory = self.copied(name)
@@ -63,15 +64,21 @@ class ModuleValues(unittest.TestCase):
                     self.assertEqual(ran.stdout, expected.stdout, "forced=%s" % forced)
                     self.assertEqual(ran.returncode, expected.returncode, "forced=%s" % forced)
 
-    def test_a_name_computed_at_run_time_is_refused(self):
-        directory = self.copied("probe09_dynamic_getattr_refused")
-        for forced in (False, True):
-            built, output = build(directory, forced)
-            self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-            self.assertFalse((directory / output).exists())
-            for needle in ("pkg.util", "computed at run time", "write instead"):
-                self.assertIn(needle, built.stderr)
-            self.assertNotIn("Traceback", built.stderr)
+    def test_refusals_are_named(self):
+        needles = {
+            "probe09_dynamic_getattr_refused": ("pkg.util", "computed at run time", "write instead"),
+            "probe11_new_attribute_refused": ("pkg.a", "NEW", "write instead"),
+        }
+        for name, wanted in needles.items():
+            with self.subTest(probe=name):
+                directory = self.copied(name)
+                for forced in (False, True):
+                    built, output = build(directory, forced)
+                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+                    self.assertFalse((directory / output).exists())
+                    for needle in wanted:
+                        self.assertIn(needle, built.stderr)
+                    self.assertNotIn("Traceback", built.stderr)
 
 
 if __name__ == "__main__":

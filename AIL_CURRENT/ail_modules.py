@@ -2768,11 +2768,38 @@ class Rewriter(ast.NodeTransformer):
                                 "read it outside the class" % (target.name, attr, attr))
         sub = self.module_value(target, attr, node)
         if sub is not None:
+            if stored:
+                entry = target.alias.get(attr)
+                what = ('an import of %s' % entry[1].name if entry is not None and entry[0] == 'mod'
+                        else 'a submodule')
+                self.program.refuse(self.mod, node, "%s.%s is assigned through module %r used as a value: that "
+                                    "name is %s, not a variable %s defines; the compiler cannot tell which binding "
+                                    "readers should see.\n  write instead: call a function in %s that does the "
+                                    "update" % (target.name, attr, target.name, what, target.name, target.path.name))
             return ast.copy_location(ast.Name(self.program.module_value_name(sub), ast.Load()), node)
         if stored:
             if self.comp:
                 self.program.refuse(self.mod, node, "`%s.%s` is assigned inside a comprehension.\n"
                                     "  write instead: assign it in a plain statement" % (target.name, attr))
+            if attr in target.alias or attr in target.std:
+                what = ('an import of %s' % target.name if attr in target.alias
+                        else 'a standard-library import of %s' % target.name)
+                self.program.refuse(self.mod, node, "assignment to %s.%s: that name is %s, not a variable %s "
+                                    "defines; this compiler cannot tell which binding readers should see.\n"
+                                    "  write instead: call a function in %s that does the update"
+                                    % (target.name, attr, what, target.name, target.path.name))
+            if attr not in target.merged:
+                if attr in MODULE_DUNDERS or attr == '__name__':
+                    self.program.refuse(self.mod, node, "%s.%s is assigned through module %r used as a value, but "
+                                        "the merged program fixes %s at build time and the generated module object "
+                                        "keeps it read-only.\n  write instead: keep %s read-only"
+                                        % (target.name, attr, target.name, attr, attr))
+                self.program.refuse(self.mod, node, "%s.%s is assigned through module %r used as a value, but %s "
+                                    "has no top-level name %r, so the generated module object has no property "
+                                    "to write.\n  write instead: `%s.%s = value` with the module named directly, "
+                                    "or define %r in %s"
+                                    % (target.name, attr, target.name, target.name, attr, target.name, attr, attr,
+                                       target.path.name))
             name = target.merged[attr]
             if self.frames:
                 if self.frames[-1] is None:
@@ -3194,11 +3221,67 @@ def merge_program(entry_path, entry_text, read=None):
     return Merged(text, _positions(module, text), program.notes, names, classes)
 
 
+def _modval_unique(program, base):
+    """A fresh top-level name for the generated module-value objects."""
+    name = base
+    while name in program.ids or name in program.kept:
+        name += '_'
+    program.ids.add(name)
+    return name
+
+
+def _modval_cache(path):
+    """CPython's `__cached__` for a source file, or None when the file has no bytecode cache path."""
+    if Path(path).suffix != '.py':
+        return None
+    try:
+        import importlib.util
+        return importlib.util.cache_from_source(str(path))
+    except (AttributeError, NotImplementedError, ValueError):
+        return None
+
+
 def _modval_nodes(program, mod):
     """The class and one instance that stand for module `mod` when the program uses it as a value."""
     class_name = program.modval_class[mod]
     instance = program.modval[mod]
-    lines = ['class %s:' % class_name]
+    suffix = instance[len('_ail_modval_'):]
+    loader_class = _modval_unique(program, '_AilLoader_' + suffix)
+    spec_class = _modval_unique(program, '_AilSpec_' + suffix)
+    loader_name = _modval_unique(program, '_ail_loader_' + suffix)
+    spec_name = _modval_unique(program, '_ail_spec_' + suffix)
+    is_package = mod.kind != 'module' and not mod.entry
+    file_value = None if mod.kind == 'namespace' else str(mod.path)
+    cached_value = _modval_cache(mod.path) if mod.kind != 'namespace' else None
+    path_name = None
+    if is_package:
+        path_name = _modval_unique(program, '_ail_modpath_' + suffix)
+    lines = []
+    if path_name is not None:
+        lines.append('%s = [%s]' % (path_name, ', '.join(repr(str(d)) for d in mod.dirs)))
+    lines.append('class %s:' % loader_class)
+    if mod.kind != 'namespace':
+        lines.append('    name = %r' % mod.name)
+        lines.append('    path = %r' % file_value)
+    else:
+        lines.append('    pass')
+    lines.append('%s = %s()' % (loader_name, loader_class))
+    lines.append('class %s:' % spec_class)
+    lines.append('    name = %r' % mod.name)
+    lines.append('    origin = %r' % file_value)
+    lines.append('    parent = %r' % (None if mod.entry else mod.package))
+    lines.append('    cached = %r' % cached_value)
+    lines.append('    @property')
+    lines.append('    def loader(self):')
+    lines.append('        return %s' % loader_name)
+    if path_name is not None:
+        lines.append('    @property')
+        lines.append('    def submodule_search_locations(self):')
+        lines.append('        return %s' % path_name)
+    else:
+        lines.append('    submodule_search_locations = None')
+    lines.append('%s = %s()' % (spec_name, spec_class))
+    lines.append('class %s:' % class_name)
     for name, kind in mod.kinds.items():
         if name in MODULE_DUNDERS or name in ('__name__', '__file__', '__package__', '__repr__'):
             continue
@@ -3227,10 +3310,24 @@ def _modval_nodes(program, mod):
     lines.append('        return %r' % mod.name)
     lines.append('    @property')
     lines.append('    def __file__(self):')
-    lines.append('        return %r' % (None if mod.kind == 'namespace' else str(mod.path)))
+    lines.append('        return %r' % file_value)
     lines.append('    @property')
     lines.append('    def __package__(self):')
     lines.append('        return %r' % (None if mod.entry else mod.package))
+    lines.append('    @property')
+    lines.append('    def __loader__(self):')
+    lines.append('        return %s' % loader_name)
+    lines.append('    @property')
+    lines.append('    def __spec__(self):')
+    lines.append('        return %s' % spec_name)
+    if cached_value is not None:
+        lines.append('    @property')
+        lines.append('    def __cached__(self):')
+        lines.append('        return %r' % cached_value)
+    if path_name is not None:
+        lines.append('    @property')
+        lines.append('    def __path__(self):')
+        lines.append('        return %s' % path_name)
     if mod.kind == 'namespace':
         shown = "<module %r (namespace) from %r>" % (mod.name, [str(d) for d in mod.dirs])
     else:
