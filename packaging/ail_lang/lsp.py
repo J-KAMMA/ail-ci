@@ -1,7 +1,7 @@
 """`ail lsp`: a small language server over stdio (JSON-RPC, Content-Length framing). Standard library only.
 
-* Diagnostics on didOpen and didSave, from `ail check` (schema ail.check/1). A source that does not parse or
-  load is an Error. A program the typed path refuses is built anyway on the slow general path, and the
+* Diagnostics on didOpen, didChange and didSave, from `ail check` (schema ail.check/1). A source that does not
+  parse or load is an Error. A program the typed path refuses is built anyway on the slow general path, and the
   server tells the two apart by building it once (a C compiler is needed for that; the result is cached
   per source hash):
     - the build works         Warning "runs on the slow general path because <reason>"
@@ -9,16 +9,24 @@
   With `strict = true` in the project (ail.toml / [tool.ail]) every typed-path refusal is an Error.
   `slow_patterns` of the report (quadratic shapes) are Information.
 * Hover on a diagnostic shows the rewrite ("write instead: ...") or, when there is none, the message.
-* The file on disk is checked, so diagnostics follow the last save; didChange is not requested.
+  Hover elsewhere is certain or absent: a function name shows its signature; a parameter or an annotated
+  name shows its annotation; a name whose every assignment in its scope is a literal of one kind
+  (int, float, str, bytes, bool or None) shows that kind; anything else shows nothing.
+* didChange is full sync (LSP change kind 1). The buffer text is checked, so an unsaved edit still gets
+  diagnostics; didSave with no text checks the file on disk.
 The blocker list comes from `compile --strict --json` (ail.strict/1: every blocker, with its rewrite); `classify()` decides
 Warning or Error.
 """
+import ast
+import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
@@ -66,8 +74,8 @@ class Diagnoser:
         except (OSError, subprocess.SubprocessError) as error:
             return subprocess.CompletedProcess(command, 2, "", str(error))
 
-    def check(self, path, options):
-        done = self._run(cli._sdk_command("check", *options, path), CHECK_TIMEOUT)
+    def check(self, path, options, env=None):
+        done = self._run(cli._sdk_command("check", *options, path), CHECK_TIMEOUT, env)
         for line in reversed(done.stdout.splitlines()):
             try:
                 report = json.loads(line)
@@ -79,10 +87,10 @@ class Diagnoser:
 
     def builds_on_general_path(self, path, options, digest, env=None):
         """True / False when the full build accepts / refuses the program, None when it cannot be tried."""
-        key = (digest, tuple(options))
+        env = env or cli._env()
+        key = (digest, tuple(options), env.get("AIL_PATH") or "")
         if key in self.verdicts:
             return self.verdicts[key]
-        env = env or cli._env()
         if not cli.find_c_compiler(env)[0]:
             return None
         cli.prepare_cache(env)
@@ -93,16 +101,17 @@ class Diagnoser:
         self.verdicts[key] = verdict
         return verdict
 
-    def strict_blockers(self, path, options, digest):
+    def strict_blockers(self, path, options, digest, env=None):
         """Every typed-path blocker, from `compile --strict --json` (schema ail.strict/1; it stops before the C
         compiler, so none is needed). Items shaped like check diagnostics; blockers without a position are left out.
         None when the report is not available."""
-        key = ("blockers", digest, tuple(options))
+        env = env or cli._env()
+        key = ("blockers", str(path), digest, tuple(options), env.get("AIL_PATH") or "")
         if key in self.verdicts:
             return self.verdicts[key]
         with tempfile.TemporaryDirectory(prefix="ail-lsp-") as directory:
             done = self._run(cli._sdk_command("compile", "--strict", "--json", *options, path,
-                                              "-o", Path(directory) / "probe"), BUILD_TIMEOUT)
+                                              "-o", Path(directory) / "probe"), BUILD_TIMEOUT, env)
         result = None
         for line in done.stdout.splitlines():
             try:
@@ -115,40 +124,46 @@ class Diagnoser:
                     if not blocker.get("line"):
                         continue
                     where = Path(blocker.get("path") or path)
+                    if not where.is_absolute():
+                        # The strict report writes blocker paths relative to the process directory.
+                        from_cwd, from_source = Path.cwd() / where, Path(path).parent / where
+                        where = from_cwd if from_cwd.exists() or not from_source.exists() else from_source
                     result.append({"code": "type", "message": blocker.get("message") or blocker.get("why") or "",
-                                   "path": str(where if where.is_absolute() else Path(path).parent / where),
-                                   "line": blocker["line"], "column": blocker.get("column") or 1})
+                                   "path": str(where), "line": blocker["line"],
+                                   "column": blocker.get("column") or 1})
         self.verdicts[key] = result
         return result
 
-    def diagnose(self, path):
-        """[(path, line, column, severity, code, message)] for the file; line and column are 1-based or None."""
+    def diagnose(self, path, env=None, source=None):
+        """[(path, line, column, severity, code, message)] for the file; line and column are 1-based or None.
+        `path` may be a temporary probe for a buffer; `source` is the opened file, whose directory finds the
+        project (a read-only directory is checked through a probe in a temporary directory elsewhere)."""
         try:
-            found = project.find(path.parent)
+            found = project.find((source or path).parent)
         except project.ProjectError as error:
             found = None
             problems = [(path, 1, 1, ERROR, "project", str(error))]
         else:
             problems = []
         options = found.compiler_options() if found else []
-        report = self.check(path, options)
+        report = self.check(path, options, env)
         if isinstance(report, tuple):
             return problems + [(path, 1, 1, ERROR, "check", "ail check failed: " + report[1])]
         found_strict = bool(found and found.strict)
         items = report.get("diagnostics") or []
         if items and report.get("stage") == "type" and items[0].get("code") not in HARD_CODES:
-            blockers = self.strict_blockers(path, options, report.get("source_sha256"))
+            blockers = self.strict_blockers(path, options, report.get("source_sha256"), env)
             if blockers:
                 items = blockers
         for item in items:
-            problems.append(self.classify(path, item, report, options, found_strict))
+            problems.append(self.classify(path, item, report, options, found_strict, env))
         for text in report.get("slow_patterns") or []:
             match = SLOW_PATTERN.match(text)
             if match:
                 problems.append((Path(match["path"]), int(match["line"]), 1, INFORMATION, "slow", match["text"]))
         return problems
 
-    def classify(self, path, item, report, options, strict):
+    def classify(self, path, item, report, options, strict, env=None):
         """The one place that decides Warning (general path) or Error (refused)."""
         where = Path(item["path"]) if item.get("path") else path
         line, column = item.get("line") or 1, item.get("column") or 1
@@ -156,7 +171,7 @@ class Diagnoser:
         code = item.get("code") or "type"
         if code in HARD_CODES or strict or report.get("stage") != "type":
             return (where, line, column, ERROR, code, message)
-        verdict = self.builds_on_general_path(path, options, report.get("source_sha256"))
+        verdict = self.builds_on_general_path(path, options, report.get("source_sha256"), env)
         if verdict is True:
             return (where, line, column, WARNING, "general-path", "runs on the slow general path because " + message)
         if verdict is None:
@@ -172,6 +187,23 @@ def _line_text(path, line):
         return lines[line - 1] if 1 <= line <= len(lines) else ""
     except OSError:
         return ""
+
+
+def _remap_problems(problems, path, temporary):
+    """Point a buffer's diagnostics at the opened file, including any path the compiler printed."""
+    full, base, real = str(temporary), temporary.name, str(path)
+    result = []
+    for where, line, column, severity, code, message in problems:
+        if Path(where) == temporary:
+            where = path
+        if message:
+            # Replace the full path first so a later base-name replacement cannot split it.
+            if full in message:
+                message = message.replace(full, real)
+            if base != path.name and base in message:
+                message = message.replace(base, path.name)
+        result.append((where, line, column, severity, code, message))
+    return result
 
 
 def to_lsp(problems, opened):
@@ -201,6 +233,480 @@ def hover_for(diagnostics, position):
     return None
 
 
+def _annotation(node):
+    """The annotation text, normalized by ast.unparse (spacing is not preserved)."""
+    return ast.unparse(node) if node is not None else None
+
+
+def _literal_type(node):
+    """The type of a literal of one of the six certain kinds, or None for anything else."""
+    if not isinstance(node, ast.Constant):
+        return None
+    value = node.value
+    if value is None:
+        return "None"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, bytes):
+        return "bytes"
+    return None
+
+
+_SCOPE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+                ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _scope_roots(scope):
+    """The nodes a scope evaluates itself; nested scopes are separate."""
+    if isinstance(scope, ast.Lambda):
+        return [scope.body]
+    if isinstance(scope, ast.DictComp):
+        return [scope.key, scope.value]
+    if isinstance(scope, _COMPREHENSIONS):
+        return [scope.elt]
+    return list(getattr(scope, "body", ()))
+
+
+def _scope_nodes(scope):
+    """Nodes of one scope in source order, not descending into nested functions, lambdas, classes
+    or comprehensions."""
+    pending = list(_scope_roots(scope))
+    while pending:
+        node = pending.pop(0)
+        yield node
+        if isinstance(node, _SCOPE_TYPES):
+            continue
+        pending[0:0] = list(ast.iter_child_nodes(node))
+
+
+def _new_scope_info():
+    return {"annotations": {}, "literals": {}, "uncertain": set(), "functions": {},
+            "globals": set(), "nonlocals": set(),
+            "global_literals": {}, "global_uncertain": set(),
+            "nonlocal_literals": {}, "nonlocal_uncertain": set()}
+
+
+def _mark_uncertain(name, info):
+    """Record a non-literal binding, routed to the global or nonlocal scope it writes."""
+    if name in info["globals"]:
+        info["global_uncertain"].add(name)
+    elif name in info["nonlocals"]:
+        info["nonlocal_uncertain"].add(name)
+    else:
+        info["uncertain"].add(name)
+
+
+def _mark_literal(name, kind, info):
+    """Record one literal kind assigned to a name, routed like `_mark_uncertain`."""
+    if name in info["globals"]:
+        info["global_literals"].setdefault(name, set()).add(kind)
+    elif name in info["nonlocals"]:
+        info["nonlocal_literals"].setdefault(name, set()).add(kind)
+    else:
+        info["literals"].setdefault(name, set()).add(kind)
+
+
+def _bind_target(target, info):
+    """Record a binding that is not a literal assignment as uncertain."""
+    if isinstance(target, ast.Name):
+        _mark_uncertain(target.id, info)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for item in target.elts:
+            _bind_target(item, info)
+    elif isinstance(target, ast.Starred):
+        _bind_target(target.value, info)
+
+
+def _pattern_bindings(pattern):
+    names = []
+    for node in ast.walk(pattern):
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.append(node.rest)
+    return names
+
+
+def _scope_info(scope):
+    """Bindings of one scope.
+
+    `annotations` maps a parameter or annotated name to its annotation text; `literals` maps a name
+    to the set of literal kinds assigned to it; `uncertain` holds a name with any non-literal
+    binding; `functions` maps a function name to its definition. Assignments under a `global` or
+    `nonlocal` declaration are kept apart so the scope they write can be resolved.
+    """
+    info = _new_scope_info()
+    annotations, literals, uncertain, functions = (info["annotations"], info["literals"],
+                                                   info["uncertain"], info["functions"])
+
+    def annotate(name, text):
+        if not text:
+            return
+        if name in info["globals"] or name in info["nonlocals"]:
+            return
+        if name in annotations and annotations[name] != text:
+            annotations.pop(name, None)
+            uncertain.add(name)
+        else:
+            annotations[name] = text
+
+    def assign(target, value):
+        if isinstance(target, ast.Name):
+            kind = _literal_type(value)
+            if kind is None:
+                _mark_uncertain(target.id, info)
+            else:
+                _mark_literal(target.id, kind, info)
+        else:
+            _bind_target(target, info)
+
+    nodes = list(_scope_nodes(scope))
+    for node in nodes:
+        if isinstance(node, ast.Global):
+            info["globals"].update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            info["nonlocals"].update(node.names)
+
+    args = getattr(scope, "args", None)
+    if args is not None:
+        for argument in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+            text = _annotation(argument.annotation)
+            if text:
+                annotate(argument.arg, text)
+            else:
+                uncertain.add(argument.arg)
+        for argument in (args.vararg, args.kwarg):
+            if argument is not None:
+                text = _annotation(argument.annotation)
+                if text:
+                    annotate(argument.arg, text)
+                else:
+                    uncertain.add(argument.arg)
+    if isinstance(scope, _COMPREHENSIONS):
+        for generator in scope.generators:
+            _bind_target(generator.target, info)
+    for node in nodes:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            annotate(node.target.id, _annotation(node.annotation))
+            if node.value is not None:
+                assign(node.target, node.value)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                assign(target, node.value)
+        elif isinstance(node, ast.AugAssign):
+            _bind_target(node.target, info)
+        elif isinstance(node, ast.NamedExpr):
+            assign(node.target, node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            _bind_target(node.target, info)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    _bind_target(item.optional_vars, info)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                _mark_uncertain((alias.asname or alias.name).split(".")[0], info)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                _mark_uncertain(alias.asname or alias.name, info)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions[node.name] = node
+        elif isinstance(node, ast.ClassDef):
+            _mark_uncertain(node.name, info)
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name:
+                _mark_uncertain(node.name, info)
+        elif isinstance(node, ast.Match):
+            for case in node.cases:
+                for name in _pattern_bindings(case.pattern):
+                    _mark_uncertain(name, info)
+    return info
+
+
+def _bound(info, name):
+    return (name in info["annotations"] or name in info["literals"] or name in info["uncertain"]
+            or name in info["functions"])
+
+
+def _hover_text(name, info, extra_literals=(), extra_uncertain=False):
+    """The certain hover text for one resolved binding, or None."""
+    if name in info["annotations"]:
+        return "`%s`: `%s`" % (name, info["annotations"][name])
+    kinds = set(info["literals"].get(name, ())) | set(extra_literals)
+    uncertain = extra_uncertain or name in info["uncertain"]
+    if name in info["functions"] and not kinds and not uncertain:
+        return "```python\n%s\n```" % _signature(info["functions"][name])
+    if uncertain:
+        return None
+    if len(kinds) == 1:
+        return "`%s`: `%s`" % (name, next(iter(kinds)))
+    return None
+
+
+def _signature(node):
+    arguments = ast.unparse(node.args)
+    returns = _annotation(node.returns)
+    return "def %s(%s)%s" % (node.name, arguments, " -> %s" % returns if returns else "")
+
+
+def _position_offset(text, position):
+    line = max(int(position.get("line") or 0), 0)
+    character = max(int(position.get("character") or 0), 0)
+    lines = text.splitlines(keepends=True)
+    start = sum(len(item) for item in lines[:line])
+    if line >= len(lines):
+        return len(text)
+    offset = units = 0
+    for char in lines[line]:
+        width = 2 if ord(char) > 0xFFFF else 1
+        if units + width > character:
+            break
+        units += width
+        offset += 1
+    return start + offset
+
+
+def _token_at(text, position):
+    """The identifier token at a position; strings and comments are not identifiers."""
+    offset = _position_offset(text, position)
+    lines = text.splitlines(keepends=True)
+    starts = []
+    total = 0
+    for item in lines:
+        starts.append(total)
+        total += len(item)
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        for token in tokens:
+            if token.type != tokenize.NAME:
+                continue
+            row = token.start[0] - 1
+            if row < 0 or row >= len(starts):
+                continue
+            start = starts[row] + token.start[1]
+            end = start + len(token.string)
+            if start <= offset < end or (offset == end and token.end[1] == len(lines[row].rstrip("\r\n"))):
+                return token
+    except (tokenize.TokenError, IndentationError):
+        pass
+    return None
+
+
+def _name_at(text, position):
+    token = _token_at(text, position)
+    return token.string if token is not None else None
+
+
+def _char_index(text, lineno, byte_column):
+    """Absolute character index of an AST position (lineno is 1-based, column is UTF-8 bytes)."""
+    lines = text.splitlines(keepends=True)
+    if lineno < 1 or lineno > len(lines):
+        return None
+    line = lines[lineno - 1]
+    prefix = line.encode("utf-8")[:byte_column].decode("utf-8", "ignore")
+    return sum(len(item) for item in lines[:lineno - 1]) + len(prefix)
+
+
+def _plain_name_token(text, tree, token):
+    """True when the token is a plain name or argument, not an attribute or keyword label."""
+    lines = text.splitlines(keepends=True)
+    if token.start[0] < 1 or token.start[0] > len(lines):
+        return False
+    start = sum(len(item) for item in lines[:token.start[0] - 1]) + token.start[1]
+    end = start + len(token.string)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Name, ast.arg)):
+            name = node.id if isinstance(node, ast.Name) else node.arg
+            if name != token.string:
+                continue
+            node_start = _char_index(text, node.lineno, node.col_offset)
+            if node_start != start:
+                continue
+            if isinstance(node, ast.arg):
+                return True
+            if _char_index(text, node.end_lineno, node.end_col_offset) == end:
+                return True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            line = lines[node.lineno - 1] if 0 < node.lineno <= len(lines) else ""
+            match = re.search(r"\bdef\s+" + re.escape(node.name) + r"\b", line)
+            if match and token.start == (node.lineno, match.end() - len(node.name)) \
+                    and token.string == node.name:
+                return True
+    return False
+
+
+def _span(text, node):
+    """Absolute character span of an AST node, or None."""
+    try:
+        start = _char_index(text, node.lineno, node.col_offset)
+        end = _char_index(text, node.end_lineno, node.end_col_offset)
+    except (AttributeError, TypeError):
+        return None
+    return None if start is None or end is None else (start, end)
+
+
+def _body_start(text, scope):
+    body = getattr(scope, "body", None)
+    if isinstance(body, list) and body:
+        span = _span(text, body[0])
+        return span[0] if span else None
+    if isinstance(scope, ast.Lambda):
+        span = _span(text, scope.body)
+        return span[0] if span else None
+    return None
+
+
+def _in_arguments(text, scope, offset):
+    args = getattr(scope, "args", None)
+    if args is None:
+        return False
+    for argument in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+        if argument is None:
+            continue
+        span = _span(text, argument)
+        if span and span[0] <= offset < span[0] + len(argument.arg):
+            return True
+    return False
+
+
+def _scope_chain(text, tree, offset):
+    """Scopes containing the cursor, outermost first.
+
+    A function's defaults, annotations and decorators are evaluated in the enclosing scope, and a
+    parameter name belongs to the function, so only the body and the parameter names include it.
+    """
+    chain = [tree]
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            span = _span(text, child)
+            if span is None:
+                visit(child)
+                continue
+            start, end = span
+            if not (start <= offset <= end):
+                continue
+            if isinstance(child, _SCOPE_TYPES):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    body = _body_start(text, child)
+                    if body is not None and offset < body and not _in_arguments(text, child, offset):
+                        visit(child)
+                        return
+                chain.append(child)
+                visit(child)
+                return
+            visit(child)
+
+    visit(tree)
+    return chain
+
+
+def _scope_kind(scope):
+    if isinstance(scope, ast.Module):
+        return "module"
+    if isinstance(scope, ast.ClassDef):
+        return "class"
+    if isinstance(scope, _COMPREHENSIONS):
+        return "comprehension"
+    return "function"
+
+
+def _hover_in_chain(tree, chain, name):
+    """Resolve `name` through the cursor's scopes, then return a certain hover text or None."""
+    infos = {}
+
+    def info_for(scope):
+        key = id(scope)
+        if key not in infos:
+            infos[key] = _scope_info(scope)
+        return infos[key]
+
+    global_literals, global_uncertain = set(), False
+    nonlocal_literals, nonlocal_uncertain = set(), False
+    mode = None
+    for index in range(len(chain) - 1, -1, -1):
+        scope = chain[index]
+        info = info_for(scope)
+        kind = _scope_kind(scope)
+        if kind == "module":
+            if mode == "nonlocal":       # a nonlocal declaration cannot reach the module
+                return None
+            literals = (set(info["literals"].get(name, ())) | set(info["global_literals"].get(name, ()))
+                        | global_literals | nonlocal_literals)
+            uncertain = (name in info["uncertain"] or name in info["global_uncertain"]
+                         or global_uncertain or nonlocal_uncertain)
+            return _hover_text(name, info, literals, uncertain)
+        if kind == "class" and index != len(chain) - 1:
+            # A class body is not an enclosing scope for a method, lambda or comprehension.
+            continue
+        if mode == "global":
+            if name in info["globals"]:
+                global_literals |= info["global_literals"].get(name, set())
+                global_uncertain = global_uncertain or name in info["global_uncertain"]
+            continue
+        if mode == "nonlocal":
+            if kind == "class":
+                continue
+            if name in info["nonlocals"]:
+                nonlocal_literals |= info["nonlocal_literals"].get(name, set())
+                nonlocal_uncertain = nonlocal_uncertain or name in info["nonlocal_uncertain"]
+                continue
+            if _bound(info, name):
+                return _hover_text(name, info, nonlocal_literals,
+                                   name in info["uncertain"] or nonlocal_uncertain)
+            continue
+        if kind in ("function", "comprehension", "class"):
+            if name in info["globals"]:
+                mode = "global"
+                global_literals |= info["global_literals"].get(name, set())
+                global_uncertain = global_uncertain or name in info["global_uncertain"]
+                continue
+            if name in info["nonlocals"]:
+                mode = "nonlocal"
+                nonlocal_literals |= info["nonlocal_literals"].get(name, set())
+                nonlocal_uncertain = nonlocal_uncertain or name in info["nonlocal_uncertain"]
+                continue
+        if _bound(info, name):
+            return _hover_text(name, info)
+    return None
+
+
+def type_hover(text, position):
+    """Markdown for a certain type or a function signature at the cursor; None when it is not certain."""
+    token = _token_at(text, position)
+    if token is None:
+        return None
+    name = token.string
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    if not _plain_name_token(text, tree, token):
+        return None
+    offset = _position_offset(text, position)
+    return _hover_in_chain(tree, _scope_chain(text, tree, offset), name)
+
+
+def apply_change(text, change):
+    """Apply one LSP content change; a change without a range replaces the whole document."""
+    replacement = change.get("text") or ""
+    selected = change.get("range")
+    if not selected:
+        return replacement
+    start = _position_offset(text, selected.get("start") or {})
+    end = _position_offset(text, selected.get("end") or {})
+    if start > end:
+        start, end = end, start
+    return text[:start] + replacement + text[end:]
+
+
 class Server:
     def __init__(self, reader, writer):
         self.reader, self.writer = reader, writer
@@ -208,6 +714,7 @@ class Server:
         self.shutdown = False
         self.published = {}                # uri -> diagnostics last published
         self.shown = {}                    # opened uri -> every uri it published to
+        self.documents = {}                # uri -> current buffer text
 
     # -- framing
     def read(self):
@@ -244,31 +751,57 @@ class Server:
         path = uri_to_path(uri)
         if path is None:
             return
-        temporary = None
+        probe, temporary, directory, env = path, None, None, None
         try:
-            if not path.is_file() and text is not None:
-                temporary = tempfile.TemporaryDirectory(prefix="ail-lsp-buffer-")
-                path = Path(temporary.name) / (path.name or "buffer.py")
-                path.write_text(text, encoding="utf-8")
-            grouped = to_lsp(self.diagnoser.diagnose(path), path)
+            if text is not None:
+                # Check the buffer through the same `ail check` the build uses. A sibling file keeps the
+                # project, local imports and relative paths intact; a read-only directory (or a path
+                # that has no directory yet) is checked in a private temporary directory instead, with
+                # the real directory first on AIL_PATH so imports still resolve.
+                if path.parent.is_dir():
+                    try:
+                        handle, name = tempfile.mkstemp(prefix=".ail-lsp-", suffix=path.suffix or ".py",
+                                                        dir=str(path.parent))
+                    except OSError:
+                        pass
+                    else:
+                        os.close(handle)
+                        probe = Path(name)
+                        probe.write_text(text, encoding="utf-8")
+                        temporary = probe
+                if temporary is None:
+                    directory = tempfile.mkdtemp(prefix="ail-lsp-buffer-")
+                    probe = Path(directory) / (path.name or "buffer.py")
+                    probe.write_text(text, encoding="utf-8")
+                    temporary = probe
+                    env = cli._env()
+                    existing = env.get("AIL_PATH")
+                    env["AIL_PATH"] = str(path.parent) + (os.pathsep + existing if existing else "")
+            problems = self.diagnoser.diagnose(probe, env, path)
             if temporary is not None:
-                grouped = {uri: next(iter(grouped.values()))}
+                problems = _remap_problems(problems, path, temporary)
+            grouped = to_lsp(problems, path)
             for other in self.shown.get(uri, set()) - set(grouped):
                 self.publish(other, [])
             grouped.setdefault(uri, [])
             for target, items in grouped.items():
-                self.publish(target if temporary is None else uri, items)
+                self.publish(target, items)
             self.shown[uri] = set(grouped)
         finally:
-            if temporary is not None:
-                temporary.cleanup()
+            if directory is not None:
+                shutil.rmtree(directory, ignore_errors=True)
+            elif temporary is not None:
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
 
     # -- dispatch
     def handle(self, message):
         method, params = message.get("method"), message.get("params") or {}
         if method == "initialize":
             self.reply(message, {"capabilities": {
-                "textDocumentSync": {"openClose": True, "change": 0, "save": {"includeText": False}},
+                "textDocumentSync": {"openClose": True, "change": 1, "save": {"includeText": False}},
                 "hoverProvider": True},
                 "serverInfo": {"name": "ail-lsp", "version": cli.__version__}})
         elif method == "shutdown":
@@ -278,17 +811,45 @@ class Server:
             return False
         elif method == "textDocument/didOpen":
             document = params.get("textDocument") or {}
-            self.analyse(document.get("uri", ""), document.get("text"))
+            uri = document.get("uri", "")
+            if document.get("text") is not None:
+                self.documents[uri] = document["text"]
+            self.analyse(uri, document.get("text"))
+        elif method == "textDocument/didChange":
+            uri = (params.get("textDocument") or {}).get("uri", "")
+            text = self.documents.get(uri)
+            if text is None:
+                path = uri_to_path(uri)
+                text = path.read_text(encoding="utf-8", errors="replace") if path and path.is_file() else ""
+            for change in params.get("contentChanges") or []:
+                text = apply_change(text, change)
+            self.documents[uri] = text
+            self.analyse(uri, text)
         elif method == "textDocument/didSave":
             uri = (params.get("textDocument") or {}).get("uri", "")
+            if params.get("text") is not None:
+                self.documents[uri] = params["text"]
             self.analyse(uri, params.get("text"))
         elif method == "textDocument/didClose":
             uri = (params.get("textDocument") or {}).get("uri", "")
+            self.documents.pop(uri, None)
             for target in self.shown.pop(uri, {uri}):
                 self.publish(target, [])
         elif method == "textDocument/hover":
             uri = (params.get("textDocument") or {}).get("uri", "")
-            self.reply(message, hover_for(self.published.get(uri, []), params.get("position") or {"line": 0, "character": 0}))
+            position = params.get("position") or {"line": 0, "character": 0}
+            answer = hover_for(self.published.get(uri, []), position)
+            if answer is None:
+                text = self.documents.get(uri)
+                if text is None:
+                    path = uri_to_path(uri)
+                    if path is not None and path.is_file():
+                        text = path.read_text(encoding="utf-8", errors="replace")
+                if text is not None:
+                    value = type_hover(text, position)
+                    if value:
+                        answer = {"contents": {"kind": "markdown", "value": value}}
+            self.reply(message, answer)
         elif "id" in message and method is not None:
             self.reply(message, error={"code": -32601, "message": "method not found: %s" % method})
         return True

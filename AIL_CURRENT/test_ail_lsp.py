@@ -1,10 +1,10 @@
 """`ail lsp` (packaging/ail_lang/lsp.py): the language server over stdio, driven by a scripted LSP client.
 
-* initialize advertises open/close sync, save notifications and hover;
-* didOpen / didSave publish diagnostics from `ail check`: a source that does not load is an Error with its
-  "write instead:" text; a typed-path blocker the general path builds is a Warning "runs on the slow general
-  path because ..."; `strict = true` in ail.toml makes the blocker an Error; a clean file publishes none;
-* hover on a diagnostic shows the rewrite;
+* initialize advertises open/close sync, didChange, save notifications and hover;
+* didOpen / didChange / didSave publish diagnostics from `ail check`: a source that does not load is an Error
+  with its "write instead:" text; a typed-path blocker the general path builds is a Warning "runs on the slow
+  general path because ..."; `strict = true` in ail.toml makes it an Error; a clean file publishes none;
+* hover on a diagnostic shows the rewrite, and elsewhere a certain annotation, literal type or signature;
 * didClose clears, unknown requests get -32601, shutdown + exit end the process with status 0.
 
 The warning/error split builds the program once, so those cases need a C compiler and are skipped without one.
@@ -32,6 +32,36 @@ BLOCKER = ("def find(d: dict[int, int], k: int) -> int | None:\n    return d.get
 # refused outright: main() is never called
 REFUSED = "def main() -> None:\n    print('hi')\n"
 BROKEN = "def main() -> None:\n    x = [1, 2\n    print(x)\nmain()\n"
+# a real front-end type error: the annotation and the value disagree
+TYPE_ERROR = 'def main() -> None:\n    x: int = "hi"\n    print(x)\n\n\nmain()\n'
+TYPED = ("def total() -> int:\n    value: int = 3\n    return value\n\n\n"
+         "def main() -> None:\n    print(total())\n\n\nmain()\n")
+LITERALS = ("def main() -> None:\n    i = 1\n    f = 2.5\n    s = 'text'\n    b = b'raw'\n"
+            "    t = True\n    n = None\n    print(i, f, s, b, t, n)\n\n\nmain()\n")
+PROBE = ("def main() -> None:\n    a = 1 / 2\n    b = not 1\n    c = abs(-3.5)\n"
+         "    d = sum([1.5, 2.5])\n    n = round(1.234, 2)\n    print(a, b, c, d, n)\n\n\nmain()\n")
+MIXED = ("def main() -> None:\n    m = 1\n    m = 2.5\n    print(m)\n\n\nmain()\n")
+CALLS = ("def main() -> None:\n    raw = b'a b'.split()\n    rng = range(3)\n"
+         "    print(raw, rng)\n\n\nmain()\n")
+STRINGS = ("def main() -> None:\n    x = 1\n    print('x = 2')  # x = 3\n\n\nmain()\n")
+ATTRIBUTE = ("def main() -> None:\n    x = 1\n    obj = object()\n    print(obj.x)\n"
+             "    print(x)\n\n\nmain()\n")
+KEYWORD = ("def show(x: int) -> None:\n    print(x)\n\n\ndef main() -> None:\n"
+           "    show(x=2)\n\n\nmain()\n")
+GENERAL_IMPORT = ("from dep import value\n\ndef find(d: dict[int, int], k: int) -> int | None:\n"
+                  "    return d.get(k)\n\n\ndef main() -> None:\n"
+                  "    print(find(value(), 1))\n\n\nmain()\n")
+CLASS_SCOPE = ("x = 's'\nclass C:\n    x = 1\n    def f(self):\n"
+               "        print(x)\nC().f()\n")
+GLOBAL_DEF = ("def g():\n    return 1\nclass C:\n    def g(self):\n        return 2\n"
+              "    def f(self):\n        print(g)\nC().f()\n")
+LAMBDA_SCOPE = ("def f():\n    x = 's'\n    g = lambda x: x\n    print(g(2), x)\nf()\n")
+GLOBAL_DECL = ("x = 's'\ndef f(cond: bool) -> None:\n    global x\n    if cond:\n        x = 1\n"
+               "    print(x)\nf(False)\n")
+GLOBAL_READ = ("y = 's'\ndef f() -> None:\n    global y\n    print(y)\nf()\n")
+NONLOCAL_SCOPE = ("def f():\n    x = 's'\n    def g():\n        nonlocal x\n        x = 1\n"
+                  "        print(x)\n    g()\nf()\n")
+COMPREHENSION_SCOPE = ("x = 's'\ndef f():\n    print([x for x in range(3)])\n    print(x)\nf()\n")
 
 
 def setUpModule():
@@ -158,6 +188,40 @@ class Protocol(LspCase):
         self.assertEqual(item["range"]["start"]["line"], 1)
         self.assertIn("never closed", item["message"])
 
+    def test_a_buffer_diagnostic_never_shows_the_temp_file_name(self):
+        _, uri = self.open("helper.py", BROKEN)
+        (item,) = self.client.diagnostics(uri)
+        self.assertNotIn(".ail-lsp-", item["message"])
+        self.assertIn("helper.py", item["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_publishes_a_syntax_error(self):
+        folder = self.dir / "readonly"
+        folder.mkdir()
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        uri = (folder / "broken.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": BROKEN}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 1)
+        self.assertIn("never closed", item["message"])
+        self.assertNotIn(".ail-lsp-", item["message"])
+        self.assertNotIn(str(folder) + "/" + str(folder), item["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_still_resolves_imports(self):
+        folder = self.dir / "readonly-import"
+        folder.mkdir()
+        (folder / "dep.py").write_text("def value() -> int:\n    return 7\n", encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        text = "from dep import value\n\ndef main() -> None:\n    print(value())\n\n\nmain()\n"
+        uri = (folder / "main.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": text}})
+        self.assertEqual(self.client.diagnostics(uri), [])
+
     def test_a_refusal_is_an_error_with_the_rewrite_and_hover_shows_it(self):
         _, uri = self.open("refused.py", REFUSED)
         (item,) = self.client.diagnostics(uri)
@@ -171,6 +235,152 @@ class Protocol(LspCase):
         far = self.client.request("textDocument/hover", {"textDocument": {"uri": uri},
                                                          "position": {"line": 40, "character": 0}})
         self.assertIsNone(far["result"])
+
+    def test_did_change_rechecks_the_buffer_without_writing_the_file(self):
+        path, uri = self.open("change.py", CLEAN)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        self.client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": BROKEN}]})
+        self.assertEqual(self.client.diagnostics(uri)[0]["severity"], 1)
+        self.assertEqual(path.read_text(encoding="utf-8"), CLEAN)
+        self.client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 3},
+            "contentChanges": [{"text": CLEAN}]})
+        self.assertEqual(self.client.diagnostics(uri), [])
+
+    def test_an_incremental_did_change_uses_its_range(self):
+        path, uri = self.open("incremental.py", CLEAN)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        self.client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"range": {"start": {"line": 1, "character": 10},
+                                          "end": {"line": 1, "character": 15}}, "text": "1 +"}]})
+        self.assertEqual(len(self.client.diagnostics(uri)), 1)
+        self.assertEqual(path.read_text(encoding="utf-8"), CLEAN)
+
+    def test_hover_shows_an_annotation_and_a_signature(self):
+        _, uri = self.open("types.py", TYPED)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        annotated = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 1, "character": 5}})
+        self.assertIn("`value`: `int`", annotated["result"]["contents"]["value"])
+        signature = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 0, "character": 4}})
+        self.assertIn("def total() -> int", signature["result"]["contents"]["value"])
+
+    def test_hover_shows_a_type_only_for_literal_assignments(self):
+        _, uri = self.open("literals.py", LITERALS)
+        expected = [("i", 1, "int"), ("f", 2, "float"), ("s", 3, "str"),
+                    ("b", 4, "bytes"), ("t", 5, "bool"), ("n", 6, "None")]
+        for name, line, kind in expected:
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": line, "character": 4}})
+            self.assertEqual(answer["result"]["contents"]["value"], "`%s`: `%s`" % (name, kind))
+
+    def test_hover_is_none_for_the_review_probe_and_derived_names(self):
+        _, uri = self.open("probe.py", PROBE)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        for line in range(1, 6):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": line, "character": 4}})
+            self.assertIsNone(answer["result"], "line %d" % line)
+
+    def test_hover_is_none_for_a_mixed_type_and_for_calls(self):
+        _, mixed = self.open("mixed.py", MIXED)
+        for line in (1, 2):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": mixed}, "position": {"line": line, "character": 4}})
+            self.assertIsNone(answer["result"])
+        _, calls = self.open("calls.py", CALLS)
+        for line, character in ((1, 4), (2, 4), (1, 17), (2, 10)):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": calls}, "position": {"line": line, "character": character}})
+            self.assertIsNone(answer["result"])
+
+    def test_hover_is_none_for_an_attribute_and_a_keyword_label(self):
+        _, uri = self.open("attribute.py", ATTRIBUTE)
+        attribute = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 14}})
+        self.assertIsNone(attribute["result"])
+        local = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 4, "character": 10}})
+        self.assertIn("`x`: `int`", local["result"]["contents"]["value"])
+        _, uri = self.open("keyword.py", KEYWORD)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        label = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 5, "character": 9}})
+        self.assertIsNone(label["result"])
+
+    def test_hover_ignores_strings_and_comments(self):
+        _, uri = self.open("strings.py", STRINGS)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        name = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 1, "character": 4}})
+        self.assertIn("`x`: `int`", name["result"]["contents"]["value"])
+        for character in (11, 22):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": 2, "character": character}})
+            self.assertIsNone(answer["result"])
+
+    def test_hover_skips_a_class_body_for_a_method(self):
+        _, uri = self.open("class_scope.py", CLASS_SCOPE)
+        self.client.diagnostics(uri)       # the class shape is a general-path warning; hover is independent
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 4, "character": 14}})
+        self.assertEqual(answer["result"]["contents"]["value"], "`x`: `str`")
+        _, uri = self.open("global_def.py", GLOBAL_DEF)
+        self.client.diagnostics(uri)
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 6, "character": 14}})
+        self.assertIn("def g()", answer["result"]["contents"]["value"])
+        self.assertNotIn("self", answer["result"]["contents"]["value"])
+
+    def test_hover_treats_a_lambda_as_a_scope(self):
+        _, uri = self.open("lambda_scope.py", LAMBDA_SCOPE)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        for character in (15, 18):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": 2, "character": character}})
+            self.assertIsNone(answer["result"])
+        outer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 16}})
+        self.assertEqual(outer["result"]["contents"]["value"], "`x`: `str`")
+
+    def test_hover_resolves_global_and_nonlocal_declarations(self):
+        _, uri = self.open("global_decl.py", GLOBAL_DECL)
+        self.client.diagnostics(uri)       # the global assignment is a general-path warning; hover is independent
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 5, "character": 10}})
+        self.assertIsNone(answer["result"])
+        _, uri = self.open("global_read.py", GLOBAL_READ)
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 10}})
+        self.assertEqual(answer["result"]["contents"]["value"], "`y`: `str`")
+        _, uri = self.open("nonlocal_scope.py", NONLOCAL_SCOPE)
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 5, "character": 14}})
+        self.assertIsNone(answer["result"])
+
+    def test_hover_treats_a_comprehension_as_a_scope(self):
+        _, uri = self.open("comprehension_scope.py", COMPREHENSION_SCOPE)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        for character in (12, 15):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": 2, "character": character}})
+            self.assertIsNone(answer["result"])
+        outer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 10}})
+        self.assertEqual(outer["result"]["contents"]["value"], "`x`: `str`")
+
+    def test_a_type_error_in_a_strict_project_is_an_error(self):
+        (self.dir / "strict").mkdir()
+        (self.dir / "strict" / "ail.toml").write_text('entry = "type_error.py"\nstrict = true\n', encoding="utf-8")
+        _, uri = self.open("strict/type_error.py", TYPE_ERROR)
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 1)
+        self.assertEqual(item["range"]["start"]["line"], 1)
+        self.assertIn("declared int", item["message"])
 
     def test_save_republishes_and_close_clears(self):
         path, uri = self.open("edit.py", BROKEN)
@@ -205,6 +415,56 @@ class GeneralPath(LspCase):
             "textDocument": {"uri": uri}, "position": item["range"]["start"]})
         self.assertIn("**write instead:** return a sentinel", hover["result"]["contents"]["value"])
 
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_keeps_the_import_path_for_the_classifier(self):
+        folder = self.dir / "readonly-general"
+        folder.mkdir()
+        (folder / "dep.py").write_text("def value() -> int:\n    return 7\n", encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        uri = (folder / "main.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": GENERAL_IMPORT}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 2, item["message"])
+        self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_strict_project_keeps_its_error(self):
+        # The review's R3: the fallback probe lives in mkdtemp, but the project must still be found from
+        # the opened file's directory, so `strict = true` turns the blocker into an Error.
+        folder = self.dir / "readonly-strict"
+        folder.mkdir()
+        (folder / "ail.toml").write_text('entry = "blocker.py"\nstrict = true\n', encoding="utf-8")
+        (folder / "blocker.py").write_text(BLOCKER, encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        uri = (folder / "blocker.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": BLOCKER}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 1, item["message"])
+        self.assertNotIn("slow general path", item["message"])
+        self.assertIn("int | None", item["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_directory_review_probe_is_a_warning(self):
+        # The review's Probe A: an unused import in a 0555 directory must not turn the blocker into an
+        # Error. Its build needs the same AIL_PATH the check used, or `from dep import value` fails.
+        folder = self.dir / "readonly-review"
+        folder.mkdir()
+        (folder / "dep.py").write_text("def value() -> int:\n    return 7\n", encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        text = "from dep import value\ndef main() -> None:\n    print([b'a'])\nmain()\n"
+        uri = (folder / "main.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": text}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 2, item["message"])
+        self.assertEqual(item["code"], "general-path")
+        self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
+
     def test_strict_project_makes_the_blocker_an_error(self):
         (self.dir / "ail.toml").write_text('entry = "blocker.py"\nstrict = true\n', encoding="utf-8")
         _, uri = self.open("blocker.py", BLOCKER)
@@ -212,6 +472,20 @@ class GeneralPath(LspCase):
         self.assertEqual(item["severity"], 1)
         self.assertNotIn("slow general path", item["message"])
         self.assertIn("write instead:", item["message"])
+
+
+    def test_scripted_session_on_clean_type_error_and_fallback_files(self):
+        _, clean = self.open("clean.py", CLEAN)
+        self.assertEqual(self.client.diagnostics(clean), [])
+        (self.dir / "strict").mkdir()
+        (self.dir / "strict" / "ail.toml").write_text('entry = "type_error.py"\nstrict = true\n', encoding="utf-8")
+        _, type_error = self.open("strict/type_error.py", TYPE_ERROR)
+        self.assertEqual(self.client.diagnostics(type_error)[0]["severity"], 1)
+        _, fallback = self.open("blocker.py", BLOCKER)
+        (item,) = self.client.diagnostics(fallback)
+        self.assertEqual(item["severity"], 2)
+        self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
+        self.assertIn("int | None", item["message"])
 
 
 class Classify(unittest.TestCase):
@@ -256,6 +530,38 @@ class Classify(unittest.TestCase):
         lsp, _ = self.diagnoser(True)
         self.assertEqual(lsp.rewrite_of("no.\n  write instead: use `x`\n"), "use `x`")
         self.assertIsNone(lsp.rewrite_of("nothing to write"))
+
+
+class Remap(unittest.TestCase):
+    """Buffer diagnostics point at the opened file, never at the temporary copy."""
+
+    def setUp(self):
+        sys.path.insert(0, str(PACKAGING))
+        self.addCleanup(sys.path.remove, str(PACKAGING))
+        from ail_lang import lsp
+        self.lsp = lsp
+
+    def test_a_fallback_with_the_same_base_name_is_not_duplicated(self):
+        # The read-only fallback keeps the opened file's base name; replacing that base name after the
+        # full temp path was remapped used to duplicate the real path (`/ro/helper.py/ro/helper.py`).
+        opened, temporary = Path("/ro/helper.py"), Path("/tmp/ail-lsp-buffer-1/helper.py")
+        problems = [(temporary, 2, 1, 1, "syntax",
+                     "AIL source /tmp/ail-lsp-buffer-1/helper.py: '[' was never closed "
+                     "(/tmp/ail-lsp-buffer-1/helper.py, line 2)")]
+        (where, _, _, _, _, message), = self.lsp._remap_problems(problems, opened, temporary)
+        self.assertEqual(where, opened)
+        self.assertNotIn("ail-lsp-buffer", message)
+        self.assertNotIn(str(opened) + str(opened), message)
+        self.assertEqual(message, "AIL source /ro/helper.py: '[' was never closed (/ro/helper.py, line 2)")
+
+    def test_a_sibling_copy_with_a_different_name_is_remapped(self):
+        opened, temporary = Path("/real/helper.py"), Path("/real/.ail-lsp-abc.py")
+        problems = [(temporary, 2, 1, 1, "syntax",
+                     "AIL source /real/.ail-lsp-abc.py: bad (.ail-lsp-abc.py, line 2)")]
+        (where, _, _, _, _, message), = self.lsp._remap_problems(problems, opened, temporary)
+        self.assertEqual(where, opened)
+        self.assertNotIn(".ail-lsp-", message)
+        self.assertEqual(message, "AIL source /real/helper.py: bad (helper.py, line 2)")
 
 
 if __name__ == "__main__":
