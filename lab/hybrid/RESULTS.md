@@ -55,6 +55,17 @@ The 10 compare-lab programs use the performance case and arguments from `lab/com
 
 None.
 
+## Boundary probes
+
+Beyond the 40 programs, small probes exercised the hybrid's argument/result boundary; all matched CPython (stdout, exit status, last stderr line).
+
+| probe | native functions | match | what it covers |
+| --- | --- | --- | --- |
+| int64 edges fed from stdin | 9 (`add1`, `half`, `ident`, `isbig`, `joinn`, `mul`, `neg`, `total`, `twice`) | yes | values at and beyond ±2**63 through an argument, a list item, an attribute and a dict value; arithmetic and return overflow fall back inside the clone; `float`/`int` mismatch (`half(3)`); empty list; negative values; empty, non-ASCII and lone-surrogate strings |
+| mutation / two lists | 3 (`add1`, `second`, `upper`) | yes | a mutated list parameter and a call to another user function stay in Python (`alias`, `outer` rejected); two lists with a later bad argument; `list[float]`; empty and subnormal floats |
+| bool where `int` is annotated | 0 | yes | a `True`/`False` literal at a call site makes the analysis refuse the whole program (build-time conservatism, not a result difference); the program still runs in CPython |
+| standalone int64 probe | - | refused by name | `bash ~/tools/cmp.sh` default and `AIL_UNIFIED_FORCE=1` builds both stop with `OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)` on text/arithmetic ints beyond int64 |
+
 ## Functions kept in Python by the safety filters
 
 These functions were reported by the analysis but not accelerated; the reason is the `_select`/`_unsafe_body` refusal (the same reason was already enforced before this check).
