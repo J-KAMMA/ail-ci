@@ -82,9 +82,11 @@ CASES = [
     ('print_a_list', 'python',
      'def main() -> None:\n    xs = [True, False]\n    print(xs)\n\n\nmain()\n',
      '3:', ['print() given a list[int]', 'for x in xs: print(x)']),
+    # (one nested width field is built by the typed path -- `f"{x:{w}.2f}"` matches CPython -- but a
+    # spec with two fields still has no single int64 width to pass, so it stays refused)
     ('nested_format_spec', 'python',
-     'def main() -> None:\n    w = 8\n    x = 3.14159\n    print(f"{x:{w}.2f}")\n\n\nmain()\n',
-     '4:', ['a nested format spec', 'a literal spec']),
+     'def main() -> None:\n    w = 8\n    p = 2\n    x = 3.14159\n    print(f"{x:{w}.{p}f}")\n\n\nmain()\n',
+     '5:', ['more than one nested {field}', 'a literal spec']),
     ('star_args', 'python',
      'def f(*args: int) -> int:\n    return sum(args)\n\n\ndef main() -> None:\n    print(f(1, 2, 3))\n\n\nmain()\n',
      '1:', ['plain positional arguments', 'list every parameter by name']),
