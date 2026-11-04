@@ -929,5 +929,5 @@ def linear_regression_prop(xs: list[int], ys: list[int]) -> list[float]:
     return [slope, 0.0]
 
 
-def linear_repr(slope: float, intercept: float) -> str:
-    return "LinearRegression(slope=" + str(slope) + ", intercept=" + str(intercept) + ")"
+def linear_repr(fit: list[float]) -> str:
+    return "LinearRegression(slope=" + str(fit[0]) + ", intercept=" + str(fit[1]) + ")"

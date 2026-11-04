@@ -26,6 +26,100 @@ All 12 programs built with the default command in a temp directory (no cache). `
 
 Before: 10 of 12 build (8 typed, 2 general), 2 refused.
 
+## After (job-stats2_rr1-11042346)
+
+Same command on the same machine after the change.
+
+| program | result | notes |
+| --- | --- | --- |
+| 01_score_summary.py | typed | |
+| 02_modes.py | typed | |
+| 03_string_modes.py | typed | |
+| 04_float_stats.py | typed | |
+| 05_quantiles_report.py | typed | |
+| 06_covariance_correlation.py | typed | |
+| 07_regression.py | typed | `linear_regression`, `proportional=True`, `.slope` / `.intercept`, the printed form |
+| 08_normal_dist.py | refused | `statistics.NormalDist used here is not built (...)`; exit 3 |
+| 09_weighted_stats.py | typed | |
+| 10_grouped_stats.py | typed | `variance/stdev(xbar=)`, `pvariance/pstdev(mu=)` |
+| 11_geometric_harmonic.py | typed | `geometric_mean`, `harmonic_mean` |
+| 12_error_handling.py | typed | |
+
+After: 11 of 12 typed and matching CPython; 08 refused by name. The test
+`AIL_CURRENT/test_ail_std_statistics.py` compiles the 11 and compares stdout and exit code with CPython,
+asserts that 07, 10 and 11 carry no `built on the general path` note, and runs an edge-case program
+(empty, one element, negative values, values near 2**62).
+
+### What was added
+
+* `variance` / `stdev` with `xbar=` and `pvariance` / `pstdev` with `mu=`, over `list[int]` with an int
+  literal centre. CPython's `_ss` with a given centre is `sum((x - c)**2)` exactly, so `strt.ss_centre`
+  computes that in int64 and `strt.ratio_float` turns `ss / (n - 1)` (or `ss / n`) into the correctly
+  rounded double the way CPython's `float(Fraction)` does (55-bit quotient, sticky remainder: it works
+  for any int64 numerator/denominator, unlike the older `frac_float`). `stdev`/`pstdev` reuse
+  `sqrt_of_frac`. The value is an int when the fraction is whole and a float otherwise, so the same
+  print / float-spec / variable contexts as `variance(xs)` decide the helper; other uses are refused by
+  name.
+* `geometric_mean(list[int])`: `exp(fsum(log(float(x))) / n)`, with CPython's single error text
+  `geometric mean requires a non-empty dataset containing positive numbers` for an empty or
+  non-positive list. Built for any int64 data (the logs are floats, so no overflow).
+* `harmonic_mean(list[int])`: CPython computes each `1 / x` as a correctly rounded float
+  (`ratio_float(1, x)`, which is int/int true division, not `1.0 / float(x)`), sums those doubles
+  exactly, and rounds `n / total` once. The typed helper sums them as scaled int64 integers and divides
+  with `ratio_float`. That fits int64 only for some data, so the lowering computes the same fit check at
+  build time (and compares with CPython's own `harmonic_mean` as a guard) and refuses the rest by name:
+  the default build then uses the general path, which handles the large cases
+  (`harmonic_mean([2**62, 2**63-1])` prints `6.148914691236517e+18` on the general path). A one-element
+  literal list is lowered to its int value, exactly as CPython returns it.
+* `linear_regression(x, y)` over `list[int]`: CPython 3.12's float algorithm — `fsum` of the two lists
+  over n, the deviations, `math.sumprod` (the existing `sumprod_floats`, CPython's TripleLength
+  compensated sum), `sxy / sxx`, and `ybar - slope * xbar`; `proportional=True` uses the exact integer
+  products of `math.sumprod`, rounded once. Error texts are CPython's three.
+* The result object: `dunders.rewrite` runs in `pyfunc` **before** `stdlib4.rewrite` injects the
+  statistics helpers, so a class defined in `strt.py` may have `__init__` only — an injected `__repr__`
+  is refused (`dunder method ...; only __init__ is supported here`) and `print(obj)` is refused for a
+  class with no printable form. Finding for the owners of `AIL_CURRENT/python/pkg-v12/pyfunc.py` /
+  `dunders.py`: the dunder pass must also see injected helper classes (run `dunders.rewrite` after the
+  library rewrites, or let an injected class opt into `__repr__`). Worked around inside `statlib.py`:
+  `linear_regression` returns `[slope, intercept]`, and the lowering rewrites `.slope` / `.intercept`
+  reads to `[0]` / `[1]` and `print(fit)` / `str(fit)` / a bare f-string field to
+  `linear_repr(fit)` (an injected helper returning `LinearRegression(slope=..., intercept=...)`). Other
+  uses of the result are refused by name.
+
+### Limits recorded here
+
+* `variance(xs, xbar=c)` (and `stdev`) with a centre far from the data: the exact sum of squares leaves
+  int64, so the typed path refuses by name and the general path stops with `OverflowError: integer
+  overflow in * (ints are 64-bit; --exact-int gives exact ints)` — the same as before this change
+  (the general path's statistics prelude also computes that square in 64-bit). A centre near the data
+  (the `xbar=mean` use) stays in int64 and is exact: `variance([2**62, 2**62+2], xbar=2**62)` is `4`.
+* `linear_regression(..., proportional=True)` needs the literal values at build time (to prove the exact
+  int product sums fit int64) and the general path does not publish `linear_regression` at all, so a
+  refused proportional form makes the whole program unbuildable — the same outcome as before this
+  change (07 did not build at all). Non-proportional regression over any `list[int]` is built, and
+  rounds exactly like CPython for values near 2**62.
+
+### Probes (job-stats2_rr1, in `/tmp/probes`, `bash .agent/cmp.sh <probe> $PWD`)
+
+| probe | default build | forced general build |
+| --- | --- | --- |
+| p_centre_edges.py (variance/pvariance/stdev/pstdev with a centre, float spec, one point, negatives, whole-vs-fraction, empty, too-short) | typed, same stdout/exit as CPython | same |
+| p_centre_big.py (centre near 2**62: `variance(..., xbar=2**62)` is `4`, pstdev, stdev) | typed, same | same |
+| p_centre_computed.py, p_centre_computed2.py (centre held in a variable) | refused by name, general path same | same |
+| p_centre_far.py (`variance([2**62, 2**62+2], xbar=0)`) | refused by name; general path stops with `OverflowError` (pre-existing, see Limits) | same stop |
+| p_mean_edges.py (geometric/harmonic: empty, one point, all ones, positive, zero, negative) | typed, same | same |
+| p_mean_zero.py (`harmonic_mean` containing 0) | refused by name, general path same (`0`, `0`) | same |
+| p_mean_big.py (geometric near 2**62 typed; harmonic near 2**62 falls back) | same stdout/exit | same |
+| p_mean_arg.py (geometric/harmonic of a list parameter) | typed, same | same |
+| p_alias.py (a literal list aliased and then appended to) | refused by name (not known immutable), general path same | same |
+| p_sources.py (data through an attribute, a dict value and a list item) | refused by name, general path same | same |
+| p_linear_edges.py (print / `.slope` / `.intercept` / float spec, proportional, negative literals, constant x, one point, length mismatch) | typed, same stdout/exit, non-proportional and proportional | general path does not publish `linear_regression` (build fails, as before) |
+| p_linear_arg.py (non-proportional regression of two list parameters) | typed, same | refused (general path) |
+| p_linear_big.py (x near 2**62: CPython `x is constant`, AIL exits the same) | typed, same stdout/exit | refused (general path) |
+| p_linear_refused.py (`print(linear_regression(a, b, proportional=True))` with literal-bound names) | typed, same | refused (general path) |
+| p_linear_prop_big_refused.py (proportional with products above int64) | refused by name (`an exact product of this data leaves 64 bits`) | refused (general path) |
+| p_linear_prop_arg_refused.py (proportional of parameters) | refused by name (`both lists must be literal ints`) | refused (general path) |
+
 ## Before the fixes
 
 | program | result | first message |

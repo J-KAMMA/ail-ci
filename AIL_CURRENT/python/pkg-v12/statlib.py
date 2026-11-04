@@ -119,6 +119,9 @@ class Stat:
                 return 'float'
             if left == 'int' and right == 'int':
                 return 'int'
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            kind = self.scalar_kind(node.operand, env)
+            return kind if kind in ('int', 'float') else None
         if isinstance(node, ast.Subscript):
             base = self.list_elem(node.value, env)
             if base in ('int', 'float', 'str') and not isinstance(node.slice, ast.Slice):
@@ -343,17 +346,37 @@ class Stat:
         """The typed path refuses a __repr__ on an injected class (dunders runs before the helper is added), so
         linear_regression returns [slope, intercept]; lower the two field reads and the text forms here."""
         linear = (new_name('linear_regression_int'), new_name('linear_regression_prop'))
-        scopes = {}
         for node in ast.walk(self.tree):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Call) \
-                    and isinstance(node.value.func, ast.Name) and node.value.func.id in linear:
-                target = node.targets[0] if isinstance(node, ast.Assign) else node.target
-                if not isinstance(target, ast.Name):
-                    refuse(node, 'statistics.linear_regression: assign the result to one name (fit = ...) here')
-                scope = self.enclosing(node)
-                scopes.setdefault(id(scope), (scope, {}))[1].setdefault(target.id, []).append(node)
+            for child in ast.iter_child_nodes(node):
+                child._st_parent = node
         replacements = {}
-        for scope, names in scopes.values():
+        assigned = {}
+        for node in ast.walk(self.tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in linear):
+                continue
+            parent = getattr(node, '_st_parent', None)
+            if isinstance(parent, ast.Attribute) and parent.value is node and parent.attr in ('slope', 'intercept'):
+                index = 0 if parent.attr == 'slope' else 1
+                replacements[id(parent)] = ast.copy_location(
+                    ast.Subscript(value=node, slice=ast.Constant(value=index), ctx=ast.Load()), parent)
+            elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
+                    and parent.func.id in ('print', 'str') and node in parent.args:
+                replacements[id(node)] = ast.copy_location(self.call('linear_repr', node), node)
+            elif isinstance(parent, ast.FormattedValue) and parent.value is node \
+                    and parent.format_spec is None and parent.conversion in (-1, 115):
+                replacements[id(node)] = ast.copy_location(self.call('linear_repr', node), node)
+            elif isinstance(parent, (ast.Assign, ast.AnnAssign)):
+                target = parent.targets[0] if isinstance(parent, ast.Assign) else parent.target
+                if not isinstance(target, ast.Name):
+                    refuse(parent, 'statistics.linear_regression: assign the result to one name (fit = ...) here')
+                scope = self.enclosing(parent)
+                assigned.setdefault(id(scope), (scope, {}))[1].setdefault(target.id, []).append(parent)
+            elif isinstance(parent, ast.Expr):
+                continue
+            else:
+                refuse(node, 'statistics.linear_regression: the result is used here in a way that is not built '
+                       '(print it, format it, or read .slope / .intercept)')
+        for scope, names in assigned.values():
             nodes = self.scope_nodes(scope)
             for name, assigns in names.items():
                 stores = [n for n in nodes if isinstance(n, ast.Name) and n.id == name
@@ -371,11 +394,11 @@ class Stat:
                     elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
                             and parent.func.id in ('print', 'str') and use in parent.args:
                         replacements[id(use)] = ast.copy_location(
-                            self.call('linear_repr', self.subscript(name, 0), self.subscript(name, 1)), use)
+                            self.call('linear_repr', ast.Name(id=name, ctx=ast.Load())), use)
                     elif isinstance(parent, ast.FormattedValue) and parent.value is use \
                             and parent.format_spec is None and parent.conversion in (-1, 115):
                         replacements[id(use)] = ast.copy_location(
-                            self.call('linear_repr', self.subscript(name, 0), self.subscript(name, 1)), use)
+                            self.call('linear_repr', ast.Name(id=name, ctx=ast.Load())), use)
                     else:
                         refuse(assigns[0], 'statistics.linear_regression: the result is used here in a way that '
                                'is not built (print it, format it, or read .slope / .intercept)')
