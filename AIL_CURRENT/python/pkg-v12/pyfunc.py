@@ -31039,11 +31039,19 @@ def _elide_readonly_field_alias_in_function(fn, class_names, info, funcs):
     own = list(_alias_own_nodes(fn))
     params = {arg.arg for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]}
     stores = {}
+    declared_outer = set()
     for node in own:
         if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             stores[node.id] = stores.get(node.id, 0) + 1
         elif isinstance(node, ast.ExceptHandler) and node.name:
             stores[node.name] = stores.get(node.name, 0) + 1
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            # A `global`/`nonlocal` name is a binding outside this function's locals. Eliding its
+            # only store (`x = o.f`) would leave the outer slot unwritten, so neither an alias
+            # name nor its owner may be declared outer, wherever the declaration sits in the
+            # function. The block-local check below still catches `o`; this catches `x` and any
+            # declaration that precedes the alias's live range.
+            declared_outer.update(node.names)
     parents = {}
     for node in ast.walk(fn):
         for child in ast.iter_child_nodes(node):
@@ -31053,7 +31061,7 @@ def _elide_readonly_field_alias_in_function(fn, class_names, info, funcs):
     changed = 0
     valid = []
     for body, index, statement, (x, o, field) in candidates:
-        if x in params or stores.get(x, 0) != 1:
+        if x in params or x in declared_outer or o in declared_outer or stores.get(x, 0) != 1:
             continue
         last = index
         for later in range(index, len(body)):

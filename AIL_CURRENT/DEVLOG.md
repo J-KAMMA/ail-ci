@@ -1,3 +1,19 @@
+## 2026-11-04 -- arena1 S2 fix: outer-scope aliases keep their store
+
+Review 1 found that a `global` (or `nonlocal`) alias name was elided: the `Global`/`Nonlocal`
+check ran only over the alias's live range, so a declaration before the range was missed and
+`global g; g = t.par` lost its only store (HEAD printed `2\n1`, CPython `2\n2`).  The pass now
+scans the whole function for `Global`/`Nonlocal` declarations and refuses the elision when either
+the alias name or its owner is declared outer.  The typed path then falls back to the general
+path, which performs the store correctly.
+
+Added `test_global_and_nonlocal_aliases_match_cpython` to `test_ail_readonly_field_alias.py`
+(global alias, global owner, nonlocal alias; default and `AIL_UNIFIED_FORCE=1`).  Probes
+`/tmp/probes/p10_global.py`, `p10b_global_owner.py`, `p10c_nonlocal.py`, `p10d_global_read.py`
+and `p10e_normal.py` match CPython on both builds; the normal shape still reads `f_nm`/`f_par`
+in place.  `test_ail_readonly_field_alias`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass at `-j 2`.
+
 ## 2026-11-04 -- arena1 S2 fix: shadowing lambda parameters keep the alias copy
 
 The read-only field-alias pass substituted `o.f` inside a sort-key lambda whose parameter

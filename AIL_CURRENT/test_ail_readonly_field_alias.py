@@ -160,6 +160,45 @@ def main() -> int:
 main()
 '''
 
+GLOBAL_READONLY = '''class T:
+    nm: list[str]
+    par: list[int]
+    def __init__(self, nm: list[str], par: list[int]) -> None:
+        self.nm = nm
+        self.par = par
+
+g: list[int] = [1]
+t_global: T = T(["a"], [1, 2])
+
+def f_global(t: T) -> int:
+    global g
+    g = t.par
+    return len(g)
+
+def f_owner() -> int:
+    global t_global
+    par = t_global.par
+    return len(par)
+
+def outer(t: T) -> int:
+    h: list[int] = [9]
+    def inner() -> int:
+        nonlocal h
+        h = t.par
+        return len(h)
+    n = inner()
+    return n * 10 + len(h)
+
+def main() -> int:
+    print(f_global(T(["a"], [1, 2])))
+    print(len(g))
+    print(f_owner())
+    print(outer(T(["a"], [1, 2])))
+    return 0
+
+main()
+'''
+
 FORCE_SMOKE = '''def f() -> int:
     xs = [1, 2]
     ys = xs
@@ -254,6 +293,15 @@ class ReadonlyFieldAliasNativeTests(unittest.TestCase):
                             ('readonly_cpython_forced', {'AIL_UNIFIED_FORCE': '1'})):
             with self.subTest(build=name):
                 built = self.compile_with(name, READONLY, extra, syntax='python')
+                self.check_run(built, expected.stdout.decode())
+
+    def test_global_and_nonlocal_aliases_match_cpython(self):
+        expected = cpython_output(GLOBAL_READONLY)
+        self.assertEqual(expected.returncode, 0, expected.stderr.decode(errors='replace'))
+        for name, extra in (('readonly_outer', None),
+                            ('readonly_outer_forced', {'AIL_UNIFIED_FORCE': '1'})):
+            with self.subTest(build=name):
+                built = self.compile_with(name, GLOBAL_READONLY, extra, syntax='python')
                 self.check_run(built, expected.stdout.decode())
 
     def test_forced_general_path_still_runs(self):
