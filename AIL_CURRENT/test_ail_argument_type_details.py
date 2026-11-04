@@ -42,6 +42,19 @@ class ArgumentTypeDetailsTests(unittest.TestCase):
         self.mismatch('fn take(value:int)->int {return value;} fn main()->int {let parts:list[bytes]=[b"x"];return take(value=parts);}',
                       'int', 'list[bytes]', 'bytes-list parameter across a function boundary is unsupported; pass joined bytes or an int')
 
+    def test_text_argument_keeps_the_call_site_statement_location(self):
+        source = self.source('# 日本語😀\nfn take(value:int)->int {return value;}\n'
+                             'fn main()->int {return take("wrong");}')
+        status, report = self.check(source)
+        self.assertEqual(status, 1, report)
+        diagnostic, = report['diagnostics']
+        self.assertEqual(diagnostic['message'], 'passing str where take() wants int')
+        self.assertEqual(diagnostic['type_details'], dict(operation='argument', callee='take',
+                         parameter='value', parameter_index=0, expected='int', actual='str'))
+        self.assertEqual((diagnostic['path'], diagnostic['function'], diagnostic['line'],
+                          diagnostic['column'], diagnostic['location_kind']),
+                         (str(source), 'main', 3, 17, 'source_statement'))
+
     def test_reversed_keywords_report_bound_parameter_and_source_order(self):
         prefix = 'fn take(left:int,right:int)->int {return left+right;}\nfn main()->int {return '
         diagnostic = self.mismatch(prefix + 'take(right="wrong",left=1);}', 'int', 'str',

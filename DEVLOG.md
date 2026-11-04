@@ -1,3 +1,27 @@
+## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
+
+`test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda
+(#361): `take("wrong")` against `fn take(x:int)` reported `line 2, column 1`,
+`location_kind: function_declaration`, `operation: parameter`, `signature_override`, and the
+pyfunc message rather than the call-site statement at `line 3, column 17` with an `argument`
+record.  The export carries one squashed commit, so `git bisect` was not possible; tracing the
+two suspect brace-to-Python conversion jobs instead pointed at propagation: `_claim` now returns
+`str` for the literal, `_propagate_signatures_pass` feeds it to `_param_kinds`, and
+`_explicit_annotation_conflicts` raised the numeric-style `signature_override` refusal before
+`_call_user_func` could refuse the argument at the call.  `_explicit_annotation_conflicts` now
+raises only for a NUMERIC caller claim (int/float); text, bytes and list claims are dropped so
+the existing per-call guard reports the argument, callee, parameter index, expected/actual and
+the original `.ail` statement position through `source_map`.  Numeric override behaviour
+(float/int, int/str annotation conflicts) is unchanged.
+
+`test_ail_sdk.py` 30/31 -> 31/31; `test_ail_argument_type_details.py` 11/15 -> 16/16 with the
+new source-position regression; 73 tests across test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, test_ail_type_details, test_ail_source_check,
+test_ail_float_argument_widening and test_ail_refusal_messages pass (one skip).
+`compileall -j 2` passes with `language_examples/binary_numbers.py` excluded: its line 2 comment
+contains `encoding:` and is the separate PEP 263 break PR #376 fixes.  Added DIFFERENCES row
+`C?-job-sdkdiag1-11041645-1`.
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
