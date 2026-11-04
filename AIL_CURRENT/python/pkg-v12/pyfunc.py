@@ -38098,7 +38098,16 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     if not library and fns[-1].name in owned_bytes_fns:
         raise Unsupported('the entry function cannot return checked bytes')
     if not library and fns[-1].name in owned_str_fns:
-        raise Unsupported('the entry function cannot return checked str')
+        if fns[-1].returns is None:
+            # `_owned_unannotated_str_fns` infers an owned str return for an UNANNOTATED helper so
+            # a CALLER can adopt the value.  The entry point has no caller to hand ownership to:
+            # its ABI is the legacy out-parameter one.  Drop the inferred ownership for the entry
+            # here so the definition it emits and every call site in this compilation agree.  An
+            # explicit `-> str` (rewritten to `__ail_checked_str__`) is still refused, because
+            # there the source itself asked for the owned ABI.
+            owned_str_fns.discard(fns[-1].name)
+        else:
+            raise Unsupported('the entry function cannot return checked str')
     # AIL_TASK_gridcallconv_20260915.md: which of EACH function's own 'array' parameters are read
     # as a rectangular grid -- the same determination `_one_function` makes for itself via
     # `ctx.gridparam` (line ~9959), but settled here, once, for every function in `fns`, so a CALL
