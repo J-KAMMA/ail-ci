@@ -37708,11 +37708,19 @@ def _script_entry(tree, names):
     the real entry from the call the script itself makes, without moving any generated definition
     or changing a source line.  The call is usually inside the standard
     `if __name__ == '__main__':` guard, so the guard's body is searched too."""
+    def main_guard(node):
+        test = node.test
+        return (isinstance(test, ast.Compare) and isinstance(test.left, ast.Name)
+                and test.left.id == '__name__' and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.Eq) and len(test.comparators) == 1
+                and isinstance(test.comparators[0], ast.Constant)
+                and test.comparators[0].value == '__main__')
+
     def expressions(nodes):
         for node in reversed(nodes):
             if isinstance(node, ast.Expr):
                 yield node
-            elif isinstance(node, ast.If):
+            elif isinstance(node, ast.If) and main_guard(node):
                 yield from expressions(node.orelse)
                 yield from expressions(node.body)
 
