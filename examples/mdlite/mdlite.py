@@ -144,6 +144,14 @@ def render_inline(text):
     return "".join(parts)
 
 
+class ListItem:
+    """One list item with its optional nested child items."""
+
+    def __init__(self, content):
+        self.content = content
+        self.children = []
+
+
 class Markdown:
     """A block parser that walks the input lines once and collects HTML."""
 
@@ -262,34 +270,36 @@ class Markdown:
         first = parse_item(self.lines[self.index])
         base = first[0]
         kind = first[1]
-        items = []
+        top = []
+        current = None
         while self.index < len(self.lines):
             item = parse_item(self.lines[self.index])
             if item is None:
                 break
             indent, item_kind, content = item
             if indent <= base:
-                if item_kind != kind:
+                if item_kind != kind or indent != base:
                     break
-                items.append([content, []])
+                current = ListItem(content)
+                top.append(current)
             elif indent >= base + 2:
-                if not items:
+                if current is None:
                     break
-                items[len(items) - 1][1].append(content)
+                current.children.append(content)
             else:
                 break
             self.index += 1
         lines = ["<" + kind + ">"]
-        for content, children in items:
-            if children:
-                lines.append("<li>" + render_inline(content))
+        for item in top:
+            if item.children:
+                lines.append("<li>" + render_inline(item.content))
                 lines.append("<" + kind + ">")
-                for child in children:
+                for child in item.children:
                     lines.append("<li>" + render_inline(child) + "</li>")
                 lines.append("</" + kind + ">")
                 lines.append("</li>")
             else:
-                lines.append("<li>" + render_inline(content) + "</li>")
+                lines.append("<li>" + render_inline(item.content) + "</li>")
         lines.append("</" + kind + ">")
         self.out.append("\n".join(lines))
 

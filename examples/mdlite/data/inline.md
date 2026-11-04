@@ -10,7 +10,7 @@ Unmatched code: a lone backtick ` here.
 
 A link with no target: [missing] stays plain.
 
-Non-ASCII text: こんにちは世界, café, and an emoji 🙂 here.
+Non-ASCII text: こんにちは世界, café, and an emoji ✨ here.
 
 `code with <tags> & "quotes"` is escaped, and **強*em*調** nests.
 
