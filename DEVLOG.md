@@ -1,3 +1,24 @@
+## 2026-11-04 -- rbguide1: re-apply the guide (job-guide1-11041926)
+
+Re-applied the accepted `guide1` change (`git diff b796a01..job-guide1-11041926`) on this tree.
+It adds `docs/guide/` (README plus four chapters, 43 buildable samples), `test_ail_guide.py`
+(builds every sample, runs the ones that build, compares stdout and exit status with CPython 3.12,
+and checks refusal, strict, general-path, exact-int and stop samples), registers it in
+`tests.d/test_ail_guide.txt`, and drops the `GH_MODELS_TOKEN`/`ghm.key` plumbing from
+`.github/workflows/agent-worker.yml`.  The workflow file matched the job's base, so the patch
+applied cleanly; `manifest.d` was regenerated rather than taken from the patch.
+`tools/diff_ids.py` is not present on this tree (as earlier entries note); `tools/update_manifest.py`
+was run and `--check` passes.  No compiler or runtime change, so no DIFFERENCES row.
+Probes (17, `bash ~/tools/cmp.sh`, default and general builds) match CPython: typed numbers,
+containers with empty/negative/aliased lists, dataclass fields, text/bytes boundaries, files/argv,
+errors (try/else/finally, KeyError/ZeroDivisionError/ValueError/custom class), `sys.exit(3)`,
+math/re/json/collections/heapq+bisect/statistics, and `ail_ffi` cbrt.  The four int64-overflow
+provenances (argument, list item, attribute, dict value) stop with the documented
+`OverflowError: integer overflow in + ...`, exit 1; `eval` is refused with exit 3, `numpy` with
+exit 2, the general-path note appears and `--strict` refuses with exit 3, and `--exact-int`
+matches CPython.  Tests on the final commit: `test_ail_guide` (45), `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` (25 together, 1 skip).
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
