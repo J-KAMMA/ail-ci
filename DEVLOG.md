@@ -1,3 +1,27 @@
+## 2026-11-04 -- fz227 review: gate the exact helper, restore the small-int fast path, `/=`
+
+Review fixes on top of the fz227 commit. (1) The exact int/int helper was pulled in
+unconditionally by `FDIV` and `OBJ2` (and `OBJ2` inlined it), so `f_only.py` (typed, float-only
+`/`) and `a_nodiv.py` (general, no division) grew a dead `ail__idiv_exact` and `#include
+<math.h>`. `FDIV` now only needs `DIE`; a new `IFDIV` fragment holds `ail_fdiv_i` and needs
+`IDIVEXACT`; the boxed helper and the non-big operator arm sit in a `/*D<*/.../*D|*/.../*D>*/`
+block resolved from a new `biggate` piece `idiv` (`ail_op_truediv`, `ail_op_idiv`,
+`ail__idiv_exact`), computed for every program, not only the big-int ones. Both probes' C is now
+byte-identical to the base commit (`diff` empty); a program that reaches `/` still gets the
+helper. (2) `test_ail_fz227.py::FLOW_CASE` used values (`2**62 / 3`, `INT64_MAX / 7`) where both
+operands convert exactly, so it did not reproduce: with those values the base build's stdout was
+identical. It now uses pairs such as `6976454540695398849 / 3684474835157277` (base: DIFF in
+both builds; HEAD: same), and adds `AUG_CASE` (`/=`), bools and the +-2**53 boundary. That
+exposed a fourth lowering site: the legacy numeric-value path behind `/=`, `a = a / b` and
+`a += b / c` always took its float formula. It now uses the int formula when neither operand is
+floating. (3) Every int/int `/` took the exact path (128-bit division): about 8x on a
+division-only loop. `ail_fdiv_i`, the unified scalar path and the boxed non-big arm now divide
+as doubles when both operands are within +-2**53 (exactly representable, one IEEE division
+rounds the exact quotient) and take the exact path otherwise; a 20M-iteration list-fed loop
+runs at the base time again (0.02 s both). `needs_libm` knows `IDIVEXACT`/`IFDIV`. `prog.c` for
+`f_only` (typed) and `a_nodiv` (general) equals base byte for byte; `test_ail_fz227` 4/4,
+`test_ail_safetynet` green.
+
 ## 2026-11-04 -- fz227: int / int true division is exact (job-fz227-11050703)
 
 The daily fuzzer (seed 2076120023) printed `((4611686018427387904 // 52) / 3)`: CPython

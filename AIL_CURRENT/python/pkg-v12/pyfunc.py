@@ -13656,8 +13656,15 @@ def _numeric_value_expression(node, ctx):
                 if key in types:ctx.types[key]=types[key]
                 else:ctx.types.pop(key,None)
             ctx.comprehension_cnames=names
-        tag='1' if isinstance(node.op,ast.Div) else '_nb_left.floating || _nb_right.floating'
-        return ('({ _ail_nb_value _nb_left=%s; _ail_nb_value _nb_right=%s; _ail_nb_value _nb_result={0}; _nb_result.floating=%s; if (_nb_result.floating) _nb_result.f=%s; else _nb_result.i=%s; _nb_result; })').replace("_ail_nb_value",_numeric_value_type(ctx))%(left,right,tag,formulas[1],formulas[0])
+        if isinstance(node.op,ast.Div):
+            # `/` always produces a float, but an int/int pair must use CPython's exact true
+            # division, not two conversions to double (the old numeric-value path rounded them)
+            tag='1'
+            float_expr='((_nb_left.floating || _nb_right.floating) ? %s : %s)'%(formulas[1],formulas[0])
+        else:
+            tag='_nb_left.floating || _nb_right.floating'
+            float_expr=formulas[1]
+        return ('({ _ail_nb_value _nb_left=%s; _ail_nb_value _nb_right=%s; _ail_nb_value _nb_result={0}; _nb_result.floating=%s; if (_nb_result.floating) _nb_result.f=%s; else _nb_result.i=%s; _nb_result; })').replace("_ail_nb_value",_numeric_value_type(ctx))%(left,right,tag,float_expr,formulas[0])
     if isinstance(node,ast.IfExp):
         return '((%s) ? (%s) : (%s))' % (_truthy(node.test,ctx),_numeric_value_expression(node.body,ctx),_numeric_value_expression(node.orelse,ctx))
     if isinstance(node,ast.UnaryOp) and isinstance(node.op,(ast.USub,ast.UAdd)) and _numeric_expression_needed(node.operand,ctx):
@@ -14410,11 +14417,12 @@ def _expr(node, ctx):
             ctx.parts.add('FDIVF')           # CPython words a float division by zero differently from int / int
             return _ordered_numeric_pair(node.left, node.right, ctx,
                                          'ail_fdiv_f((double)({}), (double)({}))')
-        ctx.parts.add('FDIV')
         if _etype(node.left, ctx) == INT and _etype(node.right, ctx) == INT:
             # int / int is CPython's exact long_true_divide, not two rounded conversions
+            ctx.parts.add('IFDIV')
             return _ordered_numeric_pair(node.left, node.right, ctx,
                                          'ail_fdiv_i((int64_t)({}), (int64_t)({}))')
+        ctx.parts.add('FDIV')
         return _ordered_numeric_pair(node.left, node.right, ctx,
                                      'ail_fdiv((double)({}), (double)({}))')
     if (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.FloorDiv, ast.Mod))

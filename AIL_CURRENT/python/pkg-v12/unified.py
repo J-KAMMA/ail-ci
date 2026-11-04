@@ -2910,8 +2910,12 @@ def _binop(comp, node, ctx, t):
         elif isinstance(op, ast.RShift):
             guarded('%s < 0' % b, ['%s = %s >= 63 ? (%s < 0 ? -1 : 0) : (%s >> %s);' % (r, b, a, a, b)])
         elif isinstance(op, ast.Div):
-            # int / int is CPython's exact long_true_divide, not two rounded conversions
-            guarded('%s == 0' % b, ['%s = ail__idiv_exact(%s, %s);' % (r, a, b)])
+            # int / int is CPython's exact long_true_divide, not two rounded conversions; both
+            # operands within +-2**53 are exact as doubles, so one IEEE division is enough there
+            guarded('%s == 0' % b,
+                    ['%s = ((((uint64_t)%s + ((uint64_t)1 << 53)) | ((uint64_t)%s + ((uint64_t)1 << 53))) >> 54)'
+                     ' ? ail__idiv_exact(%s, %s) : (double)%s / (double)%s;'
+                     % (r, a, b, a, b, a, b)])
         else:
             raise Conflict((ctx.u.name, '*'), 'int operator %s' % type(op).__name__)
         return r

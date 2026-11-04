@@ -8,8 +8,10 @@ rounds each operand first, so once either is beyond 2**53 the result can be one 
 
 The typed path emitted the two conversions, the general path's scalar specialisation did too,
 and both boxed operator runtimes did. They now share `ail__idiv_exact`, CPython's 55-bit
-quotient plus sticky remainder, rounded once. Each program is compared with CPython on the
-general build, the IR build and the legacy (AIL_IR=0) build.
+quotient plus sticky remainder, rounded once; both operands within +-2**53 keep the old double
+division (their conversions are exact, so one IEEE division already rounds the exact quotient).
+Each program is compared with CPython on the general build, the IR build and the legacy
+(AIL_IR=0) build.
 """
 import os
 import subprocess
@@ -28,6 +30,12 @@ DIRECT_CASE = r'''def main() -> None:
     print(9223372036854775807 / 3)
     print(-9223372036854775807 / 7)
     print(9007199254740993 / 2)
+    # the +-2**53 boundary of the double fast path
+    print(9007199254740991 / 3)
+    print(-9007199254740992 / 3)
+    print(9007199254740992 / 3)
+    print(-9007199254740993 / 3)
+    print(0 / 3, 0 / -3)
 
 
 main()
@@ -45,16 +53,30 @@ def divide(a: int, b: int) -> float:
 
 
 def main() -> None:
-    nums = [4611686018427387904, 9223372036854775807, -4611686018427387904]
-    divisors = [3, 7, -3]
+    # each pair rounds at least one operand as a double; these differ on the old lowering
+    nums = [6976454540695398849, 4865782901354085936, -931725450029404348]
+    divisors = [3684474835157277, -7048155917072976836, -7491968275375482579]
     for i in range(3):
         print(nums[i] / divisors[i])
-    print(divide(4611686018427387904, 3), divide(-4611686018427387904, 3))
-    d = {"a": 4611686018427387904, "b": 3}
+    print(divide(6976454540695398849, 3684474835157277), divide(-931725450029404348, -7491968275375482579))
+    d = {"a": 6976454540695398849, "b": 3684474835157277}
     print(d["a"] / d["b"])
-    box = Box(4611686018427387904)
-    print(box.v / 3)
+    box = Box(4865782901354085936)
+    print(box.v / -7048155917072976836)
     print(0 / 3, 0 / -3)
+
+
+main()
+'''
+
+AUG_CASE = r'''def main() -> None:
+    a = 6976454540695398849
+    a /= 3684474835157277
+    print(a)
+    b = 4865782901354085936
+    b /= -7048155917072976836
+    print(b)
+    print(True / 2, False / 3)
 
 
 main()
@@ -122,6 +144,9 @@ class Fz227Tests(unittest.TestCase):
 
     def test_flow(self):
         self.check('flow', FLOW_CASE)
+
+    def test_aug(self):
+        self.check('aug', AUG_CASE)
 
     def test_zero(self):
         self.check('zero', ZERO_CASE)
