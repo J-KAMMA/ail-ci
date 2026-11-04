@@ -1,10 +1,10 @@
-"""docs/guide cannot rot: every code sample in it is built by the compiler and run, and printed
-output is checked against CPython 3.12.
+"""docs/guide cannot rot: every code sample in it is built by the compiler, every sample that
+builds is run, and printed output is checked against CPython 3.12.
 
 The guide uses the tutorial's sample format (`docs/tutorial.md`,
 `AIL_CURRENT/test_ail_tutorial.py`):
 
-    <!-- sample: NAME [general] [refuse] [static] [exact] [stop] [args=A,B] -->
+    <!-- sample: NAME [general] [refuse] [static] [missing] [exact] [stop] [args=A,B] -->
 
 followed by a ```python block and the optional blocks that follow it:
 
@@ -21,6 +21,7 @@ Rules checked for each sample (the mode is in the comment):
 * general: builds without --strict and says so in a note, refuses with --strict (exit 3), output equals CPython's;
 * refuse: the compiler exits 3 and builds nothing;
 * static: the compiler exits 2 and builds nothing (a static big-int refusal);
+* missing: the compiler exits 2 and builds nothing (an unavailable import);
 * exact: builds with --exact-int, stdout and exit code equal CPython's;
 * stop: builds with --strict, runs, prints the ```stdout block, exits 1, and its stderr contains the
   ```stderr lines; where CPython also fails, the AIL executable must fail too.
@@ -149,6 +150,12 @@ class Guide(unittest.TestCase):
             if "refuse" in flags:
                 done = self.compile(work, name, extra, name + ".bin")
                 self.assertEqual(done.returncode, 3, name + ": " + done.stderr)
+                self.assertFalse(Path(work, name + ".bin").exists())
+                self.check_lines(sample["refusal"], done.stdout + done.stderr, name, work)
+                return
+            if "missing" in flags:
+                done = self.compile(work, name, extra, name + ".bin")
+                self.assertEqual(done.returncode, 2, name + ": " + done.stderr)
                 self.assertFalse(Path(work, name + ".bin").exists())
                 self.check_lines(sample["refusal"], done.stdout + done.stderr, name, work)
                 return

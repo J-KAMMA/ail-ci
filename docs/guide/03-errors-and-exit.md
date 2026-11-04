@@ -1,6 +1,6 @@
 # 3. Errors and exit status
 
-Errors are ordinary Python exceptions. Name the kinds you catch; there is no bare `except`.
+Errors are ordinary Python exceptions. Catch the kinds you expect by name.
 Uncaught errors print a message on stderr and exit with status 1.
 
 ## try, except, else and finally

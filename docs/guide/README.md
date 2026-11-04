@@ -1,8 +1,10 @@
 # AIL user guide
 
-This guide is for AIL 0.1. It shows small programs, and every code sample in it is built by the
-compiler and run by `AIL_CURRENT/test_ail_guide.py`; its stdout is compared byte for byte with
-CPython 3.12. The sample style is the one used by [the tutorial](../tutorial.md).
+This guide is for AIL 0.1. `AIL_CURRENT/test_ail_guide.py` builds every code sample with the
+compiler. Every sample that builds is run; its stdout and exit status are compared with CPython
+3.12, and a sample that shows a run-time stop is checked against the text shown here instead. A
+sample that shows a refusal is checked against the compiler's message. The sample style is the one
+used by [the tutorial](../tutorial.md).
 
 Read [INSTALL.md](../INSTALL.md) first for a working setup and a C compiler.
 

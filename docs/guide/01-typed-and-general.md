@@ -152,12 +152,16 @@ main()
 ```
 
 ```note
-note: c1_general_dict.py:3:5: built on the general path (about 20x slower) because print() given a dict[str, int], not a number or a str. write instead: print an element or a measurement (`print(xs[0])`, `print(len(xs))`), or one line per element (`for x in xs: print(x)`); run with --strict to see why
+note: c1_general_dict.py:3:5: built on the general path
+because print() given a dict[str, int], not a number or a str.
+write instead: print an element or a measurement (`print(xs[0])`, `print(len(xs))`), or one line per element (`for x in xs: print(x)`); run with --strict to see why
 ```
 
-Read the note from left to right: `c1_general_dict.py:3:5` is the first blocker (file, line,
-column); "built on the general path" says this build is not typed-fast; the text after "because"
-is the reason; and "write instead" is a rewrite that stays typed. The note is on stderr.
+The compiler prints this as one line and adds its own rough speed estimate after "built on the
+general path"; this guide leaves that estimate out and splits the rest for reading. Read the note
+from left to right: `c1_general_dict.py:3:5` is the first blocker (file, line, column); "built on
+the general path" says this build is not typed-fast; the text after "because" is the reason; and
+"write instead" is a rewrite that stays typed. The note is on stderr.
 
 `--strict` turns the note into an error. It lists the blockers and builds nothing, with exit status
 3:
@@ -261,6 +265,26 @@ c1_refuse_eval.py:3:5: not in the subset: call to eval()
 write instead: define `eval` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str)
 ```
 
-Other refused constructs include `exec`, `locals()`, `async def`, and imports of third-party
-packages such as `numpy`. The built constructs are listed in `AIL_CURRENT/AIL_REFERENCE.md` and
+Other constructs outside the subset, such as `exec`, `locals()` and `async def`, are refused the
+same way, with exit status 3. An import that is not available is also refused, but with exit
+status 2:
+
+<!-- sample: c1_missing_numpy missing -->
+```python
+import numpy
+
+
+def main() -> None:
+    print(numpy)
+
+
+main()
+```
+
+```refusal
+c1_missing_numpy.py:1:1: import of 'numpy' is not available: it is not part of the standard library and no module of that name is on the search path, so CPython stops here with ModuleNotFoundError.
+write instead: drop the import and write what you need by hand with plain lists, dicts and loops
+```
+
+The built constructs are listed in `AIL_CURRENT/AIL_REFERENCE.md` and
 `AIL_CURRENT/AIL_REFERENCE_MORE.md`.
