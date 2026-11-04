@@ -106,8 +106,10 @@ class Repr:
             indent = indent * ' '
         try:
             sep = ',\n' + (self.maxlevel - level + 1) * indent
-        except TypeError:
-            raise TypeError('Repr.indent must be a str, int or None')
+        except TypeError as error:
+            raise TypeError(
+                "Repr.indent must be a str, int or None, not <class '%s'>"
+                % (type(indent).__name__,)) from error
         joined = sep.join(('',) + tuple(pieces) + ('',))
         return joined[1:-len(indent) or None]
 
