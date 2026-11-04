@@ -1,3 +1,25 @@
+## 2026-11-04 -- reprlib1: re-apply bundled `reprlib` on the current export
+
+Re-applied the accepted `reprlib1` change (`job-reprlib1-11042007`) on top of this tree. The
+`stdlib/reprlib.py`, `test_ail_std_reprlib.py`, `tests.d/test_ail_std_reprlib.txt` and
+`lab/stdlib/reprlib/*` additions applied cleanly, and the `agent-worker.yml` hunk (drop
+`GH_MODELS_TOKEN`) applied cleanly as this tree still had it. The `pyfunc.py` hunk (skip a `STR`
+claim in `_explicit_annotation_conflicts`) applied cleanly but is now redundant: this tree's
+sdkdiag1 change already gates that loop on `_sig_override_kind(...) in NUM`. Both sides' fixes are
+kept. `manifest.d/45.txt` conflicted on the `pyfunc.py` pin; the markers were removed keeping ours
+and `tools/update_manifest.py` recomputed every pin (`--check` passes). `tools/diff_ids.py` is not
+present on this tree, so only `update_manifest.py` ran.
+
+Tests on the final commit: `test_ail_std_reprlib` 3, and `test_ail_safetynet` + `test_ail_files` +
+`test_ail_corpus_findings3` 25 (1 skip) -- all pass. Probes: 6 in `/tmp/probes`
+(`p_repr_types`, `p_repr_containers`, `p_repr_indent`, `p_repr_nested`, `p_repr_channels`,
+`p_repr_recursive`); default and forced general builds both match CPython 3.12 on widths
+(`maxstring` 0/1/30/31, `maxlong`), empty/one/exact/over-limit containers, negative `indent`
+(ValueError), negative `maxlevel`, aliasing, nested `maxlevel`, values reaching repr through an
+argument, a list item, an attribute and a dict value, and `recursive_repr` cycles. A `__repr__`
+that raises inside `%r` remains an engine-level "AIL internal error" in both builds; a plain
+`"%r" % (obj,)` probe without `reprlib` fails the same way, so it is pre-existing and untouched.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda
