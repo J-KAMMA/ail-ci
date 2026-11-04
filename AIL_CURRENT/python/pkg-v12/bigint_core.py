@@ -46,8 +46,16 @@ static AIL_BIGFN size_t ail_bn_sub(ail_limb *o, const ail_limb *a, size_t na, co
     return ail_bn_norm(o, na);
 }
 
-/* o[0..na+nb) = a * b, schoolbook; o must not alias a or b */
+/* o[0..na+nb) = a * b, schoolbook; o must not alias a or b. A single-limb multiplier is the common
+   case for a big value times a small counter (the pi spigot, Collatz): one pass, no zeroing of o and no
+   read-modify-write of the destination. */
 static AIL_BIGFN void ail_bn_mul_school(ail_limb *o, const ail_limb *a, size_t na, const ail_limb *b, size_t nb) {
+    if (nb == 1) {
+        uint64_t c = 0, m = b[0];
+        for (size_t i = 0; i < na; i++) { c += (uint64_t)a[i] * m; o[i] = (ail_limb)c; c >>= 32; }
+        o[na] = (ail_limb)c;
+        return;
+    }
     memset(o, 0, (na + nb) * sizeof(ail_limb));
     for (size_t i = 0; i < na; i++) {
         uint64_t c = 0, ai = a[i];
