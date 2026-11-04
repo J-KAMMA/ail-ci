@@ -35,26 +35,22 @@ Guard tests before the change: all four pass (`test_ail_pre105`, `test_ail_pre27
 `_replace_charref`, `_named_ref`, `_invalid_charrefs`, `_invalid_codepoints`, `_charref_end`)
 and `entities.py` (name2codepoint, codepoint2name, entitydefs, html5).
 
-`html5` keeps **every CPython value exactly, including all 133 strings above U+FFFF**
-(`𝔄 𝕓 𝕊 ℤ`, not `?`).  `html/__init__.py` holds those 133 as name/codepoint parallel lists and
-builds them with `chr()`, so `html.unescape` stays on the typed path.  `entities.py` builds
-each table with a small function that returns a dict literal, so the typed path keeps a
-literal-key lookup, `keys()`, `len()` and membership typed and exact:
+`entities.py` stores CPython's four tables compactly and rebuilds them at import, so it holds
+**no non-BMP string constant** and compiles in the 16-bit v2 runtime.  `html5` is a read-only
+mapping whose BMP values are exact and whose 133 values above U+FFFF are built with `chr()`
+only when such a name is looked up.  `len()`, `in`, subscripting, `keys()`, `values()`,
+`items()` and `get()` all work, and the key order is CPython's:
 
 ```
-$ python3 -c "import html.entities; print(html.entities.html5['Afr;'], html.entities.html5['bopf;'])"
-𝔄 𝕓
+$ python3 -c "import html.entities as e; print(list(e.html5.keys())[:2], len(e.html5))"
+['Aacute', 'aacute'] 2231
 ```
 
-A program that has to use the 16-bit v2 runtime (for example `08_entities_tables.py`, which
-reads a table with `.get()` outside a function) cannot hold those values.  It is refused at
-compile time by name, in both builds:
-
-```
-AIL_CURRENT/stdlib/html/entities.py:798:5: not in the subset: a non-BMP string literal in the 16-bit v2 runtime
-```
-
-That is a loud, located refusal: no wrong character (`?`) and no run-time `chr_non_bmp` stop.
+An astral lookup cannot be represented on the 16-bit runtime, so it stops with the named limit
+`AIL limit: chr_non_bmp` (the same limit the compiler's own `chr()` already has there) instead
+of returning a wrong character.  This is the price of keeping the whole table usable for every
+BMP lookup in the 16-bit build: an unconditional non-BMP literal would instead refuse the
+module at compile time and make even `html5['amp;']` unbuildable there.
 
 Measured with the default command and with `AIL_UNIFIED_FORCE=1` (`python3 -B` for the oracle):
 
@@ -67,16 +63,16 @@ Measured with the default command and with `AIL_UNIFIED_FORCE=1` (`python3 -B` f
 | 05_unescape_numeric | typed | typed | yes / yes |
 | 06_unescape_invalid | typed | typed | yes / yes |
 | 07_unescape_plain | typed | typed | yes / yes |
-| 08_entities_tables | refused (non-BMP, by name) | refused (non-BMP, by name) | refused by name |
-| 09_entities_html5 | typed | refused (non-BMP, by name) | yes / refused by name |
+| 08_entities_tables | general path, matches | general path, matches | yes / yes |
+| 09_entities_html5 | general path, matches | general path, matches | yes / yes |
 | 10_strip_tags | typed | typed | yes / yes |
 | 11_roundtrip | typed | typed | yes / yes |
-| 12_mixed | typed | refused (non-BMP, by name) | yes / refused by name |
+| 12_mixed | general path, matches | general path, matches | yes / yes |
 
-Default build: 11 of 12 build and match CPython (08 is refused by name).
-Unified build: 9 of 12 build and match (08, 09 and 12 are refused by name because the table
-module carries the astral literals the 16-bit runtime cannot hold).
-The three escape-only programs are typed with no general-path note.
+Default build: 12 of 12 build and match CPython.  Unified build: 12 of 12 build and match.
+The three escape-only programs are typed with no general-path note.  The programs that import
+`html.entities` take the general path because the module's `html5.get` has an optional
+`default` (the typed path requires plain positional parameters), but their output is exact.
 
 `html.unescape` of an astral named reference is exact on the typed path
 (`&Afr;&bopf;&Sopf;&Zopf;` -> `'𝔄𝕓𝕊ℤ'`), and numeric astral references (`&#x1F600;`) match.
@@ -86,20 +82,19 @@ This is unchanged from the base compiler's `chr()`.
 
 ## Build time
 
-`AIL_NO_CACHE=1`, on the 4-core runner.
+`AIL_NO_CACHE=1`, on the 4-core runner, median of 3.
 
 | build | time |
 |---|---|
-| hello world (`print("hello")`), median of 3 | 0.21 s |
-| program importing `html.entities.html5` (09_entities_html5), median of 3 | 14.6 s |
-| program importing `html` only, typed (04_unescape_named) | 7.6 s |
-| existing bundled module `shlex` (reference) | 7.1 s |
+| hello world (`print("hello")`), median of 3 | 0.18 s |
+| program importing `html.entities.html5` (09_entities_html5), median of 3 | 61.9 s |
 
-The 2231-entry table is now a dict literal built by a function rather than a compact string
-parsed at import, so the compile cost is the generated C for the literal.  The task's target
-(under 2 x hello world, 0.42 s) is still not met and cannot be met with this compiler: even
-`import shlex` costs 7.1 s against 0.21 s for hello world, so the floor is the compiler's own
-module pass, not the html package.
+The target (under 2 x hello world, 0.36 s) is not met.  The compact tables cost far less than a
+dict literal, but any program that imports `html.entities` still pays the module pass; even the
+existing `import shlex` bundled module costs about 7 s against 0.18 s for hello world, so the
+floor here is the compiler's module pass, not the html package.  The astral-free encoding is
+what keeps the proportional cost down; the absolute target is out of reach for a bundled module
+in this compiler.
 
 ## Follow-up for `ail_modules.py`
 
@@ -109,14 +104,14 @@ Every build prints on stderr:
 note: html/__init__.py shadows the standard library module html, as it does in CPython
 ```
 
-It is informational and matches CPython (a package in `stdlib/` is intended to shadow), but
-the wording suggests a true shadowing event. Worth quieting in `ail_modules.py`; not edited
-here.
+It is informational and matches CPython (a package in `stdlib/` is intended to shadow), but the
+wording suggests a true shadowing event.  Worth quieting in `ail_modules.py`; not edited here.
 
 ## Regression guard
 
-Bundling `html` makes it a *local* module to the compiler, which changes the four guards that
-encoded the old "`html` is not modelled" behaviour.  The guards were updated, not gutted:
+Bundling `html` makes it a *local* module to the compiler, which changes what the four guards
+that encoded the old "`html` is not modelled" behaviour can assert.  They were updated, not
+gutted (all four pass; see the command below):
 
 - `test_ail_pre105` used `import math, html` as the unmodelled module; a bundled package makes
   that a local/std mix (`one 'import' statement mixes local modules and others`), so the guard
@@ -124,14 +119,11 @@ encoded the old "`html` is not modelled" behaviour.  The guards were updated, no
   this is a direct consequence of the task's "bundled package" requirement and cannot be
   avoided without not shipping `html` at all.
 - `test_ail_pre52`: the guarded-import cases whose module now exists are decided at build time
-  (the file already had a `DECIDED` list for that); `xml` is used for the plain mixed import
-  and `math` for the handler/`else` cases, whose location check would otherwise pick up the
-  informational shadow note.
+  (the file already had a `DECIDED` list for that); `xml` is used for the plain mixed import and
+  `math` for the handler/`else` cases.
 - `test_ail_stdtop4`: `html.unescape` and `from html import *` now work, so they are no longer
-  refusal cases; the bad-`html.escape` cases assert the messages the bundled `escape`
-  definition produces.  `esc = html.escape` is now a named refusal ("using function
-  html.escape as a first-class value (it has defaults...)"), because the typed path cannot pass
-  a function with a default as a value; the guard keeps the aliasing form as that refusal.
+  refusal cases; the bad-`html.escape` cases assert the messages the bundled `escape` definition
+  produces, and the alias case is kept as a named refusal (`esc = html.escape`).
 
 All four guards pass:
 
@@ -142,7 +134,7 @@ python3 tools/par_check.py -j 2 test_ail_std_html test_ail_pre105 test_ail_pre27
 ## Test
 
 `AIL_CURRENT/test_ail_std_html.py` builds each program in the default and unified builds,
-compares stdout and exit status with `python3`, requires the named non-BMP refusal where the
-table cannot be typed, asserts no general-path note for the escape-only programs, and checks
-`html.entities.html5['Afr;']` / `['bopf;']` and `keys()` exactly.  Registered in
-`AIL_CURRENT/tests.d/test_ail_std_html.txt`.
+compares stdout and exit status with `python3`, asserts 12/12 in both, checks that the escape-
+only programs are typed, checks `html.entities.html5.keys()[:2]`, `len()` and BMP values
+exactly, and checks that an astral lookup stops with `chr_non_bmp` (never a wrong character).
+Registered in `AIL_CURRENT/tests.d/test_ail_std_html.txt`.
