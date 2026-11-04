@@ -232,16 +232,20 @@ OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact i
 ```
 
 When a program needs values beyond int64, build with `--exact-int` (or set `AIL_EXACT_INT=1`).
-Then integers are exact, as in CPython, at a slower speed:
+Then a value above int64 in an `int` local, and the arithmetic on it, are exact as in CPython, at a
+slower speed:
 
 <!-- sample: c1_exact exact -->
 ```python
-print(9223372036854775808)
+big: int = 9223372036854775808
+print(big)
+print(big + 1)
 print(1 << 100)
 ```
 
 ```output
 9223372036854775808
+9223372036854775809
 1267650600228229401496703205376
 ```
 

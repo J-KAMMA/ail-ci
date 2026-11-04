@@ -137,7 +137,8 @@ main()
 ZeroDivisionError: integer division or modulo by zero
 ```
 
-`except Exception` catches every kind. `type(e).__name__` and `str(e)` read like CPython's:
+`except Exception` catches the built-in error kinds. Here it catches a `RuntimeError`, and
+`type(e).__name__` and `str(e)` read like CPython's:
 
 <!-- sample: c3_exception -->
 ```python

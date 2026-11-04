@@ -102,8 +102,8 @@ AIL
 
 ## Reading stdin
 
-`for line in sys.stdin` gives one line at a time and keeps the newline. This program numbers the
-lines it reads:
+`for line in sys.stdin` gives one line at a time, newline included. This program numbers the lines
+and trims the newline with `strip`:
 
 <!-- sample: c2_stdin_lines -->
 ```python
