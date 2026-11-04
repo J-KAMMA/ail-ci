@@ -772,7 +772,8 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         # bundled standard modules written in AIL over the C FFI (G5a): stdlib/zlib.py and its C glue
         if (root / 'stdlib').is_dir() and any(name.startswith('stdlib/') for name in pins):
             _no_links(root / 'stdlib', root)
-            selected.update(p for p in (root / 'stdlib').iterdir() if p.suffix in ('.py', '.c', '.h'))
+            selected.update(p for p in (root / 'stdlib').rglob('*')
+                            if p.suffix in ('.py', '.c', '.h') and '__pycache__' not in p.parts)
 
     # A selected C interface must include its full declared input closure.
     for path in tuple(selected):

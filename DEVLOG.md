@@ -1,3 +1,36 @@
+## 2026-11-04 -- rbtoml1: re-apply accepted toml1 (bundled tomllib) on the current export
+
+Re-applied the accepted `toml1` change (`job-toml1-11042158`, base `612b780`) on this tree. The
+new `AIL_CURRENT/stdlib/tomllib/` package (a rewritten port of CPython 3.12's parser keeping
+`loads`, `load`, `TOMLDecodeError`), `test_ail_std_tomllib.py` (registered through
+`AIL_CURRENT/tests.d/test_ail_std_tomllib.txt`) and the twelve `lab/stdlib/tomllib` programs with
+`RESULTS.md` applied cleanly, as did the `agent-worker.yml` hunk removing the unused
+`GH_MODELS_TOKEN`.
+
+Two conflicts were resolved keeping both sides' fixes. In `python/pkg-v12/pyfunc.py` this tree
+already drops a str claim upstream (`_drop_text_overrides` / `_override_from_site`), so
+`_explicit_annotation_conflicts` never sees one; the accepted `STR` guard is kept as an explicit
+early `continue` before the `NUM` filter, so both the upstream drop and the declaration-level
+guard exist. The `manifest.d` shards were not hand-edited: `tools/update_manifest.py` regenerated
+the seven entries (21, 45, 53, 57, a1, f7, fe), including the pyfunc pin and the `s` pins for the
+four tomllib sources, the test module and the tests.d entry.
+
+`test_ail_sdk` then failed `test_declared_distribution_excludes_unadopted_files_and_checks_closure`:
+the legacy SDK discovery (a MANIFEST without `sdk_files`) walked only top-level `stdlib/*.py`, so a
+re-export dropped `stdlib/tomllib/*.py` while the pinned `sha256` map still listed them. `ail_sdk.py`
+now walks `stdlib` recursively (still skipping `__pycache__`), and the test passes.
+
+Tests on the final commit, `python3 tools/par_check.py -j 2`: `test_ail_std_tomllib`,
+`test_ail_sdk`, `test_ail_argument_type_details`, `test_ail_pyreach_infer`, `test_ail_source_check`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` all pass.
+Probes: 8 in `/tmp/probes` (`p_toml_types`, `p_toml_sources`, `p_toml_load`, `p_toml_float`,
+`p_toml_errors`, `p_toml_arrays`, `p_arg_str_ok`, `p_arg_str_refuse`); every one matches CPython 3.12
+on both builds, including types/widths/negatives/empty documents, TOML text reaching `loads` through
+a literal, a variable, a function argument, a list item, an attribute and a dict value, bytes
+readers, `parse_float` (Decimal and the `int`/`str` not-callable errors), the seven decode-error
+messages, arrays/inline tables/arrays of tables, and str parameters with list-item and dict-value
+arguments.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda

@@ -32559,11 +32559,16 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     dropped instead, leaving the function's own annotation in place.
     """
     for pname, text in override.items():
-        if _sig_override_kind(fn, pname, text) not in NUM:
+        given = _sig_override_kind(fn, pname, text)
+        if given == STR:
+            # A str claim is new in s3 and is NOT grounds for refusing a helper: the
+            # per-call guard already names the offending text argument where it is
+            # written (`test_multiple_call_evidence_keeps_parameter_and_argument_scopes`).
+            continue
+        if given not in NUM:
             continue
         for a in fn.args.args:
             if a.arg == pname and a.annotation is not None:
-                given = _sig_override_kind(fn, pname, text)
                 expected = _annotation_kind(a.annotation, classes or ())
                 if given != expected and not (expected == FLT and given == INT):
                     return True
