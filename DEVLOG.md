@@ -1,3 +1,16 @@
+## 2026-11-04 -- diffaudit1 review fixes: keep pre116-10251611-1 open, restore the GitHub Models key
+
+Review found two defects in the re-applied `diffaudit1` change. First, `C?-job-pre116-10251611-1`
+was marked `fixed` although its own stated residual is still live: a saved generator whose allowed
+`next`/constructor raises when consumed is raised when the generator is made. Probe `p8c_gen_next`
+(`next` on a user iterator whose `__next__` raises) gives `next early ValueError boom` on both
+builds where CPython prints `next made` / `next late ValueError boom`; the cited probe covers only
+`next(iter([]))`, which matches. The status cell is back to `open` and `lab/diffaudit/AUDIT.md` now
+records three, not four, flipped rows and explains the narrow probe. Second, the job's prescribed
+range also dropped `GH_MODELS_TOKEN`/`ghm.key` from `.github/workflows/agent-worker.yml` although
+this tree's `.agent/pipeline.sh` still reads `$RUNNER_TEMP/ghm.key`; the base `d6cd9ee` lines are
+restored (key write, cleanup and leak scan). `tools/update_manifest.py --check` exits 0.
+
 ## 2026-11-04 -- diffaudit1 re-applied: 20-probe audit of open DIFFERENCES rows (job-diffaudit1-11042037)
 
 Re-applied the accepted `diffaudit1` change on this tree. The job's two rejected hunks were the
@@ -10,9 +23,10 @@ continue plus its docstring sentence are present. `tools/diff_ids.py` is absent 
 New `lab/diffaudit/` holds `audit.py` and 20 probe programs; `test_ail_diffaudit.py` pins their
 verdicts (5 now-matches, 6 still-differs, 8 refused-as-said, plus the pre138 fused-pipeline
 residual and the pre90 forced-build finding), registered through
-`AIL_CURRENT/tests.d/test_ail_diffaudit.txt`. Four open rows proved now-matches in both builds
+`AIL_CURRENT/tests.d/test_ail_diffaudit.txt`. Three open rows proved now-matches in both builds
 and their DIFFERENCES.md status cells now say `fixed;lab/diffaudit/<probe>.py`:
-pre116-10251611-1, pre138-10250109-2, rbrbfuzz4-10262129-4 and rbfuzz4-10240913-4.
+pre138-10250109-2, rbrbfuzz4-10262129-4 and rbfuzz4-10240913-4.
+pre116-10251611-1 stayed open (see the review-fix entry above: its stated residual is live).
 
 `test_ail_diffaudit` 5 tests OK; `test_ail_safetynet` + `test_ail_corpus_findings3` 7 tests OK;
 `test_ail_files` 18 tests OK (one skip). Five probes (saved-generator trap, eager `next`,

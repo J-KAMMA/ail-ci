@@ -83,8 +83,11 @@ Counts: open=10, empty=0, refused=4, declared=13 (total 27).
 | MODSYS-5 | modules / a module reached through a function or a name that has two meanings | declared; `test_ail_modsys.py` |
 | MODSYS-6 | modules / conditions that guard an import | declared; `test_ail_modsys.py` |
 
-On the final tree `audit.py` prints 23 rows (open=6, refused=4, declared=13): the four
+On the final tree `audit.py` prints 24 rows (open=7, refused=4, declared=13): three
 `open` rows below prove `now-matches` in both builds and moved to `fixed`.
+`C?-job-pre116-10251611-1` stays open: its probe only covers `next(iter([]))`, and the
+row's stated residual (an allowed `next` or constructor that raises is raised when the
+generator is made, not at `next()`) still differs.
 
 ## Verdicts (20 probes)
 
@@ -119,11 +122,10 @@ then stop at `d1 | d2` with `TypeError: unsupported operand type(s) for |: 'dict
 
 ## Stale rows changed in DIFFERENCES.md
 
-Four `open` rows proved `now-matches` in both builds; only their status cell changed:
+Three `open` rows proved `now-matches` in both builds; only their status cell changed:
 
 | id | old status | new status |
 | --- | --- | --- |
-| C?-job-pre116-10251611-1 | open | fixed;lab/diffaudit/C__job_pre116_10251611_1.py |
 | C?-job-pre138-10250109-2 | open | fixed;lab/diffaudit/C__job_pre138_10250109_2.py |
 | C?-job-rbrbfuzz4-10262129-4 | open | fixed;lab/diffaudit/C__job_rbrbfuzz4_10262129_4.py |
 | C?-job-rbfuzz4-10240913-4 | open | fixed;lab/diffaudit/C__job_rbfuzz4_10240913_4.py |
