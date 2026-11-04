@@ -176,6 +176,29 @@ hottest functions are accepted.**  `fastwalk.walk` alone is 4.53 s of the summed
 
 `tools/update_manifest.py --check` passes; `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass.
+## 2026-11-04 -- fuzzpyb follow-up: verified the 500-seed run, filed four more trap-text causes
+
+Re-ran `lab/fuzzpy/run.py` on seeds 1-500 (two jobs, `ulimit -v 1500000`, 10 s timeout): every
+`summary.json` row reproduces (silent 0, loud-ok 115, crash 0, refused 30, other 355; 470 built,
+227 typed / 243 general; 9 stderr-only). Boundary probes found four more default-path message
+defects, filed as `lab/fuzzpy/findings/006.py`-`009.py`: `//` by zero loses "or modulo";
+`min()`/`max()` of an empty list parameter prints "min() of an empty sequence"; `str.index` prints
+`ValueError` with no text; a bytes index prints "bytes index out of range". Fixed `run.py` so a
+refusal row names the refusal (first message line, not the trailing "write instead" advice), the
+stderr-only count comes from the stdout/exit fields rather than a reason prefix, and compile
+messages keep a relative `prog.ail` path. `lab/fuzzpy/REPORT.md` has the counts, the findings and
+the 53-probe tally. `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
+## 2026-11-03 -- fuzzpyb: 500 typed-Python programs against the default build
+
+Ran `lab/fuzzpy/run.py` on seeds 1-500, two jobs, in chunks of 100, with the 1.5 GB limit
+and a 10 s timeout per process. `lab/fuzzpy/summary.json` has 500 rows: silent 0, loud-ok
+115, crash 0, refused 30, other 355 (346 identical + 9 stderr-only). The typed path built
+257/500 (51.4%). No silent wrong output and no crash: the 9 differing last stderr lines are
+the typed path's uncaught-trap text (no `IndexError:`/`ZeroDivisionError:` prefix; `KeyError`
+also loses the key), reduced to `lab/fuzzpy/findings/001.py`-`005.py`. The raw `seed22`
+finding is a compile-time int64 constant refusal, counted as loud-ok and not filed.
+`lab/fuzzpy/REPORT.md` has the numbers.
 
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
