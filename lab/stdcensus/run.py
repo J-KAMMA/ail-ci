@@ -26,12 +26,27 @@ AIL = ROOT / 'AIL_CURRENT' / 'ail_chatgpt.py'
 STDLIB = Path(sysconfig.get_path('stdlib'))
 
 
-def integ_sha():
+INTEG_SHA = ''
+
+
+def discover_integ_sha():
+    for ref in ('origin/integ', 'integ'):
+        try:
+            p = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--verify', ref], text=True,
+                               capture_output=True, timeout=10)
+            if p.returncode == 0:
+                return p.stdout.strip()
+        except Exception:
+            pass
     try:
         return subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True,
                               capture_output=True, timeout=10).stdout.strip()
     except Exception:
         return ''
+
+
+def integ_sha():
+    return INTEG_SHA or discover_integ_sha()
 
 
 def source_of(name):
@@ -144,8 +159,11 @@ def main():
     ap.add_argument('--only', nargs='+')
     ap.add_argument('--timeout', type=float, default=120)
     ap.add_argument('--deadline', type=float, default=1800, help='whole-run seconds')
+    ap.add_argument('--integ-sha', default='', help='base integ commit recorded in every record')
     ap.add_argument('-o', '--output', default=str(HERE / 'results.jsonl'))
     args = ap.parse_args()
+    global INTEG_SHA
+    INTEG_SHA = args.integ_sha or discover_integ_sha()
     names = [x.strip() for x in (HERE / 'modules.txt').read_text().splitlines() if x.strip()]
     if args.only:
         wanted = set(args.only)
