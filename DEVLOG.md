@@ -1,3 +1,118 @@
+## 2026-11-04 -- relnotesd: finish and verify the relnotesc release-doc audit (job-relnotesd-11041012)
+
+Applied `bb6d43c` from `job-relnotesc-11040507` (skipping its "agent worker report") onto
+`origin/integ` 133ca78.  `DEVLOG.md` kept both entries; the staging export's runner-workflow change
+and its `ci-proposed/` copy were dropped, so the branch now touches only `README.md`, `CHANGELOG.md`,
+`docs/INSTALL.md`, `DEVLOG.md`, `AIL_CURRENT/test_ail_readme.py`, its `tests.d` entry and its
+manifest pins.
+
+Re-ran the measurements on the final tree.  README's fenced `python` block prints `total: 42` like
+CPython; a default-build int64 overflow exits 1 with `OverflowError`; `--exact-int` matches CPython
+for `2 ** 200` and `-2 ** 64`; an out-of-range literal is refused with the flag hint; `--strict`
+refuses the dict-print fallback and names the rewrite; `ail check` passes with no C compiler on
+`PATH`; `ail doctor --check`, `ail new`, `ail cache stats|path|clear`, `ail lsp` (initialize),
+`ail build --lib` (`.so`, `.a`, `.h`) and `ail build --debug` (`raised near file:line`) work.  The
+documented exit statuses and error texts hold (1 for an uncaught exception, 2 for an existing
+output or a missing third-party import, 3 for a refusal).  Runtime division-by-zero, index and
+missing-key faults print only their message as the CHANGELOG now says; an explicit `raise` prints
+`ValueError: boom`.  `tools/wheel_check.py` builds and installs the wheel and its 15 tutorial
+samples pass.  `docs/INSTALL.md` now says that the active `wheel` job covers Linux and that the
+proposed `ci-proposed/workflows/platforms-wheel.yml` adds macOS 14 and native Windows once
+installed; the Windows compiler text names MinGW-w64 UCRT gcc, as the platforms CI job assumes.
+
+Tests on this commit: `test_ail_readme`, `test_compare_publish`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`, `test_ail_doctor`, `test_ail_debug_lines`,
+`test_ail_i64_constants`, `test_ail_c_export` and `test_ail_build_cache` pass, and
+`tools/update_manifest.py --check` is clean.  Probes: `readme_example`, `edge_values` (empty,
+negative, argument/list-item/attribute/dict values, int64 min/max) and `aliasing` (copy, alias,
+mutation) match CPython on the default and unified builds.  No compiler, runtime, version, tag or
+publish change.
+
+Follow-up verification: re-ran `test_ail_readme`, `test_compare_publish` and `test_ail_safetynet`
+(all pass) and `tools/update_manifest.py --check` (clean).  Re-ran the run/build/check/doctor,
+`new`, `cache`, `lsp`, `build --lib`, `build --debug`, exit-status and int64-overflow probes on
+this tree; all held in the default and unified builds.  Corrected the CHANGELOG packaging bullet:
+the active `wheel` CI job covers Linux only, while macOS and native Windows wheel checks are in the
+proposed `platforms-wheel` workflow, matching `docs/INSTALL.md`.
+
+## 2026-11-04 -- relnotesc: finish relnotesb and audit every release-doc claim (job-relnotesc-11040507)
+
+Applied the four commits from `job-relnotesb-11032053` onto `origin/integ` 095e0321; the only
+conflict was `DEVLOG.md`, where both entries are kept.  This run did the verification the earlier
+review never reached.
+
+Claim audit: every behaviour sentence in `README.md`, `CHANGELOG.md` and `docs/INSTALL.md` was run
+on HEAD.  README's fenced `python` block builds and prints `total: 42`; a runtime int64 overflow
+stops with `OverflowError` and exit 1; `--exact-int` and `AIL_EXACT_INT=1` match CPython for
+`2 ** 200`; literals outside int64 are refused with the flag hint; `--strict` refuses a fallback
+and names the rewrite; `ail check` passes with no C compiler on `PATH`; `ail run`/`build`/`new`/
+`cache`/`lsp` (initialize reply) and `ail doctor --check` work; `ail build --lib` writes `.so`,
+`.a` and `.h`; and `--debug` adds `raised near file:line`.  Every standard-library module named in
+README/CHANGELOG imports and runs a small use (the all-in-one import probe is refused as a mixed
+local/other import, not as a missing module).  The wheel builds and installs: `tools/wheel_check.py`
+passes with 15 tutorial samples.  Numbers in README stay limited to the four scorecard lines
+`test_compare_publish` checks (0/4, 10/10, 10/10, 6/10) plus the link to `docs/COMPARISON.md`.
+
+Two wordings did not hold and are corrected.  CHANGELOG said every runtime error keeps CPython's
+exception name; the default typed build prints only the message for division-by-zero, index and
+missing-key faults (an explicit `raise` still prints the name).  `docs/INSTALL.md` now names the
+`platforms-wheel` workflow (`ci-proposed/workflows/platforms-wheel.yml`) for the macOS and Windows
+wheel check, while the active `.github` `wheel` job runs it on Linux.  The C compiler text still
+matches `tools/wheel_check.py` and that workflow: MinGW-w64 UCRT gcc on Windows, Apple clang on
+macOS, gcc on Linux, with `zig cc` as the fallback.
+
+Tests on the final tree: `test_ail_readme`, `test_compare_publish`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_safetynet` (without `ulimit -v`, because the known
+`S4_generators_gc` case needs the normal address space), `test_ail_fe_cache`, `test_ail_server`,
+`test_ail_loop_block_release`, `test_ail_i64_constants`, `test_ail_modconst`,
+`test_ail_builtin_shadowing`, `test_ail_debug_lines`, `test_ail_c_objects` and `test_ail_ail2py`
+pass, and `tools/update_manifest.py --check` is clean.  No compiler, runtime, version, tag or
+publish change.
+
+## 2026-11-03 -- reldocs: apply the first run's branch and verify release 0.1 docs
+
+Cherry-picked `5a015bb` and `c64abe3` from `job-relnotes-11031523` (the "agent worker report"
+commit was left out).  The only conflict was `DEVLOG.md`; both entries are kept here, this one
+first.
+
+The first run's README rewrite had dropped the four scorecard lines that `test_compare_publish`
+checks against the latest compare-lab report, so the test failed.  Restored them in the "How AIL
+compares" section (peak RSS 0/4, binary 10/10, compile 10/10 slower, wall 6/10) and kept the link
+to `docs/COMPARISON.md` for the full table.  Also removed the one performance ratio in the README
+that was not in the latest report (`about 20x`, for the general path); it now says `much slower`.
+Nothing else in the README, CHANGELOG or install guide changed.
+
+Verification on the final commit: `python3 tools/update_manifest.py --check` is clean; the four
+required modules (`test_ail_readme`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`) ran on both builds in 348 s with 0 failed, and `test_compare_publish`
+passes.  Probes `readme_example`,
+`readme_edge_values` (empty, negative, argument, list item, attribute, dict value) and
+`readme_aliasing` (copy, alias and mutation) match CPython on the default and unified builds.
+The README integer claims were checked by hand: a runtime int64 overflow stops with
+`OverflowError` and exit 1, `--exact-int` matches CPython for `2 ** 200`, and a literal outside
+int64 is refused with a position and the flag hint.  `ail build` plus `./total`, and
+`ail run --strict`, both print `total: 42`.  No compiler, runtime, test, version, tag or
+publication changed.
+
+## 2026-11-03 -- reldocs: README, CHANGELOG and install guide for 0.1
+
+Rewrote the top-level `README.md` for a reader who has never seen AIL: three-sentence introduction
+(Python syntax, optional annotations, native binary), `pip install ailc`, the C compiler for Linux,
+macOS and Windows, a short tested example with `ail run` / `ail build`, the int64 default and
+`--exact-int`, what is supported and what is not, and a link to `docs/COMPARISON.md` with the wins
+and losses instead of copied numbers.
+
+Added `CHANGELOG.md` with a 0.1.0 entry grouped into features, correctness, performance and known
+limitations, summarised from the exported commit and the recent `DEVLOG.md` entries.  Updated
+`docs/INSTALL.md` to install the PyPI distribution `ailc` by default (the checkout install remains
+the alternative).
+
+`AIL_CURRENT/test_ail_readme.py` (registered through `tests.d/test_ail_readme.txt`) extracts every
+fenced ```python block from `README.md`, runs it through `ail run` in `packaging/ail_lang`, and
+compares stdout and exit status with CPython.  Probes `readme_example` and `readme_edge_values`
+(negative and empty lists, argument/list-item/attribute/dict values) match CPython on both
+`cmp.sh` builds.  The readme test, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.  No compiler, runtime or version number changed.
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against

@@ -3,15 +3,16 @@
 AIL compiles a subset of Python 3.12 to C and builds a small native executable with your C
 compiler. You install it as the Python package `ailc`, which gives you the `ail` command.
 
-> `ailc` is **not published on PyPI yet**. Until it is, install it from a checkout of this
-> repository (below). The commands are the same after publishing, minus the clone. The PyPI
-> project `ail-lang` is not AIL; install `ailc`.
+Install the PyPI distribution `ailc`; it provides the `ail` command. The PyPI project `ail-lang`
+is not AIL.
 
-Checked on 2026-10-31 on Ubuntu 24.04 under WSL 2 (Python 3.12.3, gcc 13.3.0): `pip wheel`, a
-fresh virtual environment, `pip install` of the wheel, then `ail run` of a hello world and of a
-typed program, and every sample of [the tutorial](tutorial.md). CI now does the same on Linux,
-macOS 14 and native Windows (see "Platforms"). The macOS and native Windows setup steps below were
-still not run by hand.
+Checked on 2026-10-31 on Ubuntu 24.04 under WSL 2 (Python 3.12.3, gcc 13.3.0): a fresh virtual
+environment, `pip install` of the wheel, then `ail run` of a hello world and of a typed program,
+and every sample of [the tutorial](tutorial.md). `tools/wheel_check.py` repeats this from a built
+wheel. The active `wheel` CI job runs it on Linux; the proposed `platforms-wheel` workflow
+(`ci-proposed/workflows/platforms-wheel.yml`) is set up to run it on Linux, macOS 14 and native
+Windows when installed (see "Platforms"). The macOS and native Windows setup steps below were still
+not run by hand.
 
 ## Requirements
 
@@ -20,7 +21,7 @@ still not run by hand.
 - **A C compiler** on `PATH`: AIL uses `$PIPE_CC` if set, otherwise the first of `cc`, `clang`,
   `gcc`; failing those, a `zig cc` (`$AIL_ZIG`, `zig` on `PATH`, or the `ziglang` wheel from
   `pip install "ailc[zig]"`, about 50 MB). `ail check` needs no C compiler.
-- **git**, to get the code until the package is published.
+- **git**, only when installing from a checkout instead of PyPI.
 
 ## Linux
 
@@ -28,16 +29,16 @@ On Ubuntu 24.04 (the platform the full test suite runs on) everything is in the 
 repositories. `python3-venv` is a separate package there and is easy to miss:
 
 ```sh
-sudo apt install python3 python3-venv python3-pip gcc git
-git clone https://github.com/J-KAMMA/ail-ci.git
+sudo apt install python3 python3-venv python3-pip gcc
 python3 -m venv ~/.venvs/ail
-~/.venvs/ail/bin/pip install ./ail-ci
+~/.venvs/ail/bin/pip install ailc
 ~/.venvs/ail/bin/ail doctor --check
 ```
 
 Put `~/.venvs/ail/bin` on your `PATH` (or `source ~/.venvs/ail/bin/activate`) to type just `ail`.
-On Fedora use `sudo dnf install python3 gcc git`. `pip install .` and `pip wheel .` both work;
-only a wheel is built (there is no sdist).
+On Fedora use `sudo dnf install python3 gcc`. To install from a checkout instead, add `git`,
+clone the repository and run `~/.venvs/ail/bin/pip install ./ail-ci`; `pip install .` and
+`pip wheel .` both work there. Only a wheel is built (there is no sdist).
 
 First program:
 
@@ -74,9 +75,8 @@ Line Tools, which provide `cc` (Apple clang):
 
 ```sh
 xcode-select --install
-git clone https://github.com/J-KAMMA/ail-ci.git
 python3 -m venv ~/.venvs/ail
-~/.venvs/ail/bin/pip install ./ail-ci
+~/.venvs/ail/bin/pip install ailc
 ~/.venvs/ail/bin/ail doctor --check
 ```
 
@@ -96,13 +96,12 @@ Two options:
   winget install MSYS2.MSYS2                  # then, in the MSYS2 UCRT64 shell:
   pacman -S mingw-w64-ucrt-x86_64-gcc
   $env:Path = "C:\msys64\ucrt64\bin;$env:Path"
-  git clone https://github.com/J-KAMMA/ail-ci.git
   py -3 -m venv $HOME\ail-venv
-  & $HOME\ail-venv\Scripts\pip install .\ail-ci
+  & $HOME\ail-venv\Scripts\pip install ailc
   & $HOME\ail-venv\Scripts\ail doctor --check
   ```
 
-  Alternatively `pip install ".\ail-ci[zig]"` brings a `zig cc` and needs no MinGW. Set
+  Alternatively `pip install "ailc[zig]"` brings a `zig cc` and needs no MinGW. Set
   `PYTHONUTF8=1` for UTF-8 output. Native Windows is a supported CI target for a subset of the
   tests, not the full suite.
 
@@ -112,13 +111,14 @@ Two options:
 |---|---|
 | Linux x86-64 (Ubuntu 24.04) | full test suite in CI; wheel install + tutorial samples in CI; this guide was run here |
 | Linux arm64 | representative subset in CI |
-| macOS 14 arm64 | representative subset in CI; wheel install + tutorial samples in CI |
-| Windows (MinGW-w64, `windows-latest`) | representative subset in CI; wheel install + tutorial samples in CI |
+| macOS 14 arm64 | representative subset in CI; wheel install + tutorial samples in the proposed `platforms-wheel` workflow |
+| Windows (MinGW-w64, `windows-latest`) | representative subset in CI; wheel install + tutorial samples in the proposed `platforms-wheel` workflow |
 
 "Wheel install + tutorial samples" means a fresh virtual environment, `pip install` of the built
 wheel, `ail --version`, `ail doctor --check`, `ail run` of a hello world and a typed program, and
 every sample of [the tutorial](tutorial.md) through the installed `ail`; `tools/wheel_check.py`
-does this in CI. On Windows the C (FFI) tutorial sample is skipped because the CPython side of it
+does this, the Linux `wheel` CI job runs it, and the proposed `platforms-wheel` workflow adds
+macOS 14 and native Windows once installed. On Windows the C (FFI) tutorial sample is skipped because the CPython side of it
 loads `libm`, which Windows does not have; the skip is printed with its reason.
 
 ## Without installing (from the checkout)
@@ -150,7 +150,7 @@ platform cache directory).
 - **`The virtual environment was not created successfully ... ensurepip is not available`**
   (Debian/Ubuntu): `sudo apt install python3-venv`. For pip itself: `sudo apt install python3-pip`.
   `error: externally-managed-environment` means pip refuses to touch the system Python: use a
-  virtual environment as above (or `pipx install ./ail-ci`).
+  virtual environment as above (or `pipx install ailc`).
 - **`ail: no C compiler found`**, or `"c_compiler_available": false` in `doctor`: install `gcc`
   (`sudo apt install gcc`, `sudo dnf install gcc`, MinGW), the Xcode Command Line Tools on macOS,
   or `pip install "ailc[zig]"`; or set `PIPE_CC=/path/to/cc`. `PIPE_CC` must resolve on `PATH`.
@@ -173,5 +173,6 @@ platform cache directory).
 - **`hash mismatch: NAME`** from the test tools (checkout only): a file pinned in
   `AIL_CURRENT/manifest.d/` changed. Run `python3 tools/update_manifest.py`, then
   `python3 tools/update_manifest.py --check`.
-- **pip says `Directory ... is not installable`**: you are in a directory without
-  `pyproject.toml`; install from the repository root (`pip install ./ail-ci`).
+- **pip says `Directory ... is not installable`** from a checkout: you are in a directory without
+  `pyproject.toml`; install from the repository root (`pip install ./ail-ci`), or use
+  `pip install ailc` from PyPI.
