@@ -1,3 +1,23 @@
+## 2026-11-04 -- str call-site evidence must not override an explicit parameter annotation
+
+The full suite reported `test_ail_argument_type_details`, `test_ail_check_repair_context` and
+`test_ail_source_check` failing on this tree: a str argument to a declared non-str parameter
+(`fn take(value:int) ... take("wrong")`) was reported at the callee DECLARATION as
+`operation="parameter", inference_scope="signature_override"` instead of at the call site as
+`operation="argument"`. Call-site `str` evidence (`_claim` returning STR) is new in the s3 str-param
+work and was flowing into signature propagation; `_param_kinds` then raised the override conflict and
+`_explicit_annotation_conflicts` re-raised it.
+
+`_str_claim_against_annotation` now keeps a `str` claim from being treated as an override when the
+parameter carries an explicit annotation: the declaration stands and the existing call guard reports
+the mismatch at the caller, exactly as before str claims existed. An unannotated parameter still
+accepts str call-site evidence, and numeric claims keep section 26's parameter-scoped refusal
+(`int`/`float` narrowing). No language semantics changed; only diagnostic attribution.
+
+Tests on this commit: test_ail_argument_type_details (15), test_ail_check_repair_context (8),
+test_ail_source_check (33), test_ail_collections (13), test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3 and nine adjacent typed/check modules, all OK. Manifest shard 45 updated.
+
 ## 2026-11-04 -- pycomp1b: re-applied the Codon/mypyc/Nuitka comparison on the current export
 
 Re-applied accepted job `pycomp1b` (fetched `job-pycomp1b-11041409`) on this tree. Its change adds the

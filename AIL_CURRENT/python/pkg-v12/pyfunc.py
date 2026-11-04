@@ -32522,12 +32522,29 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     unannotated program into a refusal it did not have before.
     """
     for pname, text in override.items():
+        given = _sig_override_kind(fn, pname, text)
+        if given == STR and _str_claim_against_annotation(fn, pname, classes):
+            continue     # str call-site evidence never outvotes an explicit annotation
         for a in fn.args.args:
             if a.arg == pname and a.annotation is not None:
-                given = _sig_override_kind(fn, pname, text)
                 expected = _annotation_kind(a.annotation, classes or ())
                 if given != expected and not (expected == FLT and given == INT):
                     return True
+    return False
+
+
+def _str_claim_against_annotation(fn, pname, classes=None):
+    """True when `pname` carries an explicit annotation that is not `str` itself.
+
+    A call site passing a str value is evidence a call-site guard has always owned: it may
+    settle an UNANNOTATED parameter, but it is not a signature override. Against an explicit
+    annotation the declaration stands and the call's own guard reports the mismatch at the
+    caller (operation="argument"), exactly as it did before call-site str evidence reached
+    propagation; numeric evidence keeps section 26's parameter-scoped refusal.
+    """
+    for a in fn.args.args:
+        if a.arg == pname and a.annotation is not None:
+            return _annotation_kind(a.annotation, classes or ()) != STR
     return False
 
 
@@ -32570,6 +32587,8 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
         if any(len(s) > 1 for s in per_param.values()):
             continue                             # disagreement -- left for `_plan_clones`
         site = {pname: next(iter(s)) for pname, s in per_param.items()}
+        site = {pname: claim for pname, claim in site.items()
+                if not (claim == STR and _str_claim_against_annotation(by_name[g], pname, classes))}
         override, arity_seed = _override_from_site(site)
         try:
             new_params = _param_kinds(by_name[g], classes or {}, override or None,
