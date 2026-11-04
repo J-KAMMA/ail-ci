@@ -122,7 +122,8 @@ def _compile(directory, name, text, general):
 
 
 def _last_line(blob):
-    lines = [line for line in blob.decode('utf-8', 'replace').replace('\r\n', '\n').split('\n') if line]
+    lines = [line for line in blob.decode('utf-8', 'replace').replace('\r\n', '\n').split('\n')
+             if line and not line.startswith('  raised near ')]
     return lines[-1] if lines else ''
 
 

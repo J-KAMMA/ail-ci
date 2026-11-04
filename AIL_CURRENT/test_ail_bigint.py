@@ -586,7 +586,7 @@ class DefaultBuild(unittest.TestCase):
 
     def test_b6_fix06_forms_typed_only(self):
         """The same in-range forms print CPython's answer with AIL_NO_GENERAL=1; the module-level zero keeps the
-        typed path's own "integer division by zero" trap."""
+        typed path's own "integer division or modulo by zero" trap."""
         for name in ("b6_counter", "b6_money", "b6_intfloat", "b6_min", "b6_min_sources", "b6_modzero"):
             made, exe, src = self.build(name, {"AIL_NO_GENERAL": "1"})
             self.assertEqual(made.returncode, 0,
@@ -598,7 +598,7 @@ class DefaultBuild(unittest.TestCase):
             if want.returncode == 0:
                 self.assertEqual(got.stderr, want.stderr, name)
             else:
-                self.assertIn("integer division by zero", got.stderr, name)
+                self.assertIn("integer division or modulo by zero", got.stderr, name)
 
     def test_b6_fix06_values_beyond_int64_stop_loudly_on_the_typed_path(self):
         """The typed path starts the field/item/module/int(float) forms and the INT64_MIN edges, then stops with

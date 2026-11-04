@@ -123,8 +123,12 @@ _mix_call_h_cache = None
 #. Both paths call the boxed unit's ail_mix_drain_out() (defined beside mix_call.h).
 _MIX_DRAIN_EXTERN = 'extern void ail_mix_drain_out(void);\n'
 _MIX_DRAIN_SITES = (
-    ('    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n',
-     '    ail_mix_drain_out(); fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
+    ('    {\n        const char *name = ail_exc_pyname(w);\n        fflush(stdout);\n'
+     '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
+     '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n',
+     '    {\n        const char *name = ail_exc_pyname(w);\n        ail_mix_drain_out(); fflush(stdout);\n'
+     '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
+     '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
     ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
      'static void ail_exception_uncaught(ail_exception *value) {\n    ail_mix_drain_out();\n    fflush(stdout);\n'),
 )
@@ -5615,7 +5619,8 @@ class Compiler(boxclosure.ClosureMixin):
             self.stmt(s, ctx)
 
     def stmt(self, node, ctx):
-        where = pyfunc._debug_where(node)       # `ail build --debug` only: the C of the statement maps to its line
+        # The general path's release runtime does not report a site; only --debug needs the store.
+        where = pyfunc._debug_where(node) if os.environ.get('AIL_DEBUG') == '1' else None
         if where is None:
             return self._stmt(node, ctx)
         ctx.lines.append('    ' * ctx.indent + 'AIL_DBG_SITE("%s:%d");' % where)

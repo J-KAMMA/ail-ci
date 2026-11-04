@@ -4,14 +4,15 @@ Every program below is ordinary Python.  CPython runs it as the oracle and the c
 Python syntax, AIL_NO_GENERAL=1 so the typed path must take it) prints the same bytes, or the spelling
 is refused by name -- there is no third outcome where the answers differ.
 
-Built: re.match / fullmatch / search / findall (zero or one group) / finditer / split (no groups) / sub
-(string replacement with \\1, \\g<1>, \\g<name>, \\n ...; a non-literal replacement without a backslash)
-/ escape, `NAME = re.compile(literal)` with the same methods, match objects with group / start / end
-(`m.group()`, `m.group("name")`, `a, b = m.span()`, `a, b = m.groups()`), truthiness and `is None`; str and
-bytes patterns; flags I M S X A.  The pattern has to be a string literal (or a name bound once to one).
-Refused by name: lookahead / lookbehind, backreferences, atomic and possessive forms, conditionals, scoped
-flags, a repeated group that can match the empty string, IGNORECASE with a non-ASCII pattern character,
-findall with several groups, split with groups, a function as the replacement, m.groups() as a value.
+Built: re.match / fullmatch / search / findall (a list of tuples with several groups) / finditer / split
+(with groups: their text, or None when a group did not take part) / sub and subn (string replacement with
+\\1, \\g<1>, \\g<name>, \\n ...; a non-literal replacement without a backslash) / escape, `NAME =
+re.compile(literal)` with the same methods, match objects with group / start / end (`m.group()`,
+`m.group("name")`, `m.group(1, 2)`, `m.span()`, `a, b = m.span()`, `a, b = m.groups()`), truthiness and
+`is None`; str and bytes patterns; flags I M S X A.  The pattern has to be a string literal (or a name bound
+once to one).  Refused by name: lookahead / lookbehind, backreferences, atomic and possessive forms,
+conditionals, scoped flags, a repeated group that can match the empty string, IGNORECASE with a non-ASCII
+pattern character, a function as the replacement, m.groups() as a value, m.groupdict().
 
 The engine is a leftmost-first Pike VM (CPython's backtracking priority, linear time), so groups and
 spans are CPython's.  Generated tests: random patterns from the supported grammar x random subjects,
@@ -325,11 +326,8 @@ REFUSALS = [
     ("ignorecase non-ASCII", 're.search("\u00e9", s, re.I)', "IGNORECASE with a non-ASCII"),
     ("dynamic pattern", 're.search(s, s)', "string literal"),
     ("compile in a call", 're.search(re.compile("a"), s)', "string literal"),
-    ("findall groups", 're.findall(r"(a)(b)", s)', "tuples"),
-    ("split groups", 're.split(r"(,)", s)', "group"),
     ("bad template", 're.sub(r"a", r"\\q", s)', "bad escape"),
     ("bad group in template", 're.sub(r"a", r"\\3", s)', "invalid group reference"),
-    ("subn template", 're.subn(r"a", r"\\g<0>", s)', "subn with a replacement template"),
     ("groups value", 're.search(r"(a)", s).groups()', "m.groups()"),
     ("groupdict", 're.search(r"(a)", s).groupdict()', "m.groupdict()"),
     ("unbalanced", 're.search(r"(a", s)', "missing )"),
