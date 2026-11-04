@@ -1,3 +1,3 @@
-# line: 1
-# names: not a Python expression
+# line: 3
+# names: yield outside function
 yield 1

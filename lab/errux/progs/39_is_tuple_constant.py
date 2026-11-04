@@ -1,4 +1,4 @@
-# line: 3
+# line: 5
 # names: `is` with a tuple constant
 a = ()
 b = ()

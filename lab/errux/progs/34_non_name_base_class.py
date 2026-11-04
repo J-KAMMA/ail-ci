@@ -1,4 +1,4 @@
-# line: 3
+# line: 5
 # names: non-name base class
 class A:
     pass

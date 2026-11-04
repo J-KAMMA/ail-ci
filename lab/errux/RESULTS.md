@@ -4,7 +4,7 @@
 - Base: `origin/integ`; corpus commit: `b228f88`
 - Programs: `lab/errux/progs/` (40, one distinct refusal each)
 - Scorer: `lab/errux/score.py`; baseline: `lab/errux/baseline.json`
-- Total: **117 / 160** over 40 programs (max 4 each)
+- Total: **116 / 160** over 40 programs (max 4 each)
 
 ## Scoring rules
 
@@ -70,11 +70,12 @@ the construct AIL refuses). `trimmed first stderr line` is cut to 160 characters
 | `37_keyword_only_required.py` | 2 | 3 | accepts | not in the subset: a required keyword-only parameter a in def f (this cut requires every keyword-only parameter to have a default) |
 | `38_multiple_inheritance.py` | 2 | 3 | accepts | not in the subset: multiple inheritance in class C |
 | `39_is_tuple_constant.py` | 2 | 3 | accepts | not in the subset: `is` with a tuple constant (line 5, DIFFERENCES C175): CPython merges equal tuple constants of a code object (`a = (); b = (); a is b` is Tru |
-| `40_yield_outside_function.py` | 2 | 3 | rejects | not in the subset: not a Python expression: invalid syntax (<unknown>, line 3) |
+| `40_yield_outside_function.py` | 1 | 3 | rejects | not in the subset: not a Python expression: invalid syntax (<unknown>, line 3) |
 
-**Total: 117 / 160.** 32 messages name the location (rule 2), 40 name the construct
-(rule 3), 5 give a rewrite hint (02, 10, 11, 12, 29; rule 4), and all 40 use a clean
-status (rule 1). Note that 29 earns the hint point from the substring `use` inside
+**Total: 116 / 160.** 32 messages name the location (rule 2), 39 name the construct
+(rule 3; `40` does not, now that its `names` is the construct `yield outside function`
+rather than the parser preface), 5 give a rewrite hint (02, 10, 11, 12, 29; rule 4),
+and all 40 use a clean status (rule 1). Note that 29 earns the hint point from the substring `use` inside
 "inconsistent use of tabs and spaces", not from actual guidance; the hint rule is a
 string test, so that is a false positive worth tightening later.
 
@@ -83,30 +84,36 @@ string test, so that is a false positive worth tightening later.
 The 10 lowest scores, ties broken by file name. "Missing" names the scoring rules the
 first line does not satisfy.
 
-1. `33_class_body_statement.py` — score 2.
-   Message: `not in the subset: a class body statement other than def/assignment/pass/docstring in C`
-   Missing: no `<file>.py:N:` prefix (rule 2) and no rewrite hint (rule 4).
-2. `34_non_name_base_class.py` — score 2.
-   Message: `not in the subset: a non-name base class in class B`
-   Missing: no location prefix and no rewrite hint; it also does not say which expression formed the base.
-3. `35_encode_error_handler.py` — score 2.
-   Message: `not in the subset: str.encode() with the error handler 'xmlcharrefreplace' on the general path (built: utf-8, ascii, latin-1; errors strict, ignore, replace)`
-   Missing: no location prefix and no rewrite hint (`built:` is not one of the hint words).
-4. `36_generator_with_threads.py` — score 2.
-   Message: `not in the subset: a generator function in a program with threads (the general path runs a generator on a stack of its own, which the thread lock does not follow)`
-   Missing: no location prefix and no rewrite hint; it does not name the `def` that holds the `yield`.
-5. `37_keyword_only_required.py` — score 2.
-   Message: `not in the subset: a required keyword-only parameter a in def f (this cut requires every keyword-only parameter to have a default)`
-   Missing: no location prefix and no rewrite hint.
-6. `38_multiple_inheritance.py` — score 2.
-   Message: `not in the subset: multiple inheritance in class C`
-   Missing: no location prefix and no rewrite hint.
-7. `39_is_tuple_constant.py` — score 2.
-   Message: `not in the subset: \`is\` with a tuple constant (line 5, DIFFERENCES C175): CPython merges equal tuple constants of a code object (\`a = (); b = (); a is b\` is True; \`()\` is a singleton) and here each tuple display is a value of its own; compare with \`==\``
-   Missing: the line number is parenthetical (`(line 5, ...)`), not the `<file>.py:N:` prefix (rule 2), and there is no hint word (rule 4) even though `compare with ==` is close.
-8. `40_yield_outside_function.py` — score 2.
+1. `40_yield_outside_function.py` — score 1.
    Message: `not in the subset: not a Python expression: invalid syntax (<unknown>, line 3)`
-   Missing: no location prefix (the parser's `<unknown>` is the compiler's wrapper, not the program) and no rewrite hint. This is a syntactically valid Python program, so it is not a syntax error in CPython; CPython rejects it at run time with `SyntaxError: 'yield' outside function`.
+   Missing: no location prefix (the parser's `<unknown>` is the compiler's wrapper, not the program),
+   the construct is not named (`yield outside function` does not appear), and there is no rewrite hint.
+   This is a syntactically valid Python program, so it is not a syntax error in CPython; CPython
+   rejects it at run time with `SyntaxError: 'yield' outside function`.
+2. `33_class_body_statement.py` — score 2.
+   Message: `not in the subset: a class body statement other than def/assignment/pass/docstring in C`
+   Missing: no `<file>.py:N:` prefix (rule 2, expected line 4) and no rewrite hint (rule 4).
+3. `34_non_name_base_class.py` — score 2.
+   Message: `not in the subset: a non-name base class in class B`
+   Missing: no location prefix (expected line 5) and no rewrite hint; it also does not say which
+   expression formed the base.
+4. `35_encode_error_handler.py` — score 2.
+   Message: `not in the subset: str.encode() with the error handler 'xmlcharrefreplace' on the general path (built: utf-8, ascii, latin-1; errors strict, ignore, replace)`
+   Missing: no location prefix (expected line 4) and no rewrite hint (`built:` is not one of the hint words).
+5. `36_generator_with_threads.py` — score 2.
+   Message: `not in the subset: a generator function in a program with threads (the general path runs a generator on a stack of its own, which the thread lock does not follow)`
+   Missing: no location prefix (expected line 4) and no rewrite hint; it does not name the `def` that
+   holds the `yield`.
+6. `37_keyword_only_required.py` — score 2.
+   Message: `not in the subset: a required keyword-only parameter a in def f (this cut requires every keyword-only parameter to have a default)`
+   Missing: no location prefix (expected line 3) and no rewrite hint.
+7. `38_multiple_inheritance.py` — score 2.
+   Message: `not in the subset: multiple inheritance in class C`
+   Missing: no location prefix (expected line 7) and no rewrite hint.
+8. `39_is_tuple_constant.py` — score 2.
+   Message: `not in the subset: \`is\` with a tuple constant (line 5, DIFFERENCES C175): CPython merges equal tuple constants of a code object (\`a = (); b = (); a is b\` is True; \`()\` is a singleton) and here each tuple display is a value of its own; compare with \`==\``
+   Missing: the line number is parenthetical (`(line 5, ...)`), not the `<file>.py:N:` prefix (rule 2),
+   and there is no hint word (rule 4) even though `compare with ==` is close.
 9. `01_undefined_name_nested.py` — score 3.
    Message: `01_undefined_name_nested.py:5:9: not in the subset: name 'missing_name' is not defined`
    Missing: no rewrite hint (rule 4); the location is correct.

@@ -1,4 +1,4 @@
-# line: 3
+# line: 4
 # names: generator function
 import threading
 def gen() -> int:

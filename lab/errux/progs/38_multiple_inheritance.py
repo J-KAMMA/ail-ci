@@ -1,4 +1,4 @@
-# line: 5
+# line: 7
 # names: multiple inheritance
 class A:
     pass
