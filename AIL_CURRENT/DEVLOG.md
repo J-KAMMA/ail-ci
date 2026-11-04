@@ -1,3 +1,16 @@
+## 2026-11-04 -- arena1 S2 re-applied on the integ tree (job-rbarena1s2c-11041649)
+
+Re-applied the accepted `job-arena1s2c-11041356` change (read-only list-field alias elision in
+`pyfunc.py`, `test_ail_readonly_field_alias.py`, its `tests.d` registration, the worker-key
+cleanup, and the three arena1 S2 DEVLOG entries) on top of the integ tree.  The `pyfunc.py` hunks
+applied cleanly; `AIL_CURRENT/DEVLOG.md` conflicted at the top only, and both sides were kept
+(this entry, the fz226 entry and the three arena1 entries).  `tools/diff_ids.py` is not present on
+this tree; `python3 tools/update_manifest.py` regenerated the shard pins, and `--check` passes.
+
+Verification on the final commit: `test_ail_readonly_field_alias` (4 tests), `test_ail_sort_keys`,
+`test_ail_struct_list_inplace`, `test_ail_field_views`, `test_ail_heapq_bisect`,
+`test_ail_ir_cover`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
@@ -15,6 +28,46 @@ in `tests.d`; added DIFFERENCES row `C?-job-fz226-11041145-1`.  The load-time re
 which `lab/fuzz/run.py` currently classes as `crash` (it only counts exit 3 as `refused`); that
 is a fuzzer-classification issue, not a silent language difference.  Final-state tests:
 test_ail_fz226, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-11-04 -- arena1 S2 fix: local struct field aliases stay on the IR path
+
+The read-only field-alias pass also elided `x = s.f` when `s` was a struct local, not a parameter.
+That hid the `list.share` the IR ownership pass turns into a field borrow, so the grid `main`
+(`bs = ru.b`, `ss = ru.s`) reported `field_borrows == 0` and `test_ail_ir_cover` failed.  The pass
+now elides only when the owner is a function parameter; a struct local's alias is left for the IR
+(`field_borrows == 2` again), while the parameter shapes in `test_ail_readonly_field_alias` and the
+`global`/`nonlocal` guard still behave as before.
+
+`test_ail_ir_cover` passes (5 tests); `test_ail_readonly_field_alias` (4),
+`test_ail_ir_s3b` (14) and `test_ail_ir_f1` (13) also pass.
+
+## 2026-11-04 -- arena1 S2 fix: outer-scope aliases keep their store
+
+Review 1 found that a `global` (or `nonlocal`) alias name was elided: the `Global`/`Nonlocal`
+check ran only over the alias's live range, so a declaration before the range was missed and
+`global g; g = t.par` lost its only store (HEAD printed `2\n1`, CPython `2\n2`).  The pass now
+scans the whole function for `Global`/`Nonlocal` declarations and refuses the elision when either
+the alias name or its owner is declared outer.  The typed path then falls back to the general
+path, which performs the store correctly.
+
+Added `test_global_and_nonlocal_aliases_match_cpython` to `test_ail_readonly_field_alias.py`
+(global alias, global owner, nonlocal alias; default and `AIL_UNIFIED_FORCE=1`).  Probes
+`/tmp/probes/p10_global.py`, `p10b_global_owner.py`, `p10c_nonlocal.py`, `p10d_global_read.py`
+and `p10e_normal.py` match CPython on both builds; the normal shape still reads `f_nm`/`f_par`
+in place.  `test_ail_readonly_field_alias`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass at `-j 2`.
+
+## 2026-11-04 -- arena1 S2 fix: shadowing lambda parameters keep the alias copy
+
+The read-only field-alias pass substituted `o.f` inside a sort-key lambda whose parameter
+shadowed the struct name, so the key read the element's field instead of the outer struct's
+(e.g. `p = o.par; sorted(xs, key=lambda o: p[o.idx])`).  The pass now rejects any lambda in the
+alias's live range whose parameters bind `o` or `x`, and the copy is kept for that shape.
+
+Negative tests added for a lambda parameter shadowing the struct name, one shadowing the alias
+name, and a comprehension whose target shadows the struct; all three are compared with CPython,
+and the generated C keeps `ail_list_snapshot` for the shadowed shape.  The `do_sort` shape still
+elides both snapshots.  Probes (`p_shadow_o`, `p_shadow_x`, `p_comp_shadow`, plus the twelve
+earlier probes) match CPython on the default and `AIL_UNIFIED_FORCE=1` builds.
 
 ## 2026-11-03 -- rails3: element-bounded range counters stay int64 (job-rails3-11040144)
 
@@ -34,6 +87,45 @@ default and unified builds; the overflow probe stops loudly on both int64 paths 
 `--exact-int`, and the >2**64 list-element probe stays exact.  Added
 `test_ail_range_element_bounds.py` and registered it in `tests.d`; the targeted modules,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on the final commit.
+## 2026-11-03 -- arena1 S2: read-only list-field aliases feed sort keys in place (job-arena1s2b-11040443)
+
+`x = o.f` for a `list[int]`, `list[float]` or `list[str]` field normally copies the field into
+a private list.  The new AST pass in `pyfunc.py` (`_elide_readonly_field_aliases`, run in
+`_to_c_once` before `sortkeys.rewrite` and on the write-stage probe) drops that copy only when
+every use between the assignment and the last mention is read-only and the value cannot escape:
+`x` is assigned once, `o` is a plain name not rebound in the range, no attribute/element store or
+mutating method touches `x` or `o.f`, every call passes the borrow check, no user function
+receives `o` or the struct, `x` is not returned or aliased, and it is not captured by a
+non-sort-key lambda.  `do_sort` now reads `f_nm` / `f_par` in place.
+
+`_borrow_call_safe` is called through `_alias_call_safe`, which treats any typing context the
+light alias scope cannot supply as unsafe.  That fixes the crash on `t.par.pop()` (the field
+method path asked the scope for `type_of`) and keeps the copy, as the task requires.  A refused
+rewritten compile is retried with `_alias_elide=False`, so the old route survives.
+
+tree_fold, N=3,000,000, same input and runner:
+
+| | peak RSS | wall (median 5) | minor faults |
+|---|---:|---:|---:|
+| before (`b47e3fa9`) | 414,172 KiB | 1,536 ms | 135,313 |
+| after | 367,284 KiB | 1,490 ms | 136,124 |
+
+The target ≤415 MB is met (367.3 MB, −46.9 MB / −11.3%).  Wall is inside the noise band (direct
+runs: 1.45 s before, 1.48 s after).  Minor faults did **not** fall on this runner (they are 0.6%
+higher and the two ranges do not overlap), so that part of the plan's expectation is not met.
+
+The generated `do_sort` has no `ail_pslist_snapshot` / `ail_list_snapshot`.  The C diff is not
+limited to those lines: removing the local copies also lets the sort lowering take its `ir`
+form, so the rest of the body uses `ir` temporaries and reads the fields in place.
+
+Verification on this commit: `test_ail_readonly_field_alias` (now with the field-pop negative),
+`test_ail_sort_keys`, `test_ail_struct_list_inplace`, `test_ail_field_views`,
+`test_ail_heapq_bisect`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass at `-j 2`; all ten lab/compare tasks are correct on the typed path with every public and
+hidden case; a 300 s bounded `lab/corpus/check.py` run is 188 same / 1 refused / 1 limit (default)
+and 191 same / 1 refused / 1 limit (`AIL_IR=1`) with no DIFF or crash; twelve `/tmp/probes` programs
+match CPython on both builds; ASan+UBSan are clean on tree_fold's example case and on the mixed
+regression program.  The full corpus (219 programs) was not re-run.
 
 ## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
 
