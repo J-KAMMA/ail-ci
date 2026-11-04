@@ -1,3 +1,15 @@
+## 2026-11-04 -- pyreach s5 fix round: role bindings and one-argument `get` proof
+
+Review defects closed.  The record-dict lowering used a function-wide role map, so a row name
+shared with another dict or reused as a plain list was rewritten in the wrong region (TypeError,
+empty output, or a C type error).  `_record_roles` now records the binding-node ids it introduces
+and `_record_bound_names` lists every binding of a name; a role name with any other binding makes
+the dict keep the old route (`s_twodict_loop.py`, `s_name_reuse.py` now match CPython on both
+builds).  A one-argument `d.get(k)` presence proof now also requires every name in the key
+expression to be unrebound between the store (or the `if k in d:` guard) and the use, so
+`q_stalekey.py` / `q_guard_stale.py` take the general path and match CPython.  The manifest is
+regenerated.
+
 ## 2026-11-04 -- pyreach s5: dicts of record lists and dicts of sets
 
 A local `d = {}` whose stores are record lists (`d[k] = [name, balance, open]`) now lowers to the

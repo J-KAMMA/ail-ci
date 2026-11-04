@@ -4738,11 +4738,78 @@ def _record_classify(fn, name):
     return None
 
 
-def _record_roles(fn, name, kind):
-    """Names bound to a row (or an items tuple) of dict `name`, from the uses this lowering knows."""
-    roles = {}
+def _target_name_nodes(target):
+    """The `Name` nodes a binding target binds (tuples and lists destructured, `*rest`)."""
+    if isinstance(target, ast.Name):
+        return [target]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        out = []
+        for elt in target.elts:
+            out.extend(_target_name_nodes(elt))
+        return out
+    if isinstance(target, ast.Starred):
+        return _target_name_nodes(target.value)
+    return []
 
-    def role(nm, value):
+
+def _record_bound_names(fn):
+    """Name -> ids of every node that binds it anywhere in `fn`.
+
+    `_record_roles` only knows the bindings that make a name a row; a role name bound by any other
+    statement (a plain assignment, another loop, a parameter) must not be rewritten as a row."""
+    bound = {}
+
+    def add(node):
+        bound.setdefault(node.id, set()).add(id(node))
+
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name_node in _target_name_nodes(target):
+                    add(name_node)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            for name_node in _target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, ast.AugAssign):
+            for name_node in _target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            for name_node in _target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    for name_node in _target_name_nodes(item.optional_vars):
+                        add(name_node)
+        elif isinstance(node, ast.NamedExpr):
+            for name_node in _target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.setdefault(node.name, set()).add(id(node))
+        elif isinstance(node, ast.Lambda):
+            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                bound.setdefault(arg.arg, set()).add(id(arg))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                bound.setdefault(arg.arg, set()).add(id(arg))
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for gen in node.generators:
+                for name_node in _target_name_nodes(gen.target):
+                    add(name_node)
+    return bound
+
+
+def _record_roles(fn, name, kind):
+    """(roles, recognized) for the names bound to a row (or an items tuple) of dict `name`.
+
+    `recognized` holds the binding-node ids the lowering itself introduces; a role name with any
+    other binding in the function is rejected, so a name shared with another dict or reused for a
+    plain value leaves the source unchanged instead of being rewritten in the wrong region."""
+    roles = {}
+    recognized = {}
+
+    def role(nm, value, node_id):
+        recognized.setdefault(nm, set()).add(node_id)
         if nm in roles and roles[nm] != value:
             roles[nm] = 'conflict'
         else:
@@ -4772,50 +4839,53 @@ def _record_roles(fn, name, kind):
                 if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
                         and isinstance(value.func.value, ast.Name) and value.func.value.id == name
                         and value.func.attr in ('get', 'setdefault')):
-                    role(target, 'row' if kind == 'record' else 'set')
+                    role(target, 'row' if kind == 'record' else 'set', id(node.targets[0]))
                 elif (isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name)
                       and value.value.id == name):
-                    role(target, 'row' if kind == 'record' else 'set')
+                    role(target, 'row' if kind == 'record' else 'set', id(node.targets[0]))
                 elif (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
                       and value.func.id == 'sorted' and value.args and is_items(unwrap(value.args[0]))):
-                    role(target, 'items')
+                    role(target, 'items', id(node.targets[0]))
                 elif isinstance(value, ast.Name) and value.id in roles and roles[value.id] in ('row', 'item', 'items'):
-                    role(target, roles[value.id])
+                    role(target, roles[value.id], id(node.targets[0]))
             if isinstance(node, (ast.For, ast.AsyncFor)):
                 it = node.iter
                 if is_values(it) and isinstance(node.target, ast.Name):
-                    role(node.target.id, 'row' if kind == 'record' else 'set')
+                    role(node.target.id, 'row' if kind == 'record' else 'set', id(node.target))
                 elif is_items(it):
                     if isinstance(node.target, ast.Name):
-                        role(node.target.id, 'item')
+                        role(node.target.id, 'item', id(node.target))
                     elif (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
                           and isinstance(node.target.elts[0], ast.Name)
                           and isinstance(node.target.elts[1], ast.Name)):
-                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set')
+                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set',
+                             id(node.target.elts[1]))
                 elif isinstance(it, ast.Name) and roles.get(it.id) == 'items':
                     if (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
                             and isinstance(node.target.elts[0], ast.Name)
                             and isinstance(node.target.elts[1], ast.Name)):
-                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set')
+                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set',
+                             id(node.target.elts[1]))
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted':
                 if node.args and is_items(unwrap(node.args[0])):
                     for kw in node.keywords:
                         if kw.arg == 'key' and isinstance(kw.value, ast.Lambda):
                             for arg in kw.value.args.args:
-                                role(arg.arg, 'item')
+                                role(arg.arg, 'item', id(arg))
             if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
                 for gen in node.generators:
                     if is_values(gen.iter) and isinstance(gen.target, ast.Name):
-                        role(gen.target.id, 'row' if kind == 'record' else 'set')
+                        role(gen.target.id, 'row' if kind == 'record' else 'set', id(gen.target))
                     elif is_items(gen.iter):
                         if isinstance(gen.target, ast.Name):
-                            role(gen.target.id, 'item')
+                            role(gen.target.id, 'item', id(gen.target))
                         elif (isinstance(gen.target, ast.Tuple) and len(gen.target.elts) == 2
                               and isinstance(gen.target.elts[1], ast.Name)):
-                            role(gen.target.elts[1].id, 'row' if kind == 'record' else 'set')
+                            role(gen.target.elts[1].id, 'row' if kind == 'record' else 'set',
+                                 id(gen.target.elts[1]))
         if roles == before:
             break
-    return roles
+    return roles, recognized
 
 
 class _RecordTransformer(ast.NodeTransformer):
@@ -4868,7 +4938,7 @@ class _RecordTransformer(ast.NodeTransformer):
         self.guarded = self._collect_guards(fn)
 
     def _collect_guards(self, fn):
-        """Statement id -> key texts proved present by an enclosing `if k in d:` body.
+        """Statement id -> key text -> line of the enclosing `if k in d:` test.
 
         A key element removed by a `del d[k]` is dropped for the statements that follow it."""
         guards = {}
@@ -4882,14 +4952,14 @@ class _RecordTransformer(ast.NodeTransformer):
             return None
 
         def mark(statements, keys):
-            keys = set(keys)
+            keys = dict(keys)
             for stmt in statements:
-                guards.setdefault(id(stmt), set()).update(keys)
+                guards.setdefault(id(stmt), {}).update(keys)
                 if isinstance(stmt, ast.If):
-                    inner = set(keys)
+                    inner = dict(keys)
                     found = key_of(stmt.test)
                     if found is not None:
-                        inner.add(found)
+                        inner[found] = stmt.lineno
                     mark(stmt.body, inner)
                     mark(stmt.orelse, keys)
                     continue
@@ -4899,13 +4969,13 @@ class _RecordTransformer(ast.NodeTransformer):
                                 and target.value.id == self.d):
                             text = _record_key_text(target.slice)
                             if text is not None:
-                                keys.discard(text)
+                                keys.pop(text, None)
                     continue
                 for child in ast.iter_child_nodes(stmt):
                     if isinstance(child, ast.stmt):
                         mark([child], keys)
 
-        mark(fn.body, set())
+        mark(fn.body, {})
         return guards
 
     def fresh(self, prefix):
@@ -4915,9 +4985,41 @@ class _RecordTransformer(ast.NodeTransformer):
         self.taken.add(name)
         return name
 
+    def _key_stable(self, key, start, end):
+        """No name read by `key` is rebound in the source between line `start` (exclusive) and
+        `end` (inclusive), so the key text means the same value at the use as at the store."""
+        names = {node.id for node in ast.walk(key) if isinstance(node, ast.Name)}
+        if not names:
+            return True
+        for node in ast.walk(self.fn):
+            line = getattr(node, 'lineno', None)
+            if line is None or not (start < line <= end):
+                continue
+            targets = []
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    targets.extend(_target_name_nodes(target))
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+                targets.extend(_target_name_nodes(node.target))
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.Delete)):
+                for target in (node.targets if isinstance(node, ast.Delete) else [node.target]):
+                    targets.extend(_target_name_nodes(target))
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        targets.extend(_target_name_nodes(item.optional_vars))
+            elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                for gen in node.generators:
+                    targets.extend(_target_name_nodes(gen.target))
+            elif isinstance(node, ast.ExceptHandler) and node.name and node.name in names:
+                return False
+            if any(target.id in names for target in targets):
+                return False
+        return True
+
     def _proven(self, key, line):
-        """True when an unconditional store of this key executes before `line` and no
-        `del d[k]` of the same key lies between that store and the use."""
+        """True when an unconditional store of this key executes before `line`, the key reads the
+        same values at both, and no `del d[k]` of the same key lies between them."""
         text = _record_key_text(key)
         if text is None:
             return False
@@ -4925,7 +5027,9 @@ class _RecordTransformer(ast.NodeTransformer):
         if not stores:
             return False
         last = max(stores)
-        return not any(other == text and last < at < line for at, other in self.deletes)
+        if any(other == text and last < at < line for at, other in self.deletes):
+            return False
+        return self._key_stable(key, last, line)
 
     def _none_tested(self, name):
         for node in ast.walk(self.fn):
@@ -5061,7 +5165,9 @@ class _RecordTransformer(ast.NodeTransformer):
             return None
         if attr == 'get' and len(value.args) == 1:
             text = _record_key_text(value.args[0])
-            guarded = text is not None and text in self.guarded.get(id(stmt), ())
+            guard_line = self.guarded.get(id(stmt), {}).get(text) if text is not None else None
+            guarded = guard_line is not None and self._key_stable(value.args[0], guard_line,
+                                                                  value.lineno)
             if not guarded:
                 if isinstance(target, ast.Name) and self._none_tested(target.id):
                     raise _RecordUnsupported()
@@ -5468,9 +5574,13 @@ def _lower_record_dict(fn, name, box, taken, box_needed):
     if classified is None:
         raise _RecordUnsupported()
     kind, arity, list_values = classified
-    roles = _record_roles(fn, name, kind)
+    roles, recognized = _record_roles(fn, name, kind)
     if any(role == 'conflict' for role in roles.values()):
         raise _RecordUnsupported()
+    bound = _record_bound_names(fn)
+    for role_name, role in roles.items():
+        if len(bound.get(role_name, ())) != len(recognized.get(role_name, ())):
+            raise _RecordUnsupported()
     transformer = _RecordTransformer(fn, name, kind, arity, roles, box, taken, box_needed)
     key_hints = set()
     for node in ast.walk(fn):
