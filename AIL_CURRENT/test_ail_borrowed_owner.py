@@ -348,7 +348,12 @@ class BorrowedOwnerTests(unittest.TestCase):
             body = program[program.index("\nint64_t deep(int64_t v_d, int64_t v_lim) {"):]
             body = body[:body.index("\n}\n")]
             self.assertNotIn("ail_cleanup_frame", body)
-            self.assertIn("ail_depth--", body)
+            self.assertNotIn("ail_depth--", body)
+            self.assertIn("deep__d(v_d, v_lim, ail_depth + 1)", body)
+            inner = program[program.index("\nint64_t deep__d("):]
+            inner = inner[:inner.index("\n}\n")]
+            self.assertIn("if (ail_d > AIL_MAX_RECURSION_DEPTH)", inner)
+            self.assertIn("deep__d(ir2, v_lim, ail_d + 1)", inner)
 
     def test_element_locals_match_cpython_and_borrow_only_when_safe(self):
         with tempfile.TemporaryDirectory() as directory:

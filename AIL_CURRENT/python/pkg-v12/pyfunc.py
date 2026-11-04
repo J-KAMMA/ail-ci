@@ -37932,6 +37932,24 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                                  else [node.body, node.orelse] if isinstance(node, ast.IfExp) else []))):
         # Callback edges can form cycles absent from the static direct-call graph.
         recursive |= {f.name for f in fns}
+    # Expose the strongly connected component of every recursive function, plus the direct-call
+    # graph the IR uses to decide whether a self-recursive function's other calls can reach a
+    # guarded function (bce s2). A callback edge that forced a function recursive without a
+    # self-reachable path has no SCC here, so it keeps today's global depth counter.
+    _direct_calls = {f.name: frozenset(_calls_with_methods(f)) for f in fns}
+    _recursion_scc = {}
+    for _name in recursive:
+        _reach = reach.get(_name, ())
+        if _name in _reach:
+            _recursion_scc[_name] = frozenset(
+                _g for _g in recursive if _g in _reach and _name in reach.get(_g, ()))
+    recursion_info = {
+        'names': frozenset(names),
+        'reach': {_k: frozenset(_v) for _k, _v in reach.items()},
+        'recursive': frozenset(recursive),
+        'scc': _recursion_scc,
+        'direct': _direct_calls,
+    }
     owned_str_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                      and f.returns.id == '__ail_checked_str__'}
     owned_str_fns.update(key for key, signature in external_exports.items() if signature['owned_str'])
@@ -38280,6 +38298,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         return ((fn, sigs_used, strict, cname, recursive_flag, csym, arity, clones,
                  base_ctx, classes, defaults),
                 dict(is_method=fn.name in method_names, grid_by_func=grid_by_func,
+                     recursion_info=recursion_info,
                      owned_str_fns=owned_str_fns, owned_bytes_fns=owned_bytes_fns,
                      separate_units=bool(info is not None and info.get('_want_units')),
                      static_helpers=bool(info is not None and info.get('_mixed_clone')
@@ -39755,7 +39774,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   experimental_borrow_scalar_self=False, experimental_trim_borrowed_exc_base=False,
                   experimental_byte_arithmetic=False, experimental_ephemeral_numeric_temps=False,
                   experimental_private_try_scalars=False, experimental_fresh_bytes_fields=False,
-                  borrowed_callback_summaries=None, readonly_bytes_consumers=(), builders_enabled=True):
+                  borrowed_callback_summaries=None, readonly_bytes_consumers=(), builders_enabled=True,
+                  recursion_info=None):
     """The signature and the body of one function, with the others already typed.
 
     `defaults`, if given, is `to_c`'s whole-program `{fname: {param_name: default_ast_node}}`
@@ -39928,6 +39948,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.defaults = defaults or {}
     ctx.classes = classes or {}
     ctx.csym = csym or {}
+    ctx.recursion_info = recursion_info or {}
     ctx.handled_symbols = cleanup_symbols
     ctx.clones = clones or {}
     ctx.readonly_scalar_helpers = readonly_scalar_helpers
@@ -41380,7 +41401,7 @@ _QC_ALIASED_OK = frozenset({
     'defaults', 'float64_pipelines', 'funcs_byterow', 'funcs_grid', 'handled_symbols',
     'internal_exact_bytes_fns', 'local_annotations', 'modconsts', 'non_escaping_helpers',
     'numeric_allowed_names', 'owned_bytes_fns', 'owned_str_fns', 'params', 'readonly_bytes_consumers',
-    'readonly_scalar_helpers', 'slist_names', 'stdin_root_bound',
+    'readonly_scalar_helpers', 'slist_names', 'stdin_root_bound', 'recursion_info',
     'untyped_str_sets', 'untyped_byte_sets'})
 _QC_INIT = [0]  # >0 while a Ctx / ClassInfo is being constructed: nothing can have queried it yet
 _QC_ALLOWED = (str, tuple, int, float, bool, type(None), frozenset)
