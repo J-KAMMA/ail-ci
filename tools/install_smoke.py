@@ -97,6 +97,12 @@ firstline() {
 setup_fail() {
     for name in version doctor hello typed tutorial; do emit "$name" "FAIL $1"; done
 }
+same() {
+    python3 -c 'import sys
+a = open(sys.argv[1], "rb").read()
+b = open(sys.argv[2], "rb").read()
+raise SystemExit(0 if a == b else 1)' "$1" "$2"
+}
 meta() {
     py=$(python3 -c 'import platform; print(platform.python_version())' 2>/dev/null || printf '?')
     libc=$(ldd --version 2>&1 | { IFS= read -r line || [ -n "$line" ]; printf '%s\n' "$line"; } || printf '?')
@@ -118,14 +124,14 @@ doctor() {
 hello() {
     python3 /c/hello.py >/tmp/exp 2>/tmp/experr; exprc=$?
     /tmp/v/bin/ail run --strict /c/hello.py >/tmp/got 2>/tmp/err; rc=$?
-    if [ "$rc" -eq 0 ] && [ "$exprc" -eq 0 ] && cmp -s /tmp/got /tmp/exp; then emit hello PASS
+    if [ "$rc" -eq 0 ] && [ "$exprc" -eq 0 ] && same /tmp/got /tmp/exp; then emit hello PASS
     elif [ -s /tmp/err ]; then emit hello "FAIL $(firstline /tmp/err)"
     else emit hello "FAIL stdout differs from CPython"; fi
 }
 typed() {
     python3 /c/typed.py >/tmp/exp 2>/tmp/experr; exprc=$?
     /tmp/v/bin/ail run --strict /c/typed.py >/tmp/got 2>/tmp/err; rc=$?
-    if [ "$rc" -eq 0 ] && [ "$exprc" -eq 0 ] && cmp -s /tmp/got /tmp/exp; then emit typed PASS
+    if [ "$rc" -eq 0 ] && [ "$exprc" -eq 0 ] && same /tmp/got /tmp/exp; then emit typed PASS
     elif [ -s /tmp/err ]; then emit typed "FAIL $(firstline /tmp/err)"
     else emit typed "FAIL stdout differs from CPython"; fi
 }
