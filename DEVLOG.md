@@ -1,3 +1,23 @@
+## 2026-11-04 -- diffaudit1 re-applied: 20-probe audit of open DIFFERENCES rows (job-diffaudit1-11042037)
+
+Re-applied the accepted `diffaudit1` change on this tree. The job's two rejected hunks were the
+generated `manifest.d/45.txt` pin (recomputed by `tools/update_manifest.py`, not hand-edited) and
+`AIL_CURRENT/python/pkg-v12/pyfunc.py`: this tree already gates `_explicit_annotation_conflicts`
+on a NUMERIC caller claim (`sdkdiag1`), which subsumes the job's `str`-against-non-`str` skip.
+Both sides are kept: the NUM gate stays and the explicit `given == STR and expected != STR`
+continue plus its docstring sentence are present. `tools/diff_ids.py` is absent on this tree.
+
+New `lab/diffaudit/` holds `audit.py` and 20 probe programs; `test_ail_diffaudit.py` pins their
+verdicts (5 now-matches, 6 still-differs, 8 refused-as-said, plus the pre138 fused-pipeline
+residual and the pre90 forced-build finding), registered through
+`AIL_CURRENT/tests.d/test_ail_diffaudit.txt`. Four open rows proved now-matches in both builds
+and their DIFFERENCES.md status cells now say `fixed;lab/diffaudit/<probe>.py`:
+pre116-10251611-1, pre138-10250109-2, rbrbfuzz4-10262129-4 and rbfuzz4-10240913-4.
+
+`test_ail_diffaudit` 5 tests OK; `test_ail_safetynet` + `test_ail_corpus_findings3` 7 tests OK;
+`test_ail_files` 18 tests OK (one skip). Five probes (saved-generator trap, eager `next`,
+lambda `%` traps, `dict(d)` `__eq__` count, annotated `str` argument) match CPython 3.12 on both
+builds.
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda

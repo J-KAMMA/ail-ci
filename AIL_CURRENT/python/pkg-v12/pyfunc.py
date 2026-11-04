@@ -32550,7 +32550,9 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     disagrees with unannotated BODY evidence is a different, softer thing (`_param_kinds` already
     refuses several such mismatches too, e.g. an inferred sequence against a caller's `int` claim),
     and is dropped rather than raised, so propagation can never turn an already-working,
-    unannotated program into a refusal it did not have before.
+    unannotated program into a new refusal it did not have before. A `str` claim against a
+    non-`str` annotation is in the dropped group: the call guard refuses that call by name at the
+    call site (section 212), and raising here would report it against the declaration instead.
 
     Only a NUMERIC caller claim is raised here. A text, bytes or list claim is refused
     at the call itself (`_call_user_func`'s argument branches), which names the call
@@ -32565,6 +32567,11 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
             if a.arg == pname and a.annotation is not None:
                 given = _sig_override_kind(fn, pname, text)
                 expected = _annotation_kind(a.annotation, classes or ())
+                # A str claim against a non-str annotation is the call guard's argument
+                # mismatch, named at the call site; propagating it here would attribute the
+                # failure to the declaration instead.
+                if given == STR and expected != STR:
+                    continue
                 if given != expected and not (expected == FLT and given == INT):
                     return True
     return False
