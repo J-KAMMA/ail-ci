@@ -16,10 +16,13 @@ python3 AIL_CURRENT/ail_chatgpt.py build --cpython examples/hybrid/collatz.py -o
 python3 examples/hybrid/collatz.py 200000          # same stdout and exit status
 ```
 
-With the installed `ail` command:
+The installed `ail` command has no hybrid mode: `ail build` forwards to the SDK's `compile`, which
+rejects `--cpython` (see the finding below).  Call the SDK compiler that ships beside the installed
+package instead:
 
 ```sh
-ail build --cpython examples/hybrid/collatz.py -o /tmp/collatz-hybrid
+SDK=$(python3 -c 'import ail_lang, pathlib; print(pathlib.Path(ail_lang.__file__).parent / "sdk")')
+python3 -B "$SDK/ail_chatgpt.py" build --cpython examples/hybrid/collatz.py -o /tmp/collatz-hybrid
 /tmp/collatz-hybrid/collatz 200000
 ```
 
@@ -58,6 +61,18 @@ wall clock milliseconds for the whole program, including process start-up.
 load cost; it is there to show the boundary, not to be fast.
 
 ## Findings
+
+**The installed `ail` cannot build a hybrid.**  `packaging/ail_lang/cli.py` maps `ail build` to the
+SDK's `compile` command and does not forward `--cpython`, so the flag reaches a parser that has no
+such option:
+
+```sh
+ail build --cpython examples/hybrid/collatz.py -o /tmp/collatz-hybrid
+# ail_chatgpt.py: error: unrecognized arguments: --cpython
+```
+
+The SDK compiler bundled beside the package (`ail_lang/sdk/ail_chatgpt.py`) does support it, so the
+installed command in the build section calls that file directly.
 
 **`%` with a variable divisor is refused.**  The body gate treats `Mod` like division because the
 divisor can be zero.  A constant nonzero divisor is allowed.

@@ -1,7 +1,8 @@
 """Sum of squares over a list[float] parameter.
 
-The list is copied into the native call, the loop runs as typed C, and Python does the list
-construction and the formatting.
+The hybrid produces no unit for a `list[float]` parameter, so `sum_squares` runs in CPython;
+the program still runs and its output equals CPython's.  Python does the list construction and
+the formatting, and the whole loop stays interpreted.
 """
 import sys
 
