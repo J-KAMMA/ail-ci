@@ -183,7 +183,9 @@ passing program in the default mode, runs it and compares both exit code and std
   `fmean([2**53+1]*3, weights=[1, 1, 1])` is `9007199254740994.0`. The denominator is still `fsum` of the
   weights converted to float, as in CPython, and it is checked for zero before the product sum.
 * The refusal test in `test_ail_stdlib_batch4.py` and the named-refusal list in `test_ail_genlib.py` now use
-  `statistics.linear_regression` for the name that stays unsupported.
+  `statistics.linear_regression` for the name that stays unsupported. (job-stats2_rr1: `linear_regression`
+  is built now, so the typed refusal test in `test_ail_stdlib_batch4.py` uses `statistics.NormalDist`;
+  the `test_ail_genlib.py` list goes through the general path, which still does not publish it.)
 
 `correlation(..., method="ranked")` is refused by name; only `method="linear"` is built. Forced general-path
 builds (`AIL_UNIFIED_FORCE=1`) still refuse these names because the general path does not publish them; the
