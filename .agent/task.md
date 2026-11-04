@@ -1,3 +1,48 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+All checks are done. Final report:
+
+## What the change really does
+Adds only `lab/infer/` (fetch/export/ref/AIL GPT-2 scripts, token files, README/RESULTS) plus a DEVLOG entry and one DIFFERENCES row. No `AIL_CURRENT/*.py` or `tools/*` file changes, so the compiler and runtime are untouched — this is a measurement/showcase job, and the review is about the lab's correctness and claims.
+
+## Claims checked (against HEAD, real zenz weights, and the generated C)
+I downloaded the pinned Q5 GGUF (sha256 matches), dequantized it to f32, and ran ref.py and the compiled `gpt2.py` (`/tmp/t_gpt2`, 106,816 B, `--strict`).
+
+- **AIL == `ref.py`, 64 tokens** — verified exactly: top-5 `244 11.1414851 / 255 9.38343885 / 329 8.00675566 / 172 6.62297552 / 249 5.8384196`, greedy `244 249 248 172 120 202 435 354 280 386 259 623 241 435 354 280`.
+- **1-token prompt, AIL vs ref** — verified, byte-identical output.
+- **1024 boundary** — verified: `tokens1024.txt == tokens.txt*16`; `STEPS=0` prints top-5 and exits 0 (matches ref top-5); default prints top-5 then the named refusal, exit 2; 1025-token prompt refuses, exit 2. `STEPS=0`/`-5` on 1 token both exit 0 and agree.
+- **AIL vs CPython** — verified with a scaled synthetic model (E=128, 2 heads, ctx 32): default build == CPython on all boundary cases (context-exact, over-context, empty prompt, negative STEPS). `infer_guard`-style probe via `cmp.sh`: both builds match CPython stdout/stderr/exit.
+- **Copy volume** — verified from `--debug-dir` C: 12 `ail_flist_snapshot` calls per layer-token (26 textual occurrences, 14 lines), head/`lnf` excluded; the 12 lists sum to 7,087,872 doubles (54.07 MiB), 40.56 GiB for 12×64. Arithmetic is right.
+- **Binary size 106,816 B** — exact. **Compile time** — 8.47 s with `AIL_NO_CACHE=1` (the 8.34 s figure), 0.57 s warm.
+- **No weights in git**, **no compiler files changed**, **manifest** (`update_manifest.py --check`) clean.
+- **Tests** — `test_ail_safetynet` 152 s and `test_ail_files` 83 s pass on HEAD. `test_ail_corpus_findings3` not re-run (no module added/edited).
+- **llama.cpp numbers** (0.150 s prefill, 12.93 ms/token, 27,120 B) — **unverified**: building llama.cpp does not fit the box.
+
+## Observations (non-blocking)
+- `ref.py` has no `N_CTX` guard: on the 1024-token prompt it prints the top-5 and then dies with `ValueError: operands could not be broadcast ... (1025,768) (1024,768)` (exit 1). The RESULTS row is still true for the top-5, but a reader reproducing it gets a traceback.
+- `export_f32.py` silently writes raw Q5_K blocks as f32 if handed a quantized GGUF (I hit this before dequantizing); the documented pipeline passes the F32 GGUF, so it is not a defect, just a trap.
+- RESULTS says "warm C compiler cache" for 8.34 s; that number is the cache-disabled time.
+- Pre-existing: `gpt2.py` has no general-path build (`AIL_UNIFIED_FORCE=1` → "not in the subset: general path explicitly requested"), a named refusal and not caused by this change.
+
+Speed (item 5): no compiler/runtime change, so gdev icount is not applicable.
+
+VERDICT: ACCEPT
+[commandcode stop=end_turn turns=37 out_tokens=32653]
+
+## full suite
+test_ail_modules
+
+## suite fix skipped: only 88 minutes left
+
+
+--- ORIGINAL TASK ---
 Lane: infer
 
 # infer s1: GPT-2 inference written in AIL against llama.cpp (zenz-v3.2-small, f32, single thread)
