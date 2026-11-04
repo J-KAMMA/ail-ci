@@ -78,9 +78,13 @@ def pick_mode(mode):
     return 'perf' if r.returncode == 0 else 'callgrind'
 
 
-def compile_task(tree, task, work, syntax='ail'):
-    """Build with --debug-dir; return (program.c text, gcc command, binary path, native report) or raise."""
-    src = Path(tree) / 'lab/compare/src' / task / ('main.ail' if syntax == 'ail' else 'main.py')
+def compile_task(tree, task, work, syntax='ail', src_root=None):
+    """Build with --debug-dir; return (program.c text, gcc command, binary path, native report) or raise.
+
+    `src_root` lets the base and head compilers read the same source path.  Every build records the
+    source path in AIL_DBG_SITE, so building the base tree from its own copy would make otherwise
+    identical C differ by the two worktrees' absolute paths (and change binary size)."""
+    src = Path(src_root or tree) / 'lab/compare/src' / task / ('main.ail' if syntax == 'ail' else 'main.py')
     dbg = work / ('dbg_%s_%s' % (task, syntax))
     shutil.rmtree(dbg, ignore_errors=True)
     exe = work / ('%s_%s.bin' % (task, syntax))
@@ -164,14 +168,29 @@ def check(args, mode, work):
     for task in args.tasks:
         for syntax in ('ail', 'python'):
             key = '%s/%s' % (task, syntax)
-            try:
-                bw, hw = work / 'base', work / 'head'
-                bw.mkdir(exist_ok=True); hw.mkdir(exist_ok=True)
-                bsrc, _, bexe, _ = compile_task(args.base, task, bw, syntax)
-                hsrc, _, hexe, _ = compile_task(REPO, task, hw, syntax)
-            except Exception as e:
-                res[key] = dict(error=str(e)[:400]); print(key, 'ERROR', str(e)[:200]); bad = 1
+            bw, hw = work / 'base', work / 'head'
+            bw.mkdir(exist_ok=True); hw.mkdir(exist_ok=True)
+            # A task the language cannot compile fails the same way in both trees; that is a
+            # pre-existing limitation, not a regression, so it does not fail the check.
+            errors, built = {}, {}
+            for tag, tree, root, workdir in (('base', args.base, REPO, bw), ('head', REPO, None, hw)):
+                try:
+                    built[tag] = compile_task(tree, task, workdir, syntax, src_root=root)
+                except Exception as e:
+                    errors[tag] = str(e)[:400]
+            if errors:
+                if len(errors) == 1:
+                    print(key, 'ERROR', errors[list(errors)[0]][:200]); bad = 1
+                    res[key] = dict(error=errors[list(errors)[0]])
+                elif errors['base'] == errors['head']:
+                    print(key, 'same failure', flush=True)
+                    res[key] = dict(same_failure=True)
+                else:
+                    print(key, 'ERROR', errors['head'][:200]); bad = 1
+                    res[key] = dict(error=errors['head'])
                 continue
+            bsrc, _, bexe, _ = built['base']
+            hsrc, _, hexe, _ = built['head']
             if bsrc == hsrc:
                 res[key] = dict(same_c=True); print(key, 'same C', flush=True)
                 continue

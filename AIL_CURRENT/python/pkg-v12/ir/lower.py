@@ -333,8 +333,13 @@ class Lowering(TextLowering):
         reach = info.get('reach') or {}
         recursive = info.get('recursive') or frozenset()
         for node in ast.walk(fn):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            if not isinstance(node, ast.Call):
                 continue
+            if not isinstance(node.func, ast.Name):
+                # A method (or any computed) call is not resolved in the direct-call graph here;
+                # if it is a compiled method it may reach a guarded function, so keep the global
+                # counter rather than assume it is a runtime helper.
+                return 'unknown callee %s' % type(node.func).__name__
             g = node.func.id
             if g not in self.ctx.funcs:
                 continue              # a builtin/runtime helper, not a compiled function
