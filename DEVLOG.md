@@ -1,3 +1,29 @@
+## 2026-11-04 -- str arguments are per-call argument diagnostics again (job-rbmodval2b-11042200)
+
+The suite run after re-applying modval2b found four red modules (`test_ail_argument_type_details`,
+`test_ail_check_repair_context`, `test_ail_source_check`, `test_ail_collections`). One pre-pass cause:
+`_call_site_signature` turned a str argument into a `sig_override` claim. For `take("wrong")` against
+`value: int` that reported `operation: parameter, inference_scope: signature_override` at the
+declaration instead of `operation: argument` at the call (`passing str where take() wants int`); for
+the generated `_ail_ctr_subtract_iter_str(c, "a")` it made the typed path refuse `Counter.subtract`
+with a `list[str]` message and fall back to the general path. STR is not propagation evidence (that
+pass is for INT/FLT/BYTES/array; unannotated str parameters are settled by `_infer_strparam_pass`),
+so `_call_site_signature` now skips it and the per-call guard reports it. Positional float-to-int
+narrowing keeps its `signature_override` diagnostic at the declaration.
+
+Probes (`/tmp/probes`, `cmp.sh`, general + default builds): positional str to an int parameter,
+keyword str, str to a `list[str]` parameter, a str reached through a list item and through a dict
+value, and an int call followed by a str call are all status 1 `type` with the argument diagnostic at
+the call site; a positional float to an int parameter still reports `operation: parameter` at the
+declaration. An unannotated str parameter and a `list[str]` program compile typed-only
+(`AIL_NO_GENERAL=1`) and match CPython. `Counter.subtract("a")` matches CPython through the general
+path and is refused by name typed-only. Modules: `test_ail_argument_type_details` (15),
+`test_ail_source_check` (33), `test_ail_check_repair_context` (8), `test_ail_collections` (13),
+`test_ail_modules_values`, `test_ail_modules`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_refusal_messages`, `test_ail_type_details`,
+`test_ail_owned_type_details` and `test_ail_sdk` -> 0 failed. `tools/update_manifest.py` refreshed
+`manifest.d/45.txt`.
+
 ## 2026-11-04 -- re-apply accepted modval2b on the current tree (job-rbmodval2b-11041645)
 
 Re-applied the accepted `job-modval2b-11041417` change (a local module used as a value becomes one

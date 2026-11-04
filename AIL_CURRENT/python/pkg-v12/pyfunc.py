@@ -32478,6 +32478,15 @@ def _call_site_signature(args, callee_params, ctx):
         if _pk in SETS and _is_set_literal(arg):
             continue  # `set()` / `{1, 2}` take the typed set parameter's kind (`_map_pointer`).
         c = _claim(arg, ctx)
+        if c == STR:
+            # STR is NOT propagation evidence. A str argument that contradicts an annotated int/float
+            # parameter is the per-call argument guard's job (`_call_user_func`'s scalar branch), which
+            # names the callee and the call position; turning it into a `sig_override` instead reports
+            # the parameter's declaration and, for a target whose annotation is already `list[str]`
+            # (the generated `_ail_ctr_subtract_iter_str`), makes the typed path refuse a program the
+            # general path builds. The unannotated str/list-of-str call-site rule is `_infer_strparam_pass`
+            # below, which is deliberately independent of this pass.
+            continue
         if _bytearray_as_bytes and c == BYTEARRAY:
             # A bytearray argument is read as a bytes view for a parameter whose body wants a
             # read-only sequence (or bytes): the call lowers through `ail_bytearray_readonly_arg`.
