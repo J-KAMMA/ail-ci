@@ -37,9 +37,18 @@ The complete typed refusal for `01` started:
 
 Ten of the twelve programs build and match CPython byte for byte in both the
 default build and with `AIL_UNIFIED_FORCE=1`.  The default build falls back to
-the general path for every program that imports `difflib` (the note names
-`difflib.SequenceMatcher.__init__` and its default arguments); the forced build
-takes the same general path directly.
+the general path for every program that builds; the forced build takes the same
+general path directly.  The fallback note differs by program:
+
+* most programs stop on `stdlib/difflib.py:110:13` — `the result of __lt__() is
+  declared bool, but NotImplemented is not a bool` (the `Match` comparison
+  methods return `NotImplemented` for a non-`Match` operand, as CPython's tuple
+  comparison does);
+* `03_patch_preview.py` and `05_context_patch.py` stop on the iterator-class
+  wrapper — `iterating a difflib.unified_diff` / `difflib.context_diff`: `its
+  __iter__ is not 'return iter(...)' or a generator (an iterator class with
+  __next__ is not built)`.  These are the only two programs that reach that
+  wrapper without first hitting the `Match` note.
 
 | Program | Default build | `AIL_UNIFIED_FORCE=1` | Note |
 |---|---|---|---|
@@ -96,7 +105,7 @@ the rewrites needed by the compiler (a small `Match` class instead of
 instead of generator helpers, and the callable-wrapper shapes used by
 `unified_diff`, `context_diff` and `IS_CHARACTER_JUNK`).  The behaviour
 differences are: `diff_bytes` uses `latin-1` instead of ASCII +
-`surrogateescape` and dispatches only to the bundled `unified_diff` /
-`context_diff`; `IS_CHARACTER_JUNK` takes one argument (the programs never pass
-the optional `ws`); `diff_bytes` does not accept an arbitrary `dfunc` value; and
-`HtmlDiff`/`_mdiff` are not included.
+`surrogateescape` and passes the decoded lines to whatever `dfunc` it is given
+(the bundled `unified_diff`/`context_diff` as well as a custom function);
+`IS_CHARACTER_JUNK` takes one argument (the programs never pass
+the optional `ws`); and `HtmlDiff`/`_mdiff` are not included.
