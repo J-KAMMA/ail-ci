@@ -31090,6 +31090,15 @@ def _elide_readonly_field_alias_in_function(fn, class_names, info, funcs):
                             ok = False
                             break
                 elif isinstance(node, ast.Lambda):
+                    bound = {arg.arg for arg in [*node.args.posonlyargs, *node.args.args,
+                                                 *node.args.kwonlyargs]}
+                    if node.args.vararg is not None:
+                        bound.add(node.args.vararg.arg)
+                    if node.args.kwarg is not None:
+                        bound.add(node.args.kwarg.arg)
+                    if o in bound or x in bound:
+                        ok = False
+                        break
                     if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(node)):
                         if not _borrow_lambda_ok(node, parents):
                             ok = False

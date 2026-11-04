@@ -2,8 +2,10 @@
 
 A `let x = o.f` for a `list[int]`/`list[float]`/`list[str]` field is a private copy.  The AST pass
 elides only read-only aliases that feed sort-key columns; the cases below pin both the elided C and
-each reason the copy must survive.  Output is compared against an explicit `.copy()` reference build,
-and the forced general path is smoke-built separately (it does not accept `struct`).
+each reason the copy must survive.  The Python-syntax read-only shapes are compared with CPython,
+and the mutation shapes are compared with today's explicit `.copy()` reference build.  A lambda
+whose parameters shadow the struct name (or the alias name) must keep the copy.  The forced general
+path is smoke-built separately.
 """
 import os
 from pathlib import Path
@@ -16,6 +18,7 @@ import unittest
 import test_ail_c_objects as support
 
 MIXED = r'''struct T { nm: list[str]; par: list[int]; }
+struct U { par: list[int]; idx: int; }
 
 fn positive(t: T) -> int {
     let n = len(t.nm);
@@ -48,6 +51,25 @@ fn n_minlambda(t: T) -> int {
     let n = len(nm);
     return min(range(n), key=lambda i: (par[i], nm[i]));
 }
+fn shadow_o(o: U, xs: list[U]) -> list[int] {
+    let p = o.par;
+    let ys = sorted(xs, key=lambda o: p[o.idx]);
+    let out: list[int] = [];
+    for y in ys { out.append(y.idx); }
+    return out;
+}
+fn shadow_x(t: T) -> int {
+    let par = t.par;
+    let xs = [3, 1, 2];
+    let ys = sorted(xs, key=lambda par: par);
+    return ys[0] + par[0];
+}
+fn comp_shadow(o: U, xs: list[U]) -> int {
+    let p = o.par;
+    let total = 0;
+    for q in [p[o.idx] for o in xs] { total += q; }
+    return total;
+}
 fn main() -> int {
     let t = T(["b","a","c"], [3,1,2]);
     print(positive(t));
@@ -64,14 +86,79 @@ fn main() -> int {
     print(n_minlambda(t));
     print(n_after(t));
     print(n_fieldpop(t));
+    let u = U([10,20,30], 9);
+    let us = [U([100,0,0], 2), U([0,200,0], 0), U([0,0,300], 1)];
+    for v in shadow_o(u, us) { print(v); }
+    print(shadow_x(t));
+    print(comp_shadow(u, us));
     return 0;
 }
 '''
 
 REFERENCE = (MIXED.replace('let nm = t.nm;', 'let nm = t.nm.copy();')
-                  .replace('let par = t.par;', 'let par = t.par.copy();'))
+                  .replace('let par = t.par;', 'let par = t.par.copy();')
+                  .replace('let p = o.par;', 'let p = o.par.copy();'))
 
-EXPECTED = '5\n4\n8\n4\n6\n3\n4\n3\n3\n3\n4\n1\n6\n33\n'
+EXPECTED = '5\n4\n8\n4\n6\n3\n4\n3\n3\n3\n4\n1\n6\n33\n0\n1\n2\n4\n60\n'
+
+READONLY = '''class T:
+    nm: list[str]
+    par: list[int]
+    def __init__(self, nm: list[str], par: list[int]) -> None:
+        self.nm = nm
+        self.par = par
+
+class U:
+    par: list[int]
+    idx: int
+    def __init__(self, par: list[int], idx: int) -> None:
+        self.par = par
+        self.idx = idx
+
+def positive(t: T) -> int:
+    n = len(t.nm)
+    nm = t.nm
+    par = t.par
+    idx = [i for i in range(1, n)]
+    idx.sort(key=lambda i: (par[i], nm[i], i))
+    total = 0
+    for i in idx: total += par[i] + len(nm[i])
+    return total
+
+def shadow_o(o: U, xs: list[U]) -> list[int]:
+    p = o.par
+    ys = sorted(xs, key=lambda o: p[o.idx])
+    out: list[int] = []
+    for y in ys:
+        out.append(y.idx)
+    return out
+
+def shadow_x(t: T) -> int:
+    par = t.par
+    xs = [3, 1, 2]
+    ys = sorted(xs, key=lambda par: par)
+    return ys[0] + par[0]
+
+def comp_shadow(o: U, xs: list[U]) -> int:
+    p = o.par
+    total = 0
+    for q in [p[o.idx] for o in xs]:
+        total += q
+    return total
+
+def main() -> int:
+    t = T(["b", "a", "c"], [3, 1, 2])
+    print(positive(t))
+    u = U([10, 20, 30], 9)
+    us = [U([100, 0, 0], 2), U([0, 200, 0], 0), U([0, 0, 300], 1)]
+    for v in shadow_o(u, us):
+        print(v)
+    print(shadow_x(t))
+    print(comp_shadow(u, us))
+    return 0
+
+main()
+'''
 
 FORCE_SMOKE = '''def f() -> int:
     xs = [1, 2]
@@ -88,7 +175,8 @@ main()
 
 SNAPSHOT_NEGATIVES = ('n_append', 'n_other', 'n_usert', 'n_xsort', 'n_xappend',
                       'n_alias', 'n_pass', 'n_rebind', 'n_after', 'n_minlambda')
-PAR_NEGATIVES = ('n_elem', 'n_return', 'n_minlambda', 'n_fieldpop')
+PAR_NEGATIVES = ('n_elem', 'n_return', 'n_minlambda', 'n_fieldpop', 'shadow_x')
+SHADOW_NEGATIVES = ('shadow_o',)
 
 
 def function_body(csource, name):
@@ -97,6 +185,11 @@ def function_body(csource, name):
     if match is None:
         raise AssertionError('no C body for ' + name)
     return match.group(1)
+
+
+def cpython_output(source):
+    return subprocess.run([sys.executable, '-X', 'utf8', '-B', '-c', source],
+                          capture_output=True, timeout=60)
 
 
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),
@@ -108,14 +201,16 @@ class ReadonlyFieldAliasNativeTests(unittest.TestCase):
     ail_build = support.CObjectTests.ail_build
     check_run = support.CObjectTests.check_run
 
-    def compile_with(self, name, source, env_extra=None):
-        path = self.write(name + '.ail', source)
+    def compile_with(self, name, source, env_extra=None, syntax=None):
+        path = self.write(name + '.py', source)
         output = self.root / name
         env = dict(os.environ, PYTHONUTF8='1', **(env_extra or {}))
-        result = subprocess.run([sys.executable, '-X', 'utf8', '-B',
-                                 str(support.ROOT / 'ail_chatgpt.py'), 'compile', str(path),
-                                 '-o', str(output)],
-                                capture_output=True, timeout=180, env=env)
+        args = [sys.executable, '-X', 'utf8', '-B',
+                str(support.ROOT / 'ail_chatgpt.py'), 'compile', str(path)]
+        if syntax is not None:
+            args.extend(('--syntax', syntax))
+        args.extend(('-o', str(output)))
+        result = subprocess.run(args, capture_output=True, timeout=180, env=env)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         path.unlink()
         return output
@@ -129,7 +224,7 @@ class ReadonlyFieldAliasNativeTests(unittest.TestCase):
         path.unlink()
         return output, (debug / 'program.c').read_text(encoding='utf8')
 
-    def test_elided_alias_matches_explicit_copy_and_keeps_unsafe_copies(self):
+    def test_elided_alias_matches_reference_and_keeps_unsafe_copies(self):
         executable, csource = self.compile_debug('readonly_alias', MIXED)
         reference = self.ail_build('readonly_alias_ref', REFERENCE)
         self.check_run(executable, EXPECTED)
@@ -148,11 +243,23 @@ class ReadonlyFieldAliasNativeTests(unittest.TestCase):
         for name in PAR_NEGATIVES:
             with self.subTest(case=name):
                 self.assertIn('v_par', function_body(csource, name))
+        for name in SHADOW_NEGATIVES:
+            with self.subTest(case=name):
+                self.assertIn('v_p', function_body(csource, name))
+
+    def test_readonly_shapes_match_cpython(self):
+        expected = cpython_output(READONLY)
+        self.assertEqual(expected.returncode, 0, expected.stderr.decode(errors='replace'))
+        for name, extra in (('readonly_cpython', None),
+                            ('readonly_cpython_forced', {'AIL_UNIFIED_FORCE': '1'})):
+            with self.subTest(build=name):
+                built = self.compile_with(name, READONLY, extra, syntax='python')
+                self.check_run(built, expected.stdout.decode())
 
     def test_forced_general_path_still_runs(self):
-        normal = self.compile_with('force_smoke', FORCE_SMOKE)
+        normal = self.compile_with('force_smoke', FORCE_SMOKE, syntax='python')
         forced = self.compile_with('force_smoke_forced', FORCE_SMOKE,
-                                   {'AIL_UNIFIED_FORCE': '1'})
+                                   {'AIL_UNIFIED_FORCE': '1'}, syntax='python')
         self.check_run(normal, '33\n')
         self.check_run(forced, '33\n')
 

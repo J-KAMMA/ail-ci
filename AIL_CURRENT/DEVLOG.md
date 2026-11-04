@@ -1,3 +1,16 @@
+## 2026-11-04 -- arena1 S2 fix: shadowing lambda parameters keep the alias copy
+
+The read-only field-alias pass substituted `o.f` inside a sort-key lambda whose parameter
+shadowed the struct name, so the key read the element's field instead of the outer struct's
+(e.g. `p = o.par; sorted(xs, key=lambda o: p[o.idx])`).  The pass now rejects any lambda in the
+alias's live range whose parameters bind `o` or `x`, and the copy is kept for that shape.
+
+Negative tests added for a lambda parameter shadowing the struct name, one shadowing the alias
+name, and a comprehension whose target shadows the struct; all three are compared with CPython,
+and the generated C keeps `ail_list_snapshot` for the shadowed shape.  The `do_sort` shape still
+elides both snapshots.  Probes (`p_shadow_o`, `p_shadow_x`, `p_comp_shadow`, plus the twelve
+earlier probes) match CPython on the default and `AIL_UNIFIED_FORCE=1` builds.
+
 ## 2026-11-03 -- rails3: element-bounded range counters stay int64 (job-rails3-11040144)
 
 `for j in range(a[s], a[s + 1])` used to give `j` a tagged `ail_tint` in the default int64 build,
