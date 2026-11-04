@@ -4837,7 +4837,6 @@ class _RecordTransformer(ast.NodeTransformer):
             self.fields.append(field)
         self.set_positions = set()
         self.key_kind = None
-        self.proofs = []
         self.assigned = {}
         for node in ast.walk(fn):
             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
@@ -4846,16 +4845,68 @@ class _RecordTransformer(ast.NodeTransformer):
                 self.assigned.setdefault(node.target.id, []).append(node.value)
             elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name):
                 self.assigned.setdefault(node.target.id, []).append(node.iter)
+        self.flat_stores = []
+        for stmt in fn.body:
+            if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                    and isinstance(stmt.targets[0], ast.Subscript)
+                    and isinstance(stmt.targets[0].value, ast.Name)
+                    and stmt.targets[0].value.id == name and isinstance(stmt.value, ast.List)):
+                self.flat_stores.append((stmt.lineno, _record_key_text(stmt.targets[0].slice)))
+            elif (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+                  and isinstance(stmt.value.func, ast.Attribute)
+                  and isinstance(stmt.value.func.value, ast.Name)
+                  and stmt.value.func.value.id == name and stmt.value.func.attr == 'setdefault'
+                  and len(stmt.value.args) == 2):
+                self.flat_stores.append((stmt.lineno, _record_key_text(stmt.value.args[0])))
+        self.deletes = []
         for node in ast.walk(fn):
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Subscript)
-                    and isinstance(node.targets[0].value, ast.Name)
-                    and node.targets[0].value.id == name and isinstance(node.value, ast.List)):
-                self.proofs.append((node.lineno, _record_key_text(node.targets[0].slice)))
-            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                  and isinstance(node.func.value, ast.Name) and node.func.value.id == name
-                  and node.func.attr == 'setdefault' and len(node.args) == 2):
-                self.proofs.append((node.lineno, _record_key_text(node.args[0])))
+            if isinstance(node, ast.Delete):
+                for target in node.targets:
+                    if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                            and target.value.id == name):
+                        self.deletes.append((node.lineno, _record_key_text(target.slice)))
+        self.guarded = self._collect_guards(fn)
+
+    def _collect_guards(self, fn):
+        """Statement id -> key texts proved present by an enclosing `if k in d:` body.
+
+        A key element removed by a `del d[k]` is dropped for the statements that follow it."""
+        guards = {}
+
+        def key_of(test):
+            if (isinstance(test, ast.Compare) and len(test.ops) == 1
+                    and isinstance(test.ops[0], ast.In)
+                    and isinstance(test.comparators[0], ast.Name)
+                    and test.comparators[0].id == self.d):
+                return _record_key_text(test.left)
+            return None
+
+        def mark(statements, keys):
+            keys = set(keys)
+            for stmt in statements:
+                guards.setdefault(id(stmt), set()).update(keys)
+                if isinstance(stmt, ast.If):
+                    inner = set(keys)
+                    found = key_of(stmt.test)
+                    if found is not None:
+                        inner.add(found)
+                    mark(stmt.body, inner)
+                    mark(stmt.orelse, keys)
+                    continue
+                if isinstance(stmt, ast.Delete):
+                    for target in stmt.targets:
+                        if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                                and target.value.id == self.d):
+                            text = _record_key_text(target.slice)
+                            if text is not None:
+                                keys.discard(text)
+                    continue
+                for child in ast.iter_child_nodes(stmt):
+                    if isinstance(child, ast.stmt):
+                        mark([child], keys)
+
+        mark(fn.body, set())
+        return guards
 
     def fresh(self, prefix):
         name = prefix
@@ -4865,10 +4916,27 @@ class _RecordTransformer(ast.NodeTransformer):
         return name
 
     def _proven(self, key, line):
+        """True when an unconditional store of this key executes before `line` and no
+        `del d[k]` of the same key lies between that store and the use."""
         text = _record_key_text(key)
         if text is None:
             return False
-        return any(at < line and other == text for at, other in self.proofs)
+        stores = [at for at, other in self.flat_stores if other == text and at < line]
+        if not stores:
+            return False
+        last = max(stores)
+        return not any(other == text and last < at < line for at, other in self.deletes)
+
+    def _none_tested(self, name):
+        for node in ast.walk(self.fn):
+            if (isinstance(node, ast.Compare) and len(node.ops) == 1
+                    and isinstance(node.ops[0], (ast.Is, ast.IsNot))):
+                left, right = node.left, node.comparators[0]
+                for one, other in ((left, right), (right, left)):
+                    if (isinstance(one, ast.Name) and one.id == name
+                            and isinstance(other, ast.Constant) and other.value is None):
+                        return True
+        return False
 
     def _row_of(self, node):
         if self.kind != 'record':
@@ -4984,7 +5052,7 @@ class _RecordTransformer(ast.NodeTransformer):
         out.append(_r_if(_r_cmp(_r_load(slot), ast.Lt(), _r_const(0)), body))
         return out, slot
 
-    def _special_assign(self, target, value):
+    def _special_assign(self, target, value, stmt):
         if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
                 and isinstance(value.func.value, ast.Name) and value.func.value.id == self.d):
             return None
@@ -4992,8 +5060,13 @@ class _RecordTransformer(ast.NodeTransformer):
         if attr not in ('get', 'setdefault') or value.keywords:
             return None
         if attr == 'get' and len(value.args) == 1:
-            if not self._proven(value.args[0], value.lineno):
-                raise _RecordUnsupported()
+            text = _record_key_text(value.args[0])
+            guarded = text is not None and text in self.guarded.get(id(stmt), ())
+            if not guarded:
+                if isinstance(target, ast.Name) and self._none_tested(target.id):
+                    raise _RecordUnsupported()
+                if not self._proven(value.args[0], value.lineno):
+                    raise _RecordUnsupported()
             key = self.visit(value.args[0])
             if self.kind == 'set':
                 slot = _r_sub(_r_load(self.d), key)
@@ -5100,7 +5173,7 @@ class _RecordTransformer(ast.NodeTransformer):
                 return self._store_set(target.slice, node.value)
             raise _RecordUnsupported()
         if isinstance(target, ast.Name):
-            special = self._special_assign(target, node.value)
+            special = self._special_assign(target, node.value, node)
             if special is not None:
                 return special
             role = self.roles.get(target.id)
@@ -5319,6 +5392,12 @@ class _RecordTransformer(ast.NodeTransformer):
         if isinstance(func, ast.Name) and func.id == 'len' and len(node.args) == 1:
             row = self._row_of(node.args[0])
             if row is not None:
+                if (isinstance(row, ast.Subscript) and isinstance(row.value, ast.Name)
+                        and row.value.id == self.d):
+                    key = self.visit(row.slice)
+                    return ast.IfExp(
+                        test=_r_cmp(_r_sub(_r_load(self.d), key), ast.GtE(), _r_const(0)),
+                        body=_r_const(self.arity), orelse=_r_const(0))
                 return _r_const(self.arity)
             if isinstance(node.args[0], ast.Name) and node.args[0].id == self.d:
                 return node
