@@ -1,3 +1,28 @@
+## 2026-11-04 -- re-applied decexact2: Decimal/Fraction compute exactly in int64 mode; property stores stop by name (job-rbdecexact2_rr1-11050044)
+
+Re-applied the accepted `job decexact2` change (`e466453..job-decexact2-11020914`) onto this tree.
+The Decimal/Fraction prelude functions and methods now enter the per-function exact depth
+(`exact_depth`), so `Decimal(1) / Decimal(3)`, `sqrt`, `getcontext().prec = 50`,
+`Decimal("1e30") + 1` and `Decimal(2) ** 100` match CPython without `--exact-int`; user code stays
+int64 and its overflow still stops loudly.  `pyboxed2.build` keeps the big-int runtime for a program
+that uses either library, and every successful prelude return passes `ail_exact_visible`, so an int
+(or a tuple/list of ints) that leaves the library follows the program's mode and stops with
+`OverflowError: integer overflow in int()`.  Fraction's `numerator`/`denominator` are read-only
+properties over the internal `_n`/`_d`; a store to a getter-only property raises
+`AttributeError: property 'x' of '<run-time class>' object has no setter`, and a plain class
+attribute or method bound later in the same body (or in a subclass) shadows the property for read
+and store.
+
+Two context conflicts resolved by keeping both sides: `dunderrt._edits` keeps the newer
+`ordering`/`reversed_` parameters together with the int64 return check, and `pyboxed2` keeps the
+array ordering/reversed dispatch next to the exact-depth set.  `tools/diff_ids.py` is not present
+in this export, so the DIFFERENCES row uses the placeholder id directly.  `test_ail_int64_default.py`
+gained the `DecimalLibrary` cases; `test_ail_hostile_input.py` now checks the declared int64 stop
+for `int("9" * 30)` on both builds, and `test_ail_stdtop1.py` drops the `AIL_EXACT_INT` harness.
+Required tests: `test_ail_int64_default`, `test_ail_stdtop1`, `test_ail_hostile_input`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`; probes `/tmp/probes/*` match
+CPython on both builds or stop by name.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda

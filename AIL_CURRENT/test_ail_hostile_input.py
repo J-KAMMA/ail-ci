@@ -314,8 +314,16 @@ class HostileInput(unittest.TestCase):
                 self.compare(name, data)
 
     def test_documented_differences(self):
-        """DIFFERENCES.md: a valid non-BMP UTF-8 sequence still stops."""
-        self.compare('numbers', b'9' * 30)        # exact ints (bigint): an int beyond int64 matches CPython
+        """DIFFERENCES.md: ints beyond int64 stop by default; a valid non-BMP UTF-8 sequence still stops."""
+        for mode in ('general', 'default'):
+            # ints are int64 by default (DEVLOG 2026-10-31): a parsed value beyond int64 stops loudly
+            # instead of returning CPython's exact big integer; exact ints are opt-in (--exact-int).
+            got = self.run_ail('numbers', mode, b'9' * 30)
+            err = got.stderr.decode('utf-8', 'replace')
+            self.assertEqual(got.returncode, 1, (mode, err[-1000:]))
+            self.assertEqual(got.stdout, b'', (mode, got.stdout[:200]))
+            self.assertIn('OverflowError: integer overflow in int()', err, (mode, err[-1000:]))
+            self.assertIn('--exact-int', err, (mode, err[-1000:]))
         for name, data, text in (
                 ('binary', b'\xf0\x9f\x98\x80', 'code point above U+FFFF'),):
             for mode in ('general', 'default'):

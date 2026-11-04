@@ -362,6 +362,13 @@ _VIEW_OP_NE = (
 
 
 def _edits(inplace=False, ordering=False, reversed_=False):
+    import biggate
+    if biggate.ON:
+        _int_ret = ('if (f) { ail_st st = f(cx, out, x); '
+                    'if (cx->exact_depth == 0 && out->tag == AIL_T_BIG) '
+                    'return ail_hit_limit(cx, "int_overflow", "integer overflow in int()"); return st; }')
+    else:
+        _int_ret = 'if (f) return f(cx, out, x);'
     """(old, new) text replacements, each applied to exactly one place of the runtime."""
     e = []
     if inplace:
@@ -619,7 +626,7 @@ def _edits(inplace=False, ordering=False, reversed_=False):
               '            case AIL_T_STR: base = 10; break;\n'
               '            case AIL_T_INST: {\n'
               '                ail_d1_fn f = ail_dun1(x, AIL_D1_INT); if (!f) f = ail_dun1(x, AIL_D1_INDEX); if (!f) f = ail_dun1(x, AIL_D1_TRUNC);\n'
-              '                if (f) return f(cx, out, x);\n'
+              '                ' + _int_ret + '\n'
               '            }\n            /* fall through */\n'
               '            default: {\n                char buf[128]; snprintf(buf, sizeof buf, "int() argument must be'))
     e.append(('        case AIL_T_STR: break;\n        default: {\n            char buf[96]; snprintf(buf, sizeof buf, "float() argument must be',
@@ -632,7 +639,7 @@ def _edits(inplace=False, ordering=False, reversed_=False):
     e.append(("        default: { char buf[80]; snprintf(buf, sizeof buf, \"int() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));",
               "        case AIL_T_INST: {\n"
               "            ail_d1_fn f = ail_dun1(x, AIL_D1_INT); if (!f) f = ail_dun1(x, AIL_D1_INDEX); if (!f) f = ail_dun1(x, AIL_D1_TRUNC);\n"
-              "            if (f) return f(cx, out, x);\n"
+              "            " + _int_ret + "\n"
               "        }\n"
               "        /* fall through */\n"
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"int() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
