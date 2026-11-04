@@ -32520,8 +32520,16 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     refuses several such mismatches too, e.g. an inferred sequence against a caller's `int` claim),
     and is dropped rather than raised, so propagation can never turn an already-working,
     unannotated program into a refusal it did not have before.
+
+    Only a NUMERIC caller claim is raised here. A text, bytes or list claim is refused
+    at the call itself (`_call_user_func`'s argument branches), which names the call
+    expression and the original source position; raising it here would instead point at
+    the callee's declaration, which is less useful for a repair loop. The claim is
+    dropped instead, leaving the function's own annotation in place.
     """
     for pname, text in override.items():
+        if _sig_override_kind(fn, pname, text) not in NUM:
+            continue
         for a in fn.args.args:
             if a.arg == pname and a.annotation is not None:
                 given = _sig_override_kind(fn, pname, text)

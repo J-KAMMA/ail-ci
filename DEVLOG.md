@@ -1,3 +1,19 @@
+## 2026-11-04 -- hybrid examples follow-up: call-site argument diagnostics keep their location (job-rbhybex1-11042105)
+
+The full suite showed `test_ail_argument_type_details`, `test_ail_check_repair_context`,
+`test_ail_collections` and `test_ail_source_check` failing on the re-applied hybrid-examples tree:
+a non-numeric call argument (`take("wrong")`, a `str` handed to an `slist` parameter) was claimed
+by signature propagation and raised as a `signature_override` at the callee's declaration, so the
+report named `take` instead of the caller and `operation: "parameter"` instead of `"argument"`.
+`_explicit_annotation_conflicts` now raises a propagation conflict only for NUMERIC (int/float)
+claims; text, bytes and list claims are dropped there and left to the call-site argument guard,
+which names the call expression and its original source position.  Numeric conflicts keep the
+declaration-scoped refusal.  No language behaviour change beyond diagnostic attribution, so no
+DIFFERENCES row.  Regenerated the `pyfunc.py` manifest pin.  Final-state modules: the four above,
+plus `test_ail_type_details`, `test_ail_owned_type_details`, `test_ail_float_argument_widening`,
+`test_ail_refusal_messages`, `test_ail_examples_hybrid`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` (12 modules, 0 failed).
+
 ## 2026-11-04 -- hybrid examples re-apply: CPython-hybrid examples and their test (job-hybex1-11041922)
 
 Re-applied the accepted `job-hybex1-11041922` change on the current tree: `examples/hybrid/`
