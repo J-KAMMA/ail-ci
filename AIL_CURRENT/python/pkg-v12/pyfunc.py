@@ -32487,6 +32487,26 @@ def _call_site_signature(args, callee_params, ctx):
     return site
 
 
+def _drop_text_overrides(fn, site, classes=None):
+    """`site` without a str claim on a parameter whose EXPLICIT annotation is not str.
+
+    A str argument to a parameter annotated int/bytes/list/... is an ordinary call-type error:
+    the existing call guard already refuses it at the call site, naming the callee and carrying
+    operation="argument" (SEMANTICS.md section 212). Letting the claim become a signature override
+    would move that diagnostic to the callee's declaration and replace the callee's own guard
+    message. A str claim on an unannotated parameter (or on a real `str` one) is still evidence
+    and is propagated exactly as section 26 describes.
+    """
+    out = {}
+    for pname, claim in site.items():
+        if claim == STR and any(a.arg == pname and a.annotation is not None
+                                and _annotation_kind(a.annotation, classes or ()) != STR
+                                for a in fn.args.args):
+            continue
+        out[pname] = claim
+    return out
+
+
 def _claim_key(site):
     return tuple(sorted(site.items()))
 
@@ -32581,7 +32601,8 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
             gparams = sigs[g][0]
             if len(n.args) != len(gparams):
                 continue
-            site = _call_site_signature(n.args, gparams, caller_ctx)
+            site = _drop_text_overrides(by_name[g], _call_site_signature(n.args, gparams, caller_ctx),
+                                        classes)
             for pname, c in site.items():
                 claims.setdefault(g, {}).setdefault(pname, set()).add(c)
     changed = False
@@ -32993,7 +33014,8 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
             gparams = sigs[g][0]
             if len(n.args) != len(gparams):
                 continue
-            site = _call_site_signature(n.args, gparams, caller_ctx)
+            site = _drop_text_overrides(by_name[g], _call_site_signature(n.args, gparams, caller_ctx),
+                                        classes)
             site_lists.setdefault(g, []).append(site)
 
     clones = {}
