@@ -32529,6 +32529,8 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
             if a.arg == pname and a.annotation is not None:
                 given = _sig_override_kind(fn, pname, text)
                 expected = _annotation_kind(a.annotation, classes or ())
+                if given == STR:
+                    continue    # a str claim is reported at its call site as an argument error
                 if given != expected and not (expected == FLT and given == INT):
                     return True
     return False
