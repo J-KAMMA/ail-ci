@@ -1,3 +1,44 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: reprlib1
+
+**What the change really does.** Adds a bundled AIL stdlib `AIL_CURRENT/stdlib/reprlib.py` (a 3.12 port with an identity-list `recursive_repr`, a hard-coded builtin dispatch chain plus a `getattr` fallback), a test module, 12 lab programs + `RESULTS.md`, and three manifest entries. All files are in the allowed list; a non-user program's generated C is byte-identical to base (`/tmp/dbgA/program.c` vs `/tmp/dbgB/program.c`, 564462 bytes).
+
+**Probes** (both builds, `/tmp/rprobes/`): `a3_strings`, `a4_maxother`, `a6_mutate`, `a7_misc`, `a9_limits`, `d1_ctrl` — same stdout as CPython. `a2_indent_err`, `a10_joinerr` — **differs** (below). Others hit pre-existing compiler behaviour, verified identical on `/tmp/base`.
+
+**Report claims**
+- `recursive_repr` keys on identity — verified (source; `test_recursive_identity` passes).
+- `__init__` keyword-only, `Repr(3)` refused at compile time — verified (`not in the subset: reprlib.Repr() called with too many positional arguments`).
+- `repr1` adds a `getattr` fallback — verified, and it does not dispatch a `def repr_<Type>` (probe `a1_subclass`); the report says so.
+- 11/12 programs match in both builds — verified: `test_ail_std_reprlib` OK (139 s).
+- `p3_ok … float: same stdout` — **false**; only the exception *type* matches, the message differs (defect 1).
+- "safetynet: only `S4_generators_gc` fails" — false here: `test_ail_safetynet` passed (176 s).
+- Manifest `--check` passes — verified.
+
+**Pre-existing** (identical on base, not blocking)
+- Mixed-type `set`/`frozenset` iteration order (`a5_mixed` vs base `b1_setorder`).
+- `func.__name__` unavailable; hence `recursive_repr` metadata (`a8_recmeta` vs base `b2_attr`).
+- `%r` of an object whose `__repr__` raises aborts instead of raising catchably (`c1_badrepr` vs base `c4_badrepr_base`); the module's `except Exception` cannot fire.
+- Default instance repr `<Foo object>` differs from CPython's (`c2_classrepr` vs base `c3_classrepr_base`).
+- Dynamic `getattr(obj, 'repr_' + name)` on a method raises `AttributeError` (`a1_subclass` vs base `b3_dispatch_base`). This is the compiler gap the report describes; program 10 routes around it, which the brief's known-risk clause anticipated.
+
+**Not checked**: `test_ail_files`, `test_ail_corpus_findings3` (not rerun per instructions), CI shards (not pushed), typed-path behaviour (all 11 programs fall back to the general path).
+
+`Repr.indent` message is fixable in-module with `type(indent).__name__`; `type(...)` as a bare value is refused (`b4_typefmt`), but `. __name__` already works elsewhere in the module.
+
+VERDICT: FIX
+1. `Repr._join` raises the CPython 3.11 error text; 3.12 appends the offending type. Probe `/tmp/rprobes/a2_indent_err.py` (and `a10_joinerr.py`), both builds, list and dict: expected `err TypeError Repr.indent must be a str, int or None, not <class 'float'>` (and `bytes`, `list`); actual `err TypeError Repr.indent must be a str, int or None`. Same exit status, wrong stdout. Fix in `stdlib/reprlib.py`: append `, not <class '%s'>` via `type(indent).__name__`.
+[commandcode stop=end_turn turns=26 out_tokens=35079]
+
+
+--- ORIGINAL TASK ---
 Lane: reprlib
 
 # reprlib1: `import reprlib` as a bundled AIL module (`AIL_CURRENT/stdlib/reprlib.py`)
