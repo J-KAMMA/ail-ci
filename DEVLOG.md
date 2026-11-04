@@ -1,3 +1,21 @@
+## 2026-11-04 -- pycomp1b: re-applied the Codon/mypyc/Nuitka comparison on the current export
+
+Re-applied accepted job `pycomp1b` (fetched `job-pycomp1b-11041409`) on this tree. Its change adds the
+three Python-compiler compare-lab columns (`check_tools.py`, `run_task.py`, `merge.py`, `toolchains.env`,
+`compat/codon/ail.py`), the manual `compare-lab` workflow, `docs/COMPARISON-PYCOMP.md` and its five DEVLOG
+entries. The only conflict was `DEVLOG.md`; both sides are kept (this entry plus the re-applied entries and
+the tree's existing ones). `.github/workflows/agent-worker.yml` already had the same GH_MODELS removal, so
+it did not change. `tools/diff_ids.py` is absent on this tree; `tools/update_manifest.py` and `--check` are
+clean.
+
+Probes: merge heading over the default, `ail,c`, `ail` and `ail,python,codon,mypyc,nuitka` columns plus an
+unknown language (all ok); `first_diff` boundaries (8/8); merge geomean fixture (0.35x); `build_pycomp`
+command and run setup for codon, mypyc and Nuitka with fake tools and a failing build (4/4); `check_tools`
+pins matching and a Codon mismatch (ok / exit 1); one AIL boundary program (empty list, negative, wrap,
+floor/mod, list alias, attribute) matched CPython on both builds. No codon/mypy/nuitka/valgrind is installed
+here, so the compiler columns were not re-measured. Tests: test_compare_publish (14), test_ail_safetynet (5),
+test_ail_files (18, 1 skipped), test_ail_corpus_findings3 (2), all OK.
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
@@ -200,6 +218,73 @@ also loses the key), reduced to `lab/fuzzpy/findings/001.py`-`005.py`. The raw `
 finding is a compile-time int64 constant refusal, counted as loud-ok and not filed.
 `lab/fuzzpy/REPORT.md` has the numbers.
 
+## 2026-11-04 -- bench review fix: compile geomean is 0.80x
+
+Restored the compile-time geomean in `docs/COMPARISON-PYCOMP.md` and the previous DEVLOG entry from
+0.72x to 0.80x. Probe: `/tmp/probes/mkresults.py docs/COMPARISON-PYCOMP.md /tmp/rprobes/results` builds
+`result-*.json` from the document's own compile table, then
+`merge.py /tmp/rprobes/results --langs ail,python,codon,mypyc,nuitka` prints
+`**geomean** ... **0.80x** (n=8)`. No compiler or runner change.
+
+## 2026-11-04 -- bench review fixes: merge heading, Codon sizes, error text, geomeans
+
+Fixed the five review defects in the pycomp comparison. `merge.py` builds its default heading with the
+same "and" join as the best-other list, so `merge.py RESULTS` again prints "AIL against C, Rust, Go, Nim
+and Python" (and `--langs ail,c` gives "AIL against C", `--langs ail` "AIL against none"). Re-built
+Codon 0.20.6 binaries for the six tasks that compile and corrected the binary-size table to
+bytes/1024 (chain_relax 171 KiB from 174,904 B, echo_pack 187, ledger_bin 249, tally_lang 249; berth_sim
+185 and term_rank 1,129 unchanged), then recomputed the prose to KiB: AIL 34-102, Codon 171-1,129,
+mypyc 307-471, Nuitka about 4.3 MiB. `rail_transfer`/Codon now records the verbatim first error line
+(`main.py:27 (9-13): error: cannot typecheck 'self'`) instead of a paraphrase. Both geomeans now follow
+from the tables: wall 0.44x (eight completed tasks; 0.41x wrongly included the two unfinished ones) and
+compile 0.80x. Re-ran `run_task.py --task chain_relax --smoke --langs ail,python,codon`:
+AIL 34,888 B, Codon 174,904 B, 32/32 cases each, Ir via callgrind. Probes: merge heading over four
+column sets, and a boundary program (empty list, negatives, large int, aliasing across a list, attribute
+and dict) matched CPython on both builds. Tests: test_compare_publish, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3 (4 modules, 0 failed). No compiler change.
+
+## 2026-11-04 -- bench finish: verify the Codon/mypyc/Nuitka comparison end to end
+
+Finished the exported pycomp comparison without touching the compiler. On this ubuntu-24.04 runner I
+installed the pins from `lab/compare/toolchains.env` (Codon 0.20.6 from the checksummed tarball, mypy
+2.4.1 compiled, Nuitka 4.3.4, valgrind 3.22.0), ran `check_tools.py --langs python,codon,mypyc,nuitka`
+(ok) and re-ran `run_task.py` smoke checks. `chain_relax`: AIL 2.36 s / 34,888 B / 144 KiB, Codon 9.21 s
+/ 174,904 B, mypyc 4.14 s / 314,352 B / 3,568 KiB, Nuitka 59.6 s / 4,507,864 B / 46,600 KiB, each matching
+CPython on all 32 public+hidden cases. `rail_transfer`: AIL, mypyc and CPython match 24/24, Codon still
+fails to build with the generic-realization error the document records. `merge.py --langs
+ail,ail-py,c,rust,go,nim,python,codon,mypyc,nuitka` now says "Best-other covers ... Codon, mypyc and
+Nuitka" and "3 for the Python compilers"; instruction counts come back as `icount_method: callgrind`
+with numeric Ir. Corrected the comparison's method note: each run records the count in its result JSON,
+but a full callgrind pass on the perf inputs did not fit this job's budget, so the document no longer
+promises an Ir table it never carried and states that per metric.
+
+Tests: test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (25 tests, OK, 1 skipped: no zig
+for `--target windows`), test_compare_publish (14 tests, OK). No new files; `tools/update_manifest.py
+--check` is clean.
+
+## 2026-11-03 -- bench review: callgrind Ir for the Python compilers, merge method text
+
+Fixed the two review defects in the Codon/mypyc/Nuitka comparison. The compare-lab runner installs
+valgrind (`compare-lab.yml`), so `run_task.py --icount auto` selects callgrind; a smoke run of
+`chain_relax` with `--langs ail,codon,mypyc,nuitka` now records `icount_method: callgrind` and numeric
+user-space Ir for all four columns. `docs/COMPARISON-PYCOMP.md` no longer claims instruction counts are
+unavailable; it documents the callgrind method and leaves the per-run counts in the result JSON (the
+full-input Ir table did not fit the job budget). `merge.py` now derives the best-other list
+and the "3 runs for the Python compilers" wording from the selected columns instead of hard-coding
+"C, Rust, Go, Nim and Python" and "median of 5". No compiler change.
+
+## 2026-11-03 -- bench: Codon, mypyc and Nuitka in compare-lab
+
+Added the three Python compilers as compare-lab columns: Codon 0.20.6 (`codon build -release`, with
+`compat/codon/ail.py`), mypyc 2.4.1 (a CPython extension that still needs CPython) and Nuitka 4.3.4
+(`--standalone --onefile`), all compiling the same `typed.py` as the AIL column. Pins are in
+`lab/compare/toolchains.env`; the workflow installs them on the runner. Measured eight of the ten
+tasks; `docs/COMPARISON-PYCOMP.md` has the table and the per-metric verdict. On those eight AIL wins
+wall time 7/8 (Codon is 1.06x faster on `chain_relax`), compile time 6/8 (mypyc wins `berth_sim` and
+`ticket_audit`), and binary size, build disk and peak RSS on 7-8/8. Build failures: `echo_pack` (mypyc
+internal error on bytearray), `rail_transfer` and `ticket_audit` (Codon generic realization errors).
+`scar_life` (mypyc over 25 min) and `tree_fold` (Codon over 10 min) were stopped at the job budget and
+are recorded as losses. No compiler change.
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
