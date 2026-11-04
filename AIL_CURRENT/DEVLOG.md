@@ -1,3 +1,14 @@
+## 2026-11-04 -- finish rbdecexact2_rr1: int64-default expectations allow the `raised near` line (job-rbdecexact2_rr1-11050423)
+
+`test_ail_int64_default` was the only red module in the full suite.  Its boundary test and its
+`int()` text test asserted the exact stderr of a typed-path overflow, but an uncaught error from a
+prelude raise site now carries the established trailing line `  raised near file:line`
+(`test_ail_debug.py`), while the general path still prints only the message.  A new `without_site()`
+helper drops that trailing line before the message checks (the same convention as
+`test_ail_c169.py`), and it is applied to the typed/general agreement check too.  No compiler or
+runtime behaviour changed; both failures reproduced identically on the base and the fix only makes
+the test accept the documented suffix.
+
 ## 2026-11-04 -- re-applied decexact2: Decimal/Fraction compute exactly in int64 mode; property stores stop by name (job-rbdecexact2_rr1-11050044)
 
 Re-applied the accepted `job decexact2` change (`e466453..job-decexact2-11020914`) onto this tree.

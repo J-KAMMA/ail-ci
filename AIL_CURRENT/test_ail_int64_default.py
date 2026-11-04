@@ -29,6 +29,15 @@ MAXV = (1 << 63) - 1
 MINV = -(1 << 63)
 SUFFIX = ' (ints are 64-bit; --exact-int gives exact ints)'
 
+
+def without_site(err):
+    """Drop the trailing `  raised near file:line` line an uncaught error carries (prelude raise sites)."""
+    lines = err.splitlines(True)
+    if len(lines) > 1 and lines[-1].startswith('  raised near '):
+        lines.pop()
+    return ''.join(lines)
+
+
 OPS = r"""import sys
 import math
 
@@ -279,6 +288,7 @@ class Boundaries(unittest.TestCase):
                 checked['beyond'] += 1
                 for mode in ('default', 'force'):
                     code, out, err = got[mode]
+                    err = without_site(err)
                     self.assertEqual((code, out), (1, ''), (mode, label, err))
                     if op == 20:
                         # (round() names the operation but, like integ's pre429, keeps its text free of the int64 hint)
@@ -291,7 +301,7 @@ class Boundaries(unittest.TestCase):
                         self.assertIn(err, ['OverflowError: integer overflow in %s%s\n' % (n, SUFFIX) for n in names], (mode, label))
                 # both paths agree on the message
                 if op != 20:
-                    self.assertEqual(got['default'][2], got['force'][2], label)
+                    self.assertEqual(without_site(got['default'][2]), without_site(got['force'][2]), label)
         self.assertGreater(checked['beyond'], 100)
         self.assertGreater(checked['fits'], 400)
         # the only results that fit but stop are an intermediate beyond int64 (-INT64_MIN), gcd/ceil at INT64_MIN
@@ -334,7 +344,7 @@ class Refusals(unittest.TestCase):
         made, ran = self.build('    print(int(str(k) + "123456789012345678901234567890"))')
         self.assertEqual(made.returncode, 0, made.stderr)
         self.assertEqual(ran[:2], (1, ''))
-        self.assertEqual(ran[2], 'OverflowError: integer overflow in int()%s\n' % SUFFIX)
+        self.assertEqual(without_site(ran[2]), 'OverflowError: integer overflow in int()%s\n' % SUFFIX)
 
 
 class OptIn(unittest.TestCase):
