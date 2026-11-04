@@ -1,3 +1,17 @@
+## 2026-11-04 -- review fix: keep this tree's GitHub Models key wiring (job-rbcrate1-11042159)
+
+The re-apply above also took the fetched diff's `.github/workflows/agent-worker.yml` hunk, which
+deleted the GitHub Models token wiring that this tree gained after the old branch (dd5cd07).
+`.agent/pipeline.sh` still gates `run_ghm` on `$RUNNER_TEMP/ghm.key` and scans keys before push,
+so the deletion left the free-model path dead and stopped `GH_MODELS_TOKEN` from being
+leak-scanned.  The workflow is restored byte-for-byte to dd5cd07: `GH_MODELS_TOKEN` is passed to
+the Key file and Key scan steps (count 2), `$RUNNER_TEMP/ghm.key` is written from `$G`, the scan
+loop includes `$G`, and cleanup removes `ghm.key`; no other file changes.  Verified with
+`/tmp/probes/workflow_ghm.py` (5 checks), `/tmp/probes/crate_targets.py` (10 checks) and
+`rle_language.py` / `textstat_language.py` through `cmp.sh` (both builds match CPython).  Final
+tests: test_ail_examples_crate, test_ail_cargo, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-11-04 -- crate1 re-applied: ail_cargo reads cargo's real target directory (job-rbcrate1-11042159)
 
 Re-applied the accepted `job-crate1-11041927` change on this tree (it added the three
@@ -6,7 +20,7 @@ with `CARGO_TARGET_DIR` pointing at a temporary directory, while `ail_cargo._art
 the crate-local `target/release`; the tool now asks `cargo metadata --no-deps` for
 `target_directory` (honouring `CARGO_TARGET_DIR`, relative values and a workspace's shared
 `target/`) and reads the cdylib and staticlib from there.  The default `crate/target` case is
-unchanged.  Files: `.github/workflows/agent-worker.yml` (GH Models token removed), `ail_cargo.py`,
+unchanged.  Files: `ail_cargo.py`,
 `test_ail_examples_crate.py`, `tests.d/test_ail_examples_crate.txt`, `examples/crate/**` (three
 crates plus README).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
 was run.  Final-state tests: test_ail_examples_crate, test_ail_cargo, test_ail_safetynet,
