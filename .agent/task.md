@@ -1,3 +1,38 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+Review complete.
+
+**What the change really does:** adds a vendored typeshed subset (48 `.pyi`, 475,737 B), `tools/typeshed_convert.py` → a 2,414-entry `stubsigs_table.py`, a lazy `stubsigs.lookup`, a corpus counter `tools/typeshed_reach.py`, and a test. No compiler file imports `stubsigs`; generated C is identical to base.
+
+**Verified:** census `909 723 76` (79.5 %), `lab/stdlib` `1479 1360 204` (91.9 %), table 191,999 B, first lookup ~1.7 ms, `typeshed_convert --check` and `update_manifest --check` exit 0, vendored list == VERSION.md (38 + 10 support), `alias_import.py` now 10/10/7 under `bisect` with no `bs` row, `datetime.date`/`deque`/`Decimal` ctor params present, 91 classes changed from empty params. Tests: `test_ail_stubsigs` and `test_ail_safetynet` both pass (`par_check -j 2`, 0 failed). Diff paths all allowed.
+
+**Probes** (`/tmp/rprobes`, all match CPython on HEAD, both builds): p1 plain (C identical base/HEAD), p2 math, p3 heapq/bisect (C identical), p4 json, p5 list mutation-during-iteration/slice/bytearray copy, p6 random+statistics, p7 negative/zero/empty. No pre-existing differences found; p4's first form failed identically on CPython, base and HEAD (my probe bug, since fixed).
+
+**Defects:** 
+1. `flags` contradicts its documented rule ("every overload must agree on ret, else `obj` + `overload`"): agreeing overload sets are flagged. `lookup("bisect.bisect_left")` → `('int', …, 'overload')`; expected flags `''`. 113 entries affected, 26 with a definite non-`obj` ret (bisect, `_hashlib.compare_digest`, `builtins.print`, …); a typeshed2 consumer following the docstring would drop those rets.
+2. Report claim "only genuinely parameterless classes remain `()`" is **false**: `lookup("builtins.ValueError")` → `('obj', (), '')`, yet `ValueError("x")` is valid via inherited `BaseException.__init__(self, *args)`; 191 of 210 empty class entries subclass something. Expected inherited ctor params, actual `()`.
+3. `lookup("sqlite3.Connection.autocommit")` → `('None', (('val','kw','int'),), 'overload')`: the property getter is `-> int`, the setter `-> None`; the converter took the last plain def. Expected `obj` (attribute/union), actual `None`.
+
+**Unverified:** upstream SHA/date and LICENSE byte-identity (no network); `test_ail_files`/`test_ail_corpus_findings3` not re-run per instruction; speed check not applicable (no compiler/runtime import).
+
+Note: 412/909 census sites are constructors; excluding them `known/total` is still 62.6 %, above target.
+
+VERDICT: FIX
+
+1. `flags="overload"` on agreeing overload sets (113 entries): probe `from stubsigs import lookup; print(lookup("bisect.bisect_left")[0], lookup("bisect.bisect_left")[2])`; expected `int ` (empty flags), actual `int overload`.
+2. Empty constructor params for inherited ctors (≥191 entries): probe `lookup("builtins.ValueError")`; expected params from inherited `*args` ctor, actual `('obj', (), '')` — contradicts the report's claim.
+3. `sqlite3.Connection.autocommit` returns `None` from the setter: probe `lookup("sqlite3.Connection.autocommit")`; expected `obj` (property, getter `int`), actual `('None', (('val','kw','int'),), 'overload')`.
+[commandcode stop=end_turn turns=38 out_tokens=47641]
+
+
+--- ORIGINAL TASK ---
 Lane: typeshed
 
 # typeshed1: vendor a pinned typeshed stdlib subset and turn its `.pyi` stubs into a signature table (no compiler change yet)
