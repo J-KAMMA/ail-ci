@@ -215,7 +215,12 @@ def main():
         return
     first = tasks[0]
     methods = sorted({t.get('icount_method', '?') for t in tasks})
-    heading = 'AIL against ' + ', '.join(NAMES[l] for l in OTHERS)
+    if len(OTHERS) > 1:
+        heading = 'AIL against ' + ', '.join(NAMES[l] for l in OTHERS[:-1]) + ' and ' + NAMES[OTHERS[-1]]
+    elif OTHERS:
+        heading = 'AIL against ' + NAMES[OTHERS[-1]]
+    else:
+        heading = 'AIL against none'
     best_others = ', '.join(NAMES[l] for l in OTHERS[:-1])
     if len(OTHERS) > 1:
         best_others += ' and ' + NAMES[OTHERS[-1]]

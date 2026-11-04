@@ -1,3 +1,20 @@
+## 2026-11-04 -- bench review fixes: merge heading, Codon sizes, error text, geomeans
+
+Fixed the five review defects in the pycomp comparison. `merge.py` builds its default heading with the
+same "and" join as the best-other list, so `merge.py RESULTS` again prints "AIL against C, Rust, Go, Nim
+and Python" (and `--langs ail,c` gives "AIL against C", `--langs ail` "AIL against none"). Re-built
+Codon 0.20.6 binaries for the six tasks that compile and corrected the binary-size table to
+bytes/1024 (chain_relax 171 KiB from 174,904 B, echo_pack 187, ledger_bin 249, tally_lang 249; berth_sim
+185 and term_rank 1,129 unchanged), then recomputed the prose to KiB: AIL 34-102, Codon 171-1,129,
+mypyc 307-471, Nuitka about 4.3 MiB. `rail_transfer`/Codon now records the verbatim first error line
+(`main.py:27 (9-13): error: cannot typecheck 'self'`) instead of a paraphrase. Both geomeans now follow
+from the tables: wall 0.44x (eight completed tasks; 0.41x wrongly included the two unfinished ones) and
+compile 0.72x (was 0.80x). Re-ran `run_task.py --task chain_relax --smoke --langs ail,python,codon`:
+AIL 34,888 B, Codon 174,904 B, 32/32 cases each, Ir via callgrind. Probes: merge heading over four
+column sets, and a boundary program (empty list, negatives, large int, aliasing across a list, attribute
+and dict) matched CPython on both builds. Tests: test_compare_publish, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3 (4 modules, 0 failed). No compiler change.
+
 ## 2026-11-04 -- bench finish: verify the Codon/mypyc/Nuitka comparison end to end
 
 Finished the exported pycomp comparison without touching the compiler. On this ubuntu-24.04 runner I

@@ -41,7 +41,7 @@ Every public and hidden case; a successful build that then differed would show `
 Build errors, verbatim (first line of each):
 
 - `echo_pack`, mypyc: `mod.py:12: ValueError: bytearray is not a valid sequence` (an internal mypyc error).
-- `rail_transfer`, Codon: a generic-realization error in `main()` (the heap-item generic type).
+- `rail_transfer`, Codon: `main.py:27 (9-13): error: cannot typecheck 'self'` (the heap-item generic type).
 - `ticket_audit`, Codon: `'bytes' object has no attribute '__int__'` while realizing `__new__(what: bytes)`.
 - No successful build printed output that differed from CPython on any case. In particular, no task exposed
   Codon's 64-bit int changing an output on these inputs.
@@ -83,13 +83,16 @@ CPython has no build step. For mypyc this is the extension only; it still needs 
 | task | AIL | Codon | mypyc | Nuitka | CPython |
 |---|---:|---:|---:|---:|---:|
 | berth_sim | 63 | 185 | 386 | 4418 | - |
-| chain_relax | 34 | 175 | 307 | 4402 | - |
-| echo_pack | 35 | 191 | build failed | 4422 | - |
-| ledger_bin | 60 | 253 | 390 | 4410 | - |
+| chain_relax | 34 | 171 | 307 | 4402 | - |
+| echo_pack | 35 | 187 | build failed | 4422 | - |
+| ledger_bin | 60 | 249 | 390 | 4410 | - |
 | rail_transfer | 63 | build failed | 470 | 4418 | - |
-| tally_lang | 73 | 253 | 458 | 4446 | - |
+| tally_lang | 73 | 249 | 458 | 4446 | - |
 | term_rank | 73 | 1129 | 391 | 4426 | - |
 | ticket_audit | 102 | build failed | 471 | 4446 | - |
+
+Codon's cells were re-measured from `codon build -release` with Codon 0.20.6 on 2026-11-04 and converted
+with 1024 bytes to the KiB; the other columns are from the 2026-11-03 run.
 
 ## Build disk (MiB, fresh build dir with its caches)
 
@@ -123,10 +126,10 @@ Lower is better.
 
 ## Where AIL wins and where it loses
 
-- **Wall time.** AIL beats the best Python compiler on 7 of the 8 completed tasks (geometric mean 0.41x of the best). Its only loss is `chain_relax`, where Codon is 1.06x faster. Codon is the only speed rival: AIL is 0.14x mypyc's time and 0.06x Nuitka's as a geometric mean. Nuitka is slower than plain CPython on 7 of 8 tasks; mypyc beats CPython on 5 of 7 it could build.
-- **Compile time.** AIL beats the best builder on 6 of 8 tasks (geometric mean 0.80x of the best) and loses only to mypyc on `berth_sim` (2.04x) and `ticket_audit` (1.05x). mypyc is the fastest builder at 4.02-5.90 s; Codon takes 9.0-11.7 s and Nuitka 58-64 s.
-- **Binary size.** AIL wins on every task: 35-104 KiB against 179-1,156 KiB for Codon, 307-482 KiB for mypyc and about 4.5 MiB for Nuitka.
-- **Build disk.** AIL wins on 7 of 8 tasks (geometric mean 0.38x of the best); Codon is smaller on `berth_sim` (200 vs 228 KiB). Codon otherwise needs 184-1,144 KiB, mypyc 3.5-4.5 MiB and Nuitka about 46 MiB.
+- **Wall time.** AIL beats the best Python compiler on 7 of the 8 completed tasks (geometric mean 0.44x of the best). Its only loss is `chain_relax`, where Codon is 1.06x faster. Codon is the only speed rival: AIL is 0.14x mypyc's time and 0.06x Nuitka's as a geometric mean. Nuitka is slower than plain CPython on 7 of 8 tasks; mypyc beats CPython on 5 of 7 it could build.
+- **Compile time.** AIL beats the best builder on 6 of 8 tasks (geometric mean 0.72x of the best) and loses only to mypyc on `berth_sim` (2.04x) and `ticket_audit` (1.05x). mypyc is the fastest builder at 4.02-5.90 s; Codon takes 9.0-11.7 s and Nuitka 58-64 s.
+- **Binary size.** AIL wins on every task: 34-102 KiB against 171-1,129 KiB for Codon, 307-471 KiB for mypyc and about 4.3 MiB for Nuitka.
+- **Build disk.** AIL wins on 7 of 8 tasks (geometric mean 0.38x of the best); Codon is smaller on `berth_sim` (200 vs 228 KiB). Codon otherwise needs 184-1,147 KiB, mypyc 3.5-4.4 MiB and Nuitka about 46 MiB.
 - **Peak RSS.** AIL has the lowest peak RSS on 7 of 8 tasks (geometric mean 0.54x of the best); Nuitka is lower on `term_rank` (156.4 vs 158.1 MiB). Codon and mypyc are consistently higher (Codon up to 6.7x and mypyc up to 8.3x, both on `tally_lang`), and mypyc carries CPython with it.
 - **Instructions.** Not compared here: the runner records user-space Ir in each result JSON, but callgrind on the perf inputs did not fit the job budget (see the method note above). The smoke check confirmed numeric Ir for all four columns.
 - **Not measured:** `scar_life` and `tree_fold` did not finish inside this job: mypyc ran more than 25 minutes of CPU on `scar_life`'s perf input before the task was stopped, and Codon ran more than 10 minutes on `tree_fold`'s. Both count as losses for the tool that did not finish; the other columns for those two tasks are missing from these tables, not from the lab.
