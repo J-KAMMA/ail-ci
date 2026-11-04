@@ -54,6 +54,7 @@ def loads(s, parse_float=0):
     root = {}
     header = []
     declared = {}
+    implicit = {}
 
     while True:
         pos = _skip_chars(src, pos, WS)
@@ -66,7 +67,7 @@ def loads(s, parse_float=0):
         if char == "#":
             pos = _skip_comment(src, pos)
         elif char == "[":
-            r = _table_header(src, pos, root, declared)
+            r = _table_header(src, pos, root, declared, implicit)
             pos = r[0]
             header = r[1]
             pos = _skip_chars(src, pos, WS)
@@ -74,7 +75,7 @@ def loads(s, parse_float=0):
             table = _table_at(root, header)
             if table is None:
                 raise TOMLDecodeError("Cannot overwrite a value", src, pos)
-            pos = _key_value(src, pos, table, parse_float)
+            pos = _key_value(src, pos, table, parse_float, header, implicit)
             pos = _skip_chars(src, pos, WS)
         else:
             raise TOMLDecodeError("Invalid statement", src, pos)
@@ -89,7 +90,7 @@ def loads(s, parse_float=0):
     return root
 
 
-def _table_header(src, pos, root, declared):
+def _table_header(src, pos, root, declared, implicit):
     is_list = 0
     if src.startswith("[[", pos):
         is_list = 1
@@ -102,6 +103,11 @@ def _table_header(src, pos, root, declared):
     parts = r[1]
 
     joined = _join_key(parts)
+    if joined in implicit:
+        raise TOMLDecodeError("Cannot declare " + _key_repr(parts) + " twice", src, pos)
+    for key in implicit.keys():
+        declared[key] = 1
+    implicit.clear()
     if is_list:
         if joined in declared:
             del declared[joined]
@@ -123,10 +129,25 @@ def _table_header(src, pos, root, declared):
     return [pos + 1, parts]
 
 
-def _key_value(src, pos, table, parse_float):
+def _key_value(src, pos, table, parse_float, header, implicit):
     r = _parse_key_value_pair(src, pos, parse_float)
     pos = r[0]
-    _set_value(table, r[1], r[2], src, pos, 0)
+    parts = r[1]
+    if len(parts) > 1:
+        i = 1
+        while i < len(parts):
+            prefix = []
+            j = 0
+            while j < len(header):
+                prefix.append(header[j])
+                j += 1
+            j = 0
+            while j < i:
+                prefix.append(parts[j])
+                j += 1
+            implicit[_join_key(prefix)] = 1
+            i += 1
+    _set_value(table, parts, r[2], src, pos, 0)
     return pos
 
 

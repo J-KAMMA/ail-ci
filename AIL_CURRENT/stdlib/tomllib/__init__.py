@@ -57,6 +57,17 @@ rewritten around them.  Each rewrite and the refusal it answers:
    ``str.count(..., start, end)`` / ``str.rindex(..., start, end)``.
    Rewrite: plain strings tested with ``in``, manual coordinate counting,
    and an ``if`` chain for the escape table.
+
+9. ``Flags`` (``dict[str, dict]`` holding ``set()`` values, plus
+   ``set[tuple[Key, int]]`` pending flags).  Refusals: ``not in the
+   subset: a required keyword-only parameter ...`` for ``Flags.set`` and
+   ``None stored in a list / tuple / dict / set ...`` for the nested
+   dictionaries.  Rewrite: two plain dicts in ``loads`` -- ``declared`` for
+   explicit ``[table]`` declarations and ``implicit`` for namespaces opened
+   by dotted keys -- both keyed by the key path joined with ``\\x00``.  A
+   table header checks both and then finalizes the implicit names, which is
+   what makes ``a.b = 1`` followed by ``[a]`` the same
+   ``Cannot declare ('a',) twice`` error as CPython.
 """
 
 __all__ = ("loads", "load", "TOMLDecodeError")
