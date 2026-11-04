@@ -1,0 +1,4 @@
+*.gguf
+*.f32
+exported/
+__pycache__/

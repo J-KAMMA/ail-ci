@@ -199,6 +199,39 @@ the typed path's uncaught-trap text (no `IndexError:`/`ZeroDivisionError:` prefi
 also loses the key), reduced to `lab/fuzzpy/findings/001.py`-`005.py`. The raw `seed22`
 finding is a compile-time int64 constant refusal, counted as loud-ok and not filed.
 `lab/fuzzpy/REPORT.md` has the numbers.
+## 2026-11-04 -- infer s1 fix: ref.py context guard and quantized export refusal
+
+`ref.py` now takes the same optional `STEPS` third argument as `gpt2.py`. It refuses a prompt longer than 1024 tokens
+by name, and after printing the prompt's top-5 it refuses a decode that would pass the context by name with exit 2,
+instead of raising numpy's broadcast `ValueError` on the 1024-token probe. `export_f32.py` refuses a quantized GGUF by
+name, because the reader's data for those tensors is raw block bytes; the documented F32/F16 path is unchanged.
+`RESULTS.md` no longer calls the 8.34 s compile time "warm": it is the `AIL_NO_CACHE=1` time, with 0.57 s warm.
+Re-ran `test_ail_modules` (passes; the reported full-suite failure was not reproducible), `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`. No compiler file changed and no weights are committed.
+
+## 2026-11-04 -- infer s1: GPT-2 inference in AIL against llama.cpp
+
+Added `lab/infer/`: `fetch.sh`, `export_f32.py`, `ref.py`, `gpt2.py`, `tokens.txt`, `prompt.txt`, `README.md` and
+`RESULTS.md`. The model is zenz-v3.2-small (GPT-2 small, 12x768, vocab 6000). The safetensors repo answers 401, so
+the public `-gguf` sibling was used: its only file is Q5_K_M, dequantized once to F32 so AIL, `ref.py` and llama.cpp
+read identical values. Upstream llama.cpp rejects `tokenizer.ggml.pre = gpt2-small-japanese-char`, so the pinned
+`azooKey/llama.cpp` fork is required. No compiler file changed. `gpt2.py` uses plain `list[float]` (`ail_array` f32 is
+still stage T3 and 2-D is stage T6) and `--strict` accepts it without a new blocker.
+
+Greedy ids after the fixed 64-token prompt are equal for AIL, `ref.py` and llama.cpp; the 1-token and 1024-token
+boundary prompts match `ref.py` top-5 and greedy ids as well (1024 with `STEPS=0`, which is committed as
+`tokens1024.txt`, the 64 ids repeated 16 times; without `STEPS=0` the program prints the top-5 and then refuses by
+name with exit 2). llama.cpp prints no logits, so its top-5 is not compared, and no 1024-token llama run was made.
+One thread: prefill 8.52 s vs llama-cli 0.150 s (56.7x), decode 130.6 ms/token vs 12.93 ms/token (10.1x), total
+11.43 s vs 0.40 s (28.6x); `llama-simple` uses its default 4 threads, so it is not a one-thread comparison. Peak RSS
+1.06 GiB vs 417 MiB, binary 106,816 B vs 1,898,560 B, AIL compile 8.34 s.
+Findings: prefill is unbatched, the matmul inner loop is scalar with `ail_flist_view_get` bounds checks and
+`ck_add`/`ck_mul` overflow checks, and the four per-layer `linear()` calls snapshot their weight lists
+(`list[list[float]]` indexing; the final head call does not); arithmetic is f64. The copies are 7,087,872 doubles
+(54.07 MiB) per layer-token, about 40.6 GiB for the 64-token prefill. `perf` is denied on the runner, so these come
+from the generated C. Details in `lab/infer/RESULTS.md`.
+
+Tests: `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass. No weights are committed.
 
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
