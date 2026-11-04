@@ -1,8 +1,8 @@
 # Census of the compiler on the typed path
 
 Measured 2026-11-04 on this branch's base (`staging:integ`).  This is measure-only: no compiler file
-was edited.  The earlier measurement on the 2026-11-03 base gave the same accepted count, 21 of 3152,
-so the share is unchanged to two decimals; the current base has seven more top-level functions.
+was edited.  The earlier measurement on the 2026-11-03 base gave the same accepted count, 21 of 3152
+(0.67%); the current base has seven more top-level functions and the share is 0.66%.
 
 **Two numbers.**
 
