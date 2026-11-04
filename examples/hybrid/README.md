@@ -16,14 +16,13 @@ python3 AIL_CURRENT/ail_chatgpt.py build --cpython examples/hybrid/collatz.py -o
 python3 examples/hybrid/collatz.py 200000          # same stdout and exit status
 ```
 
-The installed `ail` command has no hybrid mode: `ail build` forwards to the SDK's `compile`, which
-rejects `--cpython` (see the finding below).  Call the SDK compiler that ships beside the installed
-package instead:
+The installed `ail` command cannot build a hybrid, and neither can the SDK bundled in the wheel.
+`ail build` forwards to the SDK's `compile`, which has no `--cpython`; the bundled SDK refuses
+`build` by name (see the finding below).  Only the source-checkout command above produces a hybrid.
+The installed `ail` still runs the same program on the default standalone build:
 
 ```sh
-SDK=$(python3 -c 'import ail_lang, pathlib; print(pathlib.Path(ail_lang.__file__).parent / "sdk")')
-python3 -B "$SDK/ail_chatgpt.py" build --cpython examples/hybrid/collatz.py -o /tmp/collatz-hybrid
-/tmp/collatz-hybrid/collatz 200000
+ail run examples/hybrid/collatz.py 200000      # default build; same stdout and exit status
 ```
 
 Every example accepts the small argument shown by its test.  `collatz.py` also accepts a single
@@ -62,17 +61,28 @@ load cost; it is there to show the boundary, not to be fast.
 
 ## Findings
 
-**The installed `ail` cannot build a hybrid.**  `packaging/ail_lang/cli.py` maps `ail build` to the
-SDK's `compile` command and does not forward `--cpython`, so the flag reaches a parser that has no
-such option:
+**The installed `ail` cannot build a hybrid, and neither can its bundled SDK.**  `packaging/ail_lang/cli.py`
+maps `ail build` to the SDK's `compile` command and does not forward `--cpython`, so the flag reaches
+a parser that has no such option:
 
 ```sh
 ail build --cpython examples/hybrid/collatz.py -o /tmp/collatz-hybrid
 # ail_chatgpt.py: error: unrecognized arguments: --cpython
 ```
 
-The SDK compiler bundled beside the package (`ail_lang/sdk/ail_chatgpt.py`) does support it, so the
-installed command in the build section calls that file directly.
+The wheel does bundle `ail_lang/sdk/ail_chatgpt.py`, but an exported SDK (`kind:
+ail_language_sdk`, with `SDK_README_JA.md`) refuses `build` by name, so calling that file directly
+does not help either:
+
+```sh
+SDK=$(python3 -c 'import ail_lang, pathlib; print(pathlib.Path(ail_lang.__file__).parent / "sdk")')
+python3 -B "$SDK/ail_chatgpt.py" build --cpython examples/hybrid/collatz.py -o /tmp/collatz-hybrid
+# ail_chatgpt.py: error: this language SDK supports: doctor, integrity, cache, compile, ...
+```
+
+Both refusals happen before the hybrid lane runs, in files this lane does not own
+(`packaging/ail_lang/cli.py` and the SDK export), so the examples and the test build from a
+checkout with `python3 AIL_CURRENT/ail_chatgpt.py build --cpython`.
 
 **`%` with a variable divisor is refused.**  The body gate treats `Mod` like division because the
 divisor can be zero.  A constant nonzero divisor is allowed.
