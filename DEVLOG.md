@@ -1,3 +1,10 @@
+## 2026-11-04 -- pyreach s6 review fix: pin the new test module
+
+`test_ail_pyreach_byteskeys.py` and `tests.d/test_ail_pyreach_byteskeys.txt` were added without
+their manifest pins, so `tools/update_manifest.py --check` reported both as unpinned and
+`par_check.py` aborted with `hash mismatch`.  Regenerated `manifest.d/30.txt` and
+`manifest.d/70.txt`; `--check` is clean and both modules run.
+
 ## 2026-11-04 -- pyreach s6: bytes as dict/set keys and bytes dict values
 
 The typed path now has `BTAB`, a content-hashing table with owned keys (`ail_btab_upsert`, `put_b`,
