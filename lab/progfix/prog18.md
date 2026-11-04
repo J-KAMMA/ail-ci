@@ -101,6 +101,31 @@ an int in either of the two new places:
    `max()/min() with default= of bool where the elements are an int; only a default of the same
    kind is built`.  `_is_bool_expr` (boolkind.py) is the test in both places.
 
+## Review fixes (nested-width order, a field's own spec, bool elements)
+
+7. `f"{v():>{w()}}"` evaluated the nested width before the value: the C formatter call takes the
+   value and the width as arguments and C leaves argument evaluation order unspecified (gcc is
+   right-to-left), while CPython formats the value and then evaluates the spec's field.  With
+   `--debug-dir` the value is now bound to a `_fvN` local inside the call's statement expression
+   before the width is evaluated (`_fmt_value_first`), in the three small formatters and in
+   `ail_fmt_gen`/`ail_fmt_gen_str`.  Probe: both functions print, CPython prints `v w`, the typed
+   build now prints `v w` too (int, float, str, `!r`, a fill, two fields on one line).
+
+8. A nested width field's own format spec was ignored: `f"{9:>{w:>3}}"` padded to 5 where CPython
+   formats `w` with `>3` (`'  5'`), splices that into the spec (`'>  5'`) and raises
+   `ValueError: Invalid format specifier '>  5' for object of type 'int'`.  A field spec cannot
+   be applied to the `int64_t` width, so it is now refused by name:
+   `a nested format-spec field with its own format spec ({w:>3}): CPython splices the formatted
+   text into the outer spec, ...`.  An empty spec (`{w:}`) and a conversion (`{w!r}`) are not
+   refused: for an int they splice the same decimal text.
+
+9. `max`/`min(xs, default=...)` over a list of bools folded the elements to int and printed `1`/`0`
+   where CPython returns the bool (`True`/`False`).  The guard tested only the default's kind.
+   Now the element kind is tested too (`_is_bool_seq_expr`, boolkind's `bool_seq_value`): a bool
+   walk with a bool default is typed and exact (`max(flags, default=True)` prints `True`), a bool
+   walk with an int default is refused by name
+   (`max()/min() with default= of int where the elements are bool; ...`), and boolkind's max/min
+   predicate accepts the `default=` keyword so the typed result is printed as a bool.
 
 ## Following up (not fixed here)
 

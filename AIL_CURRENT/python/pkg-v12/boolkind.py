@@ -202,7 +202,13 @@ def boolish(node, env, names, lists):
             return info[0]
         f = node.func
         if isinstance(f, ast.Name):
-            if f.id in ('max', 'min') and not node.keywords and node.args:
+            if f.id in ('max', 'min') and node.args:
+                # `max(xs, default=d)` returns d for an empty xs: a bool result only when d is a
+                # bool too (and the walk itself yields bools).
+                if node.keywords:
+                    if not (len(node.keywords) == 1 and node.keywords[0].arg == 'default'
+                            and boolish(node.keywords[0].value, env, names, lists)):
+                        return False
                 if len(node.args) == 1:
                     return bool_seq_value(node.args[0], env, names, lists)
                 return all(boolish(a, env, names, lists) for a in node.args)

@@ -7126,6 +7126,19 @@ def _is_bool_expr(node, ctx):
         return False
 
 
+def _is_bool_seq_expr(node, ctx):
+    """True when iterating NODE yields bools (a list/dict-values whose every element is a bool),
+    by the same boolkind.boolish analysis `_is_bool_expr` uses. A fold's element kind has to be
+    known for `max(xs, default=d)` to stay exact: an int64 accumulator cannot carry CPython's
+    bool, so a bool walk with an int default is refused rather than printed as 1/0."""
+    try:
+        return boolkind.bool_seq_value(node, _TypedBoolEnv(ctx),
+                                       getattr(ctx, 'bool_names', ()),
+                                       getattr(ctx, 'bool_lists', ()))
+    except Unsupported:
+        return False
+
+
 def _bool_str_value(node, ctx):
     """`str(b)` for a bool `b`: the static text "True" or "False"."""
     ctx.parts.add('STR')
@@ -8964,6 +8977,19 @@ def _fmt_width_c(width_node, ctx, kind):
     return '({ %s %s; })' % (check, cell)
 
 
+def _fmt_value_first(ctx, ctype, value_c, call):
+    """Bind VALUE_C to a local, then evaluate the formatter call that reads that local.
+
+    CPython evaluates an f-string field's VALUE before its format spec's nested `{width}` field
+    (`f"{v():>{w()}}"` prints from `v` then `w`); C leaves argument evaluation order unspecified,
+    and gcc evaluates the arguments of a call right to left, which put the width first. The
+    statement expression makes the order explicit without moving the value out of the enclosing
+    statement (a value computed in a conditional must still only run in that arm)."""
+    ctx.tmp += 1
+    cell = '_fv%d' % ctx.tmp
+    return '({ %s %s = %s; %s; })' % (ctype, cell, value_c, call(cell))
+
+
 def _fmt_general(val_node, kind, spec, orig_text, ctx, str_default_align, pre_c=None,
                  width_node=None):
     """The field built by the runtime's `ail_fmt_gen` / `ail_fmt_gen_str` (cruntime.py FMTGEN), for
@@ -8983,9 +9009,13 @@ def _fmt_general(val_node, kind, spec, orig_text, ctx, str_default_align, pre_c=
                               "the '0' flag is not allowed for a str (CPython raises ValueError)" % orig_text)
         align_ch = align_ch or str_default_align
         sv = pre_c if pre_c is not None else _str_value(val_node, ctx)
-        wc = _fmt_width_c(width_node, ctx, STR) if width_node is not None else '%d' % width
-        return 'ail_fmt_gen_str(&%s, %s, %d, %d, %s, %d)' % (
-            ctx.sarena(), sv, ord(fill), {'>': 0, '<': 1, '^': 2}[align_ch], wc, prec)
+        if width_node is None:
+            return 'ail_fmt_gen_str(&%s, %s, %d, %d, %d, %d)' % (
+                ctx.sarena(), sv, ord(fill), {'>': 0, '<': 1, '^': 2}[align_ch], width, prec)
+        wc = _fmt_width_c(width_node, ctx, STR)
+        return _fmt_value_first(ctx, 'ail_str', sv, lambda cell: (
+            'ail_fmt_gen_str(&%s, %s, %d, %d, %s, %d)' % (
+                ctx.sarena(), cell, ord(fill), {'>': 0, '<': 1, '^': 2}[align_ch], wc, prec)))
     float_conv = kind == FLT or t in tuple(_FMT_FLOAT_TYPES)
     if kind == INT and t is not None and t not in _FMT_INT_TYPES + _FMT_FLOAT_TYPES:
         raise Unsupported("the format spec %r on an int: the type %r is not built (d x X o b and the float "
@@ -9014,14 +9044,25 @@ def _fmt_general(val_node, kind, spec, orig_text, ctx, str_default_align, pre_c=
     code = {None: 0, '>': 0, '<': 1, '^': 2, '=': 3}[align_ch]
     sign = {None: 0, '-': 0, '+': 1, ' ': 2}[spec.get('sign')]
     v = _expr(val_node, ctx)
-    wc = _fmt_width_c(width_node, ctx, kind) if width_node is not None else '%d' % width
-    if float_conv:
-        iv, dv, k = '0', '(double)(%s)' % v, 1
-    else:
-        iv, dv, k = v, '0.0', 0
-    return 'ail_fmt_gen(&%s, %d, %s, %s, %d, %d, %d, %d, %s, %d, %d, %d)' % (
-        ctx.sarena(), k, iv, dv, ord(fill), code, sign, 1 if spec.get('alt') else 0, wc,
-        ord(spec.get('group')) if spec.get('group') else 0, prec, ord(t) if t else 0)
+    if width_node is None:
+        if float_conv:
+            iv, dv, k = '0', '(double)(%s)' % v, 1
+        else:
+            iv, dv, k = v, '0.0', 0
+        return 'ail_fmt_gen(&%s, %d, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d)' % (
+            ctx.sarena(), k, iv, dv, ord(fill), code, sign, 1 if spec.get('alt') else 0, width,
+            ord(spec.get('group')) if spec.get('group') else 0, prec, ord(t) if t else 0)
+    wc = _fmt_width_c(width_node, ctx, kind)
+
+    def call(cell):
+        iv, dv = ('0', cell) if float_conv else (cell, '0.0')
+        return 'ail_fmt_gen(&%s, %d, %s, %s, %d, %d, %d, %d, %s, %d, %d, %d)' % (
+            ctx.sarena(), 1 if float_conv else 0, iv, dv, ord(fill), code, sign,
+            1 if spec.get('alt') else 0, wc,
+            ord(spec.get('group')) if spec.get('group') else 0, prec, ord(t) if t else 0)
+
+    return _fmt_value_first(ctx, 'double' if float_conv else 'int64_t',
+                            '(double)(%s)' % v if float_conv else v, call)
 
 
 def _resolve_fmt_type(spec, kind, orig_text, ctx_desc):
@@ -9092,22 +9133,34 @@ def _fmt_build(val_node, kind, spec, orig_text, ctx, ctx_desc, str_default_align
     ctx.parts.add('FMT')
     if kind == INT:
         v = _expr(val_node, ctx)
-        wc = _fmt_width_c(width_node, ctx, INT) if width_node is not None else '%d' % width
-        return 'ail_fmt_spec_int(&%s, %s, %s, %d, %d, %d)' % (
-            ctx.sarena(), v, wc, align, zero, ord(fill))
+        if width_node is None:
+            return 'ail_fmt_spec_int(&%s, %s, %d, %d, %d, %d)' % (
+                ctx.sarena(), v, width, align, zero, ord(fill))
+        wc = _fmt_width_c(width_node, ctx, INT)
+        return _fmt_value_first(ctx, 'int64_t', v, lambda cell: (
+            'ail_fmt_spec_int(&%s, %s, %s, %d, %d, %d)' % (
+                ctx.sarena(), cell, wc, align, zero, ord(fill))))
     if kind == FLT:
         prec = spec['precision'] if spec['precision'] is not None else -1
         v = _expr(val_node, ctx)
-        wc = _fmt_width_c(width_node, ctx, FLT) if width_node is not None else '%d' % width
-        return 'ail_fmt_spec_float(&%s, (double)(%s), %s, %d, %d, %d, %d)' % (
-            ctx.sarena(), v, wc, align, zero, prec, ord(fill))
+        if width_node is None:
+            return 'ail_fmt_spec_float(&%s, (double)(%s), %d, %d, %d, %d, %d)' % (
+                ctx.sarena(), v, width, align, zero, prec, ord(fill))
+        wc = _fmt_width_c(width_node, ctx, FLT)
+        return _fmt_value_first(ctx, 'double', '(double)(%s)' % v, lambda cell: (
+            'ail_fmt_spec_float(&%s, %s, %s, %d, %d, %d, %d)' % (
+                ctx.sarena(), cell, wc, align, zero, prec, ord(fill))))
     prec = spec['precision'] if spec['precision'] is not None else -1
     sv = pre_c if pre_c is not None else _str_value(val_node, ctx)
-    if width_node is None and width <= 0 and prec < 0:
-        return sv
-    wc = _fmt_width_c(width_node, ctx, STR) if width_node is not None else '%d' % width
-    return 'ail_fmt_spec_str(&%s, %s, %s, %d, %d)' % (
-        ctx.sarena(), sv, wc, align, prec)
+    if width_node is None:
+        if width <= 0 and prec < 0:
+            return sv
+        return 'ail_fmt_spec_str(&%s, %s, %d, %d, %d)' % (
+            ctx.sarena(), sv, width, align, prec)
+    wc = _fmt_width_c(width_node, ctx, STR)
+    return _fmt_value_first(ctx, 'ail_str', sv, lambda cell: (
+        'ail_fmt_spec_str(&%s, %s, %s, %d, %d)' % (
+            ctx.sarena(), cell, wc, align, prec)))
 
 
 _BORROW_SAFE_CALLS = frozenset(('str', 'len', 'ord', 'int', 'abs'))
@@ -9223,6 +9276,22 @@ def _repr_conv(val, kind, ctx):
     return _fmt_default_conv(val, kind, ctx)
 
 
+def _fmt_literal_spec(fs):
+    """The literal text of a format-spec AST without any nested field, '' when it is empty, and
+    None when it contains a `{field}` (CPython would splice that field's text into the spec)."""
+    if fs is None:
+        return ''
+    if not isinstance(fs, ast.JoinedStr):
+        return None
+    text = []
+    for v in fs.values:
+        if isinstance(v, ast.Constant) and isinstance(v.value, str):
+            text.append(v.value)
+        else:
+            return None
+    return ''.join(text)
+
+
 def _fstring_field(fv, ctx):
     """One `ast.FormattedValue` inside an f-string (`{expr}` or `{expr:spec}`) -- conversion
     (`!r`/`!a`, refused by name) checked first, then the value's own kind, then the spec, if one
@@ -9266,6 +9335,17 @@ def _fstring_field(fv, ctx):
                                         for v in fs.values)):
             raise Unsupported('a format spec with more than one nested {field}; not built.\n'
                               '  write instead: a literal spec, or format first and pad by hand')
+        wspec = _fmt_literal_spec(fields[0].format_spec)
+        if wspec != '':
+            # CPython formats the nested field with its own spec and splices THAT text into the
+            # outer spec (`w:>3` with w=5 makes the spec '>  5'). The compiler passes an int64
+            # width, so the field's spec cannot be applied; refusing is the only exact answer.
+            shown = '{%s:%s}' % (ast.unparse(fields[0].value),
+                                 wspec if wspec is not None else '{...}')
+            raise Unsupported(
+                'a nested format-spec field with its own format spec (%s): CPython splices the '
+                'formatted text into the outer spec, which this compiler does not build -- write '
+                'the width as a plain int expression' % shown)
         at = fs.values.index(fields[0])
         prefix = ''.join(v.value for v in fs.values[:at])
         suffix = ''.join(v.value for v in fs.values[at + 1:])
@@ -18869,7 +18949,18 @@ def _inline_fold_inner(f, arg, ctx, default=None):
             raise Unsupported('%s() takes no default=' % f)
         want = FLT if ct == 'double' else INT
         got = _etype(default, ctx)
-        if got != want or _is_bool_expr(default, ctx):
+        # A bool is an int64 0/1 in C but a distinct VALUE to CPython. The accumulator is one
+        # int64_t, so all the values it can hold have to be the same kind: a bool walk with a bool
+        # default is exact (the caller prints it as bool), a bool walk with an int default is not
+        # (CPython returns the bool element, this fold would print 1/0).
+        elem_bool = _is_bool_seq_expr(src, ctx)
+        if elem_bool and var is not None:
+            raise Unsupported('max()/min() with default= over a generator of bools; not built')
+        if elem_bool:
+            if not _is_bool_expr(default, ctx):
+                raise Unsupported('max()/min() with default= of %s where the elements are bool; '
+                                  'only a default of the same kind is built' % _a(got))
+        elif got != want or _is_bool_expr(default, ctx):
             raise Unsupported('max()/min() with default= of %s where the elements are %s; only a '
                               'default of the same kind is built'
                               % ('bool' if got == want else _a(got), _a(want)))

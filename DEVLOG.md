@@ -1,3 +1,22 @@
+## 2026-11-04 -- prog18_rr1 review fixes 2: nested-width order and spec, bool fold elements
+
+Three defects from the re-review, all on the typed path (the forced-general build matched CPython):
+
+- `f"{v():>{w()}}"` evaluated the width before the value: the formatter takes both as C arguments
+  and gcc evaluates right to left.  The value is now bound to a `_fvN` local inside the formatter
+  call's statement expression (`_fmt_value_first`), so CPython's order (value, then the spec's
+  field) holds for the small formatters and for `ail_fmt_gen`/`ail_fmt_gen_str`.
+- A nested width field's own spec was silently dropped: `f"{9:>{w:>3}}"` padded where CPython
+  splices the formatted text and raises `ValueError: Invalid format specifier '>  5' ...`.  It is
+  now refused by name.  An empty spec or a conversion is still accepted (same decimal text).
+- `max`/`min(xs, default=...)` over a list of bools printed `1`/`0` instead of `True`/`False`; the
+  guard only looked at the default's kind.  The element kind is tested too: a bool walk with a
+  bool default is typed and exact, a bool walk with an int default is refused by name, and
+  boolkind's max/min predicate now accepts `default=`.
+
+The generated C of the ten `lab/compare` tasks is byte-identical to HEAD (six emit C; four fail
+or fall back identically).  `test_ail_prog18.py` gains four tests (16 total).
+
 ## 2026-11-04 -- prog18_rr1 review fixes: a bool is not an int in a width or a default
 
 Two escape hatches let a bool through where CPython refuses it or keeps it a bool (both only on the

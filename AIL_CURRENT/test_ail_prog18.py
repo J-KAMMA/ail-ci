@@ -19,7 +19,10 @@ T2  stdout and exit code equal CPython on the task input
 T3  `max`/`min` with default=: empty and non-empty, int and float, through an argument, a list
     item, an attribute and a dict value, near-int64 values, a default with a side effect
 T4  a negative width is CPython's sign option, not a padding request (`format(9, '>-5')`)
-T5  the two programs that still need a big feature stay named in lab/progfix/prog18.md
+T5  the value of a field is evaluated before its nested width (CPython's order, not C's argument
+    order), a nested width field's own format spec is refused by name, and a bool walk with an int
+    `default=` is refused by name (a bool walk with a bool default is typed and exact)
+T6  the two programs that still need a big feature stay named in lab/progfix/prog18.md
 """
 import os
 import shutil
@@ -268,6 +271,46 @@ main()
 '''
 
 
+ORDER = '''
+def w() -> int:
+    print("w", end=" ")
+    return 5
+
+
+def v() -> int:
+    print("v", end=" ")
+    return 9
+
+
+def f() -> str:
+    print("f", end=" ")
+    return "ab"
+
+
+def main() -> None:
+    print(f"[{v():>{w()}}]")
+    print(f"[{f():>{w()}}]")
+    print(f"[{v():*>{w()}}]")
+
+
+main()
+'''
+
+
+BOOL_DEFAULT_TYPED = '''
+def main() -> None:
+    flags: list[bool] = [True, False]
+    empty: list[bool] = []
+    print(max(flags, default=True))
+    print(min(flags, default=False))
+    print(max(empty, default=True))
+    print(min(empty, default=False))
+
+
+main()
+'''
+
+
 @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
 class Prog18(unittest.TestCase):
     @classmethod
@@ -363,6 +406,28 @@ class Prog18(unittest.TestCase):
 
     def test_bool_width_and_default_match_cpython(self):
         exe, source = self.build(BOOL_EDGES, 'bool_edges', expect_typed=None)
+        self.same(exe, source)
+
+    def test_nested_width_evaluation_order_typed(self):
+        exe, source = self.build(ORDER, 'order')
+        self.same(exe, source)
+
+    def test_nested_width_own_spec_refused_by_name(self):
+        res, _, _ = compile_default(self.tmp, 'def main() -> None:\n'
+                                    '    w: int = 5\n'
+                                    '    print(f"[{9:>{w:>3}}]")\n\n\nmain()\n',
+                                    'refuse_width_spec')
+        self.assertIn('nested format-spec field with its own format spec', res.stderr)
+
+    def test_bool_walk_int_default_refused_by_name(self):
+        res, _, _ = compile_default(self.tmp, 'def main() -> None:\n'
+                                    '    flags: list[bool] = [True, False]\n'
+                                    '    print(max(flags, default=0))\n\n\nmain()\n',
+                                    'refuse_bool_walk')
+        self.assertIn('where the elements are bool', res.stderr)
+
+    def test_bool_walk_bool_default_typed(self):
+        exe, source = self.build(BOOL_DEFAULT_TYPED, 'bool_default_typed')
         self.same(exe, source)
 
     def test_report(self):
