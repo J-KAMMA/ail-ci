@@ -4619,6 +4619,11 @@ def _record_key_text(node):
         return None
 
 
+def _pos(node):
+    """(line, column) of a node, for ordering statements inside one line."""
+    return (getattr(node, 'lineno', 0), getattr(node, 'col_offset', 0))
+
+
 def _record_hint(fn, node, assigned, seen=None):
     """The kinds an expression may hold, as a set of category names ('int', 'bool', 'set', ...)."""
     seen = set() if seen is None else seen
@@ -4921,24 +4926,24 @@ class _RecordTransformer(ast.NodeTransformer):
                     and isinstance(stmt.targets[0], ast.Subscript)
                     and isinstance(stmt.targets[0].value, ast.Name)
                     and stmt.targets[0].value.id == name and isinstance(stmt.value, ast.List)):
-                self.flat_stores.append((stmt.lineno, _record_key_text(stmt.targets[0].slice)))
+                self.flat_stores.append((_pos(stmt.targets[0].slice), _record_key_text(stmt.targets[0].slice)))
             elif (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
                   and isinstance(stmt.value.func, ast.Attribute)
                   and isinstance(stmt.value.func.value, ast.Name)
                   and stmt.value.func.value.id == name and stmt.value.func.attr == 'setdefault'
                   and len(stmt.value.args) == 2):
-                self.flat_stores.append((stmt.lineno, _record_key_text(stmt.value.args[0])))
+                self.flat_stores.append((_pos(stmt.value.args[0]), _record_key_text(stmt.value.args[0])))
         self.deletes = []
         for node in ast.walk(fn):
             if isinstance(node, ast.Delete):
                 for target in node.targets:
                     if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
                             and target.value.id == name):
-                        self.deletes.append((node.lineno, _record_key_text(target.slice)))
+                        self.deletes.append((_pos(target.slice), _record_key_text(target.slice)))
         self.guarded = self._collect_guards(fn)
 
     def _collect_guards(self, fn):
-        """Statement id -> key text -> line of the enclosing `if k in d:` test.
+        """Statement id -> key text -> position of the enclosing `if k in d:` test.
 
         A key element removed by a `del d[k]` is dropped for the statements that follow it."""
         guards = {}
@@ -4948,8 +4953,8 @@ class _RecordTransformer(ast.NodeTransformer):
                     and isinstance(test.ops[0], ast.In)
                     and isinstance(test.comparators[0], ast.Name)
                     and test.comparators[0].id == self.d):
-                return _record_key_text(test.left)
-            return None
+                return _record_key_text(test.left), _pos(test.left)
+            return None, None
 
         def mark(statements, keys):
             keys = dict(keys)
@@ -4957,9 +4962,9 @@ class _RecordTransformer(ast.NodeTransformer):
                 guards.setdefault(id(stmt), {}).update(keys)
                 if isinstance(stmt, ast.If):
                     inner = dict(keys)
-                    found = key_of(stmt.test)
+                    found, at = key_of(stmt.test)
                     if found is not None:
-                        inner[found] = stmt.lineno
+                        inner[found] = at
                     mark(stmt.body, inner)
                     mark(stmt.orelse, keys)
                     continue
@@ -4986,15 +4991,18 @@ class _RecordTransformer(ast.NodeTransformer):
         return name
 
     def _key_stable(self, key, start, end):
-        """No name read by `key` is rebound in the source between line `start` (exclusive) and
-        `end` (inclusive), so the key text means the same value at the use as at the store."""
+        """No name read by `key` is rebound in the source after position `start` (exclusive) and
+        before position `end` (exclusive), so the key means the same value at the use as at the
+        store or guard.
+
+        Only a bare name or a constant is provable: a subscript or attribute key reads a container
+        whose elements may change without rebinding any name, so such a key is never proven."""
+        if not isinstance(key, (ast.Name, ast.Constant)):
+            return False
         names = {node.id for node in ast.walk(key) if isinstance(node, ast.Name)}
         if not names:
             return True
         for node in ast.walk(self.fn):
-            line = getattr(node, 'lineno', None)
-            if line is None or not (start < line <= end):
-                continue
             targets = []
             if isinstance(node, ast.Assign):
                 for target in node.targets:
@@ -5012,24 +5020,28 @@ class _RecordTransformer(ast.NodeTransformer):
                 for gen in node.generators:
                     targets.extend(_target_name_nodes(gen.target))
             elif isinstance(node, ast.ExceptHandler) and node.name and node.name in names:
-                return False
-            if any(target.id in names for target in targets):
-                return False
+                if start < _pos(node) < end:
+                    return False
+            for target in targets:
+                if target.id in names and start < _pos(target) < end:
+                    return False
         return True
 
-    def _proven(self, key, line):
-        """True when an unconditional store of this key executes before `line`, the key reads the
+    def _proven(self, key, pos):
+        """True when an unconditional store of this key executes before `pos`, the key reads the
         same values at both, and no `del d[k]` of the same key lies between them."""
+        if not isinstance(key, (ast.Name, ast.Constant)):
+            return False
         text = _record_key_text(key)
         if text is None:
             return False
-        stores = [at for at, other in self.flat_stores if other == text and at < line]
+        stores = [at for at, other in self.flat_stores if other == text and at < pos]
         if not stores:
             return False
         last = max(stores)
-        if any(other == text and last < at < line for at, other in self.deletes):
+        if any(other == text and last < at < pos for at, other in self.deletes):
             return False
-        return self._key_stable(key, last, line)
+        return self._key_stable(key, last, pos)
 
     def _none_tested(self, name):
         for node in ast.walk(self.fn):
@@ -5165,13 +5177,13 @@ class _RecordTransformer(ast.NodeTransformer):
             return None
         if attr == 'get' and len(value.args) == 1:
             text = _record_key_text(value.args[0])
-            guard_line = self.guarded.get(id(stmt), {}).get(text) if text is not None else None
-            guarded = guard_line is not None and self._key_stable(value.args[0], guard_line,
-                                                                  value.lineno)
+            guard_at = self.guarded.get(id(stmt), {}).get(text) if text is not None else None
+            guarded = guard_at is not None and self._key_stable(value.args[0], guard_at,
+                                                               _pos(value.args[0]))
             if not guarded:
                 if isinstance(target, ast.Name) and self._none_tested(target.id):
                     raise _RecordUnsupported()
-                if not self._proven(value.args[0], value.lineno):
+                if not self._proven(value.args[0], _pos(value.args[0])):
                     raise _RecordUnsupported()
             key = self.visit(value.args[0])
             if self.kind == 'set':

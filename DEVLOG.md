@@ -1,3 +1,15 @@
+## 2026-11-04 -- pyreach s5 fix round 2: same-line key rebinding and key mutation
+
+The one-argument `d.get(k)` presence proof still trusted a line interval, so a rebinding on the
+store's or guard's own line slipped through (`d[k] = [..]; k = 2` then `d.get(k)`), and a key such
+as `a[0]` was proved from an earlier store even when `a` was mutated in between.  The proof now
+orders store/guard/use by `(line, column)` and reads each binding target's own position, so a
+rebinding or `del` anywhere between them refuses the lowering.  Only a bare name or a constant key
+can be proved: a subscript or attribute key reads container elements that may change without any
+rebinding, so it keeps the old route.  `p_sameline.py`, `p_guardsameline.py` and `p_keymut.py`
+now match CPython on both builds; guarded and proven bare-name keys still lower typed.  Manifest
+regenerated.
+
 ## 2026-11-04 -- pyreach s5 fix round: role bindings and one-argument `get` proof
 
 Review defects closed.  The record-dict lowering used a function-wide role map, so a row name
