@@ -1,3 +1,42 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+# Review: lsp1b (hover / read-only dirs / message remap)
+
+**What the change does:** in `packaging/ail_lang/lsp.py` it adds full-sync `didChange`, a conservative `type_hover` (signature / annotation / all-literal-one-kind, else null), a read-only fallback that probes the buffer in a `mkdtemp` dir with `path.parent` on `AIL_PATH`, and path/base-name remapping of diagnostic messages; plus tests, docs and DEVLOG. That matches the DEVLOG. The worker's own report is truncated ("Mostly passing; three failures are my probe's own indexing…") and contains no probe list or numbers, so I treated the DEVLOG as the claim set.
+
+**Probes** (`/tmp/rprobes/`, run on HEAD and on `/tmp/base` = `work`):
+- `rev_hover.py` (44 direct `type_hover` cases): 5 review names → null; `b"a b".split()`, `range(3)` → null; strings/comments/attribute/keyword-label → null; int/float/str/bytes/bool/None → correct; same-type reassignment → type; mixed/alias/argument/list-item/dict-value/attribute/`for`-target/augassign/tuple-unpack/`-1` → null; annotation and signature correct; global/nonlocal/class/comprehension/lambda scoping correct; UTF-16 positions correct (`raw char` pos → null, `unit` pos → `int`). No wrong type found.
+- `rev_server.py` (real server): writable + read-only `didOpen` publish clean messages (`helper.py`, no `.ail-lsp-`), no temp leftovers; read-only new and existing files both publish; `didChange` full and range (including after an astral char) work and leave the file untouched; imported-module diagnostics publish on the import's own URI. `R5` (read-only `module_path` import) fails **identically on base and HEAD** — `ail check -I lib` ignores `-I`, so pre-existing.
+- `cmp.sh` on `p_sanity.py`, `p_imports.py`, `p_slice.py`: both builds match CPython, exit 0. `--debug-dir` generated `program.c` identical base vs HEAD (1,171,220 bytes). Diff touches no compiler/runtime file, so no speed impact (icount not applicable).
+
+**Tests on HEAD:** `test_ail_lsp` passed (65.9 s). `test_ail_safetynet` failed `S4_generators_gc` under `-j 2`; standalone that case matches CPython exactly on HEAD **and** on base — a concurrency flake, not caused by the change. `tools/update_manifest.py --check` clean. `test_ail_files`/`test_ail_corpus_findings3` and the 20 shards were not run (Unverified).
+
+**Defect (caused by the change):**
+1. **A read-only project loses `strict`, so an Error becomes a Warning.** The fallback hand-checks a probe file in `mkdtemp`, so `project.find(probe.parent)` cannot see the project's `ail.toml`; `found_strict` becomes False. Base checked the on-disk file and found the project.
+   Probe (`/tmp/rprobes/rev_server.py` R3): directory at `0555` containing `ail.toml` (`entry = "blocker.py"`, `strict = true`) and, on disk, `blocker.py` = `def find(d: dict[int, int], k: int) -> int | None: …`; `didOpen` of that file.
+   Expected (base, and `docs/LSP.md`): severity **1** (Error), message `int | None: only a class type can be None here …`.
+   Actual HEAD: severity **2**, `runs on the slow general path because int | None: …`.
+   (For a *new* file in a read-only dir this was already broken on base; the regression is the existing-file/`didChange` case.)
+
+**Minor, non-blocking:** `_annotation`'s docstring says "exactly as the source writes it", but it is `ast.unparse`: `x: dict [ int , int ]` hovers as `dict[int, int]`. `-1`, `x, y = 1, 2` and `x = 1 if c else 2` show no type (conservative; the rule arguably expects `int`).
+
+**Pre-existing:** R5 `module_path` import (`ail check` ignores `-I`); `S4_generators_gc` flake under parallel load.
+
+**Unverified:** the 20 shards, `test_ail_files`, `test_ail_corpus_findings3`; the VS Code/Neovim snippets in `docs/LSP.md`.
+
+VERDICT: FIX
+1. Read-only directories drop the project's `strict` setting: with `ail.toml` `strict = true` and a typed-path blocker in a `0555` directory, `didOpen` of the on-disk file publishes severity 2 (`runs on the slow general path because int | None…`) where base and the docs give severity 1 (`int | None: only a class type can be None here …`). Cause: `Diagnoser.diagnose` runs `project.find` on the `mkdtemp` probe's parent instead of the opened file's parent.
+[commandcode stop=end_turn turns=41 out_tokens=53013]
+
+
+--- ORIGINAL TASK ---
 Lane: lsp
 
 **Finish lsp1b from its existing work; do not redo it.** The run on branch `job-lsp1b-11040505` did the work, then ended ERROR because the pipeline's review step crashed (a bug in the job runner, now fixed; not your work's fault), so it got no verdict.
