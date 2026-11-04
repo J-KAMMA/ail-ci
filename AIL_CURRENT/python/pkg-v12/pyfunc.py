@@ -32491,16 +32491,27 @@ def _claim_key(site):
     return tuple(sorted(site.items()))
 
 
-def _override_from_site(site):
+def _override_from_site(site, fn=None, classes=None):
     """A `{param_name: claim}` site turned into the two things `_param_kinds` and
     `_mark_tuple_lists` each already know how to consume: a `sig_override` text dict (section 15)
-    for scalar kinds, and an arity-seed dict for row lists -- never a third, new ruleset."""
+    for scalar kinds, and an arity-seed dict for row lists -- never a third, new ruleset.
+
+    A `str` claim is value evidence, not an ABI fact: when the parameter carries an explicit
+    annotation of another kind, the call-site guard already names that one offending call and
+    keeps the diagnostic on the caller, so it is not turned into a declaration-level signature
+    conflict here. An unannotated parameter still takes the claim, exactly as before.
+    """
     override, arity_seed = {}, {}
     for pname, claim in site.items():
         if isinstance(claim, tuple) and claim[0] == 'rows':
             arity_seed[pname] = claim[1]
         elif claim == 'array':
             override[pname] = 'list'
+        elif claim == STR and fn is not None and any(
+                a.arg == pname and a.annotation is not None
+                and _annotation_kind(a.annotation, classes or ()) not in (None, STR)
+                for a in fn.args.args):
+            continue
         else:
             override[pname] = claim
     return override, arity_seed
@@ -32520,8 +32531,16 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     refuses several such mismatches too, e.g. an inferred sequence against a caller's `int` claim),
     and is dropped rather than raised, so propagation can never turn an already-working,
     unannotated program into a refusal it did not have before.
+
+    Only a NUMERIC caller claim is raised here. A text, bytes or list claim is refused
+    at the call itself (`_call_user_func`'s argument branches), which names the call
+    expression and the original source position; raising it here would instead point at
+    the callee's declaration, which is less useful for a repair loop. The claim is
+    dropped instead, leaving the function's own annotation in place.
     """
     for pname, text in override.items():
+        if _sig_override_kind(fn, pname, text) not in NUM:
+            continue
         for a in fn.args.args:
             if a.arg == pname and a.annotation is not None:
                 given = _sig_override_kind(fn, pname, text)
@@ -32570,7 +32589,7 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
         if any(len(s) > 1 for s in per_param.values()):
             continue                             # disagreement -- left for `_plan_clones`
         site = {pname: next(iter(s)) for pname, s in per_param.items()}
-        override, arity_seed = _override_from_site(site)
+        override, arity_seed = _override_from_site(site, by_name[g], classes)
         try:
             new_params = _param_kinds(by_name[g], classes or {}, override or None,
                                       {name: sig[1] for name, sig in sigs.items()}, allow_widening=True)
@@ -32999,7 +33018,7 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
             continue                     # single signature (already handled) or over the cap
         variants = {}
         for idx, (key, site) in enumerate(uniq.items()):
-            override, arity_seed = _override_from_site(site)
+            override, arity_seed = _override_from_site(site, by_name[g], classes)
             try:
                 new_params = _param_kinds(by_name[g], classes or {}, override or None,
                                           {name: sig[1] for name, sig in sigs.items()}, allow_widening=True)

@@ -1,3 +1,18 @@
+## 2026-11-04 -- full-suite fix: text arguments stay call-site diagnostics (job-rbcrate1-11042159)
+
+The exported tree predated the checker change that keeps a `str` call argument a per-call
+diagnostic: `_override_from_site` turned the call-site `str` claim into a declaration-level
+`sig_override`, so `take("wrong")` was reported against `take`'s declaration as `operation:
+"parameter"` instead of against the caller as `operation: "argument"`.  Ported that change from
+`origin/integ`: `_override_from_site(site, fn, classes)` drops a `str` claim when the parameter
+carries an explicit non-str annotation (the call-site guard names the offending call and keeps
+the position), and `_explicit_annotation_conflicts` raises only numeric claims, dropping
+text/bytes/list claims to the call itself.  Restores `test_ail_argument_type_details`,
+`test_ail_source_check`, `test_ail_check_repair_context` and `test_ail_collections`; the
+accompanying `test_text_argument_keeps_the_call_site_statement_location` case is included.
+`tools/diff_ids.py` is absent on this tree; `tools/update_manifest.py` was run and `--check`
+passes.  The crate1 fix and its test are unchanged.
+
 ## 2026-11-04 -- review fix: keep this tree's GitHub Models key wiring (job-rbcrate1-11042159)
 
 The re-apply above also took the fetched diff's `.github/workflows/agent-worker.yml` hunk, which
