@@ -147,7 +147,8 @@ def main():
     counts = {}
     for r in recs:
         counts[r['result']] = counts.get(r['result'], 0) + 1
-    built = [r for r in recs if r['result'].startswith('built')]
+    built = [r for r in recs if r['result'] in ('built-typed', 'built-general')]
+    empty = [r for r in recs if r['result'] == 'built-empty']
     wrong = [r for r in recs if r['result'] == 'wrong']
 
     buckets = {}
@@ -182,10 +183,16 @@ def main():
     lines.append('')
     lines.append('## Counts')
     lines.append('')
-    for k in ('built-typed', 'built-general', 'refused', 'timeout', 'absent', 'not run', 'wrong'):
+    for k in ('built-typed', 'built-general', 'built-empty', 'refused', 'timeout', 'absent', 'not run', 'wrong'):
         if counts.get(k):
             lines.append('- **%s**: %d' % (k, counts[k]))
     lines.append('- **built total**: %d / %d' % (len(built), len(recs)))
+    lines.append('')
+    lines.append('A module counts as **built** only when the generated program carries code from it '
+                 '(at least one `<module>__` symbol in `program.c`). `built-empty` means AIL accepted '
+                 'the import but silently dropped the module: the generated program is the general-path '
+                 'runtime with no symbol from the module, or is byte-identical to a bare '
+                 '`print("ok")`. Those do not count as built.')
     lines.append('')
     if wrong:
         lines.append('## WRONG (silent bugs)')
@@ -196,10 +203,11 @@ def main():
     lines.append('## Since 2026-10-30')
     lines.append('')
     lines.append('The 2026-10-30 hand measurement found **1/197** (colorsys only, general path). '
-                 'This run finds **%d/197** built (%d typed, %d general). '
+                 'This run finds **%d/197** built (%d typed, %d general), plus **%d** that compile '
+                 'but drop the module code (`built-empty`, excluded from the count). '
                  'The old per-module results were never committed, so only the count and colorsys '
-                 '(`built` then and now) can be compared. No WRONG result was found in either run.'
-                 % (len(built), counts.get('built-typed', 0), counts.get('built-general', 0)))
+                 '(`built` then and now) can be compared. No WRONG result was found in this run.'
+                 % (len(built), counts.get('built-typed', 0), counts.get('built-general', 0), len(empty)))
     lines.append('')
     lines.append('## Modules')
     lines.append('')

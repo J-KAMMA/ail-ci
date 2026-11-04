@@ -9,8 +9,10 @@ of it; main.py is `import M; print("ok")`.
 """
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
+import re
 import resource
 import shutil
 import subprocess
@@ -27,6 +29,53 @@ STDLIB = Path(sysconfig.get_path('stdlib'))
 
 
 INTEG_SHA = ''
+BASELINE_SHA = ''
+
+
+def _ident_ok(name):
+    """True when `import <name>` is valid Python syntax."""
+    return all(part.isidentifier() for part in name.split('.'))
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _contributes(program_c, top):
+    """True when generated C holds at least one symbol from the module.
+
+    Real compiled definitions are named `<module>__name`; when AIL drops the
+    module after accepting the import, program.c is only the runtime and holds
+    no such symbol.
+    """
+    if not program_c.is_file():
+        return True
+    pat = re.compile(r'(?<![A-Za-z0-9_])' + re.escape(top) + r'__[A-Za-z_]')
+    return pat.search(program_c.read_text(errors='replace')) is not None
+
+
+def build_baseline():
+    """sha256 of the binary for a program with no import at all.
+
+    A module whose build produces this exact binary contributed no code: AIL
+    accepted the program but silently dropped the module.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix='stdcensus-base-'))
+    try:
+        (tmp / 'main.py').write_text('print("ok")\n')
+        env = dict(os.environ, AIL_NO_CACHE='1')
+        cmd = [sys.executable, '-B', str(AIL), 'compile', 'main.py', '--syntax', 'python', '-o', 'main']
+        p = subprocess.run(cmd, cwd=tmp, env=env, text=True, capture_output=True,
+                           timeout=120, preexec_fn=_limits)
+        if p.returncode != 0 or not (tmp / 'main').exists():
+            raise SystemExit('baseline build failed: ' + p.stderr[-500:])
+        return _sha256(tmp / 'main')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def discover_integ_sha():
@@ -38,6 +87,15 @@ def discover_integ_sha():
                 return p.stdout.strip()
         except Exception:
             pass
+    # No integ ref here (an exported branch): the compiler files were last
+    # changed by the commit whose code this census measures.
+    try:
+        p = subprocess.run(['git', '-C', str(ROOT), 'log', '-1', '--format=%H', '--', 'AIL_CURRENT'],
+                           text=True, capture_output=True, timeout=10)
+        if p.returncode == 0 and p.stdout.strip():
+            return p.stdout.strip()
+    except Exception:
+        pass
     try:
         return subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True,
                               capture_output=True, timeout=10).stdout.strip()
@@ -103,12 +161,18 @@ def census_one(name, timeout):
         rec['result'] = 'absent'
         return rec
     rec['path'] = str(src)
+    if not _ident_ok(name):
+        rec['result'] = 'absent'
+        rec['first_reason'] = ('name is not a Python identifier, so it cannot be written as an '
+                               '`import` statement; CPython imports it through importlib')
+        return rec
     tmp = Path(tempfile.mkdtemp(prefix='stdcensus-'))
     try:
         _copy(src, top, is_pkg, tmp)
         (tmp / 'main.py').write_text('import ' + name + '\nprint("ok")\n')
         env = dict(os.environ, AIL_NO_CACHE='1')
-        cmd = [sys.executable, '-B', str(AIL), 'compile', 'main.py', '--syntax', 'python', '-o', 'main']
+        cmd = [sys.executable, '-B', str(AIL), 'compile', 'main.py', '--syntax', 'python', '-o', 'main',
+               '--debug-dir', 'dbg']
         try:
             p = subprocess.run(cmd, cwd=tmp, env=env, text=True, capture_output=True,
                                timeout=timeout, preexec_fn=_limits)
@@ -146,6 +210,11 @@ def census_one(name, timeout):
             rec['detail'] = ('expected rc=%r stdout=%r, got rc=%r stdout=%r stderr=%r' %
                              (want.returncode, want.stdout, got.returncode, got.stdout,
                               got.stderr[-400:]))
+        elif ((BASELINE_SHA and _sha256(binary) == BASELINE_SHA)
+              or not _contributes(tmp / 'dbg' / 'program.c', top)):
+            rec['result'] = 'built-empty'
+            rec['first_reason'] = ('module source contributed no code: the generated program has '
+                                   'no %s__ symbol (a bare print("ok") builds the same binary)' % top)
         else:
             rec['result'] = built
         return rec
@@ -162,8 +231,9 @@ def main():
     ap.add_argument('--integ-sha', default='', help='base integ commit recorded in every record')
     ap.add_argument('-o', '--output', default=str(HERE / 'results.jsonl'))
     args = ap.parse_args()
-    global INTEG_SHA
+    global INTEG_SHA, BASELINE_SHA
     INTEG_SHA = args.integ_sha or discover_integ_sha()
+    BASELINE_SHA = build_baseline()
     names = [x.strip() for x in (HERE / 'modules.txt').read_text().splitlines() if x.strip()]
     if args.only:
         wanted = set(args.only)
