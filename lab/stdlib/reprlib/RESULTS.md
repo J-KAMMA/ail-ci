@@ -88,9 +88,31 @@ without init int:5
 
 exit 0. This is a compiler bug, not a `reprlib` bug: `hasattr(self, 'repr_int')` is true but the
 following `getattr(self, 'repr_int')` raises, so a class that has a `repr_int` method cannot be
-dispatched to. The module therefore dispatches built-in type names through an explicit chain on
-`type(x).__name__` and sends every other type to `repr_instance`; a subclass that adds a
-`repr_<Type>` method overrides `repr_instance` and calls it directly (see the module docstring).
+dispatched to. `Repr.repr1` therefore dispatches built-in type names through an explicit chain on
+`type(x).__name__`, then tries `getattr(self, 'repr_' + typename)` for anything else (the
+CPython fallback a subclass's `repr_<Type>` needs) and uses `repr_instance` only when that raises.
+The lookup still fails for a `def` method: `getattr` searches instances and class attributes, and
+AIL stores methods in a separate table, so a subclass that defines `repr_Thing` gets
+`AttributeError: 'R' object has no attribute 'repr_Thing'` from the fallback and reaches
+`repr_instance` (the probe below records this).
+
+Second probe, the subclass case from the brief (both builds, `/tmp/probes5/p1_subclass.py`):
+
+```python
+import reprlib
+class Thing:
+    def __init__(self, v): self.v = v
+class R(reprlib.Repr):
+    def repr_Thing(self, x, level): return "Thing(%d)" % x.v
+print(R().repr(Thing(5)))
+print(R().repr([Thing(5), Thing(6)]))
+```
+
+CPython prints `Thing(5)` / `[Thing(5), Thing(6)]`; AIL prints `<Thing object>` /
+`[<Thing object>, <Thing object>]` after the fallback's `AttributeError`. `getattr` on the class
+value refuses too: `NotImplementedError: reading method/property 'repr_Thing' through the class
+value R is not built on the general path`. This is the same compiler gap, not a module gap, so
+`10_subclasses.py` keeps the `repr_instance` route (see the follow-up).
 
 ## After
 
@@ -126,35 +148,50 @@ itertools: x is not known to be a list / str here; ...
 `AIL_CURRENT/test_ail_std_reprlib.py` builds the eleven passing programs in both modes and compares
 stdout and the exit status with `python3`.
 
+Review fixes on top of the first cut:
+
+* `recursive_repr` now tests object identity (`any(k is self for k in running)`) instead of hashing
+  the object with `(self, 0)`. Equal-but-distinct objects are no longer mistaken for a cycle, and
+  unhashable objects no longer raise. Probe `/tmp/probes5/p2_recur.py` (a `Node` with `__eq__` /
+  `__hash__`, then an unhashable `U`) prints `N(a, N(a, None))` / `U(u)` in both builds, matching
+  CPython.
+* `Repr.__init__` is keyword-only, as in CPython 3.12: `Repr(3)` is a `TypeError`.
+* `repr1` now has the `getattr(self, 'repr_' + typename)` fallback for a subclass's `repr_<Type>`;
+  the compiler's inability to return a `def` method by a dynamic name is recorded above and in the
+  follow-ups.
+
 ## Program adjustments forced by compiler bugs (not module bugs)
 
 Two programs use a construct the compiler refuses or miscompiles even with a correct bundled
 module. They were adjusted without changing what they print; the module side stays CPython-shaped:
 
 * `10_subclasses.py`: a subclass-only `repr_MyClass` reached through `getattr` (or `self.repr_X`
-  after a dynamic name) fails as shown in the dispatch probe. The subclass now overrides
-  `repr_instance` and calls `self.repr_MyClass` directly; it still adds `repr_MyClass` and still
-  overrides `repr_str`.
+  after a dynamic name) fails as shown in the dispatch probe even though `repr1` has the fallback.
+  The subclass overrides `repr_instance` and calls `self.repr_MyClass` directly; it still adds
+  `repr_MyClass` and still overrides `repr_str`.
 * `11_recursive.py`: `@reprlib.recursive_repr()` on a method is refused with
   `the decorator on def __repr__ (only @staticmethod on a method and @functools.lru_cache/@lru_cache/@cache are supported)`.
-  The program now applies `reprlib.recursive_repr()` to module-level functions (which builds and
-  runs) and `__repr__` calls the wrapped function; default and `<cycle>` fill values are still
-  exercised.
+  The program applies `reprlib.recursive_repr()` to module-level functions (which builds and runs)
+  and `__repr__` calls the wrapped function; default and `<cycle>` fill values are still exercised.
 
 ## Follow-ups (compiler files, out of scope here)
 
 * Dynamic dispatch: `getattr(obj, 'repr_' + type(obj).__name__)` raises `AttributeError` after
-  `hasattr` returned true (probe above), so CPython's `Repr.repr1` fallback cannot be used
-  verbatim. The module uses an explicit chain for built-in types and `repr_instance` for the rest.
+  `hasattr` returned true (probe above) because AIL keeps methods out of the instance/class
+  attribute tables; the class-value form raises
+  `NotImplementedError: reading method/property 'repr_Thing' through the class value R is not built`.
+  `Repr.repr1` has the fallback, but a `def`-defined `repr_<Type>` is only reachable from a literal
+  attribute name (which the compiler does dispatch virtually), not from a run-time name.
 * A decorator on a method is refused by the general path:
 
   ```
   the decorator on def __repr__ (only @staticmethod on a method and @functools.lru_cache/@lru_cache/@cache are supported)
   ```
 
-* The builtins `id` and `builtins.repr` are not available; `recursive_repr` keys on `(self, 0)`
-  instead of `(id(self), get_ident())` (the object hash is identity-based), and the module uses
-  `'%r'` formatting instead of `builtins.repr`.
+* The builtins `id` and `builtins.repr` are not available. `recursive_repr` therefore uses
+  `any(k is self for k in running)` instead of `(id(self), get_ident())` (a list of the objects
+  being repr'd compares identity exactly), and the module uses `'%r'` formatting instead of
+  `builtins.repr`.
 * `12_bigints.py` stops at the int64 constant:
 
   ```

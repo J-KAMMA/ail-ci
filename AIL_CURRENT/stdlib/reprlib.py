@@ -3,16 +3,18 @@
 `Repr` keeps the limits (`maxlevel`, `maxtuple`, `maxlist`, `maxarray`, `maxdict`, `maxset`,
 `maxfrozenset`, `maxdeque`, `maxstring`, `maxlong`, `maxother`, `fillvalue`, `indent`), the
 `repr_*` methods, `_possibly_sorted`, `aRepr`, `repr` and `recursive_repr`.  `recursive_repr`
-keys on `(self, 0)` where CPython uses `(id(self), get_ident())`: the bundled module is one
-executable, so neither `_thread.get_ident()` nor the builtin `id` is available, and the object
-itself with a constant thread key is enough for a single-threaded program (the default object
-hash is identity-based).
+tests object identity (`any(k is self for k in running)`) where CPython keys on
+`(id(self), get_ident())`: the bundled module is one executable, so neither
+`_thread.get_ident()` nor the builtin `id` is available, but `is` is, and a list of the objects
+currently being repr'd is exactly what `id()` would compare.
 
-The compiler's `getattr(self, 'repr_' + typename)` is broken: `hasattr` returns true and then
-`getattr` raises `AttributeError` for the same name (see lab/stdlib/reprlib/RESULTS.md).  The
-built-in types therefore dispatch through an explicit chain on `type(x).__name__`, and any other
-type goes to `repr_instance`; a subclass that wants its own `repr_<Type>` method overrides
-`repr_instance` and calls it directly (CPython reaches the same method through `getattr`).
+`repr1` dispatches the built-in types through an explicit chain on `type(x).__name__`, then tries
+`getattr(self, 'repr_' + typename)` so a subclass may add `repr_<Type>` exactly as CPython
+documents, and falls back to `repr_instance` when there is no such method.  The dynamic
+`getattr` for a name a *subclass* defines is still refused by the current compiler (a method is
+not an instance attribute; see lab/stdlib/reprlib/RESULTS.md), so such a subclass only gets the
+`getattr` route when its `repr_<Type>` is stored as a class attribute; the built-in chain and
+`repr_instance` are unaffected.
 """
 
 __all__ = ["Repr", "repr", "recursive_repr"]
@@ -26,17 +28,17 @@ def _repr_of(x):
 
 def recursive_repr(fillvalue='...'):
     def decorating_function(user_function):
-        repr_running = set()
+        running = []
 
         def wrapper(self):
-            key = (self, 0)
-            if key in repr_running:
-                return fillvalue
-            repr_running.add(key)
+            for seen in running:
+                if seen is self:
+                    return fillvalue
+            running.append(self)
             try:
                 result = user_function(self)
             finally:
-                repr_running.discard(key)
+                running.pop()
             return result
 
         return wrapper
@@ -46,7 +48,7 @@ def recursive_repr(fillvalue='...'):
 
 class Repr:
 
-    def __init__(self, maxlevel=6, maxtuple=6, maxlist=6, maxarray=5, maxdict=4,
+    def __init__(self, *, maxlevel=6, maxtuple=6, maxlist=6, maxarray=5, maxdict=4,
                  maxset=6, maxfrozenset=6, maxdeque=6, maxstring=30, maxlong=40,
                  maxother=30, fillvalue='...', indent=None):
         self.maxlevel = maxlevel
@@ -86,7 +88,11 @@ class Repr:
             return self.repr_deque(x, level)
         if typename == 'array':
             return self.repr_array(x, level)
-        return self.repr_instance(x, level)
+        try:
+            method = getattr(self, 'repr_' + typename)
+        except AttributeError:
+            return self.repr_instance(x, level)
+        return method(x, level)
 
     def _join(self, pieces, level):
         if self.indent is None:

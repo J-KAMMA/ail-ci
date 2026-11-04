@@ -18,6 +18,50 @@ CLI = str(ROOT / "ail_chatgpt.py")
 PROGRAMS = ROOT.parent / "lab" / "stdlib" / "reprlib"
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc")
 
+RECURSIVE_IDENTITY = '''import reprlib
+
+
+def raw(self):
+    return "N(%s, %r)" % (self.name, self.child)
+
+
+render = reprlib.recursive_repr()(raw)
+
+
+class Node:
+    def __init__(self, name, child):
+        self.name = name
+        self.child = child
+
+    def __eq__(self, other):
+        return type(other).__name__ == 'Node' and other.name == self.name
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __repr__(self):
+        return render(self)
+
+
+class Unhashable:
+    def __init__(self, name):
+        self.name = name
+
+    def __eq__(self, other):
+        return self is other
+
+    __hash__ = None
+
+    def __repr__(self):
+        return "U(%s)" % self.name
+
+
+a = Node("a", None)
+a.child = Node("a", None)
+print(repr(a))
+print(repr(Unhashable("u")))
+'''
+
 PASSING = [
     "01_long_list.py",
     "02_tuples_sets.py",
@@ -86,6 +130,32 @@ class StdlibReprlibTests(unittest.TestCase):
                                      "%s exit\nexpected stderr: %s\nactual stderr: %s"
                                      % (name, expected.stderr, ran.stderr))
                     self.assertEqual(ran.stdout, expected.stdout, name)
+
+    def test_recursive_identity(self):
+        source = self.dir / "recursive_identity.py"
+        source.write_text(RECURSIVE_IDENTITY)
+        expected = run_cpython(source)
+        base = dict(os.environ, AIL_NO_CACHE="1")
+        base.pop("PYTHONPATH", None)
+        for forced in (False, True):
+            with self.subTest(forced=forced):
+                work = self.dir / ("recursive_identity" + ("_force" if forced else "_default"))
+                work.mkdir(exist_ok=True)
+                program = work / source.name
+                shutil.copyfile(source, program)
+                exe = work / "recursive_identity.out"
+                env = dict(base)
+                if forced:
+                    env["AIL_UNIFIED_FORCE"] = "1"
+                built = subprocess.run([sys.executable, "-B", CLI, "compile", str(program),
+                                        "--syntax", "python", "-o", str(exe)],
+                                       cwd=str(work), capture_output=True, text=True,
+                                       timeout=600, env=env)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], cwd=str(work), capture_output=True,
+                                     text=True, timeout=120)
+                self.assertEqual(ran.returncode, expected.returncode, ran.stderr)
+                self.assertEqual(ran.stdout, expected.stdout)
 
 
 if __name__ == "__main__":
