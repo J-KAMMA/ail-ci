@@ -1,3 +1,16 @@
+## 2026-11-04 -- lsp1c: read-only strict projects keep their Error
+
+Fixed the lsp1b review's remaining defect: the read-only fallback checks a probe in `tempfile.mkdtemp()`,
+so `Diagnoser.diagnose` looked for `ail.toml` from the probe's directory and lost `strict = true`. It now
+takes the opened file as the project lookup source, so a typed-path blocker in a `0555` strict project is
+an Error with the checker's message, as on the base and in `docs/LSP.md`. A read-only non-strict project
+still publishes the general-path Warning. Added the review's R3 as a test (skipped for root).
+
+Probes: 5/5 LSP cases pass (read-only strict existing file severity 1; read-only non-strict severity 2;
+writable strict severity 1; read-only syntax error with no temp name; read-only import stays a Warning).
+`test_ail_lsp`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass; the manifest
+check is clean. No generated C changes.
+
 ## 2026-11-04 -- lsp1b: certain hover, read-only directories, clean messages
 
 Finished the lsp1 work from `job-lsp1-11031803` and fixed its review's three defects. The compiler

@@ -134,10 +134,12 @@ class Diagnoser:
         self.verdicts[key] = result
         return result
 
-    def diagnose(self, path, env=None):
-        """[(path, line, column, severity, code, message)] for the file; line and column are 1-based or None."""
+    def diagnose(self, path, env=None, source=None):
+        """[(path, line, column, severity, code, message)] for the file; line and column are 1-based or None.
+        `path` may be a temporary probe for a buffer; `source` is the opened file, whose directory finds the
+        project (a read-only directory is checked through a probe in a temporary directory elsewhere)."""
         try:
-            found = project.find(path.parent)
+            found = project.find((source or path).parent)
         except project.ProjectError as error:
             found = None
             problems = [(path, 1, 1, ERROR, "project", str(error))]
@@ -232,7 +234,7 @@ def hover_for(diagnostics, position):
 
 
 def _annotation(node):
-    """The annotation text exactly as the source writes it."""
+    """The annotation text, normalized by ast.unparse (spacing is not preserved)."""
     return ast.unparse(node) if node is not None else None
 
 
@@ -775,7 +777,7 @@ class Server:
                     env = cli._env()
                     existing = env.get("AIL_PATH")
                     env["AIL_PATH"] = str(path.parent) + (os.pathsep + existing if existing else "")
-            problems = self.diagnoser.diagnose(probe, env)
+            problems = self.diagnoser.diagnose(probe, env, path)
             if temporary is not None:
                 problems = _remap_problems(problems, path, temporary)
             grouped = to_lsp(problems, path)

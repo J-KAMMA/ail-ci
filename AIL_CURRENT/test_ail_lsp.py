@@ -430,6 +430,24 @@ class GeneralPath(LspCase):
         self.assertTrue(item["message"].startswith("runs on the slow general path because "), item["message"])
 
     @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
+    def test_a_read_only_strict_project_keeps_its_error(self):
+        # The review's R3: the fallback probe lives in mkdtemp, but the project must still be found from
+        # the opened file's directory, so `strict = true` turns the blocker into an Error.
+        folder = self.dir / "readonly-strict"
+        folder.mkdir()
+        (folder / "ail.toml").write_text('entry = "blocker.py"\nstrict = true\n', encoding="utf-8")
+        (folder / "blocker.py").write_text(BLOCKER, encoding="utf-8")
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        uri = (folder / "blocker.py").as_uri()
+        self.client.notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": BLOCKER}})
+        (item,) = self.client.diagnostics(uri)
+        self.assertEqual(item["severity"], 1, item["message"])
+        self.assertNotIn("slow general path", item["message"])
+        self.assertIn("int | None", item["message"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
     def test_a_read_only_directory_review_probe_is_a_warning(self):
         # The review's Probe A: an unused import in a 0555 directory must not turn the blocker into an
         # Error. Its build needs the same AIL_PATH the check used, or `from dep import value` fails.
