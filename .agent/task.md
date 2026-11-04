@@ -1,3 +1,14 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1 skipped: only 10 minutes left
+
+
+--- ORIGINAL TASK ---
 Lane: hybdoc
 
 # hybex1: six CPython-hybrid examples (`ail build --cpython`), checked against CPython, with measured speed-ups
