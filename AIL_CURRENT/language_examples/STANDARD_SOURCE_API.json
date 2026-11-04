@@ -304,7 +304,7 @@
     {
       "module": "binary_numbers",
       "source": "language_examples/binary_numbers.ail",
-      "sha256": "c50fa2995ffeaa7fac6d9c39f9cf4cb1e321c8424430f334dca99f470822ea84",
+      "sha256": "b953f094e2d42b794e08d22b446b63684baae4d7f1d9671e631f9600c6e00aae",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -506,7 +506,7 @@
         "structs": []
       },
       "source_comments": [
-        "Integer byte encoding: unsigned 16/32 bits and signed 64 bits, exact lengths.",
+        "Integer byte encoding for unsigned 16/32 bits and signed 64 bits, exact lengths.",
         "Public helpers accept width 2/4/8 and reverse 0 (little) or 1 (big)."
       ],
       "source_check": {
@@ -2509,7 +2509,7 @@
     "language_examples/text_search.ail": "5d22ade25ae3c96068a760494542923a43587c6a19f111a6fba203d1aaeb39ea",
     "language_examples/binary_search.ail": "c5cbdbda90910c98a130060c0830d6ad0e70ce1a3464446e03993b18574d32ec",
     "language_examples/utf8_stream.ail": "24bc70595616ff825e7a5de2787d5ac5cec1dce7263b5f1598a63738d533cef7",
-    "language_examples/binary_numbers.ail": "c50fa2995ffeaa7fac6d9c39f9cf4cb1e321c8424430f334dca99f470822ea84",
+    "language_examples/binary_numbers.ail": "b953f094e2d42b794e08d22b446b63684baae4d7f1d9671e631f9600c6e00aae",
     "language_examples/binary_float64.ail": "a7ac4e48a1896db30057e179da1989421c093aa868404d02f58e7b6220977ad4",
     "language_examples/base64_codec.ail": "ee2c6a863b9afd7bc0b296bc25fcc9f044c8998977ee722140cac700eeefe171",
     "language_examples/url_codec.ail": "165be3913e5be5e5e610e7cf7757a36ae7beac8e4272008ab4184a63e63f28d7",
