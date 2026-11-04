@@ -1,3 +1,27 @@
+## 2026-11-04 -- rblsp1c suite fix: str arguments keep their call-site diagnostic
+
+The full-suite run named four failing modules (`test_ail_argument_type_details`,
+`test_ail_check_repair_context`, `test_ail_collections`, `test_ail_source_check`). One regression
+caused all of them: `pyreachs3c` added `STR` to `_claim`, so a string argument to a parameter with
+an explicit non-str annotation became a `signature_override` refusal on the callee's declaration.
+That replaced the existing call guard's message and moved the diagnostic (and repair target) from
+the caller's statement to the declaration; in `collib`, it also replaced the named
+`Counter.subtract` refusal.
+
+`pyfunc._drop_text_overrides` now leaves a str claim out of call-site propagation and clone
+planning when the callee's own source annotates that parameter as anything but `str`. Those
+programs are still refused, now at the call, by the existing guard
+(`passing str where take() wants int`, `type_details.operation = "argument"`); a str claim on an
+unannotated or genuinely `str` parameter is still propagated, so `pyreachs3c`'s helper inference
+(`test_ail_pyreach_infer`, including the mixed-call-site by-name refusal) is unchanged.
+
+Tests on the final commit: `test_ail_argument_type_details` 15, `test_ail_check_repair_context` 8,
+`test_ail_source_check` 33, `test_ail_collections` 13, `test_ail_lsp` 37, `test_ail_pyreach_infer`
+10, `test_ail_safetynet`/`test_ail_files`/`test_ail_corpus_findings3` 25 (1 skip) -- all pass.
+Probes: 10 in `/tmp/probes` (`p_arg_*`, `p_ctr_subtract`); general builds match CPython, and the
+typed path refuses each mismatch by name (str literal/variable/list item/attribute, int to str,
+`Counter.subtract("a")`).
+
 ## 2026-11-04 -- rblsp1c: re-apply lsp1c on the current export
 
 Re-applied the accepted `lsp1c` change (`job-lsp1c-11041449`) on top of this tree. The `lsp.py`,
