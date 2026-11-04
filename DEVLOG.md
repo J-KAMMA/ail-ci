@@ -1,3 +1,11 @@
+## 2026-11-04 -- pyreachs5c re-applied on the current tree (job-rbpyreachs5c-11050525)
+
+The accepted pyreachs5c change (same-line key rebinding and key mutation in the one-argument
+`d.get(k)` presence proof) was re-applied on top of the current tree; the `ail_syntax.py` and
+`pyfunc.py` hunks applied cleanly, the new `test_ail_pyreach_dictrows.py` / `tests.d` module were
+taken from the job branch, and the manifest was regenerated. `tools/diff_ids.py` is absent on this
+tree, so only `update_manifest.py` ran; `--check` passes.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda

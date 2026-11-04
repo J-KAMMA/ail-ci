@@ -37134,7 +37134,7 @@ def _explain_dict_of_containers(source, error):
     `groups[k].append(w)`) has no typed representation; without this the refusal named only a
     downstream symptom (a str key "used where a number is needed", advice to pack text into an
     int), and through the general path the program even reached gcc and failed there."""
-    if not error.args or not isinstance(error.args[0], str) or 'dict of containers' in error.args[0]:
+    if not error.args or not isinstance(error.args[0], str):
         return
     try:
         tree = ast.parse(source.strip())
@@ -37147,15 +37147,27 @@ def _explain_dict_of_containers(source, error):
         end = getattr(fn, 'end_lineno', None) or fn.lineno
         if not any(fn.lineno <= l <= end for l in lines):
             continue
-        error.args = (('`%s` uses `%s` as a dict of containers -- its values are lists, '
-                       'sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed '
-                       'dict of int lists aside), so this is refused. Rewrite: keep the groups in a '
-                       'list of structs and map each key to its index with a `dict[str, int]`: '
-                       '`struct G { items: list[str]; }` `let idx: dict[str, int] = {};` '
-                       '`let groups: list[G] = [];` then `if k not in idx { idx[k] = len(groups); '
-                       'groups.append(G([])); } groups[idx[k]].items.append(w);` (or keep parallel '
-                       'lists indexed through the int dict). Original refusal: %s')
-                      % (text, name, error.args[0]),) + error.args[1:]
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+                    and node.func.attr == 'get' and len(node.args) == 1):
+                argument = ast.unparse(node.args[0]) if node.args else 'k'
+                error.args = (('`%s.get(%s)` with one argument needs Optional values (s8): prove '
+                               '`%s in %s` and read `%s[%s]`, or pass the missing row as a second '
+                               'argument. Original refusal: %s')
+                              % (name, argument, argument, name, name, argument, error.args[0]),) + error.args[1:]
+                error.source_line = node.lineno + source[:len(source) - len(source.lstrip())].count('\n')
+                return
+        if 'dict of containers' not in error.args[0]:
+            error.args = (('`%s` uses `%s` as a dict of containers -- its values are lists, '
+                           'sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed '
+                           'dict of int lists aside), so this is refused. Rewrite: keep the groups in a '
+                           'list of structs and map each key to its index with a `dict[str, int]`: '
+                           '`struct G { items: list[str]; }` `let idx: dict[str, int] = {};` '
+                           '`let groups: list[G] = [];` then `if k not in idx { idx[k] = len(groups); '
+                           'groups.append(G([])); } groups[idx[k]].items.append(w);` (or keep parallel '
+                           'lists indexed through the int dict). Original refusal: %s')
+                          % (text, name, error.args[0]),) + error.args[1:]
         if site_line is not None:              # the container use this message names
             error.source_line = site_line + source[:len(source) - len(source.lstrip())].count('\n')
         return
