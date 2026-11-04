@@ -9,12 +9,12 @@ checkout, once with <venv>/lib/python3.*/site-packages/ail_lang/sdk/ail_chatgpt.
 installed wheel. Each build runs in its own temporary copy of the source with AIL_NO_CACHE=1 and a 1.5 GB
 address-space limit, at most two at a time.
 
-A program matches when the two builds have the same exit code, the two program.c files are byte-identical and
-the built programs print the same stdout and exit with the same status. A difference names the program and
-the first differing line of program.c.
+A program matches when both builds succeed (exit 0 and a DIR/program.c), the two program.c files are
+byte-identical and the built programs print the same stdout and exit with the same status. A program that
+neither side builds is reported as unbuilt (it is not a wheel finding and not a match). A difference names
+the program and the first differing line of program.c.
 """
 import concurrent.futures
-import difflib
 import os
 import resource
 import shutil
@@ -74,7 +74,6 @@ def build(python, compiler, source, work):
     shutil.copyfile(source, src)
     out = work / "prog"
     debug = work / "debug"
-    debug.mkdir()
     env = {k: v for k, v in os.environ.items()
            if k not in ("AIL_CACHE", "AIL_NO_CACHE", "PYTHONPATH", "PYTHONDONTWRITEBYTECODE")}
     env.update(AIL_NO_CACHE="1", PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
@@ -92,14 +91,15 @@ def build(python, compiler, source, work):
     }
 
 
-def run_binary(result):
+def run_binary(result, cwd):
     binary = result["binary"]
     if binary is None:
         return None
+    cwd.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH",)}
     env.update(PYTHONUTF8="1")
     try:
-        done = subprocess.run([str(binary)], cwd=result["work"], env=env, input=b"",
+        done = subprocess.run([str(binary)], cwd=cwd, env=env, input=b"",
                               capture_output=True, timeout=120, preexec_fn=limit_memory)
     except subprocess.TimeoutExpired:
         return {"returncode": "timeout", "stdout": b""}
@@ -121,9 +121,18 @@ def first_difference(left, right):
 def check(item, python, sdk, root):
     label, source = item
     work = Path(tempfile.mkdtemp(prefix="same-c-", dir=root))
+    run = work / "run"
     try:
-        checkout = build(sys.executable, COMPILER, source, work / "checkout")
-        installed = build(python, sdk / "ail_chatgpt.py", source, work / "installed")
+        # Both builds share the source path: --debug-dir records it in program.c (AIL_DBG_SITE), so a
+        # different temporary directory per side would differ for every program and measure nothing.
+        checkout = build(sys.executable, COMPILER, source, run)
+        left = run_binary(checkout, work / "run-checkout")
+        for leftover in (run / "prog", run / "prog.exe"):
+            if leftover.exists() or leftover.is_symlink():
+                leftover.unlink()
+        shutil.rmtree(run / "debug", ignore_errors=True)
+        installed = build(python, sdk / "ail_chatgpt.py", source, run)
+        right = run_binary(installed, work / "run-installed")
         findings = []
         if checkout["returncode"] != installed["returncode"]:
             findings.append("build exit %d vs %d" % (checkout["returncode"], installed["returncode"]))
@@ -136,16 +145,23 @@ def check(item, python, sdk, root):
                     findings.append("program.c line %d: %r vs %r" % difference)
                 else:
                     findings.append("program.c bytes differ")
-        left, right = run_binary(checkout), run_binary(installed)
-        if left is None or right is None:
-            if left is not right:
-                findings.append("built program missing in one build")
+        if left is None and right is None:
+            if checkout["returncode"] == 0 or installed["returncode"] == 0:
+                findings.append("built program missing in both builds")
+        elif left is None or right is None:
+            findings.append("built program missing in one build")
         elif left["returncode"] != right["returncode"]:
             findings.append("program exit %r vs %r" % (left["returncode"], right["returncode"]))
         elif left["stdout"] != right["stdout"]:
             difference = first_difference(left["stdout"], right["stdout"])
             findings.append("program stdout differs: %r" % (difference,))
-        return label, findings, checkout, installed
+        if findings:
+            return label, "diff", findings, checkout, installed
+        if (checkout["returncode"] != 0 or installed["returncode"] != 0
+                or checkout["program_c"] is None or installed["program_c"] is None
+                or left is None or right is None):
+            return label, "unbuilt", ["both builds exit %d with no program.c" % checkout["returncode"]], checkout, installed
+        return label, "match", [], checkout, installed
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -162,17 +178,25 @@ def main():
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
         matched = 0
-        for label, findings, checkout, installed in sorted(results):
-            if findings:
+        unbuilt = []
+        differed = 0
+        for label, verdict, findings, checkout, installed in sorted(results):
+            if verdict == "diff":
+                differed += 1
                 print("DIFF %-28s %s" % (label, "; ".join(findings)), flush=True)
                 if checkout["stderr"].strip() or installed["stderr"].strip():
                     print("  checkout stderr: %s" % checkout["stderr"].strip().splitlines()[-1:], flush=True)
                     print("  installed stderr: %s" % installed["stderr"].strip().splitlines()[-1:], flush=True)
+            elif verdict == "unbuilt":
+                unbuilt.append(label)
+                print("unbuilt %-25s %s (pre-existing on the checkout)" % (label, "; ".join(findings)), flush=True)
             else:
                 matched += 1
                 print("ok   %s" % label, flush=True)
         print("%d/%d programs build the same C from the checkout and the installed wheel" % (matched, len(items)))
-        return 0 if matched == len(items) else 1
+        if unbuilt:
+            print("%d not built by either side: %s" % (len(unbuilt), ", ".join(unbuilt)))
+        return 1 if differed else 0
 
 
 if __name__ == "__main__":

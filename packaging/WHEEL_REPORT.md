@@ -59,15 +59,27 @@ Biggest groups in the wheel (uncompressed bytes, files):
 
 `python3 tools/wheel_same_c.py` builds each program twice with `--syntax python --debug-dir` (checkout
 `AIL_CURRENT/ail_chatgpt.py` vs the installed `ail_lang/sdk/ail_chatgpt.py`), each from a temporary copy,
-`AIL_NO_CACHE=1`, `ulimit -v 1500000`, two at a time.
+`AIL_NO_CACHE=1`, `ulimit -v 1500000`, two at a time. Both sides build in the same temporary directory:
+`--debug-dir` records the absolute source path in `AIL_DBG_SITE(...)`, so a different directory per side would
+differ in every program.
 
 - 10 `lab/compare/src/*/main.py`
 - first program (sorted) of each `lab/stdlib/<module>/` directory: 19 directories in this checkout
 
-Result: **28/28** for the task's set (10 + 18) and **29/29** for every candidate (this checkout has 19
-stdlib module directories, not 18). Every program had the same build exit code, byte-identical
-`program.c`, and the same stdout/exit status of the built program. No missing wheel file was found, so
-step 3 made no fix.
+Result: **25/29** candidate programs build with both compilers and are byte-identical: both builds exit 0,
+`program.c` is byte-identical and the built programs print the same stdout and exit with the same status.
+On the task's 10 compare + 18 stdlib set that is **24/28** (24/24 of the ones that build).
+
+Four compare programs do not build with `--syntax python` on either side (the same failure from the checkout
+and the wheel, so a pre-existing language limit, not a missing wheel file):
+
+- `compare/chain_relax` (exit 2): `int64 literal out of range: 18446744073709551615`
+- `compare/rail_transfer` (exit 3): a constant integer expression overflows int64
+- `compare/tally_lang` (exit 3): `locals()/vars()/eval/exec` in a function with a possibly-unassigned local
+- `compare/tree_fold` (exit 3): `re` with a use that is not built (`re.compile` used as a value)
+
+The tool counts a program as a match only when both builds exit 0 and both wrote `program.c`; equal failures
+are reported as unbuilt, not as matches. No missing wheel file was found, so step 3 made no fix.
 
 ## Size: files left out of the wheel
 
@@ -92,9 +104,9 @@ export and source tree are unchanged), and the wheel's SDK `MANIFEST.json` no lo
 
 | measure | before | after | change |
 |---|---:|---:|---:|
-| wheel bytes | 3,682,395 | 3,453,000 | -229,395 (-6.2%) |
+| wheel bytes | 3,682,395 | 3,452,997 | -229,398 (-6.2%) |
 | wheel members | 567 | 538 | -29 |
-| installed `ail_lang` bytes (`du -sb`) | 29,015,593 | 28,105,773 | -909,820 |
+| installed `ail_lang` bytes (`du -sb`, includes directory overhead) | 29,015,593 | 28,104,567 | -911,026 |
 | installed files (incl. `__pycache__`) | 764 | 733 | -31 |
 | installed files without `__pycache__` | 13,747,838 / 561 | 12,906,797 / 532 | -841,041 / -29 |
 | wheel uncompressed payload | 13,821,310 | 12,976,863 | -844,447 |
@@ -137,14 +149,14 @@ Biggest groups after:
    84142   22281  ail_lang/sdk/python/pkg-v12/gpu.py
 ```
 
-After the removal: `python3 tools/wheel_same_c.py` still gives **29/29** and
-`python3 tools/wheel_check.py` still passes. `test_ail_packaging.py` now checks that the left-out names are
-absent from the wheel and runs `tools/wheel_check.py`.
+After the removal: `python3 tools/wheel_same_c.py` still gives **25/29** (the same four unbuilt compare
+programs, 0 diffs) and `python3 tools/wheel_check.py` still passes. `test_ail_packaging.py` now checks that
+the left-out names are absent from the wheel and runs `tools/wheel_check.py`.
 
 ## Checks run
 
+- `python3 tools/wheel_same_c.py` before and after the removal: 25/29, same four unbuilt, 0 diffs.
 - `python3 tools/wheel_check.py` before and after: pass.
-- `python3 tools/wheel_same_c.py` before and after: 29/29.
 - `python3 tools/par_check.py -j 2 test_ail_packaging test_ail_sdk`: 2 modules, 0 failed
   (`test_ail_packaging` 66.9s, `test_ail_sdk` 285.4s).
 - `python3 tools/par_check.py -j 2 test_ail_safetynet test_ail_files test_ail_corpus_findings3`:
