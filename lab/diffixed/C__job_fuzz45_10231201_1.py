@@ -1,0 +1,12 @@
+# C?-job-fuzz45-10231201-1: float //, % and divmod
+print(1.0 // 0.1)
+print(-0.0 % 2.0)
+print(-5.0 // float("inf"))
+print(float("inf") // 2.0)
+print(5.0 // -2.0, 5.0 % -2.0)
+print(-5.0 // 2.0, -5.0 % 2.0)
+print(divmod(7.5, 2.0))
+print(divmod(-7.5, 2.0))
+print(divmod(7.5, -2.0))
+print(1 // 3, -1 % 3)
+print(7.0 % 2.5, -0.0 // 2.0)
