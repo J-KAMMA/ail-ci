@@ -2389,6 +2389,55 @@ expects the named general round text, and `test_ail_pre429` expects
 passes. Final-state tests: test_ail_i64edge1, test_ail_int64_default, test_ail_pre429,
 test_ail_bigint, test_ail_python_syntax, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
+## 2026-11-01 -- std_re review: match tuple receiver evaluated once, manifest pins (job-std_re-11011833)
+
+Review follow-up.  `m.span(...)` and `m.group(a, b)` lowered to a tuple of `start`/`end`/`group` calls on a
+copy of the receiver, so a receiver with side effects (`get().group(1, 2)`, `get().span()`) was evaluated
+once per tuple element: CPython says one call, the old lowering said four and two.  The tuple is now the
+body of an immediately-invoked lambda with the receiver bound as its argument, so the receiver is
+evaluated exactly once; each element still returns `None` for a group that did not take part.
+
+Also refreshed the manifest shards: `test_ail_std_re.py` and `tests.d/test_ail_std_re.txt` were not pinned
+on the previous commit, so `python3 tools/update_manifest.py --check` exited 1.  It now exits 0.
+
+Probes in `/tmp/probes` (review's side-effect program plus `span(i)`, `span(name)`, mixed `group(0, 1, 2)` /
+`group("x", 2)`, receiver through a call / list item / attribute / dict value / function argument, empty
+subject, unmatched group, `None` receiver, negative constant refused by name, and findall/split/subn) all
+match CPython 3.12 stdout and exit code on `AIL_IR=0` and `AIL_IR=1`.  All 10 `lab/compare/src` C files
+stay byte-identical to base.  Tests on the final commit: test_ail_std_re, test_ail_re, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
+Follow-up after review 2: the `_ail_re_any` receiver change landed without a manifest update, so
+`update_manifest.py --check` still failed.  The shards for `ail_syntax.py`, `python/pkg-v12/relib.py` and
+`test_ail_std_re.py` are now regenerated; `--check` exits 0.  The stale inline comment that called the
+helper parameter `object` is corrected.
+
+## 2026-11-01 -- std_re: findall tuples, split groups, subn templates and match tuple values (job-std_re-11011833)
+
+Added 12 real `re` programs in `lab/stdlib/re/` (log parsing, validation, templating, CSV fields,
+tokenizing, phone/date normalisation, redaction and URL rewriting).  Before the fixes 8 were refused;
+now 11 build on the typed path and every one matches CPython 3.12 stdout and exit code on both
+`AIL_IR=0` and `AIL_IR=1`.  `log_summary.py` stays a named refusal because it uses `m.groupdict()`
+(a dict result with `None` for a group that did not take part), recorded as a follow-up with its exact
+message in `lab/stdlib/re/RESULTS.md`.
+
+The four reasons fixed, most blocking first: `re.findall` with several groups now returns a list of
+tuples (`""` for a group that did not take part); `re.subn` accepts a replacement template with a
+backslash (the template helper has a counted form); `re.split` with groups inserts each group's text
+between the pieces (`None` when it did not take part); and `m.span()` / `m.group(1, 2)` used as values
+lower to tuples of `m.start` / `m.end` / `m.group` calls (`None` for a group that did not take part).
+The stale refusal entries in `test_ail_re` for findall-with-groups, split-with-groups and subn
+templates were removed.
+
+Probes in `/tmp/probes` (`re_findall_tuples`, `re_split_groups`, `re_subn_templates`,
+`re_span_group_values`) cover str and bytes, empty subjects, optional and three-group patterns,
+maxsplit/count, compiled patterns, values through a function argument, a list item, an attribute and
+a dict value; all match CPython on both builds.  All 10 `lab/compare/src/*/main.ail` generated
+`program.c` files are byte-identical to base.  Added `AIL_CURRENT/test_ail_std_re.py`, registered
+through `AIL_CURRENT/tests.d/test_ail_std_re.txt`; it compares the 11 built programs with CPython on
+both IR builds.  Final-state tests: test_ail_std_re, test_ail_re, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
