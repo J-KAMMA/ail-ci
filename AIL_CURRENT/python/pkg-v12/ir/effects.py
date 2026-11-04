@@ -82,7 +82,7 @@ _CHECKED_RAISES = {
 }
 _ALWAYS_RAISES = {
     'floordiv': (ZERODIV, OVERFLOW), 'floormod': (ZERODIV,),
-    'fdiv': (ZERODIV,), 'ffloordiv': (ZERODIV,), 'ffloormod': (ZERODIV,),
+    'fdiv': (ZERODIV,), 'idiv': (ZERODIV,), 'ffloordiv': (ZERODIV,), 'ffloormod': (ZERODIV,),
 }
 
 

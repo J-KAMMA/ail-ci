@@ -3827,12 +3827,43 @@ AIL_LINK_STATE(int64_t, ail_depth, = 0);
 AIL_LINK_STATE(int64_t, ail_exc_depth[AIL_EXC_MAX_DEPTH], );
 '''
 
+IDIVEXACT = r'''
+#include <math.h>
+/* int / int in CPython is exact (long_true_divide): the quotient is rounded once, while
+   (double)a / (double)b rounds each operand first and can land one ulp away once either is
+   beyond 2**53. The quotient is taken to 55 bits with a sticky remainder and rounded to 53. */
+static inline double ail__idiv_exact(int64_t a, int64_t b) {
+    if (a == 0) return b < 0 ? -0.0 : 0.0;
+    uint64_t ua = a < 0 ? (uint64_t)0 - (uint64_t)a : (uint64_t)a;
+    uint64_t ub = b < 0 ? (uint64_t)0 - (uint64_t)b : (uint64_t)b;
+    int abl = 64 - __builtin_clzll(ua), bbl = 64 - __builtin_clzll(ub);
+    int shift = 55 - (abl - bbl);
+    __uint128_t num, den;
+    if (shift >= 0) { num = (__uint128_t)ua << shift; den = ub; }
+    else { num = ua; den = (__uint128_t)ub << -shift; }
+    __uint128_t q = num / den, r = num % den;
+    uint64_t qv = (uint64_t)q;
+    int qb = 64 - __builtin_clzll(qv), drop = qb - 53;
+    uint64_t mant = qv >> drop;
+    uint64_t rem = qv & (((uint64_t)1 << drop) - 1), half = (uint64_t)1 << (drop - 1);
+    if (rem > half || (rem == half && (r != 0 || (mant & 1)))) mant++;
+    double res = ldexp((double)mant, drop - shift);
+    return (a < 0) != (b < 0) ? -res : res;
+}
+'''
+
 FDIV = r'''
 /* Python's `/` raises on a zero divisor; C's returns an infinity. An answer that is not a number
    must not be handed back as if it were one. */
 static double ail_fdiv(double a, double b) {
     if (b == 0) ail_die("division by zero");
     return a / b;
+}
+/* int / int: CPython's long_true_divide, not the double division above (whose two conversions can
+   each round a large operand first). */
+static double ail_fdiv_i(int64_t a, int64_t b) {
+    if (b == 0) ail_die("division by zero");
+    return ail__idiv_exact(a, b);
 }
 '''
 
@@ -10340,6 +10371,10 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
     return ail_box_none();
 }
 static inline ail_obj ail_obj_truediv(ail_obj a, ail_obj b) {
+    if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
+        if (b.i == 0) ail_raise_c(AIL_ERR_ZERODIV, "division by zero");
+        return ail_box_float(ail__idiv_exact(a.i, b.i));
+    }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "division by zero");
@@ -15588,6 +15623,11 @@ static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
         if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag) && __builtin_expect((((uint64_t)a.i + ((uint64_t)1 << 53)) | ((uint64_t)b.i + ((uint64_t)1 << 53))) >> 54, 0))
             return ail__ov_truediv(cx, out, a.i, b.i);
 /*B|*/
+        /* no big ints in this build: both intlike operands are int64, divided exactly */
+        if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
+            if (b.i == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "division by zero");
+            *out = ail_box_float(cx, ail__idiv_exact(a.i, b.i)); return AIL_OK;
+        }
 /*B>*/
         double x = ail__as_dbl_ck(cx, a), y = ail__as_dbl_ck(cx, b);
 /*B<*/
@@ -23226,6 +23266,7 @@ import bigint_core as _bigint_core, bigint_obj as _bigint_obj, tint as _tint
 OBJ2 = OBJ2.replace('/*@BIGINT_CORE@*/\n', _bigint_core.CORE).replace('/*@BIGINT_EARLY@*/\n', _bigint_obj.EARLY).replace('/*@TINT@*/\n', _tint.TINT).replace('/*@BIGINT_RANGE@*/\n', _bigint_obj.RANGE)
 assert '@NUMPARSE@' not in STR + OBJ + OBJ2 and NUMPARSE in STR and NUMPARSE in OBJ and NUMPARSE in OBJ2
 import biggate as _biggate
+OBJ2 = OBJ2.replace('#include <stdarg.h>\n', '#include <stdarg.h>\n' + IDIVEXACT + '\n', 1)
 OBJ2_COND = OBJ2                              # both worlds, with the /*B<*/ blocks (biggate.py); pyboxed2 picks one per program
 OBJ2 = _biggate.resolve(OBJ2_COND, True)      # what every other reader of the runtime sees: the one with big ints
 # BEGIN GENERATED CASEMAP
@@ -25388,9 +25429,10 @@ static ail_slist ail_str_rsplit_n(ail_str s, int sep_none, ail_str sep, int64_t 
 }
 '''
 
-ORDER = ['TYPES', 'FPOW', 'DIE', 'ELEM_BOUNDS', 'STDIO', 'FREPR', 'ROUND', 'STR', 'ARGV', 'STRRET', 'SLIST', 'SROW', 'FLIST', 'FROWS', 'FROWSKEY', 'FLISTRET', 'RECDEPTH', 'FDIV', 'JSDIV', 'IPOW', 'LIST', 'LISTRET', 'MULTIRET', 'SORT', 'POOL', 'GRIDRET', 'TAB', 'BYTES', 'BTAB', 'STAB', 'BPOOL', 'BSPLIT', 'BLISTSORT', 'BYTESRET', 'SLOT', 'TUPRET', 'ROWS', 'MROWS', 'ROWSKEYB', 'ROWSKEYTAB', 'ROWSKEY', 'GRID', 'FMT', 'OBJ', 'OBJ2']
-SOURCE = {'TYPES': TYPES, 'FPOW': FPOW, 'DIE': DIE, 'STDIO': STDIO, 'FREPR': FREPR, 'ROUND': ROUND, 'STR': STR, 'ARGV': ARGV, 'STRRET': STRRET, 'SLIST': SLIST, 'SROW': SROW, 'FLIST': FLIST, 'FROWS': FROWS, 'FROWSKEY': FROWSKEY, 'FLISTRET': FLISTRET, 'RECDEPTH': RECDEPTH, 'FDIV': FDIV, 'JSDIV': JSDIV, 'IPOW': IPOW, 'LIST': LIST, 'LISTRET': LISTRET, 'MULTIRET': MULTIRET, 'SORT': SORT, 'POOL': POOL, 'GRIDRET': GRIDRET, 'TAB': TAB, 'BYTES': BYTES, 'BTAB': BTAB, 'STAB': STAB, 'BPOOL': BPOOL, 'BSPLIT': BSPLIT, 'BLISTSORT': BLISTSORT, 'BYTESRET': BYTESRET, 'SLOT': SLOT, 'TUPRET': TUPRET, 'ROWS': ROWS, 'MROWS': MROWS, 'ROWSKEYB': ROWSKEYB, 'ROWSKEYTAB': ROWSKEYTAB, 'ROWSKEY': ROWSKEY, 'GRID': GRID, 'FMT': FMT, 'OBJ': OBJ, 'OBJ2': OBJ2}
-REQUIRES = {'FREPR': ['TYPES', 'STDIO'], 'ROUND': ['DIE', 'OVERFLOWEXC'], 'LIST': ['TYPES', 'DIE'], 'LISTRET': ['TYPES', 'LIST'], 'SORT': ['TYPES', 'LIST'], 'TAB': ['TYPES', 'DIE'], 'FDIV': ['DIE'], 'IPOW': ['DIE'], 'BYTES': ['DIE'], 'BYTESRET': ['BYTES'], 'POOL': ['TYPES', 'DIE', 'LIST', 'LISTRET'], 'TUPRET': ['SLOT'], 'ROWS': ['TYPES', 'DIE', 'LIST'], 'RECDEPTH': ['DIE'], 'GRID': ['TYPES', 'DIE'], 'GRIDRET': ['TYPES', 'DIE', 'LIST', 'POOL'], 'MULTIRET': ['TYPES', 'LIST', 'LISTRET'], 'FLIST': ['DIE'], 'FLISTRET': ['FLIST'], 'ROWSKEY': ['TYPES', 'DIE', 'LIST', 'ROWS'], 'BPOOL': ['TYPES', 'DIE', 'BYTES'], 'BSPLIT': ['LIST', 'BPOOL', 'BYTES'], 'BTAB': ['TYPES', 'DIE', 'BYTES'], 'STAB': ['TYPES', 'DIE', 'STR'], 'ROWSKEYTAB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'TAB'], 'BLISTSORT': ['TYPES', 'DIE', 'LIST', 'BYTES', 'BPOOL'], 'ROWSKEYB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES', 'BPOOL'], 'FROWS': ['TYPES', 'DIE', 'FLIST'], 'FROWSKEY': ['TYPES', 'DIE', 'FLIST', 'FROWS'], 'MROWS': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES'], 'STR': ['TYPES', 'DIE', 'ELEM_BOUNDS', 'STDIO'], 'STRRET': ['STR'], 'SLIST': ['TYPES', 'DIE', 'STR'], 'SROW': ['TYPES', 'DIE', 'STR'], 'ARGV': ['STR'], 'FMT': ['STR', 'FREPR'], 'OBJ': ['STDIO']}
+ORDER = ['TYPES', 'FPOW', 'DIE', 'ELEM_BOUNDS', 'STDIO', 'FREPR', 'ROUND', 'STR', 'ARGV', 'STRRET', 'SLIST', 'SROW', 'FLIST', 'FROWS', 'FROWSKEY', 'FLISTRET', 'RECDEPTH', 'IDIVEXACT', 'FDIV', 'JSDIV', 'IPOW', 'LIST', 'LISTRET', 'MULTIRET', 'SORT', 'POOL', 'GRIDRET', 'TAB', 'BYTES', 'BTAB', 'STAB', 'BPOOL', 'BSPLIT', 'BLISTSORT', 'BYTESRET', 'SLOT', 'TUPRET', 'ROWS', 'MROWS', 'ROWSKEYB', 'ROWSKEYTAB', 'ROWSKEY', 'GRID', 'FMT', 'OBJ', 'OBJ2']
+SOURCE = {'TYPES': TYPES, 'FPOW': FPOW, 'DIE': DIE, 'IDIVEXACT': IDIVEXACT, 'STDIO': STDIO, 'FREPR': FREPR, 'ROUND': ROUND, 'STR': STR, 'ARGV': ARGV, 'STRRET': STRRET, 'SLIST': SLIST, 'SROW': SROW, 'FLIST': FLIST, 'FROWS': FROWS, 'FROWSKEY': FROWSKEY, 'FLISTRET': FLISTRET, 'RECDEPTH': RECDEPTH, 'FDIV': FDIV, 'JSDIV': JSDIV, 'IPOW': IPOW, 'LIST': LIST, 'LISTRET': LISTRET, 'MULTIRET': MULTIRET, 'SORT': SORT, 'POOL': POOL, 'GRIDRET': GRIDRET, 'TAB': TAB, 'BYTES': BYTES, 'BTAB': BTAB, 'STAB': STAB, 'BPOOL': BPOOL, 'BSPLIT': BSPLIT, 'BLISTSORT': BLISTSORT, 'BYTESRET': BYTESRET, 'SLOT': SLOT, 'TUPRET': TUPRET, 'ROWS': ROWS, 'MROWS': MROWS, 'ROWSKEYB': ROWSKEYB, 'ROWSKEYTAB': ROWSKEYTAB, 'ROWSKEY': ROWSKEY, 'GRID': GRID, 'FMT': FMT, 'OBJ': OBJ, 'OBJ2': OBJ2}
+REQUIRES = {'FREPR': ['TYPES', 'STDIO'], 'ROUND': ['DIE', 'OVERFLOWEXC'], 'LIST': ['TYPES', 'DIE'], 'LISTRET': ['TYPES', 'LIST'], 'SORT': ['TYPES', 'LIST'], 'TAB': ['TYPES', 'DIE'], 'IDIVEXACT': ['TYPES'], 'FDIV': ['DIE', 'IDIVEXACT'], 'IPOW': ['DIE'], 'BYTES': ['DIE'], 'BYTESRET': ['BYTES'], 'POOL': ['TYPES', 'DIE', 'LIST', 'LISTRET'], 'TUPRET': ['SLOT'], 'ROWS': ['TYPES', 'DIE', 'LIST'], 'RECDEPTH': ['DIE'], 'GRID': ['TYPES', 'DIE'], 'GRIDRET': ['TYPES', 'DIE', 'LIST', 'POOL'], 'MULTIRET': ['TYPES', 'LIST', 'LISTRET'], 'FLIST': ['DIE'], 'FLISTRET': ['FLIST'], 'ROWSKEY': ['TYPES', 'DIE', 'LIST', 'ROWS'], 'BPOOL': ['TYPES', 'DIE', 'BYTES'], 'BSPLIT': ['LIST', 'BPOOL', 'BYTES'], 'BTAB': ['TYPES', 'DIE', 'BYTES'], 'STAB': ['TYPES', 'DIE', 'STR'], 'ROWSKEYTAB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'TAB'], 'BLISTSORT': ['TYPES', 'DIE', 'LIST', 'BYTES', 'BPOOL'], 'ROWSKEYB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES', 'BPOOL'], 'FROWS': ['TYPES', 'DIE', 'FLIST'], 'FROWSKEY': ['TYPES', 'DIE', 'FLIST', 'FROWS'], 'MROWS': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES'], 'STR': ['TYPES', 'DIE', 'ELEM_BOUNDS', 'STDIO'], 'STRRET': ['STR'], 'SLIST': ['TYPES', 'DIE', 'STR'], 'SROW': ['TYPES', 'DIE', 'STR'], 'ARGV': ['STR'], 'FMT': ['STR', 'FREPR'], 'OBJ': ['STDIO', 'IDIVEXACT']}
+REQUIRES['OBJ2'] = ['IDIVEXACT']
 SOURCE['ELEM_BOUNDS'] = ELEM_BOUNDS
 REQUIRES['ELEM_BOUNDS'] = ['TYPES', 'DIE']
 for _bounded_part in ('STR', 'LIST', 'FLIST'):

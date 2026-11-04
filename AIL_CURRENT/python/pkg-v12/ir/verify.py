@@ -292,6 +292,9 @@ class _Checker(object):
     def op_float_binary(self, ins, scope, stack, where, top):
         self._binary(ins, where, (I.F64,), I.F64)
 
+    def op_idiv(self, ins, scope, stack, where, top):
+        self._binary(ins, where, (I.I64,), I.F64)
+
     def op_neg(self, ins, scope, stack, where, top):
         self._mode(ins, where)
         self._unary(ins, where, I.I64, I.I64)

@@ -2894,6 +2894,9 @@ class Lowering(TextLowering):
             return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
+            if not floating and left.type in (I.I64, I.I1) and right.type in (I.I64, I.I1):
+                # int / int is CPython's exact long_true_divide, not two rounded conversions
+                return self.b.value('idiv', [self.as_int(left), self.as_int(right)], I.F64)
             f = {'f': 1} if (self.P.exctext.ACTIVE and I.F64 in (left.type, right.type)) else None
             return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64, f)
         if isinstance(op, ast.Pow):

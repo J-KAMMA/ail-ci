@@ -1,3 +1,17 @@
+## 2026-11-04 -- fz227: int / int true division is exact (job-fz227-11050703)
+
+The daily fuzzer (seed 2076120023) printed `((4611686018427387904 // 52) / 3)`: CPython
+`2.9562089861714024e+16` against AIL `2.9562089861714028e+16`. Int/int `/` was lowered as
+`(double)a / (double)b` in three places -- the IR and legacy typed emitters, the unified
+scalar specialisation, and the non-big arms of both boxed operator runtimes -- so each
+operand was rounded before the single division once either was beyond 2**53. A new runtime
+fragment `IDIVEXACT` holds CPython's long_true_divide (a 55-bit quotient with a sticky
+remainder, rounded once); `ail_fdiv_i` wraps it for the typed paths and `ail__idiv_exact`
+is used by the boxed and unified paths. Float operands, `//`, `%` and small ints keep the
+old code. `test_ail_fz227.py` compares direct, argument/list/attribute/dict and
+zero-divisor cases with CPython on the general, IR and `AIL_IR=0` builds; the fuzz program
+and the `/tmp/probes` programs match on all three.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda

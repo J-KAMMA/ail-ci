@@ -14411,6 +14411,10 @@ def _expr(node, ctx):
             return _ordered_numeric_pair(node.left, node.right, ctx,
                                          'ail_fdiv_f((double)({}), (double)({}))')
         ctx.parts.add('FDIV')
+        if _etype(node.left, ctx) == INT and _etype(node.right, ctx) == INT:
+            # int / int is CPython's exact long_true_divide, not two rounded conversions
+            return _ordered_numeric_pair(node.left, node.right, ctx,
+                                         'ail_fdiv_i((int64_t)({}), (int64_t)({}))')
         return _ordered_numeric_pair(node.left, node.right, ctx,
                                      'ail_fdiv((double)({}), (double)({}))')
     if (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.FloorDiv, ast.Mod))
@@ -26917,7 +26921,7 @@ _PAR_CAPTURE_TYPES = ('int64_t', 'double', 'ail_flist', 'ail_list', 'ail_bytes',
 # back to int64 stops through ail_die, which PAR turns into a trap on that worker.  Nothing here
 # counts references or touches an arena.
 _PAR_HELPERS = frozenset((
-    'ail_die', 'ail_raise_named', 'ail_fdiv', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
+    'ail_die', 'ail_raise_named', 'ail_fdiv', 'ail_fdiv_i', 'ail__idiv_exact', 'ldexp', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
     'ail_list_get', 'ail_list_set', 'ail_flist_get', 'ail_flist_set', 'ail_bytearray_get',
     'ail_bytearray_set', 'ail_bytearray_len', 'ail_bytearray_index', 'ail_bytearray_meta', 'ail_bytes_get',
     'ail_ffloormod', 'ail_fsqrt', 'ail_ipow', 'ail_round0',
