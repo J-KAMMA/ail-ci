@@ -1,3 +1,17 @@
+## 2026-11-04 -- pyreach s3 finish: re-applied on the current export and re-verified
+
+Re-applied the s3 branch (`b2f90979`, `c969e4ff`, `85d06f83`) on the current export; only the
+DEVLOG conflicted. Re-ran the ten-source strict measurement: the after lists are identical to the
+branch tip's. `ticket_audit` loses its three named blockers, `chain_relax` its two str/number
+concatenations and `rail_transfer` its five tuple-element notes; later chain blockers appear as
+expected and `echo_pack` stays typed. `.ail` C is byte-identical for all ten twins and the five
+codegen pins. Probes: open rb/text with empty and no-final-newline files, agreeing helper params
+with negative/zero/large ints, `%`-format negative zero, str-list with `%` tuple appends, loop
+rebind with zero iterations, fold over a bytes list (general path matches CPython, strict refuses
+by name), and `list(map(int, split()))` beyond int64 (loud OverflowError on the default build,
+exact with `--exact-int`). Tests: `test_ail_pyreach_infer` (9), `test_ail_pyreach_unpack` (12),
+`test_ail_safetynet` (5), `test_ail_files` (18, 1 skip) and `test_ail_corpus_findings3` (2).
+
 ## 2026-11-03 -- pyreach s3: local kind inference for plain Python sources
 
 Six inference rules let the typed path read the shapes the lab tasks write without annotations,
