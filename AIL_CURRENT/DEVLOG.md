@@ -1,3 +1,15 @@
+## 2026-11-04 -- arena1 S2 fix: local struct field aliases stay on the IR path
+
+The read-only field-alias pass also elided `x = s.f` when `s` was a struct local, not a parameter.
+That hid the `list.share` the IR ownership pass turns into a field borrow, so the grid `main`
+(`bs = ru.b`, `ss = ru.s`) reported `field_borrows == 0` and `test_ail_ir_cover` failed.  The pass
+now elides only when the owner is a function parameter; a struct local's alias is left for the IR
+(`field_borrows == 2` again), while the parameter shapes in `test_ail_readonly_field_alias` and the
+`global`/`nonlocal` guard still behave as before.
+
+`test_ail_ir_cover` passes (5 tests); `test_ail_readonly_field_alias` (4),
+`test_ail_ir_s3b` (14) and `test_ail_ir_f1` (13) also pass.
+
 ## 2026-11-04 -- arena1 S2 fix: outer-scope aliases keep their store
 
 Review 1 found that a `global` (or `nonlocal`) alias name was elided: the `Global`/`Nonlocal`

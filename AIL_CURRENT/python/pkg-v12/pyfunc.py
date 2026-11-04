@@ -31063,6 +31063,11 @@ def _elide_readonly_field_alias_in_function(fn, class_names, info, funcs):
     for body, index, statement, (x, o, field) in candidates:
         if x in params or x in declared_outer or o in declared_outer or stores.get(x, 0) != 1:
             continue
+        if o not in params:
+            # A struct local's field alias is a field borrow the IR ownership pass can take
+            # (`list.share` from a field to a local); eliding it here would hide the borrow and
+            # leave the local's field lists without the ownership the IR path expects.
+            continue
         last = index
         for later in range(index, len(body)):
             if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(body[later])):
