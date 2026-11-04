@@ -24,8 +24,11 @@ OUT receives:
 
 The link line is also printed.  `--check`, `--errno` and `--typedef` are passed through to
 ail_bindgen.  A vendored crate (`cargo vendor` plus `.cargo/config.toml`) needs no network.
+The artifacts are read from `cargo metadata`'s `target_directory`, so `CARGO_TARGET_DIR` and
+a workspace's shared `target/` work as they do for a plain `cargo build`.
 """
 import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -83,8 +86,20 @@ def _manifest(crate):
     return data, name.replace('-', '_')
 
 
-def _artifact(crate, name, suffix):
-    path = crate / 'target' / 'release' / ('lib%s%s' % (name, suffix))
+def _target_dir(crate, allow_network, cargo):
+    """cargo's real target directory: CARGO_TARGET_DIR or the workspace's `target/`."""
+    command = [cargo, 'metadata', '--format-version', '1', '--no-deps']
+    if not allow_network:
+        command.append('--offline')
+    done = _run(command, crate, 'cargo metadata')
+    try:
+        return Path(json.loads(done.stdout)['target_directory'])
+    except (ValueError, KeyError, TypeError) as error:
+        raise CargoError('cargo metadata did not report a target_directory: %s' % error) from error
+
+
+def _artifact(target, name, suffix):
+    path = target / 'release' / ('lib%s%s' % (name, suffix))
     if not path.is_file():
         raise CargoError('cargo did not write %s (does [lib] name match %r?)' % (path, name))
     return path
@@ -157,8 +172,9 @@ def build(crate_dir, output, header=None, allow_network=False, checks=(), errnos
     _run(command, crate, 'cargo build --release%s --lib' % ('' if allow_network else ' --offline'))
 
     shared_suffix = '.dylib' if sys.platform == 'darwin' else '.so'
-    shared = _artifact(crate, name, shared_suffix)
-    archive = _artifact(crate, name, '.a')
+    target = _target_dir(crate, allow_network, cargo)
+    shared = _artifact(target, name, shared_suffix)
+    archive = _artifact(target, name, '.a')
     shutil.copy2(shared, out / shared.name)
     shutil.copy2(archive, out / archive.name)
 

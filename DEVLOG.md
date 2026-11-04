@@ -1,3 +1,17 @@
+## 2026-11-04 -- crate1: ail_cargo reads cargo's real target directory (job-crate1-11041927)
+
+`test_ail_examples_crate` failed on this tree (`test_ail_examples_crate` 3/3, `ail_cargo: cargo
+did not write .../examples/crate/rle/target/release/librle.so`) although cargo had built the
+libraries: the test builds each example with `CARGO_TARGET_DIR` pointing to a temporary
+directory, while `ail_cargo._artifact` looked in the crate-local `target/release`.  The tool now
+asks `cargo metadata --no-deps` for `target_directory` (honouring `CARGO_TARGET_DIR`, relative
+values and a workspace's shared `target/`) and reads the cdylib and staticlib from there; the
+default `crate/target` case is unchanged.  Final-state tests: test_ail_examples_crate,
+test_ail_cargo, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  Probes in
+/tmp/probes: `crate_targets.py` (12 checks: redirected, relative, workspace, default target,
+each library loaded and called) and `rle_language.py` through `cmp.sh` (both builds match
+CPython).
+
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
 The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
