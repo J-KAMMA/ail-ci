@@ -1,13 +1,15 @@
 """`import keyword` and `import token` in compiled programs against CPython's modules.
 
 The twelve programs in lab/stdlib/keyword/ and lab/stdlib/token/ use the two modules the way small
-linters, highlighters and code generators do: the keyword lists and predicates (including
-`keyword.iskeyword` passed as a value), and the token constants, `tok_name`, `EXACT_TOKEN_TYPES`
-and the terminal predicates.  Each is compiled with the default command and run beside `python3`
+linters, highlighters and code generators do: the keyword lists and predicates, and the token
+constants, `tok_name`, `EXACT_TOKEN_TYPES` and the terminal predicates.  Each is compiled with the
+default command and run beside `python3`
 on the same source, in the default build and again with `AIL_UNIFIED_FORCE=1`; stdout and the exit
 status must agree.  Every `keyword` program must be typed (no general-path fallback).  The bundled
 files' `kwlist`, `softkwlist`, `tok_name` and `EXACT_TOKEN_TYPES` are loaded with `runpy` under
-`python3` and must equal CPython's.
+`python3` and must equal CPython's.  Two probes lock the forms the typed path cannot take: a saved
+`keyword.iskeyword`/`issoftkeyword` reference falls back to the general path and prints `True`/
+`False`, and `token.ISEOF` reads the module's mutable `ENDMARKER`.
 """
 import json
 import os
@@ -40,6 +42,30 @@ print(json.dumps([
     keyword.kwlist, keyword.softkwlist, token.tok_name, token.EXACT_TOKEN_TYPES,
 ]))
 """
+
+SAVED_REFERENCE = '''import keyword
+
+
+def main() -> None:
+    f = keyword.iskeyword
+    g = keyword.issoftkeyword
+    print(f("if"), f("value"))
+    print(g("match"), g("if"))
+
+
+main()
+'''
+
+ISEOF_MUTATES = '''import token
+
+
+def main() -> None:
+    token.ENDMARKER = 5
+    print(token.ENDMARKER, token.ISEOF(5), token.ISEOF(0))
+
+
+main()
+'''
 
 
 def run_cpython(path):
@@ -116,6 +142,35 @@ class StdlibKeywordTokenTests(unittest.TestCase):
         self.assertEqual(bundled_exact, cpython_exact)
         self.assertEqual(len(bundled_names), len(cpython_names))
         self.assertEqual(len(bundled_exact), len(cpython_exact))
+
+    def compile_source(self, name, text):
+        path = self.dir / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def run_probe(self, name, text, fallback_note=None):
+        source = self.compile_source(name, text)
+        expected = run_cpython(source)
+        self.assertEqual(expected.returncode, 0, expected.stderr)
+        for mode in ("default", "force"):
+            with self.subTest(program=name, mode=mode):
+                program, exe, built = self.build(source, mode)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                if mode == "default" and fallback_note:
+                    self.assertIn(fallback_note, built.stderr)
+                ran = subprocess.run([str(exe)], cwd=str(program.parent), capture_output=True,
+                                     text=True, timeout=120)
+                self.assertEqual(ran.returncode, expected.returncode,
+                                 "%s %s exit\nexpected stderr: %s\nactual stderr: %s"
+                                 % (name, mode, expected.stderr, ran.stderr))
+                self.assertEqual(ran.stdout, expected.stdout, "%s %s" % (name, mode))
+
+    def test_saved_reference_falls_back(self):
+        self.run_probe("saved_reference.py", SAVED_REFERENCE,
+                       fallback_note="keyword.iskeyword is used as a value")
+
+    def test_iseof_reads_endmarker(self):
+        self.run_probe("iseof_mutates.py", ISEOF_MUTATES)
 
 
 if __name__ == "__main__":

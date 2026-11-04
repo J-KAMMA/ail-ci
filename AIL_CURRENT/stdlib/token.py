@@ -1,16 +1,17 @@
 """Token constants (CPython 3.12's Lib/token.py as AIL source).
 
 AIL finds this file when a program says `import token` (`ail_modules.py` searches the bundled
-`stdlib/` last).  Every constant keeps CPython 3.12's name and value.  Three definitions are
+`stdlib/` last).  Every constant keeps CPython 3.12's name and value.  Two definitions are
 rewritten because the compiler refuses CPython's form: `tok_name` and the list it extends
 `__all__` with are written out as one dict literal and one list literal (CPython builds them
-from `globals()`, which this compiler does not model), and `ISEOF` compares with the literal `0`
-(the default build reads the name `ENDMARKER` here as the string in `tok_name`).  Regenerate the
-tables with:
+from `globals()`, which this compiler does not model).  Regenerate the tables with:
 
     python3 -c "import token; print(sorted(token.tok_name.items()))"
 
-and copy the pairs below.  `ISTERMINAL`, `ISNONTERMINAL` and `ISEOF` keep CPython's bodies.
+and copy the pairs below.  `ISTERMINAL`, `ISNONTERMINAL` and `ISEOF` keep CPython's bodies; a
+program that calls `ISEOF` reads the module's `ENDMARKER`, so it is built on the general path on
+the default build (the typed path reads that bare global as a `str` here), and both builds print
+what CPython prints.
 """
 
 __all__ = [
@@ -237,4 +238,4 @@ def ISNONTERMINAL(x: int) -> bool:
 
 
 def ISEOF(x: int) -> bool:
-    return x == 0
+    return x == ENDMARKER
