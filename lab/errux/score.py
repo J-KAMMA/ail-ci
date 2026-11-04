@@ -180,7 +180,7 @@ def check(results=None):
 def print_table(results):
     print('%-40s %5s %7s  %s' % ('program', 'score', 'status', 'first stderr line'))
     for item in results:
-        status = 'builds' if item['builds'] else str(item['status'])
+        status = 'builds now' if item['builds'] else str(item['status'])
         print('%-40s %5d %7s  %s' % (item['program'], item['score'], status, item['first']))
     total = sum(item['score'] for item in results)
     print('\ntotal %d / %d over %d programs' % (total, 4 * len(results), len(results)))
