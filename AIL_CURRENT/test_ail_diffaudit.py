@@ -22,14 +22,15 @@ CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc")
 NOW_MATCHES = [
     "C__job_pre116_10242227_1",
     "C__job_pre116_10251611_1",
-    "C__job_pre138_10250109_2",
     "C__job_rbrbfuzz4_10262129_4",
     "C__job_rbfuzz4_10240913_4",
 ]
 STILL_DIFFERS = [
     "C__job_pre388_10280828_2",
     "C__job_rbrbfuzz4_10262129_3",
+    "C__job_rbrbfuzz4_10262129_5",
     "C__job_rbfuzz4_10240913_3",
+    "C__job_rbfuzz4_10240913_5",
     "C__job_std_random_11011523_1",
 ]
 REFUSED = [
@@ -120,6 +121,24 @@ class DiffAuditTests(unittest.TestCase):
                     mode = "forced" if forced else "default"
                     self.assertNotEqual(built.returncode, 0,
                                         "%s %s now builds; update AUDIT.md" % (stem, mode))
+
+    def test_pre138_pipeline(self):
+        # The row's mechanism is pymod in the fused pipeline: the compiled tool exits 1
+        # through ail_die instead of raising a catchable ZeroDivisionError.
+        stem = "C__job_pre138_10250109_2"
+        work, env, built, exe = self.build(stem, False)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        feed = work / "input.bin"
+        feed.write_bytes(b"\x01" + b"\x00" * 7 + b"\x00" * 8)
+        ran = subprocess.run([str(exe), str(feed)], cwd=str(work), capture_output=True,
+                             text=True, timeout=120, env=env)
+        self.assertEqual(ran.returncode, 1)
+        self.assertEqual(ran.stdout, "")
+        self.assertIn("integer modulo by zero", ran.stderr)
+        # A single-expression pipeline is not in the forced general-path subset.
+        _, _, built_forced, _ = self.build(stem, True)
+        self.assertNotEqual(built_forced.returncode, 0,
+                            "forced build of the pipeline now succeeds; update AUDIT.md")
 
     def test_pre90_finding(self):
         stem = "C__job_pre90_10242040_2"

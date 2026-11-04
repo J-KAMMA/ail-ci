@@ -5,10 +5,34 @@ Date: 2026-11-04. Base: `origin/integ` (`d6cd9ee`). Every probe is in `lab/diffa
 `AIL_UNIFIED_FORCE=1` (temp dir, `AIL_NO_CACHE=1`, 120 s timeout, `ulimit -v 1500000`)
 and compares stdout and exit status with CPython 3.12.
 
-## Finding: behaviour changed in another way
+## Findings: behaviour changed in another way
 
-`C?-job-pre90-10242040-2` stays open, but the forced build no longer dies with the row's
-16-bit internal error: it now stops with a named runtime limit. The default build matches.
+### `C?-job-pre138-10250109-2` (integer `%` by zero in a fused closure)
+
+The probe is the row's own fused-closure form, a single-expression program
+`sum(1 % x for x in xs)`, which compiles as the pipeline and emits `pymod` from
+`python/pkg-v12/pyfront.py`. Run on the int64 input `[1, 0]`, `pymod` still calls
+`ail_die`, so the tool exits 1 instead of raising a catchable `ZeroDivisionError`
+(the equivalent Python catches it and prints `caught`). The default build's
+`ail_die` is catchable only while a `try` is open; the pipeline has no `try`.
+The forced build refuses a single-expression pipeline
+(`not in the subset: general path explicitly requested`), so the row is recorded
+`default=still-differs`, `forced=differs-otherwise` and stays `open`.
+
+```
+probe lab/diffaudit/C__job_pre138_10250109_2.py:
+    sum(1 % x for x in xs)
+input.bin = 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   (int64 1, 0)
+
+CPython (oracle)      rc=0 stdout="caught\n"
+default build/run     rc=1 stdout="" stderr="integer modulo by zero\n"
+forced build          rc=3 stderr="not in the subset: general path explicitly requested\n"
+```
+
+### `C?-job-pre90-10242040-2` (`chr()` / 16-bit strings)
+
+Stays open: the forced build no longer dies with the row's 16-bit internal error,
+it now stops with a named runtime limit. The default build matches.
 
 ```
 probe lab/diffaudit/C__job_pre90_10242040_2.py:
@@ -27,9 +51,9 @@ forced run            rc=3 stdout="" stderr="AIL limit: chr_non_bmp\n"
 and matches CPython on both builds (`caught integer modulo by zero`). Its status is left
 `refused` as the task requires for refused rows; the owner may retire or rewrite it.
 
-## The list (25 rows, statuses before the audit)
+## The list (27 rows at base, statuses before the audit)
 
-Counts: open=8, empty=0, refused=4, declared=13 (total 25).
+Counts: open=10, empty=0, refused=4, declared=13 (total 27).
 
 | id | area | status |
 | --- | --- | --- |
@@ -49,8 +73,10 @@ Counts: open=8, empty=0, refused=4, declared=13 (total 25).
 | C?-job-pre138-10250109-2 | integer `%` by zero in a fused closure | open |
 | C?-job-rbrbfuzz4-10262129-3 | dict iteration | open |
 | C?-job-rbrbfuzz4-10262129-4 | dict construction | open |
+| C?-job-rbrbfuzz4-10262129-5 | dict operators | open |
 | C?-job-rbfuzz4-10240913-3 | dict iteration | open |
 | C?-job-rbfuzz4-10240913-4 | dict construction | open |
+| C?-job-rbfuzz4-10240913-5 | dict operators | open |
 | C?-job-rbpre54-10270147-1 | round | refused |
 | MODSYS-1 | modules / `__file__`, `__package__`, `__path__` | declared; `test_ail_modsys.py` |
 | MODSYS-2 | modules / `try: import m / except ImportError:` | declared; `test_ail_modsys.py` |
@@ -59,7 +85,10 @@ Counts: open=8, empty=0, refused=4, declared=13 (total 25).
 | MODSYS-5 | modules / a module reached through a function or a name that has two meanings | declared; `test_ail_modsys.py` |
 | MODSYS-6 | modules / conditions that guard an import | declared; `test_ail_modsys.py` |
 
-## Verdicts (18 probes)
+On the final tree `audit.py` prints 24 rows (open=7, refused=4, declared=13): the three
+`open` rows below prove `now-matches` and moved to `fixed`; `pre138` stays `open`.
+
+## Verdicts (20 probes)
 
 | id | area | old status | verdict default | verdict forced | probe file |
 | --- | --- | --- | --- | --- | --- |
@@ -75,12 +104,30 @@ Counts: open=8, empty=0, refused=4, declared=13 (total 25).
 | C?-job-pre90-10242040-2 | `chr()` / 16-bit strings | open | now-matches | differs-otherwise | `lab/diffaudit/C__job_pre90_10242040_2.py` |
 | C?-job-pre116-10251611-1 | generator expressions | open | now-matches | now-matches | `lab/diffaudit/C__job_pre116_10251611_1.py` |
 | C?-job-pre116-10242227-1 | generator expressions | refused | now-matches | now-matches | `lab/diffaudit/C__job_pre116_10242227_1.py` |
-| C?-job-pre138-10250109-2 | integer `%` by zero in a fused closure | open | now-matches | now-matches | `lab/diffaudit/C__job_pre138_10250109_2.py` |
+| C?-job-pre138-10250109-2 | integer `%` by zero in a fused closure | open | still-differs | differs-otherwise | `lab/diffaudit/C__job_pre138_10250109_2.py` |
 | C?-job-rbrbfuzz4-10262129-3 | dict iteration | open | still-differs | still-differs | `lab/diffaudit/C__job_rbrbfuzz4_10262129_3.py` |
 | C?-job-rbrbfuzz4-10262129-4 | dict construction | open | now-matches | now-matches | `lab/diffaudit/C__job_rbrbfuzz4_10262129_4.py` |
+| C?-job-rbrbfuzz4-10262129-5 | dict operators | open | still-differs | still-differs | `lab/diffaudit/C__job_rbrbfuzz4_10262129_5.py` |
 | C?-job-rbfuzz4-10240913-3 | dict iteration | open | still-differs | still-differs | `lab/diffaudit/C__job_rbfuzz4_10240913_3.py` |
 | C?-job-rbfuzz4-10240913-4 | dict construction | open | now-matches | now-matches | `lab/diffaudit/C__job_rbfuzz4_10240913_4.py` |
+| C?-job-rbfuzz4-10240913-5 | dict operators | open | still-differs | still-differs | `lab/diffaudit/C__job_rbfuzz4_10240913_5.py` |
 | C?-job-rbpre54-10270147-1 | round | refused | refused-as-said | refused-as-said | `lab/diffaudit/C__job_rbpre54_10270147_1.py` |
+
+Notes on the `still-differs` dict-operator rows: `d1 | d2` now works and prints
+`{1: 'a', 2: 'b'}` on both builds, but `d1 |= d2` still raises the row's runtime
+`TypeError` and `reversed(d)` returns a plain `iterator` where CPython returns
+`dict_reversekeyiterator` (the probe prints `type(r).__name__` first, then `next(r)`,
+then `d1 | d2`, then `d1 |= d2`; AIL exits 1 at the last line).
+
+## Stale rows changed in DIFFERENCES.md
+
+Three `open` rows proved `now-matches` in both builds; only their status cell changed:
+
+| id | old status | new status |
+| --- | --- | --- |
+| C?-job-pre116-10251611-1 | open | fixed;lab/diffaudit/C__job_pre116_10251611_1.py |
+| C?-job-rbrbfuzz4-10262129-4 | open | fixed;lab/diffaudit/C__job_rbrbfuzz4_10262129_4.py |
+| C?-job-rbfuzz4-10240913-4 | open | fixed;lab/diffaudit/C__job_rbfuzz4_10240913_4.py |
 
 ## Not audited (7 declared rows)
 
@@ -96,11 +143,10 @@ Counts: open=8, empty=0, refused=4, declared=13 (total 25).
 
 ## Totals
 
-- Rows listed: 25 (open 8, empty 0, refused 4, declared 13).
-- Rows with a committed probe and a verdict: 18 (all 8 open, all 4 refused, 6 declared).
-- `now-matches` in both builds: 5 (4 open rows marked fixed; 1 refused row in Owner to decide).
+- Rows listed at base: 27 (open 10, empty 0, refused 4, declared 13).
+- Rows with a committed probe and a verdict: 20 (all 10 open, all 4 refused, 6 declared).
+- `now-matches` in both builds: 4 (3 open rows marked fixed; 1 refused row in Owner to decide).
 - `refused-as-said` in both builds: 8 (4 refused rows and 4 declared refusals).
-- `still-differs` in both builds: 4 (pre388, the two dict-iteration rows, and the declared random row).
-- `differs-otherwise`: 1 (the pre90 row above, forced build only; its default build now matches).
-- Known differences after this audit: 4 open rows (pre388, pre90 forced-only, rbrbfuzz4-3, rbfuzz4-3) plus the refused/declared rows above.
-
+- `still-differs` in both builds: 6 (pre388, both dict-iteration rows, both dict-operator rows, and the declared random row).
+- `differs-otherwise`: 2 rows (pre90 forced only; pre138 forced only, when the forced build refuses a pipeline program).
+- Known open differences after this audit: 7 open rows (pre388, pre90 forced-only, pre138, rbrbfuzz4-3, rbrbfuzz4-5, rbfuzz4-3, rbfuzz4-5).
