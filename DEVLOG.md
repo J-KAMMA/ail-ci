@@ -1,3 +1,32 @@
+## 2026-11-04 -- prog18_rr1: typed reach of the eight prog18 hot functions (job-prog18_rr1-11050044)
+
+Profiled the eight programs (CPython 3.12, cProfile own time, largest input; `lab/progfix/prog18.md`
+has the table).  Four were already whole-program typed (`t443`, `t198`, `t210`, `g02_038`).  Three
+`pyfunc.py` fixes move two more onto the typed path and unblock a construct several tasks needed:
+
+- `_script_entry` only looked at top-level expression statements, so the usual
+  `if __name__ == '__main__': main()` script (whose generated repr/deque helpers are appended after
+  it) found no entry and refused with `the entry function cannot return checked str`.  The guard
+  body is searched now.
+- `_numeric_expression_needed` called any expression with a numeric local a numeric binding, so
+  `_numeric_assign` declared `visited: list[tuple[int, int]] = [(x, y)]` as an int and refused it
+  (`'visited' is declared ('olist', '_AilT_i_i'); assigning int is unsupported`).  A container
+  display is never a numeric binding.
+- `max(xs, default=d)` / `min(xs, default=d)` (numeric, list-of-instances and list-of-lists walks;
+  int or float `d` of the elements' kind) and an f-string nested width `f"{v:>{width}}"` (int width,
+  fill/alignment prefix, optional grouping/precision/type; a negative width is CPython's sign
+  option: int/float use `abs(w)`, a str raises `ValueError`).
+
+`t219` and `g11_014` are now whole-program typed and match CPython 3.12 on their inputs; 6 of 8
+programs and 9 of 11 hot functions are typed (was 4 and 6).  `t391` (`random.Random` prelude:
+methods with optional parameters, then `mt = self.mt`, a list field and `subscripting Attribute`)
+and `g19_014` (`datetime`/`timedelta`) stay named follow-ups in `lab/progfix/prog18.md`.  The ten
+`lab/compare` tasks keep byte-identical generated C (16 builds compared with `--debug-dir`; the
+four `main.py` variants the general path refuses fail identically and emit no C).  Probes in
+`/tmp/probes/` (`p_default`, `p_width`, `p_container`, `p_entry`, plus two named refusals) match
+CPython on the default and forced-general builds.  Added `test_ail_prog18.py` (9 tests) registered
+in `tests.d`, and DIFFERENCES row `C?-job-prog18_rr1-11050044-1`.
+
 ## 2026-11-04 -- sdkdiag1: text argument type errors report the call site again (job-sdkdiag1-11041645)
 
 `test_ail_sdk.py::test_relocated_json_source_check_without_c_compiler` was red since ec5e1eda
