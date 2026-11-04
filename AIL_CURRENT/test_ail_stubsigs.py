@@ -1,0 +1,44 @@
+"""The generated typeshed signature table and its lookup API.
+
+Running `tools/typeshed_convert.py --check` must reproduce the committed
+`python/pkg-v12/stubsigs_table.py` byte for byte, a few signatures must have the return the converter rules
+choose, and `third_party/typeshed/VERSION.md` must name a full commit and ship its `LICENSE`.
+"""
+import re
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parent
+PKG = HERE / "python" / "pkg-v12"
+if str(PKG) not in sys.path:
+    sys.path.insert(0, str(PKG))
+
+import stubsigs  # noqa: E402
+
+
+class StubSigsTest(unittest.TestCase):
+    def test_converter_reproduces_table(self):
+        result = subprocess.run(
+            [sys.executable, str(REPO / "tools" / "typeshed_convert.py"), "--check"],
+            capture_output=True, text=True, cwd=str(REPO))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_returns(self):
+        self.assertEqual(stubsigs.lookup("math.gcd")[0], "int")
+        self.assertEqual(stubsigs.lookup("math.sqrt")[0], "float")
+        self.assertEqual(stubsigs.lookup("math.isclose")[0], "bool")
+        self.assertEqual(stubsigs.lookup("heapq.heappop")[0], "obj")
+        self.assertIsNone(stubsigs.lookup("no.such"))
+
+    def test_vendor_record(self):
+        version = (REPO / "third_party" / "typeshed" / "VERSION.md").read_text(encoding="utf-8")
+        self.assertRegex(version, r"\b[0-9a-f]{40}\b")
+        self.assertTrue((REPO / "third_party" / "typeshed" / "LICENSE").is_file())
+        self.assertIn("Apache", (REPO / "third_party" / "typeshed" / "LICENSE").read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()
