@@ -1,14 +1,27 @@
 import reprlib
 
 
+def raw_node(self):
+    return "Node(%s -> %r)" % (self.name, self.child)
+
+
+node_render = reprlib.recursive_repr()(raw_node)
+
+
+def raw_other(self):
+    return "Other(%s -> %r)" % (self.name, self.child)
+
+
+other_render = reprlib.recursive_repr(fillvalue="<cycle>")(raw_other)
+
+
 class Node:
     def __init__(self, name):
         self.name = name
         self.child = None
 
-    @reprlib.recursive_repr()
     def __repr__(self):
-        return "Node(%s -> %r)" % (self.name, self.child)
+        return node_render(self)
 
 
 class Other:
@@ -16,9 +29,8 @@ class Other:
         self.name = name
         self.child = None
 
-    @reprlib.recursive_repr(fillvalue="<cycle>")
     def __repr__(self):
-        return "Other(%s -> %r)" % (self.name, self.child)
+        return other_render(self)
 
 
 def main():

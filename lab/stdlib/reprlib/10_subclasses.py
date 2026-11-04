@@ -13,6 +13,16 @@ class MyRepr(reprlib.Repr):
     def repr_str(self, x, level):
         return "STR:" + x
 
+    def repr_instance(self, x, level):
+        if isinstance(x, MyClass):
+            return self.repr_MyClass(x, level)
+        s = "%r" % (x,)
+        if len(s) > self.maxother:
+            i = max(0, (self.maxother - 3) // 2)
+            j = max(0, self.maxother - 3 - i)
+            s = s[:i] + self.fillvalue + s[len(s) - j:]
+        return s
+
 
 def main():
     r = MyRepr()
