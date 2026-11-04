@@ -1,3 +1,53 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review
+
+**What the change really does.** Adds `AIL_CURRENT/stdlib/difflib.py` (734 lines, a rewrite of CPython 3.12 difflib), 12 lab programs, `RESULTS.md`, `bench_ratio.py`, a test module and its registration/pins. It touches no compiler or runtime file; the diff is purely additive plus manifest pins.
+
+**Probes** (`bash ~/tools/cmp.sh … $PWD`, both the general and default builds vs `python3`):
+
+| probe | covers | result |
+|---|---|---|
+| `r_close.py` | n=0/-1, cutoff 0/1/-0.1/1.1, empty list, duplicates, tie ordering | both same stdout, exit 0 |
+| `r_seq.py` | autojunk n=199/200, isjunk, empty, ints, `get_grouped_opcodes` twice + n=0 | both same |
+| `r_match.py` | `Match` attr/index/slice/unpack/compare/neg index/TypeError, `find_longest_match` defaults & negative alo | both same |
+| `r_diff.py` | unified/context n=0/1/3, empty, dates/lineterm, class-as-iterator reuse, `next()`, bytes/str mix | both same |
+| `r_bytes.py` | diff_bytes latin-1 bytes, non-ASCII, custom `dfunc`, str/fromfile TypeError | both same |
+| `r_mut.py` | mutate a/b after set_seqs, `set_seq1`, delta slice reuse | both same |
+| `r_differ.py` | Differ/ndiff with/without charjunk, intraline marks, empty | both same |
+| `p_restore_junk.py` | restore `which` 0/-1/1.9/"1"/3, IS_LINE_JUNK exotic/bytes/int/None | both same |
+
+Base refusal confirmed on `/tmp/base` for `01_close_matches.py` (exact `not yet published` message). No probe revealed a semantic defect, aliasing bug, or value that changes after a copy.
+
+**Tests.** `python3 ../tools/par_check.py -j 2 test_ail_std_difflib test_ail_safetynet` **aborts before running**: `ValueError: hash mismatch: stdlib/difflib.py` (preflight). `python3 tools/update_manifest.py --check` prints `stale stdlib/difflib.py`, exit 1. Commit `2638c6c8` edited `AIL_CURRENT/stdlib/difflib.py` (actual sha256 `96fbcc77…`) without re-running the manifest writer (pin still `d167b39a…`). The direct `test_ail_std_difflib.py` run was still building when the time box expired.
+
+**Claim checks.**
+- Before: all 12 refused — verified for 01 (exact text); others consistent.
+- 10/12 build+match in both builds — **unverified** (blocked test; direct run unfinished).
+- 12 refusal/04 refusal texts — verified (`HtmlDiff` message exact; 04 default note is the `__iter__` refusal, general path `a **kwargs call argument`).
+- "fallback note names `difflib.SequenceMatcher.__init__` and its default arguments" — **false**; observed note for 08: `stdlib/difflib.py:110:13 … result of __lt__() is declared bool, but NotImplemented is not a bool`.
+- `RESULTS.md` "`diff_bytes` does not accept an arbitrary `dfunc` value" — **false**; `r_bytes.py` custom `dfunc` matches CPython in both builds (the module docstring is correct).
+- bench prints `0.9` / `600` — verified under `python3`; timings not reproduced.
+- Scope: only the permitted files changed (`git diff --name-only` check passed).
+
+**Unverified:** the 10/12 after table and produced `RESULTS.md` after rows (test harness aborts); no speed/icount check (change touches no hot compiler/runtime code); 11 of the 12 base refusals (sampled 01).
+
+**Defects**
+1. **Stale manifest pin.** `tools/update_manifest.py --check` prints `stale stdlib/difflib.py` and exits 1; consequently `par_check.py -j 2 test_ail_std_difflib test_ail_safetynet` fails in preflight with `ValueError: hash mismatch: stdlib/difflib.py` instead of running. Expected exit 0 / tests executed; actual exit 1 / preflight crash. Fix: re-run `python3 tools/update_manifest.py` after the final `difflib.py` edit and commit the pins.
+
+VERDICT: FIX
+1. Manifest pin for `AIL_CURRENT/stdlib/difflib.py` is stale (pin `d167b39a…`, file sha256 `96fbcc77…`): `python3 tools/update_manifest.py --check` → `stale stdlib/difflib.py`, exit 1 (expected exit 0); `cd AIL_CURRENT && python3 ../tools/par_check.py -j 2 test_ail_std_difflib test_ail_safetynet` → `ValueError: hash mismatch: stdlib/difflib.py` (expected: tests run).
+[commandcode stop=end_turn turns=34 out_tokens=29745]
+
+
+--- ORIGINAL TASK ---
 Lane: difflib
 
 # difflib2: `import difflib` as a bundled AIL module (`AIL_CURRENT/stdlib/difflib.py`), reusing the unmerged std_difflib work
