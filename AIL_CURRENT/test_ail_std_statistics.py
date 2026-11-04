@@ -1,8 +1,7 @@
 """The statistics programs of lab/stdlib/statistics: each passing program is compiled in the default mode and
 must print what CPython prints (stdout and exit code).
 
-The two follow-ups stay refused by name until their features are built: linear_regression (the named tuple
-result and proportional=) and NormalDist (the distribution class).
+The follow-up stays refused by name until its feature is built: NormalDist (the distribution class).
 """
 import os
 import subprocess
@@ -21,14 +20,16 @@ PASSING = (
     "04_float_stats.py",
     "05_quantiles_report.py",
     "06_covariance_correlation.py",
+    "07_regression.py",
     "09_weighted_stats.py",
     "10_grouped_stats.py",
     "11_geometric_harmonic.py",
     "12_error_handling.py",
 )
 
+TYPED = ("07_regression.py", "10_grouped_stats.py", "11_geometric_harmonic.py")
+
 REFUSED = {
-    "07_regression.py": "statistics.linear_regression",
     "08_normal_dist.py": "statistics.NormalDist",
 }
 
@@ -59,6 +60,70 @@ class StatisticsLabTests(unittest.TestCase):
                 self.assertEqual(expected.returncode, 0, expected.stderr)
                 self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
                                  ran.stderr[:500])
+
+    def test_new_forms_build_on_the_typed_path(self):
+        for name in TYPED:
+            with self.subTest(program=name), tempfile.TemporaryDirectory() as directory:
+                built, exe = compile_program(directory, name)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                self.assertNotIn("built on the general path", built.stderr)
+                self.assertTrue(exe.exists())
+
+    def test_new_forms_edges_match_cpython(self):
+        source = """import statistics
+
+
+def main() -> None:
+    empty: list[int] = []
+    try:
+        print(statistics.pvariance(empty, mu=0))
+    except statistics.StatisticsError as exc:
+        print("e:", exc)
+    try:
+        print(statistics.geometric_mean(empty))
+    except statistics.StatisticsError as exc:
+        print("e:", exc)
+    one: list[int] = [5]
+    print(statistics.pvariance(one, mu=5))
+    try:
+        print(statistics.stdev(one, xbar=5))
+    except statistics.StatisticsError as exc:
+        print("e:", exc)
+    print(statistics.geometric_mean(one), statistics.harmonic_mean(one))
+    neg: list[int] = [-3, -1, 2, 8]
+    print(statistics.variance(neg, xbar=0))
+    print(statistics.stdev(neg, xbar=-1))
+    try:
+        print(statistics.geometric_mean([-2, 4]))
+    except statistics.StatisticsError as exc:
+        print("e:", exc)
+    big: list[int] = [4611686018427387904, 4611686018427387906]
+    print(statistics.variance(big, xbar=4611686018427387904))
+    print(statistics.pvariance(big, mu=4611686018427387905))
+    print(statistics.geometric_mean(big))
+    hx: list[int] = [2, 8, 4, 16]
+    print(statistics.harmonic_mean(hx))
+    x: list[int] = [1, 2, 3, 4, 5]
+    y: list[int] = [3, 5, 7, 9, 11]
+    fit = statistics.linear_regression(x, y)
+    print(fit, fit.slope, fit.intercept)
+    print(statistics.linear_regression(x, y, proportional=True))
+    bigx: list[int] = [4611686018427387904, 4611686018427389952]
+    bigy: list[int] = [1, 2]
+    print(statistics.linear_regression(bigx, bigy))
+
+
+main()
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            built, exe = build_source(directory, "new_edges.py", source)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, timeout=300)
+            expected = subprocess.run([sys.executable, str(Path(directory, "new_edges.py"))],
+                                      capture_output=True, timeout=300)
+            self.assertEqual(expected.returncode, 0, expected.stderr)
+            self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
+                             ran.stderr[:500])
 
     def test_weighted_fmean_int_precision(self):
         source = """import statistics
