@@ -1,3 +1,41 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: "finish pycomp1" (bench branch)
+
+**What the change really does:** adds Codon 0.20.6, mypyc 2.4.1 and Nuitka 4.3.4 as compare-lab columns (build/measure code, pins, a Codon helper shim, workflow install + merge args), plus `docs/COMPARISON-PYCOMP.md`. No compiler or runtime file is touched (`git diff --name-only work..HEAD` has only `lab/compare`, `docs`, `ci-proposed`, `DEVLOG`).
+
+**Claims, against what I observed**
+1. Heading restored — **verified**: `merge.py` gives `AIL against C, Rust, Go, Nim and Python` (default), `AIL against C` (`ail,c`), `AIL against none` (`ail`), full 10-column list with "and Nuitka".
+2. Binary prose in KiB — **verified**. Rebuilt Codon binaries: chain 174,904 B→171 KiB, berth 188,968→185, echo 191,664→187, ledger 255,304→249, tally 254,528→249, term 1,155,776→1129. AIL 34–102 and mypyc 307–471 match the table.
+3. Codon sizes re-measured — **verified** (all six values above reproduce).
+4. rail_transfer error verbatim — **verified**: `main.py:27 (9-13): error: cannot typecheck 'self'`.
+5. Geomeans — **wall 0.44x verified; compile 0.72x FALSE.**
+
+**Defect**
+1. `docs/COMPARISON-PYCOMP.md` says compile "geometric mean **0.72x** of the best" (repeated in DEVLOG and the report). Feeding the document's own compile table through `merge.py` gives **0.80x**. Probe: `/tmp/rprobes/mkresults.py` (builds `result-*.json` from the doc table), then
+   `python3 lab/compare/merge.py /tmp/rprobes/results --langs ail,python,codon,mypyc,nuitka`
+   → Compile-time `**geomean** … **0.80x** (n=8)`; the doc/table says 0.72x. The commit changed a correct 0.80x into a wrong 0.72x. Fix: restore 0.80x.
+
+**Other checks**
+- New build paths work on this runner: `chain_relax --smoke`: codon 174,904 B / 32/32 cases; mypyc 4.14 s / 314,352 B / 3,568 KiB / 32/32; Nuitka 60.3 s / 4,507,864 B / 46,596 KiB / 32/32. `berth_sim` codon 188,968 B / 26/26 (exercises the heap shim; shim vs `heapq` random test also equal).
+- Tests on HEAD `19263a07`: `test_compare_publish`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` — 4 modules, 0 failed.
+- No compiler change, so non-feature programs' C is unchanged by construction; no base comparison needed. Nothing pre-existing observed.
+- Note (not blocking): `merge.py`'s default `--langs` omits the three new columns, so only the workflow's explicit `--langs` list keeps them; its module docstring still describes the old five.
+- Unverified: the workflow's download/checksum and install steps on a real runner; the two unfinished tasks; the report's exact Ir figures differ slightly on re-run (AIL 239,390 vs 239,366; Codon 124.9M vs 122.0M).
+
+VERDICT: FIX
+1. `docs/COMPARISON-PYCOMP.md` compile geomean: expected **0.80x** (doc's own table through `merge.py`), actual **0.72x**; probe `/tmp/rprobes/mkresults.py` + `merge.py /tmp/rprobes/results --langs ail,python,codon,mypyc,nuitka`. DEVLOG and the worker report repeat the wrong number.
+[commandcode stop=end_turn turns=25 out_tokens=40795]
+
+
+--- ORIGINAL TASK ---
 Lane: bench
 
 **Finish pycomp1 from its existing work; do not redo it.** The run on branch `job-pycomp1-11040105` did the work, then ended ERROR because the pipeline's review step crashed (a bug in the job runner, now fixed; not your work's fault), so it got no verdict.
