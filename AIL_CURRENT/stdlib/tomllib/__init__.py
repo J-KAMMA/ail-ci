@@ -38,9 +38,10 @@ rewritten around them.  Each rewrite and the refusal it answers:
    dict / set, or passed to a method, cannot be followed by the Optional
    rewrite; use a sentinel value there``.  Rewrite: no ``None`` is ever
    stored in a container and ``loads``'s ``parse_float`` default is the
-   string sentinel ``_PARSE_FLOAT_DEFAULT``; only that sentinel means the
-   built-in ``float``, so a literal ``0`` is called and fails exactly as
-   CPython's does (``'int' object is not callable``).
+   private function object ``_PARSE_FLOAT_DEFAULT``, compared with ``is``;
+   only that exact object means the built-in ``float``, so a literal ``0``
+   or any user string is called and fails exactly as CPython's does
+   (``'int' object is not callable`` / ``'str' object is not callable``).
 
 6. Required keyword-only parameters.  Refusal: ``not in the subset: a
    required keyword-only parameter recursive in def set (this cut requires

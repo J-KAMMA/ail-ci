@@ -37,7 +37,11 @@ class TOMLDecodeError(ValueError):
         super().__init__(msg + " (at " + coord_repr + ")")
 
 
-_PARSE_FLOAT_DEFAULT = "DEFAULT"
+def _parse_float_default():
+    pass
+
+
+_PARSE_FLOAT_DEFAULT = _parse_float_default
 
 
 def load(fp, *, parse_float=_PARSE_FLOAT_DEFAULT):
@@ -749,7 +753,7 @@ def _scan_digit_run(src, pos, allowed):
 
 
 def _to_float(text, parse_float):
-    if parse_float == _PARSE_FLOAT_DEFAULT:
+    if parse_float is _PARSE_FLOAT_DEFAULT:
         return float(text)
     value = parse_float(text)
     if isinstance(value, dict) or isinstance(value, list):
