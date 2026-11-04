@@ -1,10 +1,13 @@
 """A multi-name import refusal names only the module that is not modelled.
 
-Job errmsg3 recorded that `import math, html` printed `import of 'math, html'` as one
+Job errmsg3 recorded that `import math, xml` printed `import of 'math, xml'` as one
 unavailable module, which wrongly denies the supported `math`.  The typed path now
-picks the first name outside the modelled set (`html`, or `html.parser`), so the
+picks the first name outside the modelled set (`xml`, or `xml.etree`), so the
 refusal names that module at the import's own line.  The general path already
-refuses the use of `html` by name; an unused `html` import still builds on both.
+refuses the use of `xml` by name; an unused `xml` import still builds on both.
+
+(`html` used to be the example here, but the html2 lane now ships `html` as a bundled
+module, so a program importing it is no longer refused as unmodelled.)
 """
 import os
 import subprocess
@@ -16,22 +19,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 REFUSED = {
-    'plain': ('import math, html\n\n\ndef main():\n    print(html)\n\n\nmain()\n', "import of 'html'"),
-    'reversed': ('import html, math\n\n\ndef main():\n    print(html)\n\n\nmain()\n', "import of 'html'"),
-    'three': ('import math, html, sys\n\n\ndef main():\n    print(html)\n\n\nmain()\n', "import of 'html'"),
-    'argument': ('import math, html\n\n\ndef use(mod):\n    return mod\n\n\ndef main():\n'
-                 '    print(use(html) is html)\n\n\nmain()\n', "import of 'html'"),
-    'list_item': ('import math, html\n\n\ndef main():\n    xs = [html]\n'
-                  '    print(len(xs), math.floor(2.5))\n\n\nmain()\n', "import of 'html'"),
-    'attribute': ('import math, html\n\n\nclass Holder:\n    pass\n\n\ndef main():\n'
-                  '    h = Holder()\n    h.mod = html\n    print(h.mod is html)\n\n\nmain()\n', "import of 'html'"),
-    'dict_value': ('import math, html\n\n\ndef main():\n    d = {"h": html}\n'
-                   '    print(len(d), math.floor(2.5))\n\n\nmain()\n', "import of 'html'"),
-    'dotted': ('import math, html.parser\n\n\ndef main():\n    print(html.parser)\n\n\nmain()\n',
-               "import of 'html.parser'"),
+    'plain': ('import math, xml\n\n\ndef main():\n    print(xml)\n\n\nmain()\n', "import of 'xml'"),
+    'reversed': ('import xml, math\n\n\ndef main():\n    print(xml)\n\n\nmain()\n', "import of 'xml'"),
+    'three': ('import math, xml, sys\n\n\ndef main():\n    print(xml)\n\n\nmain()\n', "import of 'xml'"),
+    'argument': ('import math, xml\n\n\ndef use(mod):\n    return mod\n\n\ndef main():\n'
+                 '    print(use(xml) is xml)\n\n\nmain()\n', "import of 'xml'"),
+    'list_item': ('import math, xml\n\n\ndef main():\n    xs = [xml]\n'
+                  '    print(len(xs), math.floor(2.5))\n\n\nmain()\n', "import of 'xml'"),
+    'attribute': ('import math, xml\n\n\nclass Holder:\n    pass\n\n\ndef main():\n'
+                  '    h = Holder()\n    h.mod = xml\n    print(h.mod is xml)\n\n\nmain()\n', "import of 'xml'"),
+    'dict_value': ('import math, xml\n\n\ndef main():\n    d = {"h": xml}\n'
+                   '    print(len(d), math.floor(2.5))\n\n\nmain()\n', "import of 'xml'"),
+    'dotted': ('import math, xml.etree\n\n\ndef main():\n    print(xml.etree)\n\n\nmain()\n',
+               "import of 'xml.etree'"),
 }
 
-UNUSED = 'import math, html\n\n\ndef main():\n    print(math.floor(2.5))\n\n\nmain()\n'
+UNUSED = 'import math, xml\n\n\ndef main():\n    print(math.floor(2.5))\n\n\nmain()\n'
 
 
 def compile_case(directory, text, general):
@@ -57,10 +60,10 @@ class MultiNameImportRefusal(unittest.TestCase):
                     message = built.stdout + built.stderr
                     self.assertIn(built.returncode, (2, 3), message)
                     self.assertFalse(Path(directory, 'prog').exists(), message)
-                    self.assertIn('html', message)
-                    self.assertNotIn("'math, html'", message)
-                    self.assertNotIn("'html, math'", message)
-                    self.assertNotIn("'math, html, sys'", message)
+                    self.assertIn('xml', message)
+                    self.assertNotIn("'math, xml'", message)
+                    self.assertNotIn("'xml, math'", message)
+                    self.assertNotIn("'math, xml, sys'", message)
                     if not general:
                         self.assertTrue(message.startswith('prog.py:1:1:'), message)
                         self.assertIn(expected, message)

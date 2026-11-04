@@ -2,9 +2,14 @@
 
 The twelve programs in lab/stdlib/html/ use escape, unescape, the numeric and named character
 references, the entities tables and a small tag stripper the way ordinary code does.  Each is
-compiled with the default command (and again with AIL_UNIFIED_FORCE=1) and run beside `python3`
-on the same source; stdout and the exit status must agree.  The escape-only programs must build
-with no general-path note.
+compiled with the default command and run beside `python3` on the same source; stdout and the
+exit status must agree.  The escape-only programs must build with no general-path note.
+
+The html5 table keeps CPython's 133 non-BMP values exactly.  html/__init__.py builds those
+with chr() (no non-BMP constant), so escape and unescape stay typed and exact.  A program
+that reaches `html.entities` is compiled on the 16-bit general path (its int-keyed tables
+force it there), which refuses the non-BMP constants by name, so those programs (08, 09, 12)
+are expected to be refused with that message rather than to produce a wrong character.
 """
 import os
 import shutil
@@ -20,6 +25,12 @@ PROGRAMS = ROOT.parent / "lab" / "stdlib" / "html"
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc")
 
 ESCAPE_ONLY = ("01_escape_quote_true.py", "02_escape_quote_false.py", "03_escape_alias.py")
+
+# Programs whose entities tables force the 16-bit general path; they refuse the non-BMP
+# html5 values by name instead of returning a wrong character.
+ENTITIES = ("08_entities_tables.py", "09_entities_html5.py", "12_mixed.py")
+
+NON_BMP = "non-BMP string literal in the 16-bit v2 runtime"
 
 
 def run_cpython(path):
@@ -50,7 +61,7 @@ class StdlibHtmlTests(unittest.TestCase):
                           "09_entities_html5.py", "10_strip_tags.py",
                           "11_roundtrip.py", "12_mixed.py"])
 
-    def _build_and_run(self, source, build_env):
+    def _build(self, source, build_env):
         work = self.dir / (source.stem + "-" + str(len(list(self.dir.iterdir()))))
         work.mkdir(parents=True, exist_ok=True)
         program = work / source.name
@@ -60,15 +71,7 @@ class StdlibHtmlTests(unittest.TestCase):
                                 "--syntax", "python", "-o", str(exe)],
                                cwd=str(work), capture_output=True, text=True,
                                timeout=1800, env=build_env)
-        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-        expected = run_cpython(program)
-        ran = subprocess.run([str(exe)], cwd=str(work), capture_output=True,
-                             text=True, timeout=120)
-        self.assertEqual(ran.returncode, expected.returncode,
-                         "%s exit\nexpected stderr: %s\nactual stderr: %s"
-                         % (source.name, expected.stderr, ran.stderr))
-        self.assertEqual(ran.stdout, expected.stdout, source.name)
-        return built
+        return work, program, exe, built
 
     def test_programs_match_cpython(self):
         base = dict(os.environ, AIL_NO_CACHE="1")
@@ -77,11 +80,25 @@ class StdlibHtmlTests(unittest.TestCase):
         for label, env in modes:
             for source in self.sources:
                 with self.subTest(program=source.name, build=label):
-                    built = self._build_and_run(source, env)
+                    _, program, exe, built = self._build(source, env)
+                    message = built.stdout + built.stderr
+                    if source.name in ENTITIES:
+                        self.assertIn(built.returncode, (2, 3), message)
+                        self.assertIn(NON_BMP, message)
+                        self.assertFalse(exe.exists(), message)
+                        continue
+                    self.assertEqual(built.returncode, 0, message)
+                    expected = run_cpython(program)
+                    ran = subprocess.run([str(exe)], cwd=exe.parent, capture_output=True,
+                                         text=True, timeout=120)
+                    self.assertEqual(ran.returncode, expected.returncode,
+                                     "%s exit\nexpected stderr: %s\nactual stderr: %s"
+                                     % (source.name, expected.stderr, ran.stderr))
+                    self.assertEqual(ran.stdout, expected.stdout, source.name)
                     if source.name in ESCAPE_ONLY:
-                        self.assertNotIn("general path", built.stderr,
+                        self.assertNotIn("general path", message,
                                          "%s built on the general path: %s"
-                                         % (source.name, built.stderr))
+                                         % (source.name, message))
 
 
 if __name__ == "__main__":

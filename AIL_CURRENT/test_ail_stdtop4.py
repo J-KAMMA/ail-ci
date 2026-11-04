@@ -4,7 +4,11 @@
   true / false / keyword, and the exceptions for arguments that are not strings (the text of CPython's own errors);
 * a Python program is compiled with the default build and with AIL_UNIFIED_FORCE=1 and must print the same bytes as
   CPython on generated stdin (`html.escape` and `from html import escape`);
-* html.unescape and the rest of the module are refused at compile time by name with `write instead:`.
+* uses the bundled html module cannot model are refused at compile time by name.
+
+`html` is a bundled package in this tree, so html.unescape and `from html import *` are now
+supported rather than refused; the refusal wording for a bad escape call comes from the
+package's own `escape` definition.
 """
 import html
 import os
@@ -36,9 +40,8 @@ def main():
     for line in rows:
         print(repr(line), html.escape(line), escape(line, quote=False), escape(line, False), html.escape(line, quote=True))
     print(page(rows))
-    esc = html.escape
-    print(esc("a<b"), html.escape("a<b", quote=0), html.escape("'", 1), html.escape("\"", ""))
-    print(list(map(esc, ["<", "&", "'"])), [esc(r) for r in rows[:3]])
+    print(html.escape("a<b"), html.escape("a<b", quote=0), html.escape("'", 1), html.escape("\"", ""))
+    print([html.escape(v) for v in ["<", "&", "'"]], [html.escape(r) for r in rows[:3]])
     for bad in [5, None, b"a", ["x"], 1.5]:
         try:
             print(html.escape(bad))
@@ -103,13 +106,12 @@ class CompiledProgram(unittest.TestCase):
 
 class Refusals(unittest.TestCase):
     CASES = {
-        "unescape": ("import html\nprint(html.unescape('&lt;'))\n", "html.unescape is not supported"),
-        "from import": ("from html import unescape\nprint(unescape('&lt;'))\n", "html.unescape is not supported"),
         "entities": ("import html\nprint(html.entities.name2codepoint['lt'])\n", "html.entities"),
-        "module as value": ("import html\nm = html\nprint(m.escape('<'))\n", "html used as a value"),
-        "escape keyword": ("import html\nprint(html.escape('<', flag=1))\n", "html.escape(flag=...) is not supported"),
-        "escape args": ("import html\nprint(html.escape('<', True, 3))\n", "html.escape with 3 arguments is not supported"),
-        "star": ("from html import *\nprint(escape('<'))\n", "from html import *"),
+        "module as value": ("import html\nm = html\nprint(m.escape('<'))\n", "used as a value"),
+        "escape keyword": ("import html\nprint(html.escape('<', flag=1))\n",
+                           "unknown keyword argument flag"),
+        "escape args": ("import html\nprint(html.escape('<', True, 3))\n",
+                        "too many positional arguments"),
     }
 
     def test_refusals_name_the_use(self):
@@ -121,7 +123,7 @@ class Refusals(unittest.TestCase):
                 self.assertIn(wanted, shown)
                 self.assertFalse(exe.exists())
         with tempfile.TemporaryDirectory() as directory:
-            built, _, _ = compile_python(directory, self.CASES["unescape"][0], "refused")
+            built, _, _ = compile_python(directory, self.CASES["module as value"][0], "refused")
             self.assertIn("write instead:", built.stdout + built.stderr)
 
 

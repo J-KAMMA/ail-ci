@@ -45,10 +45,10 @@ REFUSED = {
                                 'prog.py:1:1:', ['a caught exception type ImportError']),
     'other_type_still_located': ('try:\n    x = 1\nexcept KeyboardInterrupt:\n    print("no")\n',
                                  'prog.py:1:1:', ['a caught exception type KeyboardInterrupt']),
-    'import_only_in_handler': ('try:\n    x = 1\nexcept ImportError:\n    import html\n'
+    'import_only_in_handler': ('try:\n    x = 1\nexcept ImportError:\n    import math\n'
                                'print("done")\n',
                                'prog.py:1:1:', ['a caught exception type ImportError']),
-    'import_only_in_else': ('try:\n    x = 1\nexcept ImportError:\n    pass\nelse:\n    import html\n'
+    'import_only_in_else': ('try:\n    x = 1\nexcept ImportError:\n    pass\nelse:\n    import math\n'
                             'print("done")\n',
                             'prog.py:1:1:', ['a caught exception type ImportError']),
     'import_only_in_finally': ('try:\n    x = 1\nexcept ImportError:\n    pass\nfinally:\n'
@@ -62,7 +62,7 @@ ACCEPTED = {
     'zero_division': ('try:\n    x = 1 // 0\nexcept ZeroDivisionError:\n    print("caught")\n'
                       'else:\n    print("not caught")\n',
                       b'caught\n'),
-    'plain_two_unused': ('import math, html\nprint(math.floor(2.5))\n', b'2\n'),
+    'plain_two_unused': ('import math, xml\nprint(math.floor(2.5))\n', b'2\n'),
     'plain_html_unused': ('import html\nprint("done")\n', b'done\n'),
 }
 
