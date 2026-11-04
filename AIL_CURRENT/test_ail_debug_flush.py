@@ -8,7 +8,8 @@ build uses, so every drain runs in both.
 
 Each program is built with and without --debug, on the default path and with AIL_UNIFIED_FORCE=1 (general path),
 and run with stdout redirected to a file and to a pipe; stdout and the exit status must be CPython's, the stderr
-text must still carry the message (and, in a debug build, the `raised near` line).
+text must still carry the message (and, on the default path, the `raised near` line; the general path prints it
+only in a debug build).
 """
 import os
 import shutil
@@ -173,9 +174,9 @@ class DebugFlush(unittest.TestCase):
                 self.assertEqual(piped.stdout, want.stdout, label + " (pipe)")
                 if code == 1:
                     self.assertTrue(to_file.stderr.strip(), label + ": no message on stderr")
-                    if site and debug and not general:
+                    if site and not general:
                         self.assertIn(b"raised near", to_file.stderr, label)
-                    if not debug:
+                    if not debug and general:
                         self.assertNotIn(b"raised near", to_file.stderr, label)
 
     def test_mixed_division_trap_in_a_clone(self):

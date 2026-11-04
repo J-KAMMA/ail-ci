@@ -12,6 +12,141 @@ libm with `-0.0`, `inf` and a subnormal; libc int64 edge, base 16/36 parsing and
 Tests: `test_ail_ffi_examples`, `test_ail_ffi`, `test_ail_ffi_handles`, `test_ail_ffi_f3a`, `test_ail_safetynet`,
 `test_ail_files` and `test_ail_corpus_findings3`.
 
+## 2026-11-03 -- rel-rterr3b review fix: DIFFERENCES row no longer lists fixed `//`/recursion wording
+
+The reviewer's only defect was `DIFFERENCES.md`: the uncaught-trap row still claimed `//` and
+recursion printed the old `integer division by zero` / `recursion depth exceeded` text.  Probes
+`p19` (`x // 0`) and `p9` (recursion) print `ZeroDivisionError: integer division or modulo by
+zero` / `RecursionError: maximum recursion depth exceeded` in the default build, matching CPython;
+only the `KeyError` payload wording (`key error` vs `'key'`) remains.  The row is corrected and
+`test_ail_build_reports` is now named as the extra edited baseline in the finish entry below.
+Re-ran the gate modules, `test_ail_safetynet` (unlimited address space), `test_ail_files` and
+`test_ail_corpus_findings3`: all pass; `tools/update_manifest.py --check` is clean.
+
+## 2026-11-03 -- rel-rterr finish (job-relrterr3b-11040718): applied relrterr3 work on current integ and re-verified
+
+Cherry-picked, in order, the work commits after `job relrterr3: export of staging:integ + task`
+(`job relrterr`, `job relrterr2` verify and fix, `job relrterr3` finish, and its `fix: uncommitted
+edits`), skipping the worker report.  The conflicts were generated manifest rows and DEVLOG order;
+`tools/update_manifest.py` regenerated the rows and `--check` passes.  This also brings the review's
+two defects: `//` by zero is now `integer division or modulo by zero` and recursion is
+`maximum recursion depth exceeded`, both equal to CPython's last traceback line.
+
+Probes (`/tmp/probes`, 25 programs, both builds): list/str/bytes/tuple index (positive, negative,
+empty, int64), pop through a variable and an alias, dict keys through a variable, argument, list
+item, attribute and dict value, `//`, `%` and float `/` through locals, argument, list item,
+attribute and dict value, recursion, explicit `raise`, a caught `IndexError`, leading blank lines,
+and a list reached through an attribute.  Every one matches CPython's stdout and exit status (or is
+the known `AIL_UNIFIED_FORCE=1` recursion segfault, which the test skips with a comment); the
+default typed build adds `Name: message` plus `  raised near file:line`, the general path keeps its
+existing text without a line.
+
+Binary sizes of the ten `lab/compare/src/*/main.ail` inputs against `737c2a2` (before -> after):
+berth_sim 64864 -> 73296, chain_relax 34888 -> 39224, echo_pack 35896 -> 40232, ledger_bin 61016
+-> 69360, rail_transfer 64936 -> 81560, scar_life 40432 -> 48632, tally_lang 74648 -> 95280,
+term_rank 74392 -> 82816, ticket_audit 104248 -> 124880, tree_fold 86336 -> 102960 (+4,336 to
++20,632 bytes, the expected per-statement site string).  The compiler merges repeated `file:line`
+literals (tally_lang has 188 unique sites and no duplicate constant in the binary), so no per-line
+dedup was added.  Instruction counts cannot be measured here: `tools/icount.c` builds, but
+`perf_event_open` returns EPERM (`perf_event_paranoid=4`) and valgrind is not installed.
+
+Gate modules, the changed expectation modules, `test_ail_bigint`, `test_ail_build_reports`,
+`test_ail_debug_flush`, the two pin modules, `test_ail_build_cache`, `test_ail_fe_cache`,
+`test_ail_c_export`, `test_c_api_bridge`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (the ASan and `S4_generators_gc` cases only fail under the 1.5 GB
+virtual-memory cap).  Message expectations updated by this change remain the ones listed in the
+three rel-rterr entries below; `test_ail_build_reports` is also edited, but only its in-process C
+baseline (it now sets `AIL_LINE_MAP` so the release C matches the CLI), not a message assertion.
+
+## 2026-11-03 -- rel-rterr follow-up review: C API tail, cache key and build-report baseline
+
+Fixed the three review defects in the cherry-picked runtime-error work.
+
+* `c_api.py` and `c_api_bridge.py` matched the pre-change one-line `ail_die` tail, so library and
+  separately compiled object exports raised `Unsupported`; both now match the multi-line tail
+  through the shared `FATAL_TAIL` constant.  `compile --lib edge` exits 0 again, and
+  `test_c_api_bridge` / `test_ail_c_export` pass.
+* `buildcache.build_env()` keyed the front-end and C compile caches on the `AIL_LINE_MAP` temporary
+  path, which changes every build.  It now hashes that file's contents, so two builds with the same
+  map hit even when the path differs; `test_ail_fe_cache` and `test_ail_build_cache` pass.
+* `test_ail_build_reports`'s in-process C baseline now loads the same source map and sets
+  `AIL_LINE_MAP`, so its release C contains the same `AIL_DBG_SITE` stores as the CLI output.
+
+Probes: the default and unified builds still match CPython's stdout and exit status for index, key,
+zero-division, recursion, pop, string index, caught `IndexError`, and argument/dict-value sites;
+the default build still names the exception and prints the source line, the unified build names it
+without the line (or segfaults on recursion, as before).  Library export and the two-path fe-cache
+probe were re-run directly.  The 20 shard gate is left to CI; instruction counts remain
+unmeasurable here (`perf_event_open` denied).
+
+## 2026-11-03 -- rel-rterr finish (job-relrterr3-11040001): cherry-picked, re-measured, one test expectation fixed
+
+Cherry-picked the first two runs' work (`job relrterr: name uncaught runtime errors and report
+their source line`, `job relrterr2: verify exception names and source lines`, `job relrterr2: fix C
+API tail, cache key and build-report baseline`), excluding the worker reports, and regenerated the
+manifest.  Re-ran 26 probes against CPython on both builds: list/str/bytes/tuple indexes (positive,
+negative, empty, int64), pop through a variable and an alias, dict keys through a variable, an
+argument, a list item and a dict value, int/mod/float division through locals, a list item, an
+attribute and an argument, recursion (default only), explicit and custom raises, a caught
+`IndexError`, and source lines after leading blank lines, across functions and through a class
+attribute.  Every probe matched CPython's stdout and exit code or was refused by name; the default
+build printed the expected `Name: message` line, and the unified build the expected existing text.
+The unified recursion probe still segfaults; the test skips it with that comment.
+
+One boundary is pre-existing and deliberately unchanged: the site is the last statement that
+*began* to run, so a trap in the caller after a callee returns reports the callee's last line (e.g.
+line 3 instead of the trap's line 8).  The base `--debug` build already did this; changing it would
+change `--debug` output and add save/restore instructions, so it is left as the documented
+"last statement" semantics.
+
+`test_ail_debug_flush` assumed a release build never prints `raised near`; the default release now
+does, so its assertion now checks absence only on the general release path (and presence on the
+default path where `site=True`).  The other updated expectations are the first run's:
+`test_ail_debug`, `test_ail_debug_lines`, `test_ail_exception_context`,
+`test_ail_exception_values_core`, `test_ail_numeric_bindings`, `test_ail_record_initializers`.
+
+Binary sizes on the ten `lab/compare/src/*/main.ail` tasks re-measured against `727b91e` are
+identical to the first run: berth_sim 64864 -> 73296, chain_relax 34888 -> 39224, echo_pack 35896
+-> 40232, ledger_bin 61016 -> 69360, rail_transfer 64936 -> 81560, scar_life 40432 -> 48632,
+tally_lang 74648 -> 95280, term_rank 74392 -> 82816, ticket_audit 104248 -> 124880, tree_fold
+86288 -> 102912 (+4,336 to +20,632 bytes).  Instruction counts still cannot be measured here:
+`tools/icount.c` builds but `perf_event_open` returns EPERM (`perf_event_paranoid=4`) and valgrind
+is not installed.  Site literals repeat a source line 5-38% in the generated C (tree_fold 379
+sites / 270 unique, tally_lang 304 / 280, berth_sim 163 / 100), but the compiler merges the
+identical constants: the built binaries contain no duplicate `file:line` literal, so a per-line
+emitter change would save nothing; a line-number table would add a second global store and a
+different print path, so it was not done.
+
+## 2026-11-03 -- rel-rterr follow-up (job-relrterr2-11031503): verified the exception name and source line
+
+Cherry-picked the first run's work commit (`job relrterr: name uncaught runtime errors and report
+their source line`); implementation unchanged apart from regenerating the manifest.  Probes in
+`/tmp/probes` cover list/str index (positive, negative, empty), list pop through a list value and
+through an alias, dict key through a variable/argument/dict value, int and float division by zero
+through locals, a list item, an attribute and an argument, recursion, an explicit `raise`, and a
+caught `IndexError`; both builds print the CPython name (and the default build the `raised near
+file:line` line) with CPython's stdout and exit status.  The known `AIL_UNIFIED_FORCE=1` recursion
+segfault is unchanged and the test still skips that probe.
+
+Site strings: 5-38% of the emitted site literals repeat a `file:line` already present in the same
+program, but the C compiler already merges those identical constants (the built binaries contain
+no duplicate site strings), so a per-line emitter dedup would change no output or size.  A
+line-number table would save some `.rodata` but needs a second global store per statement and a
+different print path, so it was left out as neither simple nor free of instruction-count risk.
+
+Binary size growth on the ten `lab/compare` tasks is unchanged from the first run, measured here
+against `aa0ea8a` (before -> after bytes): berth_sim 64864 -> 73296, chain_relax 34888 -> 39224,
+echo_pack 35896 -> 40232, ledger_bin 61016 -> 69360, rail_transfer 64936 -> 81560, scar_life
+40432 -> 48632, tally_lang 74648 -> 95280, term_rank 74392 -> 82816, ticket_audit 104248 ->
+124880, tree_fold 86288 -> 102912.  Instruction counts could not be measured: `perf_event_open`
+is denied (`kernel.perf_event_paranoid=4`) and valgrind/callgrind is not installed.
+
+Gate modules, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, the two codegen
+pin modules and `test_ail_runtime_error_names` pass.  Message expectations updated by this change
+are in `test_ail_debug` (three crash-text assertions), `test_ail_debug_lines` (release/debug C
+comparison), `test_ail_exception_context` (assert traps now report their line),
+`test_ail_exception_values_core` (forwarded raise), and the pin hashes in
+`test_ail_numeric_bindings` and `test_ail_record_initializers`.
 ## 2026-11-03 -- onelang s12 finish: reference docs in Python, converter fragments
 
 Finished onelang s12 from the work already exported into `staging:integ`: `AIL_REFERENCE_MORE.md`
@@ -372,6 +507,34 @@ No compiler or runtime behaviour changed.  Ran on Linux: `test_ail_tutorial` (15
 15 tutorial samples) pass.  Probes `/tmp/probes/sdk_symlink_roots.py` and
 `/tmp/probes/tutorial_artifact_abs.py` pass; both are refused by name under `cmp.sh` because
 AIL does not build `importlib`, which is expected for Python-only packaging code.
+## 2026-11-02 -- rel-rterr: uncaught typed runtime errors name the exception and the source line (job-relrterr-11030727)
+
+Owner decision: the default build carries the CPython exception name and the source line in its
+uncaught runtime errors.  `ail_exc_pyname` maps the typed runtime's trap messages to `IndexError`,
+`KeyError`, `ZeroDivisionError`, `ValueError`, `RuntimeError`, `UnicodeDecodeError`,
+`RecursionError` and `MemoryError`; `ail_die` prefixes the name and leaves the exit status, stdout
+flush and `--debug` "raised near" line unchanged.  A message that already starts with `Name: ` is
+not prefixed twice.  The typed emitter now stores the current statement's `file:line` in every
+build (the `#line` directives stay debug-only), so the default build can print `  raised near
+file:line`; the forced general path keeps the unified runtime's text without a line.
+
+`test_ail_runtime_error_names` covers index, key, division, recursion, pop, an explicit raise and a
+caught `IndexError`, in the default build and with `AIL_UNIFIED_FORCE=1` (the unified recursion
+probe is skipped: that path still segfaults, a separate bug).  The gate modules
+(`test_ail_exception_context`, `test_ail_exception_values_core`, `test_ail_overflow_error`,
+`test_ail_finally`, `test_ail_reraise`, `test_ail_parallel_for`, `test_ail_debug`,
+`test_ail_debug_lines`, `test_ail_fuzz_findings`), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_numeric_bindings` and `test_ail_record_initializers` pass.
+
+Binary size on the ten `lab/compare/src/*/main.ail` tasks, before -> after (bytes): berth_sim
+64864 -> 73296 (+8432), chain_relax 34888 -> 39224 (+4336), echo_pack 35896 -> 40232 (+4336),
+ledger_bin 61016 -> 69360 (+8344), rail_transfer 64936 -> 81560 (+16624), scar_life
+40432 -> 48632 (+8200), tally_lang 74648 -> 95280 (+20632), term_rank 74392 -> 82816 (+8424),
+ticket_audit 104248 -> 124880 (+20632), tree_fold 86288 -> 102912 (+16624).  The growth is above
+the original 512-byte budget because every statement now carries its site string; this is the
+owner-decided line-number cost.  Instruction counts could not be measured on this runner:
+`perf_event_open` is denied (`kernel.perf_event_paranoid=4`) and valgrind/callgrind is not
+installed, so the 10 before/after icounts are not available here.
 
 ## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
 

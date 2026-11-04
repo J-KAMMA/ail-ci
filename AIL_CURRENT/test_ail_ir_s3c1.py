@@ -399,8 +399,11 @@ class ProgramTests(unittest.TestCase):
             for args in args_list:
                 runs = {tag: run(built.exe[tag], args) for tag in built.exe}
                 for tag in ('ir', 'ir-checked'):
+                    # both the IR and the typed legacy build name the exception now, so compare
+                    # the message text with the name removed from each.
                     named = runs[tag][:2] + (re.sub(r'(?m)^[A-Za-z]+Error: ', '', runs[tag][2]),)
-                    self.assertEqual(named, runs['legacy'], '%s %s args=%s' % (name, tag, args))
+                    legacy = runs['legacy'][:2] + (re.sub(r'(?m)^[A-Za-z]+Error: ', '', runs['legacy'][2]),)
+                    self.assertEqual(named, legacy, '%s %s args=%s' % (name, tag, args))
                 if cpython:
                     expected = cpython_run(tmp, name, source, args)
                     self.assertEqual(runs['ir'][1], expected[1], '%s args=%s stdout' % (name, args))

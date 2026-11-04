@@ -61,7 +61,10 @@ class Pre55RepeatTests(unittest.TestCase):
                     ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
                     self.assertEqual(ran.returncode, 1, ran.stderr)
                     self.assertEqual(ran.stdout, "")
-                    self.assertEqual(ran.stderr, "MemoryError\n")
+                    lines = ran.stderr.splitlines()
+                    self.assertEqual(lines[:1], ["MemoryError"])
+                    self.assertTrue(all(line.startswith('  raised near ') for line in lines[1:]),
+                                    ran.stderr)
 
     def test_small_empty_negative_and_aliasing_repeats_match_cpython(self):
         source = (

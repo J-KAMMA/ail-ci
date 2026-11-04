@@ -19779,7 +19779,7 @@ def _borrowed_callback_helper(summary, ctx):
               if recursive else '')
     guard = ('ail_cleanup_frame _borrowed_frame = {ail_cleanup_top, %s_unwind, NULL}; '
              'ail_cleanup_top = &_borrowed_frame; '
-             'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded"); ' % symbol
+             'if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded"); ' % symbol
              if recursive else '')
     if recursive:
         private.parts.update(('DIE', 'RECDEPTH'))
@@ -21207,6 +21207,10 @@ _DEBUG_LINE_MAPS = {}
 _REWRITE_LINES = {}
 
 
+_REWRITE_SITE_LINES = {}
+_ACTIVE_SITE_LINES = {}
+
+
 def debug_snapshot_lines(tree):
     """`--debug`: pyc's script rewrite unparses its tree, and the text parsed again numbers its lines afresh
     (one blank line between functions, a synthesised `def`), so a `#line` taken from it would be wrong from
@@ -21237,10 +21241,8 @@ def debug_restore_lines(tree, source):
 
 
 def _debug_where(node):
-    """`ail build --debug` (AIL_DEBUG=1 and AIL_LINE_MAP=<json {combined line: [path, line]}>): the (file name,
-    line) a statement maps back to, or None (always, and no file is read, in every other build)."""
-    if os.environ.get('AIL_DEBUG') != '1':
-        return None
+    """AIL_LINE_MAP=<json {combined line: [path, line]}>: the (file name, line) a statement maps back
+    to, or None (and no file is read) when the build has no source map."""
     path = os.environ.get('AIL_LINE_MAP')
     if not path:
         return None
@@ -21252,22 +21254,27 @@ def _debug_where(node):
         except (OSError, ValueError):
             table = {}
         _DEBUG_LINE_MAPS[path] = table
-    where = table.get(getattr(node, 'lineno', None))
+    lineno = getattr(node, 'lineno', None)
+    mapped = _ACTIVE_SITE_LINES.get(lineno)
+    where = table.get(mapped if mapped is not None else lineno)
     if not where:
         return None
     return str(where[0]).replace(chr(92), '/').replace('"', chr(92) + '"'), where[1]
 
 
 def _debug_site(node, ind):
-    """The C lines that point gdb at the source line of a statement (`#line`) and record it for the
-    uncaught-exception report (AIL_DBG_SITE). Empty in every build but `--debug`. The IR emitter
-    (ir/emit_c.py) writes the same two lines from `_debug_where`."""
+    """The C lines that record a statement's source line for the uncaught-exception report
+    (AIL_DBG_SITE); `--debug` also points gdb at it with `#line`. Empty when the build has no
+    source map. The IR emitter (ir/emit_c.py) writes the same lines from `_debug_where`."""
     where = _debug_where(node)
     if not where:
         return ''
     name, line = where
+    site = '%sAIL_DBG_SITE("%s:%d");\n' % ('    ' * ind, name, line)
+    if os.environ.get('AIL_DEBUG') != '1':
+        return site
     # a directive numbers the line AFTER it: one before the site store, one before the statement's first C line
-    return '#line %d "%s"\n%sAIL_DBG_SITE("%s:%d");\n#line %d "%s"\n' % (line, name, '    ' * ind, name, line, line, name)
+    return '#line %d "%s"\n%s#line %d "%s"\n' % (line, name, site, line, name)
 
 
 def _emptied_name(stmt):
@@ -37008,6 +37015,8 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     reference Python resolves to it (shadowing.py), so no name-keyed built-in dispatch anywhere in
     the compiler can capture a call that belongs to the user. Refusals and the per-function unit
     names in `info` are reported under the user's own spelling."""
+    global _ACTIVE_SITE_LINES
+    _ACTIVE_SITE_LINES = _REWRITE_SITE_LINES.get(source.strip(), {})
     _view = _dict_view_escape(source)
     if _view is not None:
         raise Unsupported(_view)
@@ -37043,6 +37052,8 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     except Unsupported as error:
         shadowing.restore_error(error, shadow)
         raise
+    finally:
+        _ACTIVE_SITE_LINES = {}
     # range-proof markers left by code compiled outside a function body (struct constructors, ...)
     # are plain comments in still-checked calls; drop them so that C is byte-for-byte as before
     if isinstance(result, str):
@@ -40210,7 +40221,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # The guard sits after every local's declaration (C89-safe: no statement precedes it) and
     # before the first line of the translated body, so it runs exactly once per call, before any
     # of this call's own work -- including before the recursive calls the body below might make.
-    guard = ('    if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("recursion depth exceeded");\n'
+    guard = ('    if (++ail_depth > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");\n'
              if recursive else '')
     sig = signature(ctx.params, ctx, cname, ret)
     # A leaf whose whole body is one `return <expression>` is asked to be inlined by name.

@@ -56,8 +56,12 @@ EXC_EDITS = (
 # at interpreter shutdown); the hook is only spliced in when the core is present
 FLUSH_EDITS = (
     ('static void ail_die(const char *w);\n', 'static void ail_die(const char *w);\nstatic void ailf_flush_all(void);\n'),
-    ('    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n',
-     '    ailf_flush_all();\n    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
+    ('    {\n        const char *name = ail_exc_pyname(w);\n        fflush(stdout);\n'
+     '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
+     '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n',
+     '    {\n        const char *name = ail_exc_pyname(w);\n        ailf_flush_all();\n        fflush(stdout);\n'
+     '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
+     '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
     ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
      'static void ail_exception_uncaught(ail_exception *value) {\n    ailf_flush_all();\n    fflush(stdout);\n'),
 )

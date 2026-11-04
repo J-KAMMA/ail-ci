@@ -86,7 +86,7 @@ def cpython(directory, source):
 
 
 def last_line(text):
-    lines = text.strip().splitlines()
+    lines = [line for line in text.strip().splitlines() if not line.startswith('  raised near ')]
     return lines[-1] if lines else ''
 
 

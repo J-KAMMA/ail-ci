@@ -311,18 +311,16 @@ static double ail_fsqrt(double x) {
 '''
 
 DIE = r'''
-/* `ail build --debug` (AIL_DEBUG=1 adds -DAIL_DEBUG_SITE=1): each statement stores "file:line" in ail_dbg_site, and
-   an uncaught exception or fatal trap names the last one on a line after its message. Without the flag the hook
-   is empty. The fatal tails (ail_die, ail_exception_uncaught) print the site themselves and leave through the same
-   flush-and-_Exit as a release build, so every drain spliced in before them (boxed buffer, open files) runs in both. */
-#ifdef AIL_DEBUG_SITE
+/* Every build stores the current statement's "file:line" in ail_dbg_site, and an uncaught exception
+   or fatal trap names the last one on a line after its message. `ail build --debug` also adds `#line`
+   directives and builds at -O0 for gdb; the site store itself is not debug-only, because the default
+   build's runtime errors carry the source line too. The fatal tails (ail_die, ail_exception_uncaught)
+   print the site themselves and leave through the same flush-and-_Exit as before, so every drain
+   spliced in before them (boxed buffer, open files) runs in both. */
 #undef AIL_DBG_SITE
 AIL_LINK_STATE(const char *, ail_dbg_site, = NULL);
 #define AIL_DBG_SITE(s) (ail_dbg_site = (s))
 #define AIL_DBG_UNCAUGHT() do { if (ail_dbg_site) { fputs("\n  raised near ", stderr); fputs(ail_dbg_site, stderr); } } while (0)
-#else
-#define AIL_DBG_UNCAUGHT() ((void)0)
-#endif
 /* Use MinGW's C jump to avoid Windows SEH stack unwinding after explicit ail_exc_unwind.
    This does not provide C++ exception unwinding. */
 #if defined(__MINGW32__) && defined(__x86_64__) && !defined(__USE_MINGW_SETJMP_NON_SEH)
@@ -560,6 +558,35 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_UNICODE_DECODE;
     return 0;
 }
+/* The CPython exception name an uncaught ail_die() trap is reported under.  NULL means the
+   message already carries a name (`raise ValueError(...)`, `"OverflowError: ..."`) or is an
+   internal invariant that has no Python spelling. */
+static const char *ail_exc_pyname(const char *w) {
+    static const char *const named[] = {
+        "ValueError", "ZeroDivisionError", "IndexError", "KeyError", "EOFError", "OSError",
+        "RuntimeError", "UnicodeDecodeError", "AssertionError", "OverflowError", "MemoryError",
+        "RecursionError", "TypeError", "NameError", "StopIteration"
+    };
+    size_t i;
+    for (i = 0; i < sizeof named / sizeof named[0]; ++i) {
+        size_t n = strlen(named[i]);
+        if (!strncmp(w, named[i], n) && w[n] == ':' && w[n + 1] == ' ') return NULL;
+    }
+    switch (ail_exc_kind_of(w)) {
+    case AIL_EXC_VALUE: return "ValueError";
+    case AIL_EXC_ZERODIV: return "ZeroDivisionError";
+    case AIL_EXC_INDEX: return "IndexError";
+    case AIL_EXC_KEY: return "KeyError";
+    case AIL_EXC_EOF: return "EOFError";
+    case AIL_EXC_OS: return "OSError";
+    case AIL_EXC_RUNTIME: return "RuntimeError";
+    case AIL_EXC_UNICODE_DECODE: return "UnicodeDecodeError";
+    }
+    if (!strcmp(w, "maximum recursion depth exceeded")
+        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";
+    if (!strcmp(w, "out of memory")) return "MemoryError";
+    return NULL;
+}
 static void ail_die(const char *w) {
     /* Unchanged for every program that never opens a `try`: ail_exc_top stays -1 for the whole
        run, this branch is never taken, and everything below is byte-for-byte what pkg-v6 already
@@ -581,7 +608,13 @@ static void ail_die(const char *w) {
        (and uncaught) path only -- never reached by a program that does not trap, so it is
        invisible to every speed measurement in this tree (see APP_WEIGHT_AND_SPEED_20260913.md;
        none of it runs a trap). Destination and exit status are unchanged: stderr, then _Exit(1). */
-    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);
+    {
+        const char *name = ail_exc_pyname(w);
+        fflush(stdout);
+        if (name) { fputs(name, stderr); fputs(": ", stderr); }
+        fputs(w, stderr);
+    }
+    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);
 }
 /* Large buffers (whole files, decoded arrays) take one page fault per 4 KiB on first touch; on
    Linux with THP in "madvise" mode (the common default) asking for huge pages makes that one fault
