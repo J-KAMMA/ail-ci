@@ -1,3 +1,21 @@
+## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
+
+The daily fuzzer (seed 2076102845, modes default+ir) printed `((3 - -9223372036854775807) ** 1)`
+and recorded `DIFF|cpython='9223372036854775810' ail='287'`: the int64 run stopped at the
+subtraction after the `finally` had printed 287, so stdout was not a prefix of CPython's.
+
+On this tree the constant expression is already refused by name at compile time
+(`int64 constant out of range` / `int64 constant expression out of range`), so the silent DIFF
+does not reproduce and no compiler change was needed.  In-range neighbours match CPython on the
+default and `AIL_IR=1` builds.  A value that reaches the subtraction through an argument, a list
+item, an attribute or a dict value cannot be folded: it keeps the declared int64 overflow
+contract (exit 1, `integer overflow`, stdout a prefix of CPython's), and `--exact-int` matches
+CPython.  Added `test_ail_fz226.py` (6 tests, default and IR, plus exact-int) and registered it
+in `tests.d`; added DIFFERENCES row `C?-job-fz226-11041145-1`.  The load-time refusal exits 2,
+which `lab/fuzz/run.py` currently classes as `crash` (it only counts exit 3 as `refused`); that
+is a fuzzer-classification issue, not a silent language difference.  Final-state tests:
+test_ail_fz226, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
