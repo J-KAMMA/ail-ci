@@ -304,7 +304,10 @@ STOPS = {
 
 
 def _last_line(data):
-    lines = [x for x in data.decode('utf-8', 'replace').splitlines() if x.strip()]
+    # The runtime appends a "  raised near <file>:<line>" continuation to an uncaught exception;
+    # the message is the line before it.
+    lines = [x for x in data.decode('utf-8', 'replace').splitlines()
+             if x.strip() and not x.startswith('  raised near ')]
     return lines[-1] if lines else ''
 
 
@@ -315,7 +318,8 @@ def _same_last_line(got, want):
     # CPython prefixes the exception name and, for bytes, leaves the message generic.
     if want.startswith('IndexError: '):
         msg = want[len('IndexError: '):]
-        return got == msg or got == 'bytes ' + msg
+        return got in (msg, 'bytes ' + msg,
+                       'IndexError: ' + msg, 'IndexError: bytes ' + msg)
     return False
 
 
@@ -327,14 +331,14 @@ def _cpython(directory, name, source):
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode, _last_line(done.stderr)
 
 
-def _build_run(directory, name, source, mode, bce=None):
+def _build_run(directory, name, source, mode, bce=None, tag=''):
     text, suffix, flags = source, '.ail', []
     if mode == 'force':
         # the forced general path is a Python-surface build; the .ail oracle is the same program
         text, suffix, flags = ail2py.convert(source), '.py', ['--syntax', 'python']
     src = Path(directory) / (name + '_' + mode + suffix)
     src.write_text(text, encoding='utf-8')
-    exe = Path(directory) / ('exe_' + name + '_' + mode)
+    exe = Path(directory) / ('exe_' + name + '_' + mode + tag)
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     for key in ('AIL_NO_GENERAL', 'AIL_UNIFIED_FORCE', 'AIL_BCE', 'AIL_BCE_AUDIT'):
         env.pop(key, None)
@@ -398,8 +402,10 @@ class BceProbeTests(unittest.TestCase):
                         continue
                     if name in DEPTH_ORACLE:
                         for mode, got in runs.items():
-                            want, err = _build_run(directory, name + '_oracle_' + mode, source,
-                                                   mode, bce=0)
+                            # Same source name as the head build: the runtime's "raised near"
+                            # line prints the compiled path, and only the program should differ.
+                            want, err = _build_run(directory, name, source, mode, bce=0,
+                                                   tag='_oracle')
                             self.assertIsNotNone(want, '%s (%s) AIL_BCE=0 oracle\n%s'
                                                  % (name, mode, err))
                             self.assertEqual(got[0], want[0], '%s (%s) stdout' % (name, mode))
