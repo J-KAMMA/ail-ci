@@ -1,0 +1,484 @@
+{
+  "cases": [
+    "chain_relax",
+    "tree_fold",
+    "tally_lang"
+  ],
+  "functions": [
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/fastwalk.py",
+      "line": 24,
+      "name": "walk",
+      "per_build": {
+        "chain_relax": 0.218,
+        "tally_lang": 1.0579,
+        "tree_fold": 0.9882
+      },
+      "reason": "note: <source>:21: os.environ.get() with these arguments is not built; os.cpu_count() is built; the rest of os (environ, path, ...) is not",
+      "tottime": 2.2641,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 1552,
+      "name": "_etype",
+      "per_build": {
+        "chain_relax": 0.6018,
+        "tally_lang": 0.1535,
+        "tree_fold": 0.3463
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 1.1015,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 8050,
+      "name": "_is_str_expr",
+      "per_build": {
+        "chain_relax": 0.36,
+        "tally_lang": 0.072,
+        "tree_fold": 0.1593
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.5912,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/ail_chatgpt.py",
+      "line": 388,
+      "name": "_shallow_walk",
+      "per_build": {
+        "chain_relax": 0.0139,
+        "tally_lang": 0.157,
+        "tree_fold": 0.0701
+      },
+      "reason": "write instead: drop the import and write what you need by hand with plain lists, dicts and loops",
+      "tottime": 0.241,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 29050,
+      "name": "_promote_floats",
+      "per_build": {
+        "chain_relax": 0.0285,
+        "tally_lang": 0.0388,
+        "tree_fold": 0.1222
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1895,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/ail_chatgpt.py",
+      "line": 409,
+      "name": "_binding_counts",
+      "per_build": {
+        "chain_relax": 0.0112,
+        "tally_lang": 0.1263,
+        "tree_fold": 0.0492
+      },
+      "reason": "write instead: drop the import and write what you need by hand with plain lists, dicts and loops",
+      "tottime": 0.1867,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 30270,
+      "name": "_bind_object_types",
+      "per_build": {
+        "chain_relax": 0.0189,
+        "tally_lang": 0.0405,
+        "tree_fold": 0.116
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1755,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 7261,
+      "name": "_is_slist_expr",
+      "per_build": {
+        "chain_relax": 0.0917,
+        "tally_lang": 0.0229,
+        "tree_fold": 0.0482
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1628,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 3819,
+      "name": "_mark_str_containers",
+      "per_build": {
+        "chain_relax": 0.0218,
+        "tally_lang": 0.0308,
+        "tree_fold": 0.1041
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1567,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/bigcap.py",
+      "line": 431,
+      "name": "_walk_own",
+      "per_build": {
+        "chain_relax": 0.0215,
+        "tally_lang": 0.0729,
+        "tree_fold": 0.0521
+      },
+      "reason": "note: <source>:1447: os.environ.get() with these arguments is not built; os.cpu_count() is built; the rest of os (environ, path, ...) is not",
+      "tottime": 0.1465,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/ail_chatgpt.py",
+      "line": 2055,
+      "name": "_walk_own_scope",
+      "per_build": {
+        "chain_relax": 0.0058,
+        "tally_lang": 0.1155,
+        "tree_fold": 0.0206
+      },
+      "reason": "write instead: drop the import and write what you need by hand with plain lists, dicts and loops",
+      "tottime": 0.1419,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 12868,
+      "name": "_is_map_value",
+      "per_build": {
+        "chain_relax": 0.0772,
+        "tally_lang": 0.0168,
+        "tree_fold": 0.0419
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1358,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 5110,
+      "name": "_param_kinds",
+      "per_build": {
+        "chain_relax": 0.0086,
+        "tally_lang": 0.0387,
+        "tree_fold": 0.0682
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1155,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 4210,
+      "name": "_mark_tuple_lists",
+      "per_build": {
+        "chain_relax": 0.013,
+        "tally_lang": 0.0227,
+        "tree_fold": 0.074
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1097,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 9833,
+      "name": "_is_owned_bytes_call",
+      "per_build": {
+        "chain_relax": 0.0626,
+        "tally_lang": 0.0132,
+        "tree_fold": 0.0317
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.1075,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/ail_chatgpt.py",
+      "line": 1177,
+      "name": "_escaped_constant_statements",
+      "per_build": {
+        "chain_relax": 0.0113,
+        "tally_lang": 0.0517,
+        "tree_fold": 0.0437
+      },
+      "reason": "write instead: drop the import and write what you need by hand with plain lists, dicts and loops",
+      "tottime": 0.1066,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/boolkind.py",
+      "line": 289,
+      "name": "_own_nodes",
+      "per_build": {
+        "chain_relax": 0.0091,
+        "tally_lang": 0.0332,
+        "tree_fold": 0.0628
+      },
+      "reason": "note: <source>:98: os.environ.get() with these arguments is not built; os.cpu_count() is built; the rest of os (environ, path, ...) is not",
+      "tottime": 0.1051,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 11245,
+      "name": "_is_bytes_expr",
+      "per_build": {
+        "chain_relax": 0.0565,
+        "tally_lang": 0.0087,
+        "tree_fold": 0.0332
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0984,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 3583,
+      "name": "_mark_bytes_containers",
+      "per_build": {
+        "chain_relax": 0.0116,
+        "tally_lang": 0.0241,
+        "tree_fold": 0.0578
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0935,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 12878,
+      "name": "_map_value_kind",
+      "per_build": {
+        "chain_relax": 0.052,
+        "tally_lang": 0.0105,
+        "tree_fold": 0.0259
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0884,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 12886,
+      "name": "_mvk",
+      "per_build": {
+        "chain_relax": 0.0485,
+        "tally_lang": 0.0105,
+        "tree_fold": 0.0244
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0834,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 7872,
+      "name": "_is_owned_str_call",
+      "per_build": {
+        "chain_relax": 0.0496,
+        "tally_lang": 0.0104,
+        "tree_fold": 0.0226
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0825,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 9828,
+      "name": "_owned_method_name",
+      "per_build": {
+        "chain_relax": 0.0467,
+        "tally_lang": 0.009,
+        "tree_fold": 0.022
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0778,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 1016,
+      "name": "_fn_kind",
+      "per_build": {
+        "chain_relax": 0.0385,
+        "tally_lang": 0.0108,
+        "tree_fold": 0.0251
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0744,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 12827,
+      "name": "_map_kind",
+      "per_build": {
+        "chain_relax": 0.0385,
+        "tally_lang": 0.0092,
+        "tree_fold": 0.0201
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0678,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/bigcap.py",
+      "line": 975,
+      "name": "_lp_locals",
+      "per_build": {
+        "chain_relax": 0.0088,
+        "tally_lang": 0.0275,
+        "tree_fold": 0.023
+      },
+      "reason": "note: <source>:1447: os.environ.get() with these arguments is not built; os.cpu_count() is built; the rest of os (environ, path, ...) is not",
+      "tottime": 0.0593,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 12917,
+      "name": "_is_map_snapshot",
+      "per_build": {
+        "chain_relax": 0.0309,
+        "tally_lang": 0.0081,
+        "tree_fold": 0.0194
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0584,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 7455,
+      "name": "_numeric_field_kind",
+      "per_build": {
+        "chain_relax": 0.0281,
+        "tally_lang": 0.0082,
+        "tree_fold": 0.018
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0543,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 7915,
+      "name": "_is_utf8_codec_call",
+      "per_build": {
+        "chain_relax": 0.031,
+        "tally_lang": 0.0069,
+        "tree_fold": 0.0164
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0542,
+      "verdict": "reject"
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 1136,
+      "name": "_dynamic_result",
+      "per_build": {
+        "chain_relax": 0.0231,
+        "tally_lang": 0.0085,
+        "tree_fold": 0.0225
+      },
+      "reason": "write instead: import it under another name (`from ... import ast as other`)",
+      "tottime": 0.0541,
+      "verdict": "reject"
+    }
+  ],
+  "not_units": [
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 41066,
+      "name": "wrapper",
+      "per_build": {
+        "chain_relax": 0.1709,
+        "tally_lang": 0.0698,
+        "tree_fold": 0.2046
+      },
+      "tottime": 0.4453
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 41141,
+      "name": "_walk_uncached",
+      "per_build": {
+        "chain_relax": 0.0413,
+        "tally_lang": 0.1268,
+        "tree_fold": 0.2153
+      },
+      "tottime": 0.3834
+    },
+    {
+      "file": "AIL_CURRENT/ail_chatgpt.py",
+      "line": 1998,
+      "name": "visit",
+      "per_build": {
+        "chain_relax": 0.0151,
+        "tally_lang": 0.1399,
+        "tree_fold": 0.0604
+      },
+      "tottime": 0.2154
+    },
+    {
+      "file": "AIL_CURRENT/ail_chatgpt.py",
+      "line": 3645,
+      "name": "visit",
+      "per_build": {
+        "chain_relax": 0.002,
+        "tally_lang": 0.0825,
+        "tree_fold": 0.0056
+      },
+      "tottime": 0.0901
+    },
+    {
+      "file": "AIL_CURRENT/python/pkg-v12/pyfunc.py",
+      "line": 3117,
+      "name": "type_of",
+      "per_build": {
+        "chain_relax": 0.0399,
+        "tally_lang": 0.0117,
+        "tree_fold": 0.024
+      },
+      "tottime": 0.0756
+    },
+    {
+      "file": "AIL_CURRENT/ail_chatgpt.py",
+      "line": 3658,
+      "name": "scan",
+      "per_build": {
+        "chain_relax": 0.0014,
+        "tally_lang": 0.0598,
+        "tree_fold": 0.0036
+      },
+      "tottime": 0.0648
+    }
+  ],
+  "not_units_total": 6,
+  "profiles": {
+    "chain_relax": [
+      "/tmp/prof/parent/chain_relax.prof",
+      "/tmp/prof/child/chain_relax/child.prof"
+    ],
+    "tally_lang": [
+      "/tmp/prof/parent/tally_lang.prof",
+      "/tmp/prof/child/tally_lang/child.prof"
+    ],
+    "tree_fold": [
+      "/tmp/prof/parent/tree_fold.prof",
+      "/tmp/prof/child/tree_fold/child.prof"
+    ]
+  },
+  "schema": "ail.selfhost_hot/1",
+  "tottime_seconds": 12.3732
+}

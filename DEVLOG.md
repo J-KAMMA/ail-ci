@@ -130,6 +130,52 @@ and exact under `--exact-int`. The ten `.ail` twins generate byte-identical C.
 
 Tests: `test_ail_pyreach_infer` (9 tests, registered through `tests.d`), `test_ail_pyreach_unpack`,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+## 2026-11-04 -- selfhost1b: finish the compiler census on the current base
+
+Applied the four selfhost1 commits after its export (classifier, census, hot functions/report, and
+the chunk/duplicate-def fix) and re-ran the measurements on this branch's base, which is newer than
+the 2026-11-03 base used for the original run.
+
+The full census finished all 156 files whole in one 600 s-per-file pass (no chunking, no errors):
+**3,159 top-level functions, 21 accepted (0.66%)**, 3,138 rejected, 3,538 methods.  The 21 are the
+same six files and the same functions as before; the seven extra functions on the newer base are all
+rejected, so the accepted count and the hot result are unchanged.  Top rejection reasons: 940
+unsupported import, 828 imported-and-redefined name, 497 not emitted, 234 tuple-element type, 220
+`os.environ.get()`.  `dtrt.py` is 5/167 (3.0%); 14 of the 15 largest files are at 0%.
+
+The three cold builds were profiled again; **0 of the 30 hottest functions are accepted**.  `walk`
+(2.264 s) leads, then `_etype` (1.101 s) and `_is_str_expr` (0.591 s); 22 of the 30 are in
+`pyfunc.py`.  `census.json` and `hot.json` are regenerated and `CENSUS.md` has the updated tables.
+
+Tests on this commit: `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files` (1 skip) and
+`test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.  No compiler file was edited.
+
+## 2026-11-03 -- selfhost1: census of the compiler on the typed path
+
+Measured, not changed: which of the compiler's own top-level functions the CPython hybrid's typed
+selection accepts, which are hot, and why the rest fall off.  No compiler file was edited.
+
+`tools/selfhost_census.py` analyses each file whole with `ail_cpython_hybrid._analysis` and `_select`,
+without building an extension, one file per process under a 1.5 GB `RLIMIT_AS` and a 300 s timeout.
+Over the 156 scope files (204,816 lines) there are **3,152 top-level functions, 21 accepted (0.67%)**,
+and 3,538 methods (counted, no verdict).  The 21 live in six files (`prelude_ailarray.py` 6,
+`dtrt.py` 5, `hash_prelude.py` 5, `prelude_fraction.py` 2, `strt.py` 2, `prelude_array.py` 1);
+14 of the 15 largest files are at 0% and `dtrt.py` is 5/167 (3.0%).  `dtrt.py` and `strt.py` hit the
+300 s timeout in the batched pass but finish whole with a longer limit (`dtrt.py` about 150 s here),
+so both were rerun whole and no file is recorded `chunked`.  The chunk fallback now keeps every
+module-level statement; the earlier slice dropped it and misclassified all 167 `dtrt.py` functions.
+The top two rejection reasons are module-level, 56% of all rejections: an unsupported import (940) and
+a name that is imported and also defined again (827).  Because the typed path analyses a program
+whole, one such line rejects every function in the file.
+
+Three cold builds (`chain_relax`, `tree_fold`, `tally_lang`) were profiled with `cProfile`, parent and
+`pyc.py` child both, into `lab/selfhost/hot.json` (`lab/selfhost/hot_functions.py`).  **0 of the 30
+hottest functions are accepted.**  `fastwalk.walk` alone is 4.53 s of the summed `tottime`; 25 of the
+30 are in `pyfunc.py`, the rest in `fastwalk.py`, `bigcap.py` and `boolkind.py`.  The report is
+`lab/selfhost/CENSUS.md`.
+
+`tools/update_manifest.py --check` passes; `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.
 
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
