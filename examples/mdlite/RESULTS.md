@@ -1,7 +1,7 @@
 # mdlite results
 
 - Date: 2026-11-04
-- App commit: `9b93694` (`examples/mdlite/mdlite.py`, 336 lines)
+- App commit: `9b93694` (`examples/mdlite/mdlite.py`, 335 lines)
 - Oracle: CPython 3.12.3
 - Host: GitHub Actions runner, Linux, 4 cores
 
