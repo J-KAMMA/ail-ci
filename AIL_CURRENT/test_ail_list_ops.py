@@ -378,6 +378,11 @@ fn main() -> int {
         self.assertEqual((result.returncode, result.stdout.decode(), result.stderr.decode()), (0, want, ''))
 
 
+def _without_site(stderr):
+    return b''.join(line for line in stderr.splitlines(keepends=True)
+                    if not line.startswith(b'  raised near '))
+
+
 class AssertTests(unittest.TestCase):
     setUp = support.CObjectTests.setUp
     write = support.CObjectTests.write
@@ -398,7 +403,7 @@ class AssertTests(unittest.TestCase):
     return 0;
 }'''
         result = self.run_source('assert_fail', source)
-        self.assertEqual((result.returncode, result.stdout, result.stderr),
+        self.assertEqual((result.returncode, result.stdout, _without_site(result.stderr)),
                          (1, b'before\n', b'AssertionError: x is 3\n'))
 
     def test_bare_assert_and_numeric_messages(self):
@@ -408,7 +413,8 @@ class AssertTests(unittest.TestCase):
         for number, (body, message) in enumerate(cases):
             with self.subTest(body=body):
                 result = self.run_source('assert_form%d' % number, 'fn main() -> int { %s return 0; }' % body)
-                self.assertEqual((result.returncode, result.stdout, result.stderr), (1, b'', message))
+                self.assertEqual((result.returncode, result.stdout, _without_site(result.stderr)),
+                                 (1, b'', message))
 
     def test_assert_is_catchable_as_assertion_error_only(self):
         source = '''fn check(n: int) -> int { assert n >= 0, "negative: " + str(n); return n; }
@@ -425,7 +431,7 @@ fn main() -> int {
     return 0;
 }'''
         result = self.run_source('assert_catch', source)
-        self.assertEqual((result.returncode, result.stdout, result.stderr),
+        self.assertEqual((result.returncode, result.stdout, _without_site(result.stderr)),
                          (1, b'AssertionError negative: -5\nAssertionError []\nouter negative: -1\nraised\n7 4\n',
                           b'AssertionError: seen was 4\n'))
 

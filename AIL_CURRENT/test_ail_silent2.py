@@ -286,7 +286,8 @@ class DequeNan(unittest.TestCase):
         checks = [i for i, line in enumerate(lines) if 'C119' in line]
         self.assertEqual(len(checks), 4)
         for i in checks:
-            self.assertRegex(lines[i - 1] + lines[i], r'!=')
+            # the site store sits between the guard and the die, so look back past it
+            self.assertRegex(''.join(lines[max(0, i - 2):i + 1]), r'!=')
             for j in range(i + 1, min(i + 4, len(lines))):
                 self.assertNotIn('C119', lines[j])
 

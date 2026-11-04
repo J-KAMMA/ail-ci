@@ -83,7 +83,8 @@ def _run(directory, name, source, general):
 
 
 def _last_line(stderr):
-    lines = [line for line in stderr.decode('utf-8', 'replace').splitlines() if line.strip()]
+    lines = [line for line in stderr.decode('utf-8', 'replace').splitlines()
+             if line.strip() and not line.startswith('  raised near ')]
     return lines[-1] if lines else ''
 
 
