@@ -1,3 +1,32 @@
+## 2026-11-04 -- rbguide1 finish: a str argument keeps its per-call diagnostic
+
+The full suite on the re-applied guide change failed four modules (`test_ail_argument_type_details`,
+`test_ail_check_repair_context`, `test_ail_source_check`, `test_ail_collections`).  The cause was
+not the guide: `_claim` (pyreach s3) reports a `STR` call-site claim, and
+`_propagate_signatures_pass` folded every unanimous claim into the callee's signature, so
+`fn take(value:int)` called with `"wrong"` raised the declaration-site `signature_override`
+conflict ("'value' is annotated int in the source, but the caller also supplies str") instead of the
+per-call `operation="argument"` diagnostic of SEMANTICS section 212.  It also masked
+`Counter.subtract("a")`'s own named refusal.  A `STR` claim is evidence for an UNANNOTATED parameter
+only (`_infer_strparam_pass` moves exactly those, and `_plan_clones` already drops the str side of a
+mixed disagreement), so `_propagate_signatures_pass` now drops a `STR` claim on a parameter that
+carries a real source annotation.  Non-str claims still raise the parameter conflict, so an `int`
+supplied to a `str` annotation is unchanged.
+Diagnostic probes (`check`, HEAD vs the pre-fix tree, brace syntax, in /tmp/probes): `q1`
+`int` parameter + str argument now `passing str where take() wants int`, `operation="argument"`,
+`function: main`, `location_kind: source_statement`, exit 1 (base: the declaration conflict);
+`q7` float + str the same; `q3` (str annotation, int argument) keeps `signature_override`; `q2`
+(int/int), `q4` (unannotated str inference), `q5` (invalid annotation) and `q6` (unannotated mixed)
+are byte-identical to the base.  Python-syntax probes `p1`-`p9` (`bash ~/tools/cmp.sh`, default and
+general builds) match CPython stdout and exit, including an unannotated str helper, float widening,
+mixed call sites and `Counter.subtract("a")`.
+Tests on the final commit (`-j 2`): `test_ail_argument_type_details` (15), `test_ail_check_repair_context`
+(8), `test_ail_source_check` (33) and `test_ail_collections` (13) now pass, as do `test_ail_guide`
+(45, 43 samples), `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_refusal_messages`, `test_ail_pyreach_infer`, `test_ail_float_argument_widening` and
+`test_ail_type_details` (8 modules, 400 s, 0 failed).  `update_manifest.py --check` passes.
+Also corrected the previous entry's probe count (17 -> 22).
+
 ## 2026-11-04 -- rbguide1: re-apply the guide (job-guide1-11041926)
 
 Re-applied the accepted `guide1` change (`git diff b796a01..job-guide1-11041926`) on this tree.
@@ -9,7 +38,7 @@ and checks refusal, strict, general-path, exact-int and stop samples), registers
 applied cleanly; `manifest.d` was regenerated rather than taken from the patch.
 `tools/diff_ids.py` is not present on this tree (as earlier entries note); `tools/update_manifest.py`
 was run and `--check` passes.  No compiler or runtime change, so no DIFFERENCES row.
-Probes (17, `bash ~/tools/cmp.sh`, default and general builds) match CPython: typed numbers,
+Probes (22, `bash ~/tools/cmp.sh`, default and general builds) match CPython: typed numbers,
 containers with empty/negative/aliased lists, dataclass fields, text/bytes boundaries, files/argv,
 errors (try/else/finally, KeyError/ZeroDivisionError/ValueError/custom class), `sys.exit(3)`,
 math/re/json/collections/heapq+bisect/statistics, and `ail_ffi` cbrt.  The four int64-overflow

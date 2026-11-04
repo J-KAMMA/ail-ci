@@ -32563,6 +32563,15 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
             if len(n.args) != len(gparams):
                 continue
             site = _call_site_signature(n.args, gparams, caller_ctx)
+            # A `str` claim is call-site evidence for an UNANNOTATED parameter only (`_infer_
+            # strparam_pass` moves exactly those). Against a real source annotation the argument
+            # is a per-call rejection the call guard already names (`operation="argument"`,
+            # SEMANTICS.md section 212); feeding it to `_param_kinds` here would instead raise a
+            # declaration-site `signature_override` conflict and mask that diagnostic -- and would
+            # mask the named refusal a typed container's own guard gives. Drop it, the same way
+            # `_plan_clones` drops the str side of a mixed disagreement.
+            annotated = {a.arg for a in by_name[g].args.args if a.annotation is not None}
+            site = {p: c for p, c in site.items() if not (c == STR and p in annotated)}
             for pname, c in site.items():
                 claims.setdefault(g, {}).setdefault(pname, set()).add(c)
     changed = False
