@@ -3270,6 +3270,11 @@ class Lowering(TextLowering):
             raise NotS0('call binding of %s(): %s' % (f, error))
         params, ret = ctx.funcs[f]
         symbol = ctx.csym.get(f, f)
+        if (ret == P.STR and f not in getattr(ctx, 'owned_str_fns', ())
+                and symbol not in getattr(ctx, 'owned_str_fns', ())):
+            # A non-owned str return uses the legacy out-parameter ABI; the IR emits only the
+            # owned one, so let the whole function fall back to the legacy emitter.
+            raise NotS0('the str return of %s() is not owned by the caller' % f)
         if f in getattr(ctx, 'clones', {}):
             try:
                 site = P._call_site_signature(arg_nodes, params, ctx.base_ctx)
