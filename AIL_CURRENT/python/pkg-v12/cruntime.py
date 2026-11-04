@@ -311,12 +311,13 @@ static double ail_fsqrt(double x) {
 '''
 
 DIE = r'''
-/* Every build stores the current statement's "file:line" in ail_dbg_site, and an uncaught exception
-   or fatal trap names the last one on a line after its message. `ail build --debug` also adds `#line`
-   directives and builds at -O0 for gdb; the site store itself is not debug-only, because the default
-   build's runtime errors carry the source line too. The fatal tails (ail_die, ail_exception_uncaught)
-   print the site themselves and leave through the same flush-and-_Exit as before, so every drain
-   spliced in before them (boxed buffer, open files) runs in both. */
+/* The debug build stores the current statement's "file:line" in ail_dbg_site, and an uncaught
+   exception or fatal trap names the last one on a line after its message. `ail build --debug` also
+   adds line directives and builds at -O0 for gdb. Only that debug build records a site: a default
+   build's stderr must end with CPython's own exception line, so the emitter writes no AIL_DBG_SITE
+   call unless AIL_DEBUG_SITE is set, and the report below prints nothing without one (the fatal
+   tails leave through the same flush-and-_Exit as before, so every drain spliced in before them --
+   boxed buffer, open files -- runs in both). */
 #undef AIL_DBG_SITE
 AIL_LINK_STATE(const char *, ail_dbg_site, = NULL);
 #define AIL_DBG_SITE(s) (ail_dbg_site = (s))

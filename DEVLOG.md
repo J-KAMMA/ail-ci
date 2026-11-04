@@ -125,6 +125,41 @@ int reaching a typed function through a list item, a dict value and an attribute
 CPython; the int64-overflow probe `int("9223372036854775809")` is refused by name.  Final-state
 modules: `test_ail_examples_hybrid`, `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3` (4 modules, 0 failed).
+## 2026-11-04 -- relrterr4: the uncaught-trap source line is debug-only again (job-relrterr4-11042111)
+
+relrterr3b made every build record each statement's `file:line` and print `  raised near file:line`
+after an uncaught exception.  That broke eight integ modules: the extra line became stderr's last
+line (CPython's message is last), and the embedded source paths made the generated C differ between
+twin directories (and made the split planner refuse).  Chose option (a), the old behaviour: the site
+store and the report are `--debug` only again, while relrterr3b's real gain stays -- the CPython
+exception names (`KeyError: 'b'`, `IndexError: list index out of range`) in both builds.
+
+* `pyfunc._debug_where` returns None unless `AIL_DEBUG=1`, and `ail_chatgpt.py` passes no source map
+  to a release build, so release C has no `AIL_DBG_SITE("file:line")` call; the typed runtime tail
+  prints nothing without a site.  The general path was already debug-only.
+* The runtime comment that spelled the literal `#line` made `ccsplit.plan` return reason 3 (the
+  `'#line' in body` guard) after relrterr3b reworded it; it now says "line directives".
+* Deliberate test updates: `test_ail_debug`, `test_ail_debug_flush`, `test_ail_debug_lines`,
+  `test_ail_exception_context`, `test_ail_exception_values_core`, `test_ail_runtime_error_names`
+  (release output is the bare CPython line again), `test_ail_bound_builtin` (CPython's
+  `integer division or modulo by zero`) and `test_ail_bce` (the new `IndexError: ` prefix around the
+  known bytes wording).  DIFFERENCES `C?-job-relrterr4-11042111-1`.
+
+Probes (`/tmp/probes`, 10 programs, default and forced general builds, all vs CPython): list/str/
+bytes index, `pop` through an alias, dict key through an argument, `//` through an attribute,
+`//` through a list item, explicit `raise`, `assert`, an index reached through a dict value, and a
+division reached through a list item.  Every default and general build matches CPython's stdout,
+exit status and last stderr line (bytes keeps the known `bytes index out of range` wording); a
+`--debug` build still prints the bare message then `  raised near file:line`.
+
+Module counts before -> after (failures counted as unittest/subtest failures on this HEAD):
+test_ail_silent_diffs3 36 -> 0, test_ail_ail2py 3 -> 0, test_ail_bound_builtin 1 -> 0,
+test_ail_bce 2 -> 0, test_ail_cc_split 3 -> 0, test_ail_onelang_twins 11 -> 0;
+test_ail_int64_default and test_ail_classnames were green when measured (6 and 9 tests) and stay
+green.  relrterr3b's modules pass: test_ail_debug (10), test_ail_debug_flush (13),
+test_ail_debug_lines (9), test_ail_exception_context (6), test_ail_exception_values_core (14),
+test_ail_list_ops (15), test_ail_build_reports (4), test_ail_bigint (67),
+test_ail_runtime_error_names (2).  `python3 -m compileall -q -j 0 AIL_CURRENT tools` is clean.
 
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 

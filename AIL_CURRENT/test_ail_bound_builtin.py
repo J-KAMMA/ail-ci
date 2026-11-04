@@ -161,7 +161,7 @@ class BoundBuiltin(unittest.TestCase):
         ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
         self.assertEqual(ran.stdout.decode(), "start\ninit m\n")
         self.assertEqual(ran.returncode, 1)
-        self.assertIn("division by zero", ran.stderr.decode())
+        self.assertIn("integer division or modulo by zero", ran.stderr.decode())
 
 
 if __name__ == "__main__":

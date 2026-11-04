@@ -220,9 +220,10 @@ class DebugLines(unittest.TestCase):
                 self.assertFalse([line for line in release.splitlines() if line.startswith("#line")])
                 self.assertTrue([line for line in debug.splitlines() if line.startswith("#line")])
                 if name != "general.py":
-                    self.assertIn("AIL_DBG_SITE(\"", release)
+                    self.assertNotIn("AIL_DBG_SITE(\"", release)
                     stripped = "\n".join(line for line in debug.splitlines()
-                                         if not line.startswith("#line"))
+                                         if not line.startswith("#line")
+                                         and not line.strip().startswith("AIL_DBG_SITE(\""))
                     self.assertEqual([l for l in stripped.splitlines() if l.strip()],
                                      [l for l in release.splitlines() if l.strip()])
                 for each in ("rel", "dbg"):

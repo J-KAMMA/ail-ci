@@ -113,7 +113,8 @@ class Debug(unittest.TestCase):
         self.compile(source, self.dir / "debug", "--debug")
         plain, debug = self.run_program(self.dir / "plain"), self.run_program(self.dir / "debug")
         crash = "IndexError: list index out of range\n  raised near %s:3\n" % source
-        self.assertEqual((plain.returncode, plain.stdout, plain.stderr), (1, "start\n", crash))
+        self.assertEqual((plain.returncode, plain.stdout, plain.stderr),
+                         (1, "start\n", "IndexError: list index out of range\n"))
         self.assertEqual((debug.returncode, debug.stdout), (1, "start\n"))
         self.assertEqual(debug.stderr, crash)
 
@@ -148,7 +149,7 @@ class Debug(unittest.TestCase):
         self.assertEqual((sizes["a"], sizes["b"]), (sizes["c"], sizes["d"]))
         self.assertGreater(sizes["b"], sizes["a"])
         self.assertEqual(self.run_program(self.dir / "c").stderr,
-                         "IndexError: list index out of range\n  raised near %s:3\n" % source)
+                         "IndexError: list index out of range\n")
         self.assertIn("raised near", self.run_program(self.dir / "d").stderr)
 
     def line_table(self, program):
@@ -221,7 +222,7 @@ class DebugCommand(unittest.TestCase):
         done = self.ail("build", "prog.py", "-o", "prog_plain")
         self.assertEqual(done.returncode, 0, done.stderr)
         crash = subprocess.run([str(self.dir / "prog_plain")], capture_output=True, text=True)
-        self.assertEqual(crash.stderr, "IndexError: list index out of range\n  raised near %s:3\n" % source)
+        self.assertEqual(crash.stderr, "IndexError: list index out of range\n")
 
     def test_general_path_debug_build_says_what_it_lacks(self):
         source = self.dir / "slow.py"

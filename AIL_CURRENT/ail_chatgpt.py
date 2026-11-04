@@ -6516,7 +6516,8 @@ def main(argv=None):
             line_map = Path(tmp) / 'lines.json'
             line_map.write_text(json.dumps({str(key): [value[0], value[1]]
                                             for key, value in loading['source_map'].items()}), encoding='utf-8')
-            debug_env = {'AIL_LINE_MAP': str(line_map), **({'AIL_DEBUG': '1'} if debug else {})}
+            debug_env = ({'AIL_LINE_MAP': str(line_map), 'AIL_DEBUG': '1'} if debug
+                         else {'AIL_LINE_MAP': ''})
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
                                                 **({'AIL_NO_GENERAL': '1'} if contracts or strict else {}), **ffi_env, **debug_env})
             if prelude_units:
