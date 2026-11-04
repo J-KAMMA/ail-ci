@@ -1,7 +1,30 @@
-# `statistics` coverage (job-std_statistics-11011831)
+# `statistics` coverage (job-std_statistics-11011831, re-run job-stats2_rr1-11042346)
 
 Environment: CPython 3.12.3, the default build `python3 AIL_CURRENT/ail_chatgpt.py compile X.py --syntax python`
-(typed path first, general path as the fallback). Date: 2026-11-01.
+(typed path first, general path as the fallback). Date: 2026-11-01; the "Before (integ)" table is the
+job-stats2_rr1 re-run, 2026-11-04.
+
+## Before (integ e35b3b1)
+
+All 12 programs built with the default command in a temp directory (no cache). `typed` = no
+`built on the general path` note on stderr; `general` = that note; `refused` = exit 3, no executable.
+
+| program | result | first stderr line |
+| --- | --- | --- |
+| 01_score_summary.py | typed | |
+| 02_modes.py | typed | |
+| 03_string_modes.py | typed | |
+| 04_float_stats.py | typed | |
+| 05_quantiles_report.py | typed | |
+| 06_covariance_correlation.py | typed | |
+| 07_regression.py | refused | `07_regression.py:7:5: not in the subset: statistics.linear_regression used here is not built (...)` |
+| 08_normal_dist.py | refused | `08_normal_dist.py:5:5: not in the subset: statistics.NormalDist used here is not built (...)` |
+| 09_weighted_stats.py | typed | |
+| 10_grouped_stats.py | general | `note: 10_grouped_stats.py:8:5: built on the general path (about 20x slower) because statistics.variance with keyword arguments (mu=, xbar=, weights=...) is not built; ...` |
+| 11_geometric_harmonic.py | general | `note: 11_geometric_harmonic.py:6:5: built on the general path (about 20x slower) because statistics.geometric_mean used here is not built (...)` |
+| 12_error_handling.py | typed | |
+
+Before: 10 of 12 build (8 typed, 2 general), 2 refused.
 
 ## Before the fixes
 
