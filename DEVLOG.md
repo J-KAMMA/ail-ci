@@ -1,3 +1,11 @@
+## 2026-11-04 -- bench review fix: compile geomean is 0.80x
+
+Restored the compile-time geomean in `docs/COMPARISON-PYCOMP.md` and the previous DEVLOG entry from
+0.72x to 0.80x. Probe: `/tmp/probes/mkresults.py docs/COMPARISON-PYCOMP.md /tmp/rprobes/results` builds
+`result-*.json` from the document's own compile table, then
+`merge.py /tmp/rprobes/results --langs ail,python,codon,mypyc,nuitka` prints
+`**geomean** ... **0.80x** (n=8)`. No compiler or runner change.
+
 ## 2026-11-04 -- bench review fixes: merge heading, Codon sizes, error text, geomeans
 
 Fixed the five review defects in the pycomp comparison. `merge.py` builds its default heading with the
@@ -9,7 +17,7 @@ bytes/1024 (chain_relax 171 KiB from 174,904 B, echo_pack 187, ledger_bin 249, t
 mypyc 307-471, Nuitka about 4.3 MiB. `rail_transfer`/Codon now records the verbatim first error line
 (`main.py:27 (9-13): error: cannot typecheck 'self'`) instead of a paraphrase. Both geomeans now follow
 from the tables: wall 0.44x (eight completed tasks; 0.41x wrongly included the two unfinished ones) and
-compile 0.72x (was 0.80x). Re-ran `run_task.py --task chain_relax --smoke --langs ail,python,codon`:
+compile 0.80x. Re-ran `run_task.py --task chain_relax --smoke --langs ail,python,codon`:
 AIL 34,888 B, Codon 174,904 B, 32/32 cases each, Ir via callgrind. Probes: merge heading over four
 column sets, and a boundary program (empty list, negatives, large int, aliasing across a list, attribute
 and dict) matched CPython on both builds. Tests: test_compare_publish, test_ail_safetynet, test_ail_files,

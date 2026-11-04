@@ -127,7 +127,7 @@ Lower is better.
 ## Where AIL wins and where it loses
 
 - **Wall time.** AIL beats the best Python compiler on 7 of the 8 completed tasks (geometric mean 0.44x of the best). Its only loss is `chain_relax`, where Codon is 1.06x faster. Codon is the only speed rival: AIL is 0.14x mypyc's time and 0.06x Nuitka's as a geometric mean. Nuitka is slower than plain CPython on 7 of 8 tasks; mypyc beats CPython on 5 of 7 it could build.
-- **Compile time.** AIL beats the best builder on 6 of 8 tasks (geometric mean 0.72x of the best) and loses only to mypyc on `berth_sim` (2.04x) and `ticket_audit` (1.05x). mypyc is the fastest builder at 4.02-5.90 s; Codon takes 9.0-11.7 s and Nuitka 58-64 s.
+- **Compile time.** AIL beats the best builder on 6 of 8 tasks (geometric mean 0.80x of the best) and loses only to mypyc on `berth_sim` (2.04x) and `ticket_audit` (1.05x). mypyc is the fastest builder at 4.02-5.90 s; Codon takes 9.0-11.7 s and Nuitka 58-64 s.
 - **Binary size.** AIL wins on every task: 34-102 KiB against 171-1,129 KiB for Codon, 307-471 KiB for mypyc and about 4.3 MiB for Nuitka.
 - **Build disk.** AIL wins on 7 of 8 tasks (geometric mean 0.38x of the best); Codon is smaller on `berth_sim` (200 vs 228 KiB). Codon otherwise needs 184-1,147 KiB, mypyc 3.5-4.4 MiB and Nuitka about 46 MiB.
 - **Peak RSS.** AIL has the lowest peak RSS on 7 of 8 tasks (geometric mean 0.54x of the best); Nuitka is lower on `term_rank` (156.4 vs 158.1 MiB). Codon and mypyc are consistently higher (Codon up to 6.7x and mypyc up to 8.3x, both on `tally_lang`), and mypyc carries CPython with it.
