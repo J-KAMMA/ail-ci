@@ -1,3 +1,15 @@
+## 2026-11-04 -- prog17_rr1: update the stale typed-blockers enumerate-start expectation (job-prog17_rr1-11050712)
+
+`test_ail_typed_blockers.EnumerateStartTests.test_a_start_inside_a_fold_is_refused_by_name`
+still expected `sum(i * v for i, v in enumerate(xs, start=1))` to be refused by name, but the
+prog17 change now types the pair fold and adds the start with `ck_add`.  The test now checks that
+the typed path (and the default build) print what CPython prints, as `test_ail_prog16` already
+does for the comprehension form; no compiler change was needed.
+`test_ail_typed_blockers` 18/19 -> 19/19.  Probes `/tmp/probes/enumfold_literal.py`,
+`enumfold_routes.py`, `enumfold_plain.py`, `enumfold_floats.py`, `enumfold_slice.py`: general and
+default builds match CPython; typed alone matches for the literal/plain/routes probes and refuses
+the float-list fold and reversed `list[str]` slice by name for pre-existing unrelated reasons.
+
 ## 2026-11-04 -- prog17: reversed(str) and str-field row comprehensions typed (job-prog17_rr1-11050046)
 
 Re-run of prog17 (the original GitHub run was lost).  cProfile on the eight programs and strict
