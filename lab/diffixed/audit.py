@@ -7,10 +7,12 @@ Usage:
                                            # build and with AIL_UNIFIED_FORCE=1, compare CPython,
                                            # write AUDIT.md and exit non-zero on a difference
 
-A row is listed when its last table cell (the status/disposition column) starts with `fixed`
-and the whole row text contains neither `test_ail_` nor `lab/`.  Cells are split on `|` only
-outside backtick code spans, so a difference that quotes a `|` operator stays one cell.  One
-probe per row: the id with every character outside [A-Za-z0-9_] replaced by `_`.
+A row is listed when its status cell starts with `fixed` and the whole row text contains
+neither `test_ail_` nor `lab/`.  The status column is named by the table header, but a cell
+whose value starts with `fixed` is accepted wherever it sits, because some tables place the
+status in a different cell than their header claims.  Cells are split on `|` only outside
+backtick code spans, so a difference that quotes a `|` operator stays one cell.  One probe per
+row: the id with every character outside [A-Za-z0-9_] replaced by `_`.
 """
 import argparse
 import concurrent.futures
@@ -63,25 +65,57 @@ def split_cells(line):
     return cells
 
 
+def status_column(header):
+    """Index of the status/disposition cell in a table header, or None."""
+    for index, cell in enumerate(header):
+        if cell.strip().strip("*`").lower() in ("status", "disposition"):
+            return index
+    return None
+
+
 def table_rows():
+    """Yield (line, cells, status_index) for every data row of every table.
+
+    The status column is taken from the header of the table the row belongs to
+    (`status` or `disposition`), so it is found whether it is last or third.
+    """
     rows = []
+    status_index = None
     for line in DIFF.read_text(encoding="utf-8").splitlines():
         if not line.lstrip().startswith("|"):
+            status_index = None
             continue
         cells = split_cells(line)
-        if not cells or cells[0].lower() == "id":
+        if cells and cells[0].lower() == "id":
+            status_index = status_column(cells)
             continue
         if all(set(cell) <= set("-: ") for cell in cells):
             continue
-        rows.append((line, cells))
+        rows.append((line, cells, status_index))
     return rows
+
+
+def status_cell(cells, status_index):
+    """Return the cell holding the status, or None.
+
+    The header names the status column, but some tables put the status in a
+    different cell than their header claims, so a cell whose value starts with
+    `fixed` wins wherever it sits.  No audited table has two such cells.
+    """
+    if status_index is not None and status_index < len(cells):
+        if cells[status_index].startswith("fixed"):
+            return cells[status_index]
+    for index, cell in enumerate(cells):
+        if index and cell.startswith("fixed"):
+            return cell
+    return None
 
 
 def audited_rows():
     rows = []
-    for line, cells in table_rows():
-        status = cells[-1]
-        if not status.startswith("fixed"):
+    for line, cells, status_index in table_rows():
+        status = status_cell(cells, status_index)
+        if status is None:
             continue
         if "test_ail_" in line or "lab/" in line:
             continue
@@ -193,7 +227,7 @@ def write_audit(rows, results, elapsed):
                 findings.append((row_id, mode, res, status))
 
     lines.append("# diffixed audit: `fixed` rows that cite no test\n")
-    lines.append("Rows of `DIFFERENCES.md` whose last-cell status starts with `fixed` and whose")
+    lines.append("Rows of `DIFFERENCES.md` whose status cell starts with `fixed` and whose")
     lines.append("whole row text contains neither `test_ail_` nor `lab/`.  Every listed row has")
     lines.append("one probe in `lab/diffixed/`; each probe is built in the default build and with")
     lines.append("`AIL_UNIFIED_FORCE=1` (fresh temp dir, `AIL_NO_CACHE=1`, 120 s timeout,"
