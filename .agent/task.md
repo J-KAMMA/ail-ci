@@ -1,3 +1,55 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: binascii lane
+
+**What the change really does.** Adds a bundled AIL-source stdlib `AIL_CURRENT/stdlib/binascii.py` (hex/base64/crc32/crc_hqx), 12 lab programs + RESULTS.md, one test module, and manifest rows. No compiler or runtime file is touched. The worker's final text is empty; I verified against RESULTS.md.
+
+**Probes** (`/tmp/rprobes/p1..p9`, each run with `cmp.sh` in both builds; all matched CPython unless listed):
+- `p2_b64.py` (base64 encode/decode, strict mode, junk, padding), `p3_crc.py` (crc32 values −2⁶³…2⁶³−1, crc_hqx 0…2¹⁶+3), `p4_paths.py` (list/dict/attr/arg, mutate after hexlify/a2b/crc), `p5_unhex.py`, `p9_pad.py` (10 padding corners): identical to CPython, exit 0 both builds.
+- `p6_nofeature.py`: generated C identical HEAD vs base 2adbd4e (`--debug-dir`, `diff` clean).
+- Probe 1 and 8 differ; see defects.
+
+**Defects found**
+
+1. **Internal separator sentinel is a real byte string** (`b"\x00AIL_NO_SEP\x00"`, `_sep_byte` compares with `==`). `p1_hexsep.py`: `binascii.hexlify(b"ab", bytearray(b"\x00AIL_NO_SEP\x00"))`; `p8_edge.py`: same with bytes. Expected CPython 3.12.3: `ValueError: sep must be length 1.`, exit 1. Actual both builds: `sent b'6162'`, exit 0. A user value is silently reinterpreted as "no separator".
+2. **`_typename` has no `float`**. `p7_more.py`: `hexlify(b"abc", b"-", 2.0)` -> expected `TypeError: 'float' object cannot be interpreted as an integer`, actual `'object' object cannot be interpreted as an integer`; same for `crc32(b"abc", 2.5)` and `crc_hqx(b"abc", 2.5)`.
+3. **`bytes_per_sep` is not range-checked as a C int**. `p7_more.py`: `hexlify(b"abc", b"-", 2**31)` -> expected `OverflowError: Python int too large to convert to C int`, actual `b'616263'`, exit 0 (same for 2⁶³−1). Silently wrong output.
+4. **Non-ASCII `str` separator**. `p7_more.py`: `hexlify(b"abc", "\u0100", 1)` -> expected `ValueError: sep must be ASCII.`, actual `ValueError: byte must be in range(0, 256)` (also `"\u20ac"`).
+5. **Argument validation order**. `p8_edge.py`: `hexlify(b"abc", 5, 2.0)` -> expected the float `TypeError` above, actual `TypeError: object of type 'int' has no len()` (the sep check runs before the C-level `bytes_per_sep` conversion).
+
+**Report claims**
+- 11/12 build and match CPython in both builds: **verified** — `par_check -j 2 test_ail_std_binascii test_ail_safetynet`: `ok test_ail_std_binascii 514.3s`.
+- `11_crc_big` stops loudly with overflow: **verified** by the module's own assertion (test passes).
+- Default build takes the general path: **verified**, but the stated reason is wrong: the compiler printed `AIL_CURRENT/stdlib/binascii.py:45:5 ... because \`is None\` on something that is never None`, not "typed path cannot raise TypeError".
+- "Every error text exactly CPython's": **false** (defects 2, 4, 5).
+- crc32/crc_hqx mask value to 32/16 bits: **verified** (p3).
+- Only listed files changed; manifest `--check` clean: **verified** (`19 files, +760`).
+- Bench wall-times, "Before 0/12" (spot-checked only 01), 20 shards/PR checks: **unverified**.
+
+**Pre-existing**
+- `test_ail_safetynet` fails `S4_generators_gc` (`'5530537\n'` vs the longer expected output) identically on base 2adbd4e with the same `ulimit` — not caused by this change.
+- Stray probes left in `/tmp/rprobes` (`p_zlib.py`, `p_libm.py`, …) are from an earlier session; their diffs are CPython's missing `ail_ffi`, unrelated.
+
+Performance: not checked — no compiler/runtime code changed (no hot path).
+
+VERDICT: FIX
+
+1. `hexlify(b"ab", bytearray(b"\x00AIL_NO_SEP\x00"))` / same with bytes: expected `ValueError: sep must be length 1.` (exit 1), actual `b'6162'` (exit 0) — sentinel collision in `_sep_byte`.
+2. `hexlify(b"abc", b"-", 2.0)`, `crc32(b"abc", 2.5)`, `crc_hqx(b"abc", 2.5)`: expected `'float' object cannot be interpreted as an integer`, actual `'object' object cannot be interpreted as an integer` — `_typename` lacks `float`.
+3. `hexlify(b"abc", b"-", 2**31)`: expected `OverflowError: Python int too large to convert to C int`, actual `b'616263'` (exit 0) — `bytes_per_sep` not range-checked.
+4. `hexlify(b"abc", "\u0100", 1)`: expected `ValueError: sep must be ASCII.`, actual `byte must be in range(0, 256)`.
+5. `hexlify(b"abc", 5, 2.0)`: expected the float `TypeError`, actual `object of type 'int' has no len()` — argument check order differs from CPython.
+[commandcode stop=end_turn turns=40 out_tokens=32429]
+
+
+--- ORIGINAL TASK ---
 Lane: binascii
 
 > Re-run of binascii2, whose GitHub run was lost (no verdict 7.4 h after dispatch). If its branch job-binascii2-* has work commits, cherry-pick them first and continue; otherwise do the task from scratch on origin/integ. Commit and push after every sub-step, so a cancel does not lose the work again.
