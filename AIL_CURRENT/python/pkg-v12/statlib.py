@@ -28,7 +28,10 @@ import stdlib4
 from iterlower import _name, _call
 
 FUNCTIONS = ('mean', 'fmean', 'median', 'median_low', 'median_high', 'mode', 'multimode', 'pvariance', 'variance',
-             'pstdev', 'stdev', 'quantiles', 'covariance', 'correlation')
+             'pstdev', 'stdev', 'quantiles', 'covariance', 'correlation', 'geometric_mean', 'harmonic_mean',
+             'linear_regression')
+CENTRE = {'variance': 'xbar', 'stdev': 'xbar', 'pvariance': 'mu', 'pstdev': 'mu'}
+INT64_MAX = 9223372036854775807
 MIXED = ('mean', 'median', 'pvariance', 'variance')
 ELEMENT = ('median_low', 'median_high', 'mode')
 FLOAT_SPEC = set('feEgG%')
@@ -45,7 +48,7 @@ def helpers():
     if HELPERS is None:
         from pathlib import Path
         tree = ast.parse((Path(__file__).parent / 'strt.py').read_text(encoding='utf-8'))
-        top = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+        top = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
         uses = {}
         for name, node in top.items():
             uses[name] = {each.id for each in ast.walk(node) if isinstance(each, ast.Name) and each.id in top
@@ -189,6 +192,99 @@ class Stat:
                         env.setdefault(node.target.id, e)
         return env
 
+    # -- literal lists (the new forms need values known at build time) -----------------------------------------------------
+    def scope_nodes(self, scope):
+        """The nodes of one scope, not descending into a nested function or class."""
+        out = []
+        body = scope.body if isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)) else []
+        stack = list(body)
+        while stack:
+            node = stack.pop()
+            out.append(node)
+            for child in ast.iter_child_nodes(node):
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                    stack.append(child)
+        return out
+
+    def int_list(self, node):
+        """The ints of a list / tuple literal of int constants, or None."""
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            return None
+        out = []
+        for each in node.elts:
+            value = self.int_value(each)
+            if value is None:
+                return None
+            out.append(value)
+        return out
+
+    def int_value(self, node):
+        """The value of an int constant (a negative literal is a unary minus), or None."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            inner = self.int_value(node.operand)
+            return -inner if inner is not None else None
+        return None
+
+    def const_lists(self, scope):
+        """name -> values of a list[int] assigned once from a literal list that nothing can mutate afterwards.
+
+        The loads of such a name must be the data argument of a statistics call or `len(name)`; anything else
+        (printing it, passing it on, an item or a slice) could hand it out, so its values are not known."""
+        nodes = self.scope_nodes(scope)
+        stores = {}
+        for node in nodes:
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                stores.setdefault(node.target.id, []).append(node.value)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        stores.setdefault(target.id, []).append(node.value)
+                    else:
+                        for sub in ast.walk(target):
+                            if isinstance(sub, ast.Name):
+                                stores.setdefault(sub.id, []).append(None)
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                stores.setdefault(node.target.id, []).append(None)
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                for sub in ast.walk(node.target):
+                    if isinstance(sub, ast.Name):
+                        stores.setdefault(sub.id, []).append(None)
+        found = {}
+        for name, values in stores.items():
+            if len(values) != 1:
+                continue
+            values = self.int_list(values[0])
+            if values is not None:
+                found[name] = values
+        for name in list(found):
+            for node in nodes:
+                if not isinstance(node, ast.Name) or node.id != name or not isinstance(node.ctx, ast.Load):
+                    continue
+                parent = getattr(node, '_st_parent', None)
+                allowed = isinstance(parent, ast.Call) and node in parent.args and (
+                    isinstance(parent.func, ast.Name) and parent.func.id == 'len'
+                    or self.resolve(parent.func) in FUNCTIONS)
+                if not allowed:
+                    del found[name]
+                    break
+        return found
+
+    def values_of(self, node, scope):
+        """The values of an int list expression: a literal, or a name whose literal list cannot change."""
+        values = self.const_lists_values(node, scope)
+        if values is not None:
+            return values
+        literal = self.int_list(node)
+        return literal
+
+    def const_lists_values(self, node, scope):
+        if not isinstance(node, ast.Name):
+            return None
+        values = self.consts.get(id(scope), {}).get(node.id)
+        return values
+
     # -- walking -----------------------------------------------------------------------------------------------------------
     def run(self):
         top = self.tree
@@ -200,6 +296,7 @@ class Stat:
         for node in ast.walk(top):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 scopes.append((node, self.environment(node)))
+        self.consts = {id(scope): self.const_lists(scope) for scope, env in scopes}
         # the module level and each function, innermost scope first
         owner = {}
         for scope, env in scopes:
@@ -213,6 +310,7 @@ class Stat:
             scope, env = owner[id(call)]
             replacements[id(call)] = self.lower(call, env, scope)
         self.apply(replacements)
+        self.finish_linear()
         for node in ast.walk(top):
             if isinstance(node, ast.ExceptHandler) and node.type is not None:
                 types = node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
@@ -232,12 +330,75 @@ class Stat:
                 return node
         Swap().visit(self.tree)
 
+    def enclosing(self, node):
+        while node is not None and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+            node = getattr(node, '_st_parent', None)
+        return node
+
+    def subscript(self, name, index):
+        return ast.Subscript(value=ast.Name(id=name, ctx=ast.Load()), slice=ast.Constant(value=index),
+                             ctx=ast.Load())
+
+    def finish_linear(self):
+        """The typed path refuses a __repr__ on an injected class (dunders runs before the helper is added), so
+        linear_regression returns [slope, intercept]; lower the two field reads and the text forms here."""
+        linear = (new_name('linear_regression_int'), new_name('linear_regression_prop'))
+        scopes = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Call) \
+                    and isinstance(node.value.func, ast.Name) and node.value.func.id in linear:
+                target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+                if not isinstance(target, ast.Name):
+                    refuse(node, 'statistics.linear_regression: assign the result to one name (fit = ...) here')
+                scope = self.enclosing(node)
+                scopes.setdefault(id(scope), (scope, {}))[1].setdefault(target.id, []).append(node)
+        replacements = {}
+        for scope, names in scopes.values():
+            nodes = self.scope_nodes(scope)
+            for name, assigns in names.items():
+                stores = [n for n in nodes if isinstance(n, ast.Name) and n.id == name
+                          and not isinstance(n.ctx, ast.Load)]
+                if len(assigns) != 1 or len(stores) != 1:
+                    refuse(assigns[0], 'statistics.linear_regression: the result name is assigned more than once '
+                           'here; keep one assignment (fit = statistics.linear_regression(x, y))')
+                for use in nodes:
+                    if not isinstance(use, ast.Name) or use.id != name or not isinstance(use.ctx, ast.Load):
+                        continue
+                    parent = getattr(use, '_st_parent', None)
+                    if isinstance(parent, ast.Attribute) and parent.value is use and parent.attr in ('slope', 'intercept'):
+                        index = 0 if parent.attr == 'slope' else 1
+                        replacements[id(parent)] = ast.copy_location(self.subscript(name, index), parent)
+                    elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
+                            and parent.func.id in ('print', 'str') and use in parent.args:
+                        replacements[id(use)] = ast.copy_location(
+                            self.call('linear_repr', self.subscript(name, 0), self.subscript(name, 1)), use)
+                    elif isinstance(parent, ast.FormattedValue) and parent.value is use \
+                            and parent.format_spec is None and parent.conversion in (-1, 115):
+                        replacements[id(use)] = ast.copy_location(
+                            self.call('linear_repr', self.subscript(name, 0), self.subscript(name, 1)), use)
+                    else:
+                        refuse(assigns[0], 'statistics.linear_regression: the result is used here in a way that '
+                               'is not built (print it, format it, or read .slope / .intercept)')
+        if replacements:
+            class Swap(ast.NodeTransformer):
+                def visit(self, node):
+                    if id(node) in replacements:
+                        return replacements[id(node)]
+                    return self.generic_visit(node)
+            Swap().visit(self.tree)
+
     def lower(self, call, env, scope):
         name = self.resolve(call.func)
         if name == 'quantiles':
             return self.lower_quantiles(call, env)
         if name in ('covariance', 'correlation'):
             return self.lower_pair(call, name, env)
+        if name == 'linear_regression':
+            return self.lower_linear(call, env, scope)
+        if name in CENTRE and (call.keywords or len(call.args) == 2):
+            return self.lower_centre(call, name, env, scope)
+        if name in ('geometric_mean', 'harmonic_mean'):
+            return self.lower_mean(call, name, env, scope)
         if name == 'fmean' and (call.keywords or len(call.args) == 2):
             return self.lower_fmean(call, env)
         if call.keywords:
@@ -368,6 +529,174 @@ class Stat:
             refuse(call, "statistics.correlation(..., method='ranked') is not built; method='linear' is")
         return self.call('correlation_f', *args, method)
 
+    def lower_centre(self, call, name, env, scope):
+        """variance / pvariance / stdev / pstdev with the centre given (xbar= / mu=)."""
+        allowed = CENTRE[name]
+        kwargs = self.keyword(call, (allowed,))
+        if len(call.args) != 1:
+            refuse(call, 'statistics.%s takes the data as its one positional argument here (the centre is %s=)'
+                   % (name, allowed))
+        data = call.args[0]
+        centre = kwargs.get(allowed)
+        if centre is None or (isinstance(centre, ast.Constant) and centre.value is None):
+            refuse(call, 'statistics.%s with %s=None is not built here (leave the argument out)' % (name, allowed))
+        value = self.int_value(centre)
+        if value is None:
+            refuse(call, 'statistics.%s: %s= must be an int literal here; a computed centre is not built'
+                   % (name, allowed))
+        elem = self.list_elem(data, env)
+        if elem is None:
+            refuse(call, 'statistics.%s: the element type of the data is not known here; annotate the list '
+                   '(xs: list[int] = ...) or build it with a comprehension of int(...) / float(...)' % name)
+        if elem != 'int':
+            refuse(call, 'statistics.%s with %s= is built over a list of int here; a %s centre over floats needs '
+                   'CPython\'s exact fractions, which are not built' % (name, allowed, elem))
+        values = self.values_of(data, scope)
+        if values is None:
+            refuse(call, 'statistics.%s with %s=: the data must be a literal list of ints (its values are needed '
+                   'at build time to show the exact sum of squares fits 64 bits); use the two-pass form '
+                   'sum((x - %s) ** 2 for x in xs) / (len(xs) - 1) instead' % (name, allowed, allowed))
+        ss = 0
+        for x in values:
+            d = x - value
+            ss += d * d
+        if ss > INT64_MAX:
+            refuse(call, 'statistics.%s with %s=: the exact sum of squares leaves 64 bits for this data, so the '
+                   'value is not built on the typed path' % (name, allowed))
+        if name in ('variance', 'pvariance'):
+            kind = self.context(call)
+            if kind == 'text':
+                helper = 'variance_c_text'
+            elif kind in ('float', 'variable'):
+                helper = 'variance_c_float'
+            else:
+                refuse(call, 'statistics.%s of ints is an int when the answer is whole and a float otherwise, and '
+                       'this use needs one type: print it, format it with a float spec ({m:.2f}), or use '
+                       'statistics.fmean() (always a float) / sum(xs) / len(xs)' % name)
+            return self.call(helper, data, ast.Constant(value=value),
+                             ast.Constant(value=name == 'variance'))
+        return self.call('stdev_c', data, ast.Constant(value=value), ast.Constant(value=name == 'stdev'))
+
+    def harmonic_parts(self, values):
+        """(num, den) with num / den the result of harmonic_mean(values), when every int64 intermediate fits."""
+        count = len(values)
+        ms = []
+        es = []
+        for x in values:
+            t = 1.0 / x
+            e = 0
+            while t != float(int(t)):
+                t = t * 2.0
+                e = e + 1
+            ms.append(int(t))
+            es.append(e)
+        big = 0
+        for e in es:
+            if e > big:
+                big = e
+        total = 0
+        for i in range(count):
+            shift = big - es[i]
+            term = ms[i] << shift
+            if term > INT64_MAX - total:
+                return None
+            total += term
+        shift = 0
+        reduced = total
+        while reduced % 2 == 0:
+            reduced = reduced // 2
+            shift += 1
+        if big >= shift:
+            num = count << (big - shift)
+            den = reduced
+        else:
+            num = count
+            den = reduced << (shift - big)
+        if num > INT64_MAX or den > INT64_MAX:
+            return None
+        from fractions import Fraction
+        import statistics as module
+        if float(Fraction(num, den)) != module.harmonic_mean(values):
+            return None
+        return num, den
+
+    def lower_mean(self, call, name, env, scope):
+        if call.keywords:
+            refuse(call, 'statistics.%s with keyword arguments is not built here' % name)
+        if len(call.args) != 1:
+            refuse(call, 'statistics.%s takes the data as its one argument here' % name)
+        data = call.args[0]
+        elem = self.list_elem(data, env)
+        if elem is None:
+            refuse(call, 'statistics.%s: the element type of the data is not known here; annotate the list '
+                   '(xs: list[int] = ...) or build it with a comprehension of int(...) / float(...)' % name)
+        if elem != 'int':
+            refuse(call, 'statistics.%s of %s is not built on the typed path (list[int] is)' % (name, elem))
+        if name == 'geometric_mean':
+            return self.call('geometric_mean_int', data)
+        values = self.values_of(data, scope)
+        if values is None:
+            refuse(call, 'statistics.harmonic_mean of list[int] is built only for a literal list of positive ints '
+                   'whose exact reciprocal sum fits 64 bits (its values are needed at build time); use '
+                   'len(xs) / sum(1.0 / x for x in xs) instead')
+        if len(values) == 0:
+            refuse(call, 'statistics.harmonic_mean of an empty list raises StatisticsError; that form is not built '
+                   'on the typed path')
+        for x in values:
+            if x <= 0:
+                refuse(call, 'statistics.harmonic_mean of a non-positive value raises StatisticsError; that form is '
+                       'not built on the typed path')
+        if len(values) == 1:
+            return ast.Constant(value=values[0])
+        if self.harmonic_parts(values) is None:
+            refuse(call, 'statistics.harmonic_mean: the exact reciprocal sum of this data leaves 64 bits, so it is '
+                   'not built on the typed path; use len(xs) / sum(1.0 / x for x in xs) instead')
+        return self.call('harmonic_mean_int', data)
+
+    def lower_linear(self, call, env, scope):
+        kwargs = self.keyword(call, ('proportional',))
+        if len(call.args) != 2:
+            refuse(call, 'statistics.linear_regression takes the two data lists here')
+        left, right = call.args
+        for data in (left, right):
+            elem = self.list_elem(data, env)
+            if elem is None:
+                refuse(call, 'statistics.linear_regression: the element type of the data is not known here; '
+                       'annotate the lists (xs: list[int] = ...) or build them with a comprehension of int(...)')
+            if elem != 'int':
+                refuse(call, 'statistics.linear_regression of %s lists is not built on the typed path (list[int] is)'
+                       % elem)
+        prop = kwargs.get('proportional', ast.Constant(value=False))
+        if not (isinstance(prop, ast.Constant) and (prop.value is True or prop.value is False or prop.value is None)):
+            refuse(call, 'statistics.linear_regression(proportional=...) needs the literal True or False here')
+        if not prop.value:
+            return self.call('linear_regression_int', left, right)
+        vx = self.values_of(left, scope)
+        vy = self.values_of(right, scope)
+        if vx is None or vy is None:
+            refuse(call, 'statistics.linear_regression(proportional=True): both lists must be literal ints (their '
+                   'values are needed at build time to show the exact product sums fit 64 bits)')
+        if len(vx) != len(vy):
+            refuse(call, 'statistics.linear_regression: the lists have different lengths, which raises '
+                   'StatisticsError; that form is not built on the typed path')
+        if len(vx) < 2:
+            refuse(call, 'statistics.linear_regression of fewer than two points raises StatisticsError; that form '
+                   'is not built on the typed path')
+        sxy = 0
+        sxx = 0
+        for i in range(len(vx)):
+            product = vx[i] * vy[i]
+            square = vx[i] * vx[i]
+            if product > INT64_MAX or product < -INT64_MAX - 1 or square > INT64_MAX:
+                refuse(call, 'statistics.linear_regression(proportional=True): an exact product of this data '
+                       'leaves 64 bits, so it is not built on the typed path')
+            sxy += product
+            sxx += square
+            if sxy > INT64_MAX or sxy < -INT64_MAX - 1 or sxx > INT64_MAX:
+                refuse(call, 'statistics.linear_regression(proportional=True): an exact product sum of this data '
+                       'leaves 64 bits, so it is not built on the typed path')
+        return self.call('linear_regression_prop', left, right)
+
     def mixed(self, call, name, data, env, scope):
         kind = self.context(call)
         sample = ast.Constant(value=name == 'variance')
@@ -482,8 +811,16 @@ class Stat:
                 self.generic_visit(node)
                 node.name = mapping.get(node.name, node.name)
                 return node
+
+            def visit_ClassDef(self, node):
+                self.generic_visit(node)
+                node.name = mapping.get(node.name, node.name)
+                return node
         nodes = [Rename().visit(copy.deepcopy(node)) for name, node in top.items() if name in need]
-        self.out = '\n\n\n'.join(ast.unparse(n) for n in nodes)
+        text = '\n\n\n'.join(ast.unparse(n) for n in nodes)
+        if 'math.' in text:
+            text = 'import math\n\n\n' + text
+        self.out = text
 
 
 def rewrite(tree, inject):
@@ -499,8 +836,8 @@ def rewrite(tree, inject):
         if found is not None and found[0] == 'statistics' and not (
                 isinstance(each, ast.Name) and not isinstance(each.ctx, ast.Load)):
             refuse(each, 'statistics.%s used here is not built (mean, fmean, median, median_low, median_high, '
-                   'mode, multimode, pvariance, variance, pstdev, stdev, quantiles, covariance, correlation are, '
-                   'over a list of int)' % found[1])
+                   'mode, multimode, pvariance, variance, pstdev, stdev, quantiles, covariance, correlation, '
+                   'geometric_mean, harmonic_mean, linear_regression are, over a list of int)' % found[1])
     if stat.used:
         inject(tree, stat.out)
     return True
