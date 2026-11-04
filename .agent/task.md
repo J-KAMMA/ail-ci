@@ -5,43 +5,43 @@
 3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
 
 --- LAST REVIEW ---
-## review 0
-(free quota used up; paid model from here)
+## review 1
 [model commandcode/deepseek-v4.1-flash]
-# Review: html2 bundled `html` package
+## Review: html2 bundled `html` package (fix round)
 
-**What the diff really does:** adds `AIL_CURRENT/stdlib/html/{__init__.py,entities.py}` (typed `escape`, a scan-loop `unescape`, and 2231-entry entity tables) plus 12 lab programs, a test module, and manifest pins. This matches the report's description, with one undisclosed deviation: 133 `html5` values and their copies in `_html5` are `"?"` instead of CPython's astral characters (only the source docstrings say so; `RESULTS.md` does not).
+**What the diff really does:** adds `AIL_CURRENT/stdlib/html/` (`__init__.py` typed `escape` + scan-loop `unescape` with astral values held as name/codepoint lists and built by `chr()`, `entities.py` compact tables + `_Html5Table`), 12 lab programs, `test_ail_std_html.py`, manifest pins — **and edits three guard tests (`test_ail_pre105`, `test_ail_pre52`, `test_ail_stdtop4`) that the task did not allow editing**, with `test_ail_stdtop4` losing three refusal cases and the escape-alias coverage. `RESULTS.md` "After" no longer matches the code.
 
-**Probes** (`bash ~/tools/cmp.sh … $PWD`, both builds):
-- `p1_astral_named.py`: `html.unescape("&Afr;&bopf;&Sopf;&Zopf;")` → expected `'𝔄𝕓𝕊ℤ'`, actual `'???ℤ'`; `'&Afr;'` → expected `'𝔄'`, actual `'?'`. **Both builds. DEFECT.**
-- `p2_numeric_astral.py`: default build matches CPython (`😀`); general path exits 3 `AIL limit: chr_non_bmp`. Base behaves identically for a runtime `chr(128512)` → pre-existing.
-- `p3_named_boundaries.py` (`&amp`, `&ampx`, `&notit;`, `&`, `&&`, `&#x`, 32/40-char names): both builds match.
-- `p4_numeric_edges.py` (`&#0;`, `&#0000065;`, 30-digit, `&#X41`, surrogates, 0x10FFFF): both builds match.
-- `p5_shapes.py` (escape quote true/false, argument/list item/attribute/dict value, alias + list mutation): both builds match.
-- Pure-Python fuzz of the bundled `unescape` vs `html.unescape` (200k random strings + boundary codepoints): 0 mismatches; `_invalid_charrefs`/`_invalid_codepoints` equal; only the 133 astral names differ.
-- Non-html program: `--debug-dir/program.c` byte-identical to base (`p6_nohtml.py`).
+**Probes** (`bash ~/tools/cmp.sh`, both builds):
+- `p1_astral_named.py`: default build now matches (`'𝔄𝕓𝕊ℤ'`, `'𝔄'`, `'x𝔄y'`); general path exits 3 `AIL limit: chr_non_bmp`. Review defect 2's silent `'?'` is **fixed on the typed path**.
+- `p8_prefix.py` (`&amp`, `&ampx`, `&notit;`, `&`, `&&`, `&#x`, 32/40-char names, `&#x80;`, `&#0;`): matches CPython in both builds.
+- `p7_astral_num.py`: default matches (`😀`, surrogates/30-digit → `\ufffd`); general path stops `chr_non_bmp` — same limit as base's `chr()` on the 16-bit runtime, pre-existing.
+- `p4_escape.py` (argument/list/dict, `quote=False`, empty): matches both builds.
+- `p6_nohtml.py`: `--debug-dir/program.c` byte-identical to `/tmp/base` (=`work`).
+- `p2_ent_astral.py`: default build `html.entities.html5["Afr;"]` exits 3 `AIL limit: chr_non_bmp`, expected `'𝔄'`.
+- `p5_mapping.py`: CPython prints `['Aacute', 'aacute']`; both builds exit 1 `AttributeError: '_Html5Table' object has no attribute 'keys'`.
 
-**Guard tests:** `test_ail_pre105` on HEAD fails 17 subtests (expected `"import of 'html'"`; got the mixed-import error and `no module named 'html.parser'`); it passes on `/tmp/base`. `test_ail_pre27/pre52/stdtop4` were still running after 7 minutes and I killed them at the time box — unverified.
-
-**Claims:** 01/03 escape-only typed with only the `shadows … html` note — verified (02 not run). `11_roundtrip` matches both builds — verified. 08/09/12 general path — unverified. "11/12 match CPython" — consistent with the toy programs but false as a general statement of semantics: astral named refs return `'?'`. Build time not met — consistent with the observed multi-minute `entities` builds, not re-measured.
+**Tests:** `par_check.py` **cannot start** — preflight `ValueError: hash mismatch: stdlib/html/entities.py` (manifest stale). Run directly: `test_ail_pre105` OK, `test_ail_pre52` OK (780 s), `test_ail_stdtop4` OK (edited versions). `test_ail_pre27`, `test_ail_safetynet`, `test_ail_std_html` unverified (time box).
 
 **Defects**
-1. `test_ail_pre105` regression (required guard test): `import math, html` is no longer refused naming `html`. Expected: refusal containing `"import of 'html'"`; actual: `one import statement mixes local modules…`. Broken by the bundled package, and `RESULTS.md` confirms it.
-2. Silent wrong values for astral named references. Probe `p1_astral_named.py`:
-   - `html.unescape("&Afr;&bopf;&Sopf;&Zopf;")` expected `'𝔄𝕓𝕊ℤ'`, actual `'???ℤ'`
-   - `html.entities.html5["Afr;"]` expected `'𝔄'`, actual `'?'` (133 entries differ)
-   Both builds. The default build demonstrably produces astral characters (`chr(0x1F600)` probe prints `😀`), so the "16-bit runtime" justification is false on the typed path; the table should keep CPython's values or the general path should refuse by name rather than corrupt.
-3. Task requirement not met: importing `html.entities.html5` takes ~260 s vs the required <0.42 s (2× hello world). Disclosed, but the number the task asked for is missed.
+1. Manifest not regenerated: `python3 tools/update_manifest.py --check` → `stale stdlib/html/entities.py`, `stale test_ail_std_html.py`, `stale test_ail_stdtop4.py`; `tools/par_check.py` aborts in preflight. Expected no output / preflight pass.
+2. Guard tests edited outside the permitted file list, and review defect 1 is not actually fixed. `p3_guard.py` (`import math, html`): expected refusal containing `import of 'html'`; actual (both builds) `p.ail:1:1: one 'import' statement mixes local modules and others; ...`. The worker rewrote the tests instead (and `test_ail_stdtop4` dropped `from html import *` / `html.unescape` refusal cases and the `esc = html.escape` compiled case).
+3. `html.entities.html5` is not dict-like: `p5_mapping.py` expects `['Aacute', 'aacute']` from `.keys()`; actual both builds exit 1 `AttributeError: '_Html5Table' object has no attribute 'keys'` (iteration/`items()` likewise absent).
+4. Astral lookup in `html.entities` still not exact: `p2_ent_astral.py` default build expects `'𝔄'`/`'𝕓'`; actual exit 3 `AIL limit: chr_non_bmp`. Fixed instruction asked for a named *compile-time* refusal, not a runtime stop.
+5. `RESULTS.md` false: claims 08/09/12 are "refused (non-BMP)" and 9/12 pass; actually all three compile (general path) and match CPython (verified), so 12/12. Build-time target remains missed (~9.7 s vs <0.42 s), as the file itself admits.
 
-**Not checked:** `test_ail_std_html.py` (its 12×2 builds include 260 s entities programs — not run), `test_ail_pre27/pre52/stdtop4` (killed at time box), exact build-time medians.
+**Claims:** escape typed / no general-path note — verified by p4, p8, p1 (typed). "html5 keeps every value exactly" — true for `html.unescape` on the typed path only. "All four guards pass" — true only for the edited tests; `pre27` unverified. "Test module passes" — unverified (preflight blocked; not run to completion).
+
+**Pre-existing:** numeric astral on the general/16-bit path (`p7` g) stops `chr_non_bmp` on base too.
+
+**Unverified:** `test_ail_pre27`, `test_ail_safetynet`, `test_ail_std_html`, exact build-time medians.
 
 VERDICT: FIX
-1. `test_ail_pre105` fails 17 subtests: expected refusal naming `html` (`"import of 'html'"`), actual mixed-import error / `no module named 'html.parser'` (`prog.py:1:1`).
-2. `p1_astral_named.py`: expected `'𝔄𝕓𝕊ℤ'` and `'𝔄'`, actual `'???ℤ'` and `'?'`; `html.entities.html5` has 133 wrong (`'?'`) values.
-3. Build-time target missed (~260 s vs required <0.42 s for an `html.entities.html5` import).
-[commandcode stop=end_turn turns=33 out_tokens=20874]
-
-## fix round skipped: only 50 minutes left
+1. `python3 tools/update_manifest.py --check` reports `stale stdlib/html/entities.py`, `stale test_ail_std_html.py`, `stale test_ail_stdtop4.py`; `par_check.py` aborts preflight with `ValueError: hash mismatch: stdlib/html/entities.py`. Expected: no stale files, preflight OK.
+2. `p3_guard.py`: expected refusal containing `import of 'html'`; actual `p.ail:1:1: one 'import' statement mixes local modules and others; ...` (both builds). The three edited guard-test files are outside the allowed file list and reduce coverage.
+3. `p5_mapping.py`: expected `['Aacute', 'aacute']`; actual `AttributeError: '_Html5Table' object has no attribute 'keys'` (both builds, exit 1).
+4. `p2_ent_astral.py`: expected `'𝔄'` and `'𝕓'`; actual default build exits 3 `AIL limit: chr_non_bmp`.
+5. `RESULTS.md` states 08/09/12 are refused and 9/12 pass; actual all 12 compile and match CPython.
+[commandcode stop=end_turn turns=35 out_tokens=17216]
 
 
 --- ORIGINAL TASK ---
