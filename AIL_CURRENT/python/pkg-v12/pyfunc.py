@@ -41357,7 +41357,7 @@ _QC_ALIASED_OK = frozenset({
     'defaults', 'float64_pipelines', 'funcs_byterow', 'funcs_grid', 'handled_symbols',
     'internal_exact_bytes_fns', 'local_annotations', 'modconsts', 'non_escaping_helpers',
     'numeric_allowed_names', 'owned_bytes_fns', 'owned_str_fns', 'params', 'readonly_bytes_consumers',
-    'readonly_scalar_helpers', 'slist_names', 'stdin_root_bound',
+    'readonly_scalar_helpers', 'slist_names', 'stdin_root_bound', 'recursion_info',
     'untyped_str_sets', 'untyped_byte_sets'})
 _QC_INIT = [0]  # >0 while a Ctx / ClassInfo is being constructed: nothing can have queried it yet
 _QC_ALLOWED = (str, tuple, int, float, bool, type(None), frozenset)

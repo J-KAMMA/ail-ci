@@ -51,7 +51,8 @@ fn main()->int {let cb:Callable[[int],int]=double;return cb(3)+py_double(1);}'''
             self.assertNotRegex(generated,r'int64_t\s+double\s*\(')
             self.assertIn('v_cb = py_py_double;',generated)
             recursive_body=dict(info['c_units'][1])['double']
-            self.assertGreaterEqual(recursive_body.count('py_py_double('),2)
+            self.assertGreaterEqual(recursive_body.count('py_py_double__d('),2)
+            self.assertIn('return py_py_double__d(v_value, ail_depth + 1);',recursive_body)
             self.assertEqual([name for name,_ in info['c_units'][1]],['double','py_double','main'])
             self.assertIn('double',info['function_signatures'])
         finally:sys.path.pop(0)

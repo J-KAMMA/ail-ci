@@ -1,3 +1,24 @@
+## 2026-11-04 -- bce s2 finish: compile-time regression and old-emission tests (job-bces2c-11050255)
+
+Review 0 accepted the depth-in-a-register change, but the full suite named three modules.  All
+three reproduced here: `test_ail_borrowed_owner` and `test_ail_c_keyword_functions` asserted the
+old emission (`ail_depth--` and two direct `f(` calls), so they now check the intended shape
+(`f__d(..., ail_depth + 1)` wrapper, self-calls `f__d(..., ail_d + 1)` and no decrement).
+`test_ail_libc_names` was a real regression: a 2 KB, 44-function program took >180 s (0.8 s on
+`origin/integ`).  Cause: `ctx.recursion_info` is an aliased untracked dict, so `_qc_setattr` set
+`_qc_uncacheable` and `_etype`'s query memo was bypassed; `_etype` calls itself four times per
+`BinOp`, making a left-deep sum of 44 terms exponential.  `recursion_info` is built once and only
+read, so it joins `_QC_ALIASED_OK`; the module now runs in 1.6 s.  The safetynet `S4_generators_gc`
+failure was only my `ulimit -v 1500000` (2000 live generator stacks); it passes in 139 s without
+it and fails identically on `origin/integ` under the limit, so it is not a defect of the change.
+
+Final state: `par_check -j 2` of `test_ail_bce`, `test_ail_ir_s1/s2/s3`,
+`test_ail_range_checks`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_safetynet`, `test_ail_borrowed_owner`, `test_ail_c_keyword_functions` and
+`test_ail_libc_names` passes (11 modules, 0 failed).  The 5 codegen pins are byte-identical to
+`origin/integ`, `update_manifest.py --check` is clean, and no emitted C changed (the fix is
+compile-time only), so the earlier callgrind and same-C results still hold.
+
 ## 2026-11-04 -- bce s2 finish: exact recursion depth in a register (job-bces2c-11042316)
 
 Finished bces2 from its branch work (imported from `job-bces2-11040407`; the runner's review step
