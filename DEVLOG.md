@@ -1,3 +1,23 @@
+## 2026-11-04 -- selfhost1b: finish the compiler census on the current base
+
+Applied the four selfhost1 commits after its export (classifier, census, hot functions/report, and
+the chunk/duplicate-def fix) and re-ran the measurements on this branch's base, which is newer than
+the 2026-11-03 base used for the original run.
+
+The full census finished all 156 files whole in one 600 s-per-file pass (no chunking, no errors):
+**3,159 top-level functions, 21 accepted (0.66%)**, 3,138 rejected, 3,538 methods.  The 21 are the
+same six files and the same functions as before; the seven extra functions on the newer base are all
+rejected, so the accepted count and the hot result are unchanged.  Top rejection reasons: 940
+unsupported import, 828 imported-and-redefined name, 497 not emitted, 234 tuple-element type, 220
+`os.environ.get()`.  `dtrt.py` is 5/167 (3.0%); 14 of the 15 largest files are at 0%.
+
+The three cold builds were profiled again; **0 of the 30 hottest functions are accepted**.  `walk`
+(2.264 s) leads, then `_etype` (1.101 s) and `_is_str_expr` (0.591 s); 22 of the 30 are in
+`pyfunc.py`.  `census.json` and `hot.json` are regenerated and `CENSUS.md` has the updated tables.
+
+Tests on this commit: `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files` (1 skip) and
+`test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.  No compiler file was edited.
+
 ## 2026-11-03 -- selfhost1: census of the compiler on the typed path
 
 Measured, not changed: which of the compiler's own top-level functions the CPython hybrid's typed
@@ -24,6 +44,7 @@ hottest functions are accepted.**  `fastwalk.walk` alone is 4.53 s of the summed
 
 `tools/update_manifest.py --check` passes; `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
