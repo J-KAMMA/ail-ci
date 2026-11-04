@@ -79,7 +79,7 @@ def zlib_denominator():
     lib = library("libz.so.1")
     if lib is None:
         return None
-    text = Path("/usr/include/zlib.h").read_text(encoding="utf-8", errors="replace")
+    text = preprocess("/usr/include/zlib.h")
     return {n for n in nm(lib, only_t=True) if re.search(r"\b%s\s*\(" % re.escape(n), text)}
 
 
@@ -161,7 +161,7 @@ def split_params(text):
 
 
 def call_line(name, definition):
-    """A call of `name` with one simple value per parameter; None when the types defeat the table."""
+    """A statement calling `name` with one simple value per parameter; None when the types defeat the table."""
     inside = definition[definition.index("(") + 1:definition.rindex(")")]
     args = []
     for param in split_params(inside):
@@ -178,7 +178,9 @@ def call_line(name, definition):
             args.append("0")
         else:
             return None
-    return "%s(%s)" % (name, ", ".join(args))
+    call = "%s(%s)" % (name, ", ".join(args))
+    result = definition.rsplit("->", 1)[1].split(": ...")[0].strip()
+    return call if result == "None" else "print(%s)" % call
 
 
 def build_probe(work, blocks):
@@ -206,8 +208,9 @@ def build_probe(work, blocks):
                timeout=300, env=dict(__import__("os").environ, AIL_NO_CACHE="1"))
     if done.returncode == 0:
         return True, None
-    tail = [l for l in (done.stderr or done.stdout).strip().splitlines() if l.strip()]
-    return False, (tail[-1] if tail else "build failed")
+    lines = [l.strip() for l in (done.stderr or done.stdout).strip().splitlines() if l.strip()]
+    errors = [l for l in lines if "error:" in l]
+    return False, (errors[-1] if errors else (lines[-1] if lines else "build failed"))
 
 
 def probe(work, blocks, accepted, rejected):
@@ -236,7 +239,8 @@ def measure(name, header, denominator, cpp):
     finally:
         shutil.rmtree(work["dir"], ignore_errors=True)
     return dict(name=name, denominator=len(denominator), emitted=len(relevant), accepted=len(accepted),
-                extra=len(blocks) - len(relevant), skipped=skipped, rejected=rejected)
+                extra=len(blocks) - len(relevant), extra_names=sorted({n for n, _ in blocks} - denominator),
+                skipped=skipped, rejected=rejected)
 
 
 def table(rows):
@@ -274,8 +278,9 @@ def main(argv=None):
         for reason in row["skipped"]:
             key = re.sub(r"'[^']*'", "'...'", reason)
             reasons[key] = reasons.get(key, 0) + 1
-        print("%s: %d stubs outside the denominator (%s)" % (row["name"], row["extra"],
-              "float/long double variants of math.h" if row["name"] == "libm" else "none"))
+        print("%s: %d stubs outside the denominator%s" % (
+            row["name"], row["extra"],
+            (" (%s)" % ", ".join(row["extra_names"][:6])) if row["extra_names"] else ""))
         for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1])[:6]:
             print("  skipped %4d  %s" % (count, reason))
         for name, error in row["rejected"][:8]:
