@@ -1,3 +1,84 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I have enough to report. Time elapsed ~30 minutes.
+
+## What the change really does
+
+`lower_dict_of_records` in `ail_syntax.py` (run in `python_surface` before `tuplib`/`lower_dict_of_lists`) rewrites a local `d = {}` whose stores are equal-arity list literals (or `setdefault/get(k, [..])` / `set()`) into a `dict[key,int]` slot map plus one typed list per position; `pyfunc._explain_dict_of_containers` now names a one-argument `d.get(k)` as an s8 Optional blocker. Behaviour, not just docs — consistent with the report in broad strokes, but the report itself was truncated at "All reviewer probes match now" (stopped on `permission_denied`), so it states no actual results.
+
+## Defects
+
+1. **Role map ignores rebinding → another dict's / a non-row use is rewritten into a field list (wrong value, runtime TypeError, or C compile failure).**
+```python
+def main():
+    d = {}
+    d[1] = [10, True]
+    d[2] = [20, False]
+    e = {}
+    e[1] = [100, True]
+    e[2] = [200, False]
+    for v in d.values():        # v is later reused as e's row
+        print(v[0])
+    for k, v in e.items():
+        print(k, v[0])
+main()
+```
+CPython: `10\n20\n1 100\n2 200`, exit 0. HEAD (both builds): exit 1, empty stdout, `TypeError: list indices must be integers or slices, not list` — the d-loop body is rewritten to `e__f0[v]`. Base matches CPython.
+Single-dict variant `/tmp/rprobes/s_name_reuse.py` (`v=[7,8]` before `for v in d.values()`, then `v=[5,6]`): CPython `7\n10\n5\n6`; HEAD general build exits 1 with TypeError, default build **fails to compile** (`program.c … expected int64_t but argument is of type ail_list`). Base matches. Two dicts with distinct variable names work, so the trigger is the shared name. A failed candidate transform also leaves the preceding successful transform's output in place instead of restoring the source.
+
+2. **Unsound one-argument `d.get(k)` presence proof.** `_proven` compares `ast.unparse` of the key, ignoring reassignment.
+```python
+def main():
+    d = {}
+    k = 1
+    d[k] = ["a", 1]
+    k = 2
+    try:
+        r = d.get(k)
+        print(r[1])
+    except TypeError:
+        print("typeerror")
+    except KeyError:
+        print("keyerror")
+    print("end")
+main()
+```
+CPython: `typeerror\nend` (r is None). HEAD: `keyerror\nend` (the get became `d[k]`). Base matches CPython. The task only permits the one-arg get when `k in d` proves presence.
+
+3. **Manifest not regenerated on the final commit.** `python3 tools/update_manifest.py --check` prints `stale ail_syntax.py` (recorded `d9e577…`, actual `a4ea40…`). Consequently `tools/par_check.py` cannot start: `ValueError: hash mismatch: ail_syntax.py`. The task requires `update_manifest.py` then `--check` and the required tests on the final commit. Run directly, the new module passes 9/9 and `test_ail_safetynet` (5), `test_ail_pytyped_reach` (13), `test_ail_collections` (13) pass.
+
+## Claims check
+
+- Values/alias/`d[k][1]+=`, bool printing, insertion order, `values/items` unpack, `sorted(items(), key=…)`, dict-of-sets with duplicates, counters, `del`+alias, list position: **verified** (typed path, `p_order`, `p_loop`, `p_listpos`, `p_setpos`, `q_delreadd`, `q_sources`, `r_floatneg`, `s_single_overwrite`, `s_twodict_ok`, `r_boolassign`).
+- `sorted(d.items())` without key and one-arg get with `is None`: **verified** refused (default matches CPython, strict refuses).
+- "Any unlisted use leaves the source unchanged": **false** (defect 1).
+- `--exact-int`: **verified** exact on `9223372036854775808123`; default build exits 1 `OverflowError`.
+- `.ail` codegen pins: **verified** identical (`tools/codegen_diff.py --base work`); a non-feature `.py` produces byte-identical `program.c` vs base.
+- "ledger_bin's `acc[...]` blocker gone": **false** — the generic dict-of-containers message is still in the strict list (plus the new s8 get message); "`a[2] = False` gone" verified. "ticket_audit keeps only bytes-key blockers": **false** — `events[...]` dict-of-containers + s8 messages remain; `per.setdefault` message is gone. rail_transfer's `bysrc.setdefault` claim: **unverified** (pattern absent from `main.py`; blocker list identical HEAD vs base). "No task becomes typed": verified (all rc=3).
+- Set position in a record row (`d[k] = ["a", set()]`) is **not** typed: strict refuses downstream (`set[int] = set() …`); default falls back to general and matches CPython. The task asked for "set or list of int as a position too"; list positions do work.
+
+## Pre-existing
+None — every difference above reproduces only on HEAD, base matches CPython.
+
+## Unverified
+Speed/icount (change is a compile-time Python-surface lowering and `.ail` C is byte-identical); `test_ail_files`/`test_ail_corpus_findings3`; full suite (integrator's job).
+
+VERDICT: FIX
+
+1. Cross-dict / reused-name role corruption (`s_twodict_loop.py`, `s_name_reuse.py`): expected CPython stdout, actual TypeError/empty stdout or C compile failure.
+2. Unsound `d.get(k)` presence proof (`q_stalekey.py`): expected `typeerror`, actual `keyerror`.
+3. Stale manifest (`update_manifest.py --check` → `stale ail_syntax.py`), which blocks `par_check.py` and the required tests.
+[commandcode stop=end_turn turns=44 out_tokens=63290]
+
+
+--- ORIGINAL TASK ---
 Lane: pyreach
 
 > Re-run of pyreachs5b, whose GitHub run was lost: no verdict and no work commits. Its branch job-pyreachs5b-* has nothing to cherry-pick. Do the task below from scratch on origin/integ. Keep to 80 minutes: commit and push after every sub-step, so a cancel does not lose the work.
