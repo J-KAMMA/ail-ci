@@ -1,3 +1,22 @@
+## 2026-11-03 -- rails3: element-bounded range counters stay int64 (job-rails3-11040144)
+
+`for j in range(a[s], a[s + 1])` used to give `j` a tagged `ail_tint` in the default int64 build,
+paying `ail_tint_from_int64`/`ail_tint_add_i64` on every iteration; hoisting the bounds fixed it by
+accident.  A range counter always lies between its start and stop, so when every argument's C storage
+is int64 the counter is int64 too.  `bigcap._lp_range_value` now asks an emitter-supplied
+`int64_oracle` and, when all arguments pass, proves the full int64 bounds; the IR oracle in
+`ir/lower.py` accepts int constants, elements of int64 lists/bytes/maps, int fields and arithmetic of
+those, and refuses tagged parameters, tagged values, the exact int mode and general-path values.  The
+same call site is used by for loops and comprehensions.
+
+`t3.ail` mode 0 falls from 181,761,363 to 101,801,376 instructions (mode 1: 101,821,363 ->
+101,801,376, measured with callgrind I refs), and `fd`'s generated C now equals `fe`'s with no
+`ail_tint`.  Probes `listbound`, `fieldbound`, `negstep`, `empty` and `bounds` match CPython on the
+default and unified builds; the overflow probe stops loudly on both int64 paths and stays exact with
+`--exact-int`, and the >2**64 list-element probe stays exact.  Added
+`test_ail_range_element_bounds.py` and registered it in `tests.d`; the targeted modules,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on the final commit.
+
 ## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
 
 The daily fuzzer (seed 2076011178) printed `round((1e10 * 1e10))`.  On today's tree the seed already

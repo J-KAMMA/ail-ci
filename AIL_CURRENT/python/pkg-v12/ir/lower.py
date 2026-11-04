@@ -137,6 +137,56 @@ class Lowering(TextLowering):
         self.tracked = set()
         self.flow = None
 
+    def _range_arg_int64(self, node):
+        """Whether a range() argument's C storage is int64 in the default int64 build: an int constant,
+        an element of an int64 container (a list[int], a bytes/bytearray, an int-valued dict), an int
+        field, or arithmetic of those. A tagged parameter, a tagged value, a general-path value and the
+        exact int mode answer False, so those keep the tagged loop (lower.py's `_may_tint`)."""
+        P, ctx = self.P, self.ctx
+        try:
+            import intmode
+            if intmode.exact():
+                return False
+        except Exception:
+            return False
+        if isinstance(node, ast.Constant):
+            return type(node.value) is int and -(1 << 63) <= node.value < (1 << 63)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            return self._range_arg_int64(node.operand)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult,
+                                                               ast.FloorDiv, ast.Mod, ast.LShift,
+                                                               ast.RShift, ast.BitAnd, ast.BitOr,
+                                                               ast.BitXor)):
+            return self._range_arg_int64(node.left) and self._range_arg_int64(node.right)
+        if isinstance(node, ast.Attribute):
+            try:
+                return P._field_kind(node, ctx) == P.INT
+            except Exception:
+                return False
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+            try:
+                base = node.value
+                kind = P._etype(base, ctx)
+                if kind == P.LIST or kind == 'array':
+                    if isinstance(base, ast.Name):
+                        blocked = set()
+                        for attr in ('tstride', 'rowof', 'rowparam', 'gridparam', 'gridrow',
+                                     'handles', 'nlist', 'ndict', 'byterow', 'blist', 'strlist',
+                                     'srowtypes'):
+                            blocked.update(getattr(ctx, attr, ()) or ())
+                        if base.id in blocked:
+                            return False
+                    return P._etype(node, ctx) == P.INT
+                if kind == P.BYTES or kind == getattr(P, 'BYTEARRAY', None):
+                    return True
+                if kind in getattr(P, 'MAPS', ()):
+                    return P._mvk(kind) == P.INT
+                if P._numeric_field_kind(base, ctx) == P.LIST:
+                    return P._etype(node, ctx) == P.INT
+            except Exception:
+                return False
+        return False
+
     # ------------------------------------------------------------------ kinds and types
     def kind_type(self, kind, what, views=False, owned=False, local=False):
         """The IR type of a legacy kind. : read-only views (bytes) are allowed -- for
@@ -281,6 +331,7 @@ class Lowering(TextLowering):
             _d = _bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
             _d.classes = frozenset(getattr(ctx, 'classes', {}))
             _d.module_ints = _bigcap.module_int_consts(getattr(ctx, 'modconsts', None) or {})
+            _d.int64_oracle = self._range_arg_int64
             _proven = _bigcap.proven_int_names(fn, _d)
             _bounds = _bigcap.local_int_bounds(fn, _d)
             self.nonneg = {n for n, v in _bounds.items()
@@ -395,6 +446,8 @@ class Lowering(TextLowering):
                         return bool(_sig[1])
                     return False
                 return False
+            if isinstance(_e, (ast.Subscript, ast.Attribute)):
+                return not self._range_arg_int64(_e)
             return True
         _tint_targets, _int_targets = set(), set()
         for _n in ast.walk(fn):
