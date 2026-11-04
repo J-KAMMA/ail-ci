@@ -21417,7 +21417,10 @@ def debug_restore_lines(tree, source):
 
 def _debug_where(node):
     """AIL_LINE_MAP=<json {combined line: [path, line]}>: the (file name, line) a statement maps back
-    to, or None (and no file is read) when the build has no source map."""
+    to, or None (and no file is read) when the build has no source map. The site store is part of
+    the debug build only, so a release build records nothing even when a caller passes a map."""
+    if os.environ.get('AIL_DEBUG') != '1':
+        return None
     path = os.environ.get('AIL_LINE_MAP')
     if not path:
         return None
@@ -32565,6 +32568,8 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
             if a.arg == pname and a.annotation is not None:
                 given = _sig_override_kind(fn, pname, text)
                 expected = _annotation_kind(a.annotation, classes or ())
+                if given == STR:
+                    continue    # a str claim is reported at its call site as an argument error
                 if given != expected and not (expected == FLT and given == INT):
                     return True
     return False

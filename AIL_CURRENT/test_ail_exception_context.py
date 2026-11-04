@@ -123,9 +123,6 @@ class ExceptionContextTests(unittest.TestCase):
                 self.assertEqual(build.returncode, 0, build.stderr.decode(errors='replace')[:2048])
                 result = subprocess.run([str(binary)], capture_output=True, timeout=30)
                 want = expected
-                if statement.startswith('assert'):
-                    want = (expected[0], expected[1],
-                            expected[2] + b'  raised near ' + str(source).encode() + b':3' + os.linesep.encode())
                 self.assertEqual((result.returncode, result.stdout, result.stderr), want)
 
 
