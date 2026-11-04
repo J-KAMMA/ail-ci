@@ -127,7 +127,7 @@ seconds, median of 3 runs, on the GitHub Actions runner used for this task, with
 
 | Program | Wall time (s) | Binary bytes |
 | --- | ---: | ---: |
-| `python3` 3.12 | 1.055 | — |
-| AIL step 6 (`--strict`) | 0.372 | 86,216 |
+| `python3` 3.12 | 1.018 | — |
+| AIL step 6 (`--strict`) | 0.377 | 90,312 |
 
 The 50 MB file is not committed.
