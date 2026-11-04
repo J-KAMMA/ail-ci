@@ -6,13 +6,15 @@ CPython 3.12's `binascii` (written in C), including the exact `binascii.Error` t
 
 Supported: hexlify / b2a_hex (with `sep` and `bytes_per_sep`), unhexlify / a2b_hex, b2a_base64,
 a2b_base64 (with `strict_mode`), crc32 (table-driven, polynomial 0xEDB88320) and crc_hqx (CCITT,
-polynomial 0x1021).  `bytes`, `bytearray` and, where CPython does, an ASCII `str` are accepted.
+polynomial 0x1021).  `bytes` and `bytearray` are accepted everywhere; an ASCII `str` is accepted
+only by unhexlify / a2b_hex / a2b_base64, as in CPython.
 
 Not provided: b2a_uu, a2b_uu, b2a_qp, a2b_qp.
 """
 
 _HEX = "0123456789abcdef"
 _B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+_NO_SEP = b"\x00AIL_NO_SEP\x00"
 
 
 class Error(ValueError):
@@ -21,6 +23,34 @@ class Error(ValueError):
 
 class Incomplete(Exception):
     pass
+
+
+def _typename(data):
+    if isinstance(data, bool):
+        return "bool"
+    if isinstance(data, int):
+        return "int"
+    if isinstance(data, str):
+        return "str"
+    if isinstance(data, bytes):
+        return "bytes"
+    if isinstance(data, bytearray):
+        return "bytearray"
+    if isinstance(data, list):
+        return "list"
+    if isinstance(data, tuple):
+        return "tuple"
+    if isinstance(data, dict):
+        return "dict"
+    if data is None:
+        return "NoneType"
+    return "object"
+
+
+def _buffer(data: bytes) -> bytes:
+    if not isinstance(data, bytes) and not isinstance(data, bytearray):
+        raise TypeError("a bytes-like object is required, not '%s'" % _typename(data))
+    return bytes(data)
 
 
 def _ascii_bytes(data):
@@ -34,7 +64,27 @@ def _ascii_bytes(data):
             out.append(c)
             i = i + 1
         return bytes(out)
-    return bytes(data)
+    if isinstance(data, bytes) or isinstance(data, bytearray):
+        return bytes(data)
+    raise TypeError("argument should be bytes, buffer or ASCII string, not '%s'" % _typename(data))
+
+
+def _sep_byte(sep):
+    if sep is _NO_SEP or sep == _NO_SEP:
+        return -1
+    if isinstance(sep, str):
+        if len(sep) != 1:
+            raise ValueError("sep must be length 1.")
+        return ord(sep)
+    if isinstance(sep, bytes):
+        if len(sep) != 1:
+            raise ValueError("sep must be length 1.")
+        return sep[0]
+    if isinstance(sep, bytearray) or isinstance(sep, list) or isinstance(sep, tuple):
+        if len(sep) != 1:
+            raise ValueError("sep must be length 1.")
+        raise TypeError("sep must be str or bytes.")
+    raise TypeError("object of type '%s' has no len()" % _typename(sep))
 
 
 def _hex_value(c):
@@ -97,20 +147,12 @@ _CRC32_TABLE = [
 ]
 
 
-def hexlify(data: bytes, sep: bytes = b"", bytes_per_sep: int = 1) -> bytes:
-    buf = _ascii_bytes(data)
+def hexlify(data: bytes, sep=_NO_SEP, bytes_per_sep: int = 1) -> bytes:
+    buf = _buffer(data)
+    sepc = _sep_byte(sep)
+    if not isinstance(bytes_per_sep, int):
+        raise TypeError("'%s' object cannot be interpreted as an integer" % _typename(bytes_per_sep))
     out = bytearray()
-    sepc = -1
-    if len(sep) != 0:
-        if isinstance(sep, str):
-            if len(sep) != 1:
-                raise ValueError("sep must be length 1.")
-            sepc = ord(sep)
-        else:
-            sb = bytes(sep)
-            if len(sb) != 1:
-                raise ValueError("sep must be length 1.")
-            sepc = sb[0]
     n = len(buf)
     i = 0
     while i < n:
@@ -128,7 +170,7 @@ def hexlify(data: bytes, sep: bytes = b"", bytes_per_sep: int = 1) -> bytes:
     return bytes(out)
 
 
-def b2a_hex(data: bytes, sep: bytes = b"", bytes_per_sep: int = 1) -> bytes:
+def b2a_hex(data: bytes, sep=_NO_SEP, bytes_per_sep: int = 1) -> bytes:
     return hexlify(data, sep, bytes_per_sep)
 
 
@@ -153,8 +195,10 @@ def a2b_hex(hexstr) -> bytes:
     return unhexlify(hexstr)
 
 
-def b2a_base64(data: bytes, newline: bool = True) -> bytes:
-    buf = _ascii_bytes(data)
+def b2a_base64(data: bytes, *args, newline: bool = True) -> bytes:
+    if len(args) > 0:
+        raise TypeError("b2a_base64() takes exactly 1 positional argument (%d given)" % (1 + len(args)))
+    buf = _buffer(data)
     out = bytearray()
     n = len(buf)
     i = 0
@@ -183,7 +227,9 @@ def b2a_base64(data: bytes, newline: bool = True) -> bytes:
     return bytes(out)
 
 
-def a2b_base64(data, strict_mode: bool = False) -> bytes:
+def a2b_base64(data, *args, strict_mode: bool = False) -> bytes:
+    if len(args) > 0:
+        raise TypeError("a2b_base64() takes exactly 1 positional argument (%d given)" % (1 + len(args)))
     buf = _ascii_bytes(data)
     n = len(buf)
     out = bytearray()
@@ -241,7 +287,9 @@ def a2b_base64(data, strict_mode: bool = False) -> bytes:
 
 
 def crc32(data: bytes, value: int = 0) -> int:
-    buf = _ascii_bytes(data)
+    buf = _buffer(data)
+    if not isinstance(value, int):
+        raise TypeError("'%s' object cannot be interpreted as an integer" % _typename(value))
     crc = (value & 0xFFFFFFFF) ^ 0xFFFFFFFF
     i = 0
     while i < len(buf):
@@ -251,7 +299,9 @@ def crc32(data: bytes, value: int = 0) -> int:
 
 
 def crc_hqx(data: bytes, value: int) -> int:
-    buf = _ascii_bytes(data)
+    buf = _buffer(data)
+    if not isinstance(value, int):
+        raise TypeError("'%s' object cannot be interpreted as an integer" % _typename(value))
     crc = value & 0xFFFF
     i = 0
     while i < len(buf):

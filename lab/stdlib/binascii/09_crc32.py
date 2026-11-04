@@ -1,5 +1,6 @@
 import binascii
-import zlib
+
+ZLIB_WHOLE = 3456913684
 
 
 def main() -> None:
@@ -15,7 +16,7 @@ def main() -> None:
         pos = end
     print(whole)
     print(running)
-    print(zlib.crc32(data))
+    print(whole == ZLIB_WHOLE)
     print(binascii.crc32(b""))
     print(binascii.crc32(b"abc", 12345))
     print(binascii.crc32(b"abc", 0))
