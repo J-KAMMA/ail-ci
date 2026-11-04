@@ -51,6 +51,17 @@ KEYWORD = ("def show(x: int) -> None:\n    print(x)\n\n\ndef main() -> None:\n"
 GENERAL_IMPORT = ("from dep import value\n\ndef find(d: dict[int, int], k: int) -> int | None:\n"
                   "    return d.get(k)\n\n\ndef main() -> None:\n"
                   "    print(find(value(), 1))\n\n\nmain()\n")
+CLASS_SCOPE = ("x = 's'\nclass C:\n    x = 1\n    def f(self):\n"
+               "        print(x)\nC().f()\n")
+GLOBAL_DEF = ("def g():\n    return 1\nclass C:\n    def g(self):\n        return 2\n"
+              "    def f(self):\n        print(g)\nC().f()\n")
+LAMBDA_SCOPE = ("def f():\n    x = 's'\n    g = lambda x: x\n    print(g(2), x)\nf()\n")
+GLOBAL_DECL = ("x = 's'\ndef f(cond: bool) -> None:\n    global x\n    if cond:\n        x = 1\n"
+               "    print(x)\nf(False)\n")
+GLOBAL_READ = ("y = 's'\ndef f() -> None:\n    global y\n    print(y)\nf()\n")
+NONLOCAL_SCOPE = ("def f():\n    x = 's'\n    def g():\n        nonlocal x\n        x = 1\n"
+                  "        print(x)\n    g()\nf()\n")
+COMPREHENSION_SCOPE = ("x = 's'\ndef f():\n    print([x for x in range(3)])\n    print(x)\nf()\n")
 
 
 def setUpModule():
@@ -311,6 +322,56 @@ class Protocol(LspCase):
             answer = self.client.request("textDocument/hover", {
                 "textDocument": {"uri": uri}, "position": {"line": 2, "character": character}})
             self.assertIsNone(answer["result"])
+
+    def test_hover_skips_a_class_body_for_a_method(self):
+        _, uri = self.open("class_scope.py", CLASS_SCOPE)
+        self.client.diagnostics(uri)       # the class shape is a general-path warning; hover is independent
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 4, "character": 14}})
+        self.assertEqual(answer["result"]["contents"]["value"], "`x`: `str`")
+        _, uri = self.open("global_def.py", GLOBAL_DEF)
+        self.client.diagnostics(uri)
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 6, "character": 14}})
+        self.assertIn("def g()", answer["result"]["contents"]["value"])
+        self.assertNotIn("self", answer["result"]["contents"]["value"])
+
+    def test_hover_treats_a_lambda_as_a_scope(self):
+        _, uri = self.open("lambda_scope.py", LAMBDA_SCOPE)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        for character in (15, 18):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": 2, "character": character}})
+            self.assertIsNone(answer["result"])
+        outer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 16}})
+        self.assertEqual(outer["result"]["contents"]["value"], "`x`: `str`")
+
+    def test_hover_resolves_global_and_nonlocal_declarations(self):
+        _, uri = self.open("global_decl.py", GLOBAL_DECL)
+        self.client.diagnostics(uri)       # the global assignment is a general-path warning; hover is independent
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 5, "character": 10}})
+        self.assertIsNone(answer["result"])
+        _, uri = self.open("global_read.py", GLOBAL_READ)
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 10}})
+        self.assertEqual(answer["result"]["contents"]["value"], "`y`: `str`")
+        _, uri = self.open("nonlocal_scope.py", NONLOCAL_SCOPE)
+        answer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 5, "character": 14}})
+        self.assertIsNone(answer["result"])
+
+    def test_hover_treats_a_comprehension_as_a_scope(self):
+        _, uri = self.open("comprehension_scope.py", COMPREHENSION_SCOPE)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        for character in (12, 15):
+            answer = self.client.request("textDocument/hover", {
+                "textDocument": {"uri": uri}, "position": {"line": 2, "character": character}})
+            self.assertIsNone(answer["result"])
+        outer = self.client.request("textDocument/hover", {
+            "textDocument": {"uri": uri}, "position": {"line": 3, "character": 10}})
+        self.assertEqual(outer["result"]["contents"]["value"], "`x`: `str`")
 
     def test_a_type_error_in_a_strict_project_is_an_error(self):
         (self.dir / "strict").mkdir()

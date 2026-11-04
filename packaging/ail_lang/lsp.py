@@ -256,43 +256,101 @@ def _literal_type(node):
     return None
 
 
-def _scope_nodes(scope, upto_line=None):
-    """Nodes of one scope in source order, not descending into nested functions or classes."""
-    pending = list(getattr(scope, "body", ()))
+_SCOPE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+                ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _scope_roots(scope):
+    """The nodes a scope evaluates itself; nested scopes are separate."""
+    if isinstance(scope, ast.Lambda):
+        return [scope.body]
+    if isinstance(scope, ast.DictComp):
+        return [scope.key, scope.value]
+    if isinstance(scope, _COMPREHENSIONS):
+        return [scope.elt]
+    return list(getattr(scope, "body", ()))
+
+
+def _scope_nodes(scope):
+    """Nodes of one scope in source order, not descending into nested functions, lambdas, classes
+    or comprehensions."""
+    pending = list(_scope_roots(scope))
     while pending:
         node = pending.pop(0)
-        if upto_line is not None and getattr(node, "lineno", 0) > upto_line:
-            continue
         yield node
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(node, _SCOPE_TYPES):
             continue
         pending[0:0] = list(ast.iter_child_nodes(node))
 
 
-def _bind_target(target, uncertain):
+def _new_scope_info():
+    return {"annotations": {}, "literals": {}, "uncertain": set(), "functions": {},
+            "globals": set(), "nonlocals": set(),
+            "global_literals": {}, "global_uncertain": set(),
+            "nonlocal_literals": {}, "nonlocal_uncertain": set()}
+
+
+def _mark_uncertain(name, info):
+    """Record a non-literal binding, routed to the global or nonlocal scope it writes."""
+    if name in info["globals"]:
+        info["global_uncertain"].add(name)
+    elif name in info["nonlocals"]:
+        info["nonlocal_uncertain"].add(name)
+    else:
+        info["uncertain"].add(name)
+
+
+def _mark_literal(name, kind, info):
+    """Record one literal kind assigned to a name, routed like `_mark_uncertain`."""
+    if name in info["globals"]:
+        info["global_literals"].setdefault(name, set()).add(kind)
+    elif name in info["nonlocals"]:
+        info["nonlocal_literals"].setdefault(name, set()).add(kind)
+    else:
+        info["literals"].setdefault(name, set()).add(kind)
+
+
+def _bind_target(target, info):
     """Record a binding that is not a literal assignment as uncertain."""
     if isinstance(target, ast.Name):
-        uncertain.add(target.id)
+        _mark_uncertain(target.id, info)
     elif isinstance(target, (ast.Tuple, ast.List)):
         for item in target.elts:
-            _bind_target(item, uncertain)
+            _bind_target(item, info)
     elif isinstance(target, ast.Starred):
-        _bind_target(target.value, uncertain)
+        _bind_target(target.value, info)
+
+
+def _pattern_bindings(pattern):
+    names = []
+    for node in ast.walk(pattern):
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.append(node.rest)
+    return names
 
 
 def _scope_info(scope):
-    """(annotations, literal_types, uncertain, functions) for one scope.
+    """Bindings of one scope.
 
-    `literal_types` is the set of literal kinds assigned to a name; `uncertain` holds a name with
-    any non-literal binding. A name is typed only when every assignment in the scope is a literal of
-    one kind and nothing else binds it.
+    `annotations` maps a parameter or annotated name to its annotation text; `literals` maps a name
+    to the set of literal kinds assigned to it; `uncertain` holds a name with any non-literal
+    binding; `functions` maps a function name to its definition. Assignments under a `global` or
+    `nonlocal` declaration are kept apart so the scope they write can be resolved.
     """
-    annotations, literals, uncertain, functions = {}, {}, set(), {}
+    info = _new_scope_info()
+    annotations, literals, uncertain, functions = (info["annotations"], info["literals"],
+                                                   info["uncertain"], info["functions"])
 
     def annotate(name, text):
         if not text:
             return
+        if name in info["globals"] or name in info["nonlocals"]:
+            return
         if name in annotations and annotations[name] != text:
+            annotations.pop(name, None)
             uncertain.add(name)
         else:
             annotations[name] = text
@@ -301,11 +359,18 @@ def _scope_info(scope):
         if isinstance(target, ast.Name):
             kind = _literal_type(value)
             if kind is None:
-                uncertain.add(target.id)
+                _mark_uncertain(target.id, info)
             else:
-                literals.setdefault(target.id, set()).add(kind)
+                _mark_literal(target.id, kind, info)
         else:
-            _bind_target(target, uncertain)
+            _bind_target(target, info)
+
+    nodes = list(_scope_nodes(scope))
+    for node in nodes:
+        if isinstance(node, ast.Global):
+            info["globals"].update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            info["nonlocals"].update(node.names)
 
     args = getattr(scope, "args", None)
     if args is not None:
@@ -322,7 +387,10 @@ def _scope_info(scope):
                     annotate(argument.arg, text)
                 else:
                     uncertain.add(argument.arg)
-    for node in _scope_nodes(scope):
+    if isinstance(scope, _COMPREHENSIONS):
+        for generator in scope.generators:
+            _bind_target(generator.target, info)
+    for node in nodes:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             annotate(node.target.id, _annotation(node.annotation))
             if node.value is not None:
@@ -331,29 +399,53 @@ def _scope_info(scope):
             for target in node.targets:
                 assign(target, node.value)
         elif isinstance(node, ast.AugAssign):
-            _bind_target(node.target, uncertain)
+            _bind_target(node.target, info)
         elif isinstance(node, ast.NamedExpr):
             assign(node.target, node.value)
         elif isinstance(node, (ast.For, ast.AsyncFor)):
-            _bind_target(node.target, uncertain)
+            _bind_target(node.target, info)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 if item.optional_vars is not None:
-                    _bind_target(item.optional_vars, uncertain)
+                    _bind_target(item.optional_vars, info)
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                uncertain.add((alias.asname or alias.name).split(".")[0])
+                _mark_uncertain((alias.asname or alias.name).split(".")[0], info)
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                uncertain.add(alias.asname or alias.name)
+                _mark_uncertain(alias.asname or alias.name, info)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             functions[node.name] = node
         elif isinstance(node, ast.ClassDef):
-            uncertain.add(node.name)
+            _mark_uncertain(node.name, info)
         elif isinstance(node, ast.ExceptHandler):
             if node.name:
-                uncertain.add(node.name)
-    return annotations, literals, uncertain, functions
+                _mark_uncertain(node.name, info)
+        elif isinstance(node, ast.Match):
+            for case in node.cases:
+                for name in _pattern_bindings(case.pattern):
+                    _mark_uncertain(name, info)
+    return info
+
+
+def _bound(info, name):
+    return (name in info["annotations"] or name in info["literals"] or name in info["uncertain"]
+            or name in info["functions"])
+
+
+def _hover_text(name, info, extra_literals=(), extra_uncertain=False):
+    """The certain hover text for one resolved binding, or None."""
+    if name in info["annotations"]:
+        return "`%s`: `%s`" % (name, info["annotations"][name])
+    kinds = set(info["literals"].get(name, ())) | set(extra_literals)
+    uncertain = extra_uncertain or name in info["uncertain"]
+    if name in info["functions"] and not kinds and not uncertain:
+        return "```python\n%s\n```" % _signature(info["functions"][name])
+    if uncertain:
+        return None
+    if len(kinds) == 1:
+        return "`%s`: `%s`" % (name, next(iter(kinds)))
+    return None
 
 
 def _signature(node):
@@ -448,30 +540,140 @@ def _plain_name_token(text, tree, token):
     return False
 
 
-def _scopes_at(tree, line):
-    """Enclosing module/class/function nodes, outermost first."""
-    scopes = [tree]
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
-                and node.lineno <= line <= getattr(node, "end_lineno", node.lineno):
-            scopes.append(node)
-    scopes.sort(key=lambda node: getattr(node, "lineno", 0))
-    return scopes
-
-
-def _function_at(tree, name, line):
-    """The function definition a hover on `name` means, preferring the one around the cursor."""
-    found = [node for node in ast.walk(tree)
-             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
-    if not found:
+def _span(text, node):
+    """Absolute character span of an AST node, or None."""
+    try:
+        start = _char_index(text, node.lineno, node.col_offset)
+        end = _char_index(text, node.end_lineno, node.end_col_offset)
+    except (AttributeError, TypeError):
         return None
-    found.sort(key=lambda node: node.lineno)
-    inside = [node for node in found
-              if node.lineno <= line <= getattr(node, "end_lineno", node.lineno)]
-    if inside:
-        return inside[-1]
-    before = [node for node in found if node.lineno <= line]
-    return before[-1] if before else found[0]
+    return None if start is None or end is None else (start, end)
+
+
+def _body_start(text, scope):
+    body = getattr(scope, "body", None)
+    if isinstance(body, list) and body:
+        span = _span(text, body[0])
+        return span[0] if span else None
+    if isinstance(scope, ast.Lambda):
+        span = _span(text, scope.body)
+        return span[0] if span else None
+    return None
+
+
+def _in_arguments(text, scope, offset):
+    args = getattr(scope, "args", None)
+    if args is None:
+        return False
+    for argument in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+        if argument is None:
+            continue
+        span = _span(text, argument)
+        if span and span[0] <= offset < span[0] + len(argument.arg):
+            return True
+    return False
+
+
+def _scope_chain(text, tree, offset):
+    """Scopes containing the cursor, outermost first.
+
+    A function's defaults, annotations and decorators are evaluated in the enclosing scope, and a
+    parameter name belongs to the function, so only the body and the parameter names include it.
+    """
+    chain = [tree]
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            span = _span(text, child)
+            if span is None:
+                visit(child)
+                continue
+            start, end = span
+            if not (start <= offset <= end):
+                continue
+            if isinstance(child, _SCOPE_TYPES):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    body = _body_start(text, child)
+                    if body is not None and offset < body and not _in_arguments(text, child, offset):
+                        visit(child)
+                        return
+                chain.append(child)
+                visit(child)
+                return
+            visit(child)
+
+    visit(tree)
+    return chain
+
+
+def _scope_kind(scope):
+    if isinstance(scope, ast.Module):
+        return "module"
+    if isinstance(scope, ast.ClassDef):
+        return "class"
+    if isinstance(scope, _COMPREHENSIONS):
+        return "comprehension"
+    return "function"
+
+
+def _hover_in_chain(tree, chain, name):
+    """Resolve `name` through the cursor's scopes, then return a certain hover text or None."""
+    infos = {}
+
+    def info_for(scope):
+        key = id(scope)
+        if key not in infos:
+            infos[key] = _scope_info(scope)
+        return infos[key]
+
+    global_literals, global_uncertain = set(), False
+    nonlocal_literals, nonlocal_uncertain = set(), False
+    mode = None
+    for index in range(len(chain) - 1, -1, -1):
+        scope = chain[index]
+        info = info_for(scope)
+        kind = _scope_kind(scope)
+        if kind == "module":
+            if mode == "nonlocal":       # a nonlocal declaration cannot reach the module
+                return None
+            literals = (set(info["literals"].get(name, ())) | set(info["global_literals"].get(name, ()))
+                        | global_literals | nonlocal_literals)
+            uncertain = (name in info["uncertain"] or name in info["global_uncertain"]
+                         or global_uncertain or nonlocal_uncertain)
+            return _hover_text(name, info, literals, uncertain)
+        if kind == "class" and index != len(chain) - 1:
+            # A class body is not an enclosing scope for a method, lambda or comprehension.
+            continue
+        if mode == "global":
+            if name in info["globals"]:
+                global_literals |= info["global_literals"].get(name, set())
+                global_uncertain = global_uncertain or name in info["global_uncertain"]
+            continue
+        if mode == "nonlocal":
+            if kind == "class":
+                continue
+            if name in info["nonlocals"]:
+                nonlocal_literals |= info["nonlocal_literals"].get(name, set())
+                nonlocal_uncertain = nonlocal_uncertain or name in info["nonlocal_uncertain"]
+                continue
+            if _bound(info, name):
+                return _hover_text(name, info, nonlocal_literals,
+                                   name in info["uncertain"] or nonlocal_uncertain)
+            continue
+        if kind in ("function", "comprehension", "class"):
+            if name in info["globals"]:
+                mode = "global"
+                global_literals |= info["global_literals"].get(name, set())
+                global_uncertain = global_uncertain or name in info["global_uncertain"]
+                continue
+            if name in info["nonlocals"]:
+                mode = "nonlocal"
+                nonlocal_literals |= info["nonlocal_literals"].get(name, set())
+                nonlocal_uncertain = nonlocal_uncertain or name in info["nonlocal_uncertain"]
+                continue
+        if _bound(info, name):
+            return _hover_text(name, info)
+    return None
 
 
 def type_hover(text, position):
@@ -486,22 +688,8 @@ def type_hover(text, position):
         return None
     if not _plain_name_token(text, tree, token):
         return None
-    line = int(position.get("line") or 0) + 1
-    for scope in reversed(_scopes_at(tree, line)):
-        annotations, literals, uncertain, functions = _scope_info(scope)
-        if not (name in annotations or name in literals or name in uncertain or name in functions):
-            continue
-        if name in annotations:
-            return "`%s`: `%s`" % (name, annotations[name])
-        if name in functions and name not in literals and name not in uncertain:
-            return "```python\n%s\n```" % _signature(functions[name])
-        if name in uncertain:
-            return None
-        kinds = literals.get(name) or set()
-        if len(kinds) == 1:
-            return "`%s`: `%s`" % (name, next(iter(kinds)))
-        return None
-    return None
+    offset = _position_offset(text, position)
+    return _hover_in_chain(tree, _scope_chain(text, tree, offset), name)
 
 
 def apply_change(text, change):
