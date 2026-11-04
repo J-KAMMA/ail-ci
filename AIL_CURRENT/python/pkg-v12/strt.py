@@ -751,3 +751,183 @@ def fmean_weights_int(xs: list[int], ws: list[int]) -> float:
     for i in range(len(xs)):
         num += xs[i] * ws[i]
     return float(num) / den
+
+
+# -- the given centre (xbar= / mu=), geometric and harmonic mean, linear regression (job stats2)
+def ratio_float(num: int, den: int) -> float:
+    """num / den correctly rounded, for any two int64 values (den > 0), as CPython's int true division
+    and float(Fraction).  The quotient is scaled to 55 bits, the dropped bits kept as a sticky remainder."""
+    if num == 0:
+        return 0.0
+    neg = num < 0
+    a = num
+    if neg:
+        a = -a
+    e = 0
+    q = a // den
+    r = a % den
+    while q >= 36028797018963968:
+        if q % 2 == 1:
+            r = 1
+        q = q // 2
+        e = e + 1
+    while q < 18014398509481984:
+        if r >= den - r:
+            q = q * 2 + 1
+            r = r - (den - r)
+        else:
+            q = q * 2
+            r = r + r
+        e = e - 1
+    low = q % 4
+    q = q // 4
+    e = e + 2
+    if low > 2 or (low == 2 and (r != 0 or q % 2 == 1)):
+        q = q + 1
+    x = float(q)
+    while e > 0:
+        x = x * 2.0
+        e = e - 1
+    while e < 0:
+        x = x / 2.0
+        e = e + 1
+    if neg:
+        x = -x
+    return x
+
+
+def ss_centre(xs: list[int], c: int) -> int:
+    """sum((x - c)**2), the exact numerator of variance(xs, xbar=c) (CPython's _ss with c given)."""
+    total = 0
+    for x in xs:
+        d = x - c
+        total += d * d
+    return total
+
+
+def variance_c_text(xs: list[int], c: int, sample: bool) -> str:
+    check_var(len(xs), sample, "variance")
+    num = ss_centre(xs, c)
+    den = len(xs) - 1 if sample else len(xs)
+    if num % den == 0:
+        return str(num // den)
+    return str(ratio_float(num, den))
+
+
+def variance_c_float(xs: list[int], c: int, sample: bool) -> float:
+    check_var(len(xs), sample, "variance")
+    num = ss_centre(xs, c)
+    den = len(xs) - 1 if sample else len(xs)
+    return ratio_float(num, den)
+
+
+def stdev_c(xs: list[int], c: int, sample: bool) -> float:
+    if sample:
+        if len(xs) < 2:
+            raise ValueError("stdev requires at least two data points")
+    else:
+        if len(xs) < 1:
+            raise ValueError("pstdev requires at least one data point")
+    num = ss_centre(xs, c)
+    den = len(xs) - 1 if sample else len(xs)
+    return sqrt_of_frac(num, den)
+
+
+def geometric_mean_int(xs: list[int]) -> float:
+    n = len(xs)
+    message = "geometric mean requires a non-empty dataset containing positive numbers"
+    if n == 0:
+        raise ValueError(message)
+    for x in xs:
+        if x <= 0:
+            raise ValueError(message)
+    logs: list[float] = []
+    for x in xs:
+        logs.append(math.log(float(x)))
+    return math.exp(fsum_floats(logs) / n)
+
+
+def harmonic_mean_int(xs: list[int]) -> float:
+    """n / (the exact sum of the floats 1/x), rounded once: CPython's harmonic_mean over ints.
+    The lowering builds this only for a literal positive list whose scaled sum fits int64."""
+    n = len(xs)
+    if n < 1:
+        raise ValueError("harmonic_mean requires at least one data point")
+    ms: list[int] = []
+    es: list[int] = []
+    for x in xs:
+        if x < 0:
+            raise ValueError("harmonic mean does not support negative values")
+        if x == 0:
+            return 0.0
+        t = ratio_float(1, x)
+        e = 0
+        while t != float(int(t)):
+            t = t * 2.0
+            e += 1
+        ms.append(int(t))
+        es.append(e)
+    big = 0
+    for e in es:
+        if e > big:
+            big = e
+    s = 0
+    for i in range(n):
+        s += ms[i] << (big - es[i])
+    shift = 0
+    while s % 2 == 0:
+        s = s // 2
+        shift += 1
+    if big >= shift:
+        num = n << (big - shift)
+        den = s
+    else:
+        num = n
+        den = s << (shift - big)
+    return ratio_float(num, den)
+
+
+def linear_regression_int(xs: list[int], ys: list[int]) -> list[float]:
+    """[slope, intercept] for ordinary least squares, CPython 3.12's float algorithm (fsum, sumprod)."""
+    n = len(xs)
+    if len(ys) != n:
+        raise ValueError("linear regression requires that both inputs have same number of data points")
+    if n < 2:
+        raise ValueError("linear regression requires at least two data points")
+    fx = to_floats(xs)
+    fy = to_floats(ys)
+    xbar = fsum_floats(fx) / n
+    ybar = fsum_floats(fy) / n
+    dx: list[float] = []
+    dy: list[float] = []
+    for i in range(n):
+        dx.append(fx[i] - xbar)
+        dy.append(fy[i] - ybar)
+    sxy = sumprod_floats(dx, dy) + 0.0
+    sxx = sumprod_floats(dx, dx)
+    if sxx == 0.0:
+        raise ValueError("x is constant")
+    slope = sxy / sxx
+    return [slope, ybar - slope * xbar]
+
+
+def linear_regression_prop(xs: list[int], ys: list[int]) -> list[float]:
+    """[slope, 0.0] through the origin; the int products are exact like math.sumprod, then rounded."""
+    n = len(xs)
+    if len(ys) != n:
+        raise ValueError("linear regression requires that both inputs have same number of data points")
+    if n < 2:
+        raise ValueError("linear regression requires at least two data points")
+    sxy = 0
+    sxx = 0
+    for i in range(n):
+        sxy += xs[i] * ys[i]
+        sxx += xs[i] * xs[i]
+    if sxx == 0:
+        raise ValueError("x is constant")
+    slope = (float(sxy) + 0.0) / float(sxx)
+    return [slope, 0.0]
+
+
+def linear_repr(fit: list[float]) -> str:
+    return "LinearRegression(slope=" + str(fit[0]) + ", intercept=" + str(fit[1]) + ")"
