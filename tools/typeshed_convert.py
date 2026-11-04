@@ -15,6 +15,9 @@ Rules (see the lane brief):
   * `if sys.version_info >= (3, N)` is evaluated for CPython 3.12 on Linux, `if sys.platform == ...`
     for `linux`; the branch not taken is dropped;
   * every overload of a name must agree on ret, else ret is `obj` and flags is `overload`;
+  * a `@property` (getter/setter/deleter) is an attribute: params are empty and the ret is the
+    common getter ret, else `obj`;
+  * a class with no `__init__`/`__new__` inherits the constructor of its first resolvable base;
   * anything that is not exactly one of `int float bool str bytes None` becomes `obj` (TypeVar,
     generic, alias, Any, Literal, union, ...). Never widen a guess.
 """
@@ -171,13 +174,13 @@ def _ctor_defs(body, name, out):
             _ctor_defs(node.finalbody, name, out)
 
 
-def ctor_params(node):
-    """Parameters of a class's constructor: `__init__`, else `__new__`.
+def own_ctor_params(node):
+    """Parameters of a class's own constructor: `__init__`, else `__new__`, else `None`.
 
     typeshed puts the constructor of immutable classes (`datetime.date`, `Decimal`, ...)
     in `__new__`, and overloads it. Between overloads take the one with the most
     parameters so `deque(iterable, maxlen=...)` is not reduced to `maxlen` alone.
-    A class that defines neither inherits one; `()` is the best the stub says.
+    `None` means the class defines neither and inherits a constructor.
     """
     for name in ("__init__", "__new__"):
         defs = []
@@ -185,7 +188,89 @@ def ctor_params(node):
         if defs:
             best = max(defs, key=lambda fn: len(params_of(fn)))
             return params_of(best)
-    return ()
+    return None
+
+
+def _is_property(fn):
+    for dec in fn.decorator_list:
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        if isinstance(target, ast.Name) and target.id == "property":
+            return True
+        if isinstance(target, ast.Attribute) and target.attr in ("setter", "getter", "deleter"):
+            return True
+    return False
+
+
+def _base_names(node):
+    """(module, name) for a base expression such as `Exception`, `dict[_K, _V]`, `os.PathLike`."""
+    if isinstance(node, ast.Subscript):
+        return _base_names(node.value)
+    if isinstance(node, ast.Name):
+        return (None, node.id)
+    if isinstance(node, ast.Attribute):
+        parts = []
+        cur = node
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+            parts.reverse()
+            if len(parts) == 2:
+                return (parts[0], parts[1])
+    return (None, None)
+
+
+def resolve_ctors(registry, imports):
+    """Resolve each class's constructor through its bases, returning {module: {name: params}}.
+
+    `registry[module][name] = (bases, own params or None)`; `imports[module][local] =
+    (source module, source name)`. A class with no constructor follows its bases in MRO
+    order and keeps the first resolvable one; `object` resolves to no parameters.
+    """
+    cache = {}
+
+    def resolve(module, name, seen):
+        key = (module, name)
+        if key in cache:
+            return cache[key]
+        if key in seen or module not in registry or name not in registry[module]:
+            return None
+        seen.add(key)
+        bases, own = registry[module][name]
+        if own is not None:
+            result = own
+        else:
+            result = None
+            for base in bases:
+                target = _base_target(module, base, registry, imports)
+                if target is not None:
+                    value = resolve(target[0], target[1], seen)
+                    if value is not None:
+                        result = value
+                        break
+        seen.discard(key)
+        cache[key] = result
+        return result
+
+    return {module: {name: resolve(module, name, set()) for name in classes}
+            for module, classes in registry.items()}
+
+
+def _base_target(module, node, registry, imports):
+    base_module, name = _base_names(node)
+    if name is None:
+        return None
+    if base_module is not None:
+        return (base_module, name) if base_module in registry else None
+    if name in registry.get(module, {}):
+        return (module, name)
+    source = imports.get(module, {}).get(name)
+    if source is not None and source[1] is not None and source[0] in registry:
+        return source
+    if name in registry.get("builtins", {}):
+        return ("builtins", name)
+    return None
 
 
 def _text(annotation):
@@ -210,7 +295,9 @@ def _is_overload(fn):
 class Collector:
     def __init__(self):
         self.groups = {}
-        self.classes = {}      # module-level `Class(...)` -> params of __init__, ret `obj`
+        self.class_defs = {}   # module-level `Class` -> (bases, own params or None)
+        self.properties = set()  # qualnames of `@property` getters/setters
+        self.imports = {}      # local name -> (source module, source name or None)
         self.aliases = []      # (target name, base name, attr) from `seed = _inst.seed`
         self.vartypes = {}     # `_inst: Random` -> {'_inst': 'Random'}
         self.reexports = []    # (local, source module, source name) from `from _csv import reader`
@@ -228,7 +315,14 @@ class Collector:
                         if alias.name == "*":
                             self.stars.append(node.module)
                         else:
-                            self.reexports.append((alias.asname or alias.name, node.module, alias.name))
+                            local = alias.asname or alias.name
+                            self.reexports.append((local, node.module, alias.name))
+                            self.imports[local] = (node.module, alias.name)
+                continue
+            if isinstance(node, ast.Import) and not prefix:
+                for alias in node.names:
+                    local = alias.asname or alias.name.split(".")[0]
+                    self.imports[local] = (alias.name if alias.asname else local, None)
                 continue
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
                     and isinstance(node.annotation, ast.Name):
@@ -243,10 +337,13 @@ class Collector:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if prefix and node.name.startswith("_"):
                     continue
-                self.add(prefix + node.name, node)
+                qualname = prefix + node.name
+                if prefix and _is_property(node):
+                    self.properties.add(qualname)
+                self.add(qualname, node)
             elif isinstance(node, ast.ClassDef):
                 if not prefix:
-                    self.classes[node.name] = ctor_params(node)
+                    self.class_defs[node.name] = (list(node.bases), own_ctor_params(node))
                 self.walk(node.body, prefix + node.name + ".")
             elif isinstance(node, ast.If):
                 value = eval_cond(node.test)
@@ -267,20 +364,16 @@ class Collector:
     def table(self):
         out = {}
         for qualname, entries in self.groups.items():
-            plain = [e for e in entries if not e[2]]
             rets = {e[0] for e in entries}
-            if plain:
-                ret, params, _ = plain[-1]
-                flags = "overload" if len(entries) > 1 and len(rets) > 1 else ""
+            if qualname in self.properties:
+                out[qualname] = (entries[0][0] if len(rets) == 1 else "obj", (), "")
+                continue
+            plain = [e for e in entries if not e[2]]
+            params = (plain[-1] if plain else entries[0])[1]
+            if len(rets) == 1:
+                out[qualname] = (entries[0][0], params, "")
             else:
-                ret, params, _ = entries[0]
-                if len(rets) == 1:
-                    flags = "overload" if len(entries) > 1 else ""
-                else:
-                    ret, flags = "obj", "overload"
-            out[qualname] = (ret, params, flags)
-        for name, params in self.classes.items():
-            out.setdefault(name, ("obj", params, ""))
+                out[qualname] = ("obj", params, "overload")
         for target, base, attr in self.aliases:
             if target in out:
                 continue
@@ -302,6 +395,12 @@ def build():
         collector.walk(tree.body)
         collectors[module] = collector
         own[module] = collector.table()
+    # Constructors: own `__init__`/`__new__`, else inherited from the first resolvable base.
+    registry = {module: collector.class_defs for module, collector in collectors.items()}
+    imports = {module: collector.imports for module, collector in collectors.items()}
+    for module, classes in resolve_ctors(registry, imports).items():
+        for name, params in classes.items():
+            own[module].setdefault(name, ("obj", params if params is not None else (), ""))
     # Re-exports (`from _csv import reader`, `from _heapq import *`) and `bisect = bisect_right`.
     # Resolve in a few passes so a chain through an intermediate module settles.
     for _ in range(3):

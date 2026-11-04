@@ -34,6 +34,19 @@ class StubSigsTest(unittest.TestCase):
         self.assertEqual(stubsigs.lookup("heapq.heappop")[0], "obj")
         self.assertIsNone(stubsigs.lookup("no.such"))
 
+    def test_agreeing_overloads_have_no_flag(self):
+        ret, _params, flags = stubsigs.lookup("bisect.bisect_left")
+        self.assertEqual(ret, "int")
+        self.assertEqual(flags, "")
+
+    def test_inherited_constructor_params(self):
+        self.assertEqual(stubsigs.lookup("builtins.ValueError")[1],
+                         (("args", "star", "object"),))
+
+    def test_property_is_not_the_setter(self):
+        self.assertEqual(stubsigs.lookup("sqlite3.Connection.autocommit"),
+                         ("obj", (), ""))
+
     def test_constructor_params(self):
         # typeshed puts these constructors in `__new__`; params must not be empty.
         self.assertEqual(

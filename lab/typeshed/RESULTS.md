@@ -11,7 +11,13 @@ The counter counts calls whose callee resolves to a vendored module: `mod.f(...)
 (`re.compile(...).match`) as total but unknown. A class's constructor signature comes from `__init__` when the stub
 has one, else from `__new__` (typeshed uses `__new__` for immutable classes such as `datetime.date`, `Decimal`,
 `Fraction`); between overloads the converter keeps the one with the most parameters, so `datetime.date(year, month,
-day)` and `deque(iterable, maxlen=...)` carry their parameters rather than an empty tuple.
+day)` and `deque(iterable, maxlen=...)` carry their parameters rather than an empty tuple. A class that defines
+neither inherits the constructor of its first resolvable base (`builtins.ValueError` gets
+`BaseException.__init__(self, *args)`), so only classes with no constructor anywhere in the vendored stubs or an
+explicit no-argument constructor keep `()`. A `@property` getter/setter pair is an attribute: its parameters are
+empty and its ret is `obj` when the getter and setter disagree (`sqlite3.Connection.autocommit`), so a setter
+returning `None` never masquerades as the getter's ret. An overload set whose members all agree on the return type
+gets that ret with empty flags; `overload` flags only a set that disagrees (`obj`).
 
 ### `lab/census/programs/` (686 programs)
 
@@ -108,9 +114,9 @@ All of these are outside the scalar path: a `typeshed2` unboxing pass can only u
 `python3 -X importtime -c "import stubsigs; stubsigs.lookup('math.gcd')"` from `AIL_CURRENT/python/pkg-v12`:
 
 ```
-import time:       191 |        191 | stubsigs
-import time:      1448 |       1448 | stubsigs_table
+import time:       237 |        237 | stubsigs
+import time:      1439 |       1439 | stubsigs_table
 ```
 
-**~1.64 ms** for the first lookup (under the 10 ms target). `stubsigs_table` is imported lazily on that first
-call; importing `stubsigs` alone costs ~0.19 ms.
+**~1.68 ms** for the first lookup (under the 10 ms target). `stubsigs_table` is imported lazily on that first
+call; importing `stubsigs` alone costs ~0.24 ms.
