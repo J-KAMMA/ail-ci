@@ -1,4 +1,4 @@
-"""Modules used as values (modval2): ten probes compared with CPython, and two named refusals.
+"""Modules used as values (modval2): probes compared with CPython, and named refusals.
 
 Each probe is a small program under `tests/modval/`. The merged program gives a module that is used
 as a value one generated class and one instance: `m is pkg.util` stays true, `m.name` and
@@ -68,6 +68,9 @@ class ModuleValues(unittest.TestCase):
         needles = {
             "probe09_dynamic_getattr_refused": ("pkg.util", "computed at run time", "write instead"),
             "probe11_new_attribute_refused": ("pkg.a", "NEW", "write instead"),
+            "probe15_function_value_refused": ("pkg.util", "mod.double", "write instead"),
+            "probe16_loop_module_refused": ("pkg.a", "conditional expression", "write instead"),
+            "probe17_list_function_value_refused": ("pkg.util", "value.double", "write instead"),
         }
         for name, wanted in needles.items():
             with self.subTest(probe=name):

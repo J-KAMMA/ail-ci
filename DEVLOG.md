@@ -1,3 +1,24 @@
+## 2026-11-04 -- modval2b: branch, nested-scope and re-export fixes for module values
+
+Fixed the four defects from the review of the module-as-value merge. A `if c: m = pkg.a / else: m = pkg.b`
+is rewritten to `m = pkg.a if c else pkg.b` (the shape the compiler builds exactly); any other module
+assignment under a branch, loop or handler is now a named refusal instead of the last-assignment-wins
+result. `modvars` is saved and restored around every function, class and comprehension, so a nested
+function's local module no longer leaks to its enclosing scope. The generated module class now has
+properties for names re-exported with `from m import x` (previously an `AttributeError` at run time).
+Reading a function as a value through a module value (for example `mod.double is pkg.util.double`) is
+refused by name, both for a module passed as a parameter and for one held in a list/dict/attribute;
+calling it and the statically named `pkg.util.double` still work.
+
+Probes: the four review programs now match CPython on both builds (the branch case) or are refused by
+name with the module and the replacement named (the function-value case). The new `tests/modval`
+probes 12-17 cover the branch, nested scope, re-export, loop refusal, parameter function-value refusal
+and list function-value refusal; all module-value probes pass in both builds. Ten `lab/compare/src`
+`typed.py` C files and eight `main.py` ones are byte-identical to the previous commit (the other two
+`main.py` files are refused by both).
+Tests: `test_ail_modules_values`, `test_ail_modules`, `test_ail_modules3`, `test_ail_lib_modules`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-11-03 -- ffiex1: four real-library FFI examples, checked against CPython
 
 Added `examples/ffi/zlib_check.py`, `libm_math.py`, `libc_text.py` and `sqlite_count.py`: whole programs against
