@@ -1,3 +1,17 @@
+## 2026-11-04 -- ctimeprofb finish: direct `_load_sources` timing and a full rerun
+
+Applied the two ctimeprofb commits (skipping the worker report) and finished the lane.  The parent
+`_load_sources` estimate was inflated: it came from a profiled parent scaled by the profiled wall.
+`lab/profile/run.py` now wraps `_load_sources` with a timer in the real parent build, so the table's
+load row is a real subset of the parent.  Reran all ten tasks, median of 3, and regenerated
+`CTIME_2026-11.json` and `CTIME_2026-11.md`: chain_relax cold 2.198 s, hit 0.862 s (60.5% saved,
+below the 1.5 s target); ticket_audit hit 2.712 s.  The remaining hit cost is gcc (61% of the chain
+hit, 82% of the ticket hit) and child imports, outside the five files this lane may edit, so no cut
+was made and no `program.c` changed.
+
+Tests on the final commit: `test_ail_fe_cache`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (safetynet without the `ulimit -v` cap; the known `S4_generators_gc`
+failure appears only with it).  `update_manifest.py --check` passes.
 ## 2026-11-03 -- ctimeprofb: fixed the cache-hit harness, phase table for 10/10 tasks
 
 The ctimeprof harness from `job-ctimeprof-11032049` never actually hit: each "warm" run got its

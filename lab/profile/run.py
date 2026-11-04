@@ -39,7 +39,7 @@ SITECUSTOMIZE = '''\
 import os, sys, atexit, cProfile, time
 _start = time.perf_counter()
 _child = any(a.endswith('pyc.py') for a in sys.argv)
-_parent = any(a.endswith('ail_chatgpt.py') for a in sys.argv)
+_parent = any(a.endswith(('ail_chatgpt.py', 'load_driver.py')) for a in sys.argv)
 _stamp = os.environ.get('AILPROF_CHILD_TIME' if _child else 'AILPROF_PARENT_TIME')
 if _stamp:
     def _stamp_exit():
@@ -62,6 +62,24 @@ if _profile:
         except Exception as error:
             sys.stderr.write('profile dump failed: %r\\n' % (error,))
     atexit.register(_dump)
+'''
+
+LOAD_DRIVER = '''\
+import os, sys, time
+sys.path.insert(0, os.environ['AIL_CTIME_ROOT'])
+import ail_chatgpt
+_orig = ail_chatgpt._load_sources
+_stamp = os.environ.get('AILPROF_LOAD_TIME')
+def _timed(*args, **kwargs):
+    start = time.perf_counter()
+    try:
+        return _orig(*args, **kwargs)
+    finally:
+        if _stamp:
+            with open(_stamp, 'a', encoding='utf8') as handle:
+                handle.write('%.6f\\n' % (time.perf_counter() - start))
+ail_chatgpt._load_sources = _timed
+raise SystemExit(ail_chatgpt.main())
 '''
 
 # module -> phase.  pyfunc is the front end AND the legacy typed emitter; every profile so far
@@ -109,7 +127,9 @@ def env_for(work, fe=False, profile=None, fe_root=None, fe_log=None, parent_prof
     site.mkdir(parents=True, exist_ok=True)
     (site / 'sitecustomize.py').write_text(SITECUSTOMIZE)
     env.update(PYTHONPATH=str(site), AILPROF_CHILD_TIME=str(work / 'child.time'),
-               AILPROF_PARENT_TIME=str(work / 'parent.time'))
+               AILPROF_PARENT_TIME=str(work / 'parent.time'),
+               AILPROF_LOAD_TIME=str(work / 'load.time'),
+               AIL_CTIME_ROOT=str(AIL.parent))
     if fe:
         env.update(AIL_FE_CACHE='1', AIL_FE_CACHE_DIR=str(fe_root or (work / 'fe')),
                    AIL_FE_CACHE_LOG=str(fe_log or (work / 'fe.log')))
@@ -134,8 +154,10 @@ def build(source, out, work, fe=False, profile=None, fe_root=None, fe_log=None,
     env = env_for(work, fe=fe, profile=profile, fe_root=fe_root, fe_log=fe_log,
                   parent_profile=parent_profile)
     rss = work / 'rss'
+    driver = work / 'load_driver.py'
+    driver.write_text(LOAD_DRIVER, encoding='utf8')
     command = ['/usr/bin/time', '-f', '%M', '-o', str(rss), sys.executable, '-X', 'utf8', '-B',
-               str(AIL), 'compile', str(source), '-o', str(out)]
+               str(driver), 'compile', str(source), '-o', str(out)]
     started = time.perf_counter()
     done = subprocess.run(command, cwd=str(work), env=env, capture_output=True, text=True,
                           timeout=1800, preexec_fn=limit_memory)
@@ -149,11 +171,12 @@ def build(source, out, work, fe=False, profile=None, fe_root=None, fe_log=None,
     log_path = Path(fe_log) if fe_log else (work / 'fe.log')
     events = log_path.read_text().splitlines() if log_path.exists() else []
     child_s = read_times(work / 'child.time')
+    load_s = read_times(work / 'load.time')
     return {'ok': done.returncode == 0, 'wall': round(wall, 4),
             'front': round(wall - compiled - linked, 4), 'compile': round(compiled, 4),
             'link': round(linked, 4),
             'parent_s': round(wall - child_s, 4) if child_s is not None else None,
-            'child_s': child_s,
+            'child_s': child_s, 'load_s': load_s,
             'rss_kib': int(rss.read_text().split()[-1]) if rss.exists() else None,
             'events': events, 'stderr': done.stderr[-2000:] if done.returncode else '',
             'binary': out.stat().st_size if out.is_file() else 0,
@@ -313,7 +336,7 @@ def one_task(task, runs, root, do_profile):
     result['import_s'] = import_cost()
     result['cold_summary'] = {key: summary([row[key] for row in result['cold']])
                               for key in ('wall', 'front', 'compile', 'link', 'parent_s',
-                                          'child_s', 'rss_kib', 'binary', 'c_bytes')}
+                                          'child_s', 'load_s', 'rss_kib', 'binary', 'c_bytes')}
     result['gcc_split'] = gcc_split(pathlib.Path(ok[-1]['work']), source)
 
     for index in range(runs):
@@ -351,11 +374,8 @@ def one_task(task, runs, root, do_profile):
                      'top': top_functions(profile)}
             if parentp.exists():
                 pshares, ptotal = profile_phases(parentp)
-                wait = cumulative_function(parentp, 'run')
-                probe = max(ptotal - wait, 0.001)
-                parent_wall = max(built['wall'] - (built['child_s'] or 0.0), 0.0)
-                scale = parent_wall / probe
-                load = cumulative_of(parentp, '_load_sources') * scale
+                parent_wall = result['cold_summary']['parent_s']['median']
+                load = result['cold_summary']['load_s']['median'] or 0.0
                 entry.update(parent_s=round(parent_wall, 4), parent_profiled_s=ptotal,
                              load_sources_s=round(load, 4),
                              parent_other_s=round(max(parent_wall - load, 0.0), 4))
@@ -393,7 +413,7 @@ def main():
     tasks = [task.strip() for task in args.tasks.split(',') if task.strip()]
     root = pathlib.Path(tempfile.mkdtemp(prefix='ail-ctime-'))
     started = time.time()
-    result = {'date': '2026-11-03', 'runs': args.runs, 'limit_kib': LIMIT, 'tasks': tasks,
+    result = {'date': time.strftime('%Y-%m-%d'), 'runs': args.runs, 'limit_kib': LIMIT, 'tasks': tasks,
               'work': str(root), 'results': []}
     for task in tasks:
         row = one_task(task, args.runs, root, args.profile)
