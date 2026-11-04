@@ -5,49 +5,46 @@
 3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
 
 --- LAST REVIEW ---
-## review 0
+## review 1
 [model commandcode/deepseek-v4.1-flash]
-## Review: toml1 (bundled `stdlib/tomllib`)
+I've completed the probe and test runs. Here is my review.
 
-**What the change really does:** adds a new, hand-written TOML parser under `AIL_CURRENT/stdlib/tomllib/` (plus 12 lab programs, a test module and manifest entries). Nothing in the compiler or runtime is touched; a non-`tomllib` program's generated `program.c` is byte-identical to the base. Report's "from-scratch port" matches the diff, but it is not the task's "copy CPython's files and rewrite only refusals" approach, and the reimplementation drops CPython's `Flags`/`Frozen` checks.
+## Review: toml1 fix round
+
+**What the change really does:** In the bundled `stdlib/tomllib`, it replaces the old `declared`/`implicit` sets with bitmask flag maps (`direct`/`recursive`, `pending`) to reproduce CPython's `FROZEN`/`EXPLICIT_NEST` checks, fixes base-prefixed number scanning and the empty-datetime fraction, adds `bytearray` to `load()`, makes `parse_float` keyword-only, and makes the `parse_float` default an identity-only function object. No compiler/runtime files are touched.
 
 **Verified claims**
-- `test_ail_std_tomllib` passes: `ok 279.5s` (includes 8 programs × 2 builds).
-- Baseline: only allowed files changed; `tools/update_manifest.py --check` → 0.
-- Unrelated C unchanged: hello-world `--debug-dir/program.c` identical HEAD vs `/tmp/base`.
-- Safetynet `S4_generators_gc` fails on base too (same diff) → pre-existing.
-- Report claim "CPython's messages/positions are preserved" is **false** (defects 4–5).
+- All five review defects: `p1_frozen`, `p2_namespace`, `p3_scalars`, `p4_datetime`, `p12_frozen_headers` now match CPython in both builds (`g` and `d`), as do `p5_load`, `p7_inline`, `p8_parsefloat`, `p9_tables`, `p10_dotted`, `p11_valid`, `p13_badpf`, `pf_sentinel`, `pf_func`.
+- `p6_posargs` (`loads(doc, 0)`) is a named compile-time refusal (`not in the subset: ... loads() called with too many positional arguments`) in both builds — acceptable.
+- `load`/`loads`/sentinel paths through arguments, list items, attributes and dict values (`q_pfpaths`), bytearray readers and buffer reuse (`q_load2`) match CPython.
+- `test_ail_std_tomllib` OK (`351.0s`); `test_ail_safetynet` fails only `S4_generators_gc` (pre-existing, verified on base by the prior review). `update_manifest.py --check` rc=0.
+- Unrelated program: hello-world `--debug-dir/program.c` is byte-identical HEAD vs `/tmp/base`.
+- Claim "string sentinel was silently treated as float" is true (`b8b0009` used `== "DEFAULT"`); `q_load` l6/l7 now match CPython.
+- Claim "no user-supplied value can match it" is **overstated**: `tomllib._parser._PARSE_FLOAT_DEFAULT` is reachable (`q_sentinel`: CPython AttributeError; AIL `ok {'x': 1.5}`). Not a defect for portable programs, but the claim is false.
 
-**Defects (probes in /tmp/rprobes, both `g` and `d` builds; base cannot build `tomllib`, so all are caused by this change)**
+**Defect (caused by this change; base matches CPython)**
+1. Joined key paths use `\0` as separator, and the new full-path recursive `FROZEN` flag aliases a distinct key containing an escaped NUL. `q_nul2.py`:
+```python
+import tomllib
+for s in ['a.b = {}\n["a\\u0000b"]\nc = 2\n', 'a.b = {}\n"a\\u0000b".c = 1\n']:
+    try: print("ok", tomllib.loads(s))
+    except Exception as e: print(type(e).__name__, e)
+```
+Expected (CPython and `/tmp/base`): `ok {'a': {'b': {}}, 'a\x00b': {'c': 2}}` / `ok {'a': {'b': {}}, 'a\x00b': {'c': 1}}`.
+Actual HEAD (both builds): `TOMLDecodeError Cannot declare ('a\x00b',) twice (at line 2, column 12)` / `TOMLDecodeError Cannot mutate immutable namespace ('a\x00b',) (at line 2, column 17)`. (`q_nul` k1/k3 are the same family but pre-existing; k2 is new.)
 
-1. Inline tables/arrays are not frozen. `p1_frozen.py`:
-   `a = {b = 1}\na.c = 2` — expected `decode Cannot mutate immutable namespace ('a',) (at line 2, column 8)`; actual `ok {'a': {'b': 1, 'c': 2}}`. Same for `a = {b = {c = 1}, b.d = 2}` (expected "Cannot mutate immutable namespace ('b', 'd') (at line 1, column 26)"; actual `ok {...{'c': 1, 'd': 2}}`).
-2. List namespaces crash instead of raising `TOMLDecodeError`. `p1_frozen.py`:
-   `a = [1]\na.b = 2` — expected `Cannot mutate immutable namespace ('a',) (at line 2, column 8)`; actual `TypeError argument of type 'int' is not iterable` (same for `a = [1]\n[a]\nb = 2`, expected `Cannot declare ('a',) twice (at line 2, column 3)`).
-3. Missing "Cannot redefine namespace" check. `p2_namespace.py`:
-   `[a.b]\nc = 1\n[a]\nb.d = 2` — expected `decode Cannot redefine namespace ('a', 'b') (at line 4, column 8)`; actual `ok {'a': {'b': {'c': 1, 'd': 2}}}`.
-4. Malformed-number errors differ. `p3_scalars.py`: `x = 0o8` (also `0x`, `0b2`, `0x_1`) — expected `Expected newline or end of document after a statement (at line 1, column 6)`; actual `Invalid value (at line 1, column 5)`.
-5. Datetime position and argument boundaries. `p4_datetime.py`: `x = 1979-05-27T07:32:00.` — expected column 24, actual column 15. `p7_load3.py`: `load()` of a bytearray reader expected `ok {'x': 1}`, actual `TypeError File must be opened in binary mode...`; `loads(doc, 0)` and `loads(doc, parse_float=0)` expected (`TypeError` keyword-only / `'int' object is not callable`), actual `ok {'x': 1.5}` for both (the `0` sentinel leaks).
-
-**Pre-existing / allowed**
-- `S4_generators_gc` (verified on base).
-- `04_datetimes` printer shows `<_AilDT object>` and local times return source text; acknowledged compiler limits and part of the task's allowed 4 failures.
+**Pre-existing (identical on `/tmp/base`, not blocking)**
+- `q_nul` k1/k3: direct-flag NUL alias already wrong on base.
+- `q_num` n1–n3: datetime/time printing (`<_AilDT object>`, time as source text) — known compiler limit.
+- `q_load` l3 (custom `.decode()` reader accepted by CPython, rejected), l12 (`loads(s=...)` accepted, CPython rejects), l11 `parse_float=float` is a named refusal.
+- `q_sentinel` and `S4_generators_gc`.
 
 **Unverified**
-- Push/PR/CI shards (not run).
-- `test_ail_files` / `test_ail_corpus_findings3` (not required, not rerun).
-- Speed: not applicable (purely additive; unrelated C identical).
+- Wider suite, shards/CI, and speed: not applicable — the diff is stdlib-only, no benchmark program or compiler/runtime code is edited, and unrelated generated C is identical.
 
 VERDICT: FIX
-
-1. Enforce frozen (inline table/array) namespaces in `_set_value`/`_key_value`; currently invalid TOML is accepted (`a = {b = 1}` then `a.c = 2` → `ok {'a': {'b': 1, 'c': 2}}`, expected `Cannot mutate immutable namespace ('a',) (at line 2, column 8)`).
-2. Raise `TOMLDecodeError` instead of `TypeError` when navigating lists (`a = [1]` then `a.b = 2` → `TypeError argument of type 'int' is not iterable`, expected `Cannot mutate immutable namespace ('a',) (at line 2, column 8)`; `a = [1]` then `[a]` expected `Cannot declare ('a',) twice`).
-3. Implement CPython's "Cannot redefine namespace" check (`[a.b]` … `[a]` … `b.d = 2` → actual `ok`, expected `Cannot redefine namespace ('a', 'b') (at line 4, column 8)`).
-4. Match CPython's error text/position for base-prefixed numbers (`0o8`, `0x`, `0b2`, `0x_1`: actual `Invalid value (at line 1, column 5)`, expected `Expected newline or end of document after a statement (at line 1, column 6)`).
-5. Match the `1979-05-27T07:32:00.` error column (actual 15, expected 24), accept bytearray in `load()`, reject extra positional `parse_float` (`loads(doc, 0)`), and stop treating a literal `0` `parse_float` as the `float` sentinel.
-[commandcode stop=end_turn turns=29 out_tokens=34086]
-
-## fix round skipped: only 65 minutes left
+1. NUL-in-key aliasing regression. Probe `/tmp/rprobes/q_nul2.py` (`a.b = {}\n["a\u0000b"]\nc = 2` and `a.b = {}\n"a\u0000b".c = 1`): expected `ok {'a': {'b': {}}, 'a\x00b': {'c': 2}}` and `ok {'a': {'b': {}}, 'a\x00b': {'c': 1}}`; actual `TOMLDecodeError Cannot declare ('a\x00b',) twice` and `TOMLDecodeError Cannot mutate immutable namespace ('a\x00b',)`.
+[commandcode stop=end_turn turns=32 out_tokens=40687]
 
 
 --- ORIGINAL TASK ---
