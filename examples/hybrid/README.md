@@ -30,7 +30,8 @@ start above the loop range; passing `2**63 + 1` exercises the int64 boundary fal
 
 ## Rules for an accelerated function
 
-- Be a top-level function, not a method, nested function, class, or generator.
+- Be a top-level function, not a method, nested function, class, or generator:
+  `def f(n: int) -> int:` at module level is a candidate; a `def f(self, ...)` inside a `class` is not.
 - Annotate every parameter `int`, `bool`, `float`, `str`, `list[int]`, or `list[float]`, and return
   `int`, `bool`, `float`, or `str`: `def f(n: int) -> int:`.
 - Do not print: `print(n)` keeps the function in CPython.
@@ -39,8 +40,10 @@ start above the loop range; passing `2**63 + 1` exercises the int64 boundary fal
   `try`/`with`/`import`, touch a global, delete, or assign an attribute/index:
   `return xs[0]` and `return a % b` are refused (a nonzero constant divisor such as `n % 2` is
   allowed because it cannot raise).
-- Do not compare numbers with `is`, and do not need an int beyond int64 unless the function
-  returns `int`/`bool` so the overflow wrapper can fall back.
+- Do not compare numbers with `is`: `return a is b` keeps the function in CPython.
+- Keep int literals inside int64, and let an int expression overflow only when the function returns
+  `int` or `bool` so the wrapper can fall back: `def f(n: int) -> int: return n * n` is safe, while
+  a module-level `print(f(2 ** 63 + 1))` emits no unit at all (see the finding below).
 
 ## Measured table
 
