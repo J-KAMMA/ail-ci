@@ -181,6 +181,8 @@ def write_audit(rows, results, elapsed):
         counts[forced] = counts.get(forced, 0) + 1
         if row_id in NO_REPRO:
             no_repro.append((row_id, NO_REPRO[row_id]))
+        elif not (PROBES / (slug(row_id) + ".py")).exists():
+            no_repro.append((row_id, "no probe file in lab/diffixed/"))
         for mode, verdict in (("default", default), ("force", forced)):
             res = results.get((row_id, mode))
             if verdict == "differs":
