@@ -28,16 +28,6 @@ OVERRIDES = {
     # forced run uses a named runtime limit instead of the 16-bit internal error
     "C__job_pre90_10242040_2": {"forced": "differs-otherwise"},
 }
-# A single-expression probe is a fused pipeline program: the compiled tool reads int64s
-# from a file, so it is run with this input and compared with the Python that catches the
-# exception the row is about.
-PIPELINE = {
-    "C__job_pre138_10250109_2": {
-        "input": b"\x01" + b"\x00" * 7 + b"\x00" * 8,
-        "oracle": ("try:\n    print(sum(1 % x for x in [1, 0]))\n"
-                   "except ZeroDivisionError:\n    print('caught')\n"),
-    },
-}
 
 
 def slug(row_id):
@@ -99,7 +89,7 @@ def verdict(row, built, ran, expected):
     return "still-differs"
 
 
-def build_and_run(source, forced, data=None):
+def build_and_run(source, forced):
     work = Path(tempfile.mkdtemp(prefix="ail-diffaudit-"))
     try:
         program = work / "probe.py"
@@ -113,22 +103,15 @@ def build_and_run(source, forced, data=None):
                      "--syntax", "python", "-o", str(exe)], env, work)
         if built.returncode != 0:
             return built, None
-        if data is None:
-            ran = run([str(exe)], env, work)
-        else:
-            feed = work / "input.bin"
-            feed.write_bytes(data)
-            ran = run([str(exe), str(feed)], env, work)
+        ran = run([str(exe)], env, work)
         return built, ran
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def cpython(source, oracle=None):
+def cpython(source):
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
-    if oracle is not None:
-        return run([sys.executable, "-B", "-c", oracle], env, source.parent)
     return run([sys.executable, "-B", str(source)], env, source.parent)
 
 
@@ -149,10 +132,9 @@ def do_run():
         if row is None:
             print("%s | no matching selected row" % probe.stem)
             continue
-        spec = PIPELINE.get(probe.stem, {})
-        expected = cpython(probe, spec.get("oracle"))
-        built_default, ran_default = build_and_run(probe, False, spec.get("input"))
-        built_forced, ran_forced = build_and_run(probe, True, spec.get("input"))
+        expected = cpython(probe)
+        built_default, ran_default = build_and_run(probe, False)
+        built_forced, ran_forced = build_and_run(probe, True)
         vd = verdict(row, built_default, ran_default, expected)
         vf = verdict(row, built_forced, ran_forced, expected)
         overrides = OVERRIDES.get(probe.stem, {})

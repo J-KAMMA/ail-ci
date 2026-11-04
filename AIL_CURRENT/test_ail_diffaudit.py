@@ -22,6 +22,7 @@ CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc")
 NOW_MATCHES = [
     "C__job_pre116_10242227_1",
     "C__job_pre116_10251611_1",
+    "C__job_pre138_10250109_2",
     "C__job_rbrbfuzz4_10262129_4",
     "C__job_rbfuzz4_10240913_4",
 ]
@@ -122,11 +123,22 @@ class DiffAuditTests(unittest.TestCase):
                     self.assertNotEqual(built.returncode, 0,
                                         "%s %s now builds; update AUDIT.md" % (stem, mode))
 
-    def test_pre138_pipeline(self):
-        # The row's mechanism is pymod in the fused pipeline: the compiled tool exits 1
-        # through ail_die instead of raising a catchable ZeroDivisionError.
-        stem = "C__job_pre138_10250109_2"
-        work, env, built, exe = self.build(stem, False)
+    def test_pre138_pipeline_residual(self):
+        # Not the row's own (lambda) form, which now matches: a bare single-expression
+        # program is still compiled as a fused pipeline that exits 1 through ail_die
+        # instead of raising a catchable ZeroDivisionError (AUDIT.md, Residual difference).
+        source = ("sum(1 % x for x in xs)\n")
+        work = self.dir / "pre138_pipeline"
+        work.mkdir(parents=True, exist_ok=True)
+        program = work / "pipeline.py"
+        program.write_text(source, encoding="utf-8")
+        exe = work / "pipeline.out"
+        env = dict(os.environ, AIL_NO_CACHE="1")
+        env.pop("PYTHONPATH", None)
+        built = subprocess.run([sys.executable, "-B", CLI, "compile", str(program),
+                                "--syntax", "python", "-o", str(exe)],
+                               cwd=str(work), capture_output=True, text=True,
+                               timeout=300, env=env)
         self.assertEqual(built.returncode, 0, built.stderr)
         feed = work / "input.bin"
         feed.write_bytes(b"\x01" + b"\x00" * 7 + b"\x00" * 8)
@@ -136,7 +148,12 @@ class DiffAuditTests(unittest.TestCase):
         self.assertEqual(ran.stdout, "")
         self.assertIn("integer modulo by zero", ran.stderr)
         # A single-expression pipeline is not in the forced general-path subset.
-        _, _, built_forced, _ = self.build(stem, True)
+        forced_exe = work / "pipeline-forced.out"
+        forced_env = dict(env, AIL_UNIFIED_FORCE="1")
+        built_forced = subprocess.run([sys.executable, "-B", CLI, "compile", str(program),
+                                       "--syntax", "python", "-o", str(forced_exe)],
+                                      cwd=str(work), capture_output=True, text=True,
+                                      timeout=300, env=forced_env)
         self.assertNotEqual(built_forced.returncode, 0,
                             "forced build of the pipeline now succeeds; update AUDIT.md")
 

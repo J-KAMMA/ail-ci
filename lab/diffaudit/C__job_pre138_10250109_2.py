@@ -1,4 +1,7 @@
-# C?-job-pre138-10250109-2: integer % by zero in a fused closure.
-# A single expression is compiled as the fused pipeline (pymod in pyfront.py); the
-# equivalent Python is `try: sum(1 % x for x in [1, 0]) except ZeroDivisionError: ...`.
-sum(1 % x for x in xs)
+# C?-job-pre138-10250109-2: integer % by zero inside a lambda.
+# The row's own example: a lambda computing 1 % x raises a catchable ZeroDivisionError.
+f = lambda x: 1 % x
+try:
+    print(f(0))
+except ZeroDivisionError:
+    print("caught")
