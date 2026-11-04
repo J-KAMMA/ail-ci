@@ -1,3 +1,48 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 0
+[model commandcode/deepseek-v4.1-flash]
+## Review report — bce s2 (depth in a register)
+
+**What the change really does (one line):** it exposes SCC/reach/direct-call info from `pyfunc.to_c`, makes `ir/lower.py` keep the global counter unless a recursive IR function's SCC is exactly `{f}`, has no `try`/list-return/checked-exceptions/unknown callee/inner-symbol clash, and makes `ir/emit_c.py` emit `f__d(..., int64_t ail_d)` with the same trip check, self-calls rewritten to `f__d(..., ail_d+1)`, and `f(...)` as a wrapper calling `f__d(..., ail_depth+1)`; audit keeps the old increment/decrement plus `ail_d == ail_depth`. This matches the report.
+
+**Report claims**
+- Cherry-pick of the lost branch / integ message kept / non-Name calls disqualified: **verified** in the diff and generated C (`"maximum recursion depth exceeded"`).
+- `AIL_BCE=0` oracle equals base: **verified** (byte-identical `program.c`).
+- 17 other task/syntax pairs same C, `tree_fold/python` and `tally_lang/python` identical failures: **verified** all 20 pairs by compiling base vs head from the same source path (including `--exact-int` for `chain_relax`/`rail_transfer`); only `tally_lang/ail` differs, and its diff is exactly the depth rewrite inside `ev`.
+- tally callgrind 29,542,790,615 → 26,575,248,821 (0.89955): **verified** independently: 29,542,790,355 → 26,575,248,561 = **ratio 0.89955 (10.05% drop)**, identical output. Stripped 88,280 → 88,280 bytes; exe 95,088 → 95,120.
+- 5/5 codegen pins unchanged: **verified** (paths don't use recursion).
+- `test_ail_bce` + `test_ail_safetynet`: **verified** (2 modules, 0 failed). The report's 8-module sweep was not re-run (my instructions say only edited modules + safetynet).
+- Manifest consistent: **verified** (`update_manifest.py --check` exits 0). No `AIL_CURRENT/*recurs*` test module: **verified**.
+- Compile-time within 3%: **unverified** (not measured).
+- CI shards/PR and `bce_census.py check` end-to-end exit 0: **unverified** (push forbidden; I reproduced the substance across all 20 pairs instead).
+
+**Probes** (`/tmp/rprobes`, head vs base, default/forced/audit/`AIL_BCE=0`): `p_self` 49999/50000/50001/-1; `p_pair` 49978/49979 (trip point identical); `p_mutual_deep`, `p_method_deep`, `p_helper_deep`, `p_listparam_deep`, `p_defaults`, `p_ownlist`, `p_raise` (raise at 30k, reuse 30k: no false trip); `p_shadow` (`f__d` collision keeps global), `p_reach` (guarded callee refused), `p_try`, `p_listret`, `p_class`/`p_indirect` (callables stay legacy); value sources `p_dict`, `p_float`, `p_strparam`, `p_zero`, `p_str`, and CPython comparisons. Audit builds contain the assert and never exited 86.
+
+**Pre-existing (identical on base, not blocking):**
+- `AIL_UNIFIED_FORCE=1` counts no depth for these programs at all; base and head emit identical C there (base segfaults/flaky at 50k, head returns).
+- Deep forced-general recursion (~40k+ frames) segfaults on both trees under a 16 MB stack.
+- AIL's 50,000 limit vs CPython's 1,000, and int64 overflow refusals, are by design.
+
+No defect attributable to the change, no benchmark/source tampering (`lab/compare/src`, `bench`, `.github` untouched), and the speed/regression numbers hold.
+
+VERDICT: ACCEPT
+[commandcode stop=end_turn turns=130 out_tokens=62461]
+
+## full suite
+test_ail_borrowed_owner
+test_ail_c_keyword_functions
+test_ail_libc_names
+
+## suite fix skipped: only 140 minutes left
+
+
+--- ORIGINAL TASK ---
 Lane: codegen
 
 > Re-run of bces2b, whose GitHub run was lost: no verdict and no work commits. Its branch job-bces2b-* has nothing to cherry-pick. Do the task below from scratch on origin/integ. Keep to 80 minutes: commit and push after every sub-step, so a cancel does not lose the work.
