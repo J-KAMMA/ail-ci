@@ -3277,7 +3277,8 @@ class Lowering(TextLowering):
             raise NotS0('the str return of %s() is not owned by the caller' % f)
         if f in getattr(ctx, 'clones', {}):
             try:
-                site = P._call_site_signature(arg_nodes, params, ctx.base_ctx)
+                site = P._call_site_signature(arg_nodes, params, ctx.base_ctx,
+                                              getattr(P, '_ANNOTATED_PARAMS', {}).get(f, ()))
                 variant = ctx.clones[f].get(P._claim_key(site))
             except Exception as error:
                 raise NotS0('clone dispatch for %s(): %s' % (f, error))

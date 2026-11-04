@@ -1,3 +1,31 @@
+## 2026-11-04 -- keep call-site str inference for unannotated parameters (job-rbmodval2b-11042200)
+
+Review 0 found that the previous fix dropped EVERY `STR` claim from `_call_site_signature`, not only
+the ones that contradict an author's annotation. `_infer_strparam_pass` only revisits 'array' and
+float-only parameters, so an INT-default identity helper (`def ident(x): return x`) lost its only
+call-site str evidence: typed-only builds refused `ident("a") + "b"` with `passing str where
+ident() wants int`, and `f(items[0]).upper()` / `f(c.s)` / `f(s)` / `f(sys.argv[1])` failed with
+`a method on Call` / `subscripting Call`, where the base build compiled them.
+
+`_call_site_signature` now takes the callee's annotated parameter names and drops a `str` claim only
+for those (`_ANNOTATED_PARAMS`, filled for the whole program in `_signatures`). Annotated parameters
+keep the per-call argument diagnostic (`passing str where take() wants int`) and the generated
+`list[str]` helper still refuses instead of being overridden; unannotated parameters keep the
+`sig_override` widening that makes the identity helper work. All four clone-dispatch sites
+(`_call_user_func`, the IR lowering, `_propagate_signatures_pass` and `_plan_clones`) pass the same
+set, so a planned clone is still selected.
+
+Probes (`/tmp/rprobes`, typed-only `AIL_NO_GENERAL=1`): p26_ident, p37_identity_list_item,
+p38_identity_attr, p39_identity_strvar and p32_identity_argv now exit 0 and match CPython (they
+exited 3 on the previous commit); p21_argv_unannot matches too. p01/p02/p13/p14/p17/p18/p19/p27/p28/
+p33/p34 still refuse by name (`passing str where ... wants int/float`), p03/p12 bytes+str, p06
+list[str], p20 Counter and p41 str default refuse by name as before, and p09/p10/p11/p23/p24/p25/
+p29/p30/p40 match CPython typed-only. General+default `cmp.sh` over the whole set is unchanged
+(p07 differs only because it prints argv[0]). Modules: `test_ail_argument_type_details`,
+`test_ail_check_repair_context`, `test_ail_collections`, `test_ail_source_check` -> 69 tests OK;
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, `test_ail_modules_values` and
+`test_ail_modules` -> 93 tests OK (1 skipped). `tools/update_manifest.py` refreshed the pins.
+
 ## 2026-11-04 -- str arguments are per-call argument diagnostics again (job-rbmodval2b-11042200)
 
 The suite run after re-applying modval2b found four red modules (`test_ail_argument_type_details`,

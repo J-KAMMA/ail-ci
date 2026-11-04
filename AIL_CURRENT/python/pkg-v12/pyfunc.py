@@ -16592,7 +16592,7 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
         # up with the plan; a site the plan never saw (or a combination that was dropped -- over the
         # cap, or contradicting `fname`'s own source) simply finds nothing and calls the plain,
         # unspecialised symbol instead.
-        site = _call_site_signature(arg_nodes, params, ctx.base_ctx)
+        site = _call_site_signature(arg_nodes, params, ctx.base_ctx, _ANNOTATED_PARAMS.get(fname, ()))
         variant = ctx.clones[fname].get(_claim_key(site))
         if variant is not None:
             symbol, params, _arity = variant
@@ -32461,10 +32461,27 @@ def _claim(arg, ctx):
     return k if k in (INT, FLT, BYTES, BYTEARRAY, STR, 'array') else None
 
 
-def _call_site_signature(args, callee_params, ctx):
+# {function name: frozenset of its parameters that carry a REAL source annotation}. Filled for the
+# whole program by `_signatures` (which every compile runs before `_call_site_signature` is asked
+# anything), so a call site can tell an annotated parameter apart from one that merely happened to
+# settle to the same kind. Keyed by the same names `sigs` uses, mangled methods included.
+_ANNOTATED_PARAMS = {}
+
+
+def _call_site_signature(args, callee_params, ctx, annotated=()):
     """`{param_name: claim}` for one call site's arguments, keyed by the CALLEE's own parameter
     names so it lines up with `_param_kinds`'s `sig_override` shape (section 15) -- a parameter no
-    argument here offers evidence for is simply absent, not claimed as anything."""
+    argument here offers evidence for is simply absent, not claimed as anything.
+
+    `annotated` is the callee's own parameter names whose source carries a real annotation. Only
+    those drop a `str` claim: a str argument that contradicts such a parameter is the per-call
+    argument guard's job (`_call_user_func`'s scalar branch), which names the callee and the call
+    position, and turning it into a `sig_override` instead reports the parameter's declaration --
+    and for a target already annotated `list[str]` (the generated `_ail_ctr_subtract_iter_str`)
+    makes the typed path refuse a program the general path builds. An UNANNOTATED parameter keeps
+    its call-site str inference: `def ident(x): return x` called with a str must settle `x` to STR,
+    which is exactly what `_param_kinds`'s `sig_override` widening already does (and what
+    `_infer_strparam_pass` does for the 'array' default)."""
     site = {}
     for arg, (pname, _pk) in zip(args, callee_params):
         if callable_types.valid(_pk):
@@ -32478,14 +32495,9 @@ def _call_site_signature(args, callee_params, ctx):
         if _pk in SETS and _is_set_literal(arg):
             continue  # `set()` / `{1, 2}` take the typed set parameter's kind (`_map_pointer`).
         c = _claim(arg, ctx)
-        if c == STR:
-            # STR is NOT propagation evidence. A str argument that contradicts an annotated int/float
-            # parameter is the per-call argument guard's job (`_call_user_func`'s scalar branch), which
-            # names the callee and the call position; turning it into a `sig_override` instead reports
-            # the parameter's declaration and, for a target whose annotation is already `list[str]`
-            # (the generated `_ail_ctr_subtract_iter_str`), makes the typed path refuse a program the
-            # general path builds. The unannotated str/list-of-str call-site rule is `_infer_strparam_pass`
-            # below, which is deliberately independent of this pass.
+        if c == STR and pname in annotated:
+            # STR is not propagation evidence against the author's OWN annotation; the call guard
+            # reports it (see this function's docstring). An unannotated parameter keeps the claim.
             continue
         if _bytearray_as_bytes and c == BYTEARRAY:
             # A bytearray argument is read as a bytes view for a parameter whose body wants a
@@ -32571,7 +32583,7 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
             gparams = sigs[g][0]
             if len(n.args) != len(gparams):
                 continue
-            site = _call_site_signature(n.args, gparams, caller_ctx)
+            site = _call_site_signature(n.args, gparams, caller_ctx, _ANNOTATED_PARAMS.get(g, ()))
             for pname, c in site.items():
                 claims.setdefault(g, {}).setdefault(pname, set()).add(c)
     changed = False
@@ -32983,7 +32995,7 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
             gparams = sigs[g][0]
             if len(n.args) != len(gparams):
                 continue
-            site = _call_site_signature(n.args, gparams, caller_ctx)
+            site = _call_site_signature(n.args, gparams, caller_ctx, _ANNOTATED_PARAMS.get(g, ()))
             site_lists.setdefault(g, []).append(site)
 
     clones = {}
@@ -33191,6 +33203,12 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
     # the function that holds it never indexes it: `coefficient_of_variation(xs)` only ever passes
     # `xs` to `mean`, and deciding its kind from local evidence alone made it an int.
     by_name = {f.name: f for f in fns}
+    # The callee-side half of `_call_site_signature`'s STR rule: which parameters carry a REAL
+    # annotation, per function. Replaced wholesale -- never merged -- so a name reused by a later
+    # compile can never inherit an earlier program's annotations.
+    _ANNOTATED_PARAMS.clear()
+    _ANNOTATED_PARAMS.update((f.name, frozenset(a.arg for a in f.args.args if a.annotation is not None))
+                             for f in fns)
     for _ in range(len(fns) + 2):
         moved = False
         for f in fns:
