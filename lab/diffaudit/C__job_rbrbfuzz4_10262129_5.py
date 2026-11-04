@@ -6,3 +6,5 @@ print(next(r))
 d1 = {1: "a"}
 d2 = {2: "b"}
 print(d1 | d2)
+d1 |= d2
+print(d1)
