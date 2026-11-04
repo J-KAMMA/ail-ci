@@ -82,10 +82,15 @@ non-strict mode, while `strict_mode=True` gives `Leading padding not allowed`,
 `crc_hqx` mask their input value to 32 and 16 bits, as the C code's `unsigned_int(bitwise=True)`
 argument does.
 
-The argument handling follows CPython's C signatures. `sep` defaults to a private sentinel, so an
-explicit `sep=b""` or `sep=""` raises `ValueError: sep must be length 1.` while an omitted `sep`
-means "no separator"; a `bytearray` separator raises `TypeError: sep must be str or bytes.` and a
-value with no length raises `TypeError: object of type 'X' has no len()`. Passing a `str`, a list or
+The argument handling follows CPython's C signatures. `sep` defaults to a private sentinel (a module
+object a user value cannot alias), so an explicit `sep=b""` or `sep=""` raises
+`ValueError: sep must be length 1.` while an omitted `sep` means "no separator"; a `bytearray`
+separator raises `TypeError: sep must be str or bytes.` and a value with no length raises
+`TypeError: object of type 'X' has no len()`. A one-character `str` sep above U+00FF raises
+`ValueError: sep must be ASCII.` (U+0080..U+00FF are accepted, as in the C code). Arguments are
+validated in CPython's order: the data buffer first, then `bytes_per_sep` as a C `int`
+(`TypeError: 'float' object cannot be interpreted as an integer`; outside `-2**31..2**31-1`,
+`OverflowError: Python int too large to convert to C int`), then `sep`. Passing a `str`, a list or
 another non-buffer to `hexlify`/`b2a_hex`/`b2a_base64`/`crc32`/`crc_hqx` raises
 `TypeError: a bytes-like object is required, not 'X'`, while `unhexlify`/`a2b_hex`/`a2b_base64`
 raise `TypeError: argument should be bytes, buffer or ASCII string, not 'X'` for the same input.

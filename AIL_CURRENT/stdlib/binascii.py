@@ -14,7 +14,7 @@ Not provided: b2a_uu, a2b_uu, b2a_qp, a2b_qp.
 
 _HEX = "0123456789abcdef"
 _B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-_NO_SEP = b"\x00AIL_NO_SEP\x00"
+_NO_SEP = [0]
 
 
 class Error(ValueError):
@@ -30,6 +30,8 @@ def _typename(data):
         return "bool"
     if isinstance(data, int):
         return "int"
+    if isinstance(data, float):
+        return "float"
     if isinstance(data, str):
         return "str"
     if isinstance(data, bytes):
@@ -70,21 +72,26 @@ def _ascii_bytes(data):
 
 
 def _sep_byte(sep):
-    if sep is _NO_SEP or sep == _NO_SEP:
+    if sep is _NO_SEP:
         return -1
     if isinstance(sep, str):
         if len(sep) != 1:
             raise ValueError("sep must be length 1.")
-        return ord(sep)
+        c = ord(sep)
+        if c > 255:
+            raise ValueError("sep must be ASCII.")
+        return c
     if isinstance(sep, bytes):
         if len(sep) != 1:
             raise ValueError("sep must be length 1.")
         return sep[0]
-    if isinstance(sep, bytearray) or isinstance(sep, list) or isinstance(sep, tuple):
-        if len(sep) != 1:
-            raise ValueError("sep must be length 1.")
-        raise TypeError("sep must be str or bytes.")
-    raise TypeError("object of type '%s' has no len()" % _typename(sep))
+    try:
+        n = len(sep)
+    except TypeError:
+        raise TypeError("object of type '%s' has no len()" % _typename(sep))
+    if n != 1:
+        raise ValueError("sep must be length 1.")
+    raise TypeError("sep must be str or bytes.")
 
 
 def _hex_value(c):
@@ -149,9 +156,11 @@ _CRC32_TABLE = [
 
 def hexlify(data: bytes, sep=_NO_SEP, bytes_per_sep: int = 1) -> bytes:
     buf = _buffer(data)
-    sepc = _sep_byte(sep)
     if not isinstance(bytes_per_sep, int):
         raise TypeError("'%s' object cannot be interpreted as an integer" % _typename(bytes_per_sep))
+    if bytes_per_sep < -2147483648 or bytes_per_sep > 2147483647:
+        raise OverflowError("Python int too large to convert to C int")
+    sepc = _sep_byte(sep)
     out = bytearray()
     n = len(buf)
     i = 0
