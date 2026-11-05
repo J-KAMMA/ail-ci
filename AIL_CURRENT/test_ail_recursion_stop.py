@@ -21,6 +21,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+try:
+    import resource
+except ImportError:          # Windows: the unlimited-stack test is skipped there
+    resource = None
+
 ROOT = Path(__file__).resolve().parent
 CLI = str(ROOT / "ail_chatgpt.py")
 
@@ -154,6 +159,74 @@ GENERATOR = '''def g(n):
 print(next(g(0)))
 '''
 
+# A `yield from` chain of 12000 runs each generator on its own stack, so it fits: the owner
+# decision forbids an artificial nesting cap, and CPython's own limit of 1000 is the documented
+# difference (docs/LIMITATIONS.md).  A fixed frame counter used to refuse this depth.
+GENERATOR_CHAIN = '''def g(n):
+    if n == 0:
+        yield 1
+    else:
+        yield from g(n - 1)
+
+
+print(next(g(12000)))
+'''
+
+# The caught trap must be a RecursionError instance, not a plain RuntimeError that an alias or a
+# `type(e)` read reports by the wrong name; `except RecursionError` must not take plain
+# RuntimeErrors (its CPython subclass relation is one-way).
+CAUGHT_CLASS = '''def countdown(n: int) -> int:
+    return countdown(n + 1)
+
+
+try:
+    countdown(0)
+except RuntimeError as e:
+    print(type(e).__name__)
+    print(isinstance(e, RecursionError))
+    print(isinstance(e, RuntimeError))
+'''
+
+# `type(e) is X` needs the typed path (the general path refuses the `type` builtin by name).
+TYPED_CLASS = '''def countdown(n: int) -> int:
+    return countdown(n + 1)
+
+
+try:
+    countdown(0)
+except RuntimeError as e:
+    print(type(e) is RecursionError)
+    print(type(e) is RuntimeError)
+'''
+
+ONE_WAY = '''def countdown(n: int) -> int:
+    return countdown(n + 1)
+
+
+try:
+    countdown(0)
+except RecursionError:
+    print("recursion")
+try:
+    raise RuntimeError("plain")
+except RecursionError:
+    print("WRONG")
+except RuntimeError:
+    print("runtime")
+'''
+
+# A depth that needs more than the old hard-coded 8 MiB fallback (`f(300000)` uses roughly
+# 20 MiB of frames); under `ulimit -s unlimited` the stack really is larger, so this must
+# complete as it did before the guard existed.
+UNLIMITED = '''def descend(n: int) -> int:
+    if n == 0:
+        return 0
+    return 1 + descend(n - 1)
+
+
+print(descend(300000))
+'''
+
 
 def _run_cpython(directory, text):
     src = Path(directory) / "probe.py"
@@ -182,6 +255,14 @@ def _build_and_run(directory, name, text, env_extra):
 def _last_line(stderr):
     lines = [line.rstrip() for line in stderr.decode("utf-8", "replace").splitlines() if line.strip()]
     return lines[-1] if lines else ""
+
+
+def _run_unlimited(exe, directory):
+    """Run a built program with RLIMIT_STACK unlimited, as `ulimit -s unlimited` does."""
+    def unlimit():
+        resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+    return subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory,
+                          preexec_fn=unlimit)
 
 
 class RecursionStop(unittest.TestCase):
@@ -273,6 +354,67 @@ class RecursionStop(unittest.TestCase):
                     self.assertNotEqual(got.returncode, 0, "%s/%s" % (slug, mode))
                     self.assertTrue(_last_line(got.stderr).startswith("RecursionError:"),
                                     "%s/%s: %r" % (slug, mode, got.stderr[-400:]))
+
+    def test_caught_stop_is_a_recursionerror_instance(self):
+        # The review's p23/p12 defect: the trap was carried as plain RuntimeError, so an alias
+        # read back RuntimeError and `type(e).__name__`/isinstance lied.
+        with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+            want_out, want_rc = _run_cpython(directory, CAUGHT_CLASS)
+            self.assertEqual(want_rc, 0)
+            for mode, env_extra in MODES:
+                got, err = _build_and_run(directory, "caught_class_" + mode, CAUGHT_CLASS, env_extra)
+                self.assertIsNotNone(got, "%s\n%s" % (mode, err))
+                self.assertEqual((got.stdout.decode("utf-8", "replace"), got.returncode),
+                                 (want_out, want_rc), mode)
+
+    def test_caught_stop_exact_type(self):
+        with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+            want_out, want_rc = _run_cpython(directory, TYPED_CLASS)
+            self.assertEqual(want_rc, 0)
+            for mode, env_extra in MODES[1:]:        # the general path refuses `type` by name
+                got, err = _build_and_run(directory, "typed_class_" + mode, TYPED_CLASS, env_extra)
+                self.assertIsNotNone(got, "%s\n%s" % (mode, err))
+                self.assertEqual((got.stdout.decode("utf-8", "replace"), got.returncode),
+                                 (want_out, want_rc), mode)
+
+    def test_except_recursionerror_does_not_catch_runtimeerror(self):
+        with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+            want_out, want_rc = _run_cpython(directory, ONE_WAY)
+            self.assertEqual(want_rc, 0)
+            for mode, env_extra in MODES:
+                got, err = _build_and_run(directory, "one_way_" + mode, ONE_WAY, env_extra)
+                self.assertIsNotNone(got, "%s\n%s" % (mode, err))
+                self.assertEqual((got.stdout.decode("utf-8", "replace"), got.returncode),
+                                 (want_out, want_rc), mode)
+
+    def test_generator_chain_12000_completes(self):
+        # An artificial nesting cap refused this depth; each generator has its own stack and the
+        # chain used to complete.  CPython refuses at its default limit 1000 (documented
+        # difference), so the oracle here is the base behaviour, not CPython.
+        with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+            for mode, env_extra in MODES:
+                got, err = _build_and_run(directory, "gen_chain_" + mode, GENERATOR_CHAIN, env_extra)
+                self.assertIsNotNone(got, "%s\n%s" % (mode, err))
+                self.assertEqual(got.returncode, 0, "%s: %r" % (mode, got.stderr[-400:]))
+                self.assertEqual(got.stdout.decode("utf-8", "replace"), "1\n", mode)
+
+    @unittest.skipUnless(resource is not None and sys.platform.startswith("linux"),
+                         "RLIMIT_STACK manipulation needs POSIX resource limits")
+    def test_unlimited_stack_keeps_a_deep_recursion_working(self):
+        # The old hard-coded 8 MiB fallback for RLIM_INFINITY refused depth 300000; the real
+        # (unlimited) stack holds it, so it must complete.  Only the general path has no typed
+        # call counter (the typed path's own 50000 limit is separate).
+        with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+            got, err = _build_and_run(directory, "unlimited_g", UNLIMITED,
+                                      {"AIL_UNIFIED_FORCE": "1"})
+            self.assertIsNotNone(got, err)
+            try:
+                ran = _run_unlimited(Path(directory) / "exe_unlimited_g", directory)
+            except (ValueError, OSError) as error:
+                self.skipTest("RLIMIT_STACK cannot be made unlimited here: %s" % error)
+            self.assertEqual(ran.stdout.decode("utf-8", "replace"), "300000\n",
+                             ran.stderr[-400:])
+            self.assertEqual(ran.returncode, 0, ran.stderr[-400:])
 
 
 if __name__ == "__main__":

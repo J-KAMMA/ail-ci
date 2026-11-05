@@ -22,12 +22,17 @@ Only an actual stack exhaustion stops the program. It stops loudly and by name:
   through its ordinary exception path while a 64 KiB reserve is left for the raise. `except
   RuntimeError` and `except RecursionError` catch it and a `finally` runs. There is no frame
   count, so a depth that fits the real stack keeps working, and a function with many locals is
-  stopped before it overflows;
-- a `yield from` chain gets a separate cap of 10000 nested generator activations
-  (`AIL_MAX_GENERATOR_DEPTH`), because each generator runs on its own stack and the stack check
-  cannot see the Python nesting;
+  stopped before it overflows. When `RLIMIT_STACK` is unlimited the main stack is taken to be
+  1 GiB (256 MiB on a 32-bit address space), a conservative bound far below the first other
+  mapping, so a real exhaustion still stops by name rather than faulting and depth 300000
+  completes;
+- a `yield from` chain has no frame cap either: each generator runs on its own mapped stack, so
+  the stack check cannot see the Python nesting, and the chain keeps working until the OS can no
+  longer provide a stack; the resume then raises the same `RecursionError`, never a silent stop;
 - the typed path keeps its own check at `AIL_MAX_RECURSION_DEPTH` (50000) and reports the same
-  name;
+  name. A caught trap is a real `RecursionError` instance when the program can observe the class
+  (it names `RecursionError` or binds an `as e`): `type(e).__name__`, `repr(e)`, `isinstance` and
+  `type(e) is` agree with CPython, and `except RecursionError` does not take plain RuntimeErrors;
 - an uncaught one exits 1 with `RecursionError: maximum recursion depth exceeded` as the last
   stderr line. It never dies with a bare signal and empty stderr.
 

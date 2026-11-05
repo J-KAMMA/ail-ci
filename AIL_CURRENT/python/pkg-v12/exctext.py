@@ -27,6 +27,9 @@ import classname
 import userexc
 
 ACTIVE = False
+# The exception code of RecursionError once it is given one of its own (set by pyfunc while
+# compiling a program that can observe the class); 0 keeps the legacy alias to RuntimeError.
+RECURSION_CODE = 0
 
 TEXT, REPR, TYPE, QUAL, ARGSREPR = '__ail_text__', '__ail_repr__', '__ail_type__', '__ail_qual__', '__ail_argsrepr__'
 FILENAME = '__ail_filename__'
@@ -606,12 +609,23 @@ def classes_table(text):
     import re
     reserved = ['', 'URLError', 'HTTPError'] if userexc.reserved() else []           # codes 29 (spare), 30, 31: urllib (G12)
     names = CLASS_NAMES + reserved + [classname.qualified(n) for n in userexc.NAMES]   # F2: `b.Error` for a class of module b
+    if RECURSION_CODE:
+        names = names + ['RecursionError']       # its own code, after every user class (pyfunc assigns it)
     last = len(names) - 1
+    if RECURSION_CODE and last != RECURSION_CODE:
+        raise AssertionError('RecursionError code %d does not follow the class table (%d)' % (RECURSION_CODE, last))
     quoted = ', '.join('"%s"' % n for n in names)
     shown = len(CLASS_NAMES) + len(reserved)
-    qualified = ', '.join('"%s"' % (('urllib.error.' + n if n else n) if len(CLASS_NAMES) <= i < shown else n if i < shown
-                                       else n if classname.module(userexc.NAMES[i - shown]) != '__main__' else '__main__.' + n)
-                          for i, n in enumerate(names))
+    def _qualified(i, n):
+        if len(CLASS_NAMES) <= i < shown:
+            return 'urllib.error.' + n if n else n
+        if i < shown:
+            return n
+        user = i - shown
+        if user < len(userexc.NAMES):
+            return n if classname.module(userexc.NAMES[user]) != '__main__' else '__main__.' + n
+        return n                                   # the appended RecursionError
+    qualified = ', '.join('"%s"' % _qualified(i, n) for i, n in enumerate(names))
     function, count = re.subn(r'static const char \*ail_exception_name\(int code\) \{.*?\n\}\n',
                               lambda m: ('static const char *ail_exception_name(int code) {\n    static const char *names[] =\n        {%s};\n'
                                          '    return code >= 1 && code <= %d ? names[code] : "RuntimeError";\n}\n' % (quoted, last)),
@@ -630,6 +644,24 @@ def classes_table(text):
         text = text.replace(old, 'static const char *ail_exception_qualname(int code) {\n    static const char *names[] =\n        {%s};\n'
                                  '    return code >= 1 && code <= %d ? names[code] : "RuntimeError";\n}\n' % (qualified, last))
     return text
+
+
+def recursion_code(text):
+    """The DIE block giving the recursion trap RecursionError's own code (RECURSION_CODE)."""
+    if not RECURSION_CODE:
+        return text
+    old = 'AIL_EXC_UNICODE_DECODE = 8'
+    new = 'AIL_EXC_UNICODE_DECODE = 8, AIL_EXC_RECURSION = %d' % RECURSION_CODE
+    if text.count(old) != 1:
+        raise AssertionError('DIE block changed; update exctext.recursion_code (enum)')
+    text = text.replace(old, new)
+    old = ('    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))\n'
+           '        return AIL_EXC_RUNTIME;   /* CPython\'s RecursionError derives from RuntimeError */')
+    new = ('    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))\n'
+           '        return AIL_EXC_RECURSION;   /* its own class; RuntimeError handlers include it (pyfunc) */')
+    if text.count(old) != 1:
+        raise AssertionError('DIE block changed; update exctext.recursion_code (kind_of)')
+    return text.replace(old, new)
 
 
 def apply(text, edits, what):

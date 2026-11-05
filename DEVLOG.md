@@ -1,3 +1,30 @@
+## 2026-11-05 -- recstop1 review fixes: caught class, generator depth, unlimited stack
+
+The review of the stack-check change found three regressions, all fixed here.
+
+1. A caught recursion stop on the typed path was the RuntimeError class: the trap is carried
+   as code 7 and `EXC_NAMES['RecursionError']` aliased to 7, so `type(e).__name__` said
+   `RuntimeError` and `except RecursionError` took every RuntimeError. When a program can
+   observe the class (it names `RecursionError` or binds `as e`), `pyfunc` now assigns
+   RecursionError its own code after every user class, `classes_table` names it, the DIE
+   block gains `AIL_EXC_RECURSION` and `ail_exc_kind_of` returns it for the recursion message,
+   and a RuntimeError handler includes that code (the subclass relation is one-way). Probes
+   p23/p12 now print `RecursionError`/`True`; over-catch, `type(e) is`, `isinstance`, `repr`,
+   `raise RecursionError`, a user exception class, and an exception read through a dict value,
+   an attribute or a callee all match CPython.
+2. `AIL_MAX_GENERATOR_DEPTH` (10000) changed how deep a `yield from` chain may run: a 12000
+   chain completed on the base and stopped on HEAD. The cap and `cx->gen_depth` are gone; each
+   generator keeps its own mapped stack, and when that mapping fails the resume raises the
+   same named `RecursionError` before switching. The 12000 chain completes again; an infinite
+   chain still stops by name (at the real address-space limit).
+3. With `RLIMIT_STACK` unlimited, `ail_stack_limit_from` fell back to 8 MiB, so depth 300000
+   (about 20 MiB of frames) raised instead of completing. The unlimited case now uses a
+   conservative 1 GiB bound (256 MiB on 32-bit), far below the first other mapping: 300000
+   completes, and a runaway still stops by name.
+
+`test_ail_recursion_stop.py` grew to 13 tests (class identity, one-way handler, generator
+chain, unlimited stack). `DIFFERENCES.md` rows 1-2 and `docs/LIMITATIONS.md` were corrected.
+
 ## 2026-11-05 -- recstop1 review fix: a real stack check replaces the frame cap
 
 The review of the first cut found that `AIL_MAX_GENERAL_CALL_DEPTH` = 10000 *lowered* the maximum

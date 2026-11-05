@@ -11381,7 +11381,6 @@ typedef struct ail_ctx {
     size_t gc_threshold;
     ail_frame *frames;
     char *stack_limit;      /* lowest stack address this thread may touch: the general path's recursion stop */
-    int64_t gen_depth;      /* enclosing generator activations (each has its own stack, so only this counts nesting) */
     /* exception / limit */
     ail_excslot exc;
     int exc_pending;
@@ -18112,8 +18111,18 @@ static inline int64_t ail_intern(ail_ctx *cx, const char *name) {
    the derived limit is headroom for the raise path, so a check that fires still has
    room to build and print the exception.
    =================================================================================== */
+/* When RLIMIT_STACK is unlimited the main stack may grow until it meets another mapping,
+   so no 8 MiB default may be assumed: the base commit completed a 300000-deep recursion
+   that way. A 1 GiB reserve (256 MiB on a 32-bit address space) is far above any depth
+   that used to work and far below the first mapping, so a runaway recursion still stops
+   by name instead of faulting on an unrelated page. */
+#if SIZE_MAX > 0xffffffffu
+#define AIL_STACK_UNLIMITED ((size_t)1 << 30)
+#else
+#define AIL_STACK_UNLIMITED ((size_t)256 << 20)
+#endif
 static inline char *ail_stack_limit_from(char *sp) {
-    size_t budget = (size_t)8 << 20;
+    size_t budget = AIL_STACK_UNLIMITED;
 #if defined(AIL_HAVE_GETRUSAGE) && !defined(_WIN32)
     struct rlimit rl;
     if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur > 0)
@@ -18121,6 +18130,7 @@ static inline char *ail_stack_limit_from(char *sp) {
 #endif
     if (budget > AIL_STACK_MARGIN * 2) budget -= AIL_STACK_MARGIN;
     else budget /= 2;
+    if ((size_t)sp <= budget) return sp - (size_t)sp / 2;   /* never point below address 0 */
     return sp - budget;
 }
 
@@ -30386,6 +30396,8 @@ def _piece_text(p, want):
             text = text.replace(old, '    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")\n        || !strcmp(w, "pop index out of range")\n')
     if p == 'DIE' and 'EXCCLASSES' in want:
         text = _exctext.classes_table(text)          # S4e: Exception (28) and the user exception classes (29..)
+    if p == 'DIE':
+        text = _exctext.recursion_code(text)         # RecursionError's own code, when the program can see its class
     if 'EXCSTR' in want and p != 'DIE':
         text = _exctext.part_edit(p, text)
     if p == 'IREXC':
