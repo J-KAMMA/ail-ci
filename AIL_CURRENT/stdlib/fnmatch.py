@@ -5,7 +5,8 @@ with `os.path.normcase`, which is the identity on POSIX (this file is POSIX-only
 called.  CPython compiles `translate()`'s regular expression at run time; this compiler only accepts
 a literal pattern in `re.compile`, so matching walks the pattern directly.  `translate()` still
 returns CPython's exact regular-expression text.  Bytes patterns and names are matched as
-ISO-8859-1 text, as CPython does when it compiles them.
+ISO-8859-1 text, as CPython does when it compiles them; mixing bytes with str, or passing a
+non-string, raises the same TypeError text CPython's `re` raises.
 """
 
 __all__ = ["filter", "fnmatch", "fnmatchcase", "translate"]

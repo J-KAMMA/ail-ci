@@ -1,8 +1,8 @@
 """Derived from CPython 3.12 Lib/sched.py; PSF License, see stdlib/LICENSE-PSF.txt.
 
-A generally useful event scheduler class.  `threading.RLock` is not available here (this compiler
-rewrites `import threading` and a `cancel` method of this module collides with its future helper), so
-the scheduler is not thread-safe.  `collections.namedtuple` and a heap of class instances are
+A generally useful event scheduler class.  `threading.RLock` only builds on the general path here
+(the typed path rewrites `import threading` away and refuses a lock), so the scheduler is not
+thread-safe.  `collections.namedtuple` and a heap of class instances are
 rewritten in ways that do not build here, so `Event` is a plain class and the queue is kept sorted by
 (time, priority, sequence); the order and every result are CPython's.  The sequence number is a plain
 integer rather than `itertools.count()`, because this compiler does not keep an iterator in a
