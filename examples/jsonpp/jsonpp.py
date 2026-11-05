@@ -14,7 +14,8 @@ Numbers are never converted, so a number beyond int64 is printed unchanged.
 
 Output:
   * default: 2-space indent, one member per line, `": "` after keys;
-  * --indent N: N spaces per level (N < 0 means newlines without indentation);
+  * --indent N: N spaces per level, a non-negative decimal (0 means one
+    member per line with no indentation);
   * --sort-keys: members sorted by the byte order of the decoded key;
   * --compact: `,` and `:` with no spaces, on one line;
   * --check: print `ok <objects> <arrays> <strings> <numbers> <max_depth>`.

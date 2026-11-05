@@ -10,7 +10,7 @@ jsonpp.py [--indent N] [--sort-keys] [--compact] [--check] < input
 | option        | meaning                                                              |
 |---------------|----------------------------------------------------------------------|
 | (none)        | 2-space indent, one member per line, `": "` after keys               |
-| `--indent N`  | N spaces per level; `N` < 0 means newlines without indentation       |
+| `--indent N`  | N spaces per level, `N` >= 0 (0 means one member per line, no spaces) |
 | `--sort-keys` | members sorted by the byte order of the decoded key                  |
 | `--compact`   | `,` and `:` with no spaces, all on one line                          |
 | `--check`     | print `ok <objects> <arrays> <strings> <numbers> <max_depth>` only   |
