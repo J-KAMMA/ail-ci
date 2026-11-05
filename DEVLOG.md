@@ -1,3 +1,14 @@
+## 2026-11-05 -- relcheck1: re-apply the release preflight on the current tree (job-rbrelcheck1-11051610)
+
+Re-applied the accepted `relcheck1` change (`fcc4ccae33bf`..`job-relcheck1-11051335`).  The diff
+applied cleanly to the sources: `tools/release_check.py`, `AIL_CURRENT/test_ail_release_check.py`,
+`AIL_CURRENT/tests.d/test_ail_release_check.txt`, `lab/release/PREFLIGHT.md`, and the
+`.github/workflows/agent-worker.yml` hunk that drops `GH_MODELS_TOKEN` (this tree still had it).
+`AIL_CURRENT/manifest.d` was not applied by hand: `python3 tools/update_manifest.py` recomputed the
+new pins for the test module and its `tests.d` registration and `--check` passes.  `tools/diff_ids.py`
+is not present on this tree.  `test_ail_release_check`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass on the final commit.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this
