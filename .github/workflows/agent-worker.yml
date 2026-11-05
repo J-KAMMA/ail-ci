@@ -45,6 +45,7 @@ jobs:
           K: ${{ secrets.OPENCODE_API_KEY }}
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
           C: ${{ secrets.COMMAND_CODE_API_KEY }}
+          G: ${{ secrets.GH_MODELS_TOKEN }}
         run: |
           umask 077
           printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
@@ -53,6 +54,9 @@ jobs:
           # Command Code key (GOAT plan, owner 2026-10-26): pipeline.sh tries it before the paid OpenCode Go model.
           # The 2026-10-28 two-tasks-per-runner change dropped it by mistake, so no job used Command Code since (2026-11-03).
           [ -n "$C" ] && printf '%s' "$C" > "$RUNNER_TEMP/cc.key" || true
+          # GitHub Models (free; owner 2026-11-04). A fine-grained token with only "Models: read", never the job token:
+          # agents run arbitrary code and the job token can push
+          [ -n "$G" ] && printf '%s' "$G" > "$RUNNER_TEMP/ghm.key" || true
       - name: OpenCode CLI
         if: inputs.harness == 'oc'
         env:
@@ -82,6 +86,9 @@ jobs:
             echo "could not check out $EXTRA: running the first task only"
           fi
       - name: Worker
+        # (2026-11-05) end the work before the job's 330-minute limit, so the key scan and the push still run and the
+        # work survives; 9 runs were cancelled at 331 minutes with everything lost
+        timeout-minutes: 312
         run: |
           git rev-parse HEAD > "$RUNNER_TEMP/start"
           git config user.name "AIL agent"
@@ -139,12 +146,13 @@ jobs:
           K: ${{ secrets.OPENCODE_API_KEY }}
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
           C: ${{ secrets.COMMAND_CODE_API_KEY }}
+          G: ${{ secrets.GH_MODELS_TOKEN }}
         run: |
-          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$RUNNER_TEMP/cc.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$RUNNER_TEMP/cc.key" "$RUNNER_TEMP/ghm.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
           bad=0
           # scan checkout $1 (commits since the sha in $2); a clean checkout gets the marker file $3 and is pushed
           scan() {
-            for s in "$K" "$Q" "$C"; do
+            for s in "$K" "$Q" "$C" "$G"; do
               [ -n "$s" ] || continue
               if ( cd "$1" && { grep -rqF -e "$s" --exclude-dir=.git . || git log -p "$(cat "$2")..HEAD" | grep -qF -e "$s"; } ); then
                 echo "key found in results of $1: not pushing"; return 1
@@ -172,7 +180,13 @@ jobs:
               git add -A ci-proposed && git commit -q -F "$RUNNER_TEMP/msgs" )
           }
           push() {  # checkout $1, branch $2
-            ( cd "$1" && git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null) && { git commit -q -m "agent worker report" || true; } \
+            # (2026-11-05) a Worker cut by its step time limit leaves no report.md and maybe uncommitted edits; "git add"
+            # of the missing report failed and nothing was pushed, so re-runs started over. Keep both: the re-run
+            # continues from this branch. (The key scan above already covered the working tree.)
+            ( cd "$1" || exit 1
+              [ -f .agent/report.md ] || { cp .agent/pipeline.md .agent/report.md 2>/dev/null; echo "(worker cut at the step time limit; unfinished)" >> .agent/report.md; }
+              git add -A -- . ':(exclude).agent' ':(exclude)corpus'
+              git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null) && { git commit -q -m "agent worker report" || true; } \
               && git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:$2" )
           }
           rc=0

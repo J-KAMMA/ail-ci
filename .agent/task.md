@@ -1,3 +1,60 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+(free quota used up; paid model from here)
+[model commandcode/deepseek-v4.1-flash]
+All checks are done. Here is my review.
+
+## What the change really does
+
+`AIL_CURRENT/python/pkg-v12/noneslots.py` (new, hooked into `python_surface`) source-rewrites `xs = [None] * n` inside a function into `xs = [[] for …]` plus a `xs__p` present-bit list, rewriting `xs[i] = list/None`, `xs.append(…)` and `xs[i] is (not) None`. `optlib.py` adds `int` to `INFERRED_RETURN_KINDS`, lowers one-argument `d.get(k)` on local scalar dicts to `k in d` + `d[k] if present else zero`, and replaces the `st_For` presence reset with `_may_be_absent`. That matches the report except that the report implies the row rewrite is use-complete; it is not (below).
+
+## Claims
+
+- "noneslots validates every use … plain reads, aliases, `del`, augmented targets refuse": **false** — accepted uses are left untranslated (D1) or evaluated twice (D2), and `global` names leak the sentinel (D3).
+- Probes p1–p12 + `plain` byte-identical on both builds: **verified** (ran all 13: 2/2 same stdout each).
+- Tests (added `test_ail_pyreach_optret`, edited `test_ail_strict`, + `test_ail_safetynet`) 0 failed: **verified on HEAD** (`ok …, 0 failed`); the other six modules were not run, per the instructions.
+- Codegen identical: **verified** for `chain_relax`, `rail_transfer`, `berth_sim` `.ail` sources (old=new SHA); the "five pins" claim is **unverified** because `tools/codegen_diff.py` has no `--pins` flag, but the hook is Python-syntax only.
+- "Features 4/5 remain unlanded": **verified** (no dict-of-Optional values, no None-in-tuple-return lowering in the diff). So rail_transfer's None blockers remain and the task's "number this moves" is not reached (allowed by the stop rule, but the gate "rail_transfer scratch copy passes 23/24" was never reported).
+- "chain_relax builds typed with the None code unchanged": **unverified** (I did not build the scratch copy).
+
+## Defects (all introduced by this change; base matches CPython)
+
+1. **Guard comparisons in expression statements / assignment values are never rewritten.** `_Rewrite.visit_Expr` and the non-row branch of `visit_Assign` return the node without `generic_visit`, so the `is None` test keeps comparing the empty-list sentinel.
+   - `/tmp/rprobes/q22_slots_assign_value.py`: `xs=[None]*3; xs[1]=[1]; a=xs[0] is None; b=xs[1] is not None; c=xs[2] is None or xs[0] is None; print(a,b,c)` — expected `True True True`, actual `False True False`.
+   - `/tmp/rprobes/q16_slots_neg_append.py`: after `xs.append(None)`, `print(len(xs), xs[-2] is None, xs[-1] is None)` — expected `2 False True`, actual `2 False False` (while the `if xs[-1] is None` test in the same function prints correctly).
+
+2. **A row store duplicates a non-simple index expression.** `visit_Assign` emits `xs[<index>] = v` and then `xs__p[<same index>] = flag` without the `_is_simple` check used for guards.
+   - `/tmp/rprobes/q3_store_sideeffect.py`: `xs[idx()] = [1]` where `idx` prints — expected `idx\n[1]`, actual `idx\nidx\n[1]`.
+
+3. **A `global` row name is lowered and its flag kept local.** `rewrite()` never rejects a `global`/`nonlocal` declaration, so another function sees `[]` where CPython has `None`.
+   - `/tmp/rprobes/q28_global_rows.py`: `global G; G=[None]*2; G[0]=[1]`, then `read()` prints `G[1]` — expected `None\n2`, actual `[]\n2`.
+
+## Pre-existing (identical on `/tmp/base`)
+
+- `q7_intnone_overflow.py` (30-digit literal) → named `int64 constant expression out of range` on both trees.
+- `q25_intnone_argv.py` (runtime 19-digit `int()`) → `OverflowError` on both trees.
+- `q11_walrus_none.py` → exit 1 (TypeError) on both; only the exception wording differs.
+
+## Unverified
+
+- chain_relax / rail_transfer scratch-copy builds and the 23/24 case count.
+- The six other test modules named in the worker report.
+- Speed/icount: not measured; the `.ail` codegen is byte-identical, so AIL benchmark code is untouched, and the rewrite only fires on Python sources containing `[None]`.
+
+VERDICT: FIX
+1. `noneslots._Rewrite.visit_Expr`/`visit_Assign` must call `generic_visit` so `xs[i] is None`/`is not None` in bare expression statements and assignment values become a flag read, or the name must be refused. `/tmp/rprobes/q22_slots_assign_value.py`: expected `True True True`, actual `False True False`. `/tmp/rprobes/q16_slots_neg_append.py`: expected `2 False True`, actual `2 False False`.
+2. `_Rewrite.visit_Assign` must reject (or hoist) a store index that is not `_is_simple`. `/tmp/rprobes/q3_store_sideeffect.py`: expected `idx\n[1]`, actual `idx\nidx\n[1]`.
+3. `noneslots.rewrite` must refuse a candidate whose name is declared `global` (or carry the flag with the same scope). `/tmp/rprobes/q28_global_rows.py`: expected `None\n2`, actual `[]\n2`.
+[commandcode stop=end_turn turns=42 out_tokens=50536]
+
+
+--- ORIGINAL TASK ---
 Lane: pyreach-none
 
 **Owner decisions (2026-11-02):** Q1 None = **A, exact tagged None** on values and list elements, behaving as CPython does. Q2 ints wider than 64 bits = **B, exact masked u64 only where a proof shows the value fits**; otherwise the int64 default stays (overflow stops loudly). Q3: tally_lang's exec stays general / CPython hybrid.

@@ -232,7 +232,7 @@ rules=$(cat .agent/rules.txt 2>/dev/null)
 # fails ~70 modules until all fixes are in, and the merged result runs the full suite in the private repo.
 # (2026-11-05) RV/W1 60 -> 40: 29 reviews sat a full 60 min with no answer at a usage limit, and 21 of 300 runs neared
 # the 331-min cancel; a review that needs more than 40 min ends in FIX, which fix_cont.sh continues
-W0=100; RV=40; W1=40; SUITE=1; T_END=$(( $(date +%s) + ${PIPE_MIN:-320} * 60 ))
+W0=100; RV=40; W1=40; SUITE=1; T_END=$(( $(date +%s) + ${PIPE_MIN:-300} * 60 ))
 case "$(git rev-parse --abbrev-ref HEAD)" in job-bigint-*) W0=170; RV=50; W1=70; SUITE=0;; esac
 left() { echo $(( (T_END - $(date +%s)) / 60 )); }
 cat .agent/task.md > "$S/work0.md"
