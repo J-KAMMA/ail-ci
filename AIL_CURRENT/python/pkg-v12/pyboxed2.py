@@ -129,8 +129,8 @@ _MIX_DRAIN_SITES = (
      '    {\n        const char *name = ail_exc_pyname(w);\n        ail_mix_drain_out(); fflush(stdout);\n'
      '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
      '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
-    ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
-     'static void ail_exception_uncaught(ail_exception *value) {\n    ail_mix_drain_out();\n    fflush(stdout);\n'),
+    ('static void ail_exception_uncaught(ail_exception *value) {\n',
+     'static void ail_exception_uncaught(ail_exception *value) {\n    ail_mix_drain_out();\n'),
 )
 _MIX_DRAIN_DEF = (
     'void ail_mix_drain_out(void) {   /* called by a clone\'s trap path before _Exit */\n'

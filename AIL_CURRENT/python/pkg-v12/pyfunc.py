@@ -38981,9 +38981,6 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     runtime_parts = (parts - {'SEQHAS', 'SEQEQ', 'DIE'}
                      | ({'DIE'} if parts or folds or strict or floor else set())
                      | ({'RECDEPTH'} if recursive else set()))
-    if _RECURSION_CODE:
-        # the class table must name its own code (ail_exception_name/ail_exception_new bounds)
-        runtime_parts.add('EXCCLASSES')
     if any(SLIST in info.field_types.values() for info in classes.values()):
         runtime_parts.update(('SLIST', 'PSLIST'))
     fnkinds = {k for params, ret in sigs.values() for k in [ret, *(k for _, k in params)] if callable_types.valid(k)}

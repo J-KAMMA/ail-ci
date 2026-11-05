@@ -555,8 +555,6 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_INDEX;
     if (!strcmp(w, "key error")) return AIL_EXC_KEY;
     if (!strcmp(w, "dictionary changed size during iteration")) return AIL_EXC_RUNTIME;
-    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))
-        return AIL_EXC_RUNTIME;   /* CPython's RecursionError derives from RuntimeError */
     if (!strcmp(w, "file is not valid UTF-8"))
         return AIL_EXC_UNICODE_DECODE;
     return 0;
@@ -575,10 +573,6 @@ static const char *ail_exc_pyname(const char *w) {
         size_t n = strlen(named[i]);
         if (!strncmp(w, named[i], n) && w[n] == ':' && w[n + 1] == ' ') return NULL;
     }
-    /* Before the kind switch: the trap is catchable as RuntimeError (its CPython base) but an
-       uncaught one must still be reported under its own name. */
-    if (!strcmp(w, "maximum recursion depth exceeded")
-        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";
     switch (ail_exc_kind_of(w)) {
     case AIL_EXC_VALUE: return "ValueError";
     case AIL_EXC_ZERODIV: return "ZeroDivisionError";
@@ -589,6 +583,8 @@ static const char *ail_exc_pyname(const char *w) {
     case AIL_EXC_RUNTIME: return "RuntimeError";
     case AIL_EXC_UNICODE_DECODE: return "UnicodeDecodeError";
     }
+    if (!strcmp(w, "maximum recursion depth exceeded")
+        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";
     if (!strcmp(w, "out of memory")) return "MemoryError";
     return NULL;
 }
@@ -662,15 +658,8 @@ static const char *ail_exception_name(int code) {
 }
 static void ail_exception_uncaught(ail_exception *value) __attribute__((noreturn));
 static void ail_exception_uncaught(ail_exception *value) {
-    /* The recursion trap is carried as AIL_EXC_RUNTIME so `except RuntimeError` takes it (its
-       CPython base), but an uncaught one is reported under its own CPython name. */
-    const char *name = ail_exception_name(value->code);
-    static const char recursion_msg[] = "maximum recursion depth exceeded";
-    if (value->code == AIL_EXC_RUNTIME && value->n == (int64_t)(sizeof recursion_msg - 1)
-            && memcmp(value->p, recursion_msg, sizeof recursion_msg - 1) == 0)
-        name = "RecursionError";
     fflush(stdout);
-    fputs(name, stderr);
+    fputs(ail_exception_name(value->code), stderr);
     if (value->n) {
         fputs(": ", stderr);
         fwrite(value->p, 1, (size_t)value->n, stderr);   /* the message is UTF-8 already */
@@ -11323,8 +11312,8 @@ typedef struct ail_frame {
    two orders of magnitude (60 locals versus one), so any fixed cap is either below a depth
    that used to work or above the depth a large-frame function can reach -- and a depth that
    fits the real stack must keep working (owner decision 2026-11-05). `stack_limit` is set per
-   OS stack in ail_ctx_init (ail_stack_limit_from), threadrt.py (pthread_getattr_np) and
-   safetyrt.py (a generator's own mmap'd stack); AIL_FRAME_ENTER/LEAVE only maintain the GC
+   OS stack in ail_ctx_init (ail_stack_limit_from), threadrt.py (a thread's own mapped bounds)
+   and safetyrt.py (a generator's own mmap'd stack); AIL_FRAME_ENTER/LEAVE only maintain the GC
    frame chain. AIL_STACK_MARGIN is the room left below the limit for the raise path itself
    (building and printing the exception needs a few KiB, not the ~400 bytes a frame uses). */
 #define AIL_STACK_MARGIN ((size_t)64 << 10)
@@ -30372,6 +30361,8 @@ def _piece(p, want):
 def _piece_text(p, want):
     text = (_overflow_exception(_assert_exception(SOURCE[p])) if p == 'DIE' and 'OVERFLOWEXC' in want
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
+    if p == 'DIE' and 'RECDEPTH' in want:
+        text = _exctext.recursion_die(text)          # a program that can recurse: catchable, reported by its own name
     if p == 'DIE' and 'OSEXC' in want:
         text = _os_exception(text)
         if 'EXCSTR' in want:
@@ -30394,7 +30385,7 @@ def _piece_text(p, want):
         old = '    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")\n'
         if old in text:
             text = text.replace(old, '    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")\n        || !strcmp(w, "pop index out of range")\n')
-    if p == 'DIE' and 'EXCCLASSES' in want:
+    if p == 'DIE' and ('EXCCLASSES' in want or _exctext.RECURSION_CODE):
         text = _exctext.classes_table(text)          # S4e: Exception (28) and the user exception classes (29..)
     if p == 'DIE':
         text = _exctext.recursion_code(text)         # RecursionError's own code, when the program can see its class

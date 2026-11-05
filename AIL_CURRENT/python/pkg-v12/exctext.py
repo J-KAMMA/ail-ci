@@ -646,21 +646,68 @@ def classes_table(text):
     return text
 
 
+def recursion_die(text):
+    """The DIE block with the recursion trap catchable as RuntimeError and reported by its own name.
+
+    Applied only to a program that can recurse (the RECDEPTH part): every other program's DIE
+    text -- and therefore its pinned full C -- stays exactly what it was before the guard."""
+    old = '    if (!strcmp(w, "file is not valid UTF-8"))\n'
+    new = ('    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))\n'
+           '        return AIL_EXC_RUNTIME;   /* CPython\'s RecursionError derives from RuntimeError */\n'
+           '    if (!strcmp(w, "file is not valid UTF-8"))\n')
+    if text.count(old) != 1:
+        raise AssertionError('DIE block changed; update exctext.recursion_die (kind_of)')
+    text = text.replace(old, new)
+    old = '    switch (ail_exc_kind_of(w)) {\n'
+    new = ('    /* Before the kind switch: the trap is catchable as RuntimeError (its CPython base) but an\n'
+           '       uncaught one must still be reported under its own name. */\n'
+           '    if (!strcmp(w, "maximum recursion depth exceeded")\n'
+           '        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";\n'
+           '    switch (ail_exc_kind_of(w)) {\n')
+    if text.count(old) != 1:
+        raise AssertionError('DIE block changed; update exctext.recursion_die (pyname)')
+    text = text.replace(old, new)
+    old = ('    if (!strcmp(w, "maximum recursion depth exceeded")\n'
+           '        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";\n'
+           '    if (!strcmp(w, "out of memory")) return "MemoryError";\n')
+    if text.count(old) != 1:            # the late copy (the one just inserted sits before the switch)
+        raise AssertionError('DIE block changed; update exctext.recursion_die (pyname move)')
+    text = text.replace(old, '    if (!strcmp(w, "out of memory")) return "MemoryError";\n')
+    old = ('static void ail_exception_uncaught(ail_exception *value) {\n'
+           '    fflush(stdout);\n'
+           '    fputs(ail_exception_name(value->code), stderr);\n')
+    new = ('static void ail_exception_uncaught(ail_exception *value) {\n'
+           '    /* The recursion trap is carried as AIL_EXC_RUNTIME so `except RuntimeError` takes it (its\n'
+           '       CPython base), but an uncaught one is reported under its own CPython name. */\n'
+           '    const char *name = ail_exception_name(value->code);\n'
+           '    static const char recursion_msg[] = "maximum recursion depth exceeded";\n'
+           '    if (value->code == AIL_EXC_RUNTIME && value->n == (int64_t)(sizeof recursion_msg - 1)\n'
+           '            && memcmp(value->p, recursion_msg, sizeof recursion_msg - 1) == 0)\n'
+           '        name = "RecursionError";\n'
+           '    fflush(stdout);\n'
+           '    fputs(name, stderr);\n')
+    if text.count(old) != 1:
+        raise AssertionError('DIE block changed; update exctext.recursion_die (uncaught)')
+    return text.replace(old, new)
+
+
 def recursion_code(text):
-    """The DIE block giving the recursion trap RecursionError's own code (RECURSION_CODE)."""
+    """The DIE block giving the recursion trap RecursionError's own code (RECURSION_CODE).
+
+    Only a program that can recurse reaches the trap, and only then does recursion_die() put its
+    AIL_EXC_RUNTIME mapping in place; without one there is nothing to specialize."""
     if not RECURSION_CODE:
         return text
+    old = ('    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))\n'
+           '        return AIL_EXC_RUNTIME;   /* CPython\'s RecursionError derives from RuntimeError */')
+    if text.count(old) != 1:
+        return text
+    text = text.replace(old, ('    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))\n'
+                              '        return AIL_EXC_RECURSION;   /* its own class; RuntimeError handlers include it (pyfunc) */'))
     old = 'AIL_EXC_UNICODE_DECODE = 8'
     new = 'AIL_EXC_UNICODE_DECODE = 8, AIL_EXC_RECURSION = %d' % RECURSION_CODE
     if text.count(old) != 1:
         raise AssertionError('DIE block changed; update exctext.recursion_code (enum)')
-    text = text.replace(old, new)
-    old = ('    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))\n'
-           '        return AIL_EXC_RUNTIME;   /* CPython\'s RecursionError derives from RuntimeError */')
-    new = ('    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))\n'
-           '        return AIL_EXC_RECURSION;   /* its own class; RuntimeError handlers include it (pyfunc) */')
-    if text.count(old) != 1:
-        raise AssertionError('DIE block changed; update exctext.recursion_code (kind_of)')
     return text.replace(old, new)
 
 

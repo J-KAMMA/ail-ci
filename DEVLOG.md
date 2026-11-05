@@ -1,3 +1,18 @@
+## 2026-11-05 -- recstop1: keep non-recursive programs' C unchanged
+
+The full suite found that the guard's runtime edit changed every program's DIE block, not only
+the recursive ones: the `ail_exc_kind_of`/`ail_exc_pyname` recursion mapping and the uncaught
+RecursionError naming were unconditional, so the pinned full-C tests (the numeric-binding and
+record-initializer modules) saw different C for programs with no `try` and no recursion. Those
+splices now live in `exctext.recursion_die`, applied to a DIE block only when the program carries
+`RECDEPTH` (it can reach the trap); every other program's DIE text is byte-identical to the base,
+and the pinned hashes match again. Two follow-on breaks are fixed with it: the `pthread` wording
+in the always-emitted `AIL_STACK_LOW` comment tripped the threads module's no-thread-runtime
+scan, and pyboxed2's mixed-clone drain splice did not know the uncaught function's new first
+line, so every typed clone was dropped (bugs7, cc_jobs, flush_exit, mixed_bounds). The class
+table for a program that can observe RecursionError's class now applies inside the DIE block
+itself instead of an invalid `EXCCLASSES` runtime-part name (exception aggregate objects).
+
 ## 2026-11-05 -- recstop1 review fixes: caught class, generator depth, unlimited stack
 
 The review of the stack-check change found three regressions, all fixed here.
