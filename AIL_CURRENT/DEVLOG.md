@@ -8,7 +8,11 @@ spells (`_constructor_claims`: `Tok("W")` makes the parameter str); a forwarded 
 no longer re-derived to int. Disagreeing sites keep today's rule; bool never joins int, int never
 widens to float. SEMANTICS.md section 26a. Tests: `test_ail_callinf1.py`.
 
-@@RESULTS@@
+Numbers: pyproof typed 31 -> 31 / 55, wrong 0 -> 0; fcspec0 sample (52) typed 2 -> 2, wrong 0, moved
+0. The three targets reach their next blocker: spectral_norm / scimark_fft `list[float] parameters
+are read-only` (fclist1 lifts this only for int lists), raytrace `nearest = None` (an Optional local),
+nbody `subscripting a list[float]`. Same C: 62 programs (lab/compare/src main + typed 16, pyproof
+typed rows 16, 30 typed corpus programs) byte-identical to the base, so icount is unchanged.
 
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
