@@ -5,16 +5,18 @@
 
 Files are read with ``ast`` only; nothing is imported or executed.  Import forms resolved:
 ``import x``, ``import x.y as z``, ``from x import y``, ``from . import y`` and relative
-parents (``from .. import x``).  Imports that are not direct children of the module body
-(inside a function, a ``try``/``if`` block, ...) are marked ``lazy``; the eager graph keeps
-only the top-level ones.  Standard-library imports are recorded per module and not followed.
+parents (``from .. import x``).  Imports that run at import time -- the module body and
+module-level ``if``/``try``/``with``/``class`` statements -- are ``eager``; imports inside
+function or lambda bodies are marked ``lazy``.  Standard-library imports are recorded per
+module and not followed.
 
 Imports built dynamically are found too: ``importlib.util.spec_from_file_location`` with a
-path built from ``Path(__file__).parent`` / ``ROOT`` plus string parts, and
-``__import__('x')`` / ``importlib.import_module('x')`` with a literal name.  Those become
-lazy edges and are listed under ``dynamic_imports`` in the JSON.
+path built from ``Path(__file__)`` (optionally ``.resolve()`` / ``.parents[N]``), ``ROOT``
+or a preceding ``name = ... / 'part.py'`` assignment, plus ``__import__('x')`` /
+``importlib.import_module('x')`` with a literal name.  Those become lazy edges and are listed
+under ``dynamic_imports`` in the JSON.
 
-Both graphs are reported: ``eager`` (top-level imports only) and ``full`` (eager + lazy).
+Both graphs are reported: ``eager`` (import-time imports only) and ``full`` (eager + lazy).
 For each graph the tool computes strongly connected components (Tarjan), a layer per
 component (0 = a leaf, no imports out of the component) and a leaf-first order (by layer,
 then name: dependencies before their dependents, and a cycle stays together).
@@ -94,24 +96,55 @@ class Resolver:
 # --------------------------------------------------------------------------- imports
 
 
+def _is_path_call(n) -> bool:
+    return isinstance(n, ast.Call) and (
+        (isinstance(n.func, ast.Name) and n.func.id == "Path")
+        or (isinstance(n.func, ast.Attribute) and n.func.attr == "Path")) and bool(n.args)
+
+
+def _from_file(n) -> bool:
+    """True when an expression is rooted in ``Path(__file__)``, ``__file__`` or ``ROOT``/``HERE``/``BASE``."""
+    if isinstance(n, ast.Name) and n.id in ("__file__", "ROOT", "HERE", "BASE"):
+        return True
+    if _is_path_call(n):
+        return _from_file(n.args[0])
+    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+            and n.func.attr in ("resolve", "absolute", "expanduser") and not n.args:
+        return _from_file(n.func.value)
+    if isinstance(n, ast.Attribute) and n.attr == "parent":
+        return _from_file(n.value)
+    if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Attribute) and n.value.attr == "parents":
+        return _from_file(n.value.value)
+    return False
+
+
 def _path_static(node, file_dir: Path):
-    """Evaluate ``Path(__file__).parent / 'a' / 'b.py'`` and ``ROOT / 'a/b.py'``."""
+    """Evaluate ``Path(__file__).parent / 'a' / 'b.py'``, ``Path(__file__).resolve().parents[2] / 'x.py'``
+    and ``ROOT / 'a/b.py'``."""
     parts: list[str] = []
     base = None
+    ascend = 0
 
     def walk(n):
-        nonlocal base
+        nonlocal base, ascend
         if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div):
             walk(n.left)
             walk(n.right)
         elif isinstance(n, ast.Constant) and isinstance(n.value, str):
             parts.append(n.value)
-        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "Path" and n.args:
+        elif isinstance(n, ast.Call) and _is_path_call(n):
             walk(n.args[0])
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+                and n.func.attr in ("resolve", "absolute", "expanduser") and not n.args:
+            walk(n.func.value)
+        elif isinstance(n, ast.Subscript) and isinstance(n.value, ast.Attribute) and n.value.attr == "parents":
+            slice_node = n.slice
+            if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, int) \
+                    and _from_file(n.value.value):
+                base = "file"
+                ascend = slice_node.value
         elif isinstance(n, ast.Attribute) and n.attr == "parent":
-            if isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name) \
-                    and n.value.func.id == "Path" and n.value.args \
-                    and isinstance(n.value.args[0], ast.Name) and n.value.args[0].id == "__file__":
+            if _from_file(n.value):
                 base = "file"
         elif isinstance(n, ast.Name) and n.id in ("ROOT", "HERE", "BASE"):
             base = "file"  # ROOT = Path(__file__).resolve().parent in these modules
@@ -119,7 +152,32 @@ def _path_static(node, file_dir: Path):
     walk(node)
     if base is None or not parts:
         return None
-    return file_dir.joinpath(*parts)
+    directory = file_dir.parents[ascend - 1] if ascend else file_dir
+    return directory.joinpath(*parts)
+
+
+def _enclosing_scope(tree, lineno: int):
+    """Innermost function of ``tree`` whose body contains ``lineno`` (``tree`` otherwise)."""
+    best = tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end = getattr(node, "end_lineno", None) or node.lineno
+            if node.lineno <= lineno <= end and (best is tree or node.lineno >= best.lineno):
+                best = node
+    return best
+
+
+def _assigned_expr(tree, name: str, lineno: int):
+    """The value of the last plain ``name = expr`` before ``lineno`` in the enclosing scope, if any."""
+    scope = _enclosing_scope(tree, lineno)
+    best = None
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id == name \
+                and node.lineno <= lineno:
+            if best is None or node.lineno > best.lineno:
+                best = node
+    return best.value if best is not None else None
 
 
 def dynamic_imports(tree, file_path: Path):
@@ -130,11 +188,16 @@ def dynamic_imports(tree, file_path: Path):
         func = node.func
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
         if name == "spec_from_file_location":
-            path = _path_static(node.args[1], file_path.parent) if len(node.args) >= 2 else None
+            path = None
             shown = ""
             if len(node.args) >= 2:
+                arg = node.args[1]
+                expr = arg
+                if isinstance(expr, ast.Name):
+                    expr = _assigned_expr(tree, expr.id, node.lineno) or expr
+                path = _path_static(expr, file_path.parent)
                 try:
-                    shown = ast.unparse(node.args[1])
+                    shown = ast.unparse(arg)
                 except Exception:
                     shown = "<unparsed>"
             yield node.lineno, "spec_from_file_location", shown, path
@@ -216,13 +279,24 @@ def scan(tree, module: str, is_pkg: bool, resolver: Resolver):
         for b in bad:
             unresolved.append(f"{node.lineno}:{b}")
 
-    for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            take(node, eager)
-        else:
-            for sub in ast.walk(node):
-                if isinstance(sub, (ast.Import, ast.ImportFrom)):
-                    take(sub, lazy)
+    eager_ids: set[int] = set()
+
+    def module_scope(nodes):
+        """Imports that run at import time: module body plus nested ``if``/``try``/``with``/``class``
+        statements, but not function or lambda bodies."""
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                eager_ids.add(id(node))
+                take(node, eager)
+                continue
+            module_scope(ast.iter_child_nodes(node))
+
+    module_scope(tree.body)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and id(node) not in eager_ids:
+            take(node, lazy)
     return eager, lazy, stdlib, unresolved
 
 

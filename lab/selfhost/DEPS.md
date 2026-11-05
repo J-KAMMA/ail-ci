@@ -9,47 +9,48 @@ compiler file was edited and nothing was compiled.
 - Base: the `job-shdeps1` export of `staging:integ`, commit recorded as `base_commit` in the JSON
 - Reproduce: `python3 tools/selfhost_deps.py`
 
-Two graphs are recorded. **eager** follows only imports that are direct children of the module
-body (what runs at import time); **full** adds imports inside functions, `try`/`if` blocks and
-other nested nodes (marked `lazy`). Standard-library imports are listed per module in the JSON
+Two graphs are recorded. **eager** follows imports that run at import time — the module body
+plus module-level `if`/`try`/`with`/`class` statements; **full** adds imports inside function
+and lambda bodies (marked `lazy`). Standard-library imports are listed per module in the JSON
 and not followed.
 
 ## Two graphs
 
 | graph | modules | lines | edges | layers | cycles | modules in cycles |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| eager | 5 | 16,234 | 5 | 3 | 0 | 0 |
-| full | 163 | 215,462 | 417 | 9 | 6 | 66 |
+| eager | 6 | 17,006 | 6 | 3 | 0 | 0 |
+| full | 163 | 215,462 | 419 | 9 | 4 | 69 |
 
-The eager graph is tiny: `ail_chatgpt.py` imports only `ail_syntax`, `ail_sexpr`,
-`ail_modules` and `fastwalk` at module level (`ail_sexpr` also imports `ail_syntax`). Every
-compiler pass and back end module is reached through function-level imports, so eager lines are
-7.5% of the front end.
+The eager graph is tiny: `ail_chatgpt.py` imports `ail_syntax`, `ail_sexpr`, `ail_modules`
+and `fastwalk` at module level, and its `if __name__ == "__main__"` block imports `ail_server`
+on the documented `compile` invocation (`ail_sexpr` also imports `ail_syntax`). Every
+compiler pass and back end module is reached through function-level imports, so eager lines
+are 7.9% of the front end.
 
-Layer sizes (full), layer 0 = leaves: `62, 26, 20, 6, 40, 2, 1, 1, 5` — 9 layers. Layer sizes
-(eager): `3, 1, 1`.
+Layer sizes (full), layer 0 = leaves: `62, 22, 7, 3, 60, 2, 1, 1, 5` — 9 layers. Layer sizes
+(eager): `4, 1, 1`.
 
 ## Cycles (full graph)
 
-Six strongly connected components have more than one module; there are no self-loops. A cycle
+Four strongly connected components have more than one module; there are no self-loops. A cycle
 has to be rewritten as one unit.
 
 | size | modules |
 | ---: | --- |
-| 4 | `funclib`, `itlib`, `jsonlib`, `stdlib3` |
-| 13 | `csvgen`, `csvlib`, `dtlib`, `enumlib`, `ntlib`, `numberslib`, `randlib`, `smalllib5`, `statlib`, `stdlib4`, `stdlib5`, `stdtop`, `timelib` |
 | 2 | `ir.effects`, `ir.rtc` |
 | 2 | `ir.passes`, `ir.passes.licm` |
-| 40 | `ail_syntax`, `boxclosure`, `c_api_bridge`, `c_object`, `cruntime`, `devcc`, `dunders`, `exctext`, `filelib`, `filelower`, `filert`, `genlib`, `gpu`, `hashlower`, `ir.driver`, `ir.emit_c`, `ir.lower`, `modtables`, `module_object`, `pathlower`, `pipeline`, `proclib`, `pyboxed`, `pyboxed2`, `pyc`, `pyfront`, `pyfunc`, `pymix`, `safetyrt`, `stubcalls`, `tupcalls`, `tupcommon`, `tupexpr`, `tuplam`, `tuplegen`, `tuplib`, `tupstmt`, `unified`, `urllower`, `userexc` |
+| 60 | `ail_syntax`, `ailarray`, `boxclosure`, `c_api_bridge`, `c_object`, `cruntime`, `csvgen`, `csvlib`, `devcc`, `dtlib`, `dunders`, `enumlib`, `exctext`, `filelib`, `filelower`, `filert`, `fmtlib`, `funclib`, `genlib`, `gpu`, `hashlower`, `ir.driver`, `ir.emit_c`, `ir.lower`, `itlib`, `jsonlib`, `modtables`, `module_object`, `ntlib`, `numberslib`, `pathlower`, `pipeline`, `proclib`, `pyboxed`, `pyboxed2`, `pyc`, `pyfront`, `pyfunc`, `pymix`, `randlib`, `safetyrt`, `smalllib5`, `statlib`, `stdlib3`, `stdlib4`, `stdlib5`, `stdtop`, `stubcalls`, `timelib`, `tupcalls`, `tupcommon`, `tupexpr`, `tuplam`, `tuplegen`, `tuplib`, `tupstmt`, `unified`, `urllower`, `userexc`, `withlib` |
 | 5 | `ail_api_contracts`, `ail_chatgpt`, `ail_server`, `ail_source_context`, `ail_source_edit` |
 
-The 40-module component contains the whole typed path and the traditional code generator; it
-also contains the entry (`ail_chatgpt` is in the 5-module component, which points into it).
-`ail_syntax` alone is 5,811 lines.
+The 60-module component contains the whole typed path and the traditional code generator; it
+also contains the entry's own component (`ail_chatgpt` is in the 5-module component, which
+points into it). `ail_syntax` alone is 5,811 lines. The dynamic fallbacks in `jsonlib` and
+`stdlib4` (which load `ail_syntax.py` by path when it is not already in `sys.modules`) are
+counted as edges here, so `ail_syntax` is reachable from both.
 
 ## Highest in-degree (15, full graph)
 
-`in-degree` counts distinct importing modules; eager is the same count on top-level imports.
+`in-degree` counts distinct importing modules; eager is the same count on import-time imports.
 
 | module | in-degree | in-degree (eager) | lines |
 | --- | ---: | ---: | ---: |
@@ -60,13 +61,13 @@ also contains the entry (`ail_chatgpt` is in the 5-module component, which point
 | `pyfront` | 15 | 11 | 1,456 |
 | `stdlib5` | 12 | 10 | 289 |
 | `ir.effects` | 9 | 9 | 349 |
-| `pipeline` | 9 | 6 | 343 |
+| `pipeline` | 9 | 7 | 343 |
+| `pyfunc` | 8 | 4 | 42,062 |
+| `ail_syntax` | 8 | 3 | 5,811 |
 | `bigcap` | 8 | 2 | 1,699 |
 | `intmode` | 8 | 2 | 35 |
-| `pyfunc` | 8 | 4 | 42,062 |
 | `biggate` | 7 | 3 | 348 |
 | `cruntime` | 7 | 3 | 31,094 |
-| `ail_syntax` | 6 | 3 | 5,811 |
 | `classname` | 6 | 6 | 182 |
 
 ## First 20 in leaf-first order (candidates for the first AIL rewrites)
@@ -105,11 +106,13 @@ none of the earliest self-hosting candidates; those rewrites start from no accep
 
 ## Dynamic imports (stop-rule check)
 
-20 import expressions build their target at run time. Ten of them resolve to a file this tool
-follows; the rest are listed here. None hides an edge that changes the graph: every resolved
-target is already reachable, and the unresolved ones are standard library (`builtins`, `sys`),
-a fallback to a module already imported statically (`ail_syntax`, `compscope`), or a loop
-variable.
+20 import expressions build their target at run time. Sixteen of them resolve to a file this
+tool follows; the rest are listed here. Two resolved targets matter for the graph: the
+`ail_syntax.py` fallbacks in `jsonlib` and `stdlib4` (loaded by path when `ail_syntax` is not
+already in `sys.modules`) add the edges that join the 4-, 13- and 40-module components into the
+single 60-module cycle reported above. The other unresolved cases are standard library
+(`builtins`, `sys`), a fallback to a module already imported statically (`compscope`, imported
+by `shadowing` at line 321), or a loop variable.
 
 | container | line | form | value | target |
 | --- | ---: | --- | --- | --- |
@@ -128,17 +131,17 @@ variable.
 | `ir.lower` | 3170 | `__import__` | `intmode` | `intmode` |
 | `ir.lower` | 3249 | `__import__` | `intmode` | `intmode` |
 | `ir.lower` | 3298 | `__import__` | `intmode` | `intmode` |
-| `jsonlib` | 633 | `spec_from_file_location` | `path` (= `parents[2] / 'ail_syntax.py'`, fallback) | — (already imported statically) |
+| `jsonlib` | 633 | `spec_from_file_location` | `path` (= `pathlib.Path(__file__).resolve().parents[2] / 'ail_syntax.py'`, fallback) | `ail_syntax` |
 | `pyfunc` | 41356 | `__import__` | `pipeline` | `pipeline` |
 | `pyfunc` | 41987 | `__import__` | `sys` | — (stdlib) |
 | `shadowing` | 325 | `spec_from_file_location` | `os.path.join(..., 'compscope.py')` | — (already imported statically) |
-| `stdlib4` | 58 | `spec_from_file_location` | `path` (= `parents[2] / 'ail_syntax.py'`, fallback) | — (already imported statically) |
+| `stdlib4` | 58 | `spec_from_file_location` | `path` (= `Path(__file__).resolve().parents[2] / 'ail_syntax.py'`, fallback) | `ail_syntax` |
 
 ## Unresolved imports (stop-rule check)
 
 3 import lines cannot be resolved: `ail_chatgpt.py` lines 6311, 6314 and 6318 import
 `ail_http_compare`, `ail_http_snapshot` and `ail_http_build` inside function bodies, and no
-such module exists in the tree. Against 425 resolved import edges and 535 standard-library
+such module exists in the tree. Against 427 resolved import edges and 535 standard-library
 imports, that is 0.3%, far below the 10% stop threshold. They are lazy CLI paths and are
 listed under `unresolved` in the JSON.
 
@@ -157,8 +160,10 @@ All three match.
 
 ## Limits
 
-- A `try:` block at module level is treated as lazy, since it is not a direct child of the
-  module body; this matches "what loads at start" only when the import succeeds.
+- Imports in the module body and in module-level `if`/`try`/`with`/`class` statements are
+  eager, matching what runs when the entry is executed. A module-level `if` whose condition is
+  false at run time therefore still contributes an eager edge (e.g. `ail_server` via the
+  `__main__` guard). Imports inside function and lambda bodies are lazy.
 - `from package import name` adds an edge to `package.name` when that submodule exists and to
   the package itself (its `__init__` runs).
 - The graph is of source-level imports. A name reached through `sys.modules` or a global

@@ -110,7 +110,7 @@
       "container": "jsonlib",
       "form": "spec_from_file_location",
       "line": 633,
-      "target": null,
+      "target": "ail_syntax",
       "value": "path"
     },
     {
@@ -138,56 +138,36 @@
       "container": "stdlib4",
       "form": "spec_from_file_location",
       "line": 58,
-      "target": null,
+      "target": "ail_syntax",
       "value": "path"
     }
   ],
   "entry": "AIL_CURRENT/ail_chatgpt.py",
-  "generated": "2026-11-05T18:27:15Z",
+  "generated": "2026-11-05T18:56:25Z",
   "graphs": {
     "eager": {
       "cycles": [],
-      "edges": 5,
+      "edges": 6,
       "layer_sizes": [
-        3,
+        4,
         1,
         1
       ],
       "layers": 3,
       "leaf_first_order": [
         "ail_modules",
+        "ail_server",
         "ail_syntax",
         "fastwalk",
         "ail_sexpr",
         "ail_chatgpt"
       ],
-      "lines": 16234,
-      "modules": 5,
+      "lines": 17006,
+      "modules": 6,
       "self_loops": []
     },
     "full": {
       "cycles": [
-        [
-          "funclib",
-          "itlib",
-          "jsonlib",
-          "stdlib3"
-        ],
-        [
-          "csvgen",
-          "csvlib",
-          "dtlib",
-          "enumlib",
-          "ntlib",
-          "numberslib",
-          "randlib",
-          "smalllib5",
-          "statlib",
-          "stdlib4",
-          "stdlib5",
-          "stdtop",
-          "timelib"
-        ],
         [
           "ir.effects",
           "ir.rtc"
@@ -198,24 +178,35 @@
         ],
         [
           "ail_syntax",
+          "ailarray",
           "boxclosure",
           "c_api_bridge",
           "c_object",
           "cruntime",
+          "csvgen",
+          "csvlib",
           "devcc",
+          "dtlib",
           "dunders",
+          "enumlib",
           "exctext",
           "filelib",
           "filelower",
           "filert",
+          "fmtlib",
+          "funclib",
           "genlib",
           "gpu",
           "hashlower",
           "ir.driver",
           "ir.emit_c",
           "ir.lower",
+          "itlib",
+          "jsonlib",
           "modtables",
           "module_object",
+          "ntlib",
+          "numberslib",
           "pathlower",
           "pipeline",
           "proclib",
@@ -225,8 +216,16 @@
           "pyfront",
           "pyfunc",
           "pymix",
+          "randlib",
           "safetyrt",
+          "smalllib5",
+          "statlib",
+          "stdlib3",
+          "stdlib4",
+          "stdlib5",
+          "stdtop",
           "stubcalls",
+          "timelib",
           "tupcalls",
           "tupcommon",
           "tupexpr",
@@ -236,7 +235,8 @@
           "tupstmt",
           "unified",
           "urllower",
-          "userexc"
+          "userexc",
+          "withlib"
         ],
         [
           "ail_api_contracts",
@@ -246,13 +246,13 @@
           "ail_source_edit"
         ]
       ],
-      "edges": 417,
+      "edges": 419,
       "layer_sizes": [
         62,
-        26,
-        20,
-        6,
-        40,
+        22,
+        7,
+        3,
+        60,
         2,
         1,
         1,
@@ -328,7 +328,6 @@
         "collib",
         "dunderrt",
         "fecache",
-        "funclib",
         "gpu_vk",
         "ir.effects",
         "ir.passes.mem2reg",
@@ -336,63 +335,55 @@
         "ir.passes.specsel",
         "ir.passes.window",
         "ir.rtc",
-        "itlib",
-        "jsonlib",
         "pathlib_prelude",
         "shadowing",
         "smalllib",
         "sqllower",
-        "stdlib3",
         "stubsigs",
         "threadlib",
         "typedforms",
         "typedinherit",
         "typedpar",
-        "csvgen",
-        "csvlib",
-        "dtlib",
-        "enumlib",
         "ir.lower_text",
         "ir.ownership",
         "ir.passes.simplify",
         "ir.passes.symbounds",
         "ir.text",
         "ir.verify",
-        "ntlib",
-        "numberslib",
-        "randlib",
-        "smalllib5",
-        "statlib",
-        "stdlib4",
-        "stdlib5",
-        "stdtop",
-        "timelib",
         "walkmemo",
-        "ailarray",
-        "fmtlib",
         "ir.emit_text",
         "ir.passes",
         "ir.passes.licm",
-        "withlib",
         "ail_syntax",
+        "ailarray",
         "boxclosure",
         "c_api_bridge",
         "c_object",
         "cruntime",
+        "csvgen",
+        "csvlib",
         "devcc",
+        "dtlib",
         "dunders",
+        "enumlib",
         "exctext",
         "filelib",
         "filelower",
         "filert",
+        "fmtlib",
+        "funclib",
         "genlib",
         "gpu",
         "hashlower",
         "ir.driver",
         "ir.emit_c",
         "ir.lower",
+        "itlib",
+        "jsonlib",
         "modtables",
         "module_object",
+        "ntlib",
+        "numberslib",
         "pathlower",
         "pipeline",
         "proclib",
@@ -402,8 +393,16 @@
         "pyfront",
         "pyfunc",
         "pymix",
+        "randlib",
         "safetyrt",
+        "smalllib5",
+        "statlib",
+        "stdlib3",
+        "stdlib4",
+        "stdlib5",
+        "stdtop",
         "stubcalls",
+        "timelib",
         "tupcalls",
         "tupcommon",
         "tupexpr",
@@ -414,6 +413,7 @@
         "unified",
         "urllower",
         "userexc",
+        "withlib",
         "ail_cpython_hybrid",
         "ail_sexpr",
         "ail_modules",
@@ -430,14 +430,14 @@
     }
   },
   "module_count": {
-    "eager": 5,
+    "eager": 6,
     "full": 163
   },
   "modules": [
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 102,
+      "component_full": 97,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -531,8 +531,8 @@
         "_Int64CallChecker",
         "_ReplaceKnownNames"
       ],
-      "component_eager": 4,
-      "component_full": 102,
+      "component_eager": 5,
+      "component_full": 97,
       "dynamic": [
         {
           "form": "spec_from_file_location",
@@ -543,6 +543,7 @@
       ],
       "eager": [
         "ail_modules",
+        "ail_server",
         "ail_sexpr",
         "ail_syntax",
         "fastwalk"
@@ -728,7 +729,6 @@
         "ail_manifest",
         "ail_native_build",
         "ail_sdk",
-        "ail_server",
         "ail_slow_patterns",
         "ail_source_context",
         "ail_source_edit",
@@ -773,7 +773,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 91,
+      "component_full": 86,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -838,7 +838,7 @@
         "ExportError"
       ],
       "component_eager": null,
-      "component_full": 92,
+      "component_full": 87,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -870,7 +870,7 @@
         "Session"
       ],
       "component_eager": null,
-      "component_full": 95,
+      "component_full": 90,
       "dynamic": [],
       "eager": [
         "ail_modules"
@@ -916,7 +916,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 96,
+      "component_full": 91,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -958,7 +958,7 @@
         "Rewriter"
       ],
       "component_eager": 0,
-      "component_full": 94,
+      "component_full": 89,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1008,7 +1008,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 97,
+      "component_full": 92,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1041,7 +1041,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 98,
+      "component_full": 93,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1074,8 +1074,8 @@
       "classes": [
         "Template"
       ],
-      "component_eager": null,
-      "component_full": 102,
+      "component_eager": 1,
+      "component_full": 97,
       "dynamic": [
         {
           "form": "import_module",
@@ -1116,9 +1116,9 @@
         "_supervise",
         "serve"
       ],
-      "in_degree_eager": 0,
+      "in_degree_eager": 1,
       "in_degree_full": 1,
-      "layer_eager": null,
+      "layer_eager": 0,
       "layer_full": 8,
       "lazy": [
         "ail_chatgpt"
@@ -1157,8 +1157,8 @@
       "classes": [
         "SexprError"
       ],
-      "component_eager": 2,
-      "component_full": 93,
+      "component_eager": 3,
+      "component_full": 88,
       "dynamic": [],
       "eager": [
         "ail_syntax"
@@ -1213,7 +1213,7 @@
         "_Scanner"
       ],
       "component_eager": null,
-      "component_full": 99,
+      "component_full": 94,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1245,7 +1245,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 102,
+      "component_full": 97,
       "dynamic": [],
       "eager": [
         "ail_source_edit"
@@ -1281,7 +1281,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 102,
+      "component_full": 97,
       "dynamic": [],
       "eager": [
         "ail_syntax"
@@ -1326,8 +1326,8 @@
         "_RecordUnsupported",
         "_RecordTransformer"
       ],
-      "component_eager": 1,
-      "component_full": 90,
+      "component_eager": 2,
+      "component_full": 85,
       "dynamic": [
         {
           "form": "spec_from_file_location",
@@ -1451,7 +1451,7 @@
         "python_wording"
       ],
       "in_degree_eager": 3,
-      "in_degree_full": 6,
+      "in_degree_full": 8,
       "layer_eager": 0,
       "layer_full": 4,
       "lazy": [
@@ -1500,7 +1500,7 @@
         "Fuser"
       ],
       "component_eager": null,
-      "component_full": 11,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -1524,7 +1524,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 3,
+      "layer_full": 4,
       "lazy": [],
       "lines": 1990,
       "name": "ailarray",
@@ -1547,7 +1547,7 @@
         "_Walk"
       ],
       "component_eager": null,
-      "component_full": 20,
+      "component_full": 17,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1663,7 +1663,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 15,
+      "component_full": 12,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1700,7 +1700,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 16,
+      "component_full": 13,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -1718,7 +1718,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 17,
+      "component_full": 14,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -1739,7 +1739,7 @@
         "_Env"
       ],
       "component_eager": null,
-      "component_full": 21,
+      "component_full": 18,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1799,7 +1799,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 22,
+      "component_full": 19,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1826,7 +1826,7 @@
         "_Rewrite"
       ],
       "component_eager": null,
-      "component_full": 52,
+      "component_full": 49,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1853,7 +1853,7 @@
         "ClosureMixin"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1882,7 +1882,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 18,
+      "component_full": 15,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -1943,7 +1943,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "pipeline",
@@ -1985,7 +1985,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "buildcache",
@@ -2028,7 +2028,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 12,
+      "component_full": 9,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2063,7 +2063,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 49,
+      "component_full": 46,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2127,7 +2127,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 19,
+      "component_full": 16,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2154,7 +2154,7 @@
         "_X"
       ],
       "component_eager": null,
-      "component_full": 13,
+      "component_full": 10,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2202,7 +2202,7 @@
         "_Scope"
       ],
       "component_eager": null,
-      "component_full": 72,
+      "component_full": 67,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2232,7 +2232,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "biggate",
@@ -2290,7 +2290,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -2303,7 +2303,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 72,
       "name": "csvgen",
@@ -2327,7 +2327,7 @@
         "_SubstName"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower",
@@ -2342,7 +2342,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 1403,
       "name": "csvlib",
@@ -2359,9 +2359,11 @@
         "_Prepared"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
-      "eager": [],
+      "eager": [
+        "pipeline"
+      ],
       "functions": [
         "mode",
         "executable",
@@ -2377,9 +2379,7 @@
       "in_degree_full": 1,
       "layer_eager": null,
       "layer_full": 4,
-      "lazy": [
-        "pipeline"
-      ],
+      "lazy": [],
       "lines": 241,
       "name": "devcc",
       "path": "AIL_CURRENT/python/pkg-v12/devcc.py",
@@ -2441,7 +2441,7 @@
         "Dt"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower",
@@ -2464,7 +2464,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 1345,
       "name": "dtlib",
@@ -2481,7 +2481,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 57,
+      "component_full": 54,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2514,7 +2514,7 @@
         "_Rewriter"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "classname"
@@ -2571,7 +2571,7 @@
         "Uses"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "classname",
@@ -2594,7 +2594,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 537,
       "name": "enumlib",
@@ -2611,7 +2611,7 @@
         "_Repr"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "classname",
@@ -2651,8 +2651,8 @@
     },
     {
       "classes": [],
-      "component_eager": 3,
-      "component_full": 50,
+      "component_eager": 4,
+      "component_full": 47,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2676,7 +2676,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 51,
+      "component_full": 48,
       "dynamic": [],
       "eager": [
         "buildcache"
@@ -2726,7 +2726,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "hashlower",
@@ -2771,7 +2771,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 24,
+      "component_full": 21,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2793,7 +2793,7 @@
         "_Lowerer"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "filelib",
@@ -2824,7 +2824,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "filelib"
@@ -2859,7 +2859,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 27,
+      "component_full": 24,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2892,7 +2892,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 58,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib5"
@@ -2904,7 +2904,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 3,
+      "layer_full": 4,
       "lazy": [],
       "lines": 81,
       "name": "fmtlib",
@@ -2931,7 +2931,7 @@
         "Module"
       ],
       "component_eager": null,
-      "component_full": 100,
+      "component_full": 95,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -2982,7 +2982,7 @@
         "CmpSort"
       ],
       "component_eager": null,
-      "component_full": 9,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -2995,7 +2995,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 1,
+      "layer_full": 4,
       "lazy": [
         "stdlib3"
       ],
@@ -3014,7 +3014,7 @@
         "_Renamer"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "pyfront"
@@ -3064,7 +3064,7 @@
         "_Emit"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "pyfront"
@@ -3136,7 +3136,7 @@
         "Gen"
       ],
       "component_eager": null,
-      "component_full": 28,
+      "component_full": 25,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -3163,7 +3163,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 29,
+      "component_full": 26,
       "dynamic": [],
       "eager": [
         "gpu_spirv"
@@ -3193,7 +3193,7 @@
         "_Lowerer"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -3247,7 +3247,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 30,
+      "component_full": 27,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -3265,7 +3265,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3325,7 +3325,7 @@
         "Effects"
       ],
       "component_eager": null,
-      "component_full": 32,
+      "component_full": 29,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3360,7 +3360,7 @@
         "Emitter"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3402,7 +3402,7 @@
         "TextEmitter"
       ],
       "component_eager": null,
-      "component_full": 34,
+      "component_full": 31,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3433,7 +3433,7 @@
         "Flow"
       ],
       "component_eager": null,
-      "component_full": 35,
+      "component_full": 32,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -3455,7 +3455,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 36,
+      "component_full": 33,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -3486,7 +3486,7 @@
         "IRError"
       ],
       "component_eager": null,
-      "component_full": 31,
+      "component_full": 28,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -3519,7 +3519,7 @@
         "Lowering"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [
         {
           "form": "__import__",
@@ -3581,7 +3581,7 @@
         "TextLowering"
       ],
       "component_eager": null,
-      "component_full": 37,
+      "component_full": 34,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3610,7 +3610,7 @@
         "Resolver"
       ],
       "component_eager": null,
-      "component_full": 33,
+      "component_full": 30,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3638,7 +3638,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 45,
+      "component_full": 42,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3678,7 +3678,7 @@
         "LICM"
       ],
       "component_eager": null,
-      "component_full": 45,
+      "component_full": 42,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3710,7 +3710,7 @@
         "_Promoter"
       ],
       "component_eager": null,
-      "component_full": 40,
+      "component_full": 37,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3738,7 +3738,7 @@
         "Analysis"
       ],
       "component_eager": null,
-      "component_full": 41,
+      "component_full": 38,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3773,7 +3773,7 @@
         "Simplifier"
       ],
       "component_eager": null,
-      "component_full": 38,
+      "component_full": 35,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3809,7 +3809,7 @@
         "_Pass"
       ],
       "component_eager": null,
-      "component_full": 42,
+      "component_full": 39,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3837,7 +3837,7 @@
         "ElementFacts"
       ],
       "component_eager": null,
-      "component_full": 39,
+      "component_full": 36,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3865,7 +3865,7 @@
         "_Index"
       ],
       "component_eager": null,
-      "component_full": 43,
+      "component_full": 40,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3895,7 +3895,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 32,
+      "component_full": 29,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3924,7 +3924,7 @@
         "_Parser"
       ],
       "component_eager": null,
-      "component_full": 44,
+      "component_full": 41,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3964,7 +3964,7 @@
         "_Checker"
       ],
       "component_eager": null,
-      "component_full": 46,
+      "component_full": 43,
       "dynamic": [],
       "eager": [
         "ir",
@@ -3991,7 +3991,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 47,
+      "component_full": 44,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4069,7 +4069,7 @@
         "Streams"
       ],
       "component_eager": null,
-      "component_full": 9,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -4086,7 +4086,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 1,
+      "layer_full": 4,
       "lazy": [
         "stdlib3"
       ],
@@ -4104,7 +4104,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 59,
+      "component_full": 55,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -4126,12 +4126,12 @@
         "Resolver"
       ],
       "component_eager": null,
-      "component_full": 9,
+      "component_full": 85,
       "dynamic": [
         {
           "form": "spec_from_file_location",
           "line": 633,
-          "module": null,
+          "module": "ail_syntax",
           "value": "path"
         }
       ],
@@ -4150,8 +4150,9 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 1,
+      "layer_full": 4,
       "lazy": [
+        "ail_syntax",
         "jsonrt",
         "stdlib3"
       ],
@@ -4198,7 +4199,7 @@
         "_Lower"
       ],
       "component_eager": null,
-      "component_full": 14,
+      "component_full": 11,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4232,7 +4233,7 @@
         "Table"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4286,7 +4287,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "callable_types",
@@ -4354,7 +4355,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 48,
+      "component_full": 45,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4392,7 +4393,7 @@
         "NestedLists"
       ],
       "component_eager": null,
-      "component_full": 75,
+      "component_full": 70,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4433,7 +4434,7 @@
         "_Infer"
       ],
       "component_eager": null,
-      "component_full": 87,
+      "component_full": 82,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4473,7 +4474,7 @@
         "ParentsCall"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -4492,7 +4493,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [
         "dictviews"
       ],
@@ -4508,7 +4509,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -4524,7 +4525,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 423,
       "name": "numberslib",
@@ -4541,7 +4542,7 @@
         "_Scan"
       ],
       "component_eager": null,
-      "component_full": 61,
+      "component_full": 57,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4584,7 +4585,7 @@
         "_LocalKinds"
       ],
       "component_eager": null,
-      "component_full": 76,
+      "component_full": 71,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4638,7 +4639,7 @@
         "_Callee"
       ],
       "component_eager": null,
-      "component_full": 69,
+      "component_full": 65,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4673,7 +4674,7 @@
         "_Prefix"
       ],
       "component_eager": null,
-      "component_full": 25,
+      "component_full": 22,
       "dynamic": [],
       "eager": [
         "filelib_prelude"
@@ -4703,7 +4704,7 @@
         "_Lowerer"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -4735,7 +4736,7 @@
         "Pipeline"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -4755,7 +4756,7 @@
         "_address",
         "pipe"
       ],
-      "in_degree_eager": 6,
+      "in_degree_eager": 7,
       "in_degree_full": 9,
       "layer_eager": null,
       "layer_full": 4,
@@ -4785,7 +4786,7 @@
         "_Attrs"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -4818,7 +4819,7 @@
         "Compiler"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "classname",
@@ -4859,7 +4860,7 @@
         "NeedSlice"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "bigcap",
@@ -4870,6 +4871,7 @@
         "hashlower",
         "pyfront",
         "pyfunc",
+        "pymix",
         "stararity",
         "unified"
       ],
@@ -4974,7 +4976,6 @@
         "intmode",
         "numidentity",
         "pyfront",
-        "pymix",
         "rebrt",
         "safetyrt",
         "stdlib4",
@@ -5016,7 +5017,7 @@
         "_BigCapable"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "buildcache",
@@ -5131,7 +5132,7 @@
         "_IntConstTooLarge"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "pipeline"
@@ -5194,7 +5195,7 @@
         "_TList"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [
         {
           "form": "__import__",
@@ -6140,7 +6141,7 @@
         "MixReport"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "pyfunc",
@@ -6179,7 +6180,7 @@
         "_defs_only_source",
         "analyze"
       ],
-      "in_degree_eager": 0,
+      "in_degree_eager": 1,
       "in_degree_full": 2,
       "layer_eager": null,
       "layer_full": 4,
@@ -6196,7 +6197,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 88,
+      "component_full": 83,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6218,7 +6219,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -6230,7 +6231,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 83,
       "name": "randlib",
@@ -6243,7 +6244,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 64,
+      "component_full": 60,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -6266,7 +6267,7 @@
         "_Analyzer"
       ],
       "component_eager": null,
-      "component_full": 77,
+      "component_full": 72,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6295,7 +6296,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 78,
+      "component_full": 73,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6319,7 +6320,7 @@
         "_Region"
       ],
       "component_eager": null,
-      "component_full": 79,
+      "component_full": 74,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6359,7 +6360,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 63,
+      "component_full": 59,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -6383,7 +6384,7 @@
         "Library"
       ],
       "component_eager": null,
-      "component_full": 89,
+      "component_full": 84,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6418,7 +6419,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "cruntime",
@@ -6476,7 +6477,7 @@
         "MixedCallIR"
       ],
       "component_eager": null,
-      "component_full": 62,
+      "component_full": 58,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6507,7 +6508,7 @@
         "_Collector"
       ],
       "component_eager": null,
-      "component_full": 73,
+      "component_full": 68,
       "dynamic": [
         {
           "form": "spec_from_file_location",
@@ -6580,7 +6581,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -6598,7 +6599,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 329,
       "name": "smalllib5",
@@ -6615,7 +6616,7 @@
         "_Rewriter"
       ],
       "component_eager": null,
-      "component_full": 80,
+      "component_full": 75,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6654,7 +6655,7 @@
         "_Lowerer"
       ],
       "component_eager": null,
-      "component_full": 26,
+      "component_full": 23,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -6683,7 +6684,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 65,
+      "component_full": 61,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -6701,7 +6702,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 60,
+      "component_full": 56,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -6721,7 +6722,7 @@
         "Stat"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower",
@@ -6736,7 +6737,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 866,
       "name": "statlib",
@@ -6756,7 +6757,7 @@
         "Lib3"
       ],
       "component_eager": null,
-      "component_full": 9,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -6773,7 +6774,7 @@
       "in_degree_eager": 2,
       "in_degree_full": 5,
       "layer_eager": null,
-      "layer_full": 1,
+      "layer_full": 4,
       "lazy": [
         "funclib",
         "itlib",
@@ -6795,12 +6796,12 @@
         "Imports"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [
         {
           "form": "spec_from_file_location",
           "line": 58,
-          "module": null,
+          "module": "ail_syntax",
           "value": "path"
         }
       ],
@@ -6817,8 +6818,9 @@
       "in_degree_eager": 15,
       "in_degree_full": 17,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [
+        "ail_syntax",
         "csvgen",
         "csvlib",
         "dtlib",
@@ -6846,7 +6848,7 @@
         "Replace"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4"
@@ -6868,7 +6870,7 @@
       "in_degree_eager": 10,
       "in_degree_full": 12,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [
         "enumlib",
         "ntlib",
@@ -6890,7 +6892,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -6915,7 +6917,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [
         "intmode"
       ],
@@ -6933,7 +6935,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 101,
+      "component_full": 96,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6974,7 +6976,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 81,
+      "component_full": 76,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -6998,7 +7000,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stubsigs"
@@ -7031,7 +7033,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 54,
+      "component_full": 51,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7053,7 +7055,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 53,
+      "component_full": 50,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -7071,7 +7073,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 66,
+      "component_full": 62,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -7093,7 +7095,7 @@
         "_Rewriter"
       ],
       "component_eager": null,
-      "component_full": 67,
+      "component_full": 63,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7126,7 +7128,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 68,
+      "component_full": 64,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7152,7 +7154,7 @@
         "Lower"
       ],
       "component_eager": null,
-      "component_full": 10,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower",
@@ -7167,7 +7169,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 2,
+      "layer_full": 4,
       "lazy": [],
       "lines": 188,
       "name": "timelib",
@@ -7182,7 +7184,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 84,
+      "component_full": 79,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -7200,7 +7202,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 85,
+      "component_full": 80,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -7218,7 +7220,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 82,
+      "component_full": 77,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7253,7 +7255,7 @@
         "Calls"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "tupcommon",
@@ -7279,7 +7281,7 @@
         "Header"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "tuplegen"
@@ -7320,7 +7322,7 @@
         "Exprs"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "tupcommon"
@@ -7350,7 +7352,7 @@
         "Lams"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "tupcommon"
@@ -7379,7 +7381,7 @@
         "Table"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7422,7 +7424,7 @@
         "HardRefused"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "tupcalls",
@@ -7467,7 +7469,7 @@
         "Stmts"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "tupcommon",
@@ -7498,7 +7500,7 @@
         "_CallFactory"
       ],
       "component_eager": null,
-      "component_full": 83,
+      "component_full": 78,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -7541,7 +7543,7 @@
         "_Narrow"
       ],
       "component_eager": null,
-      "component_full": 23,
+      "component_full": 20,
       "dynamic": [],
       "eager": [
         "classname"
@@ -7591,7 +7593,7 @@
         "_Rename"
       ],
       "component_eager": null,
-      "component_full": 70,
+      "component_full": 66,
       "dynamic": [],
       "eager": [
         "parallel"
@@ -7627,7 +7629,7 @@
         "_Rewrite"
       ],
       "component_eager": null,
-      "component_full": 74,
+      "component_full": 69,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7674,7 +7676,7 @@
         "Plan"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "bigcap",
@@ -7804,7 +7806,7 @@
         "Gen"
       ],
       "component_eager": null,
-      "component_full": 55,
+      "component_full": 52,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7836,7 +7838,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 86,
+      "component_full": 81,
       "dynamic": [],
       "eager": [],
       "functions": [],
@@ -7858,7 +7860,7 @@
         "_ExcAttrs"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "iterlower"
@@ -7901,7 +7903,7 @@
         "_Subst"
       ],
       "component_eager": null,
-      "component_full": 90,
+      "component_full": 85,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7950,7 +7952,7 @@
     {
       "classes": [],
       "component_eager": null,
-      "component_full": 56,
+      "component_full": 53,
       "dynamic": [],
       "eager": [],
       "functions": [
@@ -7989,7 +7991,7 @@
         "ExitArgs"
       ],
       "component_eager": null,
-      "component_full": 71,
+      "component_full": 85,
       "dynamic": [],
       "eager": [
         "stdlib4",
@@ -8008,7 +8010,7 @@
       "in_degree_eager": 0,
       "in_degree_full": 1,
       "layer_eager": null,
-      "layer_full": 3,
+      "layer_full": 4,
       "lazy": [],
       "lines": 459,
       "name": "withlib",
@@ -8028,7 +8030,7 @@
     "AIL_CURRENT/python/pkg-v12"
   ],
   "total_lines": {
-    "eager": 16234,
+    "eager": 17006,
     "full": 215462
   },
   "unresolved": [

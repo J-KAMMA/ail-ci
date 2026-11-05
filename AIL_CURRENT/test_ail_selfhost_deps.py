@@ -7,6 +7,8 @@ with every merge, so this module pins the tool on ``lab/selfhost/deps_fixture`` 
 seven files, a two-module cycle (beta <-> gamma), one lazy edge into a package, and two
 standard-library imports that must be listed but not followed.
 """
+import ast
+import importlib.util
 import json
 import subprocess
 import sys
@@ -16,6 +18,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "selfhost_deps.py"
 FIXTURE = ROOT / "lab" / "selfhost" / "deps_fixture"
+
+
+def load_tool():
+    spec = importlib.util.spec_from_file_location("selfhost_deps", TOOL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 EAGER = {
     "entry": ["alpha", "delta"],
@@ -86,6 +96,26 @@ class SelfhostDepsTest(unittest.TestCase):
         self.assertEqual(
             self.data["graphs"]["full"]["leaf_first_order"],
             ["beta", "gamma", "pkg.leaf", "alpha", "pkg", "delta", "entry"])
+
+    def test_static_path_with_resolve_and_parents(self):
+        tool = load_tool()
+        expr = ast.parse(
+            "pathlib.Path(__file__).resolve().parents[2] / 'ail_syntax.py'",
+            mode="eval").body
+        got = tool._path_static(expr, Path("/repo/AIL_CURRENT/python/pkg-v12"))
+        self.assertEqual(got, Path("/repo/AIL_CURRENT/ail_syntax.py"))
+
+    def test_dynamic_path_from_assigned_name(self):
+        tool = load_tool()
+        tree = ast.parse(
+            "import importlib.util\n"
+            "import pathlib\n"
+            "def f():\n"
+            "    path = pathlib.Path(__file__).resolve().parents[2] / 'ail_syntax.py'\n"
+            "    spec = importlib.util.spec_from_file_location('ail_syntax', path)\n")
+        found = list(tool.dynamic_imports(tree, Path("/repo/AIL_CURRENT/python/pkg-v12/demo.py")))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][3], Path("/repo/AIL_CURRENT/ail_syntax.py"))
 
 
 if __name__ == "__main__":
