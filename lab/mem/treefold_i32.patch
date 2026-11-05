@@ -1,0 +1,250 @@
+--- program.c
++++ program_i32.c
+@@ -5260,6 +5260,41 @@
+ static void ail_list_clear(ail_list *L) { L->n = 0; }
+ static void ail_list_free(ail_list *L) { free(L->p); L->p = 0; L->n = L->cap = 0; }
+ 
++/* ---- fbnarrow1 i32 emulation: scratch copy only ---- */
++typedef struct { int32_t *p; ail_len_t n, cap; } i32list;
++static void i32_push(i32list *L, int64_t v) {
++    if (L->n == L->cap) {
++        int64_t c = L->cap ? L->cap * 2 : 8;
++        int32_t *q = (int32_t *)realloc(L->p, (size_t)c * sizeof *q);
++        if (!q) ail_die("out of memory");
++        L->p = q; L->cap = c;
++    }
++    L->p[L->n++] = (int32_t)v;
++}
++static void i32_reserve(i32list *L, int64_t extra) {
++    int32_t *q;
++    if (extra <= 0 || L->cap - L->n >= extra) return;
++    q = (int32_t *)realloc(L->p, (size_t)(L->n + extra) * sizeof *q);
++    if (!q) ail_die("out of memory");
++    L->p = q; L->cap = L->n + extra;
++}
++static int64_t i32_get(const i32list *L, int64_t i) {
++    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
++        if (i < 0) i += L->n;
++        if (i < 0 || i >= L->n) ail_die("list index out of range");
++    }
++    return L->p[i];
++}
++static void i32_set(i32list *L, int64_t i, int64_t v) {
++    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
++        if (i < 0) i += L->n;
++        if (i < 0 || i >= L->n) ail_die("list index out of range");
++    }
++    L->p[i] = (int32_t)v;
++}
++static void i32_free(i32list *L) { free(L->p); L->p = 0; L->n = L->cap = 0; }
++/* ---- end fbnarrow1 i32 emulation ---- */
++
+ /* `d = s[lo:hi:st]` -- a copy of the slice, with CPython's own clamping (slice.indices).
+    Omitted bounds are resolved by the caller, which knows the step's sign at compile time:
+    st > 0 -> lo = 0, hi = n;  st < 0 -> lo = n - 1, hi = -(n + 1) (clamps to -1, meaning
+@@ -7608,7 +7643,7 @@
+ static void ail_unwind_compact(void **p) { ail_list_free(p[0]); ail_pslist_free(p[1]); ail_list_free(p[2]); ail_list_free(p[3]); ail_list_free(p[4]); ail_list_free(p[5]); ail_list_free(p[6]); ail_list_free(p[7]); ail_obj_release(*(ail_obj_T **)p[8]); ail_obj_release(*(ail_obj_T **)p[9]); ail_obj_release(*(ail_obj_T **)p[10]); ail_obj_release(*(ail_obj_T **)p[11]); }
+ void compact(ail_obj_T *v_t, const int64_t *v_keep, int64_t v_keep_len) {
+     int64_t v_n = 0;
+-    ail_list v_mp = {0};
++    i32list v_mp = {0};
+     int64_t v__t1 = 0;
+     int64_t v__t2 = 0;
+     ail_pslist v_nm = {0};
+@@ -7633,8 +7668,8 @@
+     v_n = ({ (void)0; (v_t)->f_nm.n; });
+     v__t1 = 0LL;
+     v__t2 = v_n;
+-    ail_list_reserve(&v_mp, v__t2);
+-    for (int64_t _i = 0; _i < v__t2; _i++) ail_list_push(&v_mp, v__t1);
++    i32_reserve(&v_mp, v__t2);
++    for (int64_t _i = 0; _i < v__t2; _i++) i32_push(&v_mp, v__t1);
+     ail_pslist_free(&v_nm); v_nm = (ail_pslist){0};
+     (void)({ ail_list_clear(&v__t3); v__t3; });
+     ail_list_free(&v_w); v_w = v__t3; v__t3 = (ail_list){0};
+@@ -7647,18 +7682,18 @@
+     for (v__k1 = 0; v__k1 < v__t6; v__k1 += 1) {
+         v_i = v__k1;
+         if ((ail_list_get(&(ail_list){(int64_t *)v_keep, v_keep_len, v_keep_len}, v_i)) != 0) {
+-            ((&v_mp)->p[v_i] = (v_nm.n));
++            i32_set(&v_mp, v_i, (v_nm.n));
+             (void)(ail_pslist_push(&v_nm, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); })));
+             (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
+             (void)(ail_list_push(&v_dep, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
+             if ((((v__t7 = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t8 = 0LL), (v__t7 < v__t8)))) {
+                 (void)(ail_list_push(&v_par, -1LL));
+             } else {
+-                (void)(ail_list_push(&v_par, ail_list_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
++                (void)(ail_list_push(&v_par, i32_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
+             }
+         }
+     }
+-    ail_list_free(&v_mp);
++    i32_free(&v_mp);
+     (void)0;
+     ail_obj_store_T(&v__t9, v_t, 0);
+     ail_pslist_move(&v__t9->f_nm, &v_nm);
+@@ -7675,7 +7710,7 @@
+     ail_obj_store_T(&v__t12, v_t, 0);
+     ail_obj_field_list_move(&v__t12->f_par, &v_par);
+     ail_list_free(&v_par);
+-    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t3); ail_list_free(&v_w); ail_list_free(&v__t4); ail_list_free(&v_dep); ail_list_free(&v__t5); ail_list_free(&v_par); ail_obj_release(v__t9); ail_obj_release(v__t10); ail_obj_release(v__t11); ail_obj_release(v__t12); return;
++    ail_cleanup_top = v__cleanup_frame.previous; i32_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t3); ail_list_free(&v_w); ail_list_free(&v__t4); ail_list_free(&v_dep); ail_list_free(&v__t5); ail_list_free(&v_par); ail_obj_release(v__t9); ail_obj_release(v__t10); ail_obj_release(v__t11); ail_obj_release(v__t12); return;
+ }
+ 
+ static void ail_unwind_rebuild(void **p) { ail_list_free(p[0]); ail_list_free(p[1]); ail_list_free(p[2]); ail_list_free(p[3]); ail_list_free(p[4]); ail_pslist_free(p[5]); ail_list_free(p[6]); ail_list_free(p[7]); ail_list_free(p[8]); ail_list_free(p[9]); ail_list_free(p[10]); ail_list_free(p[11]); ail_obj_release(*(ail_obj_T **)p[12]); ail_obj_release(*(ail_obj_T **)p[13]); ail_obj_release(*(ail_obj_T **)p[14]); ail_obj_release(*(ail_obj_T **)p[15]); ail_sarena_free(p[16]); }
+@@ -7684,7 +7719,7 @@
+     ail_list v__t1 = {0};
+     ail_list v_stack = {0};
+     ail_list v__t2 = {0};
+-    ail_list v_ord = {0};
++    i32list v_ord = {0};
+     int64_t v__t3 = 0;
+     int64_t v__t4 = 0;
+     int64_t v_v = 0;
+@@ -7697,7 +7732,7 @@
+     int64_t v__t10 = 0;
+     int64_t v__t11 = 0;
+     int64_t v__t12 = 0;
+-    ail_list v_ni = {0};
++    i32list v_ni = {0};
+     int64_t v__t13 = 0;
+     int64_t v__t14 = 0;
+     int64_t v__k1 = 0;
+@@ -7725,14 +7760,14 @@
+     (void)({ ail_list_clear(&v__t1); ail_list_push(&v__t1, 0LL); v__t1; });
+     ail_list_free(&v_stack); v_stack = v__t1; v__t1 = (ail_list){0};
+     (void)({ ail_list_clear(&v__t2); v__t2; });
+-    ail_list_free(&v_ord); v_ord = v__t2; v__t2 = (ail_list){0};
++    i32_free(&v_ord); v__t2 = (ail_list){0};
+     {
+         int64_t _wmark1 = v__sarena.n;
+         ail_str *_wroots1[] = {};
+         while ((((v__t3 = v_stack.n), (v__t4 = 0LL), (v__t3 > v__t4)))) {
+             ail_sarena_keep_roots(&v__sarena, _wmark1, _wroots1, 0);
+             v_v = ail_list_pop(&v_stack, v_stack.n - 1);
+-            (void)(ail_list_push(&v_ord, v_v));
++            (void)(i32_push(&v_ord, v_v));
+             v_k = ((v__t7 = ail_list_get(&(ail_list){(int64_t *)v_cs, v_cs_len, v_cs_len}, ((v__t5 = v_v), (v__t6 = 1LL), ck_add(v__t5, v__t6)))), (v__t8 = 1LL), ck_sub(v__t7, v__t8));
+             {
+                 int64_t _wmark3 = v__sarena.n;
+@@ -7748,18 +7783,18 @@
+     ail_list_free(&v_stack);
+     v__t13 = 0LL;
+     v__t14 = v_n;
+-    ail_list_reserve(&v_ni, v__t14);
+-    for (int64_t _i = 0; _i < v__t14; _i++) ail_list_push(&v_ni, v__t13);
++    i32_reserve(&v_ni, v__t14);
++    for (int64_t _i = 0; _i < v__t14; _i++) i32_push(&v_ni, v__t13);
+     v__t15 = v_n;
+     if (0 >= 0LL && v__t15 <= ((int64_t)v_ord.n) - 0LL) {
+     for (v__k1 = 0; v__k1 < v__t15; v__k1 += 1) {
+         v_k = v__k1;
+-            ail_list_set(&v_ni, ((&v_ord)->p[ v_k]), v_k);
++            i32_set(&v_ni, ((int64_t)i32_get(&v_ord, v_k)), v_k);
+     }
+     } else {
+     for (v__k1 = 0; v__k1 < v__t15; v__k1 += 1) {
+         v_k = v__k1;
+-            ail_list_set(&v_ni, ail_list_get(&v_ord,  v_k), v_k);
++            i32_set(&v_ni, i32_get(&v_ord,  v_k), v_k);
+     }
+     }
+     ail_pslist_free(&v_nm); v_nm = (ail_pslist){0};
+@@ -7773,18 +7808,18 @@
+     v__t19 = v_n;
+     for (v__k1 = 0; v__k1 < v__t19; v__k1 += 1) {
+         v_k = v__k1;
+-        v_o = ail_list_get(&v_ord, v_k);
++        v_o = i32_get(&v_ord, v_k);
+         (void)(ail_pslist_push(&v_nm, ({ (void)0; int64_t _index = v_o; ail_pslist_get(&(v_t)->f_nm, _index); })));
+         (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
+         (void)(ail_list_push(&v_dep, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
+         if ((((v__t20 = ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t21 = 0LL), (v__t20 < v__t21)))) {
+             (void)(ail_list_push(&v_par, -1LL));
+         } else {
+-            (void)(ail_list_push(&v_par, ail_list_get(&v_ni, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
+-        }
+-    }
+-    ail_list_free(&v_ord);
+-    ail_list_free(&v_ni);
++            (void)(ail_list_push(&v_par, i32_get(&v_ni, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
++        }
++    }
++    i32_free(&v_ord);
++    i32_free(&v_ni);
+     (void)0;
+     ail_obj_store_T(&v__t22, v_t, 0);
+     ail_pslist_move(&v__t22->f_nm, &v_nm);
+@@ -7801,7 +7836,7 @@
+     ail_obj_store_T(&v__t25, v_t, 0);
+     ail_obj_field_list_move(&v__t25->f_par, &v_par);
+     ail_list_free(&v_par);
+-    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_list_free(&v__t2); ail_list_free(&v_ord); ail_list_free(&v_ni); ail_pslist_free(&v_nm); ail_list_free(&v__t16); ail_list_free(&v_w); ail_list_free(&v__t17); ail_list_free(&v_dep); ail_list_free(&v__t18); ail_list_free(&v_par); ail_obj_release(v__t22); ail_obj_release(v__t23); ail_obj_release(v__t24); ail_obj_release(v__t25); ail_sarena_free(&v__sarena); return;
++    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_list_free(&v__t2); i32_free(&v_ord); i32_free(&v_ni); ail_pslist_free(&v_nm); ail_list_free(&v__t16); ail_list_free(&v_w); ail_list_free(&v__t17); ail_list_free(&v_dep); ail_list_free(&v__t18); ail_list_free(&v_par); ail_obj_release(v__t22); ail_obj_release(v__t23); ail_obj_release(v__t24); ail_obj_release(v__t25); ail_sarena_free(&v__sarena); return;
+ }
+ 
+ static void ail_unwind_counts(void **p) { ail_list_free((ail_list *)p[0]); }
+@@ -8218,7 +8253,7 @@
+     int64_t v__t4 = 0;
+     int64_t v__t5 = 0;
+     int64_t v__t6 = 0;
+-    ail_list v_mp = {0};
++    i32list v_mp = {0};
+     int64_t v__t7 = 0;
+     int64_t v__t8 = 0;
+     ail_pslist v_nm = {0};
+@@ -8283,8 +8318,8 @@
+     }
+     v__t7 = 0LL;
+     v__t8 = v_n;
+-    ail_list_reserve(&v_mp, v__t8);
+-    for (int64_t _i = 0; _i < v__t8; _i++) ail_list_push(&v_mp, v__t7);
++    i32_reserve(&v_mp, v__t8);
++    for (int64_t _i = 0; _i < v__t8; _i++) i32_push(&v_mp, v__t7);
+     ail_pslist_free(&v_nm); v_nm = (ail_pslist){0};
+     (void)({ ail_list_clear(&v__t9); v__t9; });
+     ail_list_free(&v_w); v_w = v__t9; v__t9 = (ail_list){0};
+@@ -8302,7 +8337,7 @@
+         v_k = v_nm.n;
+         ail_bl_set(&v_name, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); }));
+         v_wt = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); });
+-        ((&v_mp)->p[v_i] = (v_k));
++        i32_set(&v_mp, v_i, (v_k));
+         if ((((v__t19 = v_i), (v__t20 = 0LL), (v__t19 > v__t20)))) {
+             v_j = v_i;
+             {
+@@ -8314,7 +8349,7 @@
+                     ail_bl_append(&v_name, (ail_str){(const uint8_t *)("\x2B"), 1, 1});
+                     ail_bl_append(&v_name, ({ (void)0; int64_t _index = v_j; ail_pslist_get(&(v_t)->f_nm, _index); }));
+                     v_wt = ((v__t25 = v_wt), (v__t26 = ({ (void)0; int64_t _index = v_j; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })), ck_add(v__t25, v__t26));
+-                    ail_list_set(&v_mp, v_j, v_k);
++                    i32_set(&v_mp, v_j, v_k);
+                 }
+             }
+         }
+@@ -8324,12 +8359,12 @@
+             (void)(ail_list_push(&v_par, -1LL));
+             (void)(ail_list_push(&v_dep, 0LL));
+         } else {
+-            (void)(ail_list_push(&v_par, ail_list_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
+-            (void)(ail_list_push(&v_dep, ((v__t29 = ail_list_get(&v_dep, ail_list_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })))), (v__t30 = 1LL), ck_add(v__t29, v__t30))));
++            (void)(ail_list_push(&v_par, i32_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
++            (void)(ail_list_push(&v_dep, ((v__t29 = ail_list_get(&v_dep, i32_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })))), (v__t30 = 1LL), ck_add(v__t29, v__t30))));
+         }
+     }
+     ail_list_free(&v_cc);
+-    ail_list_free(&v_mp);
++    i32_free(&v_mp);
+     (void)0;
+     ail_obj_store_T(&v__t31, v_t, 0);
+     ail_pslist_move(&v__t31->f_nm, &v_nm);
+@@ -8346,7 +8381,7 @@
+     ail_obj_store_T(&v__t34, v_t, 0);
+     ail_obj_field_list_move(&v__t34->f_par, &v_par);
+     ail_list_free(&v_par);
+-    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v_cc); ail_list_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t9); ail_list_free(&v_w); ail_list_free(&v__t10); ail_list_free(&v_dep); ail_list_free(&v__t11); ail_list_free(&v_par); ail_bl_free(&v_name); ail_obj_release(v__t31); ail_obj_release(v__t32); ail_obj_release(v__t33); ail_obj_release(v__t34); ail_sarena_free(&v__sarena); return;
++    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v_cc); i32_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t9); ail_list_free(&v_w); ail_list_free(&v__t10); ail_list_free(&v_dep); ail_list_free(&v__t11); ail_list_free(&v_par); ail_bl_free(&v_name); ail_obj_release(v__t31); ail_obj_release(v__t32); ail_obj_release(v__t33); ail_obj_release(v__t34); ail_sarena_free(&v__sarena); return;
+ }
+ 
+ static void ail_unwind_do_print(void **p) { ail_bl_free(p[0]); ail_sarena_free(p[1]); }

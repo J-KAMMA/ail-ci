@@ -1,0 +1,943 @@
+{
+ "census": {
+  "mode": "census",
+  "programs": [
+   {
+    "program": "berth_sim",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 2246,
+    "peak_list_bytes": 273329984,
+    "peak_list_MiB": 260.67,
+    "input_bytes": 80935887
+   },
+   {
+    "program": "chain_relax",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 130,
+    "peak_list_bytes": 2400000,
+    "peak_list_MiB": 2.29,
+    "input_bytes": 0
+   },
+   {
+    "program": "echo_pack",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 17538876,
+    "peak_list_bytes": 256000000,
+    "peak_list_MiB": 244.14,
+    "input_bytes": 32000000
+   },
+   {
+    "program": "ledger_bin",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 326,
+    "peak_list_bytes": 195031424,
+    "peak_list_MiB": 186.0,
+    "input_bytes": 59098225
+   },
+   {
+    "program": "rail_transfer",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 170,
+    "peak_list_bytes": 25042624,
+    "peak_list_MiB": 23.88,
+    "input_bytes": 4163139
+   },
+   {
+    "program": "scar_life",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 4215245,
+    "peak_list_bytes": 32976,
+    "peak_list_MiB": 0.03,
+    "input_bytes": 4196362
+   },
+   {
+    "program": "tally_lang",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 481,
+    "peak_list_bytes": 704,
+    "peak_list_MiB": 0.0,
+    "input_bytes": 421
+   },
+   {
+    "program": "term_rank",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 4998709,
+    "peak_list_bytes": 28266544,
+    "peak_list_MiB": 26.96,
+    "input_bytes": 64561670
+   },
+   {
+    "program": "ticket_audit",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 36921,
+    "peak_list_bytes": 1446400,
+    "peak_list_MiB": 1.38,
+    "input_bytes": 61998673
+   },
+   {
+    "program": "tree_fold",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 22555652,
+    "peak_list_bytes": 282882616,
+    "peak_list_MiB": 269.78,
+    "input_bytes": 27859349
+   },
+   {
+    "program": "binarytrees",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 7,
+    "peak_list_bytes": 0,
+    "peak_list_MiB": 0.0
+   },
+   {
+    "program": "cfold",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 38,
+    "peak_list_bytes": 0,
+    "peak_list_MiB": 0.0
+   },
+   {
+    "program": "deriv",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 20,
+    "peak_list_bytes": 0,
+    "peak_list_MiB": 0.0
+   },
+   {
+    "program": "linkedlist",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 10,
+    "peak_list_bytes": 0,
+    "peak_list_MiB": 0.0
+   },
+   {
+    "program": "objscan",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 20,
+    "peak_list_bytes": 0,
+    "peak_list_MiB": 0.0
+   },
+   {
+    "program": "rbtree",
+    "match": true,
+    "exit": [
+     0,
+     0
+    ],
+    "plain_bytes": 10,
+    "peak_list_bytes": 0,
+    "peak_list_MiB": 0.0
+   }
+  ],
+  "rows_at_least_1MiB": [
+   {
+    "program": "echo_pack",
+    "site": 4,
+    "label": "pack:ir14",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 256000000,
+    "MiB": 244.14,
+    "width": "empty"
+   },
+   {
+    "program": "berth_sim",
+    "site": 6,
+    "label": "py_main:ir19",
+    "nlists": 20,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 8999997,
+    "stores": 3000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "berth_sim",
+    "site": 7,
+    "label": "py_main:ir20",
+    "nlists": 17,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 2999999,
+    "stores": 3000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "berth_sim",
+    "site": 8,
+    "label": "py_main:ir21",
+    "nlists": 18,
+    "max_n": 3000000,
+    "min_value": 1,
+    "max_value": 3,
+    "stores": 3000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int8"
+   },
+   {
+    "program": "berth_sim",
+    "site": 9,
+    "label": "py_main:ir22",
+    "nlists": 20,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 3999,
+    "stores": 3000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int16"
+   },
+   {
+    "program": "berth_sim",
+    "site": 10,
+    "label": "py_main:ir23",
+    "nlists": 16,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 9,
+    "stores": 3000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int8"
+   },
+   {
+    "program": "berth_sim",
+    "site": 11,
+    "label": "py_main:ir24",
+    "nlists": 13,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 39,
+    "stores": 3000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int8"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 4,
+    "label": "py_main:ir224",
+    "nlists": 20,
+    "max_n": 4000000,
+    "min_value": 1,
+    "max_value": 5,
+    "stores": 4000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int8"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 5,
+    "label": "py_main:ir226",
+    "nlists": 18,
+    "max_n": 4000000,
+    "min_value": 6,
+    "max_value": 4294949410,
+    "stores": 4000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int64"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 6,
+    "label": "py_main:ir228",
+    "nlists": 18,
+    "max_n": 4000000,
+    "min_value": 0,
+    "max_value": 4294949410,
+    "stores": 4000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int64"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 7,
+    "label": "py_main:ir230",
+    "nlists": 17,
+    "max_n": 4000000,
+    "min_value": 0,
+    "max_value": 1048567,
+    "stores": 4000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 8,
+    "label": "py_main:ir232",
+    "nlists": 19,
+    "max_n": 4000000,
+    "min_value": 6,
+    "max_value": 59098210,
+    "stores": 4000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "tree_fold",
+    "site": 11,
+    "label": "compact:v_w",
+    "nlists": 39,
+    "max_n": 2954720,
+    "min_value": 0,
+    "max_value": 3397567,
+    "stores": 4812988,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "tree_fold",
+    "site": 12,
+    "label": "compact:v_dep",
+    "nlists": 38,
+    "max_n": 2954720,
+    "min_value": 0,
+    "max_value": 62,
+    "stores": 4812988,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int8"
+   },
+   {
+    "program": "tree_fold",
+    "site": 14,
+    "label": "compact:v_par",
+    "nlists": 11,
+    "max_n": 2954720,
+    "min_value": 0,
+    "max_value": 2954718,
+    "stores": 4812986,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "tree_fold",
+    "site": 27,
+    "label": "rebuild:v_w",
+    "nlists": 56,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 3397567,
+    "stores": 6716536,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "tree_fold",
+    "site": 28,
+    "label": "rebuild:v_dep",
+    "nlists": 55,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 62,
+    "stores": 6716536,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int8"
+   },
+   {
+    "program": "tree_fold",
+    "site": 30,
+    "label": "rebuild:v_par",
+    "nlists": 26,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 2999998,
+    "stores": 6716533,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int32"
+   },
+   {
+    "program": "tree_fold",
+    "site": 49,
+    "label": "do_prune:ir5",
+    "nlists": 4,
+    "max_n": 3000000,
+    "min_value": 0,
+    "max_value": 1,
+    "stores": 3000000,
+    "peak_bytes": 33554432,
+    "MiB": 32.0,
+    "width": "int8"
+   },
+   {
+    "program": "term_rank",
+    "site": 0,
+    "label": "?",
+    "nlists": 0,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 27344168,
+    "MiB": 26.08,
+    "width": "empty"
+   },
+   {
+    "program": "tree_fold",
+    "site": 0,
+    "label": "?",
+    "nlists": 0,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 24001080,
+    "MiB": 22.89,
+    "width": "empty"
+   },
+   {
+    "program": "berth_sim",
+    "site": 15,
+    "label": "py_main:ir63",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 24000000,
+    "MiB": 22.89,
+    "width": "empty"
+   },
+   {
+    "program": "berth_sim",
+    "site": 20,
+    "label": "py_main:ir78",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 24000000,
+    "MiB": 22.89,
+    "width": "empty"
+   },
+   {
+    "program": "berth_sim",
+    "site": 22,
+    "label": "py_main:ir81",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 24000000,
+    "MiB": 22.89,
+    "width": "empty"
+   },
+   {
+    "program": "tree_fold",
+    "site": 6,
+    "label": "compact:v_mp",
+    "nlists": 2,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 24000000,
+    "MiB": 22.89,
+    "width": "empty"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 0,
+    "label": "?",
+    "nlists": 0,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 14676288,
+    "MiB": 14.0,
+    "width": "empty"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 71,
+    "label": "py_main:v__t122",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 4565728,
+    "MiB": 4.35,
+    "width": "empty"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 72,
+    "label": "py_main:v__t125",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 4565728,
+    "MiB": 4.35,
+    "width": "empty"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 73,
+    "label": "py_main:v__t128",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 4565728,
+    "MiB": 4.35,
+    "width": "empty"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 14,
+    "label": "py_main:ir257",
+    "nlists": 16,
+    "max_n": 373940,
+    "min_value": 10111,
+    "max_value": 4294949410,
+    "stores": 373940,
+    "peak_bytes": 4194304,
+    "MiB": 4.0,
+    "width": "int64"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 15,
+    "label": "py_main:ir267",
+    "nlists": 17,
+    "max_n": 373940,
+    "min_value": 0,
+    "max_value": 1048567,
+    "stores": 373940,
+    "peak_bytes": 4194304,
+    "MiB": 4.0,
+    "width": "int32"
+   },
+   {
+    "program": "ledger_bin",
+    "site": 16,
+    "label": "py_main:ir271",
+    "nlists": 12,
+    "max_n": 373940,
+    "min_value": 0,
+    "max_value": 0,
+    "stores": 373940,
+    "peak_bytes": 4194304,
+    "MiB": 4.0,
+    "width": "int8"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 58,
+    "label": "py_main:v_etarget",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 2958416,
+    "MiB": 2.82,
+    "width": "empty"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 60,
+    "label": "py_main:v_ecost",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 2958416,
+    "MiB": 2.82,
+    "width": "empty"
+   },
+   {
+    "program": "chain_relax",
+    "site": 0,
+    "label": "?",
+    "nlists": 0,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 2400000,
+    "MiB": 2.29,
+    "width": "empty"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 44,
+    "label": "py_main:v_nstation",
+    "nlists": 3,
+    "max_n": 185358,
+    "min_value": 0,
+    "max_value": 99999,
+    "stores": 185358,
+    "peak_bytes": 2097152,
+    "MiB": 2.0,
+    "width": "int32"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 51,
+    "label": "py_main:v_estart",
+    "nlists": 1,
+    "max_n": 0,
+    "min_value": null,
+    "max_value": null,
+    "stores": 0,
+    "peak_bytes": 1482872,
+    "MiB": 1.41,
+    "width": "empty"
+   },
+   {
+    "program": "rail_transfer",
+    "site": 7,
+    "label": "py_main:v_x",
+    "nlists": 2,
+    "max_n": 100000,
+    "min_value": 0,
+    "max_value": 120,
+    "stores": 100000,
+    "peak_bytes": 1048576,
+    "MiB": 1.0,
+    "width": "int8"
+   }
+  ]
+ },
+ "emulate": {
+  "perf_input_bytes": 27859349,
+  "cases": [
+   {
+    "case": "example",
+    "match": true
+   },
+   {
+    "case": "prune_cut",
+    "match": true
+   },
+   {
+    "case": "malformed",
+    "match": true
+   },
+   {
+    "case": "tree_only",
+    "match": true
+   },
+   {
+    "case": "single_node",
+    "match": true
+   },
+   {
+    "case": "root_chain_fold",
+    "match": true
+   },
+   {
+    "case": "fold_two_chains",
+    "match": true
+   },
+   {
+    "case": "fold_root_single_child",
+    "match": true
+   },
+   {
+    "case": "fold_then_cut_then_fold",
+    "match": true
+   },
+   {
+    "case": "fold_names_with_plus",
+    "match": true
+   },
+   {
+    "case": "sort_ties",
+    "match": true
+   },
+   {
+    "case": "sort_prefix_names",
+    "match": true
+   },
+   {
+    "case": "prune_boundary",
+    "match": true
+   },
+   {
+    "case": "prune_root_kept",
+    "match": true
+   },
+   {
+    "case": "prune_uses_old_sums",
+    "match": true
+   },
+   {
+    "case": "cut_root",
+    "match": true
+   },
+   {
+    "case": "cut_missing",
+    "match": true
+   },
+   {
+    "case": "cut_leaf_and_inner",
+    "match": true
+   },
+   {
+    "case": "find_preorder_first",
+    "match": true
+   },
+   {
+    "case": "levels",
+    "match": true
+   },
+   {
+    "case": "big_weights",
+    "match": true
+   },
+   {
+    "case": "max_name",
+    "match": true
+   },
+   {
+    "case": "no_final_newline",
+    "match": true
+   },
+   {
+    "case": "deep_chain",
+    "match": true
+   },
+   {
+    "case": "wide",
+    "match": true
+   },
+   {
+    "case": "empty_input",
+    "match": true
+   },
+   {
+    "case": "empty_line_op",
+    "match": true
+   },
+   {
+    "case": "trailing_blank_line",
+    "match": true
+   },
+   {
+    "case": "crlf",
+    "match": true
+   },
+   {
+    "case": "name_too_long",
+    "match": true
+   },
+   {
+    "case": "name_uppercase",
+    "match": true
+   },
+   {
+    "case": "weight_leading_zero",
+    "match": true
+   },
+   {
+    "case": "weight_too_big",
+    "match": true
+   },
+   {
+    "case": "weight_missing",
+    "match": true
+   },
+   {
+    "case": "two_spaces",
+    "match": true
+   },
+   {
+    "case": "space_after_bracket",
+    "match": true
+   },
+   {
+    "case": "unclosed",
+    "match": true
+   },
+   {
+    "case": "extra_close",
+    "match": true
+   },
+   {
+    "case": "two_roots",
+    "match": true
+   },
+   {
+    "case": "unknown_op",
+    "match": true
+   },
+   {
+    "case": "op_missing_arg",
+    "match": true
+   },
+   {
+    "case": "op_extra_arg",
+    "match": true
+   },
+   {
+    "case": "op_bad_number",
+    "match": true
+   },
+   {
+    "case": "op_number_too_big",
+    "match": true
+   },
+   {
+    "case": "op_trailing_space",
+    "match": true
+   },
+   {
+    "case": "find_bad_name",
+    "match": true
+   },
+   {
+    "case": "error_after_output_ops",
+    "match": true
+   },
+   {
+    "case": "random0",
+    "match": true
+   },
+   {
+    "case": "random1",
+    "match": true
+   },
+   {
+    "case": "random2",
+    "match": true
+   },
+   {
+    "case": "random3",
+    "match": true
+   },
+   {
+    "case": "random4",
+    "match": true
+   },
+   {
+    "case": "random5",
+    "match": true
+   },
+   {
+    "case": "random6",
+    "match": true
+   },
+   {
+    "case": "random7",
+    "match": true
+   }
+  ],
+  "cases_match": true,
+  "perf_match": true,
+  "rss_kib": {
+   "plain": [
+    414944,
+    414956,
+    415956
+   ],
+   "i32": [
+    414208,
+    414228,
+    414232
+   ]
+  },
+  "rss_median_kib": {
+   "plain": 414956,
+   "i32": 414228
+  },
+  "rss_delta_pct": 0.18,
+  "instructions": {
+   "method": "valgrind-callgrind-Ir",
+   "n": 300000,
+   "plain": 893478193,
+   "i32": 925441599
+  },
+  "phases": {
+   "plain": "tree_fold prefixes, N=3000000, RLIMIT_AS=1500 MiB, peak RSS in MiB\n/tmp/fbnarrow1/emulate/plain:\n   0 parse                  default   130.0   fixed   130.0\n   1 stats                  default   152.9   fixed   152.9\n   2 total                  default   152.9   fixed   152.8\n   3 level 6                default   152.8   fixed   152.8\n   4 find leaf              default   152.9   fixed   152.9\n   5 sort                   default   404.5   fixed   369.3\n   6 find qqqqqqqqqqqqqqqq  default   405.0   fixed   369.3\n   7 prune 40               default   405.2   fixed   369.3\n   8 stats                  default   405.0   fixed   369.3\n   9 fold                   default   405.6   fixed   369.3\n  10 stats                  default   405.7   fixed   369.4\n  11 cut mid                default   404.5   fixed   369.3\n  12 mirror                 default   405.7   fixed   369.4\n  13 level 3                default   405.2   fixed   369.3\n  14 find x+y               default   404.6   fixed   369.3\n  15 sort                   default   405.6   fixed   369.3\n  16 stats                  default   405.2   fixed   369.3\n  17 print                  default   405.7   fixed   369.4\n  peak: default 405.7 MiB, fixed 369.4 MiB\n",
+   "i32": "tree_fold prefixes, N=3000000, RLIMIT_AS=1500 MiB, peak RSS in MiB\n/tmp/fbnarrow1/emulate/i32:\n   0 parse                  default   130.0   fixed   130.0\n   1 stats                  default   152.9   fixed   152.7\n   2 total                  default   152.9   fixed   152.9\n   3 level 6                default   152.9   fixed   153.0\n   4 find leaf              default   152.8   fixed   152.8\n   5 sort                   default   404.6   fixed   369.3\n   6 find qqqqqqqqqqqqqqqq  default   404.5   fixed   369.3\n   7 prune 40               default   404.6   fixed   369.4\n   8 stats                  default   404.6   fixed   369.3\n   9 fold                   default   404.4   fixed   369.3\n  10 stats                  default   404.5   fixed   369.3\n  11 cut mid                default   404.6   fixed   369.4\n  12 mirror                 default   404.6   fixed   369.3\n  13 level 3                default   404.4   fixed   369.3\n  14 find x+y               default   404.5   fixed   369.3\n  15 sort                   default   404.4   fixed   369.3\n  16 stats                  default   404.6   fixed   369.4\n  17 print                  default   404.6   fixed   369.3\n  peak: default 404.6 MiB, fixed 369.4 MiB\n"
+  }
+ }
+}
