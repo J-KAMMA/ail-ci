@@ -67,9 +67,7 @@ No racy probe was a silent race: every one was refused by name or built on the g
 - `hybrid/hybrid_bytearray.py` (default): `lab/race/hybrid/hybrid_bytearray_run.py:3:1: not in the subset: threading, queue and concurrent.futures are built on the general path only (one interpreter lock, CPython's GIL semantics); this program is compiled there (the general path could not build this program either); general path: join() called with too many positional arguments`
 - `hybrid/hybrid_bytearray.py` (force): `not in the subset: join() called with too many positional arguments`
 
-Elapsed: 274 s. 34 rows (14 racy, 17 safe, 3 hybrid).
-
-<!-- owner decisions are kept in lab/race/owner_decisions.md; run.py appends them here -->
+Elapsed: 282 s. 34 rows (14 racy, 17 safe, 3 hybrid).
 
 ## Owner decisions (2026-11-05)
 

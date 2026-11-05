@@ -341,6 +341,16 @@ class _Pass:
                                     'arguments in lists (results come back in order)' % (
                     node.func.value.id, node.func.attr, node.func.value.id))
             parent = parents[node]
+            if (kind == 'executor' and isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
+                    and parent.func.id == 'enumerate' and not parent.keywords and parent.args == [node]):
+                owner = parents.get(parent)
+                if not (isinstance(owner, ast.For) and owner is stmt and owner.iter is parent
+                        and isinstance(owner.target, ast.Tuple) and len(owner.target.elts) == 2):
+                    raise _Refuse(node, 'enumerate() over executor.map is only lowered as `for i, v in '
+                                        'enumerate(ex.map(f, xs))`\n  write instead: results = '
+                                        'list(ex.map(f, xs)) first, then enumerate(results)')
+                hoisted.extend(self.lower_for_map(owner, node, cap, enum=True))
+                continue
             if kind == 'executor' and not self.consumed(node, parent):
                 raise _Refuse(node, 'the iterator executor.map returns is used as a value\n  write instead: '
                                     'list(ex.map(f, xs)), or use it directly in for / sum / sorted / min / max')
@@ -370,7 +380,7 @@ class _Pass:
                 isinstance(stmt, ast.For) and not any(n is node for n in ast.walk(stmt.iter))):
             return False
         safe = {'list', 'tuple', 'sum', 'sorted', 'min', 'max', 'set', 'len', 'print', 'int', 'float', 'str',
-                'abs', 'round', 'range', 'bool', 'enumerate', 'zip'}
+                'abs', 'round', 'range', 'bool', 'enumerate'}
         inside = {id(n) for n in ast.walk(node)}
         for n in ast.walk(stmt):
             if id(n) in inside or n is stmt:
@@ -392,11 +402,9 @@ class _Pass:
     @staticmethod
     def consumed(node, parent):
         """Whether the iterator is used up by something that sees only its values, in order."""
-        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and not parent.keywords:
-            if parent.args == [node] and parent.func.id in ('list', 'tuple', 'sum', 'sorted', 'min', 'max', 'set'):
-                return True
-            if parent.func.id in ('enumerate', 'zip') and node in parent.args:
-                return True
+        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.args == [node] \
+                and not parent.keywords and parent.func.id in ('list', 'tuple', 'sum', 'sorted', 'min', 'max', 'set'):
+            return True
         if isinstance(parent, (ast.For, ast.comprehension)) and parent.iter is node:
             return True
         return False
@@ -418,10 +426,13 @@ class _Pass:
                                  'exception of the map\n  write instead: rs = list(ex.map(f, xs)) first, then the '
                                  'comprehension over rs')
 
-    def lower_for_map(self, loop, node, cap):
+    def lower_for_map(self, loop, node, cap, enum=False):
         """`for t in ex.map(f, xs[, ys]):` runs the body for the results before a failing item, as CPython does:
         the region runs first; if it raised, the loop calls f itself, one item at a time, so the exception comes at
-        its item. Returns the statements that go before the loop (the loop is changed in place)."""
+        its item. Returns the statements that go before the loop (the loop is changed in place).
+
+        With `enum`, the loop is `for i, v in enumerate(ex.map(f, xs[, ys]))`: the results are still produced in
+        order, and the pair `(position, value)` is bound so a failure keeps CPython's earlier prints."""
         if node.keywords or not 2 <= len(node.args) <= 3:
             raise _Refuse(node, 'map over %d iterables' % (len(node.args) - 1))
         fnode, its = node.args[0], node.args[1:]
@@ -460,10 +471,16 @@ class _Pass:
         old_target = loop.target
         idx = '_ail_i%d' % k
         elems = ', '.join('%s[%s]' % (nm, idx) for nm in names)
-        fetch = ast.parse('if _ail_ok%d:\n    T = _ail_r%d[%s]\nelse:\n    T = %s(%s)\n' % (
-            k, k, idx, fn.name, elems)).body[0]
-        fetch.body[0].targets[0] = copy.deepcopy(old_target)
-        fetch.orelse[0].targets[0] = copy.deepcopy(old_target)
+        ok = ast.parse('_ail_r%d[%s]' % (k, idx), mode='eval').body
+        fail = ast.parse('%s(%s)' % (fn.name, elems), mode='eval').body
+        if enum:
+            # the loop target is `i, v`; enumerate's index is the position in the result list
+            pair = lambda value: ast.Tuple(
+                elts=[ast.Name(id=idx, ctx=ast.Load()), value], ctx=ast.Load())
+            ok, fail = pair(ok), pair(fail)
+        fetch = ast.If(test=ast.parse('_ail_ok%d' % k, mode='eval').body,
+                       body=[ast.Assign(targets=[copy.deepcopy(old_target)], value=ok)],
+                       orelse=[ast.Assign(targets=[copy.deepcopy(old_target)], value=fail)])
         loop.target = ast.Name(id=idx, ctx=ast.Store())
         loop.iter = ast.parse('range(%s)' % n_expr, mode='eval').body
         loop.body = [fetch] + loop.body
