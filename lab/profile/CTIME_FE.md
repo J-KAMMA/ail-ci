@@ -155,7 +155,7 @@ echo_pack 1.188).  It is in `pyfunc.py`, which is owned by the codegen/bce-range
 lanes, so it is a **follow-up for that lane**, not a ctimes2 pick.
 
 The largest free-file rows are `fastwalk.py:walk` (0.881 s pooled, 2.8% of wall, full bound 1.029,
-halved 1.014; best task tree_fold 1.018) and `rangecheck.py` (0.943 s pooled, 3.0% of wall, full
+halved 1.014; best task tally_lang 1.020) and `rangecheck.py` (0.943 s pooled, 3.0% of wall, full
 bound 1.031, halved 1.015; best task scar_life 1.074).  Neither reaches 1.10x on any task, let alone
 three, so **no free-file row meets the ctimes2 pick rule**.  `fastwalk`/`walkmemo` repeated-walk
 reuse is the closest free idea (ctime already measured 1.15x on the front end), but the measured
