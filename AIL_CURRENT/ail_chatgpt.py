@@ -3188,6 +3188,10 @@ def _check_int64_pow_constants(tree, known):
     known is refused by name: its result can leave int64, which the fixed-width run time
     would only report as ``integer overflow``.  Direct wrapper calls with run-time operands
     keep their previous behaviour."""
+    if not any((isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow))
+               or (isinstance(node, ast.Name) and node.id == 'pow')
+               for node in ast.walk(tree)):
+        return
     names = _pow_alias_names(tree)
     if not names:
         return
@@ -3530,6 +3534,9 @@ def _check_int64_augmented_powers(tree, module_known):
     statement, so it compiled and then stopped with `integer overflow` where CPython prints
     the unbounded integer.  The same direct-statement shape is checked in function bodies;
     a computed base or exponent keeps the pre-existing run-time stop."""
+    if not any(isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)
+               for node in ast.walk(tree)):
+        return
     attributes = _known_class_attributes(tree, module_known)
     module_counts = _binding_counts(tree.body)
     passthrough = _passthrough_functions(tree, module_counts)
@@ -3568,6 +3575,9 @@ def _check_int64_routed_augmented_powers(tree, module_known):
     arguments (including containers and aliases); an augmented power whose exact result does
     not fit int64 is refused by name.  Arguments the fold cannot resolve, stores before the
     statement, calls inside a loop and powers whose result fits are left unchanged."""
+    if not any(isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)
+               for node in ast.walk(tree)):
+        return
     module_counts = _binding_counts(tree.body)
     global_names = set()
     for node in ast.walk(tree):
@@ -3655,6 +3665,26 @@ def _check_int64_routed_augmented_powers(tree, module_known):
         visit(function, False)
         return inside
 
+    static = {}
+
+    def static_info(function):
+        # the same function is scanned under many argument environments; everything here
+        # depends only on the function and the module constants, so walk it once
+        info = static.get(id(function))
+        if info is None:
+            scope_known = _function_local_int_constants(function, known)
+            parameters = _scope_parameters(function)
+            bindings = _binding_counts(function.body)
+            stored_at = {}
+            own_nodes = list(_walk_own_scope(function))
+            for inner in own_nodes:
+                if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del)):
+                    stored_at.setdefault(inner.id, []).append((inner.lineno, inner.col_offset))
+            info = (scope_known, parameters, bindings, stored_at, loop_scope_nodes(function),
+                    own_nodes)
+            static[id(function)] = info
+        return info
+
     def scan(function, env, depth, seen):
         if depth > 12:
             return
@@ -3662,14 +3692,7 @@ def _check_int64_routed_augmented_powers(tree, module_known):
         if key in seen:
             return
         seen = seen | {key}
-        scope_known = _function_local_int_constants(function, known)
-        parameters = _scope_parameters(function)
-        bindings = _binding_counts(function.body)
-        stored_at = {}
-        for inner in _walk_own_scope(function):
-            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del)):
-                stored_at.setdefault(inner.id, []).append((inner.lineno, inner.col_offset))
-        looped = loop_scope_nodes(function)
+        scope_known, parameters, bindings, stored_at, looped, own_nodes = static_info(function)
 
         def env_at(node):
             position = (node.lineno, node.col_offset)
@@ -3678,7 +3701,7 @@ def _check_int64_routed_augmented_powers(tree, module_known):
                     if name not in stored_at
                     or not (repeated or any(where < position for where in stored_at[name]))}
 
-        for node in _walk_own_scope(function):
+        for node in own_nodes:
             if (isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)
                     and isinstance(node.target, ast.Name)):
                 current = env_at(node)
@@ -4246,6 +4269,9 @@ def _check_int64_int_base_constants(tree):
     AIL ints are fixed width, so the conversion would stop with `integer overflow` where
     CPython keeps the bignum; a value that fits keeps its run-time parse.  A call with no
     explicit base uses CPython's base 10."""
+    if not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+               and node.func.id == 'int' for node in ast.walk(tree)):
+        return
     bound = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

@@ -88,6 +88,19 @@ class PyproofReportTests(unittest.TestCase):
         text = (self.out / "RESULTS.md").read_text()
         self.assertIn("typed 1 / 3, general 1, refused 1, wrong 0", text)
 
+    def test_declared_flags_tolerates_prose_apostrophe(self):
+        module = load_report()
+        case = self.dir / "flagged.py"
+        case.write_text(
+            "# ail-build: --exact-int -- the program's masks are wider than int64\n"
+            "print(1)\n"
+        )
+        self.assertEqual(module.declared_flags(case, case), ["--exact-int"])
+        case.write_text("# ail-build: --exact-int because it's wide\nprint(1)\n")
+        self.assertEqual(module.declared_flags(case, case), ["--exact-int"])
+        case.write_text("# ail-build: --exact-int\nprint(1)\n")
+        self.assertEqual(module.declared_flags(case, case), ["--exact-int"])
+
     def test_base_is_named_not_claimed_as_integ(self):
         text = (self.out / "RESULTS.md").read_text()
         base = self.recs[0]["base_ref"]

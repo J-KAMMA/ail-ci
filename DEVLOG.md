@@ -1,3 +1,127 @@
+## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
+
+Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
+apostrophe in the prose after the flags (`-- the program's masks ...`) raised
+`ValueError: No closing quotation`; the row became `not run` with no comparison while the headline
+still said `wrong 0`.
+
+- `lab/pyproof/report.py`: split the flag part off at a whitespace `--` separator and tokenize it
+  with plain whitespace splitting, so the reason is never shell-parsed. Only the leading `-...`
+  words are flags; the first `--` or non-flag word ends them. Existing directives (fnvhash's crate
+  config and scar_life's first line) parse as before.
+- `AIL_CURRENT/test_ail_pyproof_report.py`: regression test for a directive whose reason has an
+  apostrophe, one with a bare `because it's ...` reason, and a plain flag-only directive.
+
+Probes (`/tmp/probes`, `report.py -j 1` over four rows): `flagged.py` (directive line 1, values
+through `sys.argv`, a list item, an attribute and a dict value) -> `build_flags ["--exact-int"]`,
+general, `stdout_equal true`; `case/prog.py` (directive on line 3, same big-int body) -> same;
+`case6/prog.py` (directive on line 6) -> not honoured, `refused` by name
+(`int64 constant expression out of range`); `plain_int64.py` -> typed, matching. `cmp.sh`:
+`plain_int64.py` matches on both builds; `big_plain.py` (same big values, no directive) is refused
+on both builds with `OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives
+exact ints)`; `flagged.py` matches both builds under `AIL_EXACT_INT=1` and is refused without it.
+The two target rows still match: fnvhash typed, scar_life general, `stdout_equal true`.
+
+## 2026-11-05 -- fnvfix1: pyproof builds the two declared-flag programs (job-fnvfix1-11052323)
+
+`lab/pyproof` reported `wrong 2`. Both rows are programs that need exact ints by design; they
+compile and only stop at run time under the int64 default (owner decision 2026-10-31). The
+compiler is unchanged: the programs are now built with the flags they declare.
+
+- `examples/crate/fnvhash/main.py`: the crate README and `test_ail_examples_crate.py` already
+  declare `--exact-int` (its empty-string FNV-1a hash is 14695981039346656037, above `2**63`).
+  `report.py`'s mirrored `CRATE_CASES` carried `flags: []`; it now carries the declared flag and
+  `_build` passes it. The flag applies to the crate's example `main.py` (the program the crate
+  test builds), not to `bench.py`.
+- `lab/compare/src/scar_life/main.py`: compare-lab's `EXACT_INT_TASKS` does not include it, and
+  the program needs `W*H`-bit masks, so its first line declares
+  `# ail-build: --exact-int -- ...`; `report.py` reads that comment (leading `-` words are the
+  flags, the rest is the reason) and uses it for both builds.
+- `docs/tutorial.md` records that a program needing exact ints is built with the flag.
+
+pyproof on the two rows: `examples/crate/fnvhash/main.py` typed and matching,
+`lab/compare/src/scar_life/main.py` general and matching. The full census (base work `ff1dcc2`)
+is `wrong 0`: the two rows leave `wrong` and join their paths (typed 29 -> 30, general 16 -> 17),
+no other row changed and refused stays 8.  Required tests on the final commit
+(`par_check -j 2`): `test_ail_pyproof_report`, `test_ail_examples_crate`, `test_ail_tutorial`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`compileall` and `tools/update_manifest.py --check` are clean.
+## 2026-11-05 -- rbbces4: re-apply the field-fact soundness fixes (job-rbbces4-11052320)
+
+The accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`) did not apply as one patch:
+`DEVLOG.md`, `AIL_CURRENT/DEVLOG.md` and `test_ail_bce.py` conflicted, and the `manifest.d` hunks
+were not applied by hand. The source hunks applied cleanly: the new
+`AIL_CURRENT/python/pkg-v12/fieldfacts.py`, its install in `pyfunc._to_c_once` and
+`ir/driver.py` `facts_for()['fields']`. The new `FieldFactsTests` cases were inserted into the
+current `test_ail_bce.py`. `tools/diff_ids.py` is not present on this tree; `python3
+tools/update_manifest.py` regenerated every pin and `--check` passes.
+
+The change closes two soundness holes. `fieldfacts.py` built `bytes_fields` from struct names
+rather than bytes field names, so an attribute whose name matched a struct that owned a bytes
+field (an `R.vals` list next to a `struct vals { data: bytes; }`) was read as a non-negative
+bytes index; it now collects the unambiguous bytes *field* names, and a genuine bytes index
+(`r.data[0]`) still counts. `_field_still_nonneg` recognised only single-target `Assign`,
+`AnnAssign` and `AugAssign` and silently skipped every other store; it now walks the field's
+`Store`/`Del` attributes directly, so a tuple/chained target, a `for`/`with`/comprehension
+target, `del`, an operator other than `+=`/`-=`, or any other unclassified form retires the
+fact. No pass reads `facts['fields']`, so generated C is unchanged.
+
+Tests: `test_ail_bce` 11/11, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass. Probes: the dump is `{"groups": [], "nonneg": []}` for
+`n_bytes_collide.ail` (prints `-5`) and `n_tuple.py` (prints `-1`), both as CPython does.
+## 2026-11-05 -- tccprobe1: measure whether the generated C builds with tcc (measurement only) (job-tccprobe1-11051609)
+
+`lab/tccprobe/run.py` takes the ten `lab/compare` tasks and forty `corpus/gdev` programs (seed
+20261105; the first forty of the shuffled list whose C builds), emits the C once with
+`compile --debug-dir` (the saved `program.c` is byte-identical to what the compiler was handed, and
+`native_report.json` records its command line), then builds that same C with `gcc -O2`, `gcc -O0`
+and `tcc` (median of three builds, fresh directory each), runs each build three times on the same
+input and compares stdout, stderr and exit status.
+
+Result with tcc 0.9.27 (Ubuntu package): 0 of 50 build; 0 binaries ran, so nothing was compared at
+run time and the wrong-output stop condition did not trigger. All 50 build with gcc -O2 and
+gcc -O0; median C-compile wall time gcc -O2 1.2092 s, gcc -O0 0.4434 s, tcc not available. First
+blockers: 23 unsized aggregates from runtime values -- 15 unsized compound literals
+(`pyfunc.py:24481`) and 8 unsized array declarations (`cruntime.py:6450,6508,6538`) -- 19
+`static _Thread_local` (`cruntime.py:17245-17246`), 7 `__builtin_unreachable`, 1 `__int128`.
+Details, corpus list, per-task timings and the five excerpts are in `lab/tccprobe/RESULTS.md`.
+
+A fix round corrected the attribution: tcc reports both unsized aggregate forms as `index too
+large`, and `classify()` now separates them by the C line it points at (an `(T[]){...}` compound
+literal versus a `T x[] = {...};` declaration) instead of mapping all 23 to the compound literal.
+`diagnose()` also prefers the translation unit tcc names in multi-unit builds, a tcc build that
+runs but differs is labelled `wrong output` rather than a parse failure, and the excerpt set is
+`fail_1`..`fail_5` (adding the declaration form). Re-measured with 3 repetitions: the headline
+0/50, the 23/19/8 bucket split and the 40-program corpus list are unchanged; the 3-run
+determinism claim and the `program.c` sha256 (`facf9d98...`) were re-verified.
+
+No compiler, runtime or default C compiler is changed (release stays `gcc -O2`), so no DIFFERENCES
+row and no new test module: the artifact is the measurement script plus its report. Two bugs in the
+measurement itself were found and fixed before the final run: `-lm` was placed before the source
+(breaking links under `--as-needed`) and multi-unit general-path builds lost their link libraries.
+`python3 tools/update_manifest.py` and `--check` pass.
+
+## 2026-11-05 -- rbtccprobe1: re-apply the tcc build probe on the current tree (job-rbtccprobe1-11052322)
+
+Re-applied the accepted `tccprobe1` change (`c5ca5c0d`..`job-tccprobe1-11052026`).  Everything
+applied: `lab/tccprobe/` (`run.py`, `RESULTS.md`, five `fail_*.txt` excerpts), the `tccprobe1`
+measurement entry above and the `.github/workflows/agent-worker.yml` hunks, which drop
+`GH_MODELS_TOKEN` and `$RUNNER_TEMP/ghm.key` from the key-file and key-scan steps.  That removal
+is harmless: `.agent/pipeline.sh` already no-ops `run_ghm` when `$RUNNER_TEMP/ghm.key` is absent
+(`[ -s "$RUNNER_TEMP/ghm.key" ] ... || return 1`).  No compiler, runtime or default build is
+changed (release stays `gcc -O2`), so no DIFFERENCES row and no new test module.
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran;
+`--check` passes.
+Tests (`par_check -j 2`): `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass.
+Probes: `/tmp/probes/tccprobe_logic.py` (29 checks) covers `classify()` on both real `index too
+large` forms (declaration vs compound literal) and the sized forms that must not match, attribute,
+`__thread`, `__int128`, `__builtin_*`, asm, link error, `diagnose()` picking the unit tcc names in
+a multi-unit build, the `-O0`/tcc flag rewrites, single vs multi `parse_report`, `write_excerpts`
+ordering and emitters, and the `--from-json` reclassification: 29/29.
+`/tmp/probes/tccprobe_smoke.py` matches CPython under `cmp.sh` in both the general and default
+builds.  tcc 0.9.27 is not installed on this runner, so the 0/50 build numbers in `RESULTS.md`
+were not re-measured here; they are the accepted job's recorded measurement.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this
