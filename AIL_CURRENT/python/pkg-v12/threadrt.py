@@ -36,7 +36,8 @@ RUNTIME = r'''
 
 typedef struct ail_thr {
     ail_frame *frames;            /* saved while the thread does not hold the lock */
-    int64_t depth;                /* the thread's cx->call_depth while it does not hold the lock */
+    int64_t depth;                /* the thread's cx->gen_depth while it does not hold the lock */
+    char *stack_limit;            /* the thread's cx->stack_limit while it does not hold the lock */
     ail_excslot exc;
     int exc_pending;
     ail_limitslot limit;
@@ -92,8 +93,10 @@ static void ail_gil_take_locked(ail_ctx *cx, ail_thr *t) {
     ail_gil_switches++;
     __atomic_store_n(&ail_gil_drop, 0, __ATOMIC_RELAXED);
     pthread_cond_broadcast(&ail_gil_sw_cv);
+    if (!t->stack_limit) { char probe; t->stack_limit = ail_stack_limit_from(&probe); }
     cx->frames = t->frames;
-    cx->call_depth = t->depth;
+    cx->gen_depth = t->depth;
+    cx->stack_limit = t->stack_limit;
     cx->exc = t->exc;
     cx->exc_pending = t->exc_pending;
     cx->limit = t->limit;
@@ -102,7 +105,8 @@ static void ail_gil_take_locked(ail_ctx *cx, ail_thr *t) {
 static void ail_gil_drop_locked(ail_ctx *cx, ail_thr *t, int save) {
     if (save) {
         t->frames = cx->frames;
-        t->depth = cx->call_depth;
+        t->depth = cx->gen_depth;
+        t->stack_limit = cx->stack_limit;
         t->exc = cx->exc;
         t->exc_pending = cx->exc_pending;
         t->limit = cx->limit;
@@ -263,9 +267,28 @@ static void ail_th_finish_self(ail_ctx *cx, ail_thr *t) {
     pthread_mutex_unlock(&ail_gil_mu);
     free(t);
 }
+/* A thread's own stack bounds, not the creator's: pthread_getattr_np is the only portable way
+   to ask glibc where the mapping starts and ends. The guard keeps the same headroom the main
+   stack has, so the general path's check fires before the real stack is gone. */
+static char *ail_th_stack_limit(char *sp) {
+    void *base = NULL;
+    size_t size = 0;
+    pthread_attr_t at;
+    if (pthread_getattr_np(pthread_self(), &at) == 0) {
+        int rc = pthread_attr_getstack(&at, &base, &size);
+        pthread_attr_destroy(&at);
+        if (rc == 0 && base && size > AIL_STACK_MARGIN * 2) {
+            char *limit = (char *)base + AIL_STACK_MARGIN;
+            if (limit < sp) return limit;
+        }
+    }
+    return ail_stack_limit_from(sp);
+}
+
 static void *ail_th_entry(void *p) {
     ail_thr *t = (ail_thr *)p;
     ail_ctx *cx = t->cx;
+    t->stack_limit = ail_th_stack_limit((char *)&t);
     ail_gil_acquire(cx, t);
     ail_st st;
     {

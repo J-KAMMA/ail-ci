@@ -4414,12 +4414,12 @@ class Compiler(boxclosure.ClosureMixin):
         body = '\n'.join(preamble_lines) + ('\n' if preamble_lines else '')
         body += ctx.body_text()
         st_decl = '    ail_st st = AIL_OK; (void)st;\n'
-        # The typed emitters stop a call that would exhaust the C stack with a named RecursionError
-        # (ail_d / AIL_MAX_RECURSION_DEPTH); the general path had no counterpart and died with a
-        # bare SIGSEGV. The frame counter maintained by AIL_FRAME_ENTER/LEAVE makes the same stop
-        # here, before the real stack is gone. AIL_MAX_GENERAL_CALL_DEPTH leaves room for the
-        # general path's larger frames and is far above the depth any working program used.
-        depth_guard = ('    if (cx->call_depth > AIL_MAX_GENERAL_CALL_DEPTH) { st = ail_raise_c(cx, '
+        # A generated entry stops a call that would exhaust the C stack with a named
+        # RecursionError (the typed path's counterpart is ail_d / AIL_MAX_RECURSION_DEPTH).
+        # The check is a real stack check -- the address of this activation's frame against
+        # cx->stack_limit -- not a frame count: a depth that fits the real stack keeps
+        # working, and a function with many locals is still stopped before it overflows.
+        depth_guard = ('    if (AIL_STACK_LOW(cx, f)) { st = ail_raise_c(cx, '
                        'AIL_B_RECURSIONERROR, "maximum recursion depth exceeded"); goto L_leave; }\n')
         comp_decl = '    ail_completion comp = AIL_COMPLETE_NORMAL; (void)comp;\n'
         # @lru_cache/@cache (S047): the BODY compiles under a private `_impl` name; the plain
@@ -4603,7 +4603,7 @@ class Compiler(boxclosure.ClosureMixin):
         full = ('static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n'
                '    AIL_FRAME_ENTER(cx, f, %d);\n'
                '    ail_st st = AIL_OK; (void)st;\n'
-               '    if (cx->call_depth > AIL_MAX_GENERAL_CALL_DEPTH) { st = ail_raise_c(cx, '
+               '    if (AIL_STACK_LOW(cx, f)) { st = ail_raise_c(cx, '
                'AIL_B_RECURSIONERROR, "maximum recursion depth exceeded"); goto L_leave; }\n'
                '    ail_completion comp = AIL_COMPLETE_NORMAL; (void)comp;\n%s'
                '    *out = ail_box_none();\n'

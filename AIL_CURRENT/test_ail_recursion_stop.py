@@ -3,13 +3,16 @@
 Before this test, a recursive function on the general path (`AIL_UNIFIED_FORCE=1`, and the
 default build for a recursive method, which takes the general path) exhausted the C stack and
 died with a bare SIGSEGV: exit 139 and nothing on stderr.  The typed path already stopped with
-`RecursionError: maximum recursion depth exceeded`; the general path now keeps the same depth
-count on its frames (AIL_FRAME_ENTER/LEAVE) and raises the same named exception through its own
-exception path, so a `try` can catch it as CPython's `RecursionError`/`RuntimeError`.
+`RecursionError: maximum recursion depth exceeded`; the general path now checks each generated
+entry's frame address against the current stack limit (a real stack check, not a frame count)
+and raises the same named exception through its own exception path, so a `try` can catch it as
+CPython's `RecursionError`/`RuntimeError`.
 
 The owner decision of 2026-11-05 keeps recursion within the real stack working: AIL does not
-emulate CPython's default limit of 1000, so depth 5000 still completes (a documented difference,
-docs/LIMITATIONS.md), and only real stack exhaustion stops.
+emulate CPython's default limit of 1000, so depth 5000 and 12000 still complete (a documented
+difference, docs/LIMITATIONS.md), and only real stack exhaustion stops.  A recursive function
+with many locals used to overflow before any fixed frame cap could catch it; the stack check
+stops it by name.
 """
 import os
 import subprocess
@@ -98,6 +101,34 @@ DEEP = '''def descend(n: int) -> int:
 
 
 print(descend(5000))
+'''
+
+# A depth that fits the real stack (CPython refuses at its default limit of 1000, which is the
+# documented difference).  A fixed frame cap must not turn this into a RecursionError.
+DEEP_12000 = '''def descend(n: int) -> int:
+    if n == 0:
+        return 0
+    return 1 + descend(n - 1)
+
+
+print(descend(12000))
+'''
+
+# Large activations: a frame count cannot bound the real stack for these, so this used to
+# segfault even with a 10000-frame cap.
+MANY_LOCALS = '''def descend(n: int) -> int:
+    a0=0; a1=1; a2=2; a3=3; a4=4; a5=5; a6=6; a7=7; a8=8; a9=9
+    b0=0; b1=1; b2=2; b3=3; b4=4; b5=5; b6=6; b7=7; b8=8; b9=9
+    c0=0; c1=1; c2=2; c3=3; c4=4; c5=5; c6=6; c7=7; c8=8; c9=9
+    d0=0; d1=1; d2=2; d3=3; d4=4; d5=5; d6=6; d7=7; d8=8; d9=9
+    e0=0; e1=1; e2=2; e3=3; e4=4; e5=5; e6=6; e7=7; e8=8; e9=9
+    f0=0; f1=1; f2=2; f3=3; f4=4; f5=5; f6=6; f7=7; f8=8; f9=9
+    if n == 0:
+        return a0 + b0 + c0 + d0 + e0 + f0
+    return 1 + descend(n - 1) + (a9 + b9 + c9 + d9 + e9 + f9) * 0
+
+
+print(descend(100000))
 '''
 
 NESTED = '''def outer():
@@ -196,6 +227,31 @@ class RecursionStop(unittest.TestCase):
                 self.assertIsNotNone(got, err)
                 self.assertEqual(got.returncode, 0, mode)
                 self.assertEqual(got.stdout.decode("utf-8", "replace"), "5000\n", mode)
+
+    def test_depth_12000_still_completes(self):
+        # The regression the review found: a 10000-frame cap refused a depth the real stack
+        # holds (12000 completed before the guard existed).  CPython itself refuses at 1000.
+        with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+            for mode, env_extra in MODES:
+                got, err = _build_and_run(directory, "deep12k_" + mode, DEEP_12000, env_extra)
+                self.assertIsNotNone(got, err)
+                self.assertEqual(got.returncode, 0, mode)
+                self.assertEqual(got.stdout.decode("utf-8", "replace"), "12000\n", mode)
+                self.assertEqual(_last_line(got.stderr), "", mode)
+
+    def test_many_locals_stops_by_name(self):
+        # A frame count cannot bound the real stack: this activation is about 1 KiB, so the old
+        # guard was above the real limit and the program died with SIGSEGV.
+        with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+            want_out, want_rc = _run_cpython(directory, MANY_LOCALS)
+            self.assertNotEqual(want_rc, 0)
+            for mode, env_extra in MODES:
+                got, err = _build_and_run(directory, "manylocals_" + mode, MANY_LOCALS, env_extra)
+                self.assertIsNotNone(got, err)
+                self.assertEqual(got.stdout.decode("utf-8", "replace"), want_out, mode)
+                self.assertNotEqual(got.returncode, 0, mode)
+                self.assertTrue(_last_line(got.stderr).startswith("RecursionError:"),
+                                "%s: %r" % (mode, got.stderr[-400:]))
 
     def test_nested_def_recursion_stops_by_name(self):
         with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:

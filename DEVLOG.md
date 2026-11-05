@@ -1,3 +1,30 @@
+## 2026-11-05 -- recstop1 review fix: a real stack check replaces the frame cap
+
+The review of the first cut found that `AIL_MAX_GENERAL_CALL_DEPTH` = 10000 *lowered* the maximum
+working depth on the general path: `def rec(n): return 0 if n == 0 else 1 + rec(n-1);
+print(rec(12000))` completed on the base commit and raised `RecursionError` (empty stdout) on
+HEAD. It also confirmed the pre-existing half of the same root cause: a fixed frame count cannot
+bound the real stack, so a recursive function with 60 locals still died with SIGSEGV (exit 139)
+on HEAD and base, because its ~1 KiB frames overflow long before any reasonable count.
+
+`cx->call_depth` is gone. Every OS stack now records `cx->stack_limit`, the lowest address it may
+touch, with a 64 KiB reserve for the raise path: `RLIMIT_STACK` in `ail_ctx_init` for the main
+thread, `pthread_getattr_np` in `threadrt.py` for a thread, and the generator's own mmap'd buffer
+in `safetyrt.py`. A generated function entry (top-level function/method, nested def, boxclosure)
+checks `AIL_STACK_LOW(cx, f)` and raises `RecursionError("maximum recursion depth exceeded")`
+through the ordinary exception path. Because each generator has its own stack, `yield from`
+nesting keeps a separate counter (`cx->gen_depth`, `AIL_MAX_GENERATOR_DEPTH` = 10000), saved and
+restored across generator switches and thread hand-offs. Probes on both builds: direct, mutual,
+method and nested-def recursion stop by name; depth 5000 and 12000 complete (documented
+difference); 60-locals recursion now stops by name where it used to segfault; `*args`, `**kw`
+definition, closures, aliases, static/class methods, list/dict/attribute/argument routes,
+generator `yield from`, `threading.Thread` and the uncaught/`except RuntimeError`/`except
+RecursionError`/`finally` shapes match CPython or stop by name. Depth boundary on an 8 MiB stack:
+base completes 20100 and segfaults at 20200; the new check completes 20000 and stops loudly at
+20100 (about 100 frames / 0.5% lower at the very edge, the cost of the reserve). The runner cannot
+open `perf_event_open` here, so instruction counts are unavailable; the per-call work is now one
+compare and branch (the two counter increments/decrements per frame are gone).
+
 ## 2026-11-05 -- recstop1: deep recursion stops loudly on the general path (job-recstop1-11060031)
 
 The safestop1 table (`lab/safety/stops/RESULTS.md`) showed `06_rec_direct.py`, `07_rec_mutual.py` and
