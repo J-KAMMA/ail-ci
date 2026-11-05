@@ -1,7 +1,7 @@
 # rc3: cursor inference for loop traversal variables
 
 Branch `job-rc3-11060752`, base the exported `integ` tree (rc2 merged). rc1's `PRICE.md` says
-**go** for rc3 (halved projection >= 1.03x on six programs). The target and the result are
+**go** for rc3 (halved projection >= 1.03x on five programs). The target and the result are
 compared at the end: one program moves, not two.
 
 ## The rule
@@ -28,9 +28,9 @@ retain/release at a store — the store becomes a plain pointer copy. A cursor p
 to rc2's borrowed set (so callers stage non-name arguments exactly as for any borrowed position).
 `AIL_RC_BORROW=0` turns cursors off together with rc2.
 
-Implementation: `ir/borrow.py::analyze_cursors`, the same `pyfunc.py` emit hook rc2 added
-(`_BORROWED_PARAMS`/`object_params`, 9 lines), the generic object-store emission (3 lines), and
-`ir/verify.py::check_borrowed` extended to cursor locals (12 lines).
+Implementation: `ir/borrow.py::analyze_cursors`, 14 added lines in `pyfunc.py` (the same emit
+hook rc2 added — `_BORROWED_PARAMS`/`object_params` — plus the generic object-store site), and
+`ir/verify.py::check_borrowed` extended to cursor locals (10 added lines).
 
 ## Cursors detected, 16 programs
 
@@ -105,6 +105,11 @@ target "at least 1.03x on two programs".
 * **16 programs**: correct output and exit status against CPython/the task reference in the
   default build; `linkedlist` also against the `AIL_RC_BORROW=0` build. The 15 unchanged programs
   have no cursor, so rc3 does not change their generated C (their helper counts match rc2's).
+  Nine of the ten compare tasks match the oracle under the 1.5 GB `ulimit -v`; `berth_sim`'s
+  CPython `reference.py` itself raises `MemoryError` under that cap (empty oracle, exit 1), which
+  is the harness reporting "plain output differs". With the cap lifted the AIL build matches
+  `reference.py` byte-for-byte (2246 bytes, exit 0) and ten repeated runs are identical; rc3
+  detects no cursor in `berth_sim`.
 * **9 probes** (`/tmp/probes/p_*.py`: parameter walk, local walk, alias walk, field-read argument,
   call-result argument, element walk, and the three refused shapes): CPython-equal in both the
   default build and `AIL_UNIFIED_FORCE=1`, and equal again in the `AIL_RC_BORROW=0` build.
