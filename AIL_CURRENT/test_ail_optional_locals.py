@@ -284,6 +284,19 @@ GUARDED = """def main() -> None:
     if best is None:
         return
     print(best, bw)
+    best = None
+    g1 = 3
+    g2 = 4
+    for v in [2, 9]:
+        if v == 1:
+            best = g1
+            kept = g1
+        elif v == 2:
+            best = g2
+            kept = g2
+        if best is None:
+            continue
+        print("kept", best, kept)
     x = None
     for i in range(5):
         if i == 3:

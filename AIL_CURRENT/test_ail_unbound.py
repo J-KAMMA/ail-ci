@@ -645,6 +645,29 @@ print(j(0))
             want, got = _run(directory, 'del', text)
             self.compare('del', want, got, False)
 
+    def test_deleted_closure_is_not_read(self):
+        """A nested def made before `del` sees the deletion at call time (CPython: NameError, free
+        variable): the typed path refuses it and the general path answers, so no stale value is read."""
+        text = '''
+def deleted(n: int) -> int:
+    x = n + 1
+    def inner() -> int:
+        return x
+    del x
+    print("before")
+    return inner()
+
+def main():
+    try:
+        print(deleted(2))
+    except NameError as e:
+        print("N", e)
+main()
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-unbound-') as directory:
+            want, got = _run(directory, 'delclosure', text)
+            self.compare('delclosure', want, got, False)
+
     def test_general_path_proven_reads(self):
         """General path (cbloat): a read of a parameter, or of a local assigned on every path to it, has no
         UnboundLocalError check; every read that is not proven keeps it and raises as CPython does."""
