@@ -84,6 +84,9 @@ Helper emission/definition sites:
   `cruntime.py:27191/27199/27207`.
 - List/int buffers have no refcount: `ail_list_push/reserve` `cruntime.py:3926/3937`,
   `ail_slist_push/reserve` `cruntime.py:2948/2963`, `ail_pslist_*` `cruntime.py:4119-4152`.
+- Runtime helpers present but with 0 calls in all 16 runs: `ail_barena_release` (`cruntime.py:6343`),
+  `ail_binaryfile_retain/release` (`cruntime.py:27630/27635`), `ail_tcpsocket_retain/release`
+  (`cruntime.py:27987/27992`), `ail_win_release` (`cruntime.py:30091`).
 
 ## Pricing for rc2-rc5
 
