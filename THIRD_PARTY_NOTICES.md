@@ -42,8 +42,9 @@ Counts:
 - 3 files under `AIL_CURRENT/stdlib/` are AIL's own (`zlib.py`,
   `zlib_glue.c`, `zlib_glue.h`); they link the system zlib, they do not copy
   it.
-- Total files under `AIL_CURRENT/stdlib/` and `third_party/`: 66, of which 63
-  are third-party or derived and 3 are AIL's own.
+- Total files under `AIL_CURRENT/stdlib/` and `third_party/`: 67, of which 64
+  are third-party or derived (13 CPython-derived, 50 typeshed, and the PSF
+  license text) and 3 are AIL's own.
 
 ## Unchanged generated data
 
