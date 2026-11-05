@@ -1,3 +1,66 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+All probes done; no background jobs left running.
+
+**What the change really does.** It adds `AIL_CURRENT/stdlib/mimetypes.py` (CPython 3.12 `mimetypes` reimplemented as AIL source, with a local `_urlsplit` replacing `urllib.parse.urlparse`, `os.fspath`/`splitdrive` dropped, registry and `_main` removed), 10 `lab/stdlib/mimetypes/*.py` programs + `RESULTS.md`, a registered test module, and manifest updates. This matches the report's description; the two later commits are incremental fixes to `_urlsplit`.
+
+**Probes** (all in `/tmp/rprobes`, run with `bash ~/tools/cmp.sh <p> /home/runner/work/_temp/w2`, default + `AIL_UNIFIED_FORCE=1`):
+
+| probe | result |
+|---|---|
+| `p3_normal`, `p4_initstate`, `p12_containers` (normal names, suffixes, encodings, init/MimeTypes/global-alias state, URLs from list/dict/attribute) | same stdout/exit, both builds |
+| `p13_claims` (leading C0/space, trailing tab/CR/LF) | same, both builds (report fix 1 verified) |
+| `p9_brackets` (`x[::1]`, `[a]b`, `[foo]`, `[1.2.3.4]`, `[v]`, `[vz.x]`, `http://[::1/x.txt`) | same, both builds (structural checks verified) |
+| `p6_read`, `p7_read`, `p8_initfile` (`read_mime_types`, `MimeTypes.read`, `init([file])`) | same, both builds |
+| `p1_noscheme_bracket`, `p10_unsplit` | **differ** (defect 1) |
+| `p2_ipv6_invalid` | **differ** (defect 2) |
+| `nofeat.py` non-mimetypes program, `--debug-dir` vs `/tmp/base` | `program.c` byte-identical |
+| `01_plain_names.py` default vs forced-general `program.c` | same sha256 (report claim verified) |
+
+**Defects**
+
+1. `_urlsplit` returns `(None, url)` before the `url[:2] == "//"` netloc checks whenever no scheme is found, so bracket errors in scheme-less (protocol-relative) URLs are never raised. `urlsplit` performs those checks regardless of scheme.
+   Probe `/tmp/rprobes/p10_unsplit.py`:
+   ```python
+   import mimetypes
+   mimetypes.init([])
+   print(mimetypes.guess_type("//]"))
+   ```
+   Expected (CPython): exit 1, stdout empty, stderr `ValueError: Invalid IPv6 URL`.
+   Actual (both builds): exit 0, stdout `(None, None)`.
+   Same with `"//x[::1]/a.txt"` → CPython raises, compiled prints `('text/plain', None)`. Base refuses the import, so the change caused it; the docstring claim "An unbalanced '[' / ']' in the netloc raises ValueError, as urlsplit does" is false.
+
+2. Bracketed hosts containing `:` are accepted without IPv6 validation: `print(mimetypes.guess_type("http://[gggg::1]/a.txt"))` (also `[:::]`, `[[::1]`) → expected exit 1 (`ValueError: ... does not appear to be an IPv4 or IPv6 address`), actual exit 0 with `('text/plain', None)`. Documented in the module docstring and `RESULTS.md` as a known limitation (no `ipaddress.IPv6Address`), so it is a disclosed semantic gap, not a hidden one.
+
+**Report claim check**
+- "preprocessing fix" (leading space/tab/CR/LF) — verified.
+- "unbalanced bracket now raises, matching CPython" — verified for schemed URLs only; **false in general** (defect 1).
+- structural bracket checks — verified.
+- 10/10 programs build and match, both builds — verified (`test_ail_std_mimetypes` ok, 135 s).
+- `test_ail_safetynet` ok — **false here**: `S4_generators_gc` fails under `ulimit -v`; the identical failure occurs on `/tmp/base`, so it is pre-existing and unrelated.
+- `update_manifest.py --check` exit 0 — verified.
+- diff contains only allowed files — verified (17 files).
+- same C sha256 for default vs forced general — verified on one program.
+- "IPv6 address validation is local ... never rejects a valid IPv6 spelling" — the accept side is right; it also never rejects *invalid* ones (defect 2).
+
+**Pre-existing:** `S4_generators_gc` (test_ail_safetynet) fails under a memory cap on base too.
+
+**Unverified:** bytes / `PathLike` inputs (module documents str-only), a machine without `/etc/mime.types`, uncapped `S4` run, full suite (not run, per instructions), speed/icount (no compiler or runtime hot path touched — only a new stdlib file), and the 4-module test set the worker quotes.
+
+VERDICT: FIX
+1. `AIL_CURRENT/stdlib/mimetypes.py` `_urlsplit` skips netloc/bracket handling when no scheme is found. Probe `/tmp/rprobes/p10_unsplit.py` (`print(mimetypes.guess_type("//]"))`): expected exit 1 with empty stdout and `ValueError: Invalid IPv6 URL`; actual exit 0 with `(None, None)` in both builds. (Also `"//x[::1]/a.txt"`: CPython raises, compiled prints `('text/plain', None)`.)
+2. Bracketed hosts without `:`-validation (`http://[gggg::1]/a.txt`, `[:::]`, `[[::1]`): expected exit 1 from `ValueError`; actual exit 0 with `('text/plain', None)`. Documented limitation, but still a wrong exit status versus the oracle.
+[commandcode stop=end_turn turns=32 out_tokens=35987]
+
+
+--- ORIGINAL TASK ---
 Lane: stdmime
 
 # mimetypes1: `import mimetypes` in compiled programs, shipped as AIL source (`AIL_CURRENT/stdlib/mimetypes.py`)
