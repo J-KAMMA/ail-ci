@@ -1,6 +1,6 @@
 """Safe: one million independent int results through Pool.map, summed in order afterwards.
-The pool is used because ProcessPool chunks the iterable; a ThreadPool submits one future per
-item and would exceed the job's 1.5 GB address-space limit in CPython itself."""
+The pool is used because ProcessPool chunks the iterable, so a million items do not become one
+threaded task per item."""
 import multiprocessing
 
 

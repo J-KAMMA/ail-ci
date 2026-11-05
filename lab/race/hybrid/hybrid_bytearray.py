@@ -1,6 +1,9 @@
-"""Hybrid: the function takes a bytearray. The hybrid has no list/bytearray buffer for this
-argument shape, so it must keep CPython's function and still print the same checksum."""
-import threading
+"""Hybrid helper: one bytearray function and one int function, built with `ail build --cpython`.
+
+The threaded runner is `hybrid_bytearray_run.py`. The hybrid accepts int/float/bool/str/list[int]/
+list[float] parameters; a `bytearray` parameter is not eligible, so `checksum` stays in CPython
+while `tagged` is accelerated. The runner calls both from CPython threads.
+"""
 
 
 def checksum(buf: bytearray) -> int:
@@ -10,19 +13,5 @@ def checksum(buf: bytearray) -> int:
     return s
 
 
-def main():
-    buf = bytearray(range(256))
-    got = []
-
-    def worker():
-        got.append(checksum(buf))
-
-    ts = [threading.Thread(target=worker) for _ in range(4)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    print(len(got), got[0], sorted(got)[0] == sorted(got)[3])
-
-
-main()
+def tagged(n: int) -> int:
+    return n * 7 + 1

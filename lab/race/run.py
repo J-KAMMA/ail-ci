@@ -6,8 +6,13 @@
 Each ordinary probe is built twice (default, AIL_UNIFIED_FORCE=1), classified as typed parallel,
 typed, general or refused, run at AIL_THREADS 1, 2, 4 and 16 (three times each) and compared with
 `python3`. A build on the typed parallel path is also compiled once with ThreadSanitizer from the
-kept C and run once. The hybrid probes are built with `ail build --cpython` and compared with
-CPython. The three counts and a table go to lab/race/RESULTS.md.
+kept C and run once. A hybrid probe is a helper module `<name>.py` plus a threaded CPython runner
+`<name>_run.py`: the helper is built with `ail build --cpython` (that is the probe's own build), and
+a copy of the runner is run from a clean directory with `PYTHONPATH` at the built output, so the
+generated wrapper (not the source helper) is imported; its output is compared with CPython. The
+runner is also compiled and run in the default and forced AIL builds, so every row has both
+results where the general path can build the runner. The three counts and a table go to
+lab/race/RESULTS.md.
 
 Definitions from the job:
   silent race    a racy probe that runs on the typed parallel path (a shared write without the
@@ -68,7 +73,7 @@ def first_line(data):
     for line in text(data).splitlines():
         line = line.strip()
         if line and not line.startswith("{"):
-            return line[:300]
+            return line[:500]
     return ""
 
 
@@ -101,15 +106,18 @@ def compile_probe(src, work, force):
     return record
 
 
-def cpython_run(src, timeout=RUN_TIMEOUT):
-    got = call([sys.executable, "-B", str(src)], timeout, clean_env())
+def cpython_run(src, timeout=RUN_TIMEOUT, extra_env=None, cwd=None):
+    env = clean_env(extra_env)
+    got = call([sys.executable, "-B", str(src)], timeout, env, cwd=cwd)
     return {"returncode": got.returncode, "stdout": got.stdout, "stderr": got.stderr,
             "timeout": got.returncode == -9}
 
 
-def program_run(exe, threads, runs=RUNS):
+def program_run(exe, threads, runs=RUNS, extra_env=None):
     outs = []
     env = clean_env({"AIL_THREADS": str(threads)})
+    if extra_env:
+        env.update(extra_env)
     for _ in range(runs):
         got = call([str(exe)], RUN_TIMEOUT, env, cwd=exe.parent)
         outs.append({"returncode": got.returncode, "stdout": got.stdout, "stderr": got.stderr,
@@ -159,7 +167,11 @@ def tsan_check(build, work):
 def probe_files():
     racy = sorted((HERE / "racy").glob("*.py"))
     safe = sorted((HERE / "safe").glob("*.py"))
-    hybrid = sorted((HERE / "hybrid").glob("*.py"))
+    hybrid = []
+    for runner in sorted((HERE / "hybrid").glob("*_run.py")):
+        helper = runner.with_name(runner.name[:-len("_run.py")] + ".py")
+        if helper.is_file():
+            hybrid.append((helper, runner))
     return racy, safe, hybrid
 
 
@@ -201,41 +213,79 @@ def evaluate(src, kind, work_root):
     return row
 
 
-def evaluate_hybrid(src, work_root):
-    work = work_root / "hybrid" / src.stem
+def evaluate_hybrid(helper, runner, work_root):
+    work = work_root / "hybrid" / helper.stem
     work.mkdir(parents=True, exist_ok=True)
-    want = cpython_run(src)
+    helper_dir = helper.parent
+    # Run a copy of the runner from a directory that does not hold the helper source.  Python
+    # puts a script's own directory first on sys.path, so running the runner in place would
+    # import the source helper and silently skip the built extension.
+    driver = work / runner.name
+    shutil.copyfile(runner, driver)
+    want = cpython_run(driver, extra_env={"PYTHONPATH": str(helper_dir)}, cwd=work)
+    row = {"probe": "hybrid/%s" % helper.name, "runner": "hybrid/%s" % runner.name,
+           "kind": "hybrid", "cpython": want, "default": None, "force": None,
+           "hybrid": None, "tsan": "-", "silent": False,
+           "match_default": False, "match_force": False}
+    # The runner is an ordinary threaded program: record its default and forced AIL result too.
+    for force in (False, True):
+        build = compile_probe(runner, work, force)
+        key = "force" if force else "default"
+        got = {"path": build["path"], "note": build["note"], "runs": {},
+               "match": False, "timeout": False}
+        if build["path"] != "refused":
+            all_match = True
+            for threads in THREADS:
+                runs = program_run(build["exe"], threads,
+                                   extra_env={"PYTHONPATH": str(helper_dir)})
+                got["runs"][threads] = runs
+                if not all(matches(want, r) for r in runs):
+                    all_match = False
+                if any(r["timeout"] for r in runs):
+                    got["timeout"] = True
+            got["match"] = all_match
+        row[key] = got
+        row["match_default" if not force else "match_force"] = got["match"]
     out = work / "out"
     shutil.rmtree(out, ignore_errors=True)
     env = clean_env()
-    built = call([sys.executable, "-B", str(CLI), "build", "--cpython", str(src), "-o", str(out)],
-                 BUILD_TIMEOUT, env, cwd=work)
-    row = {"probe": "hybrid/%s" % src.name, "kind": "hybrid", "cpython": want,
-           "default": {"path": "hybrid", "note": "", "match": False},
-           "force": {"path": "-", "match": None}, "tsan": "-", "silent": False,
-           "match_default": False, "match_force": None}
+    built = call([sys.executable, "-B", str(CLI), "build", "--cpython", str(helper),
+                  "-o", str(out)], BUILD_TIMEOUT, env, cwd=work)
+    hybrid = {"path": "hybrid", "accelerated": [], "loaded": False,
+              "note": "the helper and the runner copy are separate modules", "runs": [],
+              "match": False}
     if built.returncode != 0:
-        row["default"] = {"path": "refused", "note": first_line(built.stderr or built.stdout),
-                          "match": False}
-        return row
-    report_path = out / "build.json"
-    report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
-    row["default"]["accelerated"] = report.get("accelerated", [])
-    exe = out / src.stem
-    if exe.is_file():
-        got = call([str(exe)], RUN_TIMEOUT, env, cwd=work)
-        row["default"]["runs"] = [{"returncode": got.returncode, "stdout": got.stdout,
-                                   "stderr": got.stderr}]
-        row["default"]["match"] = matches(want, {"returncode": got.returncode,
-                                                 "stdout": got.stdout, "timeout": False})
-    row["match_default"] = row["default"]["match"]
+        hybrid = {"path": "refused", "accelerated": [], "loaded": False,
+                  "note": first_line(built.stderr or built.stdout), "runs": [], "match": False}
+    else:
+        report_path = out / "build.json"
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
+        hybrid["accelerated"] = report.get("accelerated", [])
+        # Prove the run imports the generated wrapper (which binds the native module), not the
+        # source helper: the same sys.path and cwd the runner gets.
+        probe = ("import %s as m; print(getattr(m, '_ail_hybrid_native', None) is not None)"
+                 % helper.stem)
+        loaded = call([sys.executable, "-B", "-c", probe], RUN_TIMEOUT,
+                      clean_env({"PYTHONPATH": str(out)}), cwd=work)
+        hybrid["loaded"] = text(loaded.stdout).strip() == "True"
+        got = call([sys.executable, "-B", str(driver)], RUN_TIMEOUT,
+                   clean_env({"PYTHONPATH": str(out)}), cwd=work)
+        hybrid["runs"] = [{"returncode": got.returncode, "stdout": got.stdout,
+                           "stderr": got.stderr, "timeout": got.returncode == -9}]
+        hybrid["match"] = matches(want, {"returncode": got.returncode, "stdout": got.stdout,
+                                         "timeout": got.returncode == -9})
+    row["hybrid"] = hybrid
     return row
 
 
 def build_command(row, key):
     if row["kind"] == "hybrid":
-        return ("python3 AIL_CURRENT/ail_chatgpt.py build --cpython lab/race/%s "
-                "-o /tmp/race-out/%s" % (row["probe"], Path(row["probe"]).stem))
+        if key == "hybrid":
+            return ("python3 AIL_CURRENT/ail_chatgpt.py build --cpython lab/race/%s "
+                    "-o /tmp/race-out/%s" % (row["probe"], Path(row["probe"]).stem))
+        prefix = "AIL_UNIFIED_FORCE=1 " if key == "force" else ""
+        return ("%spython3 AIL_CURRENT/ail_chatgpt.py compile lab/race/%s -o /tmp/race-out/%s"
+                % (prefix, row["runner"], Path(row["runner"]).stem))
     prefix = "AIL_UNIFIED_FORCE=1 " if key == "force" else ""
     return ("%spython3 AIL_CURRENT/ail_chatgpt.py compile lab/race/%s -o /tmp/race-out/%s"
             % (prefix, row["probe"], Path(row["probe"]).stem))
@@ -251,7 +301,8 @@ def write_results(rows, elapsed, args):
     lines.append("# Race probe suite: measured %s" % ("today" if not args.quick else "today (quick)"))
     lines.append("")
     lines.append("`python3 lab/race/run.py`. CPython %s; the default AIL build and "
-                 "`AIL_UNIFIED_FORCE=1`; `AIL_THREADS` 1, 2, 4, 16, three runs each."
+                 "`AIL_UNIFIED_FORCE=1`; hybrid probes built with `ail build --cpython`; "
+                 "`AIL_THREADS` 1, 2, 4, 16, three runs each."
                  % platform.python_version())
     lines.append("")
     lines.append("## Today")
@@ -282,15 +333,22 @@ def write_results(rows, elapsed, args):
     lines.append("")
     lines.append("## Per-probe table")
     lines.append("")
-    lines.append("| probe | kind | default path | default match | force path | force match | TSan |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| probe | kind | default path | default match | force path | force match | hybrid | TSan |")
+    lines.append("|---|---|---|---|---|---|---|---|")
     for r in rows:
-        d, f = r["default"], r["force"]
-        lines.append("| %s | %s | %s | %s | %s | %s | %s |" % (
+        d, f, h = r["default"], r["force"], r.get("hybrid")
+        if h:
+            hybrid = "accelerated %s; %s; match %s" % (
+                ", ".join(h.get("accelerated", [])) or "none",
+                "extension loaded" if h.get("loaded") else "extension NOT loaded",
+                "yes" if h.get("match") else "no")
+        else:
+            hybrid = "-"
+        lines.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % (
             r["probe"], r["kind"], d["path"] if d else "-",
             ("yes" if r["match_default"] else "no"), f["path"] if f else "-",
-            ("yes" if r["match_force"] else ("n/a" if r["match_force"] is None else "no")),
-            r["tsan"] or "-"))
+            ("yes" if r["match_force"] else "no"),
+            hybrid, r["tsan"] or "-"))
     lines.append("")
     lines.append("## Notes")
     lines.append("")
@@ -304,6 +362,30 @@ def write_results(rows, elapsed, args):
                  "run differs from CPython, or if ThreadSanitizer reports on it.")
     lines.append("- `safe GIL-free` counts safe probes whose default build is the typed parallel "
                  "path; it is the count later steps raise.")
+    lines.append("- Each hybrid row is a helper module `<name>.py` built with `python3 -B "
+                 "AIL_CURRENT/ail_chatgpt.py build --cpython lab/race/hybrid/<name>.py -o <out>`, "
+                 "plus the threaded CPython runner `<name>_run.py`. `run.py` copies the runner to "
+                 "a directory that does not hold the helper, so `import <name>` reaches the "
+                 "generated wrapper and its native module; the `extension loaded` column proves "
+                 "that. The runner's stdout and exit status are compared with CPython.")
+    lines.append("- The default and forced columns also compile and run the same runner copy in the "
+                 "ordinary AIL builds, so every row has both. Two hybrid runners build there; "
+                 "`hybrid_bytearray_run.py` is refused by both with `general path: join() called "
+                 "with too many positional arguments` (a `bytearray` subscript in a thread body), "
+                 "so that row's match is measured from the hybrid build, where `checksum` stays in "
+                 "CPython and only `tagged` is accelerated.")
+    refused = [r for r in rows
+               if any(r.get(k) and r[k]["path"] == "refused" for k in ("default", "force"))]
+    if refused:
+        lines.append("")
+        lines.append("### Refusals (by name)")
+        lines.append("")
+        for r in refused:
+            for k in ("default", "force"):
+                got = r.get(k)
+                if got and got["path"] == "refused":
+                    note = got.get("note", "").replace(str(ROOT) + os.sep, "")
+                    lines.append("- `%s` (%s): `%s`" % (r["probe"], k, note))
     lines.append("")
     lines.append("Elapsed: %.0f s. %d rows (%d racy, %d safe, %d hybrid)." % (
         elapsed, len(rows), len(racy), len(safe), len(rows) - len(racy) - len(safe)))
@@ -329,8 +411,8 @@ def main():
             rows.append(evaluate(src, "racy", work_root))
         for src in safe:
             rows.append(evaluate(src, "safe", work_root))
-        for src in hybrid:
-            rows.append(evaluate_hybrid(src, work_root))
+        for helper, runner in hybrid:
+            rows.append(evaluate_hybrid(helper, runner, work_root))
     write_results(rows, time.time() - started, args)
     silent = sum(1 for r in rows if r.get("silent"))
     safe_matched = sum(1 for r in rows if r["kind"] == "safe" and r["match_default"])

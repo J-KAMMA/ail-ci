@@ -1,27 +1,10 @@
-"""Hybrid: the accelerated function takes and returns only ints, and CPython threads call it
-with disjoint out[k] writes. This is the safe shape the hybrid is meant to accelerate."""
-import threading
+"""Hybrid helper: an int-only typed function, built with `ail build --cpython`.
+
+The threaded runner is `hybrid_ints_run.py`. The helper has no threading import so the hybrid
+selector sees it as an ordinary module and accelerates `combine`; the runner then calls it from
+CPython threads that write disjoint `out[k]` slots.
+"""
 
 
 def combine(a: int, b: int) -> int:
     return a * 100 + b
-
-
-def main():
-    out = [0] * 8
-
-    def worker(k):
-        out[k] = combine(k, k + 1)
-
-    ts = [threading.Thread(target=worker, args=(k,)) for k in range(8)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    total = 0
-    for v in out:
-        total += v
-    print(len(out), total)
-
-
-main()
