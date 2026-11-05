@@ -125,6 +125,276 @@ class Fixed(unittest.TestCase):
             self.assertEqual(got.stdout, want.stdout)
 
 
+SLOTS = """from heapq import heappush, heappop
+
+
+def main() -> None:
+    wait = [None, [], [], []]
+    print(wait)
+    print(wait[0] is None, wait[1] is None, wait[2] is not None, wait[3] is not None)
+    w1, w2, w3 = wait[1], wait[2], wait[3]
+    heappush(w1, 5)
+    heappush(w2, 3)
+    heappush(wait[3], 9)
+    print(w1, w2, w3, wait)
+    heappush(wait[1], 1)
+    a = heappop(w1)
+    b = heappop(w2)
+    d = heappop(w3)
+    print(w1, wait[1], a, b, d)
+    print(wait)
+
+
+main()
+"""
+
+ABSENT = """def main() -> None:
+    wait = [None, [], [], []]
+    print("before")
+    print(len(wait[0]))
+    print("after")
+
+
+main()
+"""
+
+ABSENT_DYNAMIC = """from heapq import heappush
+
+
+def main() -> None:
+    wait = [None, [], []]
+    i = 0
+    print("go")
+    heappush(wait[i], 1)
+    print("no")
+
+
+main()
+"""
+
+PLAIN_READ = """def main() -> None:
+    wait = [None, [], [], []]
+    x = wait[0]
+    print(x)
+    print(wait[2])
+
+
+main()
+"""
+
+# Whole-list uses of a lowercased `[None, [], ...]` would see the stand-in `[]` where CPython has None, or
+# would desynchronise the present bits.  Each is refused by name on the typed path and matches CPython on
+# the general path.
+WHOLE_USE = {
+    'iter': """def main() -> None:
+    wait = [None, [], [1], [2]]
+    for w in wait:
+        print(w)
+
+
+main()
+""",
+    'iter_mut': """def main() -> None:
+    wait = [None, [], []]
+    for w in wait:
+        w.append(1)
+    print(wait)
+
+
+main()
+""",
+    'unpack': """def main() -> None:
+    wait = [None, [5], [6]]
+    a, b, c = wait
+    print(a, b, c)
+
+
+main()
+""",
+    'argument': """def show(rows: list) -> None:
+    print(rows, len(rows))
+
+
+def main() -> None:
+    wait = [None, [], [1, 2]]
+    show(wait)
+
+
+main()
+""",
+    'append': """def main() -> None:
+    wait = [None, []]
+    wait.append([7])
+    print(wait, len(wait), wait[2] is None)
+
+
+main()
+""",
+    'sort': """def main() -> None:
+    wait = [None, [1], [2]]
+    wait.sort()
+    print(wait)
+
+
+main()
+""",
+    'iadd': """def main() -> None:
+    wait = [None, [1]]
+    wait += [[2]]
+    print(wait)
+
+
+main()
+""",
+    'slice': """def main() -> None:
+    wait = [None, [1], [2]]
+    print(wait[:], wait[1:])
+
+
+main()
+""",
+}
+
+GUARDED = """def main() -> None:
+    best = None
+    w2 = [7, 4]
+    if best is None or w2[0] < best:
+        print("first")
+    best = w2[0]
+    if best is None or w2[1] < best:
+        print("second", best)
+    other = None
+    if other is not None and other > 0:
+        print("no")
+    other = 3
+    if other is not None and other > 0:
+        print("yes", other)
+    w1 = [5, 1]
+    w2 = [3]
+    best = None
+    if w1:
+        best = w1[0]
+        bw = w1
+    if w1 and (best is None or w1[0] < best):
+        best = w1[0]
+        bw = w1
+    if w2 and (best is None or w2[0] < best):
+        best = w2[0]
+        bw = w2
+    if best is None:
+        return
+    print(best, bw)
+    best = None
+    g1 = 3
+    g2 = 4
+    for v in [2, 9]:
+        if v == 1:
+            best = g1
+            kept = g1
+        elif v == 2:
+            best = g2
+            kept = g2
+        if best is None:
+            continue
+        print("kept", best, kept)
+    x = None
+    for i in range(5):
+        if i == 3:
+            x = i
+        if x is None:
+            break
+        print("x", x)
+
+
+main()
+"""
+
+
+@unittest.skipUnless(HAVE_CC, 'needs gcc')
+class NoneSlots(unittest.TestCase):
+    def test_none_slots_and_row_aliases(self):
+        with tempfile.TemporaryDirectory(prefix='ail-opt-slots-') as tmp:
+            want = run_cpython(tmp, SLOTS, 'slots')
+            self.assertEqual(want.returncode, 0, want.stderr)
+            for ir in ('0', '1'):
+                res, exe = build(tmp, SLOTS, 'slots', ir=ir)
+                self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+                got = run_exe(exe)
+                self.assertEqual((got.returncode, got.stdout), (0, want.stdout), 'IR=%s' % ir)
+            res, exe = build_general(tmp, SLOTS, 'slots')
+            self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+            got = run_exe(exe)
+            self.assertEqual((got.returncode, got.stdout), (0, want.stdout))
+
+    def test_absent_slot_read_exits_one_with_cpython_stdout(self):
+        with tempfile.TemporaryDirectory(prefix='ail-opt-absent-') as tmp:
+            want = run_cpython(tmp, ABSENT, 'absent')
+            self.assertEqual(want.returncode, 1, want.stderr)
+            for ir in ('0', '1'):
+                res, exe = build(tmp, ABSENT, 'absent', ir=ir)
+                self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+                got = run_exe(exe)
+                self.assertEqual(got.returncode, 1, 'IR=%s' % ir)
+                self.assertEqual(got.stdout, want.stdout, 'IR=%s' % ir)
+            res, exe = build_general(tmp, ABSENT, 'absent')
+            self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+            got = run_exe(exe)
+            self.assertEqual((got.returncode, got.stdout), (1, want.stdout))
+
+    def test_or_and_narrowing_and_guarded_binding(self):
+        with tempfile.TemporaryDirectory(prefix='ail-opt-guard-') as tmp:
+            want = run_cpython(tmp, GUARDED, 'guarded')
+            self.assertEqual(want.returncode, 0, want.stderr)
+            for ir in ('0', '1'):
+                res, exe = build(tmp, GUARDED, 'guarded', ir=ir)
+                self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+                got = run_exe(exe)
+                self.assertEqual((got.returncode, got.stdout), (0, want.stdout), 'IR=%s' % ir)
+            res, exe = build_general(tmp, GUARDED, 'guarded')
+            self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+            got = run_exe(exe)
+            self.assertEqual((got.returncode, got.stdout), (0, want.stdout))
+
+    def test_dynamic_absent_slot_read_exits_one(self):
+        with tempfile.TemporaryDirectory(prefix='ail-opt-dyn-') as tmp:
+            want = run_cpython(tmp, ABSENT_DYNAMIC, 'dyn')
+            self.assertEqual(want.returncode, 1, want.stderr)
+            for ir in ('0', '1'):
+                res, exe = build(tmp, ABSENT_DYNAMIC, 'dyn', ir=ir)
+                self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+                got = run_exe(exe)
+                self.assertEqual(got.returncode, 1, 'IR=%s' % ir)
+                self.assertEqual(got.stdout, want.stdout, 'IR=%s' % ir)
+            res, exe = build_general(tmp, ABSENT_DYNAMIC, 'dyn')
+            self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+            got = run_exe(exe)
+            self.assertEqual((got.returncode, got.stdout), (1, want.stdout))
+
+    def test_plain_slot_read_falls_back_and_matches(self):
+        with tempfile.TemporaryDirectory(prefix='ail-opt-plain-') as tmp:
+            want = run_cpython(tmp, PLAIN_READ, 'plain')
+            self.assertEqual(want.returncode, 0, want.stderr)
+            for ir in ('0', '1'):
+                res, exe = build(tmp, PLAIN_READ, 'plain', ir=ir, typed_only=False)
+                self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+                got = run_exe(exe)
+                self.assertEqual((got.returncode, got.stdout), (0, want.stdout), 'IR=%s' % ir)
+
+    def test_whole_list_uses_are_refused_by_name(self):
+        self.maxDiff = None
+        for name in sorted(WHOLE_USE):
+            text = WHOLE_USE[name]
+            with tempfile.TemporaryDirectory(prefix='ail-opt-whole-') as tmp:
+                want = run_cpython(tmp, text, 'whole')
+                res, _ = build(tmp, text, 'whole')
+                self.assertEqual(res.returncode, 3, '%s: %s' % (name, res.stderr[-2000:]))
+                self.assertIn('only read slot by slot', res.stderr, name)
+                res, exe = build(tmp, text, 'whole', typed_only=False)
+                self.assertEqual(res.returncode, 0, '%s: %s' % (name, res.stderr[-2000:]))
+                got = run_exe(exe)
+                self.assertEqual((got.returncode, got.stdout), (want.returncode, want.stdout), name)
+
+
 def gen_program(seed):
     rng = random.Random(seed)
     lines = []
