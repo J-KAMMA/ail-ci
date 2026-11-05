@@ -1,0 +1,21 @@
+{
+ "tree_fold": {
+  "args": [],
+  "census": null,
+  "census_same_output": true,
+  "cpython_same_output": false,
+  "env": "AIL_UNIFIED_FORCE=1",
+  "exit": 1,
+  "icount": 130899708123,
+  "input_bytes": 27877476,
+  "rss_kb": 2080080,
+  "rss_kb_runs": [
+   2080080,
+   2080184,
+   2080024
+  ],
+  "source": "lab/compare/src/tree_fold/typed.py",
+  "stdout_bytes": 0,
+  "task": "tree_fold"
+ }
+}
