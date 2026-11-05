@@ -1,4 +1,5 @@
 """Parser for command line options.
+Derived from CPython 3.12 Lib/getopt.py; PSF License, see stdlib/LICENSE-PSF.txt.
 
 This module helps scripts to parse the command line arguments in sys.argv.  It supports the same
 conventions as the Unix getopt() function (including the special meanings of arguments of the form

@@ -1,4 +1,5 @@
 """Keywords (from CPython 3.12's Lib/keyword.py).
+Derived from CPython 3.12 Lib/keyword.py; PSF License, see stdlib/LICENSE-PSF.txt.
 
 AIL finds this file when a program says `import keyword` (`ail_modules.py` searches the bundled
 `stdlib/` last).  `kwlist`, `softkwlist`, `__all__` and the two predicates' names and results are

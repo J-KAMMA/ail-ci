@@ -1,4 +1,5 @@
 """Token constants (CPython 3.12's Lib/token.py as AIL source).
+Derived from CPython 3.12 Lib/token.py; PSF License, see stdlib/LICENSE-PSF.txt.
 
 AIL finds this file when a program says `import token` (`ail_modules.py` searches the bundled
 `stdlib/` last).  Every constant keeps CPython 3.12's name and value.  Two definitions are
