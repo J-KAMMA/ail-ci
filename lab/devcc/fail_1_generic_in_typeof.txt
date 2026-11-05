@@ -1,0 +1,11 @@
+program: lab/compare/src/berth_sim/main.ail (compare)
+bucket: other (c2m parser)
+construct: _Generic inside __typeof__ (ail_len_t typedef)
+c2m stderr:
+  /tmp/devcc-slirwl46/gen-main-85a1379b/dbg/program.c:18:20: syntax error on _Generic (expected 'identifier'):
+  /tmp/devcc-slirwl46/gen-main-85a1379b/dbg/program.c:18:20: syntax error on _Generic (expected '<declarator>'):
+  /tmp/devcc-slirwl46/gen-main-85a1379b/dbg/program.c:22:9: syntax error on struct (expected '<declarator>'):
+  /tmp/devcc-slirwl46/gen-main-85a1379b/dbg/program.c:3347:74: syntax error on * (expected '*'):
+  /tmp/devcc-slirwl46/gen-main-85a1379b/dbg/program.c:3347:74: syntax error on * (expected '<declarator>'):
+generated C line 18: typedef __typeof__(_Generic((int64_t)0, long: (long long)0, default: (long)0)) ail_len_t;
+emitted by: AIL_CURRENT/python/pkg-v12/cruntime.py:199-200 (typedef __typeof__(_Generic(...)) ail_len_t;)
