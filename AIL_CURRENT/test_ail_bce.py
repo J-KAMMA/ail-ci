@@ -471,6 +471,23 @@ fn main() {
     try { print(run_match(data, 0, pat, len(data) + 1)); } except IndexError { print("hi"); }
 }
 """),
+    ('dec_while_guard', r"""
+fn scan(d: bytes, a: int, b: int) -> int {
+    let i = a + 1;
+    let count = 0;
+    let s = 0;
+    while i < b {
+        if count == 3 { break; }
+        s += d[i];
+        i -= 1;
+        count += 1;
+    }
+    return s;
+}
+fn main() {
+    print(scan(b"abcde", 0, 3));
+}
+"""),
 ]
 
 DEPTH_ORACLE = {
@@ -506,6 +523,9 @@ S7_ENTRY = {
 }
 S7_WHILE = {
     'echo_while_guard': ('run_match', 1),
+}
+S7_UNVERSIONED = {
+    'dec_while_guard': ('scan', 0),
 }
 
 
@@ -665,6 +685,12 @@ class BceProbeTests(unittest.TestCase):
                 self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
                 versioned = found[-1].get('passes', {}).get('versioned', 0)
                 self.assertGreaterEqual(versioned, least, '%s: %s' % (name, versioned))
+            for name, (fn, want) in S7_UNVERSIONED.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                versioned = found[-1].get('passes', {}).get('versioned', 0)
+                self.assertEqual(versioned, want, '%s: %s' % (name, versioned))
 
 
 if __name__ == '__main__':

@@ -23,6 +23,12 @@ compile times stayed within noise (max +3.1%). Instruction counts could not be m
 runner (`perf_event_open` is denied and valgrind is not installed), so the census icount gate and
 the s7 `-2%` / `-1.5%` targets remain unverified here.
 
+Review fix: `symbounds._nondecreasing` used to accept the `sub` shape `v = a - c` (`c >= 0`) as
+non-decreasing, so a decreasing carried pointer was versioned with a bogus `[0, hi-1]` range and its
+check was dropped in the default build. Only `add` with `c >= 0` is accepted now; the regression
+probe `dec_while_guard` (`i -= 1`, reads `d[-1]`) matches CPython in both builds and its `scan`
+function reports `versioned=0`.
+
 `test_ail_bce` gained `entry_emit_guard` and `echo_while_guard` (parameter boundaries, `len`,
 `len+1`, negative `a`/`p`, and an entry guard that must fall back to the checked body) plus a stats
 check for `entry_versioned`/`versioned`. Required modules all pass: `test_ail_bce`,

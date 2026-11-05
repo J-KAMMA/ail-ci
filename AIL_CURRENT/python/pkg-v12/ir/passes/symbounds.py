@@ -89,11 +89,8 @@ def _nondecreasing(v, a, defs, depth=0):
     d = defs.get(v)
     if d is None or depth > 8:
         return False
-    if d.op in ('add', 'sub'):
+    if d.op == 'add':
         x, y = d.operands
-        if d.op == 'sub':
-            c = _const_of(y, defs) if x is a else None
-            return c is not None and c >= 0
         other = y if x is a else x if y is a else None
         c = _const_of(other, defs) if other is not None else None
         return c is not None and c >= 0
