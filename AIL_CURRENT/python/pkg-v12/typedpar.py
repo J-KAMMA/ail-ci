@@ -147,6 +147,7 @@ class _Pass:
         self.done = []             # what was lowered (for the report)
         self.targets = set()       # thread functions inlined into a region
         self.pool_names = set()    # names bound to an executor or a pool
+        self.made = []             # (name, entry) for each lowered future group
 
     # -- the function a map runs ----------------------------------------------------------------
     def scalar_fn(self, node, nargs, where):
@@ -275,7 +276,9 @@ class _Pass:
                     inner[item.optional_vars.id] = (kind, cap)
                     self.pool_names.add(item.optional_vars.id)
                 out.extend(pre)
+                mark = len(self.made)
                 out.extend(self.block(s.body, inner))
+                self.escape_uses(stmts, i + 1, mark, s)
                 i += 1
                 continue
             if (isinstance(s, ast.Assign) and len(s.targets) == 1 and isinstance(s.targets[0], ast.Name)
@@ -367,7 +370,7 @@ class _Pass:
                 isinstance(stmt, ast.For) and not any(n is node for n in ast.walk(stmt.iter))):
             return False
         safe = {'list', 'tuple', 'sum', 'sorted', 'min', 'max', 'set', 'len', 'print', 'int', 'float', 'str',
-                'abs', 'round', 'range', 'bool'}
+                'abs', 'round', 'range', 'bool', 'enumerate', 'zip'}
         inside = {id(n) for n in ast.walk(node)}
         for n in ast.walk(stmt):
             if id(n) in inside or n is stmt:
@@ -389,9 +392,11 @@ class _Pass:
     @staticmethod
     def consumed(node, parent):
         """Whether the iterator is used up by something that sees only its values, in order."""
-        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.args == [node] \
-                and not parent.keywords and parent.func.id in ('list', 'tuple', 'sum', 'sorted', 'min', 'max', 'set'):
-            return True
+        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and not parent.keywords:
+            if parent.args == [node] and parent.func.id in ('list', 'tuple', 'sum', 'sorted', 'min', 'max', 'set'):
+                return True
+            if parent.func.id in ('enumerate', 'zip') and node in parent.args:
+                return True
         if isinstance(parent, (ast.For, ast.comprehension)) and parent.iter is node:
             return True
         return False
@@ -648,6 +653,7 @@ class _Pass:
         out.append(loop_node)
         out.extend(region)
         self.rewrite_uses(rest, {name: ('list', k, fn, cols)}, s)
+        self.made.append((name, ('list', k, fn, cols)))
         return used
 
     def named_futures(self, stmts, i, out, pools):
@@ -688,7 +694,23 @@ class _Pass:
         out.extend(self.region(k, fn, cols, str(len(group)), cap0, stmts[i]))
         index = {n: ('one', k, fn, cols, idx) for idx, n in enumerate(names)}
         self.rewrite_uses(stmts[j:], index, stmts[i])
+        self.made.extend(index.items())
         return j - i
+
+    def escape_uses(self, stmts, start, mark, where):
+        """A future group made in the block just lowered may be read after the block (CPython's
+        `.result()` still works once the executor is shut down). Rewrite those reads in the rest of
+        the enclosing statement list, or refuse by name so the program runs under the lock."""
+        pending = self.made[mark:]
+        if not pending or start >= len(stmts):
+            return
+        tail = stmts[start:]
+        env = {n: e for n, e in pending if _mentions(tail, n)}
+        if not env:
+            return
+        self.rewrite_uses(tail, env, where)
+        stmts[start:] = tail
+        self.made[mark:] = [(n, e) for n, e in pending if n not in env]
 
     def region(self, k, fn, cols, n, cap, where):
         """The statements that run n tasks of fn over the columns in one parallel region."""
@@ -1077,7 +1099,12 @@ def rewrite_text(source, notes=None, report=None):
                     tree.body[tree.body.index(top)] = holder
                     if p.helpers and p.helpers[-1][0] is top:
                         p.helpers = [(holder if t is top else t, h) for t, h in p.helpers]
+        left = {n for n, _ in p.made}
         for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in left and isinstance(node.ctx, ast.Load):
+                raise _Refuse(node, 'the future %r is read outside the block where its tasks are made (this '
+                                    'lowering only rewrites .result() inside that block)\n  write instead: read '
+                                    'fu.result() in the same block as the submit' % node.id)
             if isinstance(node, ast.ClassDef) and any(imports.kind(n) for n in ast.walk(node)):
                 raise _Refuse(node, 'a thread, executor or pool used inside a class')
             if isinstance(node, ast.Name) and node.id in p.pool_names:

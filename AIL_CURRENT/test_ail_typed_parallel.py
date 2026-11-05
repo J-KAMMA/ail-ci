@@ -376,9 +376,70 @@ main()
 '''
 
 
+FUTURES_AFTER = r'''
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
+
+def work(x: int) -> int:
+    return (x * 2654435761) % 1000000007
+
+
+def main():
+    w = int(sys.argv[1])
+    n = w * 4
+    xs = list(range(n))
+    with ThreadPoolExecutor(max_workers=w) as ex:
+        futs = [ex.submit(work, x) for x in xs]
+    total = 0
+    for f in futs:
+        total += f.result()
+    with ThreadPoolExecutor(max_workers=2) as ex2:
+        f1 = ex2.submit(work, 7)
+        f2 = ex2.submit(work, 11)
+    print(len(futs), total, f1.result(), f2.result())
+    total2 = 0
+    with ThreadPoolExecutor(max_workers=3) as ex3:
+        for i, v in enumerate(ex3.map(work, range(n))):
+            total2 += i * v
+    print(total2, len(xs))
+
+
+main()
+'''
+
+
+MAP_ENUMERATE = r'''
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
+
+def work(x: int) -> int:
+    return (x * 7 + 2) % 89
+
+
+def main():
+    n = int(sys.argv[1]) * 3
+    total = 0
+    with ThreadPoolExecutor(max_workers=int(sys.argv[1])) as ex:
+        for i, v in enumerate(ex.map(work, range(n))):
+            total += i * v
+    print(n, total)
+
+
+main()
+'''
+
+
 class Differential(Base):
     def test_executor_map(self):
         self.compare("maps", MAPS)
+
+    def test_futures_read_after_the_block(self):
+        self.compare("futures_after", FUTURES_AFTER, argvs=(("1",), ("2",), ("4",), ("16",)))
+
+    def test_map_consumed_by_enumerate(self):
+        self.compare("enumerate_map", MAP_ENUMERATE, argvs=(("1",), ("2",), ("4",), ("16",)))
 
     def test_pool_map(self):
         self.compare("pools", POOLS)
