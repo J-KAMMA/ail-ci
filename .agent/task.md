@@ -6,52 +6,49 @@
 
 --- LAST REVIEW ---
 ## review 1
-(free quota used up; paid model from here)
 [model commandcode/deepseek-v4.1-flash]
-All checks are done. Here is my review.
+I have everything I need. Final report:
 
 ## What the change really does
 
-`AIL_CURRENT/python/pkg-v12/noneslots.py` (new, hooked into `python_surface`) source-rewrites `xs = [None] * n` inside a function into `xs = [[] for …]` plus a `xs__p` present-bit list, rewriting `xs[i] = list/None`, `xs.append(…)` and `xs[i] is (not) None`. `optlib.py` adds `int` to `INFERRED_RETURN_KINDS`, lowers one-argument `d.get(k)` on local scalar dicts to `k in d` + `d[k] if present else zero`, and replaces the `st_For` presence reset with `_may_be_absent`. That matches the report except that the report implies the row rewrite is use-complete; it is not (below).
+`noneslots.py`: refuses a candidate whose row subscript appears in an unpack target (`xs[0], z = ...`, `*xs[0], w = ...`) or whose guard is a `Slice`; adds `_is_simple` gates on row stores and on `visit_Compare`; adds `generic_visit` in `visit_Expr` and the non-row `visit_Assign` so `xs[i] is None` in expression statements/values is lowered. Records/manifest updated.
 
-## Claims
+## Claims vs. observation
 
-- "noneslots validates every use … plain reads, aliases, `del`, augmented targets refuse": **false** — accepted uses are left untranslated (D1) or evaluated twice (D2), and `global` names leak the sentinel (D3).
-- Probes p1–p12 + `plain` byte-identical on both builds: **verified** (ran all 13: 2/2 same stdout each).
-- Tests (added `test_ail_pyreach_optret`, edited `test_ail_strict`, + `test_ail_safetynet`) 0 failed: **verified on HEAD** (`ok …, 0 failed`); the other six modules were not run, per the instructions.
-- Codegen identical: **verified** for `chain_relax`, `rail_transfer`, `berth_sim` `.ail` sources (old=new SHA); the "five pins" claim is **unverified** because `tools/codegen_diff.py` has no `--pins` flag, but the hook is Python-syntax only.
-- "Features 4/5 remain unlanded": **verified** (no dict-of-Optional values, no None-in-tuple-return lowering in the diff). So rail_transfer's None blockers remain and the task's "number this moves" is not reached (allowed by the stop rule, but the gate "rail_transfer scratch copy passes 23/24" was never reported).
-- "chain_relax builds typed with the None code unchanged": **unverified** (I did not build the scratch copy).
+| claim | verdict |
+|---|---|
+| q22/q16/q3/q28 already fixed by `8b21d4c` | **verified** — all four match CPython on both HEAD builds; q22 differs on `/tmp/base` (`False True False`) |
+| slice guards now keep CPython semantics | **verified** (`n1_slice_guard_if`: `absent` / `True`, both builds) |
+| unpack-target row stores refused | **verified** (`n3`, `n4`, `n12` for-target, `n13` nested: same stdout both builds) |
+| tests 47/0 failed/1 skipped over five modules | **partly verified** — `test_ail_pyreach_optret` + `test_ail_safetynet` on HEAD: `2 modules, 0 failed`; other three not run (per instructions) |
+| `update_manifest.py --check` exits 0 | **verified** |
+| "the change only rejects previously miscompiled shapes" | **false** — see defect |
+| typed slot test still builds under `AIL_NO_GENERAL=1` | **verified** (module test passes) |
+| codegen pins unchanged | **verified** (`codegen_diff.py --base work`: all 5 SHAs old=new; the hook runs only in the Python surface, `ail_syntax.py:5782`) |
 
-## Defects (all introduced by this change; base matches CPython)
+## Defects
 
-1. **Guard comparisons in expression statements / assignment values are never rewritten.** `_Rewrite.visit_Expr` and the non-row branch of `visit_Assign` return the node without `generic_visit`, so the `is None` test keeps comparing the empty-list sentinel.
-   - `/tmp/rprobes/q22_slots_assign_value.py`: `xs=[None]*3; xs[1]=[1]; a=xs[0] is None; b=xs[1] is not None; c=xs[2] is None or xs[0] is None; print(a,b,c)` — expected `True True True`, actual `False True False`.
-   - `/tmp/rprobes/q16_slots_neg_append.py`: after `xs.append(None)`, `print(len(xs), xs[-2] is None, xs[-1] is None)` — expected `2 False True`, actual `2 False False` (while the `if xs[-1] is None` test in the same function prints correctly).
+1. **A guard with a non-simple index is accepted as a guard but no longer rewritten.** `_candidate_ok.role` classifies any non-`Slice` subscript in `xs[i] is (not) None` as `'guard'`, but `visit_Compare` now requires `_is_simple(sub.slice)`; the comparison is left as `xs[i] is None` against the `[]` sentinel while `xs__p` is populated. Base rewrote these correctly (it deep-copies the index once), so this is a regression from `5294837`.
+   - `/tmp/rprobes/n5_guard_subscript_index.py` (`xs[ix[0]]`): expected `absent`, actual `present` + `tail present`. Base: matches CPython.
+   - `/tmp/rprobes/n10_attr_index_guard.py` (`xs[b.i]`): expected `absent`, actual `present`. Base: matches.
+   - `/tmp/rprobes/n11_guard_call_absent.py` (`xs[idx()]` on an absent slot): expected `idx` + `absent`, actual `idx` + `present`. Base: matches.
+   - Fix: add `_is_simple(sub.slice)` to the `'guard'` branch of `role` (then the candidate is refused), or drop the gate from `visit_Compare` (a guard is evaluated once, so it is safe).
 
-2. **A row store duplicates a non-simple index expression.** `visit_Assign` emits `xs[<index>] = v` and then `xs__p[<same index>] = flag` without the `_is_simple` check used for guards.
-   - `/tmp/rprobes/q3_store_sideeffect.py`: `xs[idx()] = [1]` where `idx` prints — expected `idx\n[1]`, actual `idx\nidx\n[1]`.
+Everything else probed matches: aliasing (`r1`, `r2`), mutation during iteration (`r3`), values via argument / list item / attribute / dict value (`r4`, `r5`), slice store (`n2`), slice-object index (`n14`), plain row program (`n7`), attribute-carried row (`n8`).
 
-3. **A `global` row name is lowered and its flag kept local.** `rewrite()` never rejects a `global`/`nonlocal` declaration, so another function sees `[]` where CPython has `None`.
-   - `/tmp/rprobes/q28_global_rows.py`: `global G; G=[None]*2; G[0]=[1]`, then `read()` prints `G[1]` — expected `None\n2`, actual `[]\n2`.
+## Pre-existing (identical on `/tmp/base`, both builds)
 
-## Pre-existing (identical on `/tmp/base`)
-
-- `q7_intnone_overflow.py` (30-digit literal) → named `int64 constant expression out of range` on both trees.
-- `q25_intnone_argv.py` (runtime 19-digit `int()`) → `OverflowError` on both trees.
-- `q11_walrus_none.py` → exit 1 (TypeError) on both; only the exception wording differs.
+- `/tmp/rprobes/n9_param_shadow.py`: `[None]*n` assigned after a guard on a parameter-backed `xs` lowers the earlier guard to `xs__p`, giving `UnboundLocalError: cannot access local variable 'xs__p'` (CPython: `param none` / `2 True`). Same on base → not caused by this change, but it is a wrong exit status.
 
 ## Unverified
 
-- chain_relax / rail_transfer scratch-copy builds and the 23/24 case count.
-- The six other test modules named in the worker report.
-- Speed/icount: not measured; the `.ail` codegen is byte-identical, so AIL benchmark code is untouched, and the rewrite only fires on Python sources containing `[None]`.
+- m1–m9 probe files from the worker (I recreated equivalents; the m9 shape is covered by `n1`).
+- The three test modules other than `test_ail_pyreach_optret`/`test_ail_safetynet`.
+- Speed: `.ail` codegen is byte-identical and the rewrite is Python-source-only, so no icount impact.
 
 VERDICT: FIX
-1. `noneslots._Rewrite.visit_Expr`/`visit_Assign` must call `generic_visit` so `xs[i] is None`/`is not None` in bare expression statements and assignment values become a flag read, or the name must be refused. `/tmp/rprobes/q22_slots_assign_value.py`: expected `True True True`, actual `False True False`. `/tmp/rprobes/q16_slots_neg_append.py`: expected `2 False True`, actual `2 False False`.
-2. `_Rewrite.visit_Assign` must reject (or hoist) a store index that is not `_is_simple`. `/tmp/rprobes/q3_store_sideeffect.py`: expected `idx\n[1]`, actual `idx\nidx\n[1]`.
-3. `noneslots.rewrite` must refuse a candidate whose name is declared `global` (or carry the flag with the same scope). `/tmp/rprobes/q28_global_rows.py`: expected `None\n2`, actual `[]\n2`.
-[commandcode stop=end_turn turns=42 out_tokens=50536]
+1. `noneslots._candidate_ok.role` treats a non-`Slice`, non-simple guard index as `'guard'`, but `_Rewrite.visit_Compare` skips it (`_is_simple(sub.slice)`), so the compiled program compares the empty-list sentinel with `None` instead of reading `xs__p`. `/tmp/rprobes/n5_guard_subscript_index.py`: expected `absent`, actual `present\ntail present`. `/tmp/rprobes/n10_attr_index_guard.py`: expected `absent`, actual `present`. `/tmp/rprobes/n11_guard_call_absent.py`: expected `idx\nabsent`, actual `idx\npresent`. All three match CPython on `/tmp/base`, so the change caused it.
+[commandcode stop=end_turn turns=27 out_tokens=19486]
 
 
 --- ORIGINAL TASK ---
