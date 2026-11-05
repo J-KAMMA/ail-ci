@@ -74,7 +74,7 @@ print(y)
 
 **What to do instead:** build with `--exact-int` or set `AIL_EXACT_INT=1` for programs that need
 CPython's arbitrary precision. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A1 and
-[docs/design/BIGINT.md](design/BIGINT.md).
+[AIL_CURRENT/docs/design/BIGINT.md](../AIL_CURRENT/docs/design/BIGINT.md).
 
 ## 3. Deep recursion stops at the stack limit
 
@@ -198,7 +198,8 @@ except:
   catches the SystemExit, and sys.exit() ends the program here.`
 
 **What to do instead:** write `except Exception:`, which both languages treat the same for every
-exception the program can raise. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A54.
+exception the program can raise. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A54 and
+[PORTING.md](PORTING.md) section 5.
 
 ## 11. Complex results are refused
 
@@ -224,7 +225,7 @@ print(z)
 - AIL: **refused**. `a constant of type complex`.
 
 **What to do instead:** keep the real and imaginary parts in two floats, or drop the complex
-arithmetic.
+arithmetic. See [PORTING.md](PORTING.md) for the refusal rewrites.
 
 ## 13. A regex group that did not match
 
@@ -328,10 +329,10 @@ t.join()
   the general path because the thread modules are built there only, under one interpreter lock
   with CPython's GIL semantics.
 
-**What to do instead:** nothing for correctness. Threads are about 20x slower than the typed path;
-a program that needs speed should use the typed parallel shapes. `--strict` refuses this program
-instead of building it on the general path. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A38 and
-A62.
+**What to do instead:** nothing for correctness. Threads change hands under one lock, so Python-level
+work does not use extra cores; a program that needs speed should use the typed parallel shapes.
+`--strict` refuses this program instead of building it on the general path. See
+[spec/DIFFERENCES.md](spec/DIFFERENCES.md) A38 and A62.
 
 ## 19. One executable: no `.pyc`, no byte-code compiler
 
@@ -346,7 +347,7 @@ py_compile.compile("sample.py")
 
 **What to do instead:** nothing to do; a build is a single executable and writes no `.pyc` and no
 `__pycache__`. Local modules are compiled in. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md)
-section B.
+section B and [PORTING.md](PORTING.md) for the refusal rewrites.
 
 ## 20. A standard module that is not built is refused by name
 

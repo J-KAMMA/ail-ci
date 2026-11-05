@@ -13,7 +13,6 @@ No C compiler, no test: the whole module is skipped.
 """
 import os
 import re
-import resource
 import shutil
 import subprocess
 import sys
@@ -95,10 +94,17 @@ def have_c_compiler():
 
 
 def limit_memory():
+    """Cap the address space of the child only (preexec_fn), never of this process."""
+    if os.name != 'posix':
+        return
     try:
+        import resource
         resource.setrlimit(resource.RLIMIT_AS, (1500 * 1024 * 1024, 1500 * 1024 * 1024))
-    except (ValueError, OSError):
+    except (ImportError, ValueError, OSError):
         pass
+
+
+PREEXEC = limit_memory if os.name == 'posix' else None
 
 
 class MigratingDoc(unittest.TestCase):
@@ -106,7 +112,6 @@ class MigratingDoc(unittest.TestCase):
     def setUpClass(cls):
         if not have_c_compiler():
             raise unittest.SkipTest('no C compiler')
-        limit_memory()
         cls.text = DOC.read_text(encoding='utf-8')
         cls.classes = result_classes()
         cls.tmp = tempfile.TemporaryDirectory()
@@ -138,12 +143,14 @@ class MigratingDoc(unittest.TestCase):
         made = subprocess.run(
             [sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', source.name,
              '-o', exe.name],
-            cwd=self.tmp.name, capture_output=True, text=True, timeout=600, env=clean_env())
+            cwd=self.tmp.name, capture_output=True, text=True, timeout=600, env=clean_env(),
+            preexec_fn=PREEXEC)
         return made, exe
 
     def run_python(self, name):
         return subprocess.run([sys.executable, str(Path(self.tmp.name, name))],
-                              cwd=self.tmp.name, capture_output=True, text=True, timeout=120)
+                              cwd=self.tmp.name, capture_output=True, text=True, timeout=120,
+                              preexec_fn=PREEXEC)
 
     def test_every_sample_matches_its_class(self):
         for number, name, named_error, quoted in ITEMS:
@@ -160,7 +167,7 @@ class MigratingDoc(unittest.TestCase):
                 self.assertEqual(made.returncode, 0,
                                  '%s did not build: %s' % (name, made.stderr[-2000:]))
                 ran = subprocess.run([str(exe)], cwd=self.tmp.name, capture_output=True,
-                                     text=True, timeout=180)
+                                     text=True, timeout=180, preexec_fn=PREEXEC)
                 if klass == 'same':
                     self.assertEqual(ran.returncode, cpython.returncode, name)
                     self.assertEqual(ran.stdout, cpython.stdout, name)
