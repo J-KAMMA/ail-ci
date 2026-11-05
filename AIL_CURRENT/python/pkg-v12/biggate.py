@@ -22,6 +22,8 @@ _BLOCK = re.compile(r'/\*B<\*/(.*?)/\*B\|\*/(.*?)/\*B>\*/', re.S)
 _LINEBLOCK = re.compile(r'/\*B<\*/\n(.*?)/\*B\|\*/\n(.*?)/\*B>\*/\n', re.S)
 POPEN, PMID, PCLOSE = '/*P:', '<*/', '/*P|*/'
 _PBLOCK = re.compile(r'/\*P:([a-z]+)<\*/(.*?)/\*P\|\*/(.*?)/\*P>\*/', re.S)
+DOPEN, DMID, DCLOSE = '/*D<*/', '/*D|*/', '/*D>*/'
+_DBLOCK = re.compile(r'/\*D<\*/(.*?)/\*D\|\*/(.*?)/\*D>\*/', re.S)
 UMARK = '/*U*/'
 IMARK = '/*I*/'                  # a source-level int arithmetic operator on the general path
 USER_MARK = '/*@USER@*/\n'     # between the shared runtime and the program's own text
@@ -39,6 +41,8 @@ PIECES = {
             'ail__mod_slow', 'ail__truediv_slow', 'ail_tint_floordiv', 'ail_tint_mod',
             'ail_tint__slow_divmod', 'ail_tint__divmod', 'ail_range_make',
             'pf__ail_b_divmod', 'pf__ail_b_floordiv', 'pf__ail_b_mod'),
+    # int / int only (the exact long_true_divide helper): `//`, `%`, float `/` and divmod do not need it
+    'idiv': ('ail_op_truediv', 'ail_op_idiv', 'ail__idiv_exact'),
     'pow': ('ail_op_pow', 'ail_op_ipow', 'ail__int_pow', 'ail__ov_pow', 'ail__big_pow',
             'ail_bi_pow', 'ail__pow3_big', 'pf__ail_b_pow'),
     'shift': ('ail_op_lshift', 'ail_op_rshift', 'ail_op_ilshift', 'ail_op_irshift',
@@ -128,6 +132,13 @@ def absent_stubs(text):
     if not mark:
         return text + '\n'.join(stubs) + '\n'
     return head + '/* left out of this program (biggate.absent_stubs): declared above, so defined here */\n' + '\n'.join(stubs) + '\n' + mark + user
+
+
+def resolve_idiv(text, needed):
+    """Keep the exact int/int division helper and its operator arm only when the program reaches `/`
+    (`needed`, biggate.PIECES['idiv']). A program without one keeps the runtime text it had before
+    the helper existed, even in int64 mode where the /*P:*/ pieces are all kept."""
+    return _DBLOCK.sub(lambda m: m.group(1) if needed else m.group(2), text)
 
 
 def cond(new, old=''):

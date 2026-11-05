@@ -290,6 +290,7 @@ for _name in ('tint.eq_i64', 'tint.ne_i64', 'tint.lt_i64', 'tint.le_i64', 'tint.
 
 for _name in INT_BINARY + FLOAT_BINARY:
     _op(_name, 2, 2)
+_op('idiv', 2, 2)
 for _name in ('neg', 'inv', 'fneg', 'fabs', 'zext', 'sitofp', 'fptosi'):
     _op(_name, 1, 1)
 for _pred in CMP_PREDICATES:

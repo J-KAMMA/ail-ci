@@ -699,6 +699,9 @@ class Emitter(TextEmitter):
         if op == 'pow':
             self.parts.update(('DIE', 'IPOW'))
             return self.assign_new(depth, ins.result, 'ail_ipow(%s, %s)' % (o[0], o[1]))
+        if op == 'idiv':
+            self.parts.add('IFDIV')
+            return self.assign_new(depth, ins.result, 'ail_fdiv_i(%s, %s)' % (o[0], o[1]))
         if op == 'fdiv':
             if ins.attrs.get('f'):
                 # a float operand in a program that reads exception text: CPython's `float division by zero`
