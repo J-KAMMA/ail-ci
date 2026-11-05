@@ -91,7 +91,7 @@ findings; each is stated so the probe's class names map onto a rule the day one 
 `lab/selfhost/CENSUS.md` names compiler files by accepted-function count, not a leaf module that
 builds whole with no refusals. The smallest stdlib module that does build whole under `--strict`
 with no refusal note is `AIL_CURRENT/stdlib/keyword.py` (verified 2026-11-05: exit 0, no `note:`
-line, `program.c` 15,880 bytes). It is the first target:
+line, `program.c` 213,665 bytes; the linked binary `kw` is 15,880 bytes). It is the first target:
 
 ```
 # stage 1: CPython running the AIL compiler, emitted C for the module
@@ -112,8 +112,9 @@ compiled compiler, so the second step turns on only when `selfhost/compiler.ail`
 Until then the harness runs the same two commands with the CPython-hosted compiler on both sides:
 that is a determinism dry run, not a fixpoint, and it is labelled as such in the report.
 
-Expected cost: one `keyword.py` build measured at 2.5 s and 165 MB peak RSS, two stages plus a
-`cc` link of the seed take under 10 s. In CI that is **0.2 minutes** on one shard, well under the
+Expected cost: one `keyword.py` build measured at ~0.9 s wall time and ~38 MB peak RSS (`program.c`
+213,665 bytes; the linked binary is 15,880 bytes), two stages plus a `cc` link of the seed take
+under 10 s. In CI that is **0.2 minutes** on one shard, well under the
 existing shard weights; the full compiler fixpoint (section 1) is four compiler builds, budget
 **5 CI minutes** and no more than 1.5 GB RSS (`ulimit -v 1500000`).
 
