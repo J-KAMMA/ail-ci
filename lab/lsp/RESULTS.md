@@ -10,8 +10,8 @@ attribute of an unknown object).
 | Before | 0/40 | 0 | 40 |
 | After | 40/40 | 0 | 0 |
 
-"Before" is the baseline: `ail lsp` did not answer `textDocument/definition` at all, so every
-request returned `null`.
+"Before" is the baseline: `ail lsp` did not implement `textDocument/definition` (it answered
+`-32601 method not found`), so none of the 40 positions had a target.
 
 Reproduce:
 
