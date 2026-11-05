@@ -42,6 +42,7 @@ label (`f(x=x)`), and any position inside a string or a comment. A wrong type is
 
 Make sure the `ail` command is on `PATH`:
 
+<!-- docs-test: skip ail lsp is an interactive stdin/stdout server; run it from an editor -->
 ```sh
 ail --version
 ail lsp        # speaks LSP on stdin/stdout; run it from an editor, not a terminal
@@ -49,6 +50,7 @@ ail lsp        # speaks LSP on stdin/stdout; run it from an editor, not a termin
 
 From a source checkout, use the module and point it at the SDK:
 
+<!-- docs-test: skip starts the interactive server on stdin/stdout; an editor supplies the requests -->
 ```sh
 python3 -m ail_lang lsp
 # with PYTHONPATH=/path/to/repo/packaging and AIL_SDK_DIR=/path/to/repo/AIL_CURRENT
@@ -78,6 +80,7 @@ or a tiny extension of your own. A minimal extension with `vscode-languageclient
 
 `extension.js`:
 
+<!-- docs-test: skip VS Code extension source; it needs VS Code and its extension host to run -->
 ```js
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 
@@ -107,6 +110,7 @@ Development Host. Open a folder containing the `.py` file (and optionally `ail.t
 appear after the first open or save, and hover works over names. If `ail` is not on the `PATH` seen
 by VS Code, set `command` to the absolute path of the executable. A source checkout can use:
 
+<!-- docs-test: skip client-side VS Code configuration fragment; it needs VS Code to run -->
 ```js
 const server = {
   command: "python3",
@@ -127,6 +131,7 @@ transport **stdio**, and the document selector `python`.
 
 Neovim 0.10 or newer can start the server directly. Add this to `init.lua`:
 
+<!-- docs-test: skip Neovim configuration; it needs Neovim and starts an editor -->
 ```lua
 local function ail_root()
   local found = vim.fs.find({ "ail.toml", "pyproject.toml" }, { upward = true })[1]
@@ -153,6 +158,7 @@ are in `vim.diagnostic` (see `:lua vim.diagnostic.open_float()`), and hover is a
 For a source checkout, point the command at the module and set the environment before starting
 Neovim, for example:
 
+<!-- docs-test: skip environment setup for an editor with placeholder paths; not a command sequence -->
 ```sh
 export PYTHONPATH=/path/to/repo/packaging
 export AIL_SDK_DIR=/path/to/repo/AIL_CURRENT
