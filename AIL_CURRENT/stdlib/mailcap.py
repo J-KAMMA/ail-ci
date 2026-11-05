@@ -5,10 +5,11 @@ This is CPython 3.12's Lib/mailcap.py as AIL source, used under the PSF license
 behaviour kept:
 
 * `warnings` is not a bundled module, so `_warn` writes the warning text and a
-  newline to sys.stderr instead.  CPython's `import mailcap` DeprecationWarning
-  is not printed here either (it is suppressed by the default filters); the
+  newline to sys.stderr instead.  CPython prints its `import mailcap`
+  DeprecationWarning to stderr and this module prints nothing there; the
   `readmailcapfile` deprecation message and the two `UnsafeMailcapInput`
-  refusals go to stderr with CPython's exact text.
+  refusals go to stderr with CPython's exact text.  Only stdout and the exit
+  status are intended to match.
 * `UnsafeMailcapInput` derives from `Exception` because this compiler does not
   build a class whose base is the builtin `Warning`.  CPython only ever raises
   it as a warning and mailcap itself never catches it.
