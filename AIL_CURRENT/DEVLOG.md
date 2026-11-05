@@ -1,3 +1,19 @@
+## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
+
+str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
+`Tokenizer` (and the AST ports after it) to the general path was `self.toks = [Tok(...)]` -- a list literal
+of objects -- and an unannotated `self.xs = []` filled with str or objects by methods (it defaulted to
+list[int]). `_compile_init` now types the first as `(OLIST, X)` (`_object_list_literal_kind`, common base
+allowed) and the second from `_field_list_hints`: `self.<f>.append(...)` in the class's own methods, a str
+literal / f-string -> list[str], `X(...)` -> list[X], only when those agree; other appends are not read
+and every append is still type-checked, so a field given two kinds is refused by name. The old refusal
+text (`a field is int64, float or bytes only`) now says what a list field holds. SEMANTICS.md section 25.
+
+Same C: 44 programs (pyproof typed rows that emit program.c, lab/compare/src main.py + typed.py, and the
+language_examples that build) byte-identical to origin/integ; 0 differ. Probes: `test_ail_fcclass1.py`
+(typed-only and AIL_UNIFIED_FORCE=1, vs CPython). Next blocker for ailtok: `Tokenizer.__init__` has
+statements other than `self.<name> = <expr>`; constructor calls to a class defined later in the file.
+
 ## 2026-11-05 -- rbbces4: two field-fact soundness holes closed, re-applied (job-rbbces4-11052320)
 
 Re-applied the accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`). `fieldfacts.py`
