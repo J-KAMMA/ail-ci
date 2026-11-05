@@ -83,7 +83,7 @@ def formatter_command(name, prefix, path, length):
         options += ["--line-length", str(length)]
     if name == "ruff":
         return prefix + ["--check", "--diff"] + options + [str(path)]
-    return prefix + ["--check", "--diff", "--color=false"] + options + [str(path)]
+    return prefix + ["--check", "--diff", "--no-color"] + options + [str(path)]
 
 
 def check(paths):

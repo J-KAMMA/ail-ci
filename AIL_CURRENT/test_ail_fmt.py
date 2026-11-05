@@ -27,10 +27,12 @@ CLI = str(ROOT / "ail_chatgpt.py")
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
 FORMATTER = shutil.which("ruff") or shutil.which("black")
 FORMATTER_NAME = "ruff" if shutil.which("ruff") else ("black" if shutil.which("black") else None)
+BLACK = shutil.which("black")
 
 HAS_PACKAGING = FMT_MODULE.is_file()
 NEEDS_FORMATTER = unittest.skipUnless(HAS_PACKAGING and FORMATTER,
                                       "packaging/ail_lang/fmt.py or a formatter (ruff/black) is absent")
+NEEDS_BLACK = unittest.skipUnless(HAS_PACKAGING and BLACK, "black is absent")
 NEEDS_COMPILER = unittest.skipUnless(CC, "no C compiler")
 
 LINE_DIRECTIVE = re.compile(r"^[ \t]*#line[ \t]+\d+.*$", re.M)
@@ -180,6 +182,42 @@ class CheckMode(unittest.TestCase):
                                 capture_output=True, text=True, timeout=120)
         self.assertEqual(theirs.returncode, 1, theirs.stderr)
         self.assertEqual(ours.returncode, 1, ours.stdout + ours.stderr)
+
+
+@NEEDS_BLACK
+class BlackFallback(unittest.TestCase):
+    """With only black on PATH (no ruff), `--check` still answers 0/1 and prints the diff.
+
+    `black` rejects `--color=false`; this pins the `--no-color` spelling so a regression cannot
+    hide behind the ruff path that CI normally exercises.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="ail-fmt-black-")
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.bin = self.dir / "bin"
+        self.bin.mkdir()
+        (self.bin / "black").symlink_to(BLACK)
+        (self.bin / os.path.basename(sys.executable)).symlink_to(sys.executable)
+        self.path = str(self.bin)
+
+    def test_formatted_file_exits_0(self):
+        source = self.dir / "good.py"
+        source.write_text(FORMATTED, encoding="utf-8")
+        done = check([source], path=self.path)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertNotIn("does not take a value", done.stderr)
+
+    def test_unformatted_file_exits_1_with_diff_and_is_not_written(self):
+        source = self.dir / "bad.py"
+        source.write_text(UNFORMATTED, encoding="utf-8")
+        done = check([source], path=self.path)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("---", done.stdout)
+        self.assertIn("+++", done.stdout)
+        self.assertIn('print("sum", sum(xs))', done.stdout)
+        self.assertEqual(source.read_text(encoding="utf-8"), UNFORMATTED)
 
 
 @NEEDS_FORMATTER
