@@ -126,6 +126,60 @@ four `main.py` variants the general path refuses fail identically and emit no C)
 `/tmp/probes/` (`p_default`, `p_width`, `p_container`, `p_entry`, plus two named refusals) match
 CPython on the default and forced-general builds.  Added `test_ail_prog18.py` (9 tests) registered
 in `tests.d`, and DIFFERENCES row `C?-job-rbprog18_rr1-11050842-1`.
+## 2026-11-05 -- codegen: popcount and shared span idioms land (job-spec2c-11050906; finishes job-spec2b)
+
+Recovered `job-spec2b-11032017` (commits `aefa849`, `cedbeff`, `12efd14`) on top of the
+2026-11-05 `staging:integ` export. `pyfunc._codegen_idioms` is applied once to the final generated
+C (and to `c_units` and `c_source_regions`, so `--debug-dir` stays mapped). It keeps every check:
+
+* the exact `c = 0; v = x; while v != 0: c += v & 1; v = v >> 1` shape emits an inline SWAR
+  popcount for `x >= 0` and keeps the original loop for negative values (which do not terminate
+  in CPython or AIL). SWAR rather than `__builtin_popcountll`: on this runner's generic x86-64
+  target the builtin lowers to a libgcc call and grew `tally_lang` by 40 bytes; SWAR stays flat;
+* two adjacent `ail_list_span_get` reads of the same index on two numeric fields of one struct
+  share one fast-path bounds check when their counts match, with the two original checked reads
+  as the fallback.
+
+Measured on the current base `06568d1` (= `origin/integ` source; callgrind from valgrind 3.22
+extracted under `/tmp`, since `perf_event_open` is denied). `tally_lang` drops
+19,988,037,073 -> 19,585,727,750 instructions (**-2.013%**), binary 78,696 -> 78,696 bytes,
+RSS 1,628 -> 1,628 KiB, compile 2.826 -> 2.831 s. The other nine tasks have byte-identical
+generated C and binaries, so their instruction count, bytes, RSS and compile time cannot move;
+their counts were measured once on the common binary:
+
+| task | instr before | instr after | delta | binary before -> after | RSS KiB | compile s before -> after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| berth_sim | 8,383,606,807 | 8,383,606,807 | 0 | 65,072 -> 65,072 | 243,104 | 6.948 -> 7.096 |
+| chain_relax | 1,692,839,658 | 1,692,839,658 | 0 | 35,088 -> 35,088 | 4,024 | 1.542 -> 1.542 |
+| echo_pack | 6,158,284,148 | 6,158,284,148 | 0 | 36,096 -> 36,096 | 354,404 | 2.555 -> 2.580 |
+| ledger_bin | 5,390,483,896 | 5,390,483,896 | 0 | 61,128 -> 61,128 | 337,376 | 2.954 -> 2.926 |
+| rail_transfer | 387,941,219 | 387,941,219 | 0 | 65,136 -> 65,136 | 28,952 | 2.326 -> 2.341 |
+| scar_life | 356,750,945,902 | 356,750,945,902 | 0 | 44,728 -> 44,728 | 17,664 | 1.950 -> 1.947 |
+| tally_lang | 19,988,037,073 | 19,585,727,750 | **-2.013%** | 78,696 -> 78,696 | 1,628 | 2.826 -> 2.831 |
+| term_rank | 15,990,363,423 | 15,990,363,423 | 0 | 78,688 -> 78,688 | 162,584 | 2.576 -> 2.676 |
+| ticket_audit | 13,095,191,273 | 13,095,191,273 | 0 | 112,552 -> 112,552 | 254,816 | 3.991 -> 4.019 |
+| tree_fold | 8,935,993,271 | 8,935,993,271 | 0 | 86,544 -> 86,544 | 415,512 | 3.964 -> 3.957 |
+
+Compile times are medians of alternating pairs; the small moves on tasks whose generated C is
+byte-identical are runner load noise, not a compile-time cost.
+
+The `tally_lang` drop is below the older 3% bullet: the 2026-11-05 base is already 7.7% faster
+than the 2026-11-03 base the 3.3% figure was measured on, so the same absolute saving is now a
+smaller share. It is landed under the owner's new rule ("a gain may be small if it costs
+nothing"): instructions drop, binary bytes, RSS and compile time are flat, and no compare-lab
+task gets worse.
+
+Probes (`/tmp/probes`, both the default and unified builds against CPython via `~/tools/cmp.sh`):
+`pop_probe` (0, 1, 2, 255, 2**31, 2**62, 2**63-1 through an argument, a list item, an attribute
+and a dict value), `span_probe` (first/last/negative index), `span_edge` (empty list and one past
+the end still raise `IndexError`), `span_unequal` (lists of different lengths in one loop),
+`span_mut` (aliasing and mutation), `no_feature` (generated C byte-identical to the base), and
+`pop_neg` (negative popcount times out in CPython and both builds, so the fallback is unchanged).
+All seven probe programs match CPython or time out identically. `--debug-dir` still maps `popcnt`/`get` in
+both probes, as on the base. Tests: `test_ail_span_cache`, `test_ail_numeric_loops`,
+`test_ail_native_diagnostics`, `test_ail_build_reports`, `test_ail_nested_lists`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (8 modules, 0 failed), and
+all 76 `tally_lang` public/hidden/perf cases match. Manifest `--check` passes.
 
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 
