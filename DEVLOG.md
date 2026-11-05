@@ -1,3 +1,25 @@
+## 2026-11-05 -- tccprobe1: measure whether the generated C builds with tcc (measurement only) (job-tccprobe1-11051609)
+
+`lab/tccprobe/run.py` takes the ten `lab/compare` tasks and forty `corpus/gdev` programs (seed
+20261105; the first forty of the shuffled list whose C builds), emits the C once with
+`compile --debug-dir` (the saved `program.c` is byte-identical to what the compiler was handed, and
+`native_report.json` records its command line), then builds that same C with `gcc -O2`, `gcc -O0`
+and `tcc` (median of three builds, fresh directory each), runs each build three times on the same
+input and compares stdout, stderr and exit status.
+
+Result with tcc 0.9.27 (Ubuntu package): 0 of 50 build; 0 binaries ran, so nothing was compared at
+run time and the wrong-output stop condition did not trigger. All 50 build with gcc -O2 and
+gcc -O0; median C-compile wall time gcc -O2 1.2416 s, gcc -O0 0.4574 s, tcc not available. First
+blockers: 23 unsized struct-array compound literals from runtime values (`pyfunc.py:24481`),
+19 `static _Thread_local` (`cruntime.py:17245-17246`), 7 `__builtin_unreachable`, 1 `__int128`.
+Details, corpus list, per-task timings and the four excerpts are in `lab/tccprobe/RESULTS.md`.
+
+No compiler, runtime or default C compiler is changed (release stays `gcc -O2`), so no DIFFERENCES
+row and no new test module: the artifact is the measurement script plus its report. Two bugs in the
+measurement itself were found and fixed before the final run: `-lm` was placed before the source
+(breaking links under `--as-needed`) and multi-unit general-path builds lost their link libraries.
+`python3 tools/update_manifest.py` and `--check` pass.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this

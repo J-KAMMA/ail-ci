@@ -1,0 +1,9 @@
+program: lab/compare/src/chain_relax/main.ail (compare)
+bucket: unsupported builtin or intrinsic
+construct: (see the C line)
+tcc stderr:
+  tcc: error: undefined symbol '__builtin_unreachable'
+  tcc: error: undefined symbol '__builtin_add_overflow'
+  tcc: error: undefined symbol '__builtin_sub_overflow'
+generated C line None: 
+emitted by: (see the C line above)
