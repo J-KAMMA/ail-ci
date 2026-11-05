@@ -1,3 +1,45 @@
+## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
+
+The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this
+export; the source hunks (pyfunc.py, test_ail_prog16, test_ail_typed_blockers, the new
+test_ail_prog17 and its `tests.d` registration, lab/progfix/prog17.md) applied cleanly, and only
+the DEVLOG needed merging (both sides' entries kept). The `.github/workflows/agent-worker.yml`
+hunk (dropping `GH_MODELS_TOKEN`) was already the state of this tree. `manifest.d` was not applied
+by hand: `python3 tools/update_manifest.py` recomputed every pin and `--check` passes.
+`tools/diff_ids.py` is not present on this tree.
+
+## 2026-11-04 -- prog17_rr1: update the stale typed-blockers enumerate-start expectation (job-prog17_rr1-11050712)
+
+`test_ail_typed_blockers.EnumerateStartTests.test_a_start_inside_a_fold_is_refused_by_name`
+still expected `sum(i * v for i, v in enumerate(xs, start=1))` to be refused by name, but the
+prog17 change now types the pair fold and adds the start with `ck_add`.  The test now checks that
+the typed path (and the default build) print what CPython prints, as `test_ail_prog16` already
+does for the comprehension form; no compiler change was needed.
+`test_ail_typed_blockers` 18/19 -> 19/19.  Probes `/tmp/probes/enumfold_literal.py`,
+`enumfold_routes.py`, `enumfold_plain.py`, `enumfold_floats.py`, `enumfold_slice.py`: general and
+default builds match CPython; typed alone matches for the literal/plain/routes probes and refuses
+the float-list fold and reversed `list[str]` slice by name for pre-existing unrelated reasons.
+
+## 2026-11-04 -- prog17: reversed(str) and str-field row comprehensions typed (job-prog17_rr1-11050046)
+
+Re-run of prog17 (the original GitHub run was lost).  cProfile on the eight programs and strict
+per-function reasons are in `lab/progfix/prog17.md`.  Two compiler changes:
+
+* `for c in reversed(s)` over a plain str: `_for`'s `reversed()` branch captured the source once
+  and walks it with `ail_str_prev_unit` (one-code-point views, same as the forward str door);
+  `_promote_floats` binds such a loop target STR rather than the INT default.  `gdev/g02_016` is
+  now fully typed (was `.upper() on a str is not built.` -- the real gap was the str iterable).
+* `enumerate(..., start=...)` inside a pair comprehension/fold, and a
+  `list[tuple[..., str, ...]]` annotation filled by a pair comprehension:
+  `_pair_plan` evaluates the start once after the iterable and adds it with `ck_add`;
+  `_listcomp_srows_into_temp` pushes one `ail_srow` per element.  `dev/t374` is fully typed.
+  The same probe surfaced a pre-existing `sum(i for i, w in enumerate(<list[str]>))` gcc error
+  (`int64_t v_w = ail_str`); `_inline_pair_fold` now types both pair bindings.
+
+`AIL_CURRENT/test_ail_prog17.py` (registered through `tests.d/test_ail_prog17.txt`) covers both
+shapes and the two programs; `test_ail_prog16`'s old "start is refused" case now checks it is
+built.  Probes in `/tmp/probes`: every one matches CPython on both `cmp.sh` builds.
+
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 
 `test_ail_cpython_hybrid`, `test_ail_prog2` and `test_ail_prog21` went red when pyreachs3c
