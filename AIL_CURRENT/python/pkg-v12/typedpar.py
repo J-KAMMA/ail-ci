@@ -147,6 +147,7 @@ class _Pass:
         self.done = []             # what was lowered (for the report)
         self.targets = set()       # thread functions inlined into a region
         self.pool_names = set()    # names bound to an executor or a pool
+        self.made = []             # (name, entry) for each lowered future group
 
     # -- the function a map runs ----------------------------------------------------------------
     def scalar_fn(self, node, nargs, where):
@@ -275,7 +276,9 @@ class _Pass:
                     inner[item.optional_vars.id] = (kind, cap)
                     self.pool_names.add(item.optional_vars.id)
                 out.extend(pre)
+                mark = len(self.made)
                 out.extend(self.block(s.body, inner))
+                self.escape_uses(stmts, i + 1, mark, s)
                 i += 1
                 continue
             if (isinstance(s, ast.Assign) and len(s.targets) == 1 and isinstance(s.targets[0], ast.Name)
@@ -338,6 +341,16 @@ class _Pass:
                                     'arguments in lists (results come back in order)' % (
                     node.func.value.id, node.func.attr, node.func.value.id))
             parent = parents[node]
+            if (kind == 'executor' and isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
+                    and parent.func.id == 'enumerate' and not parent.keywords and parent.args == [node]):
+                owner = parents.get(parent)
+                if not (isinstance(owner, ast.For) and owner is stmt and owner.iter is parent
+                        and isinstance(owner.target, ast.Tuple) and len(owner.target.elts) == 2):
+                    raise _Refuse(node, 'enumerate() over executor.map is only lowered as `for i, v in '
+                                        'enumerate(ex.map(f, xs))`\n  write instead: results = '
+                                        'list(ex.map(f, xs)) first, then enumerate(results)')
+                hoisted.extend(self.lower_for_map(owner, node, cap, enum=True))
+                continue
             if kind == 'executor' and not self.consumed(node, parent):
                 raise _Refuse(node, 'the iterator executor.map returns is used as a value\n  write instead: '
                                     'list(ex.map(f, xs)), or use it directly in for / sum / sorted / min / max')
@@ -367,7 +380,7 @@ class _Pass:
                 isinstance(stmt, ast.For) and not any(n is node for n in ast.walk(stmt.iter))):
             return False
         safe = {'list', 'tuple', 'sum', 'sorted', 'min', 'max', 'set', 'len', 'print', 'int', 'float', 'str',
-                'abs', 'round', 'range', 'bool'}
+                'abs', 'round', 'range', 'bool', 'enumerate'}
         inside = {id(n) for n in ast.walk(node)}
         for n in ast.walk(stmt):
             if id(n) in inside or n is stmt:
@@ -413,10 +426,13 @@ class _Pass:
                                  'exception of the map\n  write instead: rs = list(ex.map(f, xs)) first, then the '
                                  'comprehension over rs')
 
-    def lower_for_map(self, loop, node, cap):
+    def lower_for_map(self, loop, node, cap, enum=False):
         """`for t in ex.map(f, xs[, ys]):` runs the body for the results before a failing item, as CPython does:
         the region runs first; if it raised, the loop calls f itself, one item at a time, so the exception comes at
-        its item. Returns the statements that go before the loop (the loop is changed in place)."""
+        its item. Returns the statements that go before the loop (the loop is changed in place).
+
+        With `enum`, the loop is `for i, v in enumerate(ex.map(f, xs[, ys]))`: the results are still produced in
+        order, and the pair `(position, value)` is bound so a failure keeps CPython's earlier prints."""
         if node.keywords or not 2 <= len(node.args) <= 3:
             raise _Refuse(node, 'map over %d iterables' % (len(node.args) - 1))
         fnode, its = node.args[0], node.args[1:]
@@ -455,10 +471,16 @@ class _Pass:
         old_target = loop.target
         idx = '_ail_i%d' % k
         elems = ', '.join('%s[%s]' % (nm, idx) for nm in names)
-        fetch = ast.parse('if _ail_ok%d:\n    T = _ail_r%d[%s]\nelse:\n    T = %s(%s)\n' % (
-            k, k, idx, fn.name, elems)).body[0]
-        fetch.body[0].targets[0] = copy.deepcopy(old_target)
-        fetch.orelse[0].targets[0] = copy.deepcopy(old_target)
+        ok = ast.parse('_ail_r%d[%s]' % (k, idx), mode='eval').body
+        fail = ast.parse('%s(%s)' % (fn.name, elems), mode='eval').body
+        if enum:
+            # the loop target is `i, v`; enumerate's index is the position in the result list
+            pair = lambda value: ast.Tuple(
+                elts=[ast.Name(id=idx, ctx=ast.Load()), value], ctx=ast.Load())
+            ok, fail = pair(ok), pair(fail)
+        fetch = ast.If(test=ast.parse('_ail_ok%d' % k, mode='eval').body,
+                       body=[ast.Assign(targets=[copy.deepcopy(old_target)], value=ok)],
+                       orelse=[ast.Assign(targets=[copy.deepcopy(old_target)], value=fail)])
         loop.target = ast.Name(id=idx, ctx=ast.Store())
         loop.iter = ast.parse('range(%s)' % n_expr, mode='eval').body
         loop.body = [fetch] + loop.body
@@ -648,6 +670,7 @@ class _Pass:
         out.append(loop_node)
         out.extend(region)
         self.rewrite_uses(rest, {name: ('list', k, fn, cols)}, s)
+        self.made.append((name, ('list', k, fn, cols)))
         return used
 
     def named_futures(self, stmts, i, out, pools):
@@ -688,7 +711,23 @@ class _Pass:
         out.extend(self.region(k, fn, cols, str(len(group)), cap0, stmts[i]))
         index = {n: ('one', k, fn, cols, idx) for idx, n in enumerate(names)}
         self.rewrite_uses(stmts[j:], index, stmts[i])
+        self.made.extend(index.items())
         return j - i
+
+    def escape_uses(self, stmts, start, mark, where):
+        """A future group made in the block just lowered may be read after the block (CPython's
+        `.result()` still works once the executor is shut down). Rewrite those reads in the rest of
+        the enclosing statement list, or refuse by name so the program runs under the lock."""
+        pending = self.made[mark:]
+        if not pending or start >= len(stmts):
+            return
+        tail = stmts[start:]
+        env = {n: e for n, e in pending if _mentions(tail, n)}
+        if not env:
+            return
+        self.rewrite_uses(tail, env, where)
+        stmts[start:] = tail
+        self.made[mark:] = [(n, e) for n, e in pending if n not in env]
 
     def region(self, k, fn, cols, n, cap, where):
         """The statements that run n tasks of fn over the columns in one parallel region."""
@@ -1077,7 +1116,12 @@ def rewrite_text(source, notes=None, report=None):
                     tree.body[tree.body.index(top)] = holder
                     if p.helpers and p.helpers[-1][0] is top:
                         p.helpers = [(holder if t is top else t, h) for t, h in p.helpers]
+        left = {n for n, _ in p.made}
         for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in left and isinstance(node.ctx, ast.Load):
+                raise _Refuse(node, 'the future %r is read outside the block where its tasks are made (this '
+                                    'lowering only rewrites .result() inside that block)\n  write instead: read '
+                                    'fu.result() in the same block as the submit' % node.id)
             if isinstance(node, ast.ClassDef) and any(imports.kind(n) for n in ast.walk(node)):
                 raise _Refuse(node, 'a thread, executor or pool used inside a class')
             if isinstance(node, ast.Name) and node.id in p.pool_names:

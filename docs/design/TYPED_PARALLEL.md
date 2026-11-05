@@ -37,7 +37,13 @@ the program, `pyc` turns it into the one-line note `note: ... built on the gener
   when `f` is a top-level function of int/float/tuple arguments that only computes
   (`typedpar.py:152-164`); the result is the generated `_ail_pmap` loop
   `for i in _ail_par_range(0, len(xs), k)`.
-* `ex.submit(f, ...)` groups read through `.result()` (`typedpar.py:591-691`).
+* `ex.submit(f, ...)` groups read through `.result()` (`typedpar.py:591-691`), including a group made
+  inside a `with` block whose results are read after it: the region runs at the submit (inside the
+  block) and the later `.result()` / `for f in futs` reads are rewritten in place
+  (`typedpar.py:698-711`). A future read in a shape the lowering cannot rewrite is refused by name,
+  so the program falls back to the lock instead of keeping an undefined name.
+* `enumerate(ex.map(f, xs))` with an `(i, v)` for target (`typedpar.py:392-402`): the map is
+  materialised as a list first, so `enumerate` sees the results in order.
 * `ts = [threading.Thread(target=w, args=(k, out, ...)) for k in range(T)]`, then
   `for t in ts: t.start()`, then `for t in ts: t.join()` (or the append-and-start spelling), when
   all three happen in one block (`typedpar.py:813-988`). The body is inlined into
@@ -90,12 +96,13 @@ to write the CPython shape (`ThreadPoolExecutor.map`, `Pool.map`, or the started
 ## CPython hybrid
 
 The hybrid build (`ail build --cpython`) accelerates selected top-level functions in a CPython
-extension. Every native call is surrounded by `Py_BEGIN_ALLOW_THREADS` /
-`Py_END_ALLOW_THREADS` (`AIL_CURRENT/ail_cpython_hybrid.py:705-707`, `715-717`, `726-728`,
-`735-738`), so a typed function that reads a list while a CPython thread mutates it is a race
-candidate; `docs/design/CPYTHON_HYBRID.md:125-141` states the same. The hybrid accepts int, float,
-bool, str, `list[int]` and `list[float]` (`ail_cpython_hybrid.py:35-36`, `555-575`); a `bytearray`
-parameter, a mutated list, or a function that may raise stays in CPython.
+extension. A native call whose arguments are only int, float, bool or str is surrounded by
+`Py_BEGIN_ALLOW_THREADS` / `Py_END_ALLOW_THREADS`; a call that takes a list keeps the GIL while it
+runs (owner decision D4, 2026-11-05), the provisional safe default while other CPython threads may
+hold containers. `docs/design/CPYTHON_HYBRID.md:125-141` states the same. The hybrid accepts int,
+float, bool, str, `list[int]` and `list[float]` (`ail_cpython_hybrid.py:35-36`, `555-575`); a
+`bytearray` parameter, a mutated list, or a function that may raise stays in CPython, and an
+accelerated function cannot index (so it cannot read a module-level container).
 
 ## FFI
 
