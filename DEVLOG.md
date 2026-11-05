@@ -1,3 +1,25 @@
+## 2026-11-05 -- pyreach s8 re-review fix: row guards in values, side-effecting stores, global rows (job-pyreachs8-11052148)
+
+Fixed the three defects of the re-review, all in `python/pkg-v12/noneslots.py`:
+
+- `_Rewrite.visit_Expr` and the non-row path of `visit_Assign` now call `generic_visit`, so an
+  `xs[i] is None` / `is not None` test used as a bare expression statement or as an assignment
+  value reads the present bit instead of comparing the empty-list sentinel.  The row-store and
+  `.append` branches also descend into their value now, covering a guard nested in a list value.
+- A row store whose index is not `_is_simple` is refused (the flag store would evaluate the index
+  a second time), as is a chained store (`xs[0] = ys = [4]`, which the single-target rewrite
+  cannot express).  Both keep the old general route; `--strict` refuses them by name.
+- A candidate whose name is declared `global` or `nonlocal` is refused, since the present-bit
+  list would stay in the declaring function while the value name is shared.
+
+Probes `/tmp/probes/q22_slots_assign_value.py` (`True True True / True`), `q16_slots_neg_append.py`
+(`2 False True`), `q3b_store_sideeffect_guard.py`, `q30_multitarget_slots.py` and
+`q28_global_rows.py` all match CPython on both builds; the first two still build typed under
+`AIL_NO_GENERAL=1`, the other three keep the general route (strict refusal by name).
+`test_ail_pyreach_optret` gains `test_slot_guards_in_values_and_append_none` (typed) and
+`test_unsafe_row_shapes_refuse_or_fall_back` (7/7 pass), plus `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` and `test_ail_strict` on the final commit.
+
 ## 2026-11-05 -- pyreach s8 review fix: refuse unlowered `[None] * n` row uses (job-pyreachs8-11051935)
 
 The row rewrite now rejects a candidate unless every use is a shape it actually translates.  A

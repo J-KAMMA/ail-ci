@@ -192,8 +192,13 @@ def _candidate_ok(fn, name, init_target, parents):
 
 def _candidates(fn, taken):
     """Names of `fn` initialized as `[None] * n` and used only in the shapes this rewrite knows."""
+    own = _own_walk(fn)
+    declared = set()
+    for n in own:
+        if isinstance(n, (ast.Global, ast.Nonlocal)):
+            declared.update(n.names)
     init = {}
-    for n in _own_walk(fn):
+    for n in own:
         target = value = None
         if isinstance(n, ast.Assign) and len(n.targets) == 1:
             target, value = n.targets[0], n.value
@@ -202,35 +207,42 @@ def _candidates(fn, taken):
         if isinstance(target, ast.Name) and value is not None and _mult_list_none(value) is not None:
             init.setdefault(target.id, []).append(n)
     out = []
-    nodes = _own_walk(fn)
+    nodes = own
     parents = {id(child): parent for parent in nodes for child in ast.iter_child_nodes(parent)}
     for name, inits in init.items():
-        if len(inits) != 1 or name + '__p' in taken:
+        if len(inits) != 1 or name + '__p' in taken or name in declared:
             continue
         init_target = inits[0].targets[0] if isinstance(inits[0], ast.Assign) else inits[0].target
         if not _candidate_ok(fn, name, init_target, parents):
             continue
         ok = True
         for n in nodes:
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
-                    and isinstance(n.func.value, ast.Name) and n.func.value.id == name:
-                if n.func.attr != 'append' or len(n.args) != 1 or n.keywords:
-                    ok = False
-        for n in nodes:
-            target = value = None
-            if isinstance(n, ast.Assign) and len(n.targets) == 1:
-                target, value = n.targets[0], n.value
-            elif isinstance(n, ast.AnnAssign):
-                target, value = n.target, n.value
-            if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
-                    and target.value.id == name and not isinstance(target.slice, ast.Slice)):
-                if not (_is_none(value) or _list_value(value)):
-                    ok = False
-            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                    and isinstance(n.func.value, ast.Name) and n.func.value.id == name
-                    and n.func.attr == 'append'
-                    and not (_is_none(n.args[0]) or _list_value(n.args[0]))):
+            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and isinstance(n.func.value, ast.Name) and n.func.value.id == name):
+                continue
+            if n.func.attr != 'append' or len(n.args) != 1 or n.keywords:
                 ok = False
+            elif not (_is_none(n.args[0]) or _list_value(n.args[0])):
+                ok = False
+        for n in nodes:
+            if isinstance(n, ast.Assign):
+                targets, value = n.targets, n.value
+            elif isinstance(n, ast.AnnAssign):
+                targets, value = [n.target], n.value
+            else:
+                continue
+            for target in targets:
+                if not (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                        and target.value.id == name):
+                    continue
+                if isinstance(target.slice, ast.Slice):
+                    ok = False
+                elif len(targets) != 1:
+                    ok = False        # the store rewrite emits one target; a chained store is unhandled
+                elif not _is_simple(target.slice):
+                    ok = False        # the store rewrite would evaluate the index twice
+                elif not (_is_none(value) or _list_value(value)):
+                    ok = False
         if ok:
             out.append(name)
     return out
@@ -275,6 +287,7 @@ class _Rewrite(ast.NodeTransformer):
         if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Subscript)
                 and isinstance(node.targets[0].value, ast.Name)
                 and node.targets[0].value.id == self.name):
+            node = self.generic_visit(node)
             sub = node.targets[0]
             if _is_none(node.value):
                 node.value = ast.List(elts=[], ctx=ast.Load())
@@ -287,7 +300,7 @@ class _Rewrite(ast.NodeTransformer):
                               value=flag)
             ast.copy_location(setp, node)
             return [node, setp]
-        return node
+        return self.generic_visit(node)
 
     def visit_AnnAssign(self, node):
         if (isinstance(node.target, ast.Name) and node.target.id == self.name
@@ -296,6 +309,7 @@ class _Rewrite(ast.NodeTransformer):
         return self.generic_visit(node)
 
     def visit_Expr(self, node):
+        node = self.generic_visit(node)
         call = node.value
         if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
                 and isinstance(call.func.value, ast.Name) and call.func.value.id == self.name

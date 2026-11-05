@@ -138,6 +138,65 @@ def main():
 main()
 '''
 
+SLOT_VALUES = '''def main():
+    xs = [None] * 3
+    xs[1] = [1]
+    a = xs[0] is None
+    b = xs[1] is not None
+    c = xs[2] is None or xs[0] is None
+    print(a, b, c)
+    print(xs[0] is None)
+    ys = [None] * 1
+    ys[0] = [1]
+    ys.append(None)
+    print(len(ys), ys[-2] is None, ys[-1] is None)
+
+
+main()
+'''
+
+UNSAFE_ROWS = '''G = None
+
+
+def setup():
+    global G
+    G = [None] * 2
+    G[0] = [1]
+
+
+def read():
+    print(G[1])
+    print(len(G))
+
+
+def idx():
+    print("idx")
+    return 0
+
+
+def non_simple():
+    xs = [None] * 3
+    xs[idx()] = [1]
+    if xs[0] is not None:
+        print(xs[0])
+
+
+def chained():
+    xs = [None] * 3
+    ys = None
+    xs[0] = ys = [4]
+    if xs[0] is None:
+        print("none")
+    else:
+        print(xs[0], ys)
+
+
+setup()
+read()
+non_simple()
+chained()
+'''
+
 OPTIONAL_LOOP = '''def parse(s):
     if s == "":
         return None
@@ -235,6 +294,12 @@ class PyreachOptRet(unittest.TestCase):
 
     def test_none_slots_with_present_bit(self):
         self._typed('slots', SLOTS, '[0]\n[1]\n[2]\nempty\n[7]\n3\n[5]\n')
+
+    def test_slot_guards_in_values_and_append_none(self):
+        self._typed('slot_values', SLOT_VALUES, 'True True True\nTrue\n2 False True\n')
+
+    def test_unsafe_row_shapes_refuse_or_fall_back(self):
+        self._matches_cpython('unsafe_rows', UNSAFE_ROWS)
 
     def test_optional_loop_variable_reused(self):
         self._typed('optloop', OPTIONAL_LOOP, '10\n')
