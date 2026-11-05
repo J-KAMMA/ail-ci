@@ -21,7 +21,7 @@ under both and checks the class. Three classes appear:
 
 - [ ] 1. An int result outside int64 stops with `OverflowError`; CPython prints the big number.
 - [ ] 2. Exact big ints need `--exact-int` (or `AIL_EXACT_INT=1`); the default is int64 for speed.
-- [ ] 3. Deep recursion stops at the real C stack limit, not at CPython's 1,000 frames.
+- [ ] 3. Deep recursion stops at a fixed 50,000-frame guard in the default build, not at CPython's 1,000 frames.
 - [ ] 4. `eval()` is refused; write the expression in the program.
 - [ ] 5. `exec()` is refused; write the statements in the program.
 - [ ] 6. `compile()` is refused.
@@ -29,10 +29,10 @@ under both and checks the class. Three classes appear:
 - [ ] 8. `__import__()` is refused.
 - [ ] 9. `except SystemExit` is refused; `sys.exit()` ends the process here, it is not an exception.
 - [ ] 10. A bare `except:` in a program that calls `sys.exit()` is refused.
-- [ ] 11. A complex result is refused; AIL has no complex type.
+- [ ] 11. A complex result from constant operands is refused; a run-time one is a known bug (prints `nan`).
 - [ ] 12. A complex literal is refused.
 - [ ] 13. An `re` group that did not match raises `ValueError`, where CPython returns `None`.
-- [ ] 14. An integer raised to a negative exponent stops; CPython returns a float.
+- [ ] 14. A negative exponent stops when the exponent is not a constant; a constant one gives CPython's float.
 - [ ] 15. `open()` needs a literal mode, so the text/binary kind is known at build time.
 - [ ] 16. `open()` accepts only utf-8, ascii and latin-1; another encoding is refused.
 - [ ] 17. An uncaught exception prints `Kind: message` with no traceback; the exit status is CPython's.
@@ -76,7 +76,7 @@ print(y)
 CPython's arbitrary precision. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A1 and
 [AIL_CURRENT/docs/design/BIGINT.md](../AIL_CURRENT/docs/design/BIGINT.md).
 
-## 3. Deep recursion stops at the stack limit
+## 3. Deep recursion stops at a 50,000-frame guard
 
 ```python
 def down(n: int) -> int:
@@ -88,8 +88,9 @@ print(down(60000))
 ```
 
 - CPython: `RecursionError: maximum recursion depth exceeded`, exit 1.
-- AIL: **same**. The same `RecursionError` class and text, exit 1. The guard is 50,000 frames, not
-  1,000, so a depth between the two succeeds here and fails in CPython; `sys.setrecursionlimit` is
+- AIL: **same**. The same `RecursionError` class and text, exit 1. In the default build the
+  guard is a fixed 50,000-frame counter, not the C stack, so it does not move with the platform;
+  a depth between 1,000 and 50,000 succeeds here and fails in CPython; `sys.setrecursionlimit` is
   ignored.
 
 **What to do instead:** convert deep recursion to a loop, or keep the depth well under 50,000. See
@@ -201,7 +202,7 @@ except:
 exception the program can raise. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A54 and
 [PORTING.md](PORTING.md) section 5.
 
-## 11. Complex results are refused
+## 11. Complex results from constant operands are refused
 
 ```python
 print((-4.0) ** 0.5)
@@ -213,6 +214,10 @@ print((-4.0) ** 0.5)
 
 **What to do instead:** take `abs()` first, use an integer exponent, or use `cmath`-free real
 arithmetic. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) C5 and [PORTING.md](PORTING.md).
+
+Only constant operands are caught. With a run-time operand (`x = -4.0; n = 0.5; print(x ** n)`,
+`lab/migrating/complex_power_runtime.py`) the default build prints `nan`, exit 0. That is a known
+bug recorded under Bugs in [`RESULTS.md`](../lab/migrating/RESULTS.md), not declared behaviour.
 
 ## 12. Complex literals are refused
 
@@ -244,7 +249,7 @@ print(m.group(2))
 pattern, or use `m.group(0)`. AIL has no `None` for `str`. See
 [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A8.
 
-## 14. A negative integer exponent stops
+## 14. A negative exponent with a non-constant exponent stops
 
 ```python
 def power(b: int, n: int) -> int:
@@ -290,8 +295,9 @@ with open(path, "r", encoding="utf-16") as f:
 - CPython: `hi`, exit 0.
 - AIL: **refused**. `open(encoding='utf-16'): only utf-8, ascii and latin-1 are built.`
 
-**What to do instead:** use the default utf-8, or read the bytes with `"rb"` and decode them
-yourself. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A16 and section B.
+**What to do instead:** use the default utf-8, ascii or latin-1. Reading the bytes with `"rb"` does
+not help: `bytes.decode("utf-16")` is refused too, because only those three encodings are built.
+See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A16 and section B.
 
 ## 17. An uncaught exception has no traceback
 
@@ -384,5 +390,6 @@ print(len(r))
 ---
 
 The `--strict` build refuses any program that only the general path would accept, with every
-blocker listed (exit 3); the default build falls back and prints one `note:` line. If you want the
-typed path or a refusal, add `--strict`. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A62.
+blocker listed (exit 3); the default build falls back and prints a `note:` line, with a second
+when the program has a second reason (two for `threads.py`). If you want the typed path or a
+refusal, add `--strict`. See [spec/DIFFERENCES.md](spec/DIFFERENCES.md) A62.

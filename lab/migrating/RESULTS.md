@@ -37,16 +37,30 @@ in the default mode (`AIL_UNIFIED_FORCE` unset). The classes are those of
 | 21 | `range_overflow.py` | same | `OverflowError: Python int too large to convert to C ssize_t`, exit 1 | `OverflowError: integer overflow in range() (ints are 64-bit; --exact-int gives exact ints)`, exit 1 |
 
 With `--strict`, `threads.py` is refused (exit 3) instead of built on the general path; the
-default build prints the `note:` line quoted above.
+default build prints two `note:` lines: the general-path fallback and the reason the thread is not
+run in parallel on the typed path.
 
 ## Bugs
 
-The stop rule found one silent wrong output. It is not an item; it is listed here so it is not
-mistaken for declared behaviour.
+The stop rule found two silent wrong outputs. They are not items; they are listed here so they are
+not mistaken for declared behaviour.
 
 | Sample | Class | CPython 3.12 | AIL (default build) |
 |---|---|---|---|
 | `str_is.py` (see below) | silent | `True`, exit 0 | `False`, exit 0 |
+| `complex_power_runtime.py` (see below) | silent | `(1.2246467991473532e-16+2j)`, exit 0 | `nan`, exit 0 |
+
+`complex_power_runtime.py`:
+
+    x = -4.0
+    n = 0.5
+    print(x ** n)
+
+Item 11's sample uses constant operands, which the build refuses. The run-time form above builds
+and prints `nan` where CPython prints a complex number: the same bug class, reported rather than
+documented as an item.
+
+`str_is.py`:
 
     a = "x" + "y"
     b = "xy"
