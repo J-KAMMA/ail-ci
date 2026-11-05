@@ -116,18 +116,34 @@ class _Checker(object):
         return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
 
     def check_borrowed(self):
-        """A borrowed parameter (`fn.attrs['borrow']`) takes no retain on entry, so it must never be
-        stored, returned or released: any of those hands on or drops a reference this function does
-        not own (OSSA's borrowed-value rule)."""
-        names = self.fn.attrs.get('borrow') or ()
+        """A borrowed parameter takes no retain on entry, so it must never be stored, returned or
+        released: any of those hands on or drops a reference this function does not own (OSSA's
+        borrowed-value rule)."""
+        names = self.fn.attrs.get('borrow')
+        explicit = names is not None
+        if not explicit:
+            # rc2: `ir/borrow.py` decides the set on the AST and the legacy emitter records it on
+            # `pyfunc._BORROWED_PARAMS` before any function is lowered, so the IR check sees the
+            # very set the code generator elides.  No table (the IR run outside that path) means
+            # nothing was elided, and the check has nothing to say.
+            import sys
+            pyfunc = sys.modules.get('pyfunc')
+            table = getattr(pyfunc, '_BORROWED_PARAMS', None) if pyfunc is not None else None
+            if not isinstance(table, dict) or not getattr(pyfunc, '_BORROW_WIDE', False):
+                return
+            names = table.get(self.fn.name)
         if not names:
             return
         by_name = dict(zip(self.fn.param_names, self.fn.params))
         for n in names:
-            if n not in by_name:
+            if n not in by_name and explicit:
                 self.err('borrow', 'borrowed parameter %r is not a parameter' % (n,))
+            elif n not in by_name:
+                continue
         borrowed = {by_name[n] for n in names if n in by_name}
-        stores = ('store', 'global.store', 'field.set', 'list.set', 'list.push', 'list.lit',
+        # `store` copies a value into a local slot (`local.alloc`), which does not outlive the
+        # call; the stores that do hand a reference on are the field/list/dict/global ones.
+        stores = ('global.store', 'field.set', 'list.set', 'list.push', 'list.lit',
                   'ba.set', 'ba.push', 'dict.store', 'elem.store', 'rec.push')
         for ins in I.walk(self.fn.body):
             if not any(o in borrowed for o in ins.operands):

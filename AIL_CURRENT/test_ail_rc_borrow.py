@@ -147,16 +147,23 @@ class BorrowTests(unittest.TestCase):
         self.check("stores")
         body = body_of(self.cases["stores"][1], "helper")
         self.assertIn("ail_obj_store_Node(&v__t2, v_n, 0)", body)
-        self.assertEqual(body.count("ail_obj_retain("), 0)
+        # `n` is stored into `items`, so it is not borrowed: one entry retain, and the store holds
+        # its own reference too.  The list `items` is only read and stays borrowed.
+        self.assertEqual(body.count("ail_obj_retain("), 1)
         self.assertNotIn("ail_obj_retain(v_items)", body)
 
     def test_returning_helper_keeps_the_retain(self):
         self.check("returns")
         body = body_of(self.cases["returns"][1], "helper")
-        self.assertEqual(body.count("ail_obj_retain("), 1)
+        # `n` is returned, so it is owned: the entry retain and the retain that hands the value to
+        # the caller.  (The rule refuses it; the returned reference is still correct.)
+        self.assertEqual(body.count("ail_obj_retain("), 2)
 
-    def test_switch_turns_elision_off(self):
-        text = (Path(self.directory.name, "read_only.py").read_text(encoding="utf-8"))
+    def test_switch_is_the_escape_hatch(self):
+        """`AIL_RC_BORROW=0` turns the elision off: the read-only helper keeps its entry retain.
+        (The pre-rc2 ad-hoc scan would also have borrowed it; the default build uses the new rule,
+        whose difference from that scan is pinned by the storing-helper test above.)"""
+        text = Path(self.directory.name, "read_only.py").read_text(encoding="utf-8")
         env = dict(os.environ, AIL_RC_BORROW="0")
         debug = Path(self.directory.name, "off.dbg")
         source = Path(self.directory.name, "off.py")
@@ -181,8 +188,128 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(sorted(self.sets(STORES)["helper"]), ["items"])
         self.assertEqual(sorted(self.sets(RETURNS).get("helper", ())), [])
 
+    def test_comprehension_stores_are_refused(self):
+        """A comprehension builds a new container and stores the element in it, so the element is
+        not read-only (`return [p for _ in range(2)]` is a store, not a read)."""
+        node = """
+from __future__ import annotations
+
+
+class Node:
+    def __init__(self, value: int, next: Node | None) -> None:
+        self.value: int = value
+        self.next: Node | None = next
+
+
+def wrap(p: Node) -> list[Node]:
+    return [p for _ in range(2)]
+
+
+def hold(p: Node) -> int:
+    ys = [p for _ in range(3)]
+    return len(ys)
+
+
+def pack(p: Node, n: int) -> list[Node]:
+    d = {i: p for i in range(n)}
+    return [d[0], d[n - 1]]
+
+
+def main() -> int:
+    return 0
+
+
+main()
+"""
+        sets = self.sets(node)
+        self.assertNotIn("p", sets.get("wrap", ()))
+        self.assertNotIn("p", sets.get("hold", ()))
+        self.assertNotIn("p", sets.get("pack", ()))
+        # the comprehension's iterable is read, and `n` is only used there
+        self.assertIn("n", sets.get("pack", ()))
+
+    def test_methods_are_analysed(self):
+        """A class body is a scope: a method's read-only parameters are borrowed and one stored
+        into a field is refused.  `self` is a parameter like any other at analysis time."""
+        node = """
+from __future__ import annotations
+
+
+class Node:
+    def __init__(self, value: int) -> None:
+        self.value: int = value
+
+
+class Box:
+    def __init__(self, k: int) -> None:
+        self.k: int = k
+        self.held: Node | None = None
+
+    def weigh(self, p: Node) -> int:
+        return self.k * p.value
+
+    def hold(self, p: Node) -> int:
+        self.held = p
+        return p.value
+
+
+def main() -> int:
+    return 0
+
+
+main()
+"""
+        sets = self.sets(node)
+        self.assertIn("p", sets.get("weigh", ()))
+        self.assertNotIn("p", sets.get("hold", ()))
+
     def test_switch(self):
         self.assertTrue(borrow.enabled())
+
+
+class VerifyTests(unittest.TestCase):
+    def test_borrowed_store_is_an_error(self):
+        """The IR verifier rejects an owning store of a borrowed parameter (OSSA's rule)."""
+        from ir import verify
+        from ir import ir as I
+        p = I.Value(I.I64, hint="p")
+        fn = I.Function("f", [p], ["p"], [I.I64], I.Region(), attrs={"borrow": ["p"]})
+        fn.body.instrs.append(I.Instr("list.push", [p, p]))
+        checker = verify._Checker(fn, None, "S1")
+        checker.check_borrowed()
+        self.assertTrue(checker.errors)
+
+    def test_local_store_is_not_an_escape(self):
+        """An IR `store` initialises a local slot; it does not hand the reference on."""
+        from ir import verify
+        from ir import ir as I
+        p = I.Value(I.I64, hint="p")
+        place = I.Value(I.place(I.I64))
+        fn = I.Function("f", [p], ["p"], [I.I64], I.Region(), attrs={"borrow": ["p"]})
+        fn.body.instrs.append(I.Instr("store", [place, p]))
+        checker = verify._Checker(fn, None, "S1")
+        checker.check_borrowed()
+        self.assertFalse(checker.errors)
+
+    def test_borrowed_return_is_an_error(self):
+        from ir import verify
+        from ir import ir as I
+        p = I.Value(I.I64, hint="p")
+        fn = I.Function("f", [p], ["p"], [I.I64], I.Region(), attrs={"borrow": ["p"]})
+        fn.body.instrs.append(I.Instr("return", [p]))
+        checker = verify._Checker(fn, None, "S1")
+        checker.check_borrowed()
+        self.assertTrue(checker.errors)
+
+    def test_no_borrowed_params_is_clean(self):
+        from ir import verify
+        from ir import ir as I
+        p = I.Value(I.I64, hint="p")
+        fn = I.Function("g", [p], ["p"], [I.I64], I.Region())
+        fn.body.instrs.append(I.Instr("return", [p]))
+        checker = verify._Checker(fn, None, "S1")
+        checker.check_borrowed()
+        self.assertFalse(checker.errors)
 
 
 if __name__ == "__main__":
