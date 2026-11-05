@@ -226,7 +226,7 @@ and not numpy's pairwise sum; users who want Python's result call the builtin `s
 | inputs | result | definition |
 | --- | --- | --- |
 | f64 x f64 | f64 | **built (T6, 2026-10-30).** `C[i, j] = ta.dot(A[i], B[:, j])` bit for bit: the products `r(A[i,k] * B[k,j])` are added along `k` in the **one fixed order** below. K = 0 gives `+0.0` |
-| f32 x f32 | f32 | the same order with `r = r_f32` (not built yet) |
+| f32 x f32 | f32 | the same order with `r = r_f32` (not built yet: 2-D f32 is refused by name, T3 builds 1-D only) |
 | f16 x f16 | f32 (default `acc`) | the exact sum of the exact products, rounded once to f32 (GPU.md 8.7). f16 products are exact in f32, and every product is an integer multiple of `2^-48`, so the reference adds Python ints and rounds once with integer code (section 4.2). Not built yet |
 | int8 x int8 | int32 | exact integer sum; `OverflowError` if a result leaves int32; order-free (so GPU cooperative matrix may be used under GPU.md 8.7's precondition). Not built yet |
 | int32 x int32 | int32 | exact, checked, order-free. Not built yet |
@@ -610,7 +610,7 @@ stages run as one sequential line (the "split core fixes" rule).
 | **T0** | this note | merged into `integ` | - |
 | **T1** | `ail_array.py` reference, all five dtypes, 1-D API of section 2 except FFI and matmul; `test_ail_array_ref.py` | the self-test of 4.3 passes on CPython 3.12 within its CI budget; follows decisions TA1-TA3 | T0 |
 | **T2** | compiler: import pass, C runtime for **f64 and int32** 1-D, typed and general path, scalar loops (no SIMD work), errors, refusals of section 8 | differential tests of 9.2-9.3 and 9.7-9.9 pass in all build modes; size delta of a program using f64 arrays recorded | T1; IR core / typed path as today |
-| **T3** | **f32, f16, int8**, `astype`, canonical NaN, software f16 conversion, wrapping/saturating ops, `exp log tanh sqrt` | exhaustive f16 tests (9.4) and the edge sets pass; the `array('f')` refusal is lifted using the same f32 store rule (TA8) | T2 |
+| **T3** | **f32, f16, int8**, `astype`, canonical NaN, software f16 conversion, wrapping/saturating ops, `exp log tanh sqrt` | **T3a built (2026-11-05): f32 1-D**, `astype` f32<->f64 and f32<->int32, canonical NaN, `sqrt exp log tanh`, `minimum maximum clip`, `sum`/`dot`/`min`/`max`/`argmin`/`argmax`, `tolist`/`tobytes`/`repr`, 1-D ops; `test_ail_array_t3.py`, cases `array_t3_cases/` (8 files, default and `AIL_UNIFIED_FORCE=1`), edge sets of 9.3 pass. f16 and int8 are still refused by name, 2-D f32 and the `array('f')` store rule (TA8) are not built. | T2 |
 | **T4** | SIMD: vectorisable loops, int overflow flags with rescan, the 16-lane reductions, F16C in `x86-64-v3` | 9.6 neutrality passes; instruction counts (`tools/icount.c`) and RSS recorded per op family against the scalar T3 code and against C; no speed claim before that (`speed-claims`) | T3 |
 | **T5** | FFI: arrays as `ptr`/`cptr` arguments, zero copy in AIL and in the shim | 9.10 passes; borrowed-pointer rule documented in AIL_REFERENCE_MORE | T2; FFI F4 (#209: same files `ail_ffi.py`, `ail_ffi_lower.py`) merged first; F3 if u64 lengths are used |
 | **T6** | 2-D arrays (built for f64: 3.8) and exact `matmul` (3.7, built for f64, CPU: 5.6); the row broadcast, f32/f16/int matmul and the GPU kernel (GPU.md 6.2 to 6.5) are later | CPython-equal on 3.7's cases incl. `K = 0`, lane and block boundaries and planted specials; an MLP forward pass example matches the reference | T4 |

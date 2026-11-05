@@ -1783,3 +1783,604 @@ def _ail_tam_matmul(a: _AilTAM, b: _AilTAM) -> _AilTAM:
     out.c = b.c
     out.v.d = _ail_tam_mmk(a.v.d, b.v.d, _ail_tam_len(a.r), _ail_tam_len(a.c), _ail_tam_len(b.c))
     return out
+
+
+# ---- f32 (stage T3): one element is its binary32 value held exactly in a binary64 list -----------------------------------------
+# Storage is float-like: every element of a _AilTA3 is a Python float that is exactly a binary32 value (a double whose low 29
+# mantissa bits are zero), which is what a C `float` holds. Every operation still computes in binary64 and rounds once with
+# _ail_ta3_round (= r_f32 of design 3.2), never in binary32 arithmetic. The round trip through the bit pattern is what
+# `struct.pack('<f', x)` / `struct.unpack('<f', ...)` does in the reference, so the two agree bit for bit.
+class _AilTA3:
+    def __init__(self, n: int):
+        self.d = [0.0] * n
+
+
+def _ail_ta_te_a3(msg: str) -> _AilTA3:
+    if len(msg) >= 0:
+        raise TypeError(msg)
+    return _AilTA3(0)
+
+
+def _ail_ta_ve_a3(msg: str) -> _AilTA3:
+    if len(msg) >= 0:
+        raise ValueError(msg)
+    return _AilTA3(0)
+
+
+def _ail_ta3_bl(v: int) -> int:
+    """The bit length of a positive int below 2**63 (no int.bit_length() on the typed path)."""
+    p = v
+    bl = 0
+    if p >= 4294967296:
+        p = p // 4294967296
+        bl = 32
+    if p >= 65536:
+        p = p // 65536
+        bl = bl + 16
+    if p >= 256:
+        p = p // 256
+        bl = bl + 8
+    if p >= 16:
+        p = p // 16
+        bl = bl + 4
+    if p >= 4:
+        p = p // 4
+        bl = bl + 2
+    if p >= 2:
+        p = p // 2
+        bl = bl + 1
+    return bl + 1
+
+
+def _ail_ta3_bits(x: float) -> int:
+    """The binary32 bit pattern of r_f32(x) (design 3.1): nearest, ties to even, subnormals kept, overflow to +-inf, and
+    every NaN is the canonical quiet NaN 7fc00000 with the sign bit clear."""
+    if x != x:
+        return 2143289344
+    s = 0
+    y = x
+    if math.copysign(1.0, y) < 0.0:
+        s = 2147483648
+        y = -y
+    if y == 0.0:
+        return s
+    if y == math.inf:
+        return s + 2139095040
+    b = _ail_ta_bits(y)
+    e = (b[0] // 1048576) % 2048
+    m = (b[0] % 1048576) * 4294967296 + b[1]
+    if e > 0:
+        sig = m + 4503599627370496
+        k = e - 1075
+    else:
+        sig = m
+        k = -1074
+    ex = k + _ail_ta3_bl(sig) - 1
+    if ex > 127:
+        return s + 2139095040
+    u = ex - 23
+    if u < -149:
+        u = -149
+    sh = u - k
+    q = sig
+    if sh > 0:
+        if sh >= 54:
+            q = 0
+        else:
+            dd = 2
+            j = 1
+            while j < sh:
+                dd = dd * 2
+                j = j + 1
+            q = sig // dd
+            r = sig - q * dd
+            h = dd // 2
+            if r > h or (r == h and q % 2 == 1):
+                q = q + 1
+    if q == 0:
+        return s
+    bq = _ail_ta3_bl(q)
+    ex = u + bq - 1
+    if ex > 127:
+        return s + 2139095040
+    if ex < -126:
+        f = q
+        j = u + 149
+        while j > 0:
+            f = f * 2
+            j = j - 1
+        return s + f
+    top = q
+    j = 24 - bq
+    while j > 0:
+        top = top * 2
+        j = j - 1
+    while j < 0:
+        top = top // 2
+        j = j + 1
+    return s + (ex + 127) * 8388608 + (top - 8388608)
+
+
+def _ail_ta3_unbits(bits: int) -> float:
+    """The exact binary64 value of a binary32 pattern (the C cast (double)(float)); a NaN that is not the canonical
+    quiet one is a loud stop, as in T2's frombytes."""
+    s = 0
+    if bits >= 2147483648:
+        s = 1
+    e = (bits // 8388608) % 256
+    f = bits % 8388608
+    r = 0.0
+    if e == 255:
+        if f != 0:
+            if bits == 2143289344:
+                return math.nan
+            raise RuntimeError("ail_array: this f32 NaN carries a sign or payload that the compiled build does not keep "
+                               "(stage T3); write instead: ta.frombytes of canonical NaNs (7fc00000) only")
+        r = math.inf
+    elif e == 0:
+        r = _ail_ta_scale(float(f), -149)
+    else:
+        r = _ail_ta_scale(1.0 + float(f) * 1.1920928955078125e-07, e - 127)
+    if s == 1:
+        r = -r
+    return r
+
+
+def _ail_ta3_round(x: float) -> float:
+    """r_f32(x) of design 3.1 and the store rule of 3.4: what `struct.pack('<f', x)` then unpack gives."""
+    return _ail_ta3_unbits(_ail_ta3_bits(x))
+
+
+def _ail_ta3_from(xs: list[float]) -> _AilTA3:
+    a = _AilTA3(len(xs))
+    for k in range(len(xs)):
+        a.d[k] = _ail_ta3_round(xs[k])
+    return a
+
+
+def _ail_ta3_zeros(n: int) -> _AilTA3:
+    return _AilTA3(_ail_ta_length(n))
+
+
+def _ail_ta3_full(n: int, x: float) -> _AilTA3:
+    m = _ail_ta_length(n)
+    a = _AilTA3(m)
+    v = _ail_ta3_round(x)
+    for k in range(m):
+        a.d[k] = v
+    return a
+
+
+def _ail_ta3_copy(a: _AilTA3) -> _AilTA3:
+    n = len(a.d)
+    b = _AilTA3(n)
+    for k in range(n):
+        b.d[k] = a.d[k]
+    return b
+
+
+def _ail_ta3_frombytes(data: bytes) -> _AilTA3:
+    if len(data) % 4 != 0:
+        raise ValueError("ail_array: byte length " + str(len(data)) + " is not a multiple of 4 (f32)")
+    n = len(data) // 4
+    a = _AilTA3(n)
+    for k in range(n):
+        j = k * 4
+        a.d[k] = _ail_ta3_unbits(data[j] + data[j + 1] * 256 + data[j + 2] * 65536 + data[j + 3] * 16777216)
+    return a
+
+
+def _ail_ta3_tobytes(a: _AilTA3) -> bytes:
+    n = len(a.d)
+    out = bytearray(n * 4)
+    for k in range(n):
+        b = _ail_ta3_bits(a.d[k])
+        j = k * 4
+        out[j] = b % 256
+        out[j + 1] = (b // 256) % 256
+        out[j + 2] = (b // 65536) % 256
+        out[j + 3] = b // 16777216
+    return bytes(out)
+
+
+def _ail_ta3_tolist(a: _AilTA3) -> list[float]:
+    return list(a.d)
+
+
+def _ail_ta3_repr(a: _AilTA3) -> str:
+    s = "array(["
+    for k in range(len(a.d)):
+        if k > 0:
+            s = s + ", "
+        s = s + repr(a.d[k])
+    return s + "], f32)"
+
+
+def _ail_ta3_get(a: _AilTA3, i: int) -> float:
+    return a.d[_ail_ta_oob(len(a.d), i)]
+
+
+def _ail_ta3_set(a: _AilTA3, i: int, x: float):
+    k = _ail_ta_oob(len(a.d), i)
+    a.d[k] = _ail_ta3_round(x)
+
+
+def _ail_ta3_slice(a: _AilTA3, lo: int, hi: int, st: int, flags: int) -> _AilTA3:
+    r = _ail_ta_slice(len(a.d), lo, hi, st, flags)
+    out = _AilTA3(r[1])
+    for j in range(r[1]):
+        out.d[j] = a.d[r[0] + j * r[2]]
+    return out
+
+
+def _ail_ta3_setslice(a: _AilTA3, lo: int, hi: int, st: int, flags: int, b: _AilTA3):
+    r = _ail_ta_slice(len(a.d), lo, hi, st, flags)
+    if r[1] != len(b.d):
+        raise ValueError("ail_array: slice assignment needs " + str(r[1]) + " elements, not " + str(len(b.d)))
+    src = list(b.d)
+    for j in range(r[1]):
+        a.d[r[0] + j * r[2]] = src[j]
+
+
+def _ail_ta3_eq(a: _AilTA3, b: _AilTA3) -> bool:
+    if len(a.d) != len(b.d):
+        return False
+    for k in range(len(a.d)):
+        if a.d[k] != b.d[k]:
+            return False
+    return True
+
+
+def _ail_ta_ne_dtype3(a, b) -> bool:
+    return False
+
+
+def _ail_ta3_aa(dst: _AilTA3, a: _AilTA3, b: _AilTA3, op: int):
+    """dst = a op b (op 0 + 1 - 2 * 3 /) computed in binary64, rounded once to f32; dst may be a or b."""
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if op == 0:
+        for k in range(n):
+            dst.d[k] = _ail_ta3_round(a.d[k] + b.d[k])
+    elif op == 1:
+        for k in range(n):
+            dst.d[k] = _ail_ta3_round(a.d[k] - b.d[k])
+    elif op == 2:
+        for k in range(n):
+            dst.d[k] = _ail_ta3_round(a.d[k] * b.d[k])
+    else:
+        for k in range(n):
+            y = b.d[k]
+            v = 0.0
+            if y == 0.0:
+                v = _ail_ta_fdiv0(a.d[k], y)
+            else:
+                v = a.d[k] / y
+            dst.d[k] = _ail_ta3_round(v)
+
+
+def _ail_ta3_as(dst: _AilTA3, a: _AilTA3, x: float, op: int, refl: bool):
+    """dst = a op x, or x op a when refl; x is the scalar already rounded to f32 (the store rule of 3.6)."""
+    n = len(a.d)
+    s = _ail_ta3_round(x)
+    if op == 0:
+        for k in range(n):
+            dst.d[k] = _ail_ta3_round(a.d[k] + s)
+    elif op == 1:
+        if refl:
+            for k in range(n):
+                dst.d[k] = _ail_ta3_round(s - a.d[k])
+        else:
+            for k in range(n):
+                dst.d[k] = _ail_ta3_round(a.d[k] - s)
+    elif op == 2:
+        for k in range(n):
+            dst.d[k] = _ail_ta3_round(a.d[k] * s)
+    else:
+        for k in range(n):
+            p = a.d[k]
+            q = s
+            if refl:
+                p = s
+                q = a.d[k]
+            v = 0.0
+            if q == 0.0:
+                v = _ail_ta_fdiv0(p, q)
+            else:
+                v = p / q
+            dst.d[k] = _ail_ta3_round(v)
+
+
+def _ail_ta3_bin(a: _AilTA3, b: _AilTA3, op: int) -> _AilTA3:
+    out = _AilTA3(len(a.d))
+    _ail_ta3_aa(out, a, b, op)
+    return out
+
+
+def _ail_ta3_bin_s(a: _AilTA3, x: float, op: int, refl: bool) -> _AilTA3:
+    out = _AilTA3(len(a.d))
+    _ail_ta3_as(out, a, x, op, refl)
+    return out
+
+
+def _ail_ta3_ibin(a: _AilTA3, b: _AilTA3, op: int) -> _AilTA3:
+    _ail_ta3_aa(a, a, b, op)
+    return a
+
+
+def _ail_ta3_ibin_s(a: _AilTA3, x: float, op: int) -> _AilTA3:
+    _ail_ta3_as(a, a, x, op, False)
+    return a
+
+
+def _ail_ta3_neg(a: _AilTA3) -> _AilTA3:
+    out = _AilTA3(len(a.d))
+    for k in range(len(a.d)):
+        out.d[k] = _ail_ta3_round(-a.d[k])
+    return out
+
+
+def _ail_ta3_abs(a: _AilTA3) -> _AilTA3:
+    out = _AilTA3(len(a.d))
+    for k in range(len(a.d)):
+        out.d[k] = _ail_ta3_round(math.fabs(a.d[k]))
+    return out
+
+
+def _ail_ta3_fn(a: _AilTA3, which: int) -> _AilTA3:
+    """which: 0 sqrt, 1 exp, 2 log, 3 tanh; r_T(math.<f>(x)) (design 3.1)."""
+    out = _AilTA3(len(a.d))
+    for k in range(len(a.d)):
+        x = a.d[k]
+        v = 0.0
+        if x != x:
+            v = math.nan
+        elif which == 0:
+            if x < 0.0:
+                v = math.nan
+            else:
+                v = math.sqrt(x)
+        elif which == 1:
+            try:
+                v = math.exp(x)
+            except OverflowError:
+                v = math.inf
+        elif which == 2:
+            if x < 0.0:
+                v = math.nan
+            elif x == 0.0:
+                v = -math.inf
+            else:
+                v = math.log(x)
+        else:
+            v = math.tanh(x)
+        out.d[k] = _ail_ta3_round(v)
+    return out
+
+
+def _ail_ta3_pick_aa(a: _AilTA3, b: _AilTA3, smaller: bool) -> _AilTA3:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTA3(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if x != x or y != y:
+            out.d[k] = math.nan
+        elif _ail_ta_fless(y, x) == smaller:
+            out.d[k] = y
+        else:
+            out.d[k] = x
+    return out
+
+
+def _ail_ta3_pick_as(a: _AilTA3, s: float, smaller: bool) -> _AilTA3:
+    n = len(a.d)
+    y = _ail_ta3_round(s)
+    out = _AilTA3(n)
+    for k in range(n):
+        x = a.d[k]
+        if x != x or y != y:
+            out.d[k] = math.nan
+        elif _ail_ta_fless(y, x) == smaller:
+            out.d[k] = y
+        else:
+            out.d[k] = x
+    return out
+
+
+def _ail_ta3_bsum(d: list[float], start: int, stop: int) -> float:
+    """One block of design 3.5 with a binary32 accumulator: 16 lanes from -0.0, element k of the block to lane k % 16 in index
+    order, one rounding after every add, then the 8-4-2-1 tree over the lanes."""
+    lanes = [-0.0] * 16
+    k = start
+    while k < stop:
+        lane = (k - start) % 16
+        lanes[lane] = _ail_ta3_round(lanes[lane] + d[k])
+        k = k + 1
+    w = 8
+    while w > 0:
+        i = 0
+        while i < w:
+            lanes[i] = _ail_ta3_round(lanes[i] + lanes[i + w])
+            i = i + 1
+        w = w // 2
+    return lanes[0]
+
+
+def _ail_ta3_tree(blocks: list[float], lo: int, hi: int) -> float:
+    """The power-of-two tree over blocks of design 3.5, rounded to f32 after every add."""
+    if hi - lo == 1:
+        return blocks[lo]
+    p = 1
+    while p * 2 < hi - lo:
+        p = p * 2
+    return _ail_ta3_round(_ail_ta3_tree(blocks, lo, lo + p) + _ail_ta3_tree(blocks, lo + p, hi))
+
+
+def _ail_ta3_sum(a: _AilTA3) -> float:
+    n = len(a.d)
+    if n == 0:
+        return 0.0
+    nb = (n + 1023) // 1024
+    blocks = [0.0] * nb
+    for b in range(nb):
+        s = b * 1024
+        t = s + 1024
+        if t > n:
+            t = n
+        blocks[b] = _ail_ta3_bsum(a.d, s, t)
+    r = _ail_ta3_tree(blocks, 0, nb)
+    if r != r:
+        return math.nan
+    return r
+
+
+def _ail_ta3_dot(a: _AilTA3, b: _AilTA3) -> float:
+    """The products rounded to f32 first, then the fixed order of 3.5 with a f32 accumulator: bit for bit ta.sum(a * b)."""
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if n == 0:
+        return 0.0
+    p = [0.0] * n
+    for k in range(n):
+        p[k] = _ail_ta3_round(a.d[k] * b.d[k])
+    nb = (n + 1023) // 1024
+    blocks = [0.0] * nb
+    for c in range(nb):
+        s = c * 1024
+        t = s + 1024
+        if t > n:
+            t = n
+        blocks[c] = _ail_ta3_bsum(p, s, t)
+    r = _ail_ta3_tree(blocks, 0, nb)
+    if r != r:
+        return math.nan
+    return r
+
+
+def _ail_ta3_sum64(a: _AilTA3) -> float:
+    """ta.sum(a, acc=ta.f64): the elements are exact in binary64, so this is the design 3.5 order there."""
+    return _ail_taf_fsum_s(a.d)
+
+
+def _ail_ta3_dot64(a: _AilTA3, b: _AilTA3) -> float:
+    if len(b.d) != len(a.d):
+        _ail_ta_shapes(len(a.d), len(b.d))
+    return _ail_taf_fsum_d(a.d, b.d)
+
+
+def _ail_ta3_extreme(a: _AilTA3, smaller: bool, name: str) -> list[int]:
+    n = len(a.d)
+    if n == 0:
+        raise ValueError(name + "() iterable argument is empty")
+    best = 0
+    for k in range(n):
+        x = a.d[k]
+        if x != x:
+            return [k]
+        if k > 0:
+            if smaller:
+                if _ail_ta_fless(x, a.d[best]):
+                    best = k
+            else:
+                if _ail_ta_fless(a.d[best], x):
+                    best = k
+    return [best]
+
+
+def _ail_ta3_min(a: _AilTA3) -> float:
+    return _ail_ta_canon(a.d[_ail_ta3_extreme(a, True, "min")[0]])
+
+
+def _ail_ta3_max(a: _AilTA3) -> float:
+    return _ail_ta_canon(a.d[_ail_ta3_extreme(a, False, "max")[0]])
+
+
+def _ail_ta3_argmin(a: _AilTA3) -> int:
+    return _ail_ta3_extreme(a, True, "argmin")[0]
+
+
+def _ail_ta3_argmax(a: _AilTA3) -> int:
+    return _ail_ta3_extreme(a, False, "argmax")[0]
+
+
+def _ail_ta3_to_f64(a: _AilTA3) -> _AilTAF:
+    """astype(ta.f64): every binary32 value is exact in binary64 (design 3.4)."""
+    n = len(a.d)
+    out = _AilTAF(n)
+    for k in range(n):
+        out.d[k] = a.d[k]
+    return out
+
+
+def _ail_taf_to_f32(a: _AilTAF) -> _AilTA3:
+    """astype(ta.f32): r_f32 of every element, overflow to inf and canonical NaN (design 3.4)."""
+    n = len(a.d)
+    out = _AilTA3(n)
+    for k in range(n):
+        out.d[k] = _ail_ta3_round(a.d[k])
+    return out
+
+
+def _ail_tai_to_f32(a: _AilTAI) -> _AilTA3:
+    """astype(ta.f32) of an int32 array: float(x) is exact, then one rounding."""
+    n = len(a.d)
+    out = _AilTA3(n)
+    for k in range(n):
+        out.d[k] = _ail_ta3_round(float(a.d[k]))
+    return out
+
+
+def _ail_ta3_to_i32(a: _AilTA3, nearest: bool, mode: int) -> _AilTAI:
+    """astype(ta.int32) of an f32 array: the same rules as the f64 cast (design 3.4); mode 0 raise, 1 saturate."""
+    n = len(a.d)
+    out = _AilTAI(n)
+    for k in range(n):
+        x = a.d[k]
+        if x != x:
+            if mode == 1:
+                out.d[k] = 0
+                continue
+            raise ValueError("cannot convert float NaN to integer")
+        if x == math.inf or x == -math.inf:
+            if mode == 1:
+                if x > 0.0:
+                    out.d[k] = 2147483647
+                else:
+                    out.d[k] = -2147483648
+                continue
+            raise OverflowError("cannot convert float infinity to integer")
+        v = 0
+        if x >= 4294967296.0:
+            v = 4294967296
+        elif x <= -4294967296.0:
+            v = -4294967296
+        elif nearest:
+            f = int(x)
+            if float(f) > x:
+                f = f - 1
+            r = x - float(f)
+            if r > 0.5:
+                v = f + 1
+            elif r < 0.5:
+                v = f
+            elif f % 2 == 0:
+                v = f
+            else:
+                v = f + 1
+        else:
+            v = int(x)
+        if v < -2147483648 or v > 2147483647:
+            if mode == 1:
+                if v < 0:
+                    v = -2147483648
+                else:
+                    v = 2147483647
+            else:
+                raise OverflowError("int32 cast overflow at index " + str(k))
+        out.d[k] = v
+    return out

@@ -11,7 +11,7 @@ is returned as it was written (the same string), so its C does not change. Other
   `ail_array.py` before any C is involved;
 * operators, indexing, slices, `len`, iteration and printing on a value of known array kind become direct calls of those
   functions (typed path, no dispatch); an array whose kind cannot be told where the lowering needs it is refused with
-  file:line and what to write instead; the dtypes f32, f16 and int8 are stage T3 and refused by name.
+  file:line and what to write instead; f32 is built (stage T3), f16 and int8 are refused by name.
 
 A refusal leaves the program as written and adds a `note:` line (the same convention as stdlib5), after which the build
 fails because the program's own `ail_array.py` is not in the subset.
@@ -31,15 +31,19 @@ MODULE = 'ail_array'
 API = {'DType', 'Array', 'Matrix', 'matmul', 'f64', 'f32', 'f16', 'int8', 'int32', 'array', 'zeros', 'full', 'arange', 'frombytes', 'sqrt',
        'exp', 'log', 'tanh', 'minimum', 'maximum', 'clip', 'wrapping_add', 'wrapping_sub', 'wrapping_mul',
        'saturating_add', 'saturating_sub', 'sum', 'dot', 'min', 'max', 'argmin', 'argmax'}
-DTYPES = {'f64': 'F', 'int32': 'I'}
-LATER = {'f32', 'f16', 'int8'}          # stage T3
+DTYPES = {'f64': 'F', 'f32': '3', 'int32': 'I'}
+LATER = {'f16', 'int8'}                 # after stage T3
 OUTSIDE = {'bf16', 'uint8', 'int16', 'int64', 'bool_', 'uint16', 'uint32', 'uint64', 'float32', 'float16'}
-ARR = ('AF', 'AI', 'MF')
-PK = {'AF': '_ail_taf_', 'AI': '_ail_tai_', 'MF': '_ail_tam_'}
+ARR = ('AF', 'AI', 'A3', 'MF')
+PK = {'AF': '_ail_taf_', 'AI': '_ail_tai_', 'A3': '_ail_ta3_', 'MF': '_ail_tam_'}
 SCALAR = ('F', 'I', 'B')
-CLASS = {'F': '_AilTAF', 'I': '_AilTAI'}
-P = {'F': '_ail_taf_', 'I': '_ail_tai_'}
-AKIND = {'F': 'AF', 'I': 'AI'}
+CLASS = {'F': '_AilTAF', 'I': '_AilTAI', '3': '_AilTA3'}
+P = {'F': '_ail_taf_', 'I': '_ail_tai_', '3': '_ail_ta3_'}
+AKIND = {'F': 'AF', 'I': 'AI', '3': 'A3'}
+DTNAME = {'F': 'f64', 'I': 'int32', '3': 'f32'}
+TE = {'F': '_ail_ta_te_af', 'I': '_ail_ta_te_ai', '3': '_ail_ta_te_a3'}
+VE = {'F': '_ail_ta_ve_af', 'I': '_ail_ta_ve_ai', '3': '_ail_ta_ve_a3'}
+NE = {'AF': '_ail_ta_ne_dtype', 'AI': '_ail_ta_ne_dtype2', 'A3': '_ail_ta_ne_dtype3'}
 MATH_FLOAT = {'sqrt', 'exp', 'log', 'log2', 'log10', 'sin', 'cos', 'tan', 'fabs', 'pow', 'tanh', 'atan', 'atan2', 'hypot',
               'fmod', 'copysign', 'cbrt', 'exp2', 'expm1', 'log1p', 'asin', 'acos', 'sinh', 'cosh', 'degrees', 'radians'}
 MATH_INT = {'floor', 'ceil', 'trunc', 'isqrt', 'gcd', 'lcm', 'factorial', 'comb', 'perm'}
@@ -136,13 +140,13 @@ class Typer:
         if found in DTYPES:
             return DTYPES[found]
         if found in LATER:
-            no(node, '%s arrays are stage T3 of the typed arrays and not built here' % found,
-               'ta.f64 or ta.int32 (the program runs unchanged under CPython)')
+            no(node, '%s arrays come after stage T3 of the typed arrays and are not built here' % found,
+               'ta.f32, ta.f64 or ta.int32 (the program runs unchanged under CPython)')
         if found in OUTSIDE or found == 'DType':
             no(node, 'ail_array has f64, f32, f16, int8, int32', 'ta.int32 (or a list)')
         if found is not None:
-            no(node, 'ta.%s is not a dtype' % found, 'ta.f64 or ta.int32')
-        no(node, 'the dtype is not known at compile time', 'a literal ta.f64 or ta.int32 here')
+            no(node, 'ta.%s is not a dtype' % found, 'ta.f64, ta.f32 or ta.int32')
+        no(node, 'the dtype is not known at compile time', 'a literal ta.f64, ta.f32 or ta.int32 here')
 
     def annot_kind(self, node):
         if node is None:
@@ -220,7 +224,7 @@ class Typer:
                         else None
                 return 'MF' if isinstance(node.slice, ast.Slice) else 'AF'
             if v in ARR:
-                return v if isinstance(node.slice, ast.Slice) else ('F' if v == 'AF' else 'I') \
+                return v if isinstance(node.slice, ast.Slice) else v[1] \
                     if not isinstance(node.slice, ast.Tuple) else None
             if v in ('LF', 'LI'):
                 return v if isinstance(node.slice, ast.Slice) else ('F' if v == 'LF' else 'I')
@@ -338,7 +342,7 @@ class Typer:
                 if f.attr == 'copy':
                     return v
                 if f.attr == 'tolist':
-                    return 'LF' if v == 'AF' else 'LI'
+                    return 'LF' if v in ('AF', 'A3') else 'LI'
                 if f.attr == 'tobytes':
                     return 'BY'
                 if f.attr == 'astype' and node.args:
@@ -372,13 +376,13 @@ class Typer:
             return 'MF'
         a = self.kind(args['a'], env) if 'a' in args else None
         if found in ('sqrt', 'exp', 'log', 'tanh'):
-            return 'MF' if a == 'MF' else 'AF'
+            return 'MF' if a == 'MF' else ('A3' if a == 'A3' else 'AF')
         if found in ('minimum', 'maximum', 'clip'):
             return a if a in ARR else None
         if found.startswith('wrapping') or found.startswith('saturating'):
             return 'AI'
         if found in ('sum', 'dot', 'min', 'max'):
-            return {'AF': 'F', 'AI': 'I'}.get(a)
+            return {'AF': 'F', 'AI': 'I', 'A3': 'F'}.get(a)
         if found in ('argmin', 'argmax'):
             return 'I'
         return None
@@ -450,7 +454,7 @@ class Typer:
                 arrays = {k for k in got if k in ARR}
                 if arrays and arg.annotation is None and (len(arrays) > 1 or got != arrays):
                     no(fn, "parameter '%s' of %s() receives %s from the calls in this program" % (
-                        arg.arg, name, 'arrays of different kinds (1-D f64, 2-D f64, int32)' if len(arrays) > 1 else
+                        arg.arg, name, 'arrays of different kinds (1-D f64, 1-D f32, 2-D f64, int32)' if len(arrays) > 1 else
                         'an array from one call and something else (or something unknown) from another'),
                        "one function per dtype, or annotate it (%s: ta.Array[ta.f64])" % arg.arg)
 
@@ -594,9 +598,9 @@ class Lower(ast.NodeTransformer):
         """The visited operand `node` of kind `kd` stored into an array of dtype `dt` ('F' or 'I')."""
         new = self.visit(node)
         if kd == 'F':
-            return new if dt == 'F' else None
+            return new if dt in ('F', '3') else None
         if kd in ('I', 'B'):
-            if dt == 'F':
+            if dt in ('F', '3'):
                 return call('float', new) if kd == 'I' else call('_ail_ta_b2f', new)
             return new if kd == 'I' else call('_ail_ta_b2i', new)
         no(node, 'cannot tell whether this operand is a number or an array', 'annotate it (x: float, x: int or x: ta.Array[ta.f64])')
@@ -856,14 +860,14 @@ class Lower(ast.NodeTransformer):
             if vkind not in ARR:
                 if vkind is None:
                     no(node, 'cannot tell the type of the value assigned to a slice', 'annotate it (b: ta.Array[ta.f64])')
-                return ast.Expr(value=call('_ail_ta_te_' + ('af' if dt == 'F' else 'ai'),
+                return ast.Expr(value=call(TE[dt],
                                            const('ail_array: can only assign an ail_array.Array to a slice, not %s' %
-                                                 {'F': 'float', 'I': 'int', 'B': 'bool', 'S': 'str', 'LF': 'list',
-                                                  'LI': 'list', 'BY': 'bytes', 'BA': 'bytearray'}.get(vkind, 'object'))))
+                                                 {'F': 'float', 'I': 'int', '3': 'float', 'B': 'bool', 'S': 'str',
+                                                  'LF': 'list', 'LI': 'list', 'BY': 'bytes', 'BA': 'bytearray'}.get(vkind, 'object'))))
             if vkind != kd:
-                return ast.Expr(value=call('_ail_ta_te_' + ('af' if dt == 'F' else 'ai'),
+                return ast.Expr(value=call(TE[dt],
                                            const('ail_array: slice assignment: dtypes differ (%s and %s)' %
-                                                 ('f64' if dt == 'F' else 'int32', 'f64' if vkind == 'AF' else 'int32'))))
+                                                 (DTNAME[dt], DTNAME[vkind[1]]))))
             lo, hi, st, flags = self.slice_args(idx)
             return ast.Expr(value=call(P[dt] + 'setslice', arr, lo, hi, st, flags, self.visit(value)))
         ik = self.k(idx)
@@ -872,11 +876,11 @@ class Lower(ast.NodeTransformer):
         if ik in ('F', 'S'):
             no(node, 'an index that is not an int', 'an int index')
         index = self.visit(idx)
-        if dt == 'F':
+        if dt in ('F', '3'):
             if vkind not in SCALAR:
                 no(node, 'cannot tell whether the stored value is a number', 'annotate it (x: float)')
             val = self.visit(value) if vkind == 'F' else call('float' if vkind == 'I' else '_ail_ta_b2f', self.visit(value))
-            return ast.Expr(value=call('_ail_taf_set', arr, index, val))
+            return ast.Expr(value=call(P[dt] + 'set', arr, index, val))
         if vkind in ('I', 'B'):
             val = self.visit(value) if vkind == 'I' else call('_ail_ta_b2i', self.visit(value))
             return ast.Expr(value=call('_ail_tai_set', arr, index, val))
@@ -973,8 +977,8 @@ class Lower(ast.NodeTransformer):
             if isinstance(node.op, ast.USub):
                 if kd == 'MF':
                     return call('_ail_tam_neg', self.visit(node.operand))
-                if kd == 'AF':
-                    return call('_ail_taf_neg', self.visit(node.operand))
+                if kd in ('AF', 'A3'):
+                    return call(PK[kd] + 'neg', self.visit(node.operand))
                 return call('_ail_tai_unary', self.visit(node.operand), const(False))
             if isinstance(node.op, ast.Not):
                 no(node, 'the truth value of an array', 'len(a) > 0')
@@ -1000,18 +1004,17 @@ class Lower(ast.NodeTransformer):
             return self.arith2(left, lk, right, rk, code, sym, where, inplace)
         if lk in ARR:
             dt = lk[1]
-            if dt == 'F' and sym in ('//', '%'):
-                no(where, '%s on f64 arrays' % sym, 'a loop over a.tolist()')
+            if dt in ('F', '3') and sym in ('//', '%'):
+                no(where, '%s on %s arrays' % (sym, DTNAME[dt]), 'a loop over a.tolist()')
             if dt == 'I' and sym == '/':
                 no(where, '/ on int32 arrays', 'a.astype(ta.f64) / b.astype(ta.f64)')
             if rk in ARR:
                 if rk != lk:
                     self.need_pure(left, 'a dtype mismatch')
                     self.need_pure(right, 'a dtype mismatch')
-                    return call('_ail_ta_te_a' + dt.lower(), const(
+                    return call(TE[dt], const(
                         'ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
-                        ('f64' if dt == 'F' else 'int32', sym, 'f64' if rk == 'AF' else 'int32',
-                         'f64' if rk == 'AF' else 'int32', 'f64' if dt == 'F' else 'int32')))
+                        (DTNAME[dt], sym, DTNAME[rk[1]], DTNAME[rk[1]], DTNAME[dt])))
                 a, b = self.visit(left), self.visit(right)
                 return call(P[dt] + ('ibin' if inplace else 'bin'), a, b, const(code))
             if dt == 'I' and rk == 'F':
@@ -1027,8 +1030,8 @@ class Lower(ast.NodeTransformer):
         dt = rk[1]
         if inplace:
             no(where, 'an in-place operator with an array on the right', 'a = a op b')
-        if dt == 'F' and sym in ('//', '%'):
-            no(where, '%s on f64 arrays' % sym, 'a loop over a.tolist()')
+        if dt in ('F', '3') and sym in ('//', '%'):
+            no(where, '%s on %s arrays' % (sym, DTNAME[dt]), 'a loop over a.tolist()')
         if dt == 'I' and sym == '/':
             no(where, '/ on int32 arrays', 'a.astype(ta.f64) / b.astype(ta.f64)')
         if dt == 'I' and lk == 'F':
@@ -1040,7 +1043,7 @@ class Lower(ast.NodeTransformer):
     def arith2(self, left, lk, right, rk, code, sym, where, inplace):
         """An operator with a 2-D f64 array on one side: the other is a 2-D array of the same shape, or a number."""
         if lk in ARR and rk in ARR and lk != rk:
-            no(where, 'a 2-D array and a 1-D or int32 array (a row broadcast is not built)',
+            no(where, 'a 2-D array and a 1-D f32/f64 or int32 array (a row broadcast is not built)',
                'a loop over the rows: M[i] op row')
         if sym in ('//', '%'):
             no(where, '%s on f64 arrays' % sym, 'a loop over the elements')
@@ -1082,10 +1085,10 @@ class Lower(ast.NodeTransformer):
             res = call('_ail_ta_ne_shape' if lk == 'AF' else '_ail_ta_ne_shape2', self.visit(node.left),
                        self.visit(node.comparators[0]))
         elif 'MF' in (lk, rk):
-            no(node, 'comparing a 2-D array with an int32 array', 'a loop over the rows')
+            no(node, 'comparing a 2-D array with a 1-D array of another dtype', 'a loop over the rows')
         else:
             first, second = (node.left, node.comparators[0])
-            res = call('_ail_ta_ne_dtype' if lk == 'AF' else '_ail_ta_ne_dtype2', self.visit(first), self.visit(second))
+            res = call(NE[lk], self.visit(first), self.visit(second))
         if isinstance(op, ast.NotEq):
             return ast.UnaryOp(op=ast.Not(), operand=res)
         return res
@@ -1124,7 +1127,7 @@ class Lower(ast.NodeTransformer):
             no(node, 'fancy indexing or a mask', 'a loop, or ta.minimum/ta.maximum/ta.clip')
         if ik in ('F', 'S'):
             self.need_pure(node.value, 'an index that is not an int')
-            return call('_ail_ta_te_f' if dt == 'F' else '_ail_ta_te_i', const('array indices must be integers'))
+            return call('_ail_ta_te_f' if dt in ('F', '3') else '_ail_ta_te_i', const('array indices must be integers'))
         return call(P[dt] + 'get', arr, self.visit(idx))
 
     def visit_JoinedStr(self, node):
@@ -1165,8 +1168,8 @@ class Lower(ast.NodeTransformer):
                 kd = self.k(node.args[0])
                 if kd == 'MF':
                     return call('_ail_tam_abs', self.visit(node.args[0]))
-                if kd == 'AF':
-                    return call('_ail_taf_abs', self.visit(node.args[0]))
+                if kd in ('AF', 'A3'):
+                    return call(PK[kd] + 'abs', self.visit(node.args[0]))
                 return call('_ail_tai_unary', self.visit(node.args[0]), const(True))
             if f.id == 'list' and len(node.args) == 1 and not node.keywords:
                 if self.k(node.args[0]) == 'MF':
@@ -1228,18 +1231,27 @@ class Lower(ast.NodeTransformer):
         src = kd[1]
         if kd == 'MF':
             no(node, 'astype on a 2-D array', 'an f64 2-D array has no other dtype in this stage')
-        mk = 'af' if dst == 'F' else 'ai'
         if opts['rounding'] not in ('trunc', 'nearest'):
-            return call('_ail_ta_ve_' + mk, const("ail_array: rounding must be 'trunc' or 'nearest', not %r" % opts['rounding']))
+            return call(VE[dst], const("ail_array: rounding must be 'trunc' or 'nearest', not %r" % opts['rounding']))
         if opts['overflow'] not in ('raise', 'saturate', 'wrap'):
-            return call('_ail_ta_ve_' + mk, const("ail_array: overflow must be 'raise', 'saturate' or 'wrap', not %r" % opts['overflow']))
+            return call(VE[dst], const("ail_array: overflow must be 'raise', 'saturate' or 'wrap', not %r" % opts['overflow']))
         if dst == 'F':
-            return call('_ail_taf_to_f64' if src == 'F' else '_ail_tai_to_f64', recv)
-        if src == 'F':
+            if src == 'F':
+                return call('_ail_taf_to_f64', recv)
+            if src == '3':
+                return call('_ail_ta3_to_f64', recv)
+            return call('_ail_tai_to_f64', recv)
+        if dst == '3':
+            if src == '3':
+                return call('_ail_ta3_copy', recv)
+            if src == 'F':
+                return call('_ail_taf_to_f32', recv)
+            return call('_ail_tai_to_f32', recv)
+        if src in ('F', '3'):
             if opts['overflow'] == 'wrap':
                 return call('_ail_ta_ve_ai', const("ail_array: overflow='wrap' is for int-to-int casts; use 'raise' or 'saturate'"))
-            return call('_ail_taf_to_i32', recv, const(opts['rounding'] == 'nearest'),
-                        const(1 if opts['overflow'] == 'saturate' else 0))
+            return call('_ail_taf_to_i32' if src == 'F' else '_ail_ta3_to_i32', recv,
+                        const(opts['rounding'] == 'nearest'), const(1 if opts['overflow'] == 'saturate' else 0))
         return call('_ail_tai_copy', recv)
 
     def dtype_arg(self, node, args, found):
@@ -1260,7 +1272,7 @@ class Lower(ast.NodeTransformer):
     def element(self, node, dt):
         """The visited list element `node` as a value of the dtype's element type."""
         kd = self.k(node)
-        if dt == 'F':
+        if dt in ('F', '3'):
             if kd == 'F':
                 return self.visit(node)
             if kd == 'I':
@@ -1287,7 +1299,7 @@ class Lower(ast.NodeTransformer):
             self.env = saved
             return ast.ListComp(elt=elt, generators=gens)
         kd = self.k(node)
-        want = 'LF' if dt == 'F' else 'LI'
+        want = 'LF' if dt in ('F', '3') else 'LI'
         if kd == want:
             return self.visit(node)
         if kd == 'MF':
@@ -1295,22 +1307,22 @@ class Lower(ast.NodeTransformer):
         if kd in ARR:
             if kd[1] == dt:
                 return ast.Attribute(value=self.visit(node), attr='d', ctx=ast.Load())
-            if dt == 'F':
+            if dt in ('F', '3'):
                 return ast.ListComp(elt=call('float', n('_ail_v')), generators=[ast.comprehension(
                     target=ast.Name(id='_ail_v', ctx=ast.Store()), iter=ast.Attribute(value=self.visit(node), attr='d',
                                                                                      ctx=ast.Load()), ifs=[], is_async=0)])
-        if kd in ('LI', 'R') and dt == 'F':
+        if kd in ('LI', 'R') and dt in ('F', '3'):
             return ast.ListComp(elt=call('float', n('_ail_v')), generators=[ast.comprehension(
                 target=ast.Name(id='_ail_v', ctx=ast.Store()), iter=self.visit(node), ifs=[], is_async=0)])
         if kd == 'R' and dt == 'I':
             return call('list', self.visit(node))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'range':
-            if dt == 'F':
+            if dt in ('F', '3'):
                 return ast.ListComp(elt=call('float', n('_ail_v')), generators=[ast.comprehension(
                     target=ast.Name(id='_ail_v', ctx=ast.Store()), iter=self.visit(node), ifs=[], is_async=0)])
             return call('list', self.visit(node))
-        no(node, 'cannot tell the element type of these values for a%s array' % ('n f64' if dt == 'F' else 'n int32'),
-           'a list literal, a comprehension, or a list annotated as list[%s]' % ('float' if dt == 'F' else 'int'))
+        no(node, 'cannot tell the element type of these values for an array of %s' % DTNAME[dt],
+           'a list literal, a comprehension, or a list annotated as list[%s]' % ('float' if dt in ('F', '3') else 'int'))
 
     def dims2(self, shape):
         out = []
@@ -1365,7 +1377,7 @@ class Lower(ast.NodeTransformer):
         args = self.t.bind(node, found)
         if found in ('array', 'zeros', 'full', 'arange', 'frombytes'):
             dt = self.dtype_arg(node, args, found)
-            mk = 'af' if dt == 'F' else 'ai'
+            mk = {'F': 'af', 'I': 'ai', '3': 'a3'}[dt]
             if found in ('zeros', 'full') and isinstance(args.get('shape'), ast.Tuple) and len(args['shape'].elts) != 1:
                 return self.make2(node, found, args, dt)
             if found == 'zeros' and isinstance(args.get('shape'), ast.Tuple):
@@ -1392,7 +1404,7 @@ class Lower(ast.NodeTransformer):
                 if m is None:
                     return call('_ail_ta_te_' + mk, const('ail_array: a length must be an int, not bool'))
                 vk = self.k(args['value'])
-                if dt == 'F':
+                if dt in ('F', '3'):
                     if vk not in SCALAR:
                         no(args['value'], 'cannot tell whether the fill value is a number', 'annotate it (x: float)')
                     val = self.visit(args['value']) if vk == 'F' else call('float' if vk == 'I' else '_ail_ta_b2f', self.visit(args['value']))
@@ -1406,8 +1418,8 @@ class Lower(ast.NodeTransformer):
             if found == 'arange':
                 if 'n' not in args:
                     no(node, 'ta.arange without a length', 'ta.arange(n, ta.int32)')
-                if dt == 'F':
-                    return call('_ail_ta_te_af', const('ail_array: arange() makes int arrays; write arange(n, ta.int32).astype(ta.f64)'))
+                if dt in ('F', '3'):
+                    return call('_ail_ta_te_af', const('ail_array: arange() makes int arrays; write arange(n, ta.int32).astype(ta.%s)' % DTNAME[dt]))
                 m = self.length(args['n'])
                 if m is None:
                     return call('_ail_ta_te_ai', const('ail_array: a length must be an int, not bool'))
@@ -1437,12 +1449,13 @@ class Lower(ast.NodeTransformer):
             if dt == 'I':
                 self.need_pure(a, 'ta.%s of an int32 array' % found)
                 return call('_ail_ta_te_af', const('ail_array.%s() is defined for float arrays, not int32' % found))
-            return call('_ail_taf_fn', self.visit(a), const(('sqrt', 'exp', 'log', 'tanh').index(found)))
+            return call(P[dt] + 'fn', self.visit(a), const(('sqrt', 'exp', 'log', 'tanh').index(found)))
         if found in ('minimum', 'maximum', 'clip'):
             return self.pick(node, found, args, kd)
         if found.startswith('wrapping') or found.startswith('saturating'):
             return self.explicit(node, found, args, kd)
         # reductions
+        accd = None
         for opt in ('acc', 'order'):
             if opt in args:
                 if opt == 'order' and found in ('min', 'max'):
@@ -1457,6 +1470,10 @@ class Lower(ast.NodeTransformer):
                         self.need_pure(a, 'acc= on an int32 array')
                         return call('_ail_ta_ve_f', const('ail_array.%s(): acc= is for float arrays; int32 sums are exact' % found))
         if found == 'sum':
+            if dt == '3':
+                return call('_ail_ta3_sum64' if accd == 'F' else '_ail_ta3_sum', self.visit(a))
+            if dt == 'F' and accd == '3':
+                return call(VE['F'], const('ail_array.sum(): acc=f32 would narrow f64'))
             return call(P[dt] + 'sum', self.visit(a))
         if found == 'dot':
             if 'b' not in args:
@@ -1469,10 +1486,13 @@ class Lower(ast.NodeTransformer):
             if bk != kd:
                 self.need_pure(a, 'a dtype mismatch')
                 self.need_pure(args['b'], 'a dtype mismatch')
-                return call('_ail_ta_te_f' if dt == 'F' else '_ail_ta_te_i', const(
+                return call('_ail_ta_te_f' if dt in ('F', '3') else '_ail_ta_te_i', const(
                     'ail_array: %s dot %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
-                    ('f64' if dt == 'F' else 'int32', 'f64' if bk == 'AF' else 'int32', 'f64' if bk == 'AF' else 'int32',
-                     'f64' if dt == 'F' else 'int32')))
+                    (DTNAME[dt], DTNAME[bk[1]], DTNAME[bk[1]], DTNAME[dt])))
+            if dt == '3':
+                return call('_ail_ta3_dot64' if accd == 'F' else '_ail_ta3_dot', self.visit(a), self.visit(args['b']))
+            if dt == 'F' and accd == '3':
+                return call(VE['F'], const('ail_array.dot(): acc=f32 would narrow f64'))
             return call(P[dt] + 'dot', self.visit(a), self.visit(args['b']))
         return call(P[dt] + found, self.visit(a))
 
@@ -1498,10 +1518,9 @@ class Lower(ast.NodeTransformer):
             no(node, 'ta.%s of a 2-D array and a 1-D or int32 array' % name, 'a loop over the rows')
         if bk in ARR:
             if bk != kd:
-                return call('_ail_ta_te_a' + dt.lower(), const(
+                return call(TE[dt], const(
                     'ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
-                    ('f64' if dt == 'F' else 'int32', name, 'f64' if bk == 'AF' else 'int32',
-                     'f64' if bk == 'AF' else 'int32', 'f64' if dt == 'F' else 'int32')))
+                    (DTNAME[dt], name, DTNAME[bk[1]], DTNAME[bk[1]], DTNAME[dt])))
             return call(PK[kd] + 'pick_aa', left, self.visit(b), const(smaller))
         if dt == 'I' and bk == 'F':
             return call('_ail_ta_te_ai', const('ail_array: int32 %s float: write a.astype(ta.f64) (no implicit int-to-float)' % name))
@@ -1510,8 +1529,8 @@ class Lower(ast.NodeTransformer):
 
     def explicit(self, node, found, args, kd):
         dt = kd[1]
-        if dt == 'F':
-            return call('_ail_ta_te_af', const('ail_array.%s() is defined for int arrays, not f64' % found))
+        if dt in ('F', '3'):
+            return call(TE[dt], const('ail_array.%s() is defined for int arrays, not %s' % (found, DTNAME[dt])))
         if 'b' not in args:
             no(node, 'ta.%s needs two operands' % found, 'ta.%s(a, b)' % found)
         op = {'add': 0, 'sub': 1, 'mul': 2}[found.split('_')[1]]
@@ -1957,7 +1976,7 @@ def rewrite_text(source, notes=None):
         for each in ast.walk(tree):
             if isinstance(each, ast.Name) and (each.id.startswith('_ail_ta') or each.id.startswith('_AilTA')):
                 used.add(each.id)
-        stdlib5.leftover(tree, binder, 'the dtypes are literals ta.f64 / ta.int32, and the functions are called directly')
+        stdlib5.leftover(tree, binder, 'the dtypes are literals ta.f64 / ta.f32 / ta.int32, and the functions are called directly')
         for each in ast.walk(tree):
             if isinstance(each, ast.Name) and each.id in binder.aliases:
                 refuse(each, 'ail_array used as a value is not built')
