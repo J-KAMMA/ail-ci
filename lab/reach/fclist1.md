@@ -57,4 +57,21 @@ needs its own byte-identity run.
 
 See the report in the job notes; every probe matches CPython in both builds, except p08/p20, whose
 CPython output needs an int beyond int64: both builds print the int64 lines and stop with exit 1
-and an overflow message (the int64 default, decided 2026-10-31).
+and an overflow message (the int64 default, decided 2026-10-31); the forced general build does the
+same, so this is not new.
+
+Default build typed: p02 (same list twice), p11 (empty list), p14 (mutation visible to the
+caller), p15 (negative indexes, IndexError), p16 (module-level call), p08/p20 (int64). Default
+build general, as before: p01 repro (`return xs`), p03 grid row, p04 dict value, p05 `f(xs) is
+xs`, p06 global store, p07 append while iterating, p09 `b = a`, p10 list of lists, p12 float
+list, p13 operand order (`a[0] + bump(a)`), p17 forwarding through an int-defaulted parameter,
+p18 `print` of a bool list, p19 `print(perm(a), a)`.
+
+## Generated C
+
+- `lab/compare/src/*/{main,typed}.py`: 16 builds byte-identical `program.c` base vs branch; the
+  other 4 are general-path builds (no `program.c`). Identical C, so icount is unchanged.
+- the 30 programs typed in `lab/pyproof/results.jsonl`: 18 byte-identical `program.c`, 3 debug
+  dirs identical, 6 FFI examples differ only in the `ail_object_abi_<hash>` symbol (a hash of the
+  compiler package files), and 3 are the three targets above.
+- `AIL_CURRENT/test_ail_fclist1.py`: 2 tests OK (all probes and the three programs, both builds).
