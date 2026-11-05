@@ -38270,6 +38270,12 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                           % ', '.join(sorted(_MODCONSTS.vars)))
     global _BORROWED_PARAMS
     _BORROWED_PARAMS = _scan_borrowed_params(tree, library, {name, entry})
+    from ir import borrow as _borrow          # rc2: the read-only-parameter rule (ir/borrow.py)
+    if _borrow.enabled():
+        for _bf, _bp in _borrow.analyze(tree, library, {name, entry}).items():
+            _BORROWED_PARAMS[_bf] = set(_BORROWED_PARAMS.get(_bf, ())) | set(_bp)
+    else:
+        _BORROWED_PARAMS = {}
     # Nested functions (pkg-closure): lifted to ordinary top-level siblings, spliced into
     # `tree.body` immediately before the function that used to contain them, BEFORE anything below
     # inspects `tree.body` -- see the module note above `_lift_nested_functions`. A program with no
@@ -40740,8 +40746,12 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # taken (still holding its `= 0` initial value) costs nothing here either.
     owned_objs = [v for v in ctx.locals if v in ctx.freeable_objs and not _managed_obj(ctx.types[v], ctx)]
     owned += [v for v in ctx.locals if v in getattr(ctx, 'builders', ())]
+    # rc2 (ir/borrow.py): a read-only object parameter takes no entry retain and no exit release;
+    # a method's `self` stays owned (the receiver path borrows it separately, below).
+    _borrowed = _BORROWED_PARAMS.get(fn.name, ())
     object_params = [v for v, kind in ctx.params if _managed_obj(kind, ctx)
-                     and not (not is_method and _is_obj_kind(kind) and v in _BORROWED_PARAMS.get(fn.name, ()))]
+                     and not ((_is_obj_kind(kind) or _is_olist_kind(kind)) and v in _borrowed
+                              and not (is_method and v == 'self'))]
     if ((experimental_borrow_leaf_self and _borrow_leaf_self(fn, ctx, is_method, recursive)
          or experimental_borrow_scalar_self and _borrow_leaf_self(fn, ctx, is_method, recursive, scalar=True))
             # The whitelist excludes Try. A definite Raise sets has_try too;

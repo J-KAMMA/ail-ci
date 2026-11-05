@@ -94,6 +94,7 @@ class _Checker(object):
         if not self.errors:
             self.check_spans()
             self.check_ownership()
+            self.check_borrowed()
         if fn.effects is not None:
             actual = E.summarize(fn, self.program)
             if not fn.effects.covers(actual):
@@ -113,6 +114,30 @@ class _Checker(object):
             return False
         refs = ins.operands[:2] if ins.op in ('list.move', 'list.copy') else ins.operands[:1]
         return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
+
+    def check_borrowed(self):
+        """A borrowed parameter (`fn.attrs['borrow']`) takes no retain on entry, so it must never be
+        stored, returned or released: any of those hands on or drops a reference this function does
+        not own (OSSA's borrowed-value rule)."""
+        names = self.fn.attrs.get('borrow') or ()
+        if not names:
+            return
+        by_name = dict(zip(self.fn.param_names, self.fn.params))
+        for n in names:
+            if n not in by_name:
+                self.err('borrow', 'borrowed parameter %r is not a parameter' % (n,))
+        borrowed = {by_name[n] for n in names if n in by_name}
+        stores = ('store', 'global.store', 'field.set', 'list.set', 'list.push', 'list.lit',
+                  'ba.set', 'ba.push', 'dict.store', 'elem.store', 'rec.push')
+        for ins in I.walk(self.fn.body):
+            if not any(o in borrowed for o in ins.operands):
+                continue
+            if ins.op in stores:
+                self.err(ins.op, 'a borrowed parameter is stored here')
+            elif ins.op in ('return', 'yield'):
+                self.err(ins.op, 'a borrowed parameter is returned here')
+            elif ins.op == 'call' and 'release' in str(ins.attrs.get('callee', '')):
+                self.err(ins.op, 'a borrowed parameter is released here')
 
     def check_ownership(self):
         """The invariants of S3a's single-owner lists: a list reference (borrow) lives only as the
