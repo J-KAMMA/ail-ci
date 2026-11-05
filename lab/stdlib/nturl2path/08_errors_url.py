@@ -1,6 +1,13 @@
 import nturl2path
 
-CASES = ["C|/x|y", "1|/x", "12|/x", "x|a|b"]
+CASES = [
+    "C|/x|y",
+    "1|/x",
+    "12|/x",
+    "x|a|b",
+    "C:/x:y",
+    "Z|a|b",
+]
 
 for url in CASES:
     try:

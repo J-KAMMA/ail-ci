@@ -1,6 +1,13 @@
 import nturl2path
 
-CASES = ["C:x:y", "ab:/x", "\\\\?\\foo", "\\\\?\\ab"]
+CASES = [
+    "C:x:y",
+    "ab:/x",
+    "\\\\?\\foo",
+    "\\\\?\\ab",
+    "C::x",
+    "\\\\?\\x",
+]
 
 for path in CASES:
     try:
