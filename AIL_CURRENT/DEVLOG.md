@@ -1,3 +1,24 @@
+## 2026-11-05 -- relnotice1_rr1: the wheel carries the PSF notice (job-relnotice1_rr1-11060319)
+
+`test_ail_third_party_notices` failed on integ on `test_psf_license_is_in_the_wheel`: the notices
+inventory and its test were added, but the documented follow-up was never done, so
+`packaging/ail_wheel_backend.py` copied only `LICENSE-APACHE`/`LICENSE-MIT`. `collect()` and
+`prepare_metadata_for_build_wheel()` now also copy `AIL_CURRENT/stdlib/LICENSE-PSF.txt` to
+`.dist-info/licenses/LICENSE-PSF.txt` (new `PSF_NOTICE` constant; module docstring updated).
+`test_ail_packaging`'s exact wheel member list gained `NOTICE_FILES` and
+`test_license_metadata_and_files` checks the copied bytes; `THIRD_PARTY_NOTICES.md` Follow-ups
+and the notices test docstring now describe the wheel as carrying the notice. No compiler or
+runtime code changed. `manifest.d` pins were refreshed with `tools/update_manifest.py`
+(`--check` passes).
+
+Tests on the final commit: `test_ail_third_party_notices` 7 OK, `test_ail_packaging` 21 OK,
+`test_ail_obj_refs` 3 OK, `test_ail_safetynet` 5 OK, `test_ail_unified` 14 OK,
+`test_ail_virtual_dispatch` 6 OK, `test_ail_files` and `test_ail_corpus_findings3` OK.
+Probes: `/tmp/probes/p1_psf_stdlib_a.py` (colorsys, keyword, quopri, stat, token) and
+`p2_psf_stdlib_b.py` (difflib, getopt, shlex, tomllib) match CPython stdout and exit on both
+builds; `/tmp/probes/p3_wheel_psf.py` shows one `LICENSE-PSF.txt` member (2715 bytes, byte-equal),
+RECORD covering 555 members, and the prepared metadata copy byte-equal.
+
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 
 `test_ail_refuzz95` failed on `r_tuple` (default build): after the prog18 typed reach,

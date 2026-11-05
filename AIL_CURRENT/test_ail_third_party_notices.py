@@ -7,11 +7,8 @@
 * every file whose row names CPython as its origin says `LICENSE-PSF.txt` in its first 15 lines;
 * every license file the rows name exists;
 * when a C compiler and the wheel backend are available, `ail_wheel_backend.build_wheel` produces a
-  wheel that carries each derived stdlib file, `stdlib/LICENSE-PSF.txt`, and the two root licenses
-  under `.dist-info/licenses/`.
-
-The wheel still lacks the PSF notice until `packaging/ail_wheel_backend.py` copies it (see
-"Follow-ups" in THIRD_PARTY_NOTICES.md); the wheel test reports that as a failure, not a skip.
+  wheel that carries each derived stdlib file, the PSF notice (`stdlib/LICENSE-PSF.txt`) under
+  `.dist-info/licenses/`, and the two root licenses under `.dist-info/licenses/`.
 """
 import os
 import re
