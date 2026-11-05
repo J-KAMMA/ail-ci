@@ -74,7 +74,8 @@ These are refusals in the compiler, not in `sched`; the module is not edited for
    The program also passes `kwargs=`, and a `**kwargs` call argument is refused
    (`not in the subset: a **kwargs call argument`), so `sched` cannot forward keyword arguments
    to an action here; `AIL_CURRENT/stdlib/sched.py` raises `TypeError` for non-empty kwargs.
-   `_invoke` also raises `TypeError` for more than eight positional action arguments.
+   `_invoke` dispatches positional action arguments up to 16; more than 16 raises
+   `TypeError` naming the limit.
 2. `10_time_beyond_int64.py`: `2 ** 63` is refused as an int64 constant out of range, as the
    brief allows (the program stops loudly).
 3. Taking a bound method as a first-class value (`clock.time` passed to `sched.scheduler`) is not

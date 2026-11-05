@@ -36,7 +36,7 @@ Rewrites for the AIL compiler, with the behaviour kept:
   priority come out in insertion (sequence) order, as CPython's named-tuple
   heap does, and the sorted insertion keeps that order after a cancel.
 * The compiler refuses `action(*argument, **kwargs)`, so `_invoke`
-  dispatches on the argument count up to eight.  Keyword arguments raise
+  dispatches on the argument count up to 16.  Keyword arguments raise
   TypeError; that is a compiler follow-up recorded in the lab results.
 * `Event` is `collections.namedtuple('Event', ...)`, so `event.time`,
   `event.priority`, `event.sequence`, `event.action`, `event.argument` and
@@ -88,16 +88,51 @@ def _invoke(action, argument, kwargs):
     elif count == 5:
         action(argument[0], argument[1], argument[2], argument[3], argument[4])
     elif count == 6:
-        action(argument[0], argument[1], argument[2], argument[3], argument[4],
-               argument[5])
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5])
     elif count == 7:
-        action(argument[0], argument[1], argument[2], argument[3], argument[4],
-               argument[5], argument[6])
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6])
     elif count == 8:
-        action(argument[0], argument[1], argument[2], argument[3], argument[4],
-               argument[5], argument[6], argument[7])
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7])
+    elif count == 9:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7], argument[8])
+    elif count == 10:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7],
+               argument[8], argument[9])
+    elif count == 11:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7],
+               argument[8], argument[9], argument[10])
+    elif count == 12:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7],
+               argument[8], argument[9], argument[10], argument[11])
+    elif count == 13:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7],
+               argument[8], argument[9], argument[10], argument[11],
+               argument[12])
+    elif count == 14:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7],
+               argument[8], argument[9], argument[10], argument[11],
+               argument[12], argument[13])
+    elif count == 15:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7],
+               argument[8], argument[9], argument[10], argument[11],
+               argument[12], argument[13], argument[14])
+    elif count == 16:
+        action(argument[0], argument[1], argument[2], argument[3],
+               argument[4], argument[5], argument[6], argument[7],
+               argument[8], argument[9], argument[10], argument[11],
+               argument[12], argument[13], argument[14], argument[15])
     else:
-        raise TypeError("sched: more than eight action arguments are not built by this compiler")
+        raise TypeError("sched: more than 16 action arguments are not built by this compiler")
 
 
 class scheduler:
