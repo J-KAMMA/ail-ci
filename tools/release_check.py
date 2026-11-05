@@ -184,7 +184,7 @@ def main(argv=None):
     elif version is None:
         add(2, "changelog", "FAIL", "cannot look up a version heading without a version")
     else:
-        heading = re.search(r"^#{1,6}\s+.*?(?<![\w.])v?%s(?![\w.])" % re.escape(version), changelog, re.M)
+        heading = re.search(r"^#{1,6}\s+.*?(?<![\w.])v?%s(?![\w.+-])" % re.escape(version), changelog, re.M)
         if heading:
             add(2, "changelog", "PASS", "CHANGELOG.md has a heading for %s" % version)
         else:
