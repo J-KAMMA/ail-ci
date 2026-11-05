@@ -3,6 +3,7 @@
 
     python3 lab/reach/callsite/census.py [-j 2] [--out FILE.jsonl] [--only PATH ...]
     python3 lab/reach/callsite/census.py select [-j 2] -o CANDIDATES.jsonl PROGRAM[=INPUT] ...
+    python3 lab/reach/callsite/census.py make-sample SELECT.jsonl ... > lab/reach/callsite/sample.txt
     python3 lab/reach/callsite/census.py trace PROGRAM INPUT          (one CPython type profile, JSON)
 
 Default mode (the number fcspec1-fcspec3 move): builds every program of sample.txt with the
@@ -279,14 +280,41 @@ def disagreements(src_text, profile):
         for s in sites:
             c = calls.get(s)
             how['extern' if s == 'extern' else c[0] if c else 'unknown'] += 1
-        out.append(dict(fn=qual, line=int(line), scope=scope, kclass=kclass, ntuples=len(tuples),
+        d = dict(fn=qual, line=int(line), scope=scope, kclass=kclass, ntuples=len(tuples),
                         tuples=[list(t) for t in tuples], sites={s: [list(t) for t in ts] for s, ts in sites.items()},
                         how=dict(how), firstclass=name in firstclass,
                         bigint='bigint' in kinds,
                         intfloat=any('int' in t and 'float' in u and t.index('int') == u.index('float')
                                      for t in tuples for u in tuples),
-                        end=getattr(top.get(name), 'end_lineno', None) if scope == 'def' else None))
+                 end=getattr(top.get(name), 'end_lineno', None) if scope == 'def' else None)
+        d['nreal'] = len(real_keys(d))
+        out.append(d)
     return out
+
+
+def _fits(a, b):
+    """Kind `a` with its `?` (an empty container's unknown element) read as a wildcard matches b."""
+    if a == b:
+        return True
+    if '?' not in a:
+        return False
+    return re.fullmatch(re.escape(a).replace(r'\?', '.*'), b) is not None
+
+
+def real_keys(d):
+    """The instance keys the design (section 2) would build for a disagreeing function: an empty
+    container's `?` element is not a key (it takes the element kind of a site that has one), and
+    for a method or `__init__` the `self` position is not a key (a subclass receiver is
+    inheritance, not specialisation). Returns the sorted distinct keys."""
+    tuples = [tuple(t) for t in d['tuples']]
+    if d['scope'] in ('method', 'init'):
+        tuples = [t[1:] for t in tuples]
+    keys = []
+    for t in sorted(set(tuples), key=lambda t: sum('?' in k for k in t)):
+        if any(len(t) == len(k) and all(_fits(x, y) for x, y in zip(t, k)) for k in keys):
+            continue
+        keys.append(t)
+    return sorted(keys)
 
 
 def clone_source(src_text, dis):
@@ -297,12 +325,17 @@ def clone_source(src_text, dis):
     plan = {}
     for d in dis:
         name = d['fn']
-        if d['scope'] != 'def' or name not in top or d['ntuples'] > CAP_K or d['firstclass']:
+        keys = real_keys(d)
+        if d['scope'] != 'def' or name not in top or not 2 <= len(keys) <= CAP_K or d['firstclass']:
             continue
         if set(d['how']) - {'direct'}:
             continue
-        index = {tuple(t): i for i, t in enumerate(d['tuples'])}
-        plan[name] = (index, d['sites'])
+        index = {}
+        for t in d['tuples']:
+            t = tuple(t)
+            index[t] = next(i for i, k in enumerate(keys)
+                            if len(t) == len(k) and all(_fits(x, y) for x, y in zip(t, k)))
+        plan[name] = (index, d['sites'], len(keys))
     if not plan:
         return None, []
 
@@ -313,7 +346,7 @@ def clone_source(src_text, dis):
         def visit_Call(self, node):
             self.generic_visit(node)
             if isinstance(node.func, ast.Name) and node.func.id in plan:
-                index, sites = plan[node.func.id]
+                index, sites, _ = plan[node.func.id]
                 seen = sites.get('%d:%d' % (node.lineno, node.col_offset), [])
                 ids = {index[tuple(t)] for t in seen}
                 if len(ids) == 1:
@@ -325,8 +358,8 @@ def clone_source(src_text, dis):
     body = []
     for n in tree.body:
         if isinstance(n, ast.FunctionDef) and n.name in plan:
-            index, _ = plan[n.name]
-            for i in range(len(index)):
+            _, _, nkeys = plan[n.name]
+            for i in range(nkeys):
                 c = copy.deepcopy(n)
                 c.name = '%s__cs%d' % (n.name, i)
                 body.append(Rebind(n.name, i).visit(c))
@@ -487,6 +520,73 @@ def select_main(a):
     return 0
 
 
+# ----------------------------------------------------------------------------- make-sample
+
+CALLSITE_MSG = re.compile(
+    r"passing a float to .*whose .* is an int64|gets a (list of )?bools? from some calls and a|"
+    r"passing \w+ where .*\(\) wants|but the caller also supplies|default for .* but the parameter is|"
+    r"used both in float arithmetic and at a site|call sites disagree|is called with rows of")
+STEP_OF = {'scalar': 'S1', 'container': 'S2', 'class': 'S3'}
+
+
+def classify(rec):
+    """(step, confidence, functions) of one select record, or None when it is not in the sample:
+    the program must not be typed today and must have a function reached by two or more of the
+    design's instance keys (`real_keys`)."""
+    if rec.get('typed') is not False:
+        return None
+    real = [d for d in rec.get('dis', []) if d.get('nreal', len(real_keys(d))) >= 2]
+    if not real:
+        return None
+    line = rec.get('line')
+    attributable = bool(line) and any(
+        (d.get('end') and d['line'] <= line <= d['end'])
+        or any(s.split(':')[0] == str(line) for s in d['sites']) for d in real)
+    msg = bool(CALLSITE_MSG.search(rec.get('reason') or ''))
+    moved = bool(rec.get('cloned')) and not rec.get('sim_typed') and rec.get('sim_reason') != rec.get('reason')
+    if rec.get('sim_typed'):
+        conf = 'high'
+    elif msg or attributable or moved:
+        conf = 'medium'
+    else:
+        conf = 'low'
+    order = {'S1': 0, 'S2': 1, 'S3': 2, 'out': 3}
+    steps = []
+    for d in real:
+        if d['scope'] in ('nested', 'lambda'):
+            steps.append('out')
+        elif d['scope'] in ('method', 'init'):
+            steps.append('S3')
+        else:
+            steps.append(STEP_OF[d['kclass']] if d['kclass'] != 'class' else 'S3')
+    step = max(steps, key=order.get)      # the step that covers every disagreeing function
+    funcs = ';'.join('%s(%s)' % (d['fn'], '|'.join(','.join(k) for k in real_keys(d))[:120]) for d in real)
+    return step, conf, funcs
+
+
+def make_sample_main(paths):
+    print('# lab/reach/callsite/sample.txt -- fixed order; made by `census.py make-sample` from '
+          '`census.py select` records (docs/design/CALLSITE_SPEC.md section 7)')
+    print('# program<TAB>input<TAB>step (S1 scalar defs, S2 container defs/returns/recursion, S3 methods '
+          'and constructors, out = nested/lambda)<TAB>confidence (high: source clones make it typed; '
+          'medium: the first refusal is a call-site message or sits in/at a disagreeing function; '
+          'low: an unrelated blocker comes first)<TAB>disagreeing functions(keys)')
+    rows = []
+    for p in paths:
+        for line in open(p, encoding='utf-8'):
+            rec = json.loads(line)
+            c = classify(rec)
+            if c:
+                rows.append((rec['program'], rec['input']) + c)
+    seen = set()
+    for r in sorted(rows):
+        if r[0] in seen:
+            continue
+        seen.add(r[0])
+        print('\t'.join(r))
+    return 0
+
+
 # ------------------------------------------------------------------------- default census
 
 def read_sample(path=SAMPLE):
@@ -564,6 +664,11 @@ def census_main(a):
         cs = collections.Counter(r['result'] for r in recs if r['step'] == step)
         print('  %s: %d programs, typed %d / general %d / refused %d / wrong %d'
               % (step, sum(cs.values()), cs['typed'], cs['general'], cs['refused'], cs['wrong']))
+    for conf in ('high', 'medium', 'low'):
+        cs = collections.Counter(r['result'] for r in recs if r['confidence'] == conf)
+        if cs:
+            print('  confidence %s: %d programs, typed %d / general %d / refused %d / wrong %d'
+                  % (conf, sum(cs.values()), cs['typed'], cs['general'], cs['refused'], cs['wrong']))
     h = collections.Counter(bucket(r.get('reason', '')) for r in recs if r['result'] != 'typed')
     print('reasons (not typed):')
     for k, v in h.most_common():
@@ -585,6 +690,8 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == 'trace':
         return trace_main(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else 'none',
                           sys.argv[4] if len(sys.argv) > 4 else None)
+    if len(sys.argv) > 1 and sys.argv[1] == 'make-sample':
+        return make_sample_main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == 'select':
         ap = argparse.ArgumentParser(prog='census.py select')
         ap.add_argument('programs', nargs='+')
