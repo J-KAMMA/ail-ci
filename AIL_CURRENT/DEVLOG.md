@@ -1,3 +1,15 @@
+## 2026-11-06 -- callinf1: single-kind call-site inference for unannotated parameters (job-callinf1-op1106)
+
+fcspec0 measured that multi-kind specialisation moves 0 programs and recommended single-kind
+inference instead. An unannotated parameter every call site hands one kind now takes it: list[float],
+list[str], one class and list[class] claims in `_claim`/`_propagate_signatures_pass` (functions, and
+methods through `_method_call_target`); constructor parameters from the argument kinds the source
+spells (`_constructor_claims`: `Tok("W")` makes the parameter str); a forwarded sequence parameter is
+no longer re-derived to int. Disagreeing sites keep today's rule; bool never joins int, int never
+widens to float. SEMANTICS.md section 26a. Tests: `test_ail_callinf1.py`.
+
+@@RESULTS@@
+
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
 str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's

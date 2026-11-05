@@ -5061,7 +5061,7 @@ def _known_argument_kind(node, ctx):
     except Exception:
         return None
 
-def _sig_override_kind(fn, pname, kind_text):
+def _sig_override_kind(fn, pname, kind_text, classes=()):
     """What a CALLER-supplied kind (`to_c(src, sig={pname: kind_text})`) means, read through the
     exact same rule an annotation already has -- `_annotation_kind` -- rather than a second,
     parallel ruleset that could quietly drift from the first.
@@ -5079,6 +5079,14 @@ def _sig_override_kind(fn, pname, kind_text):
     except SyntaxError:
         raise Unsupported("%r: the caller-supplied kind %r is not a valid type expression"
                           % (pname, kind_text))
+    named = (node if isinstance(node, ast.Name) else node.slice
+             if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+             and node.value.id == 'list' else None)
+    if (classes and isinstance(named, ast.Name) and named.id in classes and named.id not in (
+            INT, FLT, STR, BYTES, LIST, BYTEARRAY, EXCEPTION, BINARYFILE, TCPSOCKET)):
+        # A class (or list-of-class) claim from call-site inference (job callinf1); every other
+        # text reads exactly as before, without the class table.
+        return _annotation_kind(node, classes)
     return _annotation_kind(node)
 
 
@@ -5644,7 +5652,7 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
         for pname, kind_text in sig_override.items():
             if pname not in names:
                 raise Unsupported('%r is not a parameter of %s' % (pname, fn.name))
-            given = _sig_override_kind(fn, pname, kind_text)
+            given = _sig_override_kind(fn, pname, kind_text, classes)
             existing = anns[pname]
             if allow_widening and existing == FLT and given == INT:
                 continue  # Keep the declared float ABI for an integer call argument.
@@ -5664,7 +5672,7 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
         for pname, kind_text in sig_override.items():
             if pname not in names:
                 raise Unsupported('%r is not a parameter of %s' % (pname, fn.name))
-            given = _sig_override_kind(fn, pname, kind_text)
+            given = _sig_override_kind(fn, pname, kind_text, classes)
             existing = anns[pname]
             if allow_widening and existing == FLT and given == INT:
                 continue  # Keep the declared float ABI for an integer call argument.
@@ -32950,7 +32958,12 @@ def _claim(arg, ctx):
         k = _etype(arg, ctx)
     except Unsupported:
         return None
-    return k if k in (INT, FLT, BYTES, BYTEARRAY, STR, 'array') else None
+    # FLIST / SLIST (job callinf1): a flat float or str list is evidence for an UNANNOTATED list
+    # parameter only (`_override_from_site`); before, it was silence and the callee re-derived int.
+    if ((_is_obj_kind(k) or _is_olist_kind(k)) and k[1] in getattr(ctx, 'classes', {})
+            and k[1] not in _HIER):
+        return k            # one class, or a list of it (callinf1); `_call_site_signature` narrows it
+    return k if k in (INT, FLT, BYTES, BYTEARRAY, STR, 'array', FLIST, SLIST) else None
 
 
 def _call_site_signature(args, callee_params, ctx):
@@ -32974,6 +32987,8 @@ def _call_site_signature(args, callee_params, ctx):
             # A bytearray argument is read as a bytes view for a parameter whose body wants a
             # read-only sequence (or bytes): the call lowers through `ail_bytearray_readonly_arg`.
             c = BYTES
+        if _is_obj_kind(c) and _pk not in (INT, c) or _is_olist_kind(c) and _pk not in (INT, 'array', c):
+            c = None    # a class claim is evidence only for a default (int / sequence) or same-class slot
         if c is not None:
             site[pname] = c
     return site
@@ -33003,6 +33018,13 @@ def _claim_key(site):
     return tuple(sorted(site.items()))
 
 
+def _single_kind_claim(claim):
+    """A claim that call-site inference (job callinf1) uses only when every site agrees: a flat
+    float or str list, or one class instance. It never makes a clone and, when the callee's body
+    contradicts it, it is dropped without dropping the function's other claims."""
+    return claim in (FLIST, SLIST) or _is_obj_kind(claim) or _is_olist_kind(claim)
+
+
 def _override_from_site(site, fn=None, classes=None):
     """A `{param_name: claim}` site turned into the two things `_param_kinds` and
     `_mark_tuple_lists` each already know how to consume: a `sig_override` text dict (section 15)
@@ -33019,6 +33041,16 @@ def _override_from_site(site, fn=None, classes=None):
             arity_seed[pname] = claim[1]
         elif claim == 'array':
             override[pname] = 'list'
+        elif _single_kind_claim(claim):
+            # Single-kind call-site inference (job callinf1): every site hands this parameter the
+            # same flat float / str list, or an instance of the same class. Only an unannotated
+            # parameter moves; an annotated one keeps its annotation and the call guard checks
+            # each argument against it.
+            if fn is None or any(a.arg == pname and a.annotation is not None for a in fn.args.args):
+                continue
+            override[pname] = (claim[1] if _is_obj_kind(claim)
+                               else 'list[%s]' % claim[1] if _is_olist_kind(claim)
+                               else 'list[float]' if claim == FLIST else 'list[str]')
         elif claim == STR and fn is not None and any(
                 a.arg == pname and a.annotation is not None
                 and _annotation_kind(a.annotation, classes or ()) not in (None, STR)
@@ -33069,6 +33101,64 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     return False
 
 
+def _method_call_target(call, ctx, classes):
+    """The mangled method `recv.m(...)` reaches when the caller's context already knows `recv`
+    is an instance of one class C outside any hierarchy, so the call is not virtual; else None.
+    Lets the call sites of a method's unannotated parameters be read like a function's (callinf1)."""
+    if call.keywords or any(isinstance(a, ast.Starred) for a in call.args) or not classes:
+        return None
+    try:
+        recv = _etype(call.func.value, ctx)
+    except Unsupported:
+        return None
+    if not _is_obj_kind(recv) or recv[1] not in classes or recv[1] in _HIER:
+        return None
+    info = classes[recv[1]]
+    if call.func.attr not in info.methods:
+        return None
+    return info.method_cname(call.func.attr)
+
+
+def _drop_int_against_class(fn, per_param):
+    """`{param: claims}` without an int claim that competes with one class claim (callinf1), for an
+    unannotated parameter whose body reads `param.attr`: no int has attributes, so that int claim
+    only reflects a caller's return kind this round has not settled yet (`to_light =
+    light.minus(point).unit()` is int until `minus` is). A site that really passes an int is
+    still refused by the argument guard of the call, by name."""
+    attr_names = None
+    for pname, kinds in per_param.items():
+        if INT not in kinds or len(kinds) != 2:
+            continue
+        other = next(k for k in kinds if k != INT)
+        if not _is_obj_kind(other):
+            continue
+        if attr_names is None:
+            annotated = {a.arg for a in fn.args.args if a.annotation is not None}
+            attr_names = {n.value.id for n in ast.walk(fn)
+                          if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)} - annotated
+        if pname in attr_names:
+            per_param[pname] = {other}
+
+
+def _keep_forwarded_arrays(fn, new_params, old_params, override):
+    """`new_params` with a sequence parameter the re-derivation lost put back (job callinf1).
+
+    `_signatures` marks an unannotated parameter that is only handed on to another function's
+    sequence slot as 'array' (`eval_ata(v, out, tmp)` only calls `eval_atv(v, ...)`), but
+    `_param_kinds` here sees the body alone and puts it back to the int default. A parameter no
+    call site claimed, that has no annotation and that the body alone leaves at int, keeps the
+    'array' it already had; the call into the sequence slot still checks the argument."""
+    old = dict(old_params)
+    annotated = {a.arg for a in fn.args.args if a.annotation is not None}
+    out = []
+    for pname, kind in new_params:
+        if (kind == INT and old.get(pname) == 'array' and pname not in annotated
+                and pname not in (override or {})):
+            kind = 'array'
+        out.append((pname, kind))
+    return out
+
+
 def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
                                owned_str_fns=None, owned_bytes_fns=None, defer_conflicts=False):
     """One pass of parameter-kind propagation: collect a CLAIM on every non-recursive callee's
@@ -33092,31 +33182,65 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
     for f in fns:                                 # only AFTER the loop (see `claims` below)
         caller_ctx = _caller_ctx_memo(f, sigs, arity_seeds[f.name], classes, owned_str_fns, owned_bytes_fns, key)
         for n in ast.walk(f):
-            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)):
+            if not isinstance(n, ast.Call):
                 continue
-            g = n.func.id
+            args = n.args
+            if isinstance(n.func, ast.Attribute):
+                g = _method_call_target(n, caller_ctx, classes)
+                if g is None:
+                    continue
+                args = [n.func.value] + list(n.args)
+            elif isinstance(n.func, ast.Name):
+                g = n.func.id
+            else:
+                continue
             if g not in by_name or g not in sigs or g in recursive or g == f.name:
                 continue
             gparams = sigs[g][0]
-            if len(n.args) != len(gparams):
+            if len(args) != len(gparams):
                 continue
-            site = _drop_text_overrides(by_name[g], _call_site_signature(n.args, gparams, caller_ctx),
+            site = _drop_text_overrides(by_name[g], _call_site_signature(args, gparams, caller_ctx),
                                         classes)
             for pname, c in site.items():
                 claims.setdefault(g, {}).setdefault(pname, set()).add(c)
     changed = False
     for g, per_param in claims.items():
+        _drop_int_against_class(by_name[g], per_param)
         if any(len(s) > 1 for s in per_param.values()):
             continue                             # disagreement -- left for `_plan_clones`
         site = {pname: next(iter(s)) for pname, s in per_param.items()}
         override, arity_seed = _override_from_site(site, by_name[g], classes)
+        results = {name: sig[1] for name, sig in sigs.items()}
         try:
             new_params = _param_kinds(by_name[g], classes or {}, override or None,
-                                      {name: sig[1] for name, sig in sigs.items()}, allow_widening=True)
+                                      results, allow_widening=True)
         except Unsupported:
             if not defer_conflicts and _explicit_annotation_conflicts(by_name[g], override, classes):
                 raise
-            continue
+            # Single-kind claims (float/str list, one class; job callinf1) are tried apart from
+            # the others: the others fold exactly as they did before these claims existed, and
+            # when the others fail as before, the single-kind ones still apply on their own.
+            listed = {p for p, c in site.items() if _single_kind_claim(c) and p in override}
+            if not listed:
+                continue
+            rest = {p: text for p, text in override.items() if p not in listed}
+            try:
+                new_params = _param_kinds(by_name[g], classes or {}, rest or None,
+                                          results, allow_widening=True)
+                override = rest
+            except Unsupported:
+                try:
+                    alone = dict(_param_kinds(by_name[g], classes or {},
+                                              {p: override[p] for p in listed}, results,
+                                              allow_widening=True))
+                except Unsupported:
+                    continue
+                new_params = [(p, alone[p] if p in listed else k) for p, k in sigs[g][0]]
+                if new_params != sigs[g][0]:
+                    sigs[g] = (new_params, sigs[g][1])
+                    changed = True
+                continue
+        new_params = _keep_forwarded_arrays(by_name[g], new_params, sigs[g][0], override)
         new_arity = dict(arity_seeds[g]); new_arity.update(arity_seed)
         if new_params != sigs[g][0] or new_arity != arity_seeds[g]:
             sigs[g] = (new_params, sigs[g][1])
@@ -33527,11 +33651,14 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
         for site in sites:
             for pname, claim in site.items():
                 per_param.setdefault(pname, set()).add(claim)
-        conflicting = {pname for pname, claims in per_param.items()
-                       if STR in claims and any(claim != STR for claim in claims)}
+        # The float / str list claims (job callinf1) follow the same rule: single-kind inference
+        # only, never a clone per list kind.
+        conflicting = {(pname, kind) for pname, claims in per_param.items()
+                       for kind in claims if kind == STR or _single_kind_claim(kind)
+                       if any(claim != kind for claim in claims)}
         if conflicting:
             sites = [site for site in sites
-                     if not any(site.get(pname) == STR for pname in conflicting)]
+                     if not any(site.get(pname) == kind for pname, kind in conflicting)]
         uniq = {}
         for site in sites:
             uniq.setdefault(_claim_key(site), site)
@@ -33546,7 +33673,15 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
             except Unsupported:
                 if _explicit_annotation_conflicts(by_name[g], override, classes):
                     raise
-                continue
+                listed = {p for p, c in site.items() if _single_kind_claim(c)}
+                if not listed:
+                    continue
+                override = {p: text for p, text in override.items() if p not in listed}
+                try:     # as in `_propagate_signatures_pass`: drop only the list claims (callinf1)
+                    new_params = _param_kinds(by_name[g], classes or {}, override or None,
+                                              {name: sig[1] for name, sig in sigs.items()}, allow_widening=True)
+                except Unsupported:
+                    continue
             ok, new_ret = _clone_return_kind(by_name[g], new_params, sigs, sigs[g][1], grid_fns,
                                              classes, owned_str_fns, owned_bytes_fns)
             if not ok:
@@ -34015,6 +34150,119 @@ def _range_list_as_comprehension(value, ctx):
     return comp
 
 
+# class name -> {parameter: annotation text}: the one kind every constructor call in the program
+# hands an unannotated `__init__` parameter (`_constructor_claims`). Reset by `to_c`.
+_CTOR_CLAIMS = {}
+
+
+def _literal_claim(node, class_names):
+    """The kind of a constructor argument when its syntax alone says it (job callinf1), else None.
+
+    str and f-string literals are str, float literals float, int literals int, `X(...)` of a
+    class X is X, and a non-empty list display of float (or str) literals is list[float] (or
+    list[str]). A bool literal answers 'bool', which never joins int: any bool site stops the
+    inference for that parameter. Everything else is silence: the call guard still checks it."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        node = node.operand
+        if not (isinstance(node, ast.Constant) and type(node.value) in (int, float)):
+            return None
+    if isinstance(node, ast.Constant):
+        return {str: STR, float: FLT, int: INT, bool: 'bool'}.get(type(node.value))
+    if isinstance(node, ast.JoinedStr):
+        return STR
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in class_names):
+        return node.func.id
+    if isinstance(node, ast.List) and node.elts:
+        kinds = {type(e.value) for e in node.elts if isinstance(e, ast.Constant)}
+        if len(kinds) == 1 and all(isinstance(e, ast.Constant) for e in node.elts):
+            return {float: 'list[float]', str: 'list[str]'}.get(kinds.pop())
+    return None
+
+
+def _constructor_claims(tree, classdefs):
+    """{class: {parameter: annotation text}} for single-kind call-site inference of constructor
+    parameters (job callinf1): an unannotated `__init__` parameter that every constructor call
+    whose argument kind is readable from its syntax (`_literal_claim`) agrees on. A class used
+    as a value (not called), a subclass or base class, a `**` call, or any site that disagrees
+    (bool against int included) gets nothing, and the parameter is typed as before."""
+    names = {c.name for c in classdefs}
+    params = {}
+    for c in classdefs:
+        if c.bases or c.keywords:
+            continue
+        for stmt in c.body:
+            if isinstance(stmt, ast.FunctionDef) and stmt.name == '__init__':
+                a = stmt.args
+                if not (a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg or a.defaults):
+                    params[c.name] = [p.arg for p in a.args[1:]]
+    for c in classdefs:
+        for base in c.bases:
+            if isinstance(base, ast.Name):
+                params.pop(base.id, None)
+    called = set()
+    seen = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in params:
+            called.add(id(node.func))
+            pnames = params[node.func.id]
+            bound = dict(zip(pnames, node.args))
+            if (len(node.args) > len(pnames) or any(isinstance(a, ast.Starred) for a in node.args)
+                    or any(k.arg is None or k.arg not in pnames for k in node.keywords)):
+                params[node.func.id] = []          # an argument this scan cannot bind: no claims
+                continue
+            bound.update((k.arg, k.value) for k in node.keywords)
+            for pname, arg in bound.items():
+                claim = _literal_claim(arg, names)
+                if claim is not None:
+                    seen.setdefault(node.func.id, {}).setdefault(pname, set()).add(claim)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in params and id(node) not in called:
+            params.pop(node.id)                    # first-class use: its calls are not all visible
+    out = {}
+    for cname, pnames in params.items():
+        claims = {p: s for p, s in seen.get(cname, {}).items() if p in pnames and len(s) == 1}
+        found = {p: next(iter(s)) for p, s in claims.items() if next(iter(s)) != 'bool'}
+        if found:
+            out[cname] = found
+    return out
+
+
+def _ctor_param_kinds(init_fn, info, classes):
+    """`__init__`'s parameter kinds, with `_CTOR_CLAIMS` applied to parameters the body alone left
+    at the int default (or at a plain sequence, for a list claim) -- job callinf1. A claim the body
+    contradicts drops every claim of this class: the kinds are then exactly the old ones."""
+    stripped = _stripped_self(init_fn)
+    base = _param_kinds(stripped, classes)
+    claims = _CTOR_CLAIMS.get(info.name)
+    if not claims:
+        return base
+    kinds = dict(base)
+    annotated = {a.arg for a in init_fn.args.args if a.annotation is not None}
+    chosen = {}
+    for pname, text in claims.items():
+        if pname in annotated or pname not in kinds or text == INT:
+            continue
+        if kinds[pname] == INT or kinds[pname] == 'array' and text.startswith('list['):
+            chosen[pname] = text
+    if not chosen:
+        return base
+    args = []
+    for a in stripped.args.args:
+        if a.arg in chosen:
+            a = ast.copy_location(ast.arg(arg=a.arg, annotation=ast.parse(chosen[a.arg], mode='eval').body), a)
+            ast.fix_missing_locations(a)
+        args.append(a)
+    synth = ast.copy_location(ast.FunctionDef(
+        name=stripped.name, body=stripped.body, decorator_list=[], returns=None,
+        args=ast.arguments(posonlyargs=[], args=args, vararg=None, kwonlyargs=[], kw_defaults=[],
+                           kwarg=None, defaults=[])), stripped)
+    try:
+        return _param_kinds(synth, classes)
+    except Unsupported:
+        return base
+
+
 def _compile_init(init_fn, info, classes):
     """Walk `__init__`'s body once, establishing `info.field_order`/`field_types` AS it goes (so
     `self.b = self.a + 1` on the line right after `self.a = ...` can read `self.a`'s type -- see
@@ -34024,7 +34272,7 @@ def _compile_init(init_fn, info, classes):
     something other than `self` -- would make the shape depend on control flow this compiler does
     not evaluate at compile time, so it is refused rather than guessed at.
     """
-    info.init_params = _param_kinds(_stripped_self(init_fn), classes)
+    info.init_params = _ctor_param_kinds(init_fn, info, classes)
     info.numeric_list_params = {arg.arg for arg in init_fn.args.args[1:]
                                 if _annotation_kind(arg.annotation, classes) == LIST
                                 and isinstance(arg.annotation, ast.Subscript)}
@@ -38375,6 +38623,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     global _FIELD_STORES
     _FIELD_STORES = _scan_field_stores(tree, library)
     classdefs = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+    global _CTOR_CLAIMS
+    _CTOR_CLAIMS = _constructor_claims(tree, classdefs) if classdefs and not library else {}
     classes = _scan_classes(classdefs) if classdefs else _TDict()
     if _HIER and _BOOLS is not boolkind.EMPTY:
         # an inherited bool field prints as a bool through the subclass too
