@@ -1,5 +1,6 @@
 """Conversions to/from quoted-printable transport encoding as per RFC 1521.
 
+Derived from CPython 3.12 Lib/quopri.py; PSF License, see stdlib/LICENSE-PSF.txt.
 This is CPython 3.12's Lib/quopri.py rewritten as AIL source.  The optional `from binascii import
 a2b_qp, b2a_qp` accelerator is not imported and the `main()` command-line tool is omitted
 (programs import this module, they do not run it as a script).

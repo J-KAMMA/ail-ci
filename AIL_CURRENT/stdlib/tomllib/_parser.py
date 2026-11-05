@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 """A TOML 1.0 parser that the AIL compiler builds.
+Derived from CPython 3.12 Lib/tomllib/_parser.py; PSF License, see stdlib/LICENSE-PSF.txt.
 
 This reproduces CPython 3.12's ``tomllib`` behaviour (messages, positions
 and results) in the subset of Python that ``ail_chatgpt.py`` compiles.

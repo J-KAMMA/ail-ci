@@ -1,3 +1,33 @@
+## 2026-11-05 -- relnotice1: re-apply the third-party notices inventory (job-relnotice1-11051608)
+
+Re-applied the accepted `relnotice1` change (the `995aa12`..`job-relnotice1-11051608` diff minus
+`.agent`, `corpus` and `MANIFEST.json`). It adds `THIRD_PARTY_NOTICES.md`,
+`AIL_CURRENT/stdlib/LICENSE-PSF.txt`, the first-lines PSF notice to eleven stdlib modules, the new
+`test_ail_third_party_notices` with its `tests.d` registration, and the widened CPython-derivation
+sweep for the twelve `python/pkg-v12` preludes. The `agent-worker.yml` hunk (dropping
+`GH_MODELS_TOKEN`) was already the state of this tree, so nothing changed there.
+
+One real conflict: this export has `AIL_CURRENT/stdlib/quopri.py` (a CPython 3.12 rewrite added
+after the job was written), which the job's inventory could not know about. Keeping both sides,
+`quopri.py` now carries the same `Derived from CPython 3.12 Lib/quopri.py; PSF License, see
+stdlib/LICENSE-PSF.txt.` first-lines notice and an inventory row (PSF-2.0, Notice=yes); the
+stdlib-derived count is 12 and the test's derived total 24. The `manifest.d/fe.txt` conflict kept
+both the tree's `python/pkg-v12/stubcalls.py` pin and the job's new `stdlib/tomllib/_types.py`
+hash. `python3 tools/update_manifest.py` recomputed every pin and `--check` exits 0;
+`tools/diff_ids.py` is not present on this tree.
+
+Tests on this commit: `test_ail_third_party_notices` 5/6 -- the one failure is the documented
+wheel `LICENSE-PSF.txt` copy owned by the packaging lane, not this change; `test_ail_std_quopri`
+2/2; `test_ail_std_colorsys`, `test_ail_std_difflib`, `test_ail_std_getopt`, `test_ail_std_keyword`,
+`test_ail_std_shlex`, `test_ail_std_stat`, `test_ail_std_tomllib`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass. The one skip is pre-existing:
+`test_windows_target_builds` (no zig).
+
+Probes in `/tmp/probes` (`p1_colorsys`, `p2_difflib`, `p3_getopt`, `p4_keyword` -- its
+`keyword.__all__` read is refused by name, so the probe drops it, `p5_shlex`, `p6_stat`,
+`p7_token`, `p8_tomllib` -- no datetime repr, whose `<_AilDT object>` text is a pre-existing
+difference, `p9_quopri`) all match CPython on both builds.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this
