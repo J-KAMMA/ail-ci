@@ -4,7 +4,7 @@
 - Date: 2026-11-05
 - Oracle: CPython 3.12.3
 - Programs: 24; modes: typed, default, general, hybrid; cells: 96
-- Limits: `ulimit -v 1500000`, `timeout 20`; runner wall time 98.3s
+- Limits: `ulimit -v 1500000`, `timeout 20`; runner wall time 98.4s
 
 Classification: `match` = stdout, exit status and last stderr line equal CPython; `stop-differs` = both stop nonzero, last stderr line differs; `silent-wrong` = one stops and the other does not, or stdout differs while CPython stops; `crash` = signal or timeout; `refused` = build refused.
 
