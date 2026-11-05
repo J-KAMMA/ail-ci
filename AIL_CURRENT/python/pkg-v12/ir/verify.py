@@ -143,13 +143,22 @@ class _Checker(object):
         borrowed = {by_name[n] for n in names if n in by_name}
         # `store` copies a value into a local slot (`local.alloc`), which does not outlive the
         # call; the stores that do hand a reference on are the field/list/dict/global ones.
-        stores = ('global.store', 'field.set', 'list.set', 'list.push', 'list.lit',
-                  'ba.set', 'ba.push', 'dict.store', 'elem.store', 'rec.push')
+        # Only the VALUE operands hand a reference on. The first operand of these stores is the
+        # container being written through (`obj.x = v`, `xs.append(v)`, `ba[i] = v`): mutating a
+        # borrowed reference's contents reads that reference, it does not store it. The tuple is
+        # `(first value operand, last value operand or None for every operand from there)`.
+        stores = {'global.store': (0, None), 'field.set': (1, 1), 'list.set': (2, 2),
+                  'list.push': (1, None), 'list.lit': (1, None), 'ba.set': (2, 2),
+                  'ba.push': (1, None), 'dict.store': (1, None), 'elem.store': (1, None),
+                  'rec.push': (1, None)}
         for ins in I.walk(self.fn.body):
             if not any(o in borrowed for o in ins.operands):
                 continue
             if ins.op in stores:
-                self.err(ins.op, 'a borrowed parameter is stored here')
+                first, last = stores[ins.op]
+                handed = ins.operands[first:] if last is None else ins.operands[first:last + 1]
+                if any(o in borrowed for o in handed):
+                    self.err(ins.op, 'a borrowed parameter is stored here')
             elif ins.op in ('return', 'yield'):
                 self.err(ins.op, 'a borrowed parameter is returned here')
             elif ins.op == 'call' and 'release' in str(ins.attrs.get('callee', '')):

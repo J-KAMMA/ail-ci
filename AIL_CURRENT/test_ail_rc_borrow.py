@@ -279,6 +279,32 @@ class VerifyTests(unittest.TestCase):
         checker.check_borrowed()
         self.assertTrue(checker.errors)
 
+    def test_container_operand_is_not_a_store(self):
+        """Writing through a borrowed container (`xs.append(v)`) reads that reference; only the
+        value operand hands a reference on."""
+        from ir import verify
+        from ir import ir as I
+        owner = I.Value(I.I64, hint="xs")
+        value = I.Value(I.I64, hint="v")
+        fn = I.Function("f", [owner, value], ["xs", "v"], [I.I64], I.Region(),
+                        attrs={"borrow": ["xs"]})
+        fn.body.instrs.append(I.Instr("list.push", [owner, value]))
+        checker = verify._Checker(fn, None, "S1")
+        checker.check_borrowed()
+        self.assertFalse(checker.errors)
+
+    def test_storing_a_borrowed_value_is_an_error(self):
+        from ir import verify
+        from ir import ir as I
+        owner = I.Value(I.I64, hint="xs")
+        value = I.Value(I.I64, hint="v")
+        fn = I.Function("f", [owner, value], ["xs", "v"], [I.I64], I.Region(),
+                        attrs={"borrow": ["v"]})
+        fn.body.instrs.append(I.Instr("list.push", [owner, value]))
+        checker = verify._Checker(fn, None, "S1")
+        checker.check_borrowed()
+        self.assertTrue(checker.errors)
+
     def test_local_store_is_not_an_escape(self):
         """An IR `store` initialises a local slot; it does not hand the reference on."""
         from ir import verify
