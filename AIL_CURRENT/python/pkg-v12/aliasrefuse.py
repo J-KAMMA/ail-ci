@@ -61,7 +61,16 @@ def _ann_container(a):
         a = a.value
     if isinstance(a, ast.Attribute):
         return a.attr in _CONT_ANN
-    return isinstance(a, ast.Name) and a.id in _CONT_ANN
+    if not isinstance(a, ast.Name):
+        return False
+    name = a.id
+    # the Python surface spells a returned list/dict/set `__ail_checked_list[T]` (and scalar
+    # results `__ail_checked_int__`): the wrapper is not part of the container name
+    if name.startswith('__ail_checked_'):
+        name = name[len('__ail_checked_'):]
+        if name.endswith('__'):
+            name = name[:-2]
+    return name in _CONT_ANN
 
 
 def _base(e):
@@ -613,8 +622,13 @@ class _Walk(object):
             if st.value is not None:
                 self.effects([st.value], st)
                 self.ret_refs |= self.refs(st.value)
-                if self.ret_container and isinstance(st.value, ast.Subscript) \
-                        and not isinstance(st.value.slice, ast.Slice) and _base(st.value):
+                if self.ret_container and _base(st.value) and (
+                        (isinstance(st.value, ast.Subscript)
+                         and not isinstance(st.value.slice, ast.Slice))
+                        or (isinstance(st.value, ast.Attribute)
+                            and isinstance(st.value.value, ast.Subscript))):
+                    # `g[0]` returns an element; nested-list lowering spells the same read as
+                    # `g[0].v` (a row's list field), which is still an element of `g`
                     self.ret_refs.add(_base(st.value))
             return True
         if isinstance(st, ast.Raise):
