@@ -116,6 +116,68 @@ The binary is the `--debug` build (`-g -O0`, `#line` back to `gpt2.py`), which
 is what makes the source-line column possible; the callgrind shares are of
 that `-O0` build, so they show where the work is, not the exact `-O2` split.
 
+The loader is 58% of a short profile of its own (`read_f32__irl` 32%,
+`ail_bytes_get` 19%, memset 7%), so `profile.sh` runs the program twice - empty
+prompt, then one-token prompt + 4 decode forwards - and subtracts the load-only
+counts per function.  The list below is the decode only:
+
+| # | C function | share | AIL source |
+| ---: | --- | ---: | --- |
+| 1 | `linear__irl` | 84.40% | `gpt2.py:73-87` |
+| 2 | `__memset_avx2_unaligned_erms` | 13.65% | runtime (libc) |
+| 3 | `__memcpy_avx_unaligned_erms` | 1.28% | runtime (libc) |
+| 4 | `ck_add` | 0.15% | runtime (program.c) |
+| 5 | `py_main` | 0.12% | runtime (program.c) |
+| 6 | `ail_flist_get` | 0.08% | runtime (program.c) |
+| 7 | `gelu__irl` | 0.08% | `gpt2.py:88-98` |
+| 8 | `layer_norm__irl` | 0.05% | `gpt2.py:49-72` |
+| 9 | `__expm1_fma` | 0.05% | runtime (libm) |
+| 10 | `ail_flist_set` | 0.03% | runtime (program.c) |
+
+What each entry is, and the job that would remove it:
+
+1. **`linear__irl` (84.4%)** - the matmul inner loop of
+   `s += x[k] * w[base + k]` for qkv, attention output, up, down and the logits
+   head.  Every `w[base + k]` is an inlined bounds-checked list read (compare,
+   branch, then load) and `base + k` goes through `ck_add`, an int64 overflow
+   check; one scalar multiply-add per branch, no SIMD, no FMA.  *Follow-up:*
+   a typed f32/f64 array path (`ta.f32` is stage T3, 2-D is T6) so the inner
+   loop is a plain `for (double *p)` the vectoriser can take, or bounds-check
+   the whole row once before the loop.
+2. **`memset` (13.65%)** - every call allocates its result with `[0.0] * n`
+   (`linear`, `x`, `att`, `scores`), and every element is then overwritten.
+   *Follow-up:* an uninitialised allocation for write-only outputs (or reuse a
+   scratch buffer across layers); this is free by construction once the
+   allocation is not zeroed.
+3. **`memcpy` (1.28%)** - `ail_flist_snapshot` copies the list arguments at
+   each `linear(...)` call, i.e. the per-layer weight rows.  *Follow-up:*
+   pass weights as borrows/views instead of snapshotting them per call; with
+   flat weight lists indexed by base offset the copies disappear.
+4. **`ck_add` (0.15%)** - int64 overflow checks on index arithmetic, called
+   from the loop bodies.  *Follow-up:* hoist the check out of the loop (the
+   loop bounds already keep the index in range).
+5. **`py_main` (0.12%)** - the forward-loop glue (layer loop, KV-cache stores)
+   at `-O0`.  *Follow-up:* none needed at `-O2`; it is scheduling, not work.
+6. **`ail_flist_get` (0.08%)** - bounds-checked element read for helper calls
+   the compiler did not inline.  *Follow-up:* same as (1).
+7. **`gelu__irl` (0.08%)** - GPT-2 tanh GELU, one libm `tanh` per element
+   (3072 per layer).  *Follow-up:* use the `erf` form or a vectorised tanh;
+   only worth it after (1).
+8. **`layer_norm__irl` (0.05%)** - two passes (mean/variance, then scale) over
+   768 doubles per call.  *Follow-up:* one pass with sum and sum-of-squares,
+   or fold it into the matmul's input read.
+9. **`__expm1_fma` (0.05%)** - the softmax exponential over `pos + 1` scores
+   per head.  *Follow-up:* none; it is tiny next to the matmuls.
+10. **`ail_flist_set` (0.03%)** - bounds-checked element write (`y[j] = s`
+    when not inlined).  *Follow-up:* same as (1).
+
+The ranking says the decode is one loop: 98% of the non-load work is the
+`linear` matmul plus zeroing and copying its lists, and the arithmetic helpers
+(bounds checks, overflow checks) are inlined into it at `-O0` rather than
+showing up as named callees.  That matches the 8.75x decode gap to llama.cpp's
+vectorised F32 kernels: there is no vectorisation to lose, only the scalar
+loop to replace.
+
 ## Where the time goes (findings)
 
 AIL is 56.7x slower in prefill and 10.1x per decoded token, so it is well past

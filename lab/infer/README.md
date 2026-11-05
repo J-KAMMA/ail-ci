@@ -87,10 +87,12 @@ Before the timed runs it checks that `prompt.txt` tokenizes to exactly
 `profile.sh` profiles a one-token prompt plus four decode forwards (the same
 one-token forward loop that prefill and decode both use) with `perf record -g`,
 falling back to `valgrind --tool=callgrind` when the kernel refuses perf
-(`perf_event_paranoid`) - which is the case on the GitHub runner.  It prints
-the top 10 C functions by share with the `gpt2.py` line they came from, read
-out of the `--debug` build's `#line` table.  `RESULTS.md` has both tables and
-the notes on what each hot function is.
+(`perf_event_paranoid`) - which is the case on the GitHub runner.  It profiles
+the run twice, empty prompt and then the four forwards, and subtracts the
+load-only counts, so the printed top 10 C functions and their shares are the
+decode alone, each with the `gpt2.py` def line it came from (from the
+`--debug` build).  `RESULTS.md` has both tables and the notes on what each hot
+function is.
 
 `tokens.txt` is the first 64 token ids of `prompt.txt` (the model's tokenizer,
 via `llama-tokenize`). It is committed so the three programs see exactly the

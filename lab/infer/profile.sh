@@ -163,7 +163,7 @@ def locate(sym):
     return "runtime"
 
 rows = sorted(net.items(), key=lambda kv: -kv[1])[:10]
-w = max(len(norm(n)) for _, n in rows)
+w = max(len(norm(n)) for n, _ in rows)
 print("%-4s %-*s %7s  %s" % ("#", w, "C function", "share", "AIL source"))
 for i, (name, v) in enumerate(rows, 1):
     print("%-4d %-*s %6.2f%%  %s" % (i, w, norm(name), 100.0 * v / total, locate(name)))
