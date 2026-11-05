@@ -47,7 +47,7 @@ and a dict value), `span_probe` (first/last/negative index), `span_edge` (empty 
 the end still raise `IndexError`), `span_unequal` (lists of different lengths in one loop),
 `span_mut` (aliasing and mutation), `no_feature` (generated C byte-identical to the base), and
 `pop_neg` (negative popcount times out in CPython and both builds, so the fallback is unchanged).
-All 11 programs match CPython or time out identically. `--debug-dir` still maps `popcnt`/`get` in
+All seven probe programs match CPython or time out identically. `--debug-dir` still maps `popcnt`/`get` in
 both probes, as on the base. Tests: `test_ail_span_cache`, `test_ail_numeric_loops`,
 `test_ail_native_diagnostics`, `test_ail_build_reports`, `test_ail_nested_lists`,
 `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (8 modules, 0 failed), and
