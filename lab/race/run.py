@@ -298,20 +298,27 @@ def write_results(rows, elapsed, args):
     safe_matched = [r for r in safe if r["match_default"]]
     safe_free = [r for r in safe if r["default"] and r["default"]["path"] == "typed parallel"]
     lines = []
-    lines.append("# Race probe suite: measured %s" % ("today" if not args.quick else "today (quick)"))
+    lines.append("# Race probe suite: measured after races2%s" % ("" if not args.quick else " (quick)"))
     lines.append("")
     lines.append("`python3 lab/race/run.py`. CPython %s; the default AIL build and "
                  "`AIL_UNIFIED_FORCE=1`; hybrid probes built with `ail build --cpython`; "
                  "`AIL_THREADS` 1, 2, 4, 16, three runs each."
                  % platform.python_version())
     lines.append("")
-    lines.append("## Today")
+    lines.append("## After")
     lines.append("")
     lines.append("| count | value |")
     lines.append("|---|---|")
     lines.append("| silent races | **%d** |" % len(silent))
     lines.append("| safe matched | **%d** of %d |" % (len(safe_matched), len(safe)))
     lines.append("| safe GIL-free | **%d** of %d |" % (len(safe_free), len(safe)))
+    lines.append("")
+    lines.append("Baseline when this job started (races1): silent races 0, safe matched 11 of 12, safe "
+                 "GIL-free 11 of 12. The five new safe probes (`map_range`, `map_range_start`, "
+                 "`map_enumerate`, `futures_after_with`, `submit_after_with`) all build on the typed "
+                 "parallel path. The one unmatched safe probe is `int_beyond_int64`, which stops "
+                 "loudly at the int64 boundary (its own note says that is allowed) and is the "
+                 "expected failure in `test_ail_race_probes`.")
     lines.append("")
     if silent:
         lines.append("### Silent races (named first)")
@@ -390,6 +397,10 @@ def write_results(rows, elapsed, args):
     lines.append("Elapsed: %.0f s. %d rows (%d racy, %d safe, %d hybrid)." % (
         elapsed, len(rows), len(racy), len(safe), len(rows) - len(racy) - len(safe)))
     lines.append("")
+    decisions = HERE / "owner_decisions.md"
+    if decisions.is_file():
+        lines.append(decisions.read_text(encoding="utf-8").rstrip("\n"))
+        lines.append("")
     (HERE / "RESULTS.md").write_text("\n".join(lines), encoding="utf-8")
 
 

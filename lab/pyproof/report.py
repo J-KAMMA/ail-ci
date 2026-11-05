@@ -7,7 +7,8 @@ For every program in programs.txt:
 
 * build with ``--strict`` (typed, or the refusal text);
 * build with the default command (typed, general with the ``note:`` reason, or
-  refused);
+  refused); a program that declares build flags (the crate test config for a crate's
+  ``main.py``, or a top ``# ail-build:`` comment) is built with them;
 * run the default binary and ``python3`` on the same input, compare stdout and
   the exit status (``wrong`` when the build succeeded but the output differs);
 * time both (median of three, CPython run capped at 2 s).
@@ -53,13 +54,45 @@ WRONG_REPRO = {
 # has generated their `*_ffi.py` stub and static library.  The options mirror
 # `AIL_CURRENT/test_ail_examples_crate.py`, the lab's own runner.
 CRATE_CASES = {
-    'fnvhash': {'header': 'fnvhash.h', 'flags': []},
+    # The crate README and `test_ail_examples_crate.py` build fnvhash's example main.py with
+    # `--exact-int`: its empty-string FNV-1a hash is 14695981039346656037, above 2**63.
+    'fnvhash': {'header': 'fnvhash.h', 'flags': ['--exact-int']},
     'rle': {'header': 'rle.h', 'flags': []},
     'textstat': {'header': 'textstat.h', 'flags': [],
                  'check': 'stats=negative:ValueError'},
 }
 CRATE_LOCK = threading.Lock()
 CRATE_BUILDS = {}
+
+# A program may declare its own build flags on a comment line: `# ail-build: --exact-int`.
+# The comment is inert for CPython; the runner adds the flags to both builds of that program.
+BUILD_DIRECTIVE = re.compile(r'^\s*#\s*ail-build:\s*(.+?)\s*$')
+
+
+def declared_flags(program, src):
+    """The build flags PROGRAM declares for itself.
+
+    The crate test config declares the flags for the crate's example ``main.py`` only (that is
+    the program it builds), so a crate's flags are not applied to its ``bench.py``.  Any
+    program may also declare flags in a top ``# ail-build:`` comment.
+    """
+    flags = []
+    name = crate_name(program)
+    if name and Path(program).name == 'main.py':
+        flags.extend(CRATE_CASES[name].get('flags', []))
+    if src.is_file():
+        for line in src.read_text(encoding='utf-8', errors='replace').splitlines()[:5]:
+            m = BUILD_DIRECTIVE.match(line)
+            if m:
+                # The flags are the leading `-...` words; anything after them (a `--` or prose)
+                # explains why.  Split on whitespace, not shlex: the reason is prose and may
+                # contain an apostrophe, which shlex would reject as an unclosed quotation.
+                flags_part = re.split(r'\s--\s', m.group(1), maxsplit=1)[0]
+                for word in flags_part.split():
+                    if word == '--' or not word.startswith('-'):
+                        break
+                    flags.append(word)
+    return flags
 
 
 def _limits():
@@ -244,10 +277,11 @@ def _timed(cmd, cwd, stdin_path, timeout, env, runs=3):
     return first
 
 
-def _build(src_name, out, strict, work):
+def _build(src_name, out, strict, work, flags=()):
     cmd = [sys.executable, '-B', str(AIL), 'compile', src_name, '--syntax', 'python']
     if strict:
         cmd.append('--strict')
+    cmd.extend(flags)
     cmd.extend(['-o', out])
     env = dict(os.environ, AIL_NO_CACHE='1',
                PYTHONPATH=str(ROOT / 'AIL_CURRENT') + os.pathsep + os.environ.get('PYTHONPATH', ''))
@@ -302,12 +336,14 @@ def census_one(program, spec):
         rec['exit_cpython'] = expected['rc']
         rec['stdout_equal'] = None
         rec['cpython_seconds'] = round(expected['median'], 4) if expected['median'] else None
+        flags = declared_flags(program, src)
+        rec['build_flags'] = flags
         start = time.monotonic()
-        rc, _out, err = _build(src.name, 'strict.out', True, work)
+        rc, _out, err = _build(src.name, 'strict.out', True, work, flags)
         strict_typed = rc == 0
         rec['strict_path'] = 'typed' if strict_typed else 'refused'
         rec['strict_reason'] = '' if strict_typed else first_reason(err)[:600]
-        rc, _out, err = _build(src.name, 'main.out', False, work)
+        rc, _out, err = _build(src.name, 'main.out', False, work, flags)
         rec['build_seconds'] = round(time.monotonic() - start, 2)
         if rc != 0:
             rec['first_reason'] = first_reason(err)[:600]
@@ -549,7 +585,13 @@ def render(recs, out_dir):
     lines.append('- Oracle: CPython %s (`python3`), stdout and exit status' %
                  (recs[0].get('python') if recs else 'unknown'))
     lines.append('- Build: `python3 -B AIL_CURRENT/ail_chatgpt.py compile SRC --syntax python '
-                 '[-o OUT] [--strict]`, `AIL_NO_CACHE=1`, 120 s, 1.5 GB, 2 at a time')
+                 '[-o OUT] [--strict] [declared flags]`, `AIL_NO_CACHE=1`, 120 s, 1.5 GB, 2 at a time')
+    flagged = [r for r in recs if r.get('build_flags')]
+    if flagged:
+        lines.append('- Declared build flags (the program\'s own README/test config, or its top '
+                     '`# ail-build:` comment): ' +
+                     '; '.join('`%s`: `%s`' % (r['name'], ' '.join(r['build_flags']))
+                               for r in flagged))
     lines.append('- Programs: `lab/pyproof/programs.txt` (%d, fixed order)' % len(recs))
     lines.append('')
     headline = 'typed %d / %d, general %d, refused %d, wrong %d' % (

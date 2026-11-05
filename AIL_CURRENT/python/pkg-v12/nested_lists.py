@@ -88,6 +88,58 @@ def _element_text(element):
     return element[1] if _struct(element) else element
 
 
+def _fresh_source(e):
+    """A list source that is a new list every evaluation (a slice), so rows made from it
+    never share a list even when the same expression is written twice or re-evaluated."""
+    while isinstance(e, (ast.Attribute, ast.Subscript, ast.Starred)):
+        if isinstance(e, ast.Subscript) and isinstance(e.slice, ast.Slice):
+            return True
+        e = e.value
+    return False
+
+
+def _source_name(e):
+    """The name a row source starts from (`r` for `r`, `b.r`, `d['k']`), else None."""
+    while isinstance(e, (ast.Attribute, ast.Subscript, ast.Starred)):
+        if isinstance(e, ast.Subscript) and isinstance(e.slice, ast.Slice):
+            return None
+        e = e.value
+    return e.id if isinstance(e, ast.Name) else None
+
+
+def _bound_sources(target):
+    """The row-source spellings an assignment target rebinds (`r`, `b.r`, `d['k']`)."""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Attribute, ast.Subscript)):
+        try:
+            return [ast.unparse(target)]
+        except Exception:
+            return []
+    if isinstance(target, ast.Starred):
+        return _bound_sources(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        out = []
+        for element in target.elts:
+            out.extend(_bound_sources(element))
+        return out
+    return []
+
+
+def _loop_binds(stmts):
+    """Names a loop body (or its target) binds, not counting nested defs, classes or lambdas."""
+    out = set()
+    stack = list(stmts)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            out.add(node.id)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
 class NestedLists:
     def __init__(self, tree, unsupported, library, entry=None):
         self.tree = tree
@@ -99,6 +151,9 @@ class NestedLists:
         self.rows = {}               # row class name -> element type
         self.counter = 0
         self.legacy = set()          # functions returning list[list[int]] left to the older grids
+        self.wrapped = {}            # row source -> line already copied into a row in this function
+        self.loops = []              # per enclosing loop: names it rebinds each iteration
+        self.temporary = 0           # >0 while lowering a rows list that is not stored anywhere
 
     # ---------------------------------------------------------------- annotations
     def ann(self, node):
@@ -521,6 +576,9 @@ class NestedLists:
         self.env = env
         self.cond = 0
         self.build_into = self.built_into = None
+        self.wrapped = {}
+        self.loops = []
+        self.temporary = 0
         fn.body = self.block(fn.body)
 
     def mentions_nesting(self, fn):
@@ -561,11 +619,23 @@ class NestedLists:
                     and len(s.targets[0].elts) == len(s.value.elts):
                 wants = [self.target_want(t) for t in s.targets[0].elts]
                 s.value.elts = [self.expr(v, w, pre) for v, w in zip(s.value.elts, wants)]
+                self.forget(s.targets[0])
                 s.targets[0].elts = [self.target(t, pre) for t in s.targets[0].elts]
             else:
+                target = s.targets[0] if len(s.targets) == 1 else None
                 want = self.target_want(s.targets[0]) if len(s.targets) == 1 else None
-                self.direct(s, s.targets[0] if len(s.targets) == 1 else None)
-                s.value = self.expr(s.value, want, pre)
+                # A rows list a lowering pass built itself (`chain.from_iterable([a, b, a])` keeps
+                # its argument in a generated `_il*_s` pool) is read-only machinery: sharing a row
+                # source there is never observed, so do not refuse it.
+                synthetic = isinstance(target, ast.Name) and getattr(target, '_ail_synth', False)
+                self.temporary += 1 if synthetic else 0
+                try:
+                    self.direct(s, target)
+                    s.value = self.expr(s.value, want, pre)
+                finally:
+                    self.temporary -= 1 if synthetic else 0
+                for each in s.targets:
+                    self.forget(each)
                 s.targets = [self.target(t, pre) for t in s.targets]
         elif isinstance(s, ast.AnnAssign):
             want = self.ann(s.annotation)
@@ -573,6 +643,7 @@ class NestedLists:
             if s.value is not None:
                 self.direct(s, s.target)
                 s.value = self.expr(s.value, want if _nest(want) else None, pre)
+            self.forget(s.target)
         elif isinstance(s, ast.AugAssign):
             self.settle_target(s.target, pre)
             t = self.ty(s.target, env)
@@ -585,19 +656,39 @@ class NestedLists:
             s.value = self.expr(s.value, None, pre)
         elif isinstance(s, ast.For):
             s.iter = self.expr(s.iter, None, pre)
-            s.body = self.block(s.body)
+            bound = _loop_binds([s.target] + s.body)
+            self.loops.append(bound)
+            try:
+                self.forget(s.target)                # the target is rebound on every pass
+                s.body = self.block(s.body)
+            finally:
+                self.loops.pop()
             s.orelse = self.block(s.orelse)
         elif isinstance(s, ast.While):
             test_pre = []
             s.test = self.expr(s.test, None, test_pre)
             if test_pre:
                 raise self.Unsupported('a nested-list comprehension in a while condition: build it with a let before the loop')
-            s.body = self.block(s.body)
+            self.loops.append(_loop_binds(s.body))
+            try:
+                s.body = self.block(s.body)
+            finally:
+                self.loops.pop()
             s.orelse = self.block(s.orelse)
         elif isinstance(s, ast.If):
             s.test = self.expr(s.test, None, pre)
+            incoming = dict(self.wrapped)
+            self.wrapped = dict(incoming)
             s.body = self.block(s.body)
+            taken = self.wrapped
+            self.wrapped = dict(incoming)
             s.orelse = self.block(s.orelse)
+            # A source wrapped on either path may still be the same list after the branch, so
+            # keep both paths' records (a branch that rebinds it drops its own record).
+            merged = dict(self.wrapped)
+            for source, line in taken.items():
+                merged.setdefault(source, line)
+            self.wrapped = merged
         elif isinstance(s, ast.Try):
             s.body = self.block(s.body)
             for handler in s.handlers:
@@ -701,7 +792,39 @@ class NestedLists:
         """An expression whose value is used as a struct or receiver: never unwrapped here."""
         return self.expr(e, 'keep', pre)
 
+    def forget(self, target):
+        """A rebinding gives the name a new list, so an earlier row made from it no longer
+        shares the value the name now holds."""
+        for source in _bound_sources(target):
+            self.wrapped.pop(source, None)
+
     def row_call(self, element, value, near):
+        # Converting a plain list into a row copies it.  Wrapping one value at two places would
+        # then make two rows where CPython has the same list twice (changing one is seen through
+        # the other), so refuse that shape by name instead of silently losing the identity.
+        if not self.temporary and isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)) \
+                and not _fresh_source(value):
+            try:
+                source = ast.unparse(value)
+            except Exception:
+                source = None
+            if source is not None:
+                if source in self.wrapped:
+                    raise self.Unsupported(
+                        '`%s` is stored as more than one row of a nested list; in Python those rows '
+                        'are the same list (changing one changes the other), but a plain list copied '
+                        'into a row gets its own list.\n'
+                        '  write instead: build independent rows with a comprehension, or copy the row '
+                        'for each entry (`%s.copy()`)' % (source, source))
+                base = _source_name(value)
+                if base is not None and any(base not in bound for bound in self.loops):
+                    raise self.Unsupported(
+                        '`%s` is copied into a row inside a loop that does not rebuild it each '
+                        'iteration; every pass would get its own copy where Python keeps one list '
+                        '(changing one changes all).\n'
+                        '  write instead: build a fresh row inside the loop, or copy it explicitly '
+                        '(`%s.copy()`)' % (source, source))
+                self.wrapped[source] = getattr(near, 'lineno', None)
         self.rows.setdefault(row_class(element), element)
         return ast.copy_location(ast.Call(func=ast.Name(id=row_class(element), ctx=ast.Load()),
                                           args=[value], keywords=[]), near)
@@ -733,7 +856,14 @@ class NestedLists:
             return self.hoist(e, element, pre)
         if isinstance(e, ast.List) and (_nest(want) or _nest(t)):
             element = (want[1] if _nest(want) and want[1] is not None else t[1] if _nest(t) and t[1] else 'int')
-            e.elts = [self.expr(x, ('row', element), pre) for x in e.elts]
+            # A display that is not the value of a nested-list variable, field, return or append
+            # (e.g. the argument of `chain.from_iterable([a, b, a])`) is a temporary rows list that
+            # is only walked: sharing a row source there is unobservable, so do not refuse it.
+            self.temporary += 0 if _nest(want) else 1
+            try:
+                e.elts = [self.expr(x, ('row', element), pre) for x in e.elts]
+            finally:
+                self.temporary -= 0 if _nest(want) else 1
             return e
         if (isinstance(e, ast.ListComp) and not self.cond and _plain_list(t)
                 and (t[1] == 'str' or _struct(t[1]) or len(e.generators) > 1 and t[1] in SCALARS)

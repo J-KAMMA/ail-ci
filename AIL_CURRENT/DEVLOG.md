@@ -1,3 +1,24 @@
+## 2026-11-05 -- relnotice1_rr1 suite fix: integ's linecache and struct join the notices (job-relnotice1_rr1-11060525)
+
+Merged today's integ into the branch (conflicts only in `DEVLOG.md`, `DIFFERENCES.md` and one
+`manifest.d` shard; pins refreshed). On that tree `test_ail_third_party_notices` failed
+`test_every_file_is_listed`: integ added `AIL_CURRENT/stdlib/linecache.py` and
+`AIL_CURRENT/stdlib/struct.py` after the notices inventory was written, so neither had a row.
+`linecache.py` is a reduction of CPython 3.12's `Lib/linecache.py`, so its docstring now names
+`stdlib/LICENSE-PSF.txt`; `struct.py` is AIL's own implementation, so its row is AIL-owned under
+`MIT OR Apache-2.0`. The inventory counts changed from 13/3/67 to 14/4/69 (CPython-derived /
+AIL-owned / total). The other five listed modules (`test_ail_obj_refs`, `test_ail_packaging`,
+`test_ail_safetynet`, `test_ail_unified`, `test_ail_virtual_dispatch`) pass on the merged tree.
+No compiler or runtime code changed.
+
+Tests on the merged tree: `test_ail_third_party_notices` 7 OK, `test_ail_packaging` 21 OK,
+`test_ail_obj_refs` 3 OK, `test_ail_safetynet` 5 OK, `test_ail_unified` 14 OK,
+`test_ail_virtual_dispatch` 6 OK, plus `test_ail_files` and `test_ail_corpus_findings3`.
+Probes: `p1_linecache.py` (getline/getlines/checkcache on an existing, missing, empty and
+no-final-newline file) and `p2_struct.py` (pack/unpack/calcsize/Struct incl. error texts) match
+CPython 3.12 on both builds; `p3_notices_inventory.py` (stdlib): every stdlib/third_party file is
+covered, each CPython row names LICENSE-PSF.txt, and the named license files exist.
+
 ## 2026-11-05 -- relnotice1_rr1: the wheel carries the PSF notice (job-relnotice1_rr1-11060319)
 
 `test_ail_third_party_notices` failed on integ on `test_psf_license_is_in_the_wheel`: the notices
@@ -18,6 +39,22 @@ Probes: `/tmp/probes/p1_psf_stdlib_a.py` (colorsys, keyword, quopri, stat, token
 `p2_psf_stdlib_b.py` (difflib, getopt, shlex, tomllib) match CPython stdout and exit on both
 builds; `/tmp/probes/p3_wheel_psf.py` shows one `LICENSE-PSF.txt` member (2715 bytes, byte-equal),
 RECORD covering 555 members, and the prepared metadata copy byte-equal.
+## 2026-11-05 -- rbbces4: two field-fact soundness holes closed, re-applied (job-rbbces4-11052320)
+
+Re-applied the accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`). `fieldfacts.py`
+built `bytes_fields` from struct names rather than bytes field names, so an attribute whose name
+matched a struct that owned a bytes field (an `R.vals` list next to a `struct vals { data: bytes; }`)
+was read as a non-negative bytes index. It now collects the unambiguous bytes *field* names, and a
+genuine bytes index (`r.data[0]`) still counts.
+
+`_field_still_nonneg` recognised only single-target `Assign`, `AnnAssign` and `AugAssign`, and
+silently skipped every other store of the field. It now walks the field's `Store`/`Del` attributes
+directly: a tuple/chained target, a `for`/`with`/comprehension target, `del`, an operator other
+than `+=`/`-=`, or any other unclassified form retires the fact.
+
+No pass reads `facts['fields']`, so generated C is unchanged. Added regression cases to
+`test_ail_bce.py`: the bytes/struct-name collision, a real bytes index, and tuple/chained/`for`
+stores. `tools/diff_ids.py` is not present on this tree, so only `update_manifest.py` ran.
 
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 

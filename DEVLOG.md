@@ -1,3 +1,127 @@
+## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
+
+Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
+apostrophe in the prose after the flags (`-- the program's masks ...`) raised
+`ValueError: No closing quotation`; the row became `not run` with no comparison while the headline
+still said `wrong 0`.
+
+- `lab/pyproof/report.py`: split the flag part off at a whitespace `--` separator and tokenize it
+  with plain whitespace splitting, so the reason is never shell-parsed. Only the leading `-...`
+  words are flags; the first `--` or non-flag word ends them. Existing directives (fnvhash's crate
+  config and scar_life's first line) parse as before.
+- `AIL_CURRENT/test_ail_pyproof_report.py`: regression test for a directive whose reason has an
+  apostrophe, one with a bare `because it's ...` reason, and a plain flag-only directive.
+
+Probes (`/tmp/probes`, `report.py -j 1` over four rows): `flagged.py` (directive line 1, values
+through `sys.argv`, a list item, an attribute and a dict value) -> `build_flags ["--exact-int"]`,
+general, `stdout_equal true`; `case/prog.py` (directive on line 3, same big-int body) -> same;
+`case6/prog.py` (directive on line 6) -> not honoured, `refused` by name
+(`int64 constant expression out of range`); `plain_int64.py` -> typed, matching. `cmp.sh`:
+`plain_int64.py` matches on both builds; `big_plain.py` (same big values, no directive) is refused
+on both builds with `OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives
+exact ints)`; `flagged.py` matches both builds under `AIL_EXACT_INT=1` and is refused without it.
+The two target rows still match: fnvhash typed, scar_life general, `stdout_equal true`.
+
+## 2026-11-05 -- fnvfix1: pyproof builds the two declared-flag programs (job-fnvfix1-11052323)
+
+`lab/pyproof` reported `wrong 2`. Both rows are programs that need exact ints by design; they
+compile and only stop at run time under the int64 default (owner decision 2026-10-31). The
+compiler is unchanged: the programs are now built with the flags they declare.
+
+- `examples/crate/fnvhash/main.py`: the crate README and `test_ail_examples_crate.py` already
+  declare `--exact-int` (its empty-string FNV-1a hash is 14695981039346656037, above `2**63`).
+  `report.py`'s mirrored `CRATE_CASES` carried `flags: []`; it now carries the declared flag and
+  `_build` passes it. The flag applies to the crate's example `main.py` (the program the crate
+  test builds), not to `bench.py`.
+- `lab/compare/src/scar_life/main.py`: compare-lab's `EXACT_INT_TASKS` does not include it, and
+  the program needs `W*H`-bit masks, so its first line declares
+  `# ail-build: --exact-int -- ...`; `report.py` reads that comment (leading `-` words are the
+  flags, the rest is the reason) and uses it for both builds.
+- `docs/tutorial.md` records that a program needing exact ints is built with the flag.
+
+pyproof on the two rows: `examples/crate/fnvhash/main.py` typed and matching,
+`lab/compare/src/scar_life/main.py` general and matching. The full census (base work `ff1dcc2`)
+is `wrong 0`: the two rows leave `wrong` and join their paths (typed 29 -> 30, general 16 -> 17),
+no other row changed and refused stays 8.  Required tests on the final commit
+(`par_check -j 2`): `test_ail_pyproof_report`, `test_ail_examples_crate`, `test_ail_tutorial`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`compileall` and `tools/update_manifest.py --check` are clean.
+## 2026-11-05 -- rbbces4: re-apply the field-fact soundness fixes (job-rbbces4-11052320)
+
+The accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`) did not apply as one patch:
+`DEVLOG.md`, `AIL_CURRENT/DEVLOG.md` and `test_ail_bce.py` conflicted, and the `manifest.d` hunks
+were not applied by hand. The source hunks applied cleanly: the new
+`AIL_CURRENT/python/pkg-v12/fieldfacts.py`, its install in `pyfunc._to_c_once` and
+`ir/driver.py` `facts_for()['fields']`. The new `FieldFactsTests` cases were inserted into the
+current `test_ail_bce.py`. `tools/diff_ids.py` is not present on this tree; `python3
+tools/update_manifest.py` regenerated every pin and `--check` passes.
+
+The change closes two soundness holes. `fieldfacts.py` built `bytes_fields` from struct names
+rather than bytes field names, so an attribute whose name matched a struct that owned a bytes
+field (an `R.vals` list next to a `struct vals { data: bytes; }`) was read as a non-negative
+bytes index; it now collects the unambiguous bytes *field* names, and a genuine bytes index
+(`r.data[0]`) still counts. `_field_still_nonneg` recognised only single-target `Assign`,
+`AnnAssign` and `AugAssign` and silently skipped every other store; it now walks the field's
+`Store`/`Del` attributes directly, so a tuple/chained target, a `for`/`with`/comprehension
+target, `del`, an operator other than `+=`/`-=`, or any other unclassified form retires the
+fact. No pass reads `facts['fields']`, so generated C is unchanged.
+
+Tests: `test_ail_bce` 11/11, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass. Probes: the dump is `{"groups": [], "nonneg": []}` for
+`n_bytes_collide.ail` (prints `-5`) and `n_tuple.py` (prints `-1`), both as CPython does.
+## 2026-11-05 -- tccprobe1: measure whether the generated C builds with tcc (measurement only) (job-tccprobe1-11051609)
+
+`lab/tccprobe/run.py` takes the ten `lab/compare` tasks and forty `corpus/gdev` programs (seed
+20261105; the first forty of the shuffled list whose C builds), emits the C once with
+`compile --debug-dir` (the saved `program.c` is byte-identical to what the compiler was handed, and
+`native_report.json` records its command line), then builds that same C with `gcc -O2`, `gcc -O0`
+and `tcc` (median of three builds, fresh directory each), runs each build three times on the same
+input and compares stdout, stderr and exit status.
+
+Result with tcc 0.9.27 (Ubuntu package): 0 of 50 build; 0 binaries ran, so nothing was compared at
+run time and the wrong-output stop condition did not trigger. All 50 build with gcc -O2 and
+gcc -O0; median C-compile wall time gcc -O2 1.2092 s, gcc -O0 0.4434 s, tcc not available. First
+blockers: 23 unsized aggregates from runtime values -- 15 unsized compound literals
+(`pyfunc.py:24481`) and 8 unsized array declarations (`cruntime.py:6450,6508,6538`) -- 19
+`static _Thread_local` (`cruntime.py:17245-17246`), 7 `__builtin_unreachable`, 1 `__int128`.
+Details, corpus list, per-task timings and the five excerpts are in `lab/tccprobe/RESULTS.md`.
+
+A fix round corrected the attribution: tcc reports both unsized aggregate forms as `index too
+large`, and `classify()` now separates them by the C line it points at (an `(T[]){...}` compound
+literal versus a `T x[] = {...};` declaration) instead of mapping all 23 to the compound literal.
+`diagnose()` also prefers the translation unit tcc names in multi-unit builds, a tcc build that
+runs but differs is labelled `wrong output` rather than a parse failure, and the excerpt set is
+`fail_1`..`fail_5` (adding the declaration form). Re-measured with 3 repetitions: the headline
+0/50, the 23/19/8 bucket split and the 40-program corpus list are unchanged; the 3-run
+determinism claim and the `program.c` sha256 (`facf9d98...`) were re-verified.
+
+No compiler, runtime or default C compiler is changed (release stays `gcc -O2`), so no DIFFERENCES
+row and no new test module: the artifact is the measurement script plus its report. Two bugs in the
+measurement itself were found and fixed before the final run: `-lm` was placed before the source
+(breaking links under `--as-needed`) and multi-unit general-path builds lost their link libraries.
+`python3 tools/update_manifest.py` and `--check` pass.
+
+## 2026-11-05 -- rbtccprobe1: re-apply the tcc build probe on the current tree (job-rbtccprobe1-11052322)
+
+Re-applied the accepted `tccprobe1` change (`c5ca5c0d`..`job-tccprobe1-11052026`).  Everything
+applied: `lab/tccprobe/` (`run.py`, `RESULTS.md`, five `fail_*.txt` excerpts), the `tccprobe1`
+measurement entry above and the `.github/workflows/agent-worker.yml` hunks, which drop
+`GH_MODELS_TOKEN` and `$RUNNER_TEMP/ghm.key` from the key-file and key-scan steps.  That removal
+is harmless: `.agent/pipeline.sh` already no-ops `run_ghm` when `$RUNNER_TEMP/ghm.key` is absent
+(`[ -s "$RUNNER_TEMP/ghm.key" ] ... || return 1`).  No compiler, runtime or default build is
+changed (release stays `gcc -O2`), so no DIFFERENCES row and no new test module.
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran;
+`--check` passes.
+Tests (`par_check -j 2`): `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass.
+Probes: `/tmp/probes/tccprobe_logic.py` (29 checks) covers `classify()` on both real `index too
+large` forms (declaration vs compound literal) and the sized forms that must not match, attribute,
+`__thread`, `__int128`, `__builtin_*`, asm, link error, `diagnose()` picking the unit tcc names in
+a multi-unit build, the `-O0`/tcc flag rewrites, single vs multi `parse_report`, `write_excerpts`
+ordering and emitters, and the `--from-json` reclassification: 29/29.
+`/tmp/probes/tccprobe_smoke.py` matches CPython under `cmp.sh` in both the general and default
+builds.  tcc 0.9.27 is not installed on this runner, so the 0/50 build numbers in `RESULTS.md`
+were not re-measured here; they are the accepted job's recorded measurement.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this
@@ -301,6 +425,124 @@ The accepted pyreachs5c change (same-line key rebinding and key mutation in the 
 `pyfunc.py` hunks applied cleanly, the new `test_ail_pyreach_dictrows.py` / `tests.d` module were
 taken from the job branch, and the manifest was regenerated. `tools/diff_ids.py` is absent on this
 tree, so only `update_manifest.py` ran; `--check` passes.
+## 2026-11-05 -- pyreach s7 review fix 3b: share-safe row sources are not refused
+
+The repeated/loop-invariant row-source refusal in `nested_lists` also caught sources that never
+lose Python identity, breaking `test_ail_stdlib5` (`calendar` slices), `test_ail_stdlib_batch3`
+(`chain.from_iterable([xs, ys, xs])`) and `test_ail_stdlib_batch4` (`csv`'s
+`rows.append(fields); fields = []`).  A slice is a fresh list at every evaluation, a rows list a
+lowering pass built itself (`_ail_synth` pool) is read-only machinery, and a source rebound after
+its row is a new list, so none of these are refused now.  Rebinding state is tracked per statement
+block with both branches of an `if` merged (a source wrapped on either path stays flagged), so
+`rows.append(r); if c: r = []; rows.append(r)` is still refused.  Two regression cases in
+`test_ail_nested_lists` still pass.
+
+`test_ail_stdlib5`, `test_ail_stdlib_batch3`, `test_ail_stdlib_batch4`, `test_ail_nested_lists`,
+`test_ail_prog5`, `test_ail_pyperf_lab`, `test_ail_safetynet` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` exit 0.
+
+## 2026-11-05 -- pyreach s7 review fix 3: repeated row objects stay off the typed path
+
+Review found that the previous row-list exemption was too broad: `nested_lists` copies a plain
+list into a row, so a returned `list[list[int]]` built with the same list twice (`rows = [r, r]`,
+repeated `append`/`insert`, an element store, or an append in a loop that does not rebuild the row)
+lost Python's identity.  The typed build printed `[7] []` / `[7] [8]` where CPython prints
+`[7] [7]` / `[7, 8] [7, 8]`.  `nested_lists.row_call` now refuses, by name, a non-fresh row source
+that is copied a second time in the same function, and a loop-invariant row source copied inside a
+loop.  The alias exemption in `aliasrefuse._ann_container` then only covers returned rows that the
+lowering can actually keep distinct; its comment says so.
+
+Probes `/tmp/rprobes/p18`..`p30` (list display, argument, attribute, dict value, append, insert,
+element store, loop append) plus the six `p_alias_*` probes match CPython on both the default and
+`AIL_UNIFIED_FORCE=1` builds.  Regression cases added to `test_ail_nested_lists`.
+`test_ail_prog5`, `test_ail_pyperf_lab`, `test_ail_nested_lists`, `test_ail_prog7`,
+`test_ail_prog8`, `test_ail_ir_rulex`, `test_ail_optional_locals`, `test_ail_unbound`,
+`test_ail_fuzz_findings`, `test_ail_refusal_messages`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.
+
+## 2026-11-05 -- pyreach s7 compatibility: whole-row-list aliases and row-field element aliases
+
+Two regressions from the s7 alias scan are fixed in `aliasrefuse.py`.
+
+* `_ann_container` normalized every returned `__ail_checked_list[...]` to a container, so the
+  result of a function returning `list[list[int]]` became a second-reference site (`alias = rows`)
+  and `test_ail_prog5` fell to the general path. A returned list whose element is a row (nested
+  container or `_AilRow_*` wrapper) is shared row by row on the typed path, so the outer name is
+  no longer treated as a second-reference container; a returned list of scalars still is (the
+  `return_element` alias case stays refused).
+* `refs` ignored the base of a row-field read (`gi = grid[i].v`), so an element alias was no
+  longer seen and `scimark_sor` took the typed path with a copied row (`38.0` instead of
+  `0.412217351`). The special case is removed, so that shape is refused by name and stays on the
+  sharing general path.
+
+Probes `/tmp/probes/p_alias_rows_whole.py`, `p_alias_rows_return.py`, `p_alias_rows_element.py`,
+`p_alias_return_element.py`, `p_alias_scalar_list.py` and `p_alias_rows_shapes.py` (argument, list
+item, attribute, dict value, empty and negative cases) match CPython on both builds.
+`test_ail_prog5` 7/7, `test_ail_pyperf_lab` 3/3, `test_ail_optional_locals`, `test_ail_unbound`,
+`test_ail_fuzz_findings`, `test_ail_refusal_messages`, `test_ail_ir_rulex`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
+## 2026-11-05 -- pyreach s7 review fix 2: loop-carried guarded locals and deleted closures
+
+Review 1 found two regressions in the s7 tree.  Both are fixed and probed against CPython on the
+default and `AIL_UNIFIED_FORCE=1` builds.
+
+* `optlib.bind_guarded_locals` inserted the fallback `bw = <first value>` in front of the first
+  statement of the guard's block even when that assignment was nested inside a conditional.  In a
+  loop body it therefore reset a loop-carried `bw` on every iteration that took no new assignment
+  (`t14_stale_aux.py` printed `4 3` / `end 4 3` instead of `4 4` / `end 4 4`).  When the first
+  assignment is not itself that statement, the fallback now goes in front of the outermost enclosing
+  loop, so it runs once before the loop; only a name or literal default is hoisted there (otherwise
+  the refusal stays).  Nested loops, a reset inside the loop, a direct body assignment, a loop-variable
+  default and two companions all match CPython.
+* `unbound.py`'s line-aware capture rule let any nested def made before a `del` keep reading the name
+  (`t4_del_closure_call.py` printed the deleted `3`, exit 0).  A deleted captured name is now refused
+  by name (general path, CPython's NameError/exit 1), except the compiler's `key=xs.__getitem__`
+  lambda: it is the `key=` of `sorted`/`min`/`max`/`.sort`, which runs it during that call.  Closures
+  called before `del`, aliases called after it, and an uncalled closure match CPython; the sort-key
+  pattern stays typed and a `del` before the sort is refused.
+
+`test_ail_optional_locals` 9/9, `test_ail_unbound` 20/20, `test_ail_optional_structs` 7/7,
+`test_ail_safetynet` 5/5, `test_ail_files` 18 (1 skip), `test_ail_corpus_findings3` 2/2.
+`berth_sim` is typed again, 26/26 cases; the five codegen pins and all ten `.ail` program C files are
+byte-identical to `work`.
+
+## 2026-11-05 -- pyreach s7 review fix: whole-list uses of a `None` slot list refused by name
+
+The review found that the s7 lowering rewrote only a few slot shapes and left every other use of the
+list name seeing the lowered rows, so `for w in wait`, `a, b, c = wait`, `show(wait)`, `wait.append(..)`,
+`wait[:]`, `sort`/`clear`/`+=` and mutation during iteration silently turned `None` into `[]` or
+desynchronised the present-bit list (`IndexError` where CPython exits 0).  `optlib._check_col_name_uses`
+now runs on the transformed body and refuses the name by name unless the only remaining mentions are
+the literal assignment itself and the rewrites the transformer produced (a row subscript read, or an
+argument of the generated `_ail_none_row_*` / `_ail_none_repr_*` helper).  Those programs keep their
+old route (general path) and match CPython; the supported shapes (`is None`, `print(wait)`, present-row
+unpacking, guarded `heappush`/`heappop`/`len`/method receiver) still build typed.  Probes
+`/tmp/probes/p_*.py` (iteration, unpack, argument, append, sort, `+=`, slice, mutation during iteration,
+attribute call, present-row read, supported berth_sim-style loop) match CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds; every refused one exits 3 under `AIL_NO_GENERAL=1` with the
+"only read slot by slot" message.  `berth_sim` stays typed, 26/26 cases; the ten `.ail` C files and the
+codegen pins are byte-identical to `work`.
+
+## 2026-11-05 -- pyreach s7: None list slots and `or`/`and` narrowing (job-pyreachs7-11051129)
+
+`berth_sim` now builds typed from the unchanged `.py`: all 26 public+hidden cases match `reference.py`
+and the perf input is correct for the typed build.  Two changes in `optlib.py`:
+
+* `wait = [None, [], [], []]` becomes a list of rows plus a present bit per slot.  `is None` reads the
+  bit, `print(wait)` spells the absent slots as `None`, and unpacking present slots aliases the stored
+  rows.  An absent slot used as a list (`len`, `.append`, `heappush`) raises and exits 1 with CPython's
+  stdout; any other slot read (`x = wait[0]`) is refused by name so the general path keeps the `None`.
+* a local bound only in the blocks that give an Optional its value (`bw`) is bound once in front of
+  the earliest such block, so the possibly-unbound pass does not wrap every later read.  `or`/`and`
+  narrowing already existed in the base and is now covered by probes.
+
+Bridging the base export (which did not include s2): added the BLIST stepped-slice copy in
+`_stepped_slice_temp`/`_iter_plan`, heapq on a subscript receiver, `del name` lowering (unbound.py
+already tracks the deletion), and a line-aware capture check in unbound.py so `del keys` after
+`sorted(..., key=keys.__getitem__)` no longer refuses.  Probes in `/tmp/probes` (p1-p9) match CPython
+on the default and `AIL_UNIFIED_FORCE=1` builds; int64 overflow and `--exact-int` behave as before.
+`test_ail_optional_locals` (8 tests) passes.
 
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 

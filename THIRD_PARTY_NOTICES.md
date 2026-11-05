@@ -17,10 +17,12 @@ the file already named its origin and license before this inventory was added.
 | `AIL_CURRENT/stdlib/difflib.py` | CPython 3.12 `Lib/difflib.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
 | `AIL_CURRENT/stdlib/getopt.py` | CPython 3.12 `Lib/getopt.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | no |
 | `AIL_CURRENT/stdlib/keyword.py` | CPython 3.12 `Lib/keyword.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
+| `AIL_CURRENT/stdlib/linecache.py` | CPython 3.12 `Lib/linecache.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
 | `AIL_CURRENT/stdlib/quopri.py` | CPython 3.12 `Lib/quopri.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
 | `AIL_CURRENT/stdlib/sched.py` | CPython 3.12 `Lib/sched.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | no |
 | `AIL_CURRENT/stdlib/shlex.py` | CPython 3.12 `Lib/shlex.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
 | `AIL_CURRENT/stdlib/stat.py` | CPython 3.12 `Lib/stat.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
+| `AIL_CURRENT/stdlib/struct.py` | AIL's own, written for AIL; behaviour follows CPython 3.12 `Lib/struct.py` | MIT OR Apache-2.0 | `LICENSE-MIT`, `LICENSE-APACHE` | origin named |
 | `AIL_CURRENT/stdlib/token.py` | CPython 3.12 `Lib/token.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
 | `AIL_CURRENT/stdlib/tomllib/*.py` | CPython 3.12 `Lib/tomllib/*.py` (upstream `tomli`, Taneli Hukkinen) | MIT (SPDX header in each file) | - | SPDX MIT; origin named |
 | `AIL_CURRENT/stdlib/zlib.py` | AIL's own, written over the system zlib; behaviour follows CPython 3.12 `Modules/zlibmodule.c` | MIT OR Apache-2.0 | `LICENSE-MIT`, `LICENSE-APACHE` | origin named |
@@ -34,17 +36,17 @@ the file already named its origin and license before this inventory was added.
 
 Counts:
 
-- 13 files derived from CPython under `AIL_CURRENT/stdlib/` (9 modules plus
-  the 4 files of `tomllib/`). All 13 carry a notice in their module docstring.
+- 14 files derived from CPython under `AIL_CURRENT/stdlib/` (10 modules plus
+  the 4 files of `tomllib/`). All 14 carry a notice in their module docstring.
 - 50 files under `third_party/typeshed` (48 `stdlib/**/*.pyi` stubs plus
   `LICENSE` and `VERSION.md`), all under Apache-2.0 with the license beside
   them.
-- 3 files under `AIL_CURRENT/stdlib/` are AIL's own (`zlib.py`,
-  `zlib_glue.c`, `zlib_glue.h`); they link the system zlib, they do not copy
-  it.
-- Total files under `AIL_CURRENT/stdlib/` and `third_party/`: 67, of which 64
-  are third-party or derived (13 CPython-derived, 50 typeshed, and the PSF
-  license text) and 3 are AIL's own.
+- 4 files under `AIL_CURRENT/stdlib/` are AIL's own (`zlib.py`,
+  `zlib_glue.c`, `zlib_glue.h`, `struct.py`); they link the system zlib or
+  implement the behaviour themselves, they do not copy upstream source.
+- Total files under `AIL_CURRENT/stdlib/` and `third_party/`: 69, of which 65
+  are third-party or derived (14 CPython-derived, 50 typeshed, and the PSF
+  license text) and 4 are AIL's own.
 
 ## Unchanged generated data
 

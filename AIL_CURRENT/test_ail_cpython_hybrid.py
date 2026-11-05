@@ -131,6 +131,26 @@ class CPythonHybrid(unittest.TestCase):
             self.assertTrue((out / 'prog.orig.py').is_file())
             self.assertTrue((out / 'prog.py').is_file())
 
+    def test_container_calls_keep_the_gil(self):
+        """D4: a native call with a list argument keeps the GIL; scalar-only calls still release it."""
+        import ail_cpython_hybrid as hybrid
+
+        items = [
+            {'name': 'scalar', 'mangled': 'f_scalar', 'params': [('x', 'int')], 'ret': 'int',
+             'is_bool_ret': False},
+            {'name': 'listed', 'mangled': 'f_listed',
+             'params': [('x', 'int'), ('xs', 'list[int]')], 'ret': 'int', 'is_bool_ret': False},
+            {'name': 'floats', 'mangled': 'f_floats',
+             'params': [('xs', 'list[float]')], 'ret': 'float', 'is_bool_ret': False},
+        ]
+        src = hybrid._wrapper_source('m', items)
+        scalar = src[src.index('ail_w_scalar'):src.index('ail_w_listed')]
+        listed = src[src.index('ail_w_listed'):src.index('ail_w_floats')]
+        floats = src[src.index('ail_w_floats'):]
+        self.assertIn('Py_BEGIN_ALLOW_THREADS', scalar)
+        self.assertNotIn('Py_BEGIN_ALLOW_THREADS', listed)
+        self.assertNotIn('Py_BEGIN_ALLOW_THREADS', floats)
+
     def test_unanalysable_program_runs_in_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
             src, out, report = self.build(tmp, 'refused', REFUSED)
