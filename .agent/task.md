@@ -1,3 +1,58 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I have enough to report. Let me summarize the evidence.
+
+**What the change really does:** adds a 21-item `docs/MIGRATING.md` checklist, 21+1 sample programs, a `lab/migrating/RESULTS.md` class table, and a differential test that checks the page's code blocks against the files and each sample's class. It touches no compiler or runtime source (`program.c` for a plain program is byte-identical to base), and the allowed-file list is respected.
+
+**Probes** (`bash ~/tools/cmp.sh … $PWD`, default + `AIL_UNIFIED_FORCE=1`):
+
+| probe | result |
+|---|---|
+| r1 recursion 60000 | default: same stderr `RecursionError: maximum recursion depth exceeded`, exit 1. Forced-general prints 60000, exit 0 (base-identical) |
+| r13 recursion 49999 / 50001 | 49999 prints, exit 0; 50001 stops → the guard is a **fixed 50,000-frame counter**, not the C stack |
+| r3 `print(2 ** -1)` | 0.5, exit 0, both builds = CPython |
+| r4/r15 literal 2**63 and −2**63−1 | build refused on both paths, `int64 literal out of range` |
+| r5–r8, r14 overflow via argument / list item / attribute / dict value / int64-min | loud `OverflowError: integer overflow in +|-`, exit 1, both paths |
+| r9 `except Exception` around `sys.exit(3)` | exit 3, same stdout |
+| r16 literal-mode `open`, r18 `float(2) ** -1`, r19 `abs(-4.0) ** .5`, r21 flush-then-overflow | same as CPython / `before` flushed |
+| r20 utf-16 file read as `rb` then `.decode("utf-16")` | **build refused** on both paths: `bytes.decode() with the encoding 'utf-16' … built: utf-8, ascii, latin-1` |
+| r22 `x=-4.0; n=0.5; print(x**n)` | default build prints `nan`, exit 0 (silent wrong; base-identical); `AIL_UNIFIED_FORCE=1` exits 3 |
+| r10 `a = "x"+"y"; b="xy"; print(a is b)` | `False` vs CPython `True`, identical on base — pre-existing, correctly logged in RESULTS "Bugs" |
+| r12 plain program, `--debug-dir` | `program.c` identical HEAD vs `/tmp/base` |
+
+**Tests:** `par_check.py -j 2 test_ail_docs_migrating test_ail_safetynet` → the new module passes; `test_ail_safetynet` `S4_generators_gc` fails (`'5530537\n'` vs five lines) and fails identically on base `/tmp/base` → pre-existing. `tools/update_manifest.py --check` exit 0. 21 checklist items, 21 code blocks, 21 result rows.
+
+**Claims:** rlimit-as-`preexec_fn` (3 call sites, no `setrlimit` in the parent) — verified by inspection; BIGINT link and every link in the page resolve — verified; items 10/12/19 now link `PORTING.md` and the thread speed figure is gone — verified; "8 tests OK" and "28 tests OK" — not reproducible here (safetynet fails on base too), so unverified; "3 files changed" is true only for the last commit, the whole change is 24 files/721 insertions — misleading, but every file is on the allowed list.
+
+**Defects (the page describes behaviour no sample shows, and two of them are false):**
+
+1. `docs/MIGRATING.md` item 3 bullet: "Deep recursion stops at the real C stack limit" — it stops at a fixed 50,000-frame guard (its own section says so). Probe r13: `down(49999)` prints 49999 exit 0; `down(50001)` stops with `RecursionError`. Expected per bullet: a stack-exhaustion stop; actual: a counter at 50,000 (and the true stack limit in the forced-general build is a SIGSEGV, r13 at 200000, exit 139).
+2. Item 14 bullet: "An integer raised to a negative exponent stops" — the item's own text admits a constant exponent does not. Probe r3 `print(2 ** -1)` → `0.5`, exit 0, both builds.
+3. Item 11 bullet: "A complex result is refused" — only a constant is. Probe r22: the default build builds and prints `nan`, exit 0 (the general build exits 3), so a user is told a refusal happens where the default build silently answers.
+4. Item 16 "What to do instead: … read the bytes with `"rb"` and decode them yourself" — probe r20: `bytes.decode("utf-16")` is refused on both paths; the advice cannot be followed.
+5. Footer: "the default build falls back and prints one `note:` line" contradicts item 18 and the measurement: `threads.py` builds with **two** `note:` lines (`grep -c '^note:'` = 2).
+
+VERDICT: FIX
+1. `docs/MIGRATING.md` item 3 bullet — replace "the real C stack limit" with the 50,000-frame guard (probe `/tmp/rprobes/r13_rec_49999.py` prints `49999`, exit 0; `r13_rec_50001.py` stops with `RecursionError`, exit 1).
+2. `docs/MIGRATING.md` item 14 bullet — qualify it (constant negative exponent gives the float); probe `/tmp/rprobes/r3_const_neg_exp.py` expected stop, actual `0.5`, exit 0.
+3. `docs/MIGRATING.md` item 11 bullet — say constant operands are refused and non-constant ones stop (or are a bug); probe `/tmp/rprobes/r22_complex_nonconst.py` expected refusal, actual default build `nan`, exit 0.
+4. `docs/MIGRATING.md` item 16 advice — drop "read the bytes and decode them yourself"; probe `/tmp/rprobes/r20_decode_utf16.py` expected the text, actual build refusal `bytes.decode() with the encoding 'utf-16'`.
+5. `docs/MIGRATING.md` footer — say two note lines for a fallback with a second reason (as item 18 does); measured build of `threads.py` prints two.
+
+Pre-existing (does not block): `test_ail_safetynet` S4_generators_gc (same on base), `is` on str (`True`→`False`), `nan` for a non-constant negative fractional power, and the `AIL_UNIFIED_FORCE=1` deep-recursion exit-139 at 200,000 — all identical on `/tmp/base`.
+
+Unverified: the CI shards (nothing pushed), the required 28-test suite (only the two allowed modules were run), and the report's `getrlimit` after-run value.
+[commandcode stop=end_turn turns=24 out_tokens=31623]
+
+
+--- ORIGINAL TASK ---
 Lane: docmigr
 
 # docmigr1: `docs/MIGRATING.md`, a "migrating from Python" checklist, every item checked by a test
