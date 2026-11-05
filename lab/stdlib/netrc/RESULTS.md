@@ -51,6 +51,9 @@ With `AIL_CURRENT/stdlib/netrc.py`, every program builds on the general path (th
 
 After: 10/10 in both builds.
 
+`python3 AIL_CURRENT/test_ail_std_netrc.py` builds all ten in both builds, runs each in a
+temporary directory and compares stdout and exit status with `python3`; it passes.
+
 ## Module differences from CPython 3.12
 
 Only what the compiler refuses was rewritten; parsing, tokenizing, `authenticators`,
