@@ -977,6 +977,31 @@ def _infer(info, tree, units, classes, methods, functions, declared, slots, clas
             names_of[key], lists_of[key] = _scope(env, f, declared[key], set(), set(),
                                                   module_bools, facts[key])
 
+    # A result is judged before the parameters it depends on settle: the loop above shrinks the
+    # candidates round by round and never regrows them, so `def g(flags, d): return max(flags,
+    # default=d)` discarded `bool` while `flags` / `d` were still unannotated parameters.  With
+    # every parameter and field final, reconsider each result once -- a result is a bool when
+    # every `return` is a bool under the settled names/lists.  This only ADDS bool results (the
+    # callers then print True/False, as CPython does) and stops at a fixed point, since a bool
+    # result makes more returns bool through calls.
+    while True:
+        env = build()
+        added = False
+        for key in list(cand_r):
+            if 'b' in cand_r[key]:
+                continue
+            f = unit_of[key][0]
+            rets = [r.value for r in _own_nodes(f) if isinstance(r, ast.Return)]
+            if not rets or any(v is None for v in rets):
+                continue
+            names, lists = names_of[key], lists_of[key]
+            if all(boolish(v, env, names, lists) for v in rets):
+                cand_r[key] = cand_r[key] | {'b'}
+                added = True
+        if not added:
+            break
+    env = build()
+
     # what was decided
     for (key, p), kinds in cand_p.items():
         f, off = callees[key]

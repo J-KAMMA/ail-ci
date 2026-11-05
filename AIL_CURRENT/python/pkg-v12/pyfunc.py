@@ -8964,14 +8964,21 @@ def _fmt_width_c(width_node, ctx, kind):
     ctx.tmp += 1
     cell = '_fw%d' % ctx.tmp
     ctx.parts.add('DIE')
+    # CPython parses the spliced width as a Py_ssize_t: INT64_MIN is one digit too long for it
+    # (`abs(INT64_MIN)` is not representable), so it raises this ValueError on every value kind --
+    # before the str sign check below.  Mapping it to INT64_MAX instead tried to allocate.
+    too_many = 'Too many decimal digits in format string'
+    overflow = ('if (%s == INT64_MIN) ail_raise_value_adopt(ail_exception_new('
+                'AIL_EXC_VALUE, (const uint8_t *)"%s", %d, 1));'
+                % (cell, too_many, len(too_many)))
     if kind == STR:
         msg = 'Sign not allowed in string format specifier'
-        check = ('int64_t %s = %s; if (%s < 0) ail_raise_value_adopt(ail_exception_new('
+        check = ('int64_t %s = %s; %s if (%s < 0) ail_raise_value_adopt(ail_exception_new('
                  'AIL_EXC_VALUE, (const uint8_t *)"%s", %d, 1));'
-                 % (cell, expr, cell, msg, len(msg)))
+                 % (cell, expr, overflow, cell, msg, len(msg)))
     else:
-        check = 'int64_t %s = %s; if (%s < 0) %s = (%s == INT64_MIN) ? INT64_MAX : -%s;' % (
-            cell, expr, cell, cell, cell, cell)
+        check = 'int64_t %s = %s; %s if (%s < 0) %s = -%s;' % (
+            cell, expr, overflow, cell, cell, cell)
     if pre:
         check = ' '.join(pre) + ' ' + check
     return '({ %s %s; })' % (check, cell)

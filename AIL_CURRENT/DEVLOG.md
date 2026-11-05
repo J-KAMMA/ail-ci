@@ -1,3 +1,22 @@
+## 2026-11-05 -- prog18_rr1 review fixes 3: bool result inference and INT64_MIN width
+
+Two defects from the re-review, both on the default/typed build (the forced-general build already
+matched CPython):
+
+- A bool `max`/`min(..., default=...)` reached through unannotated parameters came back as `1`/`0`,
+  not `True`/`False`.  `_is_bool_seq_expr` did see the parameters as bool (the call sites settled
+  them), but boolkind's result inference ran before those parameters settled and never regrew a
+  discarded candidate, so the helper was typed `-> int`.  `_infer` now reconsiders every result
+  once the parameter and field facts are final, adding `bool` when all `return`s are bools (to a
+  fixed point, since a bool result makes more returns bool).
+- A nested width of `INT64_MIN` died with `allocation too large` instead of CPython's
+  `ValueError: Too many decimal digits in format string` (which it raises for int, float and str
+  before the str sign check, because `abs(INT64_MIN)` does not fit `Py_ssize_t`).  `_fmt_width_c`
+  raises that ValueError instead of mapping the value to `INT64_MAX`.
+
+`test_ail_prog18` gains two tests (18 total).  Probes p1-p10 under `/tmp/probes/` match CPython on
+both builds.
+
 ## 2026-11-04 -- prog18: refresh the stale nested-format-spec refusal case
 
 `test_ail_refusal_messages` still listed `f"{x:{w}.2f}"` as a refusal, but prog18's typed path now

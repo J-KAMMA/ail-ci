@@ -23,6 +23,9 @@ T5  the value of a field is evaluated before its nested width (CPython's order, 
     order), a nested width field's own format spec is refused by name, and a bool walk with an int
     `default=` is refused by name (a bool walk with a bool default is typed and exact)
 T6  the two programs that still need a big feature stay named in lab/progfix/prog18.md
+T7  a bool `default=` reached through unannotated parameters makes the function's result a bool
+    (so its callers print True/False, not 1/0), and a nested width of INT64_MIN raises CPython's
+    `ValueError: Too many decimal digits in format string` instead of allocating
 """
 import os
 import shutil
@@ -428,6 +431,37 @@ class Prog18(unittest.TestCase):
 
     def test_bool_walk_bool_default_typed(self):
         exe, source = self.build(BOOL_DEFAULT_TYPED, 'bool_default_typed')
+        self.same(exe, source)
+
+    def test_bool_default_through_parameters_typed(self):
+        # The result is a bool only because `flags`/`d` (both unannotated parameters) are:
+        # boolkind's result candidates are shrunk before those parameters settle, so the function
+        # was typed `-> int` and its callers printed 1/0 instead of CPython's True/False.
+        exe, source = self.build(
+            'def f(d, flags):\n'
+            '    return max(flags, default=d)\n\n\n'
+            'print(f(True, [True, False]), f(False, [False, True]))\n'
+            'print(f(True, []), f(False, []))\n', 'bool_param_result')
+        self.same(exe, source)
+
+    def test_nested_width_int64_min_raises_valueerror(self):
+        # CPython parses the spliced width as a Py_ssize_t: INT64_MIN is one digit too long, so it
+        # raises ValueError for every value kind; mapping it to INT64_MAX used to allocate.
+        exe, source = self.build(
+            'w = -9223372036854775808\n'
+            'try:\n'
+            '    print(f"[{9:>{w}}]")\n'
+            'except ValueError as e:\n'
+            '    print("VE", e)\n'
+            'try:\n'
+            '    print(f"[{9.5:>{w}}]")\n'
+            'except ValueError as e:\n'
+            '    print("VE", e)\n'
+            "try:\n"
+            "    print(f\"[{'x':>{w}}]\")\n"
+            'except ValueError as e:\n'
+            '    print("VE", e)\n'
+            'print("done")\n', 'int64_min_width')
         self.same(exe, source)
 
     def test_report(self):
