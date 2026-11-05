@@ -1,3 +1,55 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+(free quota used up; paid model from here)
+[model commandcode/deepseek-v4.1-flash]
+All checks done. Here is my review.
+
+**What the change really does (one line):** adds a lab-only census harness (`lab/pyproof/report.py`) with a fixed 55-program list, recorded `results.jsonl`, generated `RESULTS.md`, five reproducers, a unit test and manifest entries — it touches no compiler or runtime file.
+
+**Claims checked**
+
+| claim | verdict |
+|---|---|
+| Buckets include general fallbacks; ranking import 6, list 3, int64 3, dict 2, None 2 | verified mechanically (`bucket_counts` on the jsonl reproduces exactly) |
+| all 15 general rows now record `strict_path: refused` | verified |
+| `programs.txt` and `results.jsonl` both 55 rows, same order | verified |
+| int64 reproducer is 3 lines and refuses on both builds | verified via `cmp.sh` |
+| 5 reproducers show their bucket via `report.py` | verified (3 refused/general, 2 refused/refused, each maps to its bucket) |
+| `test_ail_pyproof_report.py` 4 tests OK | verified |
+| `test_ail_pyproof_report` + `test_ail_safetynet` pass | verified (`par_check -j 2`: both ok, 180 s) |
+| manifest `--check` rc 0; diff confined | verified |
+| typed 24/55, general 15, refused 16, wrong 0, geomean 6.32x | **counts/geomean match the file, but the data is wrong — see defect 1** |
+| `ticket_audit` genuine timeout | unverified |
+
+Nothing compiled can change: the diff contains no compiler/runtime file, so there is no "unused feature" C-output probe to run.
+
+**Defects**
+
+1. **Six crate rows are not refusals — the census dropped the lab's build step.** `report.py` copies only sibling `*.py` and never runs `ail_cargo.py build`, so the generated `*_ffi.py` and static library are absent. With the lab's own runner:
+   - `examples/crate/rle/main.py`: default compile rc 0, **no** general-path note, AIL run rc 0, stdout == CPython. Census says `refused` / `import of 'rle_ffi' is not available`.
+   - `examples/crate/textstat/main.py`: same (typed, matches). Census says `refused`.
+   - `examples/crate/fnvhash/main.py`: compiles typed rc 0, but the default binary exits 1 with `OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)` while CPython exits 0 and prints five exact big ints. Under the task's rule this is a **`wrong` row** (silent/loud difference) that must be reported at the top with a reproducer; with the lab's `--exact-int` it matches.
+   Consequence: the #1 bucket (`import of 'X' is not available`, alone 6) is an artifact, the typed share is understated by at least 2 (24 → 26), `refused` is inflated, and the claimed `wrong 0` is false. Root cause: `census_one` never runs CPython for a refused row, so an oracle failure (missing generated module) is indistinguishable from a language refusal. The three `bench.py` rows import the same FFI and are likely affected too (I did not rebuild them individually).
+
+2. **Base provenance is wrong.** `integ_sha()` silently falls back to `HEAD`; the recorded `0aa7d3c07be…` is the worker's own census commit, not `integ` (no `origin/integ`/`integ` ref exists; the real base is `work` = `803122d…`). `RESULTS.md` prints `Base: integ 0aa7d3c…`. The README discloses the fallback, but the generated report still mislabels the base.
+
+**Pre-existing:** none (no compiler/runtime file changed, so no probe can differ on the base).
+
+**Unverified:** `ticket_audit`/`scar_life` timeout claim; `test_ail_files` and `test_ail_corpus_findings3`; the three crate `bench.py` rows; a full 55-row re-run (I re-ran 4 rows plus the 3 crate mains); speed impact (no hot code touched).
+
+VERDICT: FIX
+1. Six crate rows misclassified. Probe (existing): `examples/crate/rle/main.py` and `examples/crate/textstat/main.py` — expected default compile rc 0 on the typed path and stdout == CPython (verified via `AIL_CURRENT/test_ail_examples_crate.py`); actual census `refused` / `import of 'rle_ffi' is not available`. Probe: `examples/crate/fnvhash/main.py` — expected `wrong` (typed build, AIL exits 1 `OverflowError: integer overflow in +` vs CPython exit 0 with exact values), or matching with `--exact-int`; actual `refused` with the import text. Fix: run `ail_cargo.py build` for the crate rows (and their `bench.py` input), and run CPython for every row so a missing artifact cannot masquerade as a refusal.
+2. `RESULTS.md` reports `Base: integ 0aa7d3c…`, which is `HEAD`, not `integ` (actual base `work` = `803122d…`). Expected the base ref/sha; actual the worker's own commit.
+[commandcode stop=end_turn turns=37 out_tokens=36276]
+
+
+--- ORIGINAL TASK ---
 Lane: pyproof
 
 # pyproof1: a typed-reach census of every plain-Python program in the repository, with ranked blockers
