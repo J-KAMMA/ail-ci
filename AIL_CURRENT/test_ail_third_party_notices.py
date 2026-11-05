@@ -31,7 +31,7 @@ ROW = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*
 DERIVED_HINT = re.compile(
     r"(?i)(?:derived from|port of|ported\b[^\n]{0,60}?from)\s+CPython"
     r"|algorithms? (?:are|is) (?:those|the ones|the one) of CPython"
-    r"|CPython 3\.12's\s+(?:Mersenne|calendar|_pydecimal|fractions|ipaddress|pathlib|numbers)"
+    r"|CPython 3\.12's\s+(?:#\s*)?(?:Mersenne|calendar|_pydecimal|fractions|ipaddress|pathlib|numbers)"
     r"|follow CPython 3\.12's"
     r"|error texts are those of CPython"
     r"|of CPython 3\.12"
@@ -117,11 +117,17 @@ class NoticesTest(unittest.TestCase):
 
     def test_compiler_derived_files_are_listed(self):
         found = compiler_derived()
+        expected = sorted(path for path, (origin, _, _) in self.rows.items()
+                          if path.startswith("AIL_CURRENT/python/pkg-v12/")
+                          and origin.startswith("CPython"))
+        self.assertEqual(len(expected), 12, "the compiler-source count changed")
         for path in ("AIL_CURRENT/python/pkg-v12/prelude_csv.py",
                      "AIL_CURRENT/python/pkg-v12/prelude_format.py"):
             self.assertIn(path, found, path + " no longer declares its CPython origin")
         missing = sorted(set(found) - set(self.rows))
         self.assertEqual(missing, [], "compiler sources derived from CPython without an entry")
+        undetected = sorted(set(expected) - set(found))
+        self.assertEqual(undetected, [], "inventoried CPython compiler sources not detected")
         for path in sorted(found):
             self.assertTrue(self.rows[path][0].startswith("CPython"),
                             path + " is derived from CPython but its origin does not say so")
