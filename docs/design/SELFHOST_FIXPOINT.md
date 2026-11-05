@@ -64,9 +64,10 @@ line of the two files.
 
 The check is worthless if the compiler already emits different C for the same source from run to
 run. `lab/selfhost/DETERMINISM.md` measured the current compiler over 30 programs, three builds
-each, varying `PYTHONHASHSEED`, the output directory and the working directory. Each rule below
-answers one difference class found there; the class name is the one `tools/c_determinism.py`
-records.
+each, varying `PYTHONHASHSEED`, the output directory and the working directory: **26 of 30 programs
+and 34 of 34 comparable program-mode pairs were identical, and no difference of any class was
+observed.** The rules below are therefore preconditions for the fixpoint, not fixes for measured
+findings; each is stated so the probe's class names map onto a rule the day one appears.
 
 - **D1 — hash order.** Emit anything derived from a set or dict of strings only after sorting it
   (`sorted(...)`) or after walking a list that was built in source order. Two runs with different
