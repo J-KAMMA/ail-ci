@@ -52,6 +52,133 @@ SET_MAX = 4
 _READS = ('list.get', 'list.len', 'span.get', 'span.len', 'span.of', 'spec.get')
 
 
+def _loop_inside(loop):
+    """Every value defined in `loop` (region arguments and results, nested regions included)."""
+    out = set(loop.regions[0].args)
+    for ins in I.walk(loop.regions[0]):
+        out.update(ins.results)
+        for sub in ins.regions:
+            out.update(sub.args)
+    return out
+
+
+def _first_cmps(v, defs, depth=0):
+    """The comparisons a lowered condition `v` tests, the first conjunct first (the shape of `and`:
+    an `if` whose false arm is the constant false, its true arm another condition)."""
+    d = defs.get(v)
+    if d is None or depth > 8:
+        return []
+    if d.op.startswith('cmp.') and len(d.operands) == 2 \
+            and d.operands[0].type == I.I64 and d.operands[1].type == I.I64:
+        return [(d.op[4:], d.operands[0], d.operands[1])]
+    if d.op == 'if' and len(d.results) == 1:
+        ty = d.regions[0].instrs[-1] if d.regions[0].instrs else None
+        oy = d.regions[1].instrs[-1] if d.regions[1].instrs else None
+        if ty is not None and oy is not None and ty.op == 'yield' and oy.op == 'yield':
+            od = defs.get(oy.operands[0])
+            if od is not None and od.op == 'const' and od.attrs.get('value') is False:
+                return _first_cmps(d.operands[0], defs, depth + 1) + _first_cmps(ty.operands[0], defs, depth + 1)
+    return []
+
+
+def _nondecreasing(v, a, defs, depth=0):
+    """Whether every value `v` a `continue` passes is `a` or `a + c` with c >= 0, also through the
+    `if`-shaped arms the lowering yields (`j += 1` in a branch)."""
+    if v is a:
+        return True
+    d = defs.get(v)
+    if d is None or depth > 8:
+        return False
+    if d.op == 'add':
+        x, y = d.operands
+        other = y if x is a else x if y is a else None
+        c = _const_of(other, defs) if other is not None else None
+        return c is not None and c >= 0
+    if d.op == 'if' and d.results:
+        j = d.results.index(v)
+        alts = []
+        for arm in d.regions:
+            last = arm.instrs[-1] if arm.instrs else None
+            if last is not None and last.op == 'yield' and j < len(last.operands):
+                alts.append(last.operands[j])
+        return bool(alts) and all(_nondecreasing(x, a, defs, depth + 1) for x in alts)
+    return False
+
+
+def _const_of(v, defs):
+    d = defs.get(v)
+    if d is not None and d.op == 'const':
+        c = d.attrs.get('value')
+        if isinstance(c, int) and not isinstance(c, bool):
+            return c
+    return None
+
+
+def _first_cond(v, defs):
+    """The condition an `and`-shaped lowering evaluates first (the leftmost conjunct).  `_first_cmps`
+    skips an operand that is not an i64 comparison, so its first entry may be a later conjunct;
+    this returns the value actually tested first."""
+    d = defs.get(v)
+    while d is not None and d.op == 'if' and len(d.results) == 1:
+        ty = d.regions[0].instrs[-1] if d.regions[0].instrs else None
+        oy = d.regions[1].instrs[-1] if d.regions[1].instrs else None
+        if ty is None or oy is None or ty.op != 'yield' or oy.op != 'yield':
+            break
+        od = defs.get(oy.operands[0])
+        if not (od is not None and od.op == 'const' and od.attrs.get('value') is False):
+            break
+        v = d.operands[0]
+        d = defs.get(v)
+    return v
+
+
+def _while_index(loop, defs):
+    """`(region arg, its value before the loop, the bound)` for a `while` loop (`op == 'loop'`)
+    whose first test is `v < e`, `v` is carried and every `continue` keeps it non-decreasing, and
+    `e` is defined before the loop (so it cannot change in it)."""
+    body = loop.regions[0]
+    test = None
+    for t, ins in enumerate(body.instrs):
+        if ins.op == 'if' and not ins.results \
+                and [r.instrs[-1].op for r in ins.regions] == ['yield', 'break'] \
+                and len(ins.regions[0].instrs) == 1 and len(ins.regions[1].instrs) == 1:
+            test = t
+            break
+    if test is None:
+        return None
+    inside = _loop_inside(loop)
+    cmps = _first_cmps(body.instrs[test].operands[0], defs)
+    if not cmps:
+        return None
+    # Only the first conjunct bounds `v` for everything else in the test: `a and b` evaluates `a`
+    # before `b`, so an access in a later conjunct is in range but one in an earlier conjunct is
+    # not.  A `v < e` further down the chain therefore gives no bound (the loop is not versioned).
+    pred, a, b = cmps[0]
+    if pred in ('gt', 'ge'):
+        pred, a, b = {'gt': 'lt', 'ge': 'le'}[pred], b, a
+    if pred not in ('lt', 'le') or a not in body.args or b in inside:
+        return None
+    k = body.args.index(a)
+    continues = _continues(loop)
+    if continues and all(_nondecreasing(e.operands[k], a, defs) for e in continues):
+        return a, loop.operands[k], b, pred == 'lt'
+    return None
+
+
+def _continues(loop):
+    out = []
+
+    def walk(region):
+        for ins in region.instrs:
+            if ins.op == 'continue':
+                out.append(ins)
+            if ins.op == 'if':
+                for r in ins.regions:
+                    walk(r)
+    walk(loop.regions[0])
+    return out
+
+
 class Form(object):
     """const + sum(coeff * monomial); `terms` is a tuple of (monomial, coeff), a monomial being a tuple
     of one or two atoms (ordered by their keys), the terms ordered by their monomials."""
@@ -92,7 +219,7 @@ class Bounds(object):
     region analysed). `order` gives every value a stable key (the forms, and so the guard's C, do not
     depend on object ids). `elements(base)` gives the bounds of the elements of a container, or None."""
 
-    def __init__(self, fn, inside, defs, order, elements=None):
+    def __init__(self, fn, inside, defs, order, elements=None, while_bounds=True):
         self.fn = fn
         self.inside = inside
         self.defs = defs
@@ -100,9 +227,14 @@ class Bounds(object):
         self.elements = elements
         self.memo = {}
         self.loop_of = {}
+        self.while_of = {}
         for ins in I.walk(fn.body):
             if ins.op == 'for.range':
                 self.loop_of[ins.regions[0].args[0]] = ins
+            elif ins.op == 'loop' and while_bounds:
+                found = _while_index(ins, defs)
+                if found is not None:
+                    self.while_of[found[0]] = found[1:]
 
     # ------------------------------------------------------------------ forms
     def const(self, v):
@@ -192,6 +324,27 @@ class Bounds(object):
             if bl is None or bh is None:
                 return None
             return bl[0], self.norm([Form(h.const - 1, h.terms) for h in bh[1]], False), bl[2] + bh[2]
+        w = self.while_of.get(v)
+        if w is not None:
+            init, hi, strict = w
+            bh = self.of(hi)
+            bi = self.of(init)
+            if bh is None or bi is None:
+                return None
+            # `v` starts at `init` and never decreases, so `init >= 0` gives the cheap lower bound
+            # 0 (as a `for.range` from 0 would); every form of that bound that is not a constant
+            # becomes a side condition of the guard.
+            conds = list(bi[2])
+            for f in bi[0]:
+                if not f.terms and f.const < 0:
+                    return None
+                if f.terms:
+                    conds.append(f)
+            if strict:
+                highs = [Form(h.const - 1, h.terms) for h in bh[1]]
+            else:
+                highs = list(bh[1])
+            return [Form(0)], self.norm(highs, False), conds + bh[2]
         d = self.defs.get(v)
         if d is None:
             return None
@@ -348,7 +501,7 @@ class ElementFacts(object):
     """Bounds of the elements of the lists `fn` owns, in atoms defined at the top level of its body
     (None for a list with a use that may store an element the analysis cannot bound)."""
 
-    def __init__(self, fn, defs, order):
+    def __init__(self, fn, defs, order, while_bounds=True):
         self.fn = fn
         self.defs = defs
         self.order = order
@@ -360,7 +513,7 @@ class ElementFacts(object):
         for k, ins in enumerate(fn.body.instrs):
             for res in ins.results:
                 self.top_index[res] = k
-        self.bounds = Bounds(fn, self.inside, defs, order)
+        self.bounds = Bounds(fn, self.inside, defs, order, while_bounds=while_bounds)
         self.cache = {}
 
     def root(self, v):
