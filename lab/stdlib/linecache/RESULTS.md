@@ -61,8 +61,12 @@ Result after: **10 built, 0 typed, 0 refused; 10 build and match**.
 * `encoding="utf-8"` instead of `tokenize.open`, so a PEP 263 coding cookie and a UTF-8 BOM are
   not honoured; a file that is not UTF-8 gives the empty result.
 * `checkcache` compares content, because `os.stat` is not built (it re-reads and compares the
-  line list); CPython compares `st_size` and `st_mtime`. `08_checkcache_rewrite.py` changes the
-  file's size as well, so both implementations drop the entry.
+  lines with a snapshot taken when the entry was filled); CPython compares `st_size` and
+  `st_mtime`. `08_checkcache_rewrite.py` changes the file's size as well, so both implementations
+  drop the entry. Because the comparison uses that private snapshot rather than the list in the
+  cache, a caller that mutates the list returned by `getlines` keeps its mutation across
+  `checkcache`, as in CPython. A file that still exists but can no longer be opened keeps its
+  entry, matching `os.stat` succeeding in CPython.
 * The cache entry keeps CPython's `(size, mtime, lines, fullname)` shape with `size` the number
   of characters read and `mtime` always `0` (`None` inside a tuple is not built).
 * No `sys.path` search for a relative filename that is not in the working directory.

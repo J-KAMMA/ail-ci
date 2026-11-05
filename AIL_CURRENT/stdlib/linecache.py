@@ -13,10 +13,15 @@ Behaviour differences from CPython, each forced by what the compiler builds:
   coding cookie and a UTF-8 BOM; here a file that is not UTF-8 is read as UTF-8 and a decode
   error gives the empty result, where CPython decodes it.
 * `os.stat` is not built, so freshness is the file's *content*: `checkcache` re-reads the file
-  and drops the entry when its lines differ (or the file is gone), where CPython compares
-  `st_size` and `st_mtime`.  A rewrite that leaves the content identical is a hit here (CPython
-  would drop the entry on a changed mtime); a rewrite to different content of the same size is
-  a miss here (CPython would keep the entry when the mtime has not moved).
+  and compares it with a snapshot of the lines taken when the entry was filled, and drops the
+  entry when the content differs or the path is no longer a readable regular file, where CPython
+  compares `st_size` and `st_mtime` and drops only when `os.stat` fails or either value moved.  A
+  rewrite that leaves the content identical is a hit here (CPython would drop the entry on a
+  changed mtime); a rewrite to different content of the same size is a miss here (CPython would
+  keep the entry when the mtime has not moved).  The comparison uses that private snapshot, not
+  the list in the cache, so a caller that mutates the list returned by `getlines` keeps its
+  mutation across `checkcache`, as in CPython.  A file that still exists but can no longer be
+  opened keeps its entry, matching `os.stat` succeeding in CPython.
 * The entry tuple keeps CPython's shape `(size, mtime, lines, fullname)`; `size` is the number
   of characters read and `mtime` is always `0` (there is no mtime to record, and `None` inside
   a tuple is not built).  A `MemoryError` from a huge file is not caught in `getlines`.
@@ -35,10 +40,15 @@ __all__ = ["getline", "getlines", "clearcache", "checkcache", "updatecache", "ca
 
 cache = {}
 
+# The lines of each `cache` entry as they were when it was filled, used by `checkcache` so that
+# a mutation of the list the caller received does not make the entry look out of date.
+_snapshots = {}
+
 
 def clearcache():
     """Clear the cache entirely."""
     cache.clear()
+    _snapshots.clear()
 
 
 def getline(filename: str, lineno: int, module_globals=None):
@@ -78,6 +88,14 @@ def _read_lines(fullname: str):
     return lines
 
 
+def _drop(filename: str):
+    """Remove `filename` from both the cache and the snapshots."""
+    if filename in cache:
+        del cache[filename]
+    if filename in _snapshots:
+        del _snapshots[filename]
+
+
 def checkcache(filename=None):
     """Discard cache entries that are out of date.
 
@@ -96,9 +114,19 @@ def checkcache(filename=None):
             continue
         size, mtime, lines, fullname = entry
         fresh = _read_lines(fullname)
-        if fresh is None or fresh != lines:
-            if filename in cache:
-                del cache[filename]
+        if fresh is None:
+            # The content cannot be read now.  CPython's os.stat still succeeds for a file
+            # that exists but cannot be opened (no read permission), so keep the entry; drop
+            # it only when the path is gone or is no longer a regular file.
+            if not os.path.isfile(fullname):
+                _drop(filename)
+            continue
+        if filename in _snapshots:
+            snapshot = _snapshots[filename]
+        else:
+            snapshot = None
+        if snapshot is None or fresh != snapshot:
+            _drop(filename)
 
 
 def updatecache(filename: str, module_globals=None):
@@ -108,7 +136,7 @@ def updatecache(filename: str, module_globals=None):
     """
     if filename in cache:
         if len(cache[filename]) != 1:
-            del cache[filename]
+            _drop(filename)
     if not filename or (filename.startswith("<") and filename.endswith(">")):
         return []
 
@@ -122,4 +150,5 @@ def updatecache(filename: str, module_globals=None):
     for line in lines:
         size += len(line)
     cache[filename] = size, 0, lines, fullname
+    _snapshots[filename] = list(lines)
     return lines
