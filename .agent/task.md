@@ -1,3 +1,52 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I've gathered everything I need. Here's my review.
+
+## What the change does
+
+It adds `AIL_CURRENT/stdlib/cmd.py` (664 lines) plus 10 lab programs and a test. The module implements CPython 3.12's `Cmd` API, but dispatch is a hardcoded vocabulary of 11 command names (`_COMMAND_NAMES`) called through per-name helpers, and `get_names()` is a hardcoded `_BASE_NAMES` list plus those 11 names. The report frames this as "dispatch through real subclass methods"; in reality it supports only the exact command names the ten lab programs happen to use (`EOF, add, alpha, count, echo, greet, help, num, ping, secret, shell`), so the labs are tailored to the module. The report's "rewrote the dispatch mechanism / old module put stubs on Cmd" describes intra-branch history; versus base the whole file is new.
+
+## Probes (all in `/tmp/rprobes/`, `cmp.sh` on HEAD, default and `AIL_UNIFIED_FORCE=1`)
+
+- `p5_plain.py` (no cmd): both builds same stdout; generated `program.c` byte-identical to `/tmp/base` (`--debug-dir`). Good.
+- `p1_dispatch_outside.py`: subclass defines `do_exit`; CPython calls it, AIL prints `*** Unknown syntax: exit now`. Both builds.
+- `p2_help_table.py`: CPython prints `Documented ... echo help` + `Undocumented commands: EOF go`; AIL lists `EOF echo help` all under documented and, since `go` is outside the vocabulary, never lists it.
+- `p3_help_topic.py` / `p6_help_help.py`: `help zoom` (docstring-only) and `help help` give `*** No help on zoom` / `*** No help on help`; CPython prints `Zoom the view.` / `List available commands with "help" or detailed help with "help cmd".`
+- `p4_names.py`: `hasattr(n,'do_foo')` True but `get_names()` omits `do_foo` and `completenames('f')` returns `[]`; CPython returns `['foo']`.
+- `p7_inherit.py`: inherited `do_add`/`do_ping` dispatch correctly; only the help table diverges (same as p2).
+- Base refuses all cmd imports (`not in the subset: a non-name base class in class S`), so every difference above is caused by this change; no pre-existing differences found.
+
+## Tests
+
+`par_check.py -j 2 test_ail_std_cmd test_ail_safetynet` → both ok (170.2s / 181.3s). `tools/update_manifest.py --check` clean. `git diff --stat work..HEAD` = 22 files, all allowed.
+
+## Report claims
+
+- 4 tests OK / 9/10 labs match: **verified** (my run; the 9-program loop is inside the module).
+- safetynet ok, manifest clean, 22 allowed files: **verified**. `test_ail_files` / `test_ail_corpus_findings3`, `r3/r4/r6/r7`, and the ulimit sub-claim: **unverified** (out of reviewer scope).
+- "get_names() lists only commands the subclass defines": **false** — p4 omits a real `do_foo`; the r5 match only held because its names were in the vocabulary.
+- "reviewer's premise is wrong" for arbitrary `do_baz`: **false** — CPython dispatches it; p1 shows `do_exit` working in CPython.
+- "Every printed text exactly CPython's": **false** (p2, p3, p6).
+- RESULTS.md's quoted fallback note is stale: HEAD prints `cmd.py:302: identchars = cmd.IDENTCHARS`, not `:386 intro = None`.
+
+Not checked: runtime speed (no compiler/runtime change; p5's C is identical, so it cannot move).
+
+VERDICT: FIX
+1. `do_*` methods outside the 11-name table are never dispatched. `/tmp/rprobes/p1_dispatch_outside.py` (`class S(cmd.Cmd): def do_exit(...)`): expected `exit called: 'now'` + `res1 True`, actual `*** Unknown syntax: exit now` + `res1 None` (both builds).
+2. `help` misclassifies commands and drops the undocumented section. `/tmp/rprobes/p2_help_table.py`: expected `Documented ... echo  help` then `Undocumented commands: EOF  go`, actual `Documented ... EOF  echo  help` and `go` absent entirely (both builds). Same in `/tmp/rprobes/p7_inherit.py`.
+3. `help <name>` for a docstring-only command prints no help. `/tmp/rprobes/p3_help_topic.py`: expected `Zoom the view.`, actual `*** No help on zoom`; `/tmp/rprobes/p6_help_help.py`: expected `List available commands with "help" or detailed help with "help cmd".`, actual `*** No help on help` (both builds).
+4. `get_names()`/`completenames()` omit real methods outside the table. `/tmp/rprobes/p4_names.py`: expected names containing `do_foo` and `complete ['foo']`, actual list without `do_foo` and `complete []` (both builds).
+[commandcode stop=end_turn turns=15 out_tokens=18407]
+
+
+--- ORIGINAL TASK ---
 Lane: cmdmod
 
 # cmdmod1: `import cmd` in compiled programs, shipped as AIL source (`AIL_CURRENT/stdlib/cmd.py`)
