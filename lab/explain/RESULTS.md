@@ -63,8 +63,13 @@ actually off the typed path, and nothing at all for functions the collector neve
    function).
 
 When the blocker list stops early, the named defs are replaced in a temporary copy by typed
-stubs with the same signature (`return <a literal of the annotated type>`, or `print(0)` for a
-void def), and the build is run again, at most ten rounds. A blocker found in a later round is
+stubs that keep their signature *and their decorators* (`return <a literal of the annotated
+type>` — a class in the program builds as `Cls(0)` — or `print(0)` for a void def), and the
+build is run again, at most ten rounds. Keeping `@staticmethod` / `@classmethod` / `@property`
+matters: a hidden `@property` that lost its decorator would turn into a plain method and make
+its callers look `general`. The builds also run with `AIL_QUIET_FALLBACK`, `AIL_UNIFIED_FORCE`
+and `AIL_NO_GENERAL` removed from the environment, so the program's status always describes the
+default build rather than the caller's tuning. A blocker found in a later round is
 marked `(found after hiding f)`. A function no round named is `typed` only when the last round
 built on the typed path; otherwise `unknown` — never a guess. Temporary copies live in a
 temporary directory; the source file is only read.
@@ -79,8 +84,8 @@ g08_method_dict.py:15 main  general  print() given a dict[str, int]; write inste
 ```
 
 `--json` prints `ail.explain/1` with the same fields (`status`, `message`, `functions[]` with
-`name`, `line`, `kind`, `status`, `construct`, `why`, `write_instead`, `statement`,
-`found_after_hiding`).
+`name`, `line`, `kind`, `status`, `construct`, `why`, `write_instead`, `statement`, `after` —
+the list of functions hidden to reach that blocker, or `null` in the first round).
 
 ## After
 
@@ -96,6 +101,12 @@ All 30 programs, 117 functions listed by their `# expect:` lines:
 - 10/10 multi-blocker programs report every blocked function, including methods, nested
   functions (attributed to the enclosing function), and callers poisoned by a general callee
   (e.g. `main` printing a dict, `show` assigning a call result to an annotated list).
+- Checked outside the probe set (reviewer probes, run with the same command): a blocker in a
+  `@staticmethod` / `@classmethod` is attributed to `Cls.method` (the compiler names them
+  `Cls__static__m` / `Cls__classmethod__m`), a hidden `@property` keeps its decorator so its
+  callers stay `typed`, and `AIL_QUIET_FALLBACK=1` / `AIL_UNIFIED_FORCE=1` in the caller's
+  environment no longer change the program status line (`g01` stays `general`, `t01` stays
+  `typed`).
 
 Two expectations were corrected against the build while checking (the build is the oracle):
 `m02`/`m06`/`m07`'s callers are `typed` once the blocked callee is stubbed (assigning to an

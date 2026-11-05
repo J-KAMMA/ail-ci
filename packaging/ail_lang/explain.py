@@ -28,6 +28,11 @@ SCHEMA = 'ail.explain/1'
 MAX_HIDE_ROUNDS = 10
 COMPILER = Path('AIL_CURRENT') / 'ail_chatgpt.py'
 
+# Environment a caller may set to tune one build. The status line must describe the default
+# build, so these are removed from the compiler's environment: otherwise a caller's
+# AIL_QUIET_FALLBACK=1 hides the fallback note and the program would be called `typed`.
+_TUNING_VARIABLES = ('AIL_QUIET_FALLBACK', 'AIL_UNIFIED_FORCE', 'AIL_NO_GENERAL')
+
 
 # ------------------------------------------------------------------ the compiler
 
@@ -54,8 +59,9 @@ def _build(compiler, source, workdir, strict=False, tag='out'):
     command = [sys.executable, '-B', str(compiler), 'compile', str(source), '-o', str(target)]
     if strict:
         command += ['--strict', '--json']
+    environment = {key: value for key, value in os.environ.items() if key not in _TUNING_VARIABLES}
     try:
-        done = subprocess.run(command, capture_output=True, text=True)
+        done = subprocess.run(command, capture_output=True, text=True, env=environment)
     except OSError as error:
         raise SystemExit('ail explain: cannot run %s: %s' % (compiler, error))
     return done.returncode, done.stdout, done.stderr
@@ -95,10 +101,15 @@ _SCALARS = {
 }
 
 
-def _dummy(annotation):
+def _dummy(annotation, classes=frozenset()):
     """A C-source literal of the annotated type, or None when this module cannot make one."""
     if annotation is None:
         return None
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            annotation = ast.parse(annotation.value, mode='eval').body
+        except SyntaxError:
+            return None
     text = ast.unparse(annotation).strip()
     if text in ('None', 'NoneType'):
         return None
@@ -106,7 +117,7 @@ def _dummy(annotation):
         for part in text.split('|'):
             part = part.strip()
             if part not in ('None', 'NoneType'):
-                return _dummy(ast.parse(part, mode='eval').body)
+                return _dummy(ast.parse(part, mode='eval').body, classes)
         return None
     if text in _SCALARS:
         return _SCALARS[text]
@@ -117,12 +128,14 @@ def _dummy(annotation):
             return '[]'
         if base == 'dict':
             key, value = _subscript_parts(node)
-            kd, vd = _dummy(key), _dummy(value)
+            kd, vd = _dummy(key, classes), _dummy(value, classes)
             if kd is None or vd is None:
                 return None
             key_text = ast.unparse(key).strip()
             key_literal = '"a"' if key_text == 'str' else kd
             return '{%s: %s}' % (key_literal, vd)
+    if isinstance(node, ast.Name) and node.id in classes:
+        return '%s(0)' % node.id
     return None
 
 
@@ -151,20 +164,21 @@ class Function:
     def line(self):
         return self.node.lineno
 
-    def stub_lines(self):
-        """The def's whole span, replaced by a typed stub that keeps its signature."""
+    def stub_lines(self, classes=frozenset()):
+        """The def's whole span, replaced by a typed stub that keeps its signature and decorators."""
         node = self.node
         indent = ' ' * node.col_offset
         args = ast.unparse(node.args)
         ret = (' -> ' + ast.unparse(node.returns)) if node.returns is not None else ''
-        dummy = _dummy(node.returns)
+        dummy = _dummy(node.returns, classes)
         if dummy is not None:
             body = indent + '    return ' + dummy
         else:
             body = indent + '    print(0)'
+        decorators = [indent + '@' + ast.unparse(deco) for deco in node.decorator_list]
         first = min([node.lineno] + [d.lineno for d in node.decorator_list]) - 1
         last = (node.end_lineno or node.lineno) - 1
-        return first, last, [indent + 'def %s(%s)%s:' % (node.name, args, ret), body]
+        return first, last, decorators + [indent + 'def %s(%s)%s:' % (node.name, args, ret), body]
 
 
 def _functions(tree):
@@ -183,9 +197,16 @@ def _functions(tree):
                     key, kind = key_prefix + node.name, 'nested'
                 else:
                     key, kind = node.name, 'function'
-                record = Function(node, key, mangled_prefix + node.name, parent, kind)
+                prefix = mangled_prefix
+                if in_class is not None:
+                    decorators = {ast.unparse(deco).strip() for deco in node.decorator_list}
+                    if 'staticmethod' in decorators:
+                        prefix += 'static__'
+                    elif 'classmethod' in decorators:
+                        prefix += 'classmethod__'
+                record = Function(node, key, prefix + node.name, parent, kind)
                 ordered.append(record)
-                walk(node.body, mangled_prefix + node.name + '__', key + '.', record.owner)
+                walk(node.body, record.mangled + '__', key + '.', record.owner)
 
     walk(tree.body, '', '', None)
     return ordered
@@ -206,11 +227,11 @@ def _lookup(functions, name):
     return None
 
 
-def _source_with_stubs(text, hidden):
+def _source_with_stubs(text, hidden, classes=frozenset()):
     """`text` with each hidden def replaced by its stub; line numbers of the rest are kept."""
     lines = text.split('\n')
     for record in sorted(hidden, key=lambda fn: fn.node.lineno, reverse=True):
-        first, last, stub = record.stub_lines()
+        first, last, stub = record.stub_lines(classes)
         lines[first:last + 1] = stub
     return '\n'.join(lines)
 
@@ -244,6 +265,8 @@ def explain(path, compiler):
     except SyntaxError:
         tree = None
     functions = _functions(tree) if tree is not None else []
+    classes = ({node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
+               if tree is not None else set())
 
     report = {
         'schema': SCHEMA,
@@ -291,7 +314,7 @@ def explain(path, compiler):
                     progress = True
             if not progress or round_number >= MAX_HIDE_ROUNDS:
                 break
-            copy.write_text(_source_with_stubs(text, hidden), encoding='utf-8')
+            copy.write_text(_source_with_stubs(text, hidden, classes), encoding='utf-8')
 
     for record in functions:
         if record.kind == 'nested':
