@@ -28,7 +28,15 @@ CPYTHON_MARK = "Derived from CPython 3.12 "
 PSF_LICENSE = "LICENSE-PSF.txt"
 LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")
 ROW = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*$")
-DERIVED_HINT = re.compile(r"(?i)(?:derived from|port of|ported\b[^\n]{0,40}?from)\s+CPython")
+DERIVED_HINT = re.compile(
+    r"(?i)(?:derived from|port of|ported\b[^\n]{0,60}?from)\s+CPython"
+    r"|algorithms? (?:are|is) (?:those|the ones|the one) of CPython"
+    r"|CPython 3\.12's\s+(?:Mersenne|calendar|_pydecimal|fractions|ipaddress|pathlib|numbers)"
+    r"|follow CPython 3\.12's"
+    r"|error texts are those of CPython"
+    r"|of CPython 3\.12"
+    r"|CPython's numbers\.py"
+    r"|where CPython 3\.12 has the behaviour[^\n]*taken from")
 # A module that only says the prelude it installs is a port of CPython; it
 # contains no derived source itself.
 DESCRIBES_ANOTHER_FILE = {"AIL_CURRENT/python/pkg-v12/fmtlib.py"}
@@ -120,7 +128,7 @@ class NoticesTest(unittest.TestCase):
 
     def test_derived_CPython_files_have_the_notice(self):
         derived = derived_files(self.rows)
-        self.assertEqual(len(derived), 13, "the CPython-derived file count changed")
+        self.assertEqual(len(derived), 23, "the CPython-derived file count changed")
         followups = followups_text()
         for path in derived:
             origin, license_name, notice = self.rows[path]

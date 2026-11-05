@@ -9,7 +9,7 @@ Counts:
 
 - CPython 3.12 derived files under `AIL_CURRENT/stdlib/`: 11 (PSF License
   Version 2), all with the notice
-- CPython-derived compiler preludes outside that directory: 2 (PSF License
+- CPython-derived compiler sources outside that directory: 12 (PSF License
   Version 2), notice pending (see "Follow-ups")
 - typeshed files: 50, of which 48 are vendored stubs (Apache License 2.0)
 - AIL's own files under `AIL_CURRENT/stdlib/`: 3 (MIT OR Apache-2.0)
@@ -28,17 +28,31 @@ Counts:
   notice naming `LICENSE-PSF.txt`; the rewrites are documented in the module
   docstrings and in `lab/stdlib/<module>/RESULTS.md`.
 
-### CPython 3.12 compiler preludes
+### CPython 3.12 compiler sources
 
 - License: Python Software Foundation License Version 2 (PSF-2.0)
 - License file: `AIL_CURRENT/stdlib/LICENSE-PSF.txt`
 - Upstream: https://github.com/python/cpython (3.12 branch)
-- Status: `AIL_CURRENT/python/pkg-v12/prelude_csv.py` is a port of
-  `Modules/_csv.c`; `AIL_CURRENT/python/pkg-v12/prelude_format.py` is a port
-  of `Objects/stringlib/unicode_format.h`. Both ship in the `ailc` wheel.
-  Their first-lines PSF notice has not been added yet: the original task limits
-  docstring edits to `AIL_CURRENT/stdlib/`, so the two files are carried with
-  `Notice` = no plus the exact line for the owning lane under "Follow-ups".
+- Status: The files below are ports of CPython 3.12 source and ship in the
+  `ailc` wheel. Their first-lines PSF notice has not been added yet: the
+  original task limits docstring edits to `AIL_CURRENT/stdlib/`, so they are
+  carried with `Notice` = no plus the exact line for the owning lane under
+  "Follow-ups".
+
+  | File | CPython 3.12 source |
+  | --- | --- |
+  | `AIL_CURRENT/python/pkg-v12/hash_prelude.py` | `Lib/hashlib.py`, `Lib/hmac.py`, `Lib/secrets.py`, `Lib/random.py`, `Lib/base64.py`, and the C modules they wrap |
+  | `AIL_CURRENT/python/pkg-v12/pathlib_prelude.py` | `Lib/pathlib.py`, `Lib/posixpath.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_calendar.py` | `Lib/calendar.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_csv.py` | `Modules/_csv.c`, `Lib/csv.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_decimal.py` | `Lib/_pydecimal.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_format.py` | `Objects/stringlib/unicode_format.h` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_fraction.py` | `Lib/fractions.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_html.py` | `Lib/html/__init__.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_ipaddress.py` | `Lib/ipaddress.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_numbers.py` | `Lib/numbers.py` |
+  | `AIL_CURRENT/python/pkg-v12/prelude_random.py` | `Lib/random.py` |
+  | `AIL_CURRENT/python/pkg-v12/urllib_prelude.py` | `Lib/urllib/request.py`, `Lib/urllib/parse.py`, `Lib/http/client.py` |
 
 ### typeshed
 
@@ -73,11 +87,10 @@ here; both already carry a source note in their docstring.
   CPython source text is copied; any message text it reproduces is covered by
   CPython's PSF License Version 2 (`AIL_CURRENT/stdlib/LICENSE-PSF.txt`).
 
-Besides the entries above, the "port of CPython" sweep that found the two
-preludes matches two modules that only describe them:
-`AIL_CURRENT/python/pkg-v12/csvgen.py` installs `prelude_csv.py` and
-`AIL_CURRENT/python/pkg-v12/fmtlib.py` installs `prelude_format.py`. Neither
-contains copied third-party source.
+Besides the entries above, the "port of CPython" sweep also matches two
+modules that only describe a prelude: `AIL_CURRENT/python/pkg-v12/csvgen.py`
+installs `prelude_csv.py` and `AIL_CURRENT/python/pkg-v12/fmtlib.py` installs
+`prelude_format.py`. Neither contains copied third-party source.
 `AIL_CURRENT/stdlib/zlib_glue.c` and `zlib_glue.h` are AIL's own glue over the
 system zlib library; they copy no zlib source.
 
@@ -150,26 +163,45 @@ system zlib library; they copy no zlib source.
 | `AIL_CURRENT/stdlib/zlib.py` | AIL | MIT OR Apache-2.0 | yes |
 | `AIL_CURRENT/stdlib/zlib_glue.c` | AIL | MIT OR Apache-2.0 | yes |
 | `AIL_CURRENT/stdlib/zlib_glue.h` | AIL | MIT OR Apache-2.0 | yes |
-| `AIL_CURRENT/python/pkg-v12/prelude_csv.py` | CPython 3.12 (Modules/_csv.c) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/hash_prelude.py` | CPython 3.12 (Lib/hashlib.py, Lib/hmac.py, Lib/secrets.py, Lib/random.py, Lib/base64.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/pathlib_prelude.py` | CPython 3.12 (Lib/pathlib.py, Lib/posixpath.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_calendar.py` | CPython 3.12 (Lib/calendar.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_csv.py` | CPython 3.12 (Modules/_csv.c, Lib/csv.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_decimal.py` | CPython 3.12 (Lib/_pydecimal.py) | PSF-2.0 | no |
 | `AIL_CURRENT/python/pkg-v12/prelude_format.py` | CPython 3.12 (Objects/stringlib/unicode_format.h) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_fraction.py` | CPython 3.12 (Lib/fractions.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_html.py` | CPython 3.12 (Lib/html/__init__.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_ipaddress.py` | CPython 3.12 (Lib/ipaddress.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_numbers.py` | CPython 3.12 (Lib/numbers.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_random.py` | CPython 3.12 (Lib/random.py) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/urllib_prelude.py` | CPython 3.12 (Lib/urllib/request.py, Lib/urllib/parse.py, Lib/http/client.py) | PSF-2.0 | no |
 
 ## Follow-ups
 
-- `AIL_CURRENT/python/pkg-v12/prelude_csv.py` and
-  `AIL_CURRENT/python/pkg-v12/prelude_format.py` are CPython 3.12 ports that
+- The twelve CPython 3.12 ports listed under "CPython 3.12 compiler sources"
   ship in the wheel without a PSF notice. The task that created this inventory
   limits docstring edits to `AIL_CURRENT/stdlib/`, so the notice belongs to the
-  lane that owns `python/pkg-v12`. Add this line to the first comment block of
-  each file, naming the source shown in the inventory row:
+  lane that owns `python/pkg-v12`. Add this line to the first comment block (or
+  module docstring) of each file, naming the source shown in the inventory row:
 
   ```python
   # Derived from CPython 3.12 <source>; PSF License, see stdlib/LICENSE-PSF.txt.
   ```
 
-  `<source>` is `Modules/_csv.c` for `prelude_csv.py` and
-  `Objects/stringlib/unicode_format.h` for `prelude_format.py`. Once added, set
-  the `Notice` column for both rows to `yes`; the notices test then requires the
-  line and `LICENSE-PSF.txt` in the first 15 lines.
+  The affected files are `AIL_CURRENT/python/pkg-v12/hash_prelude.py`,
+  `AIL_CURRENT/python/pkg-v12/pathlib_prelude.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_calendar.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_csv.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_decimal.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_format.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_fraction.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_html.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_ipaddress.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_numbers.py`,
+  `AIL_CURRENT/python/pkg-v12/prelude_random.py` and
+  `AIL_CURRENT/python/pkg-v12/urllib_prelude.py`. Once added, set the `Notice`
+  column for those rows to `yes`; the notices test then requires the line and
+  `LICENSE-PSF.txt` in the first 15 lines.
 
 The wheel backend (`packaging/ail_wheel_backend.py`, owned by another lane)
 currently ships only the two root licenses. To complete the PSF notice in the
