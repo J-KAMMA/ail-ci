@@ -84,8 +84,11 @@ def declared_flags(program, src):
         for line in src.read_text(encoding='utf-8', errors='replace').splitlines()[:5]:
             m = BUILD_DIRECTIVE.match(line)
             if m:
-                # The flags are the leading `-...` words; anything after them (a `--` or prose) explains why.
-                for word in shlex.split(m.group(1)):
+                # The flags are the leading `-...` words; anything after them (a `--` or prose)
+                # explains why.  Split on whitespace, not shlex: the reason is prose and may
+                # contain an apostrophe, which shlex would reject as an unclosed quotation.
+                flags_part = re.split(r'\s--\s', m.group(1), maxsplit=1)[0]
+                for word in flags_part.split():
                     if word == '--' or not word.startswith('-'):
                         break
                     flags.append(word)
