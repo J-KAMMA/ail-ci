@@ -59,7 +59,9 @@ def _ann_container(a):
         return False
     if isinstance(a, ast.Subscript):
         # a returned list of containers (a list of rows) is shared row by row on the typed path;
-        # the outer name is not a second-reference site there, unlike a list of scalars.  Nested
+        # the outer name is not a second-reference site there, unlike a list of scalars.  A plain
+        # list stored as more than one row is not shared (each copy would be its own list), so
+        # nested_lists refuses that source instead of letting it reach the typed path.  Nested
         # rows are spelled with a row wrapper name (`_AilRow_int`) after the row lowering.
         inner = a.slice
         if (isinstance(inner, ast.Subscript) and _ann_container(inner)) \

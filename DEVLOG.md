@@ -1,3 +1,22 @@
+## 2026-11-05 -- pyreach s7 review fix 3: repeated row objects stay off the typed path
+
+Review found that the previous row-list exemption was too broad: `nested_lists` copies a plain
+list into a row, so a returned `list[list[int]]` built with the same list twice (`rows = [r, r]`,
+repeated `append`/`insert`, an element store, or an append in a loop that does not rebuild the row)
+lost Python's identity.  The typed build printed `[7] []` / `[7] [8]` where CPython prints
+`[7] [7]` / `[7, 8] [7, 8]`.  `nested_lists.row_call` now refuses, by name, a non-fresh row source
+that is copied a second time in the same function, and a loop-invariant row source copied inside a
+loop.  The alias exemption in `aliasrefuse._ann_container` then only covers returned rows that the
+lowering can actually keep distinct; its comment says so.
+
+Probes `/tmp/rprobes/p18`..`p30` (list display, argument, attribute, dict value, append, insert,
+element store, loop append) plus the six `p_alias_*` probes match CPython on both the default and
+`AIL_UNIFIED_FORCE=1` builds.  Regression cases added to `test_ail_nested_lists`.
+`test_ail_prog5`, `test_ail_pyperf_lab`, `test_ail_nested_lists`, `test_ail_prog7`,
+`test_ail_prog8`, `test_ail_ir_rulex`, `test_ail_optional_locals`, `test_ail_unbound`,
+`test_ail_fuzz_findings`, `test_ail_refusal_messages`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.
+
 ## 2026-11-05 -- pyreach s7 compatibility: whole-row-list aliases and row-field element aliases
 
 Two regressions from the s7 alias scan are fixed in `aliasrefuse.py`.

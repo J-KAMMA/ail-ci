@@ -88,6 +88,27 @@ def _element_text(element):
     return element[1] if _struct(element) else element
 
 
+def _source_name(e):
+    """The name a row source starts from (`r` for `r`, `b.r`, `d['k']`), else None."""
+    while isinstance(e, (ast.Attribute, ast.Subscript, ast.Starred)):
+        e = e.value
+    return e.id if isinstance(e, ast.Name) else None
+
+
+def _loop_binds(stmts):
+    """Names a loop body (or its target) binds, not counting nested defs, classes or lambdas."""
+    out = set()
+    stack = list(stmts)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            out.add(node.id)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
 class NestedLists:
     def __init__(self, tree, unsupported, library, entry=None):
         self.tree = tree
@@ -99,6 +120,8 @@ class NestedLists:
         self.rows = {}               # row class name -> element type
         self.counter = 0
         self.legacy = set()          # functions returning list[list[int]] left to the older grids
+        self.wrapped = {}            # row source -> line already copied into a row in this function
+        self.loops = []              # per enclosing loop: names it rebinds each iteration
 
     # ---------------------------------------------------------------- annotations
     def ann(self, node):
@@ -521,6 +544,8 @@ class NestedLists:
         self.env = env
         self.cond = 0
         self.build_into = self.built_into = None
+        self.wrapped = {}
+        self.loops = []
         fn.body = self.block(fn.body)
 
     def mentions_nesting(self, fn):
@@ -585,14 +610,23 @@ class NestedLists:
             s.value = self.expr(s.value, None, pre)
         elif isinstance(s, ast.For):
             s.iter = self.expr(s.iter, None, pre)
-            s.body = self.block(s.body)
+            bound = _loop_binds([s.target] + s.body)
+            self.loops.append(bound)
+            try:
+                s.body = self.block(s.body)
+            finally:
+                self.loops.pop()
             s.orelse = self.block(s.orelse)
         elif isinstance(s, ast.While):
             test_pre = []
             s.test = self.expr(s.test, None, test_pre)
             if test_pre:
                 raise self.Unsupported('a nested-list comprehension in a while condition: build it with a let before the loop')
-            s.body = self.block(s.body)
+            self.loops.append(_loop_binds(s.body))
+            try:
+                s.body = self.block(s.body)
+            finally:
+                self.loops.pop()
             s.orelse = self.block(s.orelse)
         elif isinstance(s, ast.If):
             s.test = self.expr(s.test, None, pre)
@@ -702,6 +736,31 @@ class NestedLists:
         return self.expr(e, 'keep', pre)
 
     def row_call(self, element, value, near):
+        # Converting a plain list into a row copies it.  Wrapping one value at two places would
+        # then make two rows where CPython has the same list twice (changing one is seen through
+        # the other), so refuse that shape by name instead of silently losing the identity.
+        if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)):
+            try:
+                source = ast.unparse(value)
+            except Exception:
+                source = None
+            if source is not None:
+                if source in self.wrapped:
+                    raise self.Unsupported(
+                        '`%s` is stored as more than one row of a nested list; in Python those rows '
+                        'are the same list (changing one changes the other), but a plain list copied '
+                        'into a row gets its own list.\n'
+                        '  write instead: build independent rows with a comprehension, or copy the row '
+                        'for each entry (`%s.copy()`)' % (source, source))
+                base = _source_name(value)
+                if base is not None and any(base not in bound for bound in self.loops):
+                    raise self.Unsupported(
+                        '`%s` is copied into a row inside a loop that does not rebuild it each '
+                        'iteration; every pass would get its own copy where Python keeps one list '
+                        '(changing one changes all).\n'
+                        '  write instead: build a fresh row inside the loop, or copy it explicitly '
+                        '(`%s.copy()`)' % (source, source))
+                self.wrapped[source] = getattr(near, 'lineno', None)
         self.rows.setdefault(row_class(element), element)
         return ast.copy_location(ast.Call(func=ast.Name(id=row_class(element), ctx=ast.Load()),
                                           args=[value], keywords=[]), near)
