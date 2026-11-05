@@ -555,6 +555,8 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_INDEX;
     if (!strcmp(w, "key error")) return AIL_EXC_KEY;
     if (!strcmp(w, "dictionary changed size during iteration")) return AIL_EXC_RUNTIME;
+    if (!strcmp(w, "maximum recursion depth exceeded") || !strcmp(w, "recursion depth exceeded"))
+        return AIL_EXC_RUNTIME;   /* CPython's RecursionError derives from RuntimeError */
     if (!strcmp(w, "file is not valid UTF-8"))
         return AIL_EXC_UNICODE_DECODE;
     return 0;
@@ -573,6 +575,10 @@ static const char *ail_exc_pyname(const char *w) {
         size_t n = strlen(named[i]);
         if (!strncmp(w, named[i], n) && w[n] == ':' && w[n + 1] == ' ') return NULL;
     }
+    /* Before the kind switch: the trap is catchable as RuntimeError (its CPython base) but an
+       uncaught one must still be reported under its own name. */
+    if (!strcmp(w, "maximum recursion depth exceeded")
+        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";
     switch (ail_exc_kind_of(w)) {
     case AIL_EXC_VALUE: return "ValueError";
     case AIL_EXC_ZERODIV: return "ZeroDivisionError";
@@ -583,8 +589,6 @@ static const char *ail_exc_pyname(const char *w) {
     case AIL_EXC_RUNTIME: return "RuntimeError";
     case AIL_EXC_UNICODE_DECODE: return "UnicodeDecodeError";
     }
-    if (!strcmp(w, "maximum recursion depth exceeded")
-        || !strcmp(w, "recursion depth exceeded")) return "RecursionError";
     if (!strcmp(w, "out of memory")) return "MemoryError";
     return NULL;
 }
@@ -658,8 +662,15 @@ static const char *ail_exception_name(int code) {
 }
 static void ail_exception_uncaught(ail_exception *value) __attribute__((noreturn));
 static void ail_exception_uncaught(ail_exception *value) {
+    /* The recursion trap is carried as AIL_EXC_RUNTIME so `except RuntimeError` takes it (its
+       CPython base), but an uncaught one is reported under its own CPython name. */
+    const char *name = ail_exception_name(value->code);
+    static const char recursion_msg[] = "maximum recursion depth exceeded";
+    if (value->code == AIL_EXC_RUNTIME && value->n == (int64_t)(sizeof recursion_msg - 1)
+            && memcmp(value->p, recursion_msg, sizeof recursion_msg - 1) == 0)
+        name = "RecursionError";
     fflush(stdout);
-    fputs(ail_exception_name(value->code), stderr);
+    fputs(name, stderr);
     if (value->n) {
         fputs(": ", stderr);
         fwrite(value->p, 1, (size_t)value->n, stderr);   /* the message is UTF-8 already */
@@ -11305,14 +11316,23 @@ typedef struct ail_frame {
     struct ail_frame *prev;
 } ail_frame;
 
+/* The general path's call depth. Every AIL_FRAME_ENTER bumps it and every AIL_FRAME_LEAVE drops it,
+   so a frame can never be forgotten by a later exit path. A generated function entry compares it
+   against this cap and stops by name (RecursionError) before the real C stack is exhausted; the
+   typed path's own counter (`ail_d`, AIL_MAX_RECURSION_DEPTH = 50000) is separate and unchanged.
+   10000 is well above the 5000-deep programs that must keep working, and leaves several megabytes
+   of the 8 MiB stack for the general path's larger frames. */
+#define AIL_MAX_GENERAL_CALL_DEPTH 10000
+
 #define AIL_FRAME_ENTER(cx, fvar, N) \
     ail_obj ail__slots_##fvar[(N)]; \
     memset(ail__slots_##fvar, 0, sizeof ail__slots_##fvar); \
     ail_frame fvar; \
-    fvar.slots = ail__slots_##fvar; fvar.n = (N); fvar.prev = (cx)->frames; (cx)->frames = &fvar
+    fvar.slots = ail__slots_##fvar; fvar.n = (N); fvar.prev = (cx)->frames; (cx)->frames = &fvar; \
+    ++(cx)->call_depth
 
 #define AIL_FRAME_LEAVE(cx, fvar) \
-    do { (cx)->frames = (fvar).prev; } while (0)
+    do { (cx)->frames = (fvar).prev; --(cx)->call_depth; } while (0)
 
 /* AIL_ROOT_N registers N existing, initialized ail_obj values (a local array, or the address
    of one local) as a frame without copying them; AIL_ROOT1 roots one local. A runtime helper
@@ -11340,6 +11360,7 @@ enum {
     AIL_B_RUNTIMEERROR, AIL_B_ASSERTIONERROR, AIL_B_NOTIMPLEMENTEDERROR, AIL_B_EOFERROR, AIL_B_OSERROR,
     AIL_B_CONNECTIONERROR, AIL_B_BLOCKINGIOERROR, AIL_B_CHILDPROCESSERROR, AIL_B_BROKENPIPEERROR, AIL_B_CONNECTIONABORTEDERROR, AIL_B_CONNECTIONREFUSEDERROR, AIL_B_CONNECTIONRESETERROR, AIL_B_FILEEXISTSERROR, AIL_B_FILENOTFOUNDERROR, AIL_B_INTERRUPTEDERROR, AIL_B_ISADIRECTORYERROR, AIL_B_NOTADIRECTORYERROR, AIL_B_PERMISSIONERROR, AIL_B_PROCESSLOOKUPERROR, AIL_B_TIMEOUTERROR,
     AIL_B_GENERATOREXIT,
+    AIL_B_RECURSIONERROR,
     AIL_B_COUNT
 };
 
@@ -11354,6 +11375,7 @@ typedef struct ail_ctx {
     size_t gc_bytes;
     size_t gc_threshold;
     ail_frame *frames;
+    int64_t call_depth;     /* AIL_FRAME_ENTER/LEAVE balanced count, for the general path's recursion guard */
     /* exception / limit */
     ail_excslot exc;
     int exc_pending;
@@ -14828,6 +14850,7 @@ static inline const char *ail_builtin_name(int id) {
         case AIL_B_PROCESSLOOKUPERROR: return "ProcessLookupError";
         case AIL_B_TIMEOUTERROR: return "TimeoutError";
         case AIL_B_GENERATOREXIT: return "GeneratorExit";
+        case AIL_B_RECURSIONERROR: return "RecursionError";
         default: return "Exception";
     }
 }
@@ -18092,6 +18115,8 @@ static inline void ail_ctx_init(ail_ctx *cx) {
            Existing non-OS builtin relationships are unchanged in this patch. */
         int parent = AIL_B_EXCEPTION;
         if (i >= AIL_B_CONNECTIONERROR && i <= AIL_B_TIMEOUTERROR) parent = AIL_B_OSERROR;
+        /* CPython: RecursionError derives from RuntimeError, so `except RuntimeError` catches it. */
+        if (i == AIL_B_RECURSIONERROR) parent = AIL_B_RUNTIMEERROR;
         if (i == AIL_B_BROKENPIPEERROR || i == AIL_B_CONNECTIONABORTEDERROR ||
             i == AIL_B_CONNECTIONREFUSEDERROR || i == AIL_B_CONNECTIONRESETERROR)
             parent = AIL_B_CONNECTIONERROR;

@@ -302,6 +302,8 @@ class ClosureMixin:
             'static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj *clo%s) {\n'
             '    AIL_FRAME_ENTER(cx, f, %d);\n'
             '    ail_st st = AIL_OK; (void)st; (void)clo;\n'
+            '    if (cx->call_depth > AIL_MAX_GENERAL_CALL_DEPTH) { st = ail_raise_c(cx, '
+            'AIL_B_RECURSIONERROR, "maximum recursion depth exceeded"); goto L_leave; }\n'
             '    ail_completion comp = AIL_COMPLETE_NORMAL; (void)comp;\n'
             '    *out = ail_box_none();\n%s\n%s\n'
             '    AIL_FRAME_LEAVE(cx, f);\n    return AIL_OK;\n'

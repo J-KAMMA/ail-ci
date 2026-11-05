@@ -1,3 +1,23 @@
+## 2026-11-05 -- recstop1: deep recursion stops loudly on the general path (job-recstop1-11060031)
+
+The safestop1 table (`lab/safety/stops/RESULTS.md`) showed `06_rec_direct.py`, `07_rec_mutual.py` and
+`08_rec_method.py` exiting with signal -11 and empty stderr on the general path. The typed path already
+counted calls (`ail_d`, `AIL_MAX_RECURSION_DEPTH` = 50000); the general frames (`AIL_FRAME_ENTER`/
+`AIL_FRAME_LEAVE` in `cruntime.py`) had no counter. The macros now maintain `cx->call_depth`, and a
+generated function entry (top-level function/method, nested def, and boxclosure function) raises
+`RecursionError("maximum recursion depth exceeded")` through the normal exception path at
+`AIL_MAX_GENERAL_CALL_DEPTH` = 10000, before the real C stack is exhausted. `RecursionError` is a real
+builtin class (base RuntimeError) and the typed path's recursion trap is now catchable the same way while
+an uncaught one still prints `RecursionError`. Re-ran the safestop suite: **match 63 -> 66, crash 3 -> 0,
+silent-wrong 3 -> 0** (the three `09_rec_deep5000.py` cells are now "documented difference" per the owner
+decision), stop-differs 10, refused 1, 80 cells. Depth 5000 still completes in both builds
+(`docs/LIMITATIONS.md`). New `test_ail_recursion_stop.py` (5 tests) covers direct/mutual/method/nested
+shapes, `except RuntimeError`/`except RecursionError`, `finally`, and depth 5000. The runner cannot open a
+hardware instruction counter here (`perf_event_open: Permission denied`, no valgrind), so the cost was
+measured as wall time on three compare-lab programs and on a 5M-call microbenchmark: unchanged within
+noise (0.14-0.15 s either build); the added work is two memory increments/decrements per frame plus one
+compare/branch per generated call.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this

@@ -199,6 +199,7 @@ EXC_NAMES = {'ValueError': 1, 'ZeroDivisionError': 2, 'IndexError': 3, 'KeyError
              'sqlite3_IntegrityError': 22, 'sqlite3_ProgrammingError': 23, 'sqlite3_InterfaceError': 24,
              'sqlite3_DataError': 25, 'sqlite3_InternalError': 26, 'sqlite3_NotSupportedError': 27,
              'Exception': 28,
+             'RecursionError': 7,   # catches the recursion trap; CPython: RecursionError is a RuntimeError
              'URLError': 30, 'HTTPError': 31}      # 30, 31: G12 urllib (HTTPError is a URLError is an OSError)              # 28: the root class (S4e); user exception classes (userexc.py) follow from 29
 _BUILTIN_EXC_NAMES = dict(EXC_NAMES)
 
