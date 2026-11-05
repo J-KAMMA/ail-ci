@@ -2,7 +2,9 @@
  "files": [
   "main.py",
   "helper.py",
-  "lib/libmod.py"
+  "lib/libmod.py",
+  "edge.py",
+  "use_pkg.py"
  ],
  "cases": [
   {
@@ -444,6 +446,110 @@
    "line": 47,
    "character": 4,
    "target": null
+  },
+  {
+   "file": "edge.py",
+   "line": 1,
+   "character": 25,
+   "target": {
+    "file": "edge.py",
+    "line": 0,
+    "character": 0,
+    "end_character": 4
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 1,
+   "character": 17,
+   "target": {
+    "file": "edge.py",
+    "line": 1,
+    "character": 17,
+    "end_character": 21
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 6,
+   "character": 11,
+   "target": {
+    "file": "edge.py",
+    "line": 2,
+    "character": 14,
+    "end_character": 20
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 2,
+   "character": 14,
+   "target": {
+    "file": "edge.py",
+    "line": 2,
+    "character": 14,
+    "end_character": 20
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 13,
+   "character": 15,
+   "target": {
+    "file": "edge.py",
+    "line": 12,
+    "character": 25,
+    "end_character": 28
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 12,
+   "character": 25,
+   "target": {
+    "file": "edge.py",
+    "line": 12,
+    "character": 25,
+    "end_character": 28
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 19,
+   "character": 19,
+   "target": {
+    "file": "edge.py",
+    "line": 18,
+    "character": 21,
+    "end_character": 24
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 18,
+   "character": 21,
+   "target": {
+    "file": "edge.py",
+    "line": 18,
+    "character": 21,
+    "end_character": 24
+   }
+  },
+  {
+   "file": "use_pkg.py",
+   "line": 0,
+   "character": 7,
+   "target": {
+    "module": "pkg/__init__.py"
+   }
+  },
+  {
+   "file": "use_pkg.py",
+   "line": 2,
+   "character": 0,
+   "target": {
+    "module": "pkg/__init__.py"
+   }
   }
  ]
 }

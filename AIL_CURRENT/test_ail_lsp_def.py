@@ -3,8 +3,10 @@
 Every position in `lab/lsp/def/expect.json` is checked against `textDocument/definition`. The probe
 covers a local with one binding and with two, parameters, globals, `global`/`nonlocal`, functions,
 classes, `self.m()`, `from helper import pick`, `import helper` then `helper.pick`, a module beside
-the program, a module on AIL_PATH and a bundled stdlib module, a comprehension variable, and the
-places that must stay empty (a string, a comment, an unknown attribute, a builtin).
+the program, a module on AIL_PATH and a bundled stdlib module, a comprehension variable (including
+its iterable, which runs in the enclosing scope), a plain `import pkg.sub` binding the package, UTF-16
+positions after an astral character, `except ... as name` and `match` captures, and the places that
+must stay empty (a string, a comment, an unknown attribute, a builtin).
 """
 import json
 import os

@@ -334,13 +334,14 @@ def _bind_target(target, info):
 
 
 def _pattern_bindings(pattern):
-    names = []
+    """The (node, name) pairs a match pattern binds."""
+    bindings = []
     for node in ast.walk(pattern):
         if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
-            names.append(node.name)
+            bindings.append((node, node.name))
         elif isinstance(node, ast.MatchMapping) and node.rest:
-            names.append(node.rest)
-    return names
+            bindings.append((node, node.rest))
+    return bindings
 
 
 def _scope_info(scope):
@@ -443,12 +444,12 @@ def _scope_info(scope):
         elif isinstance(node, ast.ExceptHandler):
             if node.name:
                 _mark_uncertain(node.name, info)
-                _add_site(info, node.name, node, "assign")
+                _add_site(info, node.name, node, "except", binding=node.name)
         elif isinstance(node, ast.Match):
             for case in node.cases:
-                for name in _pattern_bindings(case.pattern):
+                for binding, name in _pattern_bindings(case.pattern):
                     _mark_uncertain(name, info)
-                    _add_site(info, name, case.pattern, "assign")
+                    _add_site(info, name, binding, "pattern", binding=name)
     return info
 
 
@@ -558,6 +559,18 @@ def _plain_name_token(text, tree, token):
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             if token.start[0] == node.lineno and token.string in node.names:
                 return True
+        elif isinstance(node, ast.ExceptHandler) and node.name == token.string:
+            found = _except_name_span(text, node, node.name)
+            if found is not None and found[0] == start:
+                return True
+        elif isinstance(node, ast.Match):
+            for case in node.cases:
+                for binding, name in _pattern_bindings(case.pattern):
+                    if name != token.string:
+                        continue
+                    found = _name_token_span(text, binding, name)
+                    if found is not None and found[0] == start:
+                        return True
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             line = lines[node.lineno - 1] if 0 < node.lineno <= len(lines) else ""
             keyword = "class" if isinstance(node, ast.ClassDef) else "def"
@@ -619,6 +632,14 @@ def _scope_chain(text, tree, offset):
             start, end = span
             if not (start <= offset <= end):
                 continue
+            if isinstance(child, _COMPREHENSIONS):
+                generators = child.generators
+                first = generators[0].iter if generators else None
+                first_span = _span(text, first) if first is not None else None
+                if first_span is not None and first_span[0] <= offset <= first_span[1]:
+                    # The first iterable of a comprehension runs in the enclosing scope.
+                    visit(child)
+                    return
             if isinstance(child, _SCOPE_TYPES):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
                     body = _body_start(text, child)
@@ -738,11 +759,14 @@ def _token_span(text, token):
 
 
 def _offset_position(text, offset):
+    """LSP position of a character offset; `character` counts UTF-16 code units."""
     lines = text.splitlines(keepends=True)
     total = 0
     for index, line in enumerate(lines):
         if total + len(line) > offset:
-            return {"line": index, "character": len(line[:offset - total])}
+            prefix = line[:offset - total]
+            character = sum(2 if ord(char) > 0xFFFF else 1 for char in prefix)
+            return {"line": index, "character": character}
         total += len(line)
     return {"line": max(len(lines) - 1, 0), "character": 0}
 
@@ -770,6 +794,49 @@ def _definition_span(text, node):
         prefix = 6 if isinstance(node, ast.ClassDef) else (10 if isinstance(node, ast.AsyncFunctionDef) else 4)
         return start + prefix, start + prefix + len(node.name)
     return _span(text, node)
+
+
+def _tokens(text):
+    try:
+        return list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError):
+        return []
+
+
+def _name_token_span(text, node, name):
+    """The span of the name token `name` inside `node`, so a capture is not the whole pattern."""
+    span = _span(text, node)
+    if span is None or not name:
+        return None
+    for token in _tokens(text):
+        if token.type != tokenize.NAME or token.string != name:
+            continue
+        found = _token_span(text, token)
+        if found is not None and span[0] <= found[0] and found[1] <= span[1]:
+            return found
+    return None
+
+
+def _except_name_span(text, node, name):
+    """The span of the `as <name>` binding of an except handler (its header, not its body)."""
+    span = _span(text, node)
+    if span is None or not name:
+        return None
+    end = span[1]
+    if node.body:
+        body_span = _span(text, node.body[0])
+        if body_span is not None:
+            end = body_span[0]
+    previous = None
+    for token in _tokens(text):
+        found = _token_span(text, token)
+        if found is None or found[0] < span[0] or found[1] > end:
+            continue
+        if token.type == tokenize.NAME:
+            if previous == "as" and token.string == name:
+                return found
+            previous = token.string
+    return None
 
 
 def _location(path, text, node, span=None):
@@ -893,7 +960,7 @@ def _from_module_path(node, current_path, read_text):
 def _import_module_path(site, current_path, read_text):
     node, alias = site["node"], site["alias"]
     if isinstance(node, ast.Import):
-        return _module_path(alias.name, current_path, read_text)
+        return _module_path(_imported_module_name(alias), current_path, read_text)
     if isinstance(node, ast.ImportFrom):
         return _from_module_path(node, current_path, read_text)
     return None
@@ -927,6 +994,10 @@ def _sites_locations(sites, container, text, path, chain, read_text, depth=0):
             locations.append(_location(path, text, node, _definition_span(text, node)))
         elif kind == "param":
             locations.append(_location(path, text, node, _definition_span(text, node)))
+        elif kind == "except":
+            locations.append(_location(path, text, node, _except_name_span(text, node, site.get("binding"))))
+        elif kind == "pattern":
+            locations.append(_location(path, text, node, _name_token_span(text, node, site.get("binding"))))
         elif kind in ("import", "from-import"):
             locations += _import_site_locations(site, path, read_text, depth)
         else:
@@ -934,10 +1005,15 @@ def _sites_locations(sites, container, text, path, chain, read_text, depth=0):
     return _dedup(locations)
 
 
+def _imported_module_name(alias):
+    """The module a plain `import` binds: `import a.b` binds `a`, but `import a.b as c` binds the module `a.b`."""
+    return alias.name if alias.asname else alias.name.split(".")[0]
+
+
 def _import_site_locations(site, current_path, read_text, depth=0):
     node, alias = site["node"], site["alias"]
     if isinstance(node, ast.Import):
-        module_path = _module_path(alias.name, current_path, read_text)
+        module_path = _module_path(_imported_module_name(alias), current_path, read_text)
         return [_module_location(module_path)] if module_path else []
     if isinstance(node, ast.ImportFrom):
         module_path = _from_module_path(node, current_path, read_text)
