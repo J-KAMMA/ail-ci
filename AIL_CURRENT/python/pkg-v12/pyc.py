@@ -221,6 +221,14 @@ def _is_single_expression(source):
 def _cc(command, phase, **kwargs):
     """Run a C compiler step through the build cache (a no-op unless `--cache` activated it and no
     native-build report is being recorded)."""
+    if os.environ.get('AIL_DEVCC'):
+        import devcc
+        if devcc.mode() is not None:
+            command = devcc.rewrite(command, phase=phase)
+            try:
+                return native_diagnostics.run(command, phase=phase, **kwargs)
+            finally:
+                devcc.cleanup(command)
     if native_diagnostics.enabled():
         return native_diagnostics.run(command, phase=phase, **kwargs)
     return buildcache.run_cc(command, lambda c: native_diagnostics.run(c, phase=phase, **kwargs))

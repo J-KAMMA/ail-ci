@@ -6134,6 +6134,9 @@ def main(argv=None):
              'lib<NAME>.a and <NAME>.h (error codes, NAME_last_error(), NAME_free(); see NATIVE_LIBRARIES.md)')
     compile_cmd.add_argument('--target', choices=sorted(ZIG_TARGETS),
         help='cross-compile with zig cc for another OS/CPU (needs zig: $AIL_ZIG, PATH, or ~/tools/zig/zig)')
+    compile_cmd.add_argument('--cc', choices=('tcc', 'mir'),
+        help='opt-in development C compiler: tcc, or c2m for a run-style command (also AIL_DEVCC); '
+             'a program the tool cannot build identically to gcc -O2 is refused by name')
     compile_cmd.add_argument('--freestanding', action='store_true',
         help='compile one Python-syntax module to C (-o x.c) or an object (-o x.o) that needs no runtime and no libc, '
              'plus a header x.h; see docs/design/FREESTANDING.md')
@@ -6188,6 +6191,8 @@ def main(argv=None):
         os.environ['AIL_GPU_BUILD'] = '1'
     if getattr(args, 'exact_int', False):
         os.environ['AIL_EXACT_INT'] = '1'
+    if getattr(args, 'cc', None):
+        os.environ['AIL_DEVCC'] = args.cc
     if getattr(args, 'static', False):
         if sys.platform == 'darwin' and not getattr(args, 'target', None):
             parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
