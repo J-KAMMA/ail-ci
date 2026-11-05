@@ -31,10 +31,24 @@ that the compiler sees a definition of each name and accepts the helpers.  Becau
 does not inherit it and no program instantiates it, `hasattr(self, 'do_x')` is false for a
 subclass that does not implement `do_x`, `parseline('!ls')` keeps `!ls` when there is no
 `do_shell`, and `onecmd()` falls through to `default()` for an unimplemented name, exactly
-as CPython does.  `_COMMAND_NAMES` is the fixed vocabulary the module can spell this way;
-a `do_*` method outside it is not dispatched or listed.  A method's `__doc__` cannot be
-read, so the `help` table lists every `do_*` command as documented and `help <name>` with
-no `help_<name>` method prints `*** No help on <name>`.
+as CPython does.
+
+The compiler needs a literal attribute name to call a method, so the module can dispatch
+only a fixed vocabulary of command names (`_COMMAND_NAMES`).  Everything it cannot make
+exact is refused by name at run time instead of silently doing something else:
+
+* `onecmd()` raises `NotImplementedError` when the line names a real `do_*` method outside
+  that vocabulary (`hasattr()` can see it, but there is no way to call it);
+* `get_names()`, `completenames()` and the no-argument `help` table raise
+  `NotImplementedError`, because the compiler cannot enumerate a class's methods (no
+  `dir()`, `__dict__` or `__mro__`) and a table built from a fixed list would silently omit
+  commands;
+* `help <name>` raises `NotImplementedError` when it would have to read a `do_<name>`
+  docstring; a `help_<name>` method, the base `help` text and `*** No help on <name>` for
+  an unknown name are exact and still work.
+
+The ten lab programs use only the supported vocabulary and `help_<name>`; the two that also
+call the no-argument help table stop with the named `NotImplementedError` above.
 """
 
 import sys
@@ -58,68 +72,6 @@ _COMMAND_NAMES = (
     'secret',
     'shell',
 )
-
-# dir(Cmd) minus the names a subclass adds: object's attributes, Cmd's methods and class
-# attributes.  `dir()` itself is refused, so this fixed list stands in for it.  Subclass
-# commands found by `hasattr()` are added to it by get_names().
-_BASE_NAMES = (
-    '__class__',
-    '__delattr__',
-    '__dict__',
-    '__dir__',
-    '__doc__',
-    '__eq__',
-    '__format__',
-    '__ge__',
-    '__getattribute__',
-    '__getstate__',
-    '__gt__',
-    '__hash__',
-    '__init__',
-    '__init_subclass__',
-    '__le__',
-    '__lt__',
-    '__module__',
-    '__ne__',
-    '__new__',
-    '__reduce__',
-    '__reduce_ex__',
-    '__repr__',
-    '__setattr__',
-    '__sizeof__',
-    '__str__',
-    '__subclasshook__',
-    '__weakref__',
-    'cmdloop',
-    'columnize',
-    'complete',
-    'complete_help',
-    'completedefault',
-    'completenames',
-    'default',
-    'do_help',
-    'doc_header',
-    'doc_leader',
-    'emptyline',
-    'get_names',
-    'identchars',
-    'intro',
-    'lastcmd',
-    'misc_header',
-    'nohelp',
-    'onecmd',
-    'parseline',
-    'postcmd',
-    'postloop',
-    'precmd',
-    'preloop',
-    'print_topics',
-    'prompt',
-    'ruler',
-    'undoc_header',
-    'use_rawinput',
-)
-
 
 class _Stubs:
     """Compile-time definitions of the command names; never instantiated.
@@ -459,6 +411,14 @@ class Cmd:
         elif cmd == 'shell':
             if hasattr(self, 'do_shell'):
                 return _call_do_shell(self, arg)
+        # `hasattr` with a computed name finds every do_* method in the program, but this
+        # compiler can only call a method whose name is a literal.  A command that really
+        # exists outside the vocabulary is refused by name rather than sent to default().
+        if hasattr(self, 'do_' + cmd):
+            raise NotImplementedError(
+                "cmd.Cmd.onecmd: cannot dispatch do_%s: this compiler can only call a method "
+                "whose name is known at build time (the supported command names are EOF, add, "
+                "alpha, count, echo, greet, help, num, ping, secret and shell)" % cmd)
         return self.default(line)
 
     def emptyline(self):
@@ -501,17 +461,13 @@ class Cmd:
         return None
 
     def get_names(self):
-        # `dir(self.__class__)` is refused: this compiler has no dir().  The base class's
-        # own names are fixed and listed above; a subclass command is found with
-        # hasattr(), which tests exactly the classes that define the name.
-        names = list(_BASE_NAMES)
-        for name in _COMMAND_NAMES:
-            if hasattr(self, 'do_' + name) and ('do_' + name) not in names:
-                names.append('do_' + name)
-            if hasattr(self, 'help_' + name) and ('help_' + name) not in names:
-                names.append('help_' + name)
-        names.sort()
-        return names
+        # CPython's `dir(self.__class__)` cannot be written here (no dir(), __dict__ or
+        # __mro__), and a fixed list would silently leave out the subclass's commands, so
+        # the impossible answer is refused by name instead of guessed.
+        raise NotImplementedError(
+            "cmd.Cmd.get_names(): this compiler cannot enumerate a class's methods, so the "
+            "help table and completion names cannot be built exactly; use a help_<name> "
+            "method for each command you want to document")
 
     def complete_help(self, *args):
         commands = set(self.completenames(*args))
@@ -567,36 +523,30 @@ class Cmd:
                 if hasattr(self, 'help_shell'):
                     _call_help_shell(self)
                     return
+            # `help help` with no help_help: CPython prints do_help's own docstring, which
+            # is the literal below, so this case stays exact.
+            if arg == 'help':
+                self._write('List available commands with "help" or detailed help with "help cmd".\n')
+                return
+            # A computed help name cannot be called either.  Refuse it by name instead of
+            # printing "No help", which would be a silent difference.
+            if hasattr(self, 'help_' + arg):
+                raise NotImplementedError(
+                    "cmd.Cmd.do_help: cannot call help_%s: this compiler can only call a method "
+                    "whose name is known at build time" % arg)
+            # CPython reads do_<arg>.__doc__ here.  A method's docstring cannot be read by
+            # this compiler, so printing either the docstring or "No help" would be wrong
+            # for one of the two cases; refuse by name instead.
+            if hasattr(self, 'do_' + arg):
+                raise NotImplementedError(
+                    "cmd.Cmd.do_help: cannot read the docstring of do_%s; this compiler cannot "
+                    "read a method's __doc__ (define a help_%s method instead)" % (arg, arg))
             self._write("%s\n" % str(self.nohelp % (arg,)))
             return
         else:
-            names = self.get_names()
-            cmds_doc = []
-            cmds_undoc = []
-            topics = set()
-            for name in names:
-                if name[:5] == 'help_':
-                    topics.add(name[5:])
-            names.sort()
-            # There can be duplicates if routines overridden
-            prevname = ''
-            for name in names:
-                if name[:3] == 'do_':
-                    if name == prevname:
-                        continue
-                    prevname = name
-                    cmd = name[3:]
-                    if cmd in topics:
-                        cmds_doc.append(cmd)
-                        topics.remove(cmd)
-                    else:
-                        # A method's __doc__ cannot be read through getattr() here, so
-                        # every do_* command is listed as documented.
-                        cmds_doc.append(cmd)
-            self._write("%s\n" % str(self.doc_leader))
-            self.print_topics(self.doc_header, cmds_doc, 15, 80)
-            self.print_topics(self.misc_header, sorted(topics), 15, 80)
-            self.print_topics(self.undoc_header, cmds_undoc, 15, 80)
+            # The table needs dir(self.__class__) to find every command and every method's
+            # docstring to split documented from undocumented; get_names() refuses by name.
+            self.get_names()
 
     def print_topics(self, header, cmds, cmdlen, maxcol):
         if cmds:
