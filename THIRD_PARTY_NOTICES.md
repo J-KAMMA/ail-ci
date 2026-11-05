@@ -57,10 +57,17 @@ an AIL-owned file; no separate file is vendored.
 
 - The wheel does not yet carry the PSF notice. `packaging/ail_wheel_backend.py`
   copies only the root licenses (line ~43:
-  `LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")`). Change that constant to
-  `LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")` plus a stdlib copy, e.g.
-  add `stdlib/LICENSE-PSF.txt` to the `sdk_files()` selection or copy
-  `AIL_CURRENT/stdlib/LICENSE-PSF.txt` to `.dist-info/licenses/LICENSE-PSF.txt`
-  in `collect()`. The new test reports this as a wheel-check failure until the
-  backend changes; the derived stdlib files themselves are already in the
-  wheel.
+  `LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")`). In `collect()` (line
+  ~202, the `for name in LICENSE_FILES:` loop) add one line after it:
+
+  ```python
+  entries["%s/licenses/LICENSE-PSF.txt" % info] = (REPO / "AIL_CURRENT" / "stdlib" / "LICENSE-PSF.txt").read_bytes()
+  ```
+
+  and the same in `prepare_metadata_for_build_wheel()` after its
+  `for name in LICENSE_FILES:` loop. `sdk_files()` selects stdlib files by the
+  `.py`/`.c`/`.h` suffix, so the SDK copy needs a separate addition in
+  `AIL_CURRENT/ail_sdk.py` (`_license_payloads`) if the exported SDK should
+  carry the notice beside `stdlib/`. The new test reports this as a wheel-check
+  failure until the backend changes; the derived stdlib files themselves are
+  already in the wheel.

@@ -144,9 +144,8 @@ class Wheel(unittest.TestCase):
         self.assertEqual(missing, [], "derived stdlib files missing from the wheel")
 
     def test_psf_license_is_in_the_wheel(self):
-        name = "ail_lang/sdk/stdlib/LICENSE-PSF.txt"
-        self.assertIn(name, self.names,
-                      "the wheel lacks the PSF notice; see Follow-ups in THIRD_PARTY_NOTICES.md")
+        self.assertTrue(any(name.endswith("LICENSE-PSF.txt") for name in self.names),
+                        "the wheel lacks the PSF notice; see Follow-ups in THIRD_PARTY_NOTICES.md")
 
     def test_root_licenses_are_under_dist_info(self):
         info = self.info()
