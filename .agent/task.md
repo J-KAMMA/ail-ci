@@ -1,3 +1,59 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+All probes and tests are in. Here is what I found.
+
+**What the diff really does:** adds `AIL_CURRENT/stdlib/linecache.py` (CPython's `getline`/`getlines`/`checkcache`/`updatecache`/`clearcache` over `cache`, with freshness by re-reading the file and comparing it to a private `_snapshots` copy), ten lab programs + `RESULTS.md`, `test_ail_std_linecache` (+ `tests.d` entry) and the three manifest pins. No compiler or runtime file is touched; `program.c` for a program that does not import `linecache` is byte-identical to `/tmp/base` (verified on `pG_plain.py`).
+
+**Defects (all caused by this change; `/tmp/base` simply refuses these programs, and commit `4af33bd` shows the first one was correct before the fix commit):**
+
+1. `checkcache` keeps a stale entry when the file exists but can no longer be **decoded**. This is a regression introduced by `42daf72`: probe `pC_badutf8.py` matches CPython on `4af33bd`, diverges on HEAD. `_read_lines` returns `None` for a `UnicodeDecodeError` and the new code only drops when `os.path.isfile` is false.
+   ```
+   import linecache
+   open("c.txt","w").write("one\ntwo\n")
+   print(repr(linecache.getline("c.txt",1)))
+   f=open("c.txt","wb"); f.write(b"\xff\xfe bad bytes here\n"); f.close()
+   linecache.checkcache()
+   print("kept", "c.txt" in linecache.cache)
+   print(repr(linecache.getline("c.txt",1)))
+   ```
+   expected (`python3`): `'one\n'` / `kept False` / `''` · actual (both builds): `'one\n'` / `kept True` / `'one\n'`. It also contradicts the module docstring's own "a decode error gives the empty result".
+
+2. Entries installed in the public `linecache.cache` dict with `mtime is None` are dropped. CPython's `checkcache` does `if mtime is None: continue` (the real "cache seeded by a loader" idiom); here a missing `_snapshots` key means "drop".
+   ```
+   open("d.txt","w").write("one\ntwo\n")
+   linecache.cache["d.txt"] = (8, None, ["seed\n"], "d.txt")
+   print(repr(linecache.getline("d.txt",1)))
+   linecache.checkcache()
+   print("kept", "d.txt" in linecache.cache); print(repr(linecache.getline("d.txt",1)))
+   ```
+   expected: `'seed\n'` / `kept True` / `'seed\n'` · actual: `'seed\n'` / `kept False` / `'one\n'`. Fixable with `if mtime is None: continue`. The docstring's claim "`None` inside a tuple is not built" is **false** (`pI_none.py` prints `None True`).
+
+3. An entry *replaced* in `cache` after being filled is kept with its synthetic lines, because the snapshot is keyed by name only and still matches the file. `pE_seed_int.py`: expected `kept False` / `'one\n'`, actual `kept True` / `'synth\n'`. Same root cause as (2).
+
+4. Minor/doc: `cache[fn][0]` is described as "the number of characters read", but it counts the `"\n"` appended to a file without a final newline: `pF_bounds.py` prints `4 6 0` where CPython prints `4 5 <st_mtime>`. (`mtime` differing is documented; the `size` wording is not accurate.)
+
+**Report claims:** fix 1 (unreadable file keeps its entry) — **verified** (`pB_perm.py`, chmod 0, both builds: `kept True`, cached line returned). Fix 2 (caller mutation survives `checkcache`) — **verified** for the mutation path (`pA_mutate.py`: mutation + append, same list, entry length 4; `pJ_mutate_change.py`: mutation + real content change drops and re-reads; `pH_truncate.py`: truncate then `checkcache` drops). "Manifest regenerated, `--check` exits 0" — **verified**. "`test_ail_std_linecache` 2 tests OK" — **verified** (`par_check.py -j 2`: 103.6 s, ok). "`test_ail_safetynet` OK" — **verified** (185.9 s, ok). "`test_ail_files` / `test_ail_corpus_findings3` OK", the six named probe files, and the CI shards — **unverified** (not re-run / not present; report itself says shards were never exercised).
+
+**Speed:** no compiler/runtime change and `program.c` is byte-identical for non-users; 0 of 510 `~/corpus/gdev` programs mention `linecache`, so instruction counts are unchanged by construction (no `icount` run).
+
+**Pre-existing:** `/tmp/base` has no `linecache` module at all, so those programs are refused there; nothing pre-existing blocks.
+
+VERDICT: FIX
+1. `checkcache` keeps a stale entry after the cached file is rewritten to non-UTF-8 bytes: `pC_badutf8.py` expected `kept False` / `''`, actual `kept True` / `'one\n'` (regression vs `4af33bd`; contradicts the docstring).
+2. `checkcache` drops entries seeded in `linecache.cache` with `mtime is None`: `pD_seed_none.py` expected `kept True` / `'seed\n'`, actual `kept False` / `'one\n'`; add `if mtime is None: continue`, and fix the false "None inside a tuple is not built" docstring claim (`pI_none.py` prints `None True`).
+3. An entry replaced in `cache` after being filled keeps its synthetic lines: `pE_seed_int.py` expected `kept False` / `'one\n'`, actual `kept True` / `'synth\n'`.
+4. Minor: `cache[fn][0]` counts the appended newline (`pF_bounds.py`: `4 6 0` vs CPython `4 5 <mtime>`), and the docstring calls it "characters read".
+[commandcode stop=end_turn turns=23 out_tokens=24751]
+
+
+--- ORIGINAL TASK ---
 Lane: stdlinecache
 
 # linecache1: `import linecache` in compiled programs, shipped as AIL source (`AIL_CURRENT/stdlib/linecache.py`)
