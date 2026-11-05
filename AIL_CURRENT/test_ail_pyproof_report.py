@@ -64,7 +64,7 @@ class PyproofReportTests(unittest.TestCase):
         self.assertEqual(len(self.recs), len(FIXTURES))
         for rec in self.recs:
             for key in ("name", "path", "input", "result", "strict_path",
-                        "build_seconds", "python"):
+                        "build_seconds", "python", "base_ref"):
                 self.assertIn(key, rec)
             self.assertIn(rec["result"], ("typed", "general", "refused", "wrong"))
         byname = {Path(r["name"]).name: r for r in self.recs}
@@ -87,6 +87,13 @@ class PyproofReportTests(unittest.TestCase):
     def test_headline_counts(self):
         text = (self.out / "RESULTS.md").read_text()
         self.assertIn("typed 1 / 3, general 1, refused 1, wrong 0", text)
+
+    def test_base_is_named_not_claimed_as_integ(self):
+        text = (self.out / "RESULTS.md").read_text()
+        base = self.recs[0]["base_ref"]
+        self.assertIn("- Base: %s `" % base, text)
+        if base not in ("integ", "origin/integ"):
+            self.assertNotIn("- Base: integ `", text)
 
 
 if __name__ == "__main__":

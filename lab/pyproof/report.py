@@ -17,6 +17,7 @@ directory).  At most ``--jobs`` builds run at once; each build/run is capped at
 1.5 GB of address space and builds expire after 120 s.
 """
 import argparse
+import atexit
 import concurrent.futures
 import json
 import math
@@ -30,16 +31,35 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 AIL = ROOT / 'AIL_CURRENT' / 'ail_chatgpt.py'
+CARGO = ROOT / 'AIL_CURRENT' / 'ail_cargo.py'
 BUILD_TIMEOUT = 120
+CARGO_TIMEOUT = 600
 CPYTHON_TIMEOUT = 2.0
 AIL_RUN_TIMEOUT = 20.0
 BUCKET_REPRO = HERE / 'repro'
+WRONG_REPRO = {
+    'integer overflow in int()': BUCKET_REPRO / 'wrong-integer-overflow-in-int.py',
+    'integer overflow in +': BUCKET_REPRO / 'wrong-integer-overflow-at-runtime.py',
+}
+
+# The three Rust crates are ordinary Python programs only after `ail_cargo.py build`
+# has generated their `*_ffi.py` stub and static library.  The options mirror
+# `AIL_CURRENT/test_ail_examples_crate.py`, the lab's own runner.
+CRATE_CASES = {
+    'fnvhash': {'header': 'fnvhash.h', 'flags': []},
+    'rle': {'header': 'rle.h', 'flags': []},
+    'textstat': {'header': 'textstat.h', 'flags': [],
+                 'check': 'stats=negative:ValueError'},
+}
+CRATE_LOCK = threading.Lock()
+CRATE_BUILDS = {}
 
 
 def _limits():
@@ -49,23 +69,31 @@ def _limits():
         pass
 
 
-def integ_sha():
-    for ref in ('origin/integ', 'integ'):
+def base_info():
+    """(ref, sha) of the base this checkout really has.
+
+    Never label HEAD as ``integ``: when no ``origin/integ`` or ``integ`` ref
+    exists, report the ref that was used (``work``), so the generated report
+    cannot claim a base it does not have.
+    """
+    for ref in ('origin/integ', 'integ', 'work'):
         try:
             p = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--verify', ref], text=True,
                                capture_output=True, timeout=10)
             if p.returncode == 0:
-                return p.stdout.strip()
+                return ('integ' if ref.endswith('/integ') or ref == 'integ' else ref), p.stdout.strip()
         except Exception:
             pass
     try:
-        return subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True,
+        head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True,
                               capture_output=True, timeout=10).stdout.strip()
+        return 'HEAD (no integ ref)', head
     except Exception:
-        return ''
+        return 'unknown', ''
 
 
 SHA = ''
+BASE_REF = ''
 
 
 def load_programs(path):
@@ -85,6 +113,51 @@ def load_programs(path):
 def source_path(p):
     q = Path(p)
     return q if q.is_absolute() else ROOT / q
+
+
+def crate_name(program):
+    """The crate directory for a program under examples/crate, else None."""
+    parts = Path(program).parts
+    if len(parts) >= 3 and parts[0] == 'examples' and parts[1] == 'crate':
+        if parts[2] in CRATE_CASES:
+            return parts[2]
+    return None
+
+
+def _cargo_build(name, out):
+    """Run the lab's crate build once; return (rc, stdout, stderr)."""
+    crate = ROOT / 'examples' / 'crate' / name
+    case = CRATE_CASES[name]
+    cmd = [sys.executable, '-B', str(CARGO), 'build', str(crate), '-o', str(out),
+           '--header', str(crate / case['header'])]
+    if case.get('check'):
+        cmd += ['--check', case['check']]
+    env = dict(os.environ, CARGO_TARGET_DIR=str(Path(out) / 'target'))
+    try:
+        p = subprocess.run(cmd, cwd=str(out), text=True, capture_output=True,
+                           timeout=CARGO_TIMEOUT, env=env, preexec_fn=_limits)
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, '', 'cargo build timed out after %d s' % CARGO_TIMEOUT
+
+
+def prepare_crate(program, work):
+    """Build the crate behind PROGRAM and copy its artifacts into WORK."""
+    name = crate_name(program)
+    if name is None:
+        return 0, '', ''
+    with CRATE_LOCK:
+        if name not in CRATE_BUILDS:
+            cache = Path(tempfile.mkdtemp(prefix='pyproof-crate-%s-' % name))
+            atexit.register(shutil.rmtree, cache, True)
+            CRATE_BUILDS[name] = (cache,) + _cargo_build(name, cache)
+        cache, rc, out, err = CRATE_BUILDS[name]
+    if rc != 0:
+        return rc, out, err
+    for f in cache.iterdir():
+        if f.is_file():
+            shutil.copy2(f, work / f.name)
+    return 0, '', ''
 
 
 def first_reason(text):
@@ -189,7 +262,8 @@ def _build(src_name, out, strict, work):
 def census_one(program, spec):
     src = source_path(program)
     rec = {'name': program, 'path': str(src), 'input': spec, 'result': 'not run',
-           'python': sys.version.split()[0], 'integ_sha': SHA, 'build_seconds': 0.0}
+           'python': sys.version.split()[0], 'base_ref': BASE_REF, 'integ_sha': SHA,
+           'build_seconds': 0.0}
     work = Path(tempfile.mkdtemp(prefix='pyproof-'))
     try:
         for f in src.parent.glob('*.py'):
@@ -197,7 +271,37 @@ def census_one(program, spec):
                 shutil.copy2(f, work / f.name)
         # a small deterministic file for the crate bench programs
         (work / 'input.bin').write_bytes(b'the quick brown fox jumps over the lazy dog\n' * 50)
+        crate = crate_name(program)
+        if crate:
+            crate_rc, crate_out, crate_err = prepare_crate(program, work)
+            if crate_rc != 0:
+                rec['result'] = 'not run'
+                rec['first_reason'] = ('crate build failed: ' + first_reason(crate_err))[:600]
+                rec['detail'] = (crate_err or crate_out)[-1000:]
+                return rec
         args, stdin_path = prepare_input(spec, work, program)
+        env = dict(os.environ, PYTHONPATH=str(work) + os.pathsep + str(ROOT / 'AIL_CURRENT') +
+                   os.pathsep + os.environ.get('PYTHONPATH', ''))
+        # CPython is the oracle for every row, refused or not: a missing generated
+        # artifact must not look like a language refusal.
+        stub = work / (crate + '_ffi.py') if crate else None
+        original_stub = None
+        if stub is not None:
+            original_stub = stub.read_text()
+            stub.write_text(original_stub.replace('./lib%s.a' % crate, './lib%s.so' % crate))
+        # Run the real repository path (not the copy) for non-crate programs so
+        # that ``__file__``-relative lookups still find the repository.  Crate
+        # programs must run in WORK, where the generated stub and library are.
+        oracle = src.name if crate else str(src)
+        try:
+            expected = _timed([sys.executable, '-B', oracle, *args], work, stdin_path,
+                              CPYTHON_TIMEOUT, env, 3)
+        finally:
+            if stub is not None:
+                stub.write_text(original_stub)
+        rec['exit_cpython'] = expected['rc']
+        rec['stdout_equal'] = None
+        rec['cpython_seconds'] = round(expected['median'], 4) if expected['median'] else None
         start = time.monotonic()
         rc, _out, err = _build(src.name, 'strict.out', True, work)
         strict_typed = rc == 0
@@ -206,9 +310,19 @@ def census_one(program, spec):
         rc, _out, err = _build(src.name, 'main.out', False, work)
         rec['build_seconds'] = round(time.monotonic() - start, 2)
         if rc != 0:
-            rec['result'] = 'refused'
             rec['first_reason'] = first_reason(err)[:600]
             rec['reasons'] = [x[:1000] for x in reasons(err)]
+            # A CPython failure (missing generated artifact, wrong input) is an
+            # oracle failure, not evidence of a language refusal.  A timeout is
+            # not a failure: the compiler refusal stands on its own.
+            if expected['rc'] not in (0, None):
+                rec['result'] = 'not run'
+                rec['detail'] = ('CPython also failed (rc=%r), so this is not a language '
+                                 'refusal: %s' %
+                                 (expected['rc'],
+                                  expected['err'][-400:].decode('utf-8', 'replace')))
+            else:
+                rec['result'] = 'refused'
             return rec
         general = 'built on the general path' in (err or '')
         rec['default_path'] = 'general' if general else 'typed'
@@ -225,19 +339,13 @@ def census_one(program, spec):
             rec['result'] = 'wrong'
             rec['detail'] = 'compiler exited 0 but main.out was not created'
             return rec
-        env = dict(os.environ, PYTHONPATH=str(work) + os.pathsep + str(ROOT / 'AIL_CURRENT') +
-                   os.pathsep + os.environ.get('PYTHONPATH', ''))
-        expected = _timed([sys.executable, '-B', src.name, *args], work, stdin_path,
-                          CPYTHON_TIMEOUT, env, 3)
         actual = _timed([str(binary), *args], work, stdin_path, AIL_RUN_TIMEOUT, env, 3)
-        rec['exit_cpython'] = expected['rc']
         rec['exit_ail'] = actual['rc']
         rec['stdout_equal'] = expected['out'] == actual['out']
-        rec['cpython_seconds'] = round(expected['median'], 4) if expected['median'] else None
         rec['ail_seconds'] = round(actual['median'], 4) if actual['median'] else None
         if rec['cpython_seconds'] and rec['ail_seconds']:
             rec['speedup'] = round(rec['cpython_seconds'] / rec['ail_seconds'], 3)
-        if actual['rc'] != 0 or expected['out'] != actual['out']:
+        if actual['rc'] != expected['rc'] or expected['out'] != actual['out']:
             rec['result'] = 'wrong'
             rec['detail'] = ('expected rc=%r stdout=%r, got rc=%r stdout=%r stderr=%r' %
                              (expected['rc'], expected['out'][:300].decode('utf-8', 'replace'),
@@ -410,6 +518,14 @@ def geomean(values):
     return math.exp(sum(math.log(v) for v in values) / len(values))
 
 
+def wrong_repro(rec):
+    detail = rec.get('detail') or ''
+    for needle, path in WRONG_REPRO.items():
+        if needle in detail and path.exists():
+            return path
+    return None
+
+
 def render(recs, out_dir):
     counts = {}
     for r in recs:
@@ -427,7 +543,9 @@ def render(recs, out_dir):
     lines.append('Generated by `lab/pyproof/report.py` from `lab/pyproof/programs.txt` and '
                  '`lab/pyproof/results.jsonl`.')
     lines.append('')
-    lines.append('- Base: integ `%s`' % (recs[0].get('integ_sha') if recs else 'unknown'))
+    base_ref = recs[0].get('base_ref') if recs else 'unknown'
+    base_sha = recs[0].get('integ_sha') if recs else ''
+    lines.append('- Base: %s `%s`' % (base_ref, base_sha or 'unknown'))
     lines.append('- Oracle: CPython %s (`python3`), stdout and exit status' %
                  (recs[0].get('python') if recs else 'unknown'))
     lines.append('- Build: `python3 -B AIL_CURRENT/ail_chatgpt.py compile SRC --syntax python '
@@ -445,6 +563,19 @@ def render(recs, out_dir):
         lines.append('')
         for r in wrong:
             lines.append('- `%s`: %s' % (r['name'], cut(r.get('detail', ''), 300)))
+            repro = wrong_repro(r)
+            if repro is not None:
+                lines.append('  Reproducer: `lab/pyproof/repro/%s`.' % repro.name)
+        shown = []
+        for r in wrong:
+            repro = wrong_repro(r)
+            if repro is None or repro in shown:
+                continue
+            shown.append(repro)
+            lines.append('')
+            lines.append('```python')
+            lines.append(repro.read_text().rstrip('\n'))
+            lines.append('```')
         lines.append('')
     lines.append('## Counts')
     lines.append('')
@@ -516,8 +647,8 @@ def main():
     ap.add_argument('--render-only', action='store_true',
                     help='render RESULTS.md from an existing results.jsonl')
     args = ap.parse_args()
-    global SHA
-    SHA = integ_sha()
+    global SHA, BASE_REF
+    BASE_REF, SHA = base_info()
     out = Path(args.out)
     if args.render_only:
         recs = [json.loads(line) for line in (out / 'results.jsonl').read_text().splitlines()
@@ -540,7 +671,7 @@ def main():
             except Exception as e:
                 r = {'name': p, 'result': 'not run', 'first_reason': 'harness error: %r' % e,
                      'path': str(source_path(p)), 'python': sys.version.split()[0],
-                     'integ_sha': SHA, 'build_seconds': 0.0}
+                     'base_ref': BASE_REF, 'integ_sha': SHA, 'build_seconds': 0.0}
             results[p] = r
             print('%-62s %-10s %6.1fs' % (p, r['result'], r.get('build_seconds', 0.0)), flush=True)
     recs = [results[p] for p, _ in programs]
