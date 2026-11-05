@@ -1,0 +1,101 @@
+{
+  "note": "Each entry records what the 0.1 default build does with one probe in lab/limits/. 'refused' means the compile exits non-zero and 'text' is the first refusal line with the leading path:line:column: location removed; 'builds' means the compile exits 0, 'text' must appear in the build output, and the program must then print 'stdout' and exit with 'exit'. A probe whose 'expect' no longer holds means the limitation changed: update docs/LIMITATIONS.md and this file.",
+  "probes": [
+    {
+      "probe": "01_int_literal_beyond_int64.py",
+      "expect": "refused",
+      "text": "int64 constant expression out of range: 99999999999999999999",
+      "cpython": "100000000000000000000"
+    },
+    {
+      "probe": "02_int_overflow_runtime.py",
+      "expect": "builds",
+      "stderr": "OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)",
+      "stdout": "9223372036854775807\n",
+      "exit": 1,
+      "cpython": "9223372036854775807\n9223372036854775808\n"
+    },
+    {
+      "probe": "03_dict_view_is_snapshot.py",
+      "expect": "refused",
+      "text": "not in the subset: a dict view kept in a name, field, item or container (`x = d.items()`, line 2): a view follows its dict in CPython, but here it is a snapshot, so it would show old contents and a loop over it would not raise \"dictionary changed size during iteration\"; call `d.items()` where it is used, or keep `list(d.items())` for a snapshot",
+      "cpython": "[('a', 1), ('b', 2)]"
+    },
+    {
+      "probe": "04_with_around_yield.py",
+      "expect": "refused",
+      "text": "not in the subset: `with` around a `yield`: closing the generator does not pass GeneratorExit to __exit__ (not built)",
+      "cpython": "[1]"
+    },
+    {
+      "probe": "05_open_mode_not_literal.py",
+      "expect": "refused",
+      "text": "not in the subset: open() with a mode that is not a string literal: the file kind (text or binary) has to be known when the program is built.",
+      "cpython": "True"
+    },
+    {
+      "probe": "06_unsupported_decorator.py",
+      "expect": "refused",
+      "text": "not in the subset: the decorator on def bump (only @staticmethod on a method and @functools.lru_cache/@lru_cache/@cache are supported)",
+      "cpython": "20"
+    },
+    {
+      "probe": "07_multiple_inheritance.py",
+      "expect": "refused",
+      "text": "not in the subset: multiple inheritance in class C",
+      "cpython": "C"
+    },
+    {
+      "probe": "08_module_used_as_value.py",
+      "expect": "refused",
+      "text": "not in the subset: the module sys used as a plain value",
+      "cpython": "True"
+    },
+    {
+      "probe": "09_eval_not_available.py",
+      "expect": "refused",
+      "text": "not in the subset: the name 'eval' is not a known function/class/builtin",
+      "cpython": "3"
+    },
+    {
+      "probe": "10_argparse_refused.py",
+      "expect": "refused",
+      "text": "not in the subset: argparse.ArgumentParser (not yet published in NAMES_library.json)",
+      "cpython": ""
+    },
+    {
+      "probe": "11_os_system_not_built.py",
+      "expect": "refused",
+      "text": "not in the subset: os.system is not built. Built: os.getcwd chdir listdir mkdir makedirs remove unlink rmdir rename replace getenv environ walk, os.sep linesep name curdir, and os.path join exists isfile isdir islink getsize basename dirname split splitext abspath normpath isabs relpath",
+      "cpython": "0\nTrue"
+    },
+    {
+      "probe": "12_tempfile_not_built.py",
+      "expect": "refused",
+      "text": "not in the subset: tempfile.mkdtemp (not yet published in NAMES_library.json)",
+      "cpython": "True"
+    },
+    {
+      "probe": "13_sys_stdin_as_value.py",
+      "expect": "refused",
+      "text": "not in the subset: sys.stdin used as a plain value",
+      "cpython": "False"
+    },
+    {
+      "probe": "14_threads_general_path.py",
+      "expect": "builds",
+      "text": "built on the general path (about 20x slower)",
+      "stdout": "5\n",
+      "exit": 0,
+      "cpython": "5\n"
+    },
+    {
+      "probe": "15_untyped_json_general_path.py",
+      "expect": "builds",
+      "text": "built on the general path (about 20x slower)",
+      "stdout": "1\n",
+      "exit": 0,
+      "cpython": "1\n"
+    }
+  ]
+}
