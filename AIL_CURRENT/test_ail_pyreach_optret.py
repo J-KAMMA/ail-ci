@@ -219,6 +219,38 @@ main()
 '''
 
 
+SLICE_GUARD = '''def main():
+    xs = [None] * 3
+    xs[1] = [1]
+    print(xs[0:1] is not None)
+    print(xs[0:0] is not None)
+    print(xs[0:2] is None)
+    if xs[0:0] is not None:
+        print("ok")
+    print(xs[1:3])
+
+
+main()
+'''
+
+UNPACK_STORE = '''def main():
+    xs = [None] * 2
+    xs[0] = [1]
+    if xs[0] is not None:
+        xs[0], z = None, 2
+    print(xs[0] is None)
+    print(z)
+    ys = [None] * 2
+    ys[0] = [3]
+    *ys[0], w = [7, 8]
+    print(ys[0])
+    print(w)
+
+
+main()
+'''
+
+
 def build_source(tmp, name, source, flags=()):
     exe = Path(tmp) / name
     env = dict(os.environ, AIL_NO_GENERAL='1', AIL_NO_CACHE='1')
@@ -300,6 +332,12 @@ class PyreachOptRet(unittest.TestCase):
 
     def test_unsafe_row_shapes_refuse_or_fall_back(self):
         self._matches_cpython('unsafe_rows', UNSAFE_ROWS)
+
+    def test_slice_guards_keep_cpython_semantics(self):
+        self._matches_cpython('slice_guard', SLICE_GUARD)
+
+    def test_unpack_target_store_keeps_cpython_semantics(self):
+        self._matches_cpython('unpack_store', UNPACK_STORE)
 
     def test_optional_loop_variable_reused(self):
         self._typed('optloop', OPTIONAL_LOOP, '10\n')

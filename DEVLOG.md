@@ -1,3 +1,25 @@
+## 2026-11-05 -- pyreach s8 third review fix: slice guards, unpack-target stores (job-pyreachs8-11052148)
+
+Two more shapes the row rewrite accepted but did not lower exactly, both in
+`python/pkg-v12/noneslots.py`:
+
+- A guard on a slice (`xs[0:1] is not None`, `xs[0:0] is None`) is no longer rewritten to a
+  read of the present-bit list (which printed `[False]` / `[]`).  `_candidate_ok.role` no
+  longer classifies a Slice subscript as a guard, and `visit_Compare` additionally requires
+  `_is_simple(sub.slice)`, so the candidate is refused and the program keeps the general
+  route.
+- A row store inside an unpack target (`xs[0], z = None, 2`, `*xs[0], w = ...`) is refused:
+  the single-Subscript-target rewrite never lowered it, leaving the present bit stale while
+  the value guard read that bit.  `_candidate_ok` now walks the target through
+  Tuple/List/Starred nodes in Store context.
+
+Probes `/tmp/rprobes/m1_slice_guard.py` (`True True`), `m2_tuple_store_present.py`
+(`True 2`) and the previous `q22`, `q16`, `q3`, `q28` all match CPython on both builds.
+`test_ail_pyreach_optret` gains `test_slice_guards_keep_cpython_semantics` and
+`test_unpack_target_store_keeps_cpython_semantics` (9/9 pass), plus
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and `test_ail_strict`
+on the final commit.
+
 ## 2026-11-05 -- pyreach s8 re-review fix: row guards in values, side-effecting stores, global rows (job-pyreachs8-11052148)
 
 Fixed the three defects of the re-review, all in `python/pkg-v12/noneslots.py`:

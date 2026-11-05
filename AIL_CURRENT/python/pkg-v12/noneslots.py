@@ -102,8 +102,20 @@ def _candidate_ok(fn, name, init_target, parents):
     def key_of(sub):
         return ast.unparse(sub)
 
+    def unpacked(sub):
+        """The subscript is an element of an unpack target (`xs[i], x = ...`, `*xs[i], x = ...`),
+        which the store rewrite never lowers."""
+        node, parent = sub, parents.get(id(sub))
+        while isinstance(parent, (ast.Tuple, ast.List, ast.Starred)):
+            if isinstance(parent.ctx, ast.Store):
+                return True
+            node, parent = parent, parents.get(id(parent))
+        return False
+
     def role(sub):
         parent = parents.get(id(sub))
+        if unpacked(sub):
+            return 'bad'          # a store inside an unpack target is never lowered
         if (isinstance(parent, ast.Compare) and len(parent.ops) == 1
                 and isinstance(parent.ops[0], (ast.Is, ast.IsNot))):
             if parent.left is sub:
@@ -112,7 +124,7 @@ def _candidate_ok(fn, name, init_target, parents):
                 other = parent.left
             else:
                 other = None
-            if other is not None and _is_none(other):
+            if other is not None and _is_none(other) and not isinstance(sub.slice, ast.Slice):
                 return 'guard'
         if isinstance(parent, ast.Assign) and any(t is sub for t in parent.targets):
             return 'store'
@@ -339,7 +351,7 @@ class _Rewrite(ast.NodeTransformer):
             elif _is_none(left) and isinstance(right, ast.Subscript) \
                     and isinstance(right.value, ast.Name) and right.value.id == self.name:
                 sub, target_sub = right, right
-            if sub is not None:
+            if sub is not None and _is_simple(sub.slice):
                 bit = ast.Subscript(value=ast.Name(id=self.pname, ctx=ast.Load()),
                                     slice=copy.deepcopy(sub.slice), ctx=ast.Load())
                 ast.copy_location(bit, node)
