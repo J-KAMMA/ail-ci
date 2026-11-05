@@ -1,3 +1,20 @@
+## 2026-11-05 -- pyreach s7 review fix: whole-list uses of a `None` slot list refused by name
+
+The review found that the s7 lowering rewrote only a few slot shapes and left every other use of the
+list name seeing the lowered rows, so `for w in wait`, `a, b, c = wait`, `show(wait)`, `wait.append(..)`,
+`wait[:]`, `sort`/`clear`/`+=` and mutation during iteration silently turned `None` into `[]` or
+desynchronised the present-bit list (`IndexError` where CPython exits 0).  `optlib._check_col_name_uses`
+now runs on the transformed body and refuses the name by name unless the only remaining mentions are
+the literal assignment itself and the rewrites the transformer produced (a row subscript read, or an
+argument of the generated `_ail_none_row_*` / `_ail_none_repr_*` helper).  Those programs keep their
+old route (general path) and match CPython; the supported shapes (`is None`, `print(wait)`, present-row
+unpacking, guarded `heappush`/`heappop`/`len`/method receiver) still build typed.  Probes
+`/tmp/probes/p_*.py` (iteration, unpack, argument, append, sort, `+=`, slice, mutation during iteration,
+attribute call, present-row read, supported berth_sim-style loop) match CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds; every refused one exits 3 under `AIL_NO_GENERAL=1` with the
+"only read slot by slot" message.  `berth_sim` stays typed, 26/26 cases; the ten `.ail` C files and the
+codegen pins are byte-identical to `work`.
+
 ## 2026-11-05 -- pyreach s7: None list slots and `or`/`and` narrowing (job-pyreachs7-11051129)
 
 `berth_sim` now builds typed from the unchanged `.py`: all 26 public+hidden cases match `reference.py`

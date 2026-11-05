@@ -182,6 +182,79 @@ PLAIN_READ = """def main() -> None:
 main()
 """
 
+# Whole-list uses of a lowercased `[None, [], ...]` would see the stand-in `[]` where CPython has None, or
+# would desynchronise the present bits.  Each is refused by name on the typed path and matches CPython on
+# the general path.
+WHOLE_USE = {
+    'iter': """def main() -> None:
+    wait = [None, [], [1], [2]]
+    for w in wait:
+        print(w)
+
+
+main()
+""",
+    'iter_mut': """def main() -> None:
+    wait = [None, [], []]
+    for w in wait:
+        w.append(1)
+    print(wait)
+
+
+main()
+""",
+    'unpack': """def main() -> None:
+    wait = [None, [5], [6]]
+    a, b, c = wait
+    print(a, b, c)
+
+
+main()
+""",
+    'argument': """def show(rows: list) -> None:
+    print(rows, len(rows))
+
+
+def main() -> None:
+    wait = [None, [], [1, 2]]
+    show(wait)
+
+
+main()
+""",
+    'append': """def main() -> None:
+    wait = [None, []]
+    wait.append([7])
+    print(wait, len(wait), wait[2] is None)
+
+
+main()
+""",
+    'sort': """def main() -> None:
+    wait = [None, [1], [2]]
+    wait.sort()
+    print(wait)
+
+
+main()
+""",
+    'iadd': """def main() -> None:
+    wait = [None, [1]]
+    wait += [[2]]
+    print(wait)
+
+
+main()
+""",
+    'slice': """def main() -> None:
+    wait = [None, [1], [2]]
+    print(wait[:], wait[1:])
+
+
+main()
+""",
+}
+
 GUARDED = """def main() -> None:
     best = None
     w2 = [7, 4]
@@ -293,6 +366,20 @@ class NoneSlots(unittest.TestCase):
                 self.assertEqual(res.returncode, 0, res.stderr[-2000:])
                 got = run_exe(exe)
                 self.assertEqual((got.returncode, got.stdout), (0, want.stdout), 'IR=%s' % ir)
+
+    def test_whole_list_uses_are_refused_by_name(self):
+        self.maxDiff = None
+        for name in sorted(WHOLE_USE):
+            text = WHOLE_USE[name]
+            with tempfile.TemporaryDirectory(prefix='ail-opt-whole-') as tmp:
+                want = run_cpython(tmp, text, 'whole')
+                res, _ = build(tmp, text, 'whole')
+                self.assertEqual(res.returncode, 3, '%s: %s' % (name, res.stderr[-2000:]))
+                self.assertIn('only read slot by slot', res.stderr, name)
+                res, exe = build(tmp, text, 'whole', typed_only=False)
+                self.assertEqual(res.returncode, 0, '%s: %s' % (name, res.stderr[-2000:]))
+                got = run_exe(exe)
+                self.assertEqual((got.returncode, got.stdout), (want.returncode, want.stdout), name)
 
 
 def gen_program(seed):

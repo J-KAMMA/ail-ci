@@ -2085,6 +2085,7 @@ def lower_none_row_lists(tree):
         tr = _NoneRowTransformer(tree, cols)
         fn.body = tr.visit(fn).body
         _check_row_reads(fn)
+        _check_col_name_uses(fn, cols, found)
         for n in found:
             name = n.targets[0].id
             pname, present, kind = cols[name]
@@ -2134,6 +2135,35 @@ def _check_row_reads(fn):
             raise Refused(n, 'a list slot that may be None is only read as a list (a method receiver, '
                           'or the list argument of heappush / heappop / len); reading it as a value '
                           'would be None in CPython, which this form cannot represent')
+
+
+def _check_col_name_uses(fn, cols, literals):
+    """After the slot reads are rewritten, the list is a plain list of rows and the None slots are gone.
+    Only the literal assignment itself and the rewritten slot reads may still mention the name: any
+    other use (iteration, unpacking, passing it on, attribute access, any other call, any mutation of the
+    list) would silently see `[]` where CPython has `None`, or would desynchronise the present bits, so
+    it is refused by name and the program keeps its old route."""
+    literal_ids = {id(t) for n in literals for t in n.targets}
+
+    def walk(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Name) and child.id in cols and id(child) not in literal_ids:
+                allowed = (
+                    (isinstance(node, ast.Subscript) and node.value is child
+                     and isinstance(node.ctx, ast.Load)
+                     and not isinstance(node.slice, ast.Slice))
+                    or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and (node.func.id.startswith('_ail_none_row_')
+                             or node.func.id.startswith('_ail_none_repr_'))
+                        and child in node.args))
+                if not allowed:
+                    raise Refused(child, 'a list with a None slot (%r) is only read slot by slot here; '
+                                  'using the whole list (iteration, unpacking, a call argument, '
+                                  'attribute access or any mutation) would show None as [] in CPython '
+                                  'terms, so this form is refused' % child.id)
+            walk(child)
+
+    walk(fn)
 
 
 def _simple_default(e):
