@@ -82,6 +82,22 @@ value is exact; only the unsigned value above int64 stops, and it stops loudly r
   compiler (`name 'get_buffer' is not defined`), so each alias is a one-line method that calls the
   canonical one. Same names, same signatures, same behaviour.
 
+## Test notes
+
+`python3 AIL_CURRENT/test_ail_std_xdrlib.py` passes (3 tests: 9 programs compared in both builds,
+the beyond-int64 program checked for a loud stop, and the program inventory).  Probe programs in
+`/tmp/probes/` (`xd_float`, `xd_int`, `xd_bytes`, `xd_values`, `xd_pow2`) match CPython in both
+builds; they cover int widths and their error texts, hyper sign boundaries, zeros and signed
+zeros, subnormals, infinities, nan, single-precision round-half-even ties, overflowing floats,
+empty strings and arrays, and values reaching the packer through an argument, a list item, an
+attribute and a dict value.
+
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` are the required tests.
+`test_ail_files` and `test_ail_corpus_findings3` pass.  `test_ail_safetynet` fails
+`S4_generators_gc` (only the first line of its output is produced) in this runner; the same test
+fails identically at the base commit `68eb00a`, without these changes, so it is a pre-existing
+environmental failure, not an `xdrlib` regression.
+
 ## Follow-ups (out of scope: compiler files)
 
 * Passing a bound method as a value is refused at run time by the merged/general path, in any

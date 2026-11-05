@@ -83,15 +83,20 @@ def _pow2(n: int) -> float:
 
 
 def _split(x: float):
-    """Return (sign, e, frac) with x = (2**52 + frac) * 2**(e-52) for normals and
-    x = frac * 2**-1074 for subnormals, or (sign, 0, 0) for a zero."""
+    """Return (sign, e, n) with x = n * 2**e exactly.
+
+    A finite nonzero double is a normal (n in [2**52, 2**53), e >= -1074) or a subnormal
+    (n < 2**52, e = -1074).  A zero is (sign, 0, 0); an infinity is (sign, 9999, 0) and a
+    nan is (sign, 9999, 1)."""
     sign = 0
     if math.copysign(1.0, x) < 0.0:
         sign = 1
     a = math.fabs(x)
     if a == 0.0:
         return sign, 0, 0
-    if math.isnan(a) or math.isinf(a):
+    if math.isnan(a):
+        return sign, 9999, 1
+    if math.isinf(a):
         return sign, 9999, 0
     e = 0
     m = a
@@ -103,25 +108,24 @@ def _split(x: float):
         e = e - 1
     if m < 1.0:
         return sign, -1074, int(m * _TWO52)
-    return sign, e - 52, int((m - 1.0) * _TWO52)
+    return sign, e - 52, int((m - 1.0) * _TWO52) + (1 << 52)
 
 
 def _double_bytes(x: float) -> bytes:
-    sign, e, frac = _split(x)
+    sign, e, n = _split(x)
     if e == 9999:
-        if not math.isnan(x):
-            hi = (sign << 31) | (2047 << 20)
-            return hi.to_bytes(4, "big") + b"\0\0\0\0"
-        hi = 2047 << 20 | (1 << 19)
+        hi = (sign << 31) | (2047 << 20)
+        if n != 0:
+            hi = hi | (1 << 19)
         return hi.to_bytes(4, "big") + b"\0\0\0\0"
-    if e == 0 and frac == 0:
-        hi = sign << 31
-        return hi.to_bytes(4, "big") + b"\0\0\0\0"
-    if e == -1074:
-        hi = (sign << 31) | (frac >> 32)
-        lo = frac & _UINT_MAX
+    if n == 0:
+        return (sign << 31).to_bytes(4, "big") + b"\0\0\0\0"
+    if n < (1 << 52):
+        hi = (sign << 31) | (n >> 32)
+        lo = n & _UINT_MAX
         return hi.to_bytes(4, "big") + lo.to_bytes(4, "big")
-    hi = (sign << 31) | ((e + 1023 + 52) << 20) | (frac >> 32)
+    frac = n - (1 << 52)
+    hi = (sign << 31) | ((e + 1075) << 20) | (frac >> 32)
     lo = frac & _UINT_MAX
     return hi.to_bytes(4, "big") + lo.to_bytes(4, "big")
 
@@ -130,6 +134,8 @@ def _round_shift(n: int, shift: int) -> int:
     """Round n / 2**shift to nearest, ties to even."""
     if shift <= 0:
         return n << (-shift)
+    if shift > 63:
+        return 0
     q = n >> shift
     rem = n - (q << shift)
     half = 1 << (shift - 1)
@@ -141,29 +147,23 @@ def _round_shift(n: int, shift: int) -> int:
 
 
 def _float_bytes(x: float) -> bytes:
-    sign, e, frac = _split(x)
+    sign, e, n = _split(x)
     if e == 9999:
-        if math.isnan(x):
+        if n != 0:
             return ((sign << 31) | (255 << 23) | (1 << 22)).to_bytes(4, "big")
         return ((sign << 31) | (255 << 23)).to_bytes(4, "big")
-    if e == 0 and frac == 0:
+    if n == 0:
         return (sign << 31).to_bytes(4, "big")
-    if e == -1074:
-        n = frac
-        s = -1074
-    else:
-        n = frac + (1 << 52)
-        s = e
     nb = 0
     t = n
     while t > 0:
         nb = nb + 1
         t = t >> 1
-    exp = nb - 1 + s
+    exp = nb - 1 + e
     if exp > 127:
         raise OverflowError("float too large to pack with f format")
     if exp < -126:
-        f = _round_shift(n, -(s + 149))
+        f = _round_shift(n, -(e + 149))
         if f >= (1 << 23):
             return ((sign << 31) | (1 << 23)).to_bytes(4, "big")
         return ((sign << 31) | f).to_bytes(4, "big")
