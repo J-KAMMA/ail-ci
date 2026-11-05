@@ -1,0 +1,68 @@
+# `examples/algos`: plain Python algorithms against CPython
+
+Built from commit `997ffca` on AMD EPYC 7763 64-Core Processor.  `python3` is the oracle; stdout and exit status must agree.
+
+| program | default | strict | match default | match forced | AIL ms | CPython ms | speed-up | bytes | first refusal / fallback |
+|---|---|---|---|---|---:|---:|---:|---:|---|
+| dijkstra | general | refused | yes | yes | 1847 | 2671 | 1.45x | 141184 | 'graph' is a module-level name assigned to a Call, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted as a... |
+| huffman | general | refused | yes | yes | 1055 | 1111 | 1.05x | 145696 | 'text' is a module-level name assigned to a Call, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted as a ... |
+| knapsack | general | refused | yes | yes | 759 | 2278 | 3.00x | 136832 | 'capacity' is a module-level name assigned to a Name, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted a... |
+| lcs | general | refused | yes | yes | 2433 | 2583 | 1.06x | 175376 | constructor _AilT_i_s() needs str |
+| levenshtein | general | refused | yes | yes | 2642 | 1870 | 0.71x | 136296 | call to min(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. |
+| life | general | refused | yes | yes | 3657 | 2601 | 0.71x | 132552 | a tuple target over a sequence (`for i, x in ...` is built for enumerate(xs), zip(a, b) and d.items() only). |
+| mandelbrot | general | refused | yes | yes | 92 | 1826 | 19.75x | 121216 | 'SMALL' is a module-level name assigned to a Compare, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted a... |
+| rpn | general | refused | no | no | 936 | 946 | 1.01x | 150696 | 'SMALL' is a module-level name assigned to a Compare, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted a... |
+| sieve | general | refused | yes | yes | 8633 | 1892 | 0.22x | 348736 | 'SMALL' is a module-level name assigned to a Compare, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted a... |
+| sudoku | general | refused | yes | yes | 67 | 56 | 0.83x | 129392 | 'best' is a _AilT_i_i instance and is being assigned an int; a local's kind is settled by its FIRST assignment and never changes afterwards -- give... |
+| topo | general | refused | yes | yes | 21950 | 1818 | 0.08x | 137384 | `graph[node] = []` uses `graph` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values ... |
+| wordfreq | general | refused | yes | yes | 1256 | 2644 | 2.11x | 148704 | 'SMALL' is a module-level name assigned to a Compare, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted a... |
+
+Totals: **11/12 build and match** in the default build, **11/12** with `AIL_UNIFIED_FORCE=1`; **0 typed**, 12 general, 0 refused.
+
+Geomean speed-up over CPython (default build): **1.04x**.
+
+`icount`: perf_event_open denied: perf_event_open: Permission denied.
+
+## Fallback notes
+
+* **dijkstra**: note: dijkstra.py:21:9: built on the general path (about 20x slower) because `graph[node] = []` uses `graph` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused. Rewrite: keep the groups in a list of class instances and map each key to its index with a `dict[str, int]`: `@dataclass class G: items: list[str]` `idx: dict[str, int] = {}` `groups: list[G] = []` then `if k not in idx: idx[k] = len(groups); groups.append(G([])) groups[idx[k]].items.append(w)` (or keep parallel lists indexed through the int dict). Original refusal: a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why
+* **huffman**: note: huffman.py:34:5: built on the general path (about 20x slower) because 'heap'[...] is a 3-tuple, not a number; read a field of it; run with --strict to see why
+* **knapsack**: note: knapsack.py:4:1: built on the general path (about 20x slower) because `in` with a str; a str is never an element of a list, set or dict of numbers, so `in` only works when BOTH sides are str (substring search). write instead: `"a" in text` for substrings; for membership in a collection of str use a `set[str]` or `dict[str, int]`; to test a byte value, compare ints (`b == 97`); run with --strict to see why
+* **lcs**: note: lcs.py:47:5: built on the general path (about 20x slower) because constructor _AilT_i_s() needs str; run with --strict to see why
+* **levenshtein**: note: levenshtein.py:35:13: built on the general path (about 20x slower) because call to min(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. write instead: define `min` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str); run with --strict to see why
+* **life**: note: life.py:26:5: built on the general path (about 20x slower) because a tuple target over a sequence (`for i, x in ...` is built for enumerate(xs), zip(a, b) and d.items() only). write instead: `for i in range(len(xs)):` and read `xs[i]`; for enumerate(xs, 1) use `for i in range(len(xs)):` and print `i + 1`; run with --strict to see why
+* **mandelbrot**: note: mandelbrot.py:4:1: built on the general path (about 20x slower) because `in` with a str; a str is never an element of a list, set or dict of numbers, so `in` only works when BOTH sides are str (substring search). write instead: `"a" in text` for substrings; for membership in a collection of str use a `set[str]` or `dict[str, int]`; to test a byte value, compare ints (`b == 97`); run with --strict to see why
+* **rpn**: note: built on the general path (about 20x slower) because expression returns a str on one path and something else on another; a str and a number have no single C return type, and a str and bytes are separate types that never mix (SEMANTICS.md section 31); run with --strict to see why
+* **sieve**: note: sieve.py:4:1: built on the general path (about 20x slower) because `in` with a str; a str is never an element of a list, set or dict of numbers, so `in` only works when BOTH sides are str (substring search). write instead: `"a" in text` for substrings; for membership in a collection of str use a `set[str]` or `dict[str, int]`; to test a byte value, compare ints (`b == 97`); run with --strict to see why
+* **sudoku**: note: sudoku.py:30:5: built on the general path (about 20x slower) because 'best' is a _AilT_i_i instance and is being assigned an int; a local's kind is settled by its FIRST assignment and never changes afterwards -- give the second kind a different name, or use the value inline without binding it to one; run with --strict to see why
+* **topo**: note: topo.py:2:1: built on the general path (about 20x slower) because import of 'collections' with a use that is not built: Counter, defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and deque are built for str / int / tuple keys and int / float / str / tuple elements; the rest of the module is not (namedtuple and ChainMap are built by the library pass) -- the notes below name the use; run with --strict to see why
+* **wordfreq**: note: wordfreq.py:4:1: built on the general path (about 20x slower) because `in` with a str; a str is never an element of a list, set or dict of numbers, so `in` only works when BOTH sides are str (substring search). write instead: `"a" in text` for substrings; for membership in a collection of str use a `set[str]` or `dict[str, int]`; to test a byte value, compare ints (`b == 97`); run with --strict to see why
+
+## Ranked blockers
+
+Every default build is general and every `--strict` build is refused. The buckets below
+combine the first refusal line with the default fallback note for each program (name text
+replaced); a program must have every bucket that mentions it cleared before it can build
+typed.
+
+| rank | bucket | programs affected | programs |
+| ---: | --- | ---: | --- |
+| 1 | module-level script state: a name assigned to a Call, Compare, IfExp or Name, an empty list, or a module table | 12 | all |
+| 2 | `in` with a `str` (`"--small" in sys.argv`) | 4 | knapsack, mandelbrot, sieve, wordfreq |
+| 3 | int-keyed dict of containers (`graph[node] = []`, then append tuples) | 2 | dijkstra, topo |
+| 4 | tuple target over a sequence (`for left, right in pairs`) | 1 | life |
+| 5 | call to `min()` with three arguments | 1 | levenshtein |
+| 6 | tuple/list constructor needs `str` (`_AilT_i_s()`) | 1 | lcs |
+| 7 | local kind settled by its first assignment (`best`) | 1 | sudoku |
+| 8 | expression returns `str` on one path and a number on another | 1 | rpn |
+| 9 | `collections` import with a use not built (`deque` in this context) | 1 | topo |
+| 10 | heap element is a 3-tuple, not a number | 1 | huffman |
+
+### Reproducers for the top three
+
+Each file under `repro/` is 7-13 lines and was compiled with
+`python3 AIL_CURRENT/ail_chatgpt.py compile <file> -o /tmp/<name>.out --syntax python --strict`.
+
+* `repro/01_module_scope.py` -> refused: `'edges' is a module-level name assigned to a Call, not a literal`.
+* `repro/02_str_membership.py` -> refused: `` `in` with a str; a str is never an element of a list, set or dict of numbers``.
+* `repro/03_dict_of_lists.py` -> refused: `` `graph[node] = []` uses `graph` as a dict of containers``.
