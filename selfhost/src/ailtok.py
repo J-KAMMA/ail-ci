@@ -195,10 +195,13 @@ class Tokenizer:
         self.toks.pop()
         # start index of each physical line; a line ends after its '\n'
         self.starts = [0]
+        self.lone_cr = -1
         k = 0
         while k < self.n:
             if text[k] == "\n":
                 self.starts.append(k + 1)
+            elif text[k] == "\r" and self.lone_cr < 0 and (k + 1 >= self.n or text[k + 1] != "\n"):
+                self.lone_cr = k
             k += 1
         self.nlines = len(self.starts)
         if self.n > 0 and text[self.n - 1] == "\n":
@@ -271,6 +274,10 @@ class Tokenizer:
 
     # --- main loop ---------------------------------------------------------------------------
     def run(self) -> list[Tok]:
+        if self.lone_cr >= 0:
+            # CPython's tokenizer treats a lone carriage return inconsistently; refuse it by name
+            self.i = self.lone_cr
+            self.fail("a carriage return not followed by a newline is not supported")
         while True:
             if len(self.frames) > 0:
                 fr = self.frames[len(self.frames) - 1]

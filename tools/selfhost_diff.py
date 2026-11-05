@@ -38,8 +38,43 @@ def read_list(path):
 
 
 def run_side(cmd, paths, jobs, tmp, tag, env):
-    """Run cmd over paths in `jobs` parts.  Returns (dumps by path, seconds, failures)."""
+    """Run cmd over paths in `jobs` parts.  Returns (dumps by path, seconds, failures).
+
+    When a run exits non-zero, the first path of its part with no dump is the one it stopped on:
+    that path gets the dump ``!! refused: exit N: <last stderr line>`` and the rest of the part
+    (with the last dumped path, whose dump may be cut short) is run again."""
+    dumps = {}
+    fails = []
+    secs = 0.0
+    todo = list(paths)
+    rnd = 0
+    while todo:
+        d, s, f, parts = run_once(cmd, todo, jobs, tmp, "%s%d_" % (tag, rnd), env)
+        secs += s
+        rnd += 1
+        todo = []
+        for part, fail in zip(parts, f):
+            got = [p for p in part if p in d]
+            for p in got:
+                dumps[p] = d[p]
+            if fail is None:
+                continue
+            fails.append(fail)
+            left = [p for p in part if p not in d]
+            if not left:
+                continue
+            last_line = fail.strip().split("\n")[-1][:300]
+            dumps[left[0]] = ("!! refused: %s\n" % last_line).encode("utf-8")
+            redo = left[1:]
+            if got and got[-1] == part[part.index(left[0]) - 1]:
+                redo = [got[-1]] + redo
+            todo += redo
+    return dumps, secs, fails
+
+
+def run_once(cmd, paths, jobs, tmp, tag, env):
     parts = [paths[k::jobs] for k in range(jobs)] if jobs > 1 else [paths]
+    parts = [p for p in parts if p]
     procs = []
     t0 = time.perf_counter()
     for k, part in enumerate(parts):
@@ -59,6 +94,8 @@ def run_side(cmd, paths, jobs, tmp, tag, env):
         fo.close()
         if p.returncode != 0:
             fails.append("exit %d: %s" % (p.returncode, err.decode("utf-8", "replace").strip()[-400:]))
+        else:
+            fails.append(None)
         outs.append(out)
     secs = time.perf_counter() - t0
     dumps = {}
@@ -76,7 +113,7 @@ def run_side(cmd, paths, jobs, tmp, tag, env):
                     buf.append(line)
         if cur is not None:
             dumps[cur] = b"".join(buf)
-    return dumps, secs, fails
+    return dumps, secs, fails, parts
 
 
 def first_diff(a, b):
