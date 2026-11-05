@@ -142,6 +142,19 @@ such module exists in the tree. Against 425 resolved import edges and 535 standa
 imports, that is 0.3%, far below the 10% stop threshold. They are lazy CLI paths and are
 listed under `unresolved` in the JSON.
 
+## Spot check
+
+Three modules picked at random from the graph were compared with a `grep` of their import
+lines:
+
+| module | JSON edges | import lines |
+| --- | --- | --- |
+| `collib` | eager `[]`, lazy `[dictviews]` | 17-19 `ast`, `re`, `copy` (stdlib); 3202 `import dictviews` in a function |
+| `tupcalls` | eager `[tupcommon, tupexpr]`, lazy `[]` | 2 `import ast` (stdlib); 4 `from tupcommon import *`; 5 `from tupexpr import unopt` |
+| `ail_syntax` | eager `[]`, lazy `[ailarray, callable_types, collib, matchlower, modtables, nestfn, optlib, raisefrom, relib, sqllower, stdlib4, stdlib5, threadlib, tuplib, typedpar]` | 2-15 standard library at top level; 167/176/187/198 `threadlib`/`ailarray`/`stdlib5`/`stdlib4`, 4046/4057 `sqllower`/`modtables`, 5757 `typedpar` in functions; 71-153 the codec files loaded by path |
+
+All three match.
+
 ## Limits
 
 - A `try:` block at module level is treated as lazy, since it is not a direct child of the
