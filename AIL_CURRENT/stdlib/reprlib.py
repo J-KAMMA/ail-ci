@@ -17,19 +17,68 @@ def _py_repr(x):
     return "%r" % x
 
 
+_BARE_TYPE_NAMES = (
+    "slice", "object", "type", "memoryview", "property", "staticmethod",
+    "classmethod", "super", "enumerate", "zip", "map", "filter", "reversed",
+    "function", "builtin_function_or_method", "method", "module", "generator",
+    "NoneType", "ellipsis", "NotImplementedType", "code", "frame", "traceback",
+    "cell", "mappingproxy", "dict_keys", "dict_values", "dict_items",
+    "getset_descriptor", "member_descriptor", "wrapper_descriptor",
+    "method_descriptor",
+    "BaseException", "BaseExceptionGroup", "Exception", "ExceptionGroup",
+    "ArithmeticError", "AssertionError", "AttributeError", "BlockingIOError",
+    "BrokenPipeError", "BufferError", "BytesWarning", "ChildProcessError",
+    "ConnectionAbortedError", "ConnectionError", "ConnectionRefusedError",
+    "ConnectionResetError", "DeprecationWarning", "EOFError",
+    "EncodingWarning", "EnvironmentError", "FileExistsError",
+    "FileNotFoundError", "FloatingPointError", "FutureWarning",
+    "GeneratorExit", "IOError", "ImportError", "ImportWarning",
+    "IndentationError", "IndexError", "InterruptedError", "IsADirectoryError",
+    "KeyError", "KeyboardInterrupt", "LookupError", "MemoryError",
+    "ModuleNotFoundError", "NameError", "NotADirectoryError",
+    "NotImplementedError", "OSError", "OverflowError",
+    "PendingDeprecationWarning", "PermissionError", "ProcessLookupError",
+    "RecursionError", "ReferenceError", "ResourceWarning", "RuntimeError",
+    "RuntimeWarning", "StopAsyncIteration", "StopIteration", "SyntaxError",
+    "SyntaxWarning", "SystemError", "SystemExit", "TabError", "TimeoutError",
+    "TypeError", "UnboundLocalError", "UnicodeDecodeError",
+    "UnicodeEncodeError", "UnicodeError", "UnicodeTranslateError",
+    "UnicodeWarning", "UserWarning", "ValueError", "Warning",
+    "ZeroDivisionError",
+)
+
+_MODULE_TYPE_NAMES = {
+    "deque": "collections.deque",
+    "OrderedDict": "collections.OrderedDict",
+    "defaultdict": "collections.defaultdict",
+    "Counter": "collections.Counter",
+    "UserDict": "collections.UserDict",
+    "UserList": "collections.UserList",
+    "UserString": "collections.UserString",
+    "array": "array.array",
+}
+
+
 def _type_label(value):
     """CPython's `type(value)` text, rebuilt from the class name.
 
     This compiler exposes only `type(x).__name__`, not the class object, so the module is not
-    readable.  The builtin scalar and container types are recognised by identity and print bare;
-    every other class is a program class, and CPython prints `__main__` for it.
+    readable.  The builtin scalar and container types are recognised by identity, the builtin
+    types the compiler cannot name (a `slice`, a `memoryview`, an exception, ...) by name, and
+    the collections/array classes by name with their module.  Every other class is a class of
+    the program, and CPython prints `__main__` for it.
     """
     name = value.__class__.__name__
-    if (type(value) is float or type(value) is complex or type(value) is bytes
+    if (type(value) is bool or type(value) is int or type(value) is str
+            or type(value) is float or type(value) is complex or type(value) is bytes
             or type(value) is bytearray or type(value) is list or type(value) is tuple
             or type(value) is dict or type(value) is set or type(value) is frozenset
             or type(value) is range):
         return "<class '" + name + "'>"
+    if name in _BARE_TYPE_NAMES:
+        return "<class '" + name + "'>"
+    if name in _MODULE_TYPE_NAMES:
+        return "<class '" + _MODULE_TYPE_NAMES[name] + "'>"
     return "<class '__main__." + name + "'>"
 
 

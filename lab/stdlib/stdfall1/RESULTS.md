@@ -103,8 +103,13 @@ by the compiler and are described in each module docstring.
   removal compare with `is`, so equal-but-distinct objects do not defeat it. The only visible
   difference is concurrent threads, which this runtime does not have. `_join`'s invalid-indent
   message needs CPython's full `type(indent)` text; this compiler exposes only
-  `type(x).__name__`, so `_type_label` rebuilds `<class '__main__.Name'>` from the class name
-  (builtin scalar/container types are recognised by identity and print bare).
+  `type(x).__name__`, so `_type_label` rebuilds it from the class name: builtin scalar/container
+  types are recognised by identity and print bare, the builtin types the compiler cannot name
+  (`slice`, `memoryview`, exceptions, ...) and the collections/array classes are recognised by
+  name (`<class 'slice'>`, `<class 'collections.deque'>`), and every other class is a class of
+  the program, printed as `<class '__main__.Name'>`. A class defined in another program module
+  would still be printed as `__main__`; the compiler exposes no module for an instance's class,
+  so that one case cannot be made exact.
 - `sched.py`: `threading.RLock` is not available, so the scheduler is not
   thread-safe. `Event` is a plain class and the queue is kept sorted by
   `(time, priority, sequence)` - the same key CPython's `heapq` orders the
