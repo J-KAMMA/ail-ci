@@ -60,7 +60,7 @@ by tree height (62 observed; int32 is the provable bound, int8 is only this inpu
 `par`/`idx`/`cs`/`ord`/`ni`/`mp`/`keep` by `n < 2^31`.
 
 Against rc1's 384 MiB of "list buffers", 292.67 MiB of int buffers is **76.2%**. The remainder is
-the `list[str]` `nm` field (`ail_pslist`, 24 B/element ≈ 72 MiB at 3M) plus its sarena text and the
+the `list[str]` `nm` field (`ail_pslist`, 24 B/element ≈ 68.7 MiB at 3M) plus its sarena text and the
 string sort-key columns, which are not `list[int]` and are outside (a). The tracked sum is a capacity
 figure (the tracker sees `cap`, not resident pages), as in rc1. **This is below the 80% done-check
 for (a)**; the check is not met by this input.
@@ -81,8 +81,9 @@ push/get/set/reserve/free to:
 - `keep` (the `compact` 0/1 list), `mp`, `ord`, `ni` and `cs` (all index columns, `≤ n < 2^31`).
 
 It deliberately leaves **every `w` list int64**, the T field and the `compact`/`rebuild`/`fold`
-locals alike: `do_fold` accumulates `w[j]` into `wt` and pushes the sum, and `sub`/sort-key columns
-also leave int32 on the perf input, so no bound smaller than int64 can be proven for them. (The
+locals alike: `do_fold` accumulates `w[j]` into `wt` and pushes the sum, `sub` is a copy of that `w`,
+and one sort-key column (`v__t11`, the negated folded `sub`) reaches −5.3e10 on the perf input, so no
+bound smaller than int64 can be proven for any `w`-derived list. (The
 earlier scratch edit that narrowed `f_w` was withdrawn: storing a folded weight in an int32 would
 truncate silently on another input.)
 
@@ -106,7 +107,8 @@ accessor in place of the inlined int64 form.
 **5.86%** (needs no worse than +1%). The drop is above the 5% stop threshold, so this is a measured
 no-go rather than an early stop. fbnarrow2-4 should not start on this evidence: narrowing every
 provably-int32 list (all of `dep`, `par`, `keep`, `mp`, `ord`, `ni`, `cs`) still leaves the `w`
-columns int64, and those account for 96 MiB of the 292.67 MiB peak set.
+columns int64, and the two live `w` sites (`parse_tree:(v_t)->f_w` and `rebuild:v_w`) account for
+**64.0 MiB** of the 292.67 MiB peak set.
 
 ## Operations tree_fold applies to each narrowed list (fbnarrow3 requirements)
 

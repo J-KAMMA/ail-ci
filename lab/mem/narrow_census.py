@@ -526,7 +526,16 @@ def census(only=None):
     doc = {'mode': 'census', 'programs': results,
            'rows_at_least_1MiB': sorted(big, key=lambda x: -x['peak_bytes']),
            'all_measured_rows': sorted(rows, key=lambda x: (-x['peak_bytes'], x['program'], x['label']))}
-    (HERE / 'NARROW.json').write_text(json.dumps(doc, indent=1))
+    final = doc
+    prev = HERE / 'NARROW.json'
+    try:
+        old = json.loads(prev.read_text())
+        emu = old.get('emulate') if 'census' in old else None
+        if emu is not None:
+            final = {'census': doc, 'emulate': emu}
+    except Exception:
+        pass
+    prev.write_text(json.dumps(final, indent=1))
     return results
 
 
