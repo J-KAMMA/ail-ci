@@ -115,10 +115,22 @@ Two honest caveats:
 
 ## Verification
 
-- 16/16 programs built with the change and matched CPython (stdout + exit status), in the default
-  build, with `AIL_RC_BORROW=0` and with `AIL_UNIFIED_FORCE=1` (six `lab/rc/progs` programs and the
-  ten compare tasks; see the test log in the task report).
+- Six `lab/rc/progs` programs: CPython-equal stdout and exit status in the default build, with
+  `AIL_RC_BORROW=0` and with `AIL_UNIFIED_FORCE=1` (18 builds, all equal).
+- Ten compare tasks (`typed.py` against CPython): default and `AIL_RC_BORROW=0` equal on nine.
+  `echo_pack` differs from the CPython baseline in **both** builds, byte for byte the same output
+  in each, so the difference is not the borrow elision; I did not root-cause it (the comparison
+  used `src/echo_pack/main.py` at `TREE_N=300000`, while `run.py` uses
+  `tasks/echo_pack/reference.py`).
+- Corpus sample: the first 40 sorted `lab/corpus/programs` files, default and `AIL_RC_BORROW=0`,
+  empty stdin: 0 output or exit-status differences (40/40). The brief asks for 200; the time budget
+  did not allow it.
 - `AIL_CURRENT/test_ail_rc_borrow.py`: 4 programs (read-only helper, storing helper, recursive walk,
   returning helper), each against CPython and against the expected count of `ail_obj_retain` in
   `program.c`, plus the analysis's own sets and the `AIL_RC_BORROW=0` switch. 7/7 pass.
-- The 20-shard CI suite is the remaining gate; nothing here was merged.
+- `test_ail_borrowed_owner`, `test_ail_borrowed_elements`, `test_ail_borrowed_element_fields`,
+  `test_ail_callable_owned_results`, `test_ail_exception_resources`,
+  `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`: pass. (Run
+  `test_ail_borrowed_elements` without `ulimit -v`: its ASan subprocess cannot map shadow memory
+  under a 1.5 GB virtual cap.)
+- The 20-shard CI suite is the remaining gate; nothing here was merged or pushed.
