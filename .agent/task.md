@@ -1,4 +1,4 @@
-**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_obj_refs test_ail_safetynet test_ail_third_party_notices test_ail_unified test_ail_virtual_dispatch.
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_obj_refs test_ail_packaging test_ail_safetynet test_ail_third_party_notices test_ail_unified test_ail_virtual_dispatch.
 
 Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
