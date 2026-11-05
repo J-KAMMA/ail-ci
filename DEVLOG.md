@@ -1,3 +1,18 @@
+## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
+
+The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this
+export; all source hunks applied cleanly. The `.github/workflows/agent-worker.yml` hunk (dropping
+`GH_MODELS_TOKEN`) was already the state of this tree. Added `lab/pyproof` (README, RESULTS,
+programs, report.py, results.jsonl, seven reproducers), `AIL_CURRENT/test_ail_pyproof_report.py`
+and its `tests.d` registration; `manifest.d` was regenerated with
+`python3 tools/update_manifest.py` (recomputed pins; `--check` passes).
+`tools/diff_ids.py` is not present on this tree, so only `update_manifest.py` ran.
+Tests (`par_check -j 2`): `test_ail_pyproof_report`, `test_ail_examples_crate`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` all pass.
+Probes: `/tmp/probes/probe_exit3.py` and `probe_numbers.py` are `typed` with CPython-matching
+stdout and the same exit status; the five bucket reproducers match or are refused by name, and
+the two `wrong` overflow reproducers still exit 1 as their rows say.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this
