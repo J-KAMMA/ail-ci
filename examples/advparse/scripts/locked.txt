@@ -1,0 +1,19 @@
+look
+look
+inventory
+i
+score
+go north
+take apple
+south
+east
+take rope
+west
+down
+take sword
+up
+up
+x book
+down
+examine door
+open door

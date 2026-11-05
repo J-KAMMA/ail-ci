@@ -1,0 +1,17 @@
+   LOOK
+   I
+  SCORE
+   GO    NORTH
+  OPEN   THE   CHEST
+
+   TAKE   THE   COIN
+   TAKE   THE   APPLE
+   LOOK
+   X   COIN
+   DROP  THE COIN
+   I
+   SCORE
+   X   APPLE
+   TAKE   THE    COIN
+   
+   QUIT

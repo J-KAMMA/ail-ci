@@ -1,0 +1,26 @@
+go east
+take rope
+walk west
+east
+drop rope
+get rope
+pick up iron key
+west
+look
+l
+examine rope
+x iron key
+inventory
+i
+score
+n
+s
+e
+w
+u
+d
+go north
+go south
+go down
+go up
+quit

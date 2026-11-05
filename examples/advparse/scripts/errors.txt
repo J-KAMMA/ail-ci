@@ -1,0 +1,26 @@
+take it
+frobnicate
+pick
+take banana
+examine banana
+drop apple
+go sideways
+go
+take
+drop
+put
+put apple
+put apple in
+put apple in banana
+open
+close
+open banana
+close banana
+score
+go north
+take chest
+open chest
+take coin
+put coin in banana
+put coin in
+quit

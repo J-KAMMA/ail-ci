@@ -1,0 +1,21 @@
+go north
+open chest
+take coin
+take apple
+south
+east
+take iron key
+take rope
+west
+down
+take lamp
+take sword
+up
+up
+open cabinet
+take brass key
+take book
+down
+open door
+west
+quit
