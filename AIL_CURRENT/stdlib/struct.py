@@ -233,7 +233,8 @@ def _put_int(out: bytearray, pos: int, width: int, value: int, signed: bool, lit
     out[pos:pos + width] = value.to_bytes(width, order, signed=signed)
 
 
-def _pack_into_items(out: bytearray, items, offsets, native: bool, little: bool, values) -> None:
+def _pack_into_items(out: bytearray, items, offsets, native: bool, little: bool, values,
+                     end: int) -> None:
     expected = 0
     for item in items:
         if item[0] == 'x':
@@ -291,6 +292,11 @@ def _pack_into_items(out: bytearray, items, offsets, native: bool, little: bool,
                 out[pos] = n
                 for m in range(n):
                     out[pos + 1 + m] = raw[m]
+            elif pos < end:
+                # CPython writes the length byte (count - 1 == -1, i.e. 0xff) even
+                # for a zero-count p when the destination has room; pack() has no
+                # room so its result stays b''.
+                out[pos] = 255
             index = index + 1
         else:
             width = _item_size(code, native)
@@ -300,6 +306,17 @@ def _pack_into_items(out: bytearray, items, offsets, native: bool, little: bool,
                 _put_int(out, pos, width, v, signed, little)
                 pos = pos + width
                 index = index + 1
+
+
+def _zero_p_offset(items, offsets, size: int) -> int:
+    """The offset of a zero-count p that lands at the end of the struct, else -1.
+
+    CPython's pack_into writes that trailing length byte (0xff) past the struct's own
+    size, straight into the caller's buffer, so it cannot go through the temp target."""
+    for k in range(len(items)):
+        if items[k][0] == 'p' and items[k][1] == 0 and offsets[k] >= size:
+            return offsets[k]
+    return -1
 
 
 def _unpack_items(data, items, offsets, native: bool, little: bool) -> tuple:
@@ -349,7 +366,7 @@ def pack(format, *values) -> bytes:
     """pack(fmt, v1, v2, ...) -> bytes: the values packed according to the format."""
     parsed = _parse(format)
     out = bytearray(parsed[3])
-    _pack_into_items(out, parsed[2], parsed[4], parsed[1], parsed[0], values)
+    _pack_into_items(out, parsed[2], parsed[4], parsed[1], parsed[0], values, len(out))
     return bytes(out)
 
 
@@ -383,9 +400,12 @@ def pack_into(format, buffer, offset, *values) -> None:
                     "offset %d (actual buffer size is %d)"
                     % (offset + size, size, offset, len(buffer)))
     target = bytearray(size)
-    _pack_into_items(target, parsed[2], parsed[4], parsed[1], parsed[0], values)
+    _pack_into_items(target, parsed[2], parsed[4], parsed[1], parsed[0], values, size)
     for i in range(size):
         buffer[used + i] = target[i]
+    extra = _zero_p_offset(parsed[2], parsed[4], size)
+    if extra >= 0 and used + extra < len(buffer):
+        buffer[used + extra] = 255
 
 
 def unpack_from(format, buffer, offset: int = 0) -> tuple:
@@ -420,10 +440,10 @@ def _iter_records(parsed, buffer, size):
 def iter_unpack(format, buffer):
     """iter_unpack(fmt, buffer) -> iterator of tuples, one per record."""
     parsed = _parse(format)
-    _check_buffer(buffer)
     size = parsed[3]
     if size == 0:
         raise error("cannot iteratively unpack with a struct of length 0")
+    _check_buffer(buffer)
     if len(buffer) % size != 0:
         raise error("iterative unpacking requires a buffer of a multiple of %d bytes" % size)
     return _iter_records(parsed, buffer, size)
@@ -446,7 +466,8 @@ class Struct:
 
     def pack(self, *values) -> bytes:
         out = bytearray(self.size)
-        _pack_into_items(out, self._items, self._offsets, self._native, self._little, values)
+        _pack_into_items(out, self._items, self._offsets, self._native, self._little, values,
+                         len(out))
         return bytes(out)
 
     def unpack(self, buffer) -> tuple:
@@ -472,9 +493,13 @@ class Struct:
                         "offset %d (actual buffer size is %d)"
                         % (offset + self.size, self.size, offset, len(buffer)))
         target = bytearray(self.size)
-        _pack_into_items(target, self._items, self._offsets, self._native, self._little, values)
+        _pack_into_items(target, self._items, self._offsets, self._native, self._little, values,
+                         self.size)
         for i in range(self.size):
             buffer[used + i] = target[i]
+        extra = _zero_p_offset(self._items, self._offsets, self.size)
+        if extra >= 0 and used + extra < len(buffer):
+            buffer[used + extra] = 255
 
     def unpack_from(self, buffer, offset: int = 0) -> tuple:
         _check_buffer(buffer)
