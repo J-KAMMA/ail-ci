@@ -1,3 +1,48 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+Restored the generated artifact and confirmed the tree is clean. Writing the verdict.
+
+## Review of fbnarrow1 (`work..HEAD`, 3 commits, +4523 lines)
+
+**What the change really does.** Adds four measurement-only files under `lab/mem/`: `narrow_census.py` (instruments a scratch copy of each generated C), `NARROW.json`, `NARROW.md`, `treefold_i32.patch`. No compiler/runtime/C file is touched (verified: `git diff --stat work..HEAD` is `lab/mem` only; generated `program.c` hash is identical base vs HEAD, `bde00de…` both). That matches the lane, but the report's numbers do not match the committed artifact.
+
+**Probes / measurements I ran** (no AIL-language probes needed — semantics unchanged, C identical):
+- `git worktree list` → base at `/tmp/rbase` (4b0b712, `work`) vs HEAD: same `program.c` for a list-int probe; both print `30` / `[0, 1, 4, 9, 16]`.
+- `python3 lab/mem/narrow_census.py --census --only tree_fold` (HEAD) → `tree_fold True 292.67 MiB`.
+- Applied the committed `lab/mem/treefold_i32.patch` to a fresh `program.c`, `cc -O2 …`: stdout identical to the plain build on the 3M perf input and to CPython on a 3k-node case; `/usr/bin/time -v` ×3: plain 414,204/414,280/414,920 KiB, patched 367,324/367,320/367,356 KiB; callgrind `Ir` at N=300k: plain 893,478,238, patched 966,266,816.
+- `python3 tools/par_check.py -j 2 test_ail_safetynet` → 1/1 ok (293 s). No test module added or edited.
+
+**Defects**
+
+1. **`NARROW.md` (a) is stale and contradicted by `NARROW.json`.** The table lists `compact: v_w/v_dep/v_par` and `do_prune: ir5` at 32.0 MiB each at the peak, total 269.8 MiB. The committed JSON, and my rerun of the same script, give peak **292.67 MiB** with those four sites at **0 bytes**; the peak set is `parse_tree:(v_t)->f_w/dep/par` + `rebuild:v_w/dep/par` + `rebuild:v_ord` + `rebuild:v_ni` + `do_sort:v__t5`. So "the peak falls in `compact` (the prune op), not in `sort`" is false — the peak is the sort/rebuild path. Two per-program figures are also stale: `ticket_audit` is 3.41 MiB (md: 1.4), `term_rank` 27.22 (md: 27.0); the JSON has 39 rows ≥1 MiB, md says 38. Expected (md) 269.8 MiB; actual 292.67 MiB.
+2. **`NARROW.md` (b) prices a patch that is not the committed one.** It says the edit "gives the local index lists `mp`, `ord` and `ni` an `int32_t *p`" and that converting `w`/`dep`/`par` "was not finished". `lab/mem/treefold_i32.patch` narrows the T fields `f_w`/`f_dep`/`f_par` plus `keep`/`mp`/`ord`/`ni`/`cs`. Its numbers (414,956→414,228 KiB = −0.18%; `Ir` 893,478,193→925,441,599 = +3.58%) are exactly the `emulate` block of commit f764183's JSON; the final JSON has **no `emulate` section at all**, so the delivered (b) is unsupported by the artifact.
+3. **The delivered patch's measurements invert the report's reason for no-go.** Measured on HEAD's patch: peak RSS **−11.3%** (passes the ≥10% bar), `Ir` **+8.15%** (fails the ≤+1% bar). The verdict happens to stay "no-go", but only via the instruction criterion; the report says RSS fell 0.18% and instructions rose 3.58%.
+4. **The patch narrows `f_w` although the report says it cannot be.** `NARROW.md` requires "Any list that cannot be proven in range must stay int64 (e.g. `w`, which `fold` can push past int32)" — `do_fold` accumulates `wt` into `w`, and the patch stores it as int32, so on other inputs the emulation truncates silently. The −11.3% RSS figure is therefore not a legal narrowing.
+5. **Done-check (a) ≥80% is not met.** 292.67 / 384 MiB = **76%** (md reports 70%); the remainder includes `ail_pslist` and string columns, but the task's bar is stated against list-buffer bytes.
+6. **No worker report.** The run produced no final text, so the mandatory probe list/self-check is absent.
+
+**Claim check:** "only `lab/mem` files" verified; "16/16 tracked builds match" verified for the census (`match: true` for all 16, and I reproduced `tree_fold`); "no CPU PMU, callgrind `Ir` at 300k" verified (`/sys/bus/event_source/devices` has no `cpu`; `Ir` reproduces within 45 instructions); "27,859,349 B perf input" verified; "55 public+hidden cases identical" verified only for the *old* patch — for the committed patch I checked the perf input and one 3k-node case (both match CPython). "(a) reproduced in NARROW.json" false; "(b) reproduced" false; "peak in compact" false.
+
+**Pre-existing:** none (no compiler/runtime change; base and HEAD emit identical C).
+
+**Unverified:** all 55 cases against CPython for the committed patch; the other 15 programs' census (reran only `tree_fold`); the 20 CI shards.
+
+VERDICT: FIX
+1. `NARROW.md` (a) table/labels/per-program figures must be regenerated from the committed `NARROW.json` (peak 292.67 MiB, `compact`/`do_prune` sites 0 bytes at peak, 39 rows, ticket_audit 3.41, term_rank 27.22, and the peak is in the sort/rebuild path).
+2. `NARROW.md` (b) must describe and measure the committed `treefold_i32.patch` (T fields `w`/`dep`/`par` + `keep`/`mp`/`ord`/`ni`/`cs`) and `NARROW.json` must carry the `emulate` block; observed on HEAD: RSS 414,280 → 367,324 KiB (−11.3%), `Ir` 893,478,238 → 966,266,816 (+8.15%), stdout identical on the perf input and a 3,000-node case.
+3. Drop `f_w` from the int32 patch (or bound it) — `do_fold` accumulates `wt` into `w`, so it is not provably int32; the current emulation can truncate.
+4. State that (a) covers 76% of rc1's 384 MiB, below the 80% done-check.
+[commandcode stop=end_turn turns=37 out_tokens=29652]
+
+
+--- ORIGINAL TASK ---
 Lane: fb-narrow
 
 > Re-run of fbnarrow1: the first run (Claude Code test) did not start (not logged in). Do the task normally.
