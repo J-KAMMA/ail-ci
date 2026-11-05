@@ -23,7 +23,9 @@ permissions:
 
 concurrency:
   group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  # (2026-11-05) never cancel a running integ suite: merges land every ~80 min, the suite takes 50-100 min, and
+  # cancel-in-progress left integ without a finished full run from 09:12 UTC on. A newer integ push now waits.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/integ' }}
 
 jobs:
   plan:
