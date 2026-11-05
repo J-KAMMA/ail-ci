@@ -1,0 +1,16 @@
+look
+look
+inventory
+i
+score
+go north
+take apple
+x apple
+drop apple
+take apple
+south
+east
+take rope
+take iron key
+x key
+inventory

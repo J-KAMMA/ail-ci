@@ -1,0 +1,17 @@
+look
+i
+go up
+open cabinet
+take brass key
+go down
+east
+drop brass key
+take key
+examine key
+take iron key
+examine it
+drop it
+take brass key
+inventory
+x brass key
+quit

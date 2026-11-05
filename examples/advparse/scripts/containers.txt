@@ -1,0 +1,25 @@
+go north
+take coin
+open chest
+take coin
+open chest
+put coin in chest
+close chest
+put coin in chest
+open chest
+take coin
+examine chest
+close chest
+open chest
+south
+up
+open cabinet
+take brass key
+x cabinet
+close cabinet
+take book
+put book in cabinet
+open cabinet
+put book in cabinet
+examine cabinet
+quit
