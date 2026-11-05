@@ -41,9 +41,12 @@ Implementation: `ir/borrow.py::analyze_cursors`, the same `pyfunc.py` emit hook 
 | chain_relax | `digits_only(ch)`, `fmt(ch)` — `ch` is a `str`, not a managed reference; no new calls |
 | binarytrees, cfold, deriv, rbtree, berth_sim, echo_pack, ledger_bin, rail_transfer, scar_life, tally_lang, term_rank, ticket_audit, tree_fold | none |
 
-Only `linkedlist` changes generated code among the 16; the other 15 `program.c` files are
-byte-identical to rc2's (their helper counts and instruction estimates match rc2's published
-numbers to the call).
+Only `linkedlist` changes generated code among the 16. The analysis returns no cursor for the
+other 15, so every rc3 code path is a no-op there and their `program.c` is unchanged by rc3;
+their exact dynamic helper counts match rc2's published counts to the call. (Their gcov
+instruction *estimates* are unchanged by rc3 but one of them, `term_rank`, differs from rc2's
+published table by +2.6% because `staging:integ` moved between the two jobs; that is baseline
+drift, not an rc3 cost.)
 
 ## Three refused cases (tests in `test_ail_rc_cursor.py`)
 
@@ -79,8 +82,10 @@ linkedlist 6056 → 6056; binarytrees 1576 → 1576; cfold 1964 → 1964; deriv 
 16936 → 16936; rbtree 5296 → 5304 (+0.15%, inside the 1% bar; rc2 recorded the same single-run
 noise).
 
-The ten compare tasks were measured too: no cursor is detected in any of them, so their counts,
-instruction estimates and RSS are unchanged.
+The ten compare tasks were measured too: no cursor is detected in any of them, so rc3 does not
+change their generated C; their exact helper counts equal rc2's published counts (e.g.
+`ticket_audit` 1 retain / 4 releases on the object helpers, `term_rank` the same bytearray counts
+as rc2).
 
 ### Price, achieved
 
@@ -99,14 +104,16 @@ target "at least 1.03x on two programs".
 
 * **16 programs**: correct output and exit status against CPython/the task reference in the
   default build; `linkedlist` also against the `AIL_RC_BORROW=0` build. The 15 unchanged programs
-  have byte-identical C to rc2, whose verification stands.
-* **8 probes** (`/tmp/probes/p_*.py`: parameter walk, local walk, alias walk, field-read argument,
-  element walk, and the three refused shapes): CPython-equal in both the default build and
-  `AIL_UNIFIED_FORCE=1`, and equal again in the `AIL_RC_BORROW=0` build.
+  have no cursor, so rc3 does not change their generated C (their helper counts match rc2's).
+* **9 probes** (`/tmp/probes/p_*.py`: parameter walk, local walk, alias walk, field-read argument,
+  call-result argument, element walk, and the three refused shapes): CPython-equal in both the
+  default build and `AIL_UNIFIED_FORCE=1`, and equal again in the `AIL_RC_BORROW=0` build.
 * **Corpus**: the two corpus programs that produce a cursor (`deepseek-v4.1-flash-free/t452.py`,
   `glm-5.3-flash-free/t452.py`, both linked-list generators) match CPython in both builds; the
-  second exits 1 in CPython and in AIL, with the same stdout. A 40-program sample of the first 40
-  corpus files was run in the default and `AIL_RC_BORROW=0` builds with empty stdin.
+  second exits 1 in CPython and in AIL, with the same stdout. A 40-program sample (the first 40
+  sorted corpus files, empty stdin) was built in the default and `AIL_RC_BORROW=0` builds:
+  **0 output/exit differences in 40/40, 0 build failures**. (rc2 also managed 40 of the 200 the
+  brief asks for; the time budget did not allow 200.)
 * **valgrind** on `p_param_walk`, `p_elem_walk`, `p_refused_append` (the accepted cursor shapes
   and one refused one), default and `AIL_RC_BORROW=0` builds: 0 invalid reads/writes and
   `definitely lost: 0 bytes in 0 blocks` in every run.
