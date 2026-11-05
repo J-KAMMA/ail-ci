@@ -1664,6 +1664,10 @@ def _etype(node, ctx):
     if isinstance(node, ast.Subscript) and _etype(node.value, ctx) == BLIST:
         return BLIST if isinstance(node.slice, ast.Slice) else BYTES
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('list', 'sorted') and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name) and node.args[0].id in ctx.bkeys):
+        return BLIST
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id in ('list', 'sorted') and node.args
             and _etype(node.args[0], ctx) == BLIST):
         return BLIST
@@ -1691,6 +1695,9 @@ def _etype(node, ctx):
         # Unknown receivers are refused by _attr_read before their values are used.
         return _field_kind(node, ctx) or INT
     if isinstance(node, ast.Subscript):
+        if (isinstance(node.value, ast.Name) and node.value.id in ctx.bkeys
+                and not isinstance(node.slice, ast.Slice)):
+            return ctx.bkeyvals.get(node.value.id, INT)
         if not isinstance(node.slice, ast.Slice):
             _reject_nsum_storage(node.slice, ctx, 'an index or key')
         if isinstance(node.value, (ast.Name, ast.Call, ast.Subscript, ast.Attribute)) and _is_olist_kind(_etype(node.value, ctx)):
@@ -2873,6 +2880,7 @@ class Ctx:
                                                  # (via BPOOL handles -- see _mark_bytes_containers)
         self.bkeys = set()                      # SET/DICT-typed locals keyed by bytes CONTENT
                                                  # (via BTAB instead of ail_tab -- same function)
+        self.bkeyvals = {}                      # bytes-keyed dict name -> INT/STR/BYTES value kind
         self.rowbytes = {}                      # ROWS locals -> set of field indices that are
                                                  # bytes (via BPOOL handles -- see _mark_bytes_rows)
         self.loopdepth = 0                      # how many enclosing for/while bodies we are inside
@@ -3540,7 +3548,39 @@ def _handle_nest_arity(node, ctx):
     return None
 
 
-def _is_byteish_struct(node, byteish, blist=frozenset()):
+def _is_binary_open_struct(node):
+    """`open(path, 'rb')` / `open(path, mode='rb')` -- a binary file handle, before any `Ctx`."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'open'):
+        return False
+    mode = node.args[1] if len(node.args) > 1 else None
+    for kw in node.keywords:
+        if kw.arg == 'mode':
+            mode = kw.value
+    return isinstance(mode, ast.Constant) and isinstance(mode.value, str) and 'b' in mode.value
+
+
+def _is_binary_read_struct(node, binvars=frozenset()):
+    """A structural test for a bytes-producing read: `read_stdin_bytes(...)` / `read_bytes(...)`
+    (what `ail_syntax` rewrites `sys.stdin.buffer.read()` and a binary `f.read()` to), plus the
+    raw `sys.stdin.buffer.read()` / `open(..., 'rb').read()` / `f.read()` shapes."""
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('read_bytes', 'read_stdin_bytes')):
+        return True
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'read' and not node.args and not node.keywords):
+        return False
+    receiver = node.func.value
+    if isinstance(receiver, ast.Attribute) and receiver.attr == 'buffer':
+        base = receiver.value
+        return (isinstance(base, ast.Attribute) and base.attr == 'stdin'
+                and isinstance(base.value, ast.Name) and base.value.id == 'sys')
+    if isinstance(receiver, ast.Name) and receiver.id in binvars:
+        return True
+    return _is_binary_open_struct(receiver)
+
+
+def _is_byteish_struct(node, byteish, blist=frozenset(), binvars=frozenset()):
     """A structural (pre-`Ctx`) test for "this expression is definitely bytes", usable before a
     `Ctx` exists to ask `_is_bytes_expr` -- mirrors it exactly, plus a name already known bytes-ish
     from the fixed point below: a byte literal, `bytes([v])`, a slice of a byteish base, `a + b` of
@@ -3553,11 +3593,13 @@ def _is_byteish_struct(node, byteish, blist=frozenset()):
     legitimate bytes key instead of the nonsense it is. Both are the SAME mutable set the caller's
     fixed point is still growing, so a `names` that becomes `blist` two lines into that fixed point
     is visible here on the very next pass, not one pass later.
+
+    `binvars` names locals bound by `with open(..., 'rb') as f:` / `f = open(..., 'rb')`, so
+    `f.read()` is recognised without a `Ctx` to say what `f` is.
     """
     if _is_byteslit(node) or _is_bytes_one_call(node):
         return True
-    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id in ('read_bytes', 'read_stdin_bytes')):
+    if _is_binary_read_struct(node, binvars):
         return True
     if isinstance(node, ast.Name):
         return node.id in byteish
@@ -3566,7 +3608,8 @@ def _is_byteish_struct(node, byteish, blist=frozenset()):
             and node.value.func.attr == 'split'):
         return _is_byteish_struct(node.value.func.value, byteish, blist)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-            and node.func.attr in ('replace', 'translate', 'removeprefix', 'removesuffix', 'join')):
+            and node.func.attr in ('replace', 'translate', 'removeprefix', 'removesuffix', 'join',
+                                   'strip', 'lstrip', 'rstrip')):
         return _is_byteish_struct(node.func.value, byteish, blist)
     if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
             and node.value.id in blist and not isinstance(node.slice, ast.Slice)):
@@ -3585,11 +3628,48 @@ def _is_byteish_struct(node, byteish, blist=frozenset()):
     return False
 
 
-def _is_byteish_split_struct(node, byteish, blist=frozenset()):
-    """A structural `.split(...)` on a bytes receiver, as a LIST-building expression."""
+def _is_bytes_split_struct(node, byteish, blist=frozenset(), binvars=frozenset()):
+    """`<bytes-ish>.split(...)`, including the `x.split(...) if c else x.split(...)` shape
+    `ail_syntax` emits around a stdin/file read that may not have bound its name (`_ail_set_data`).
+    Used only to recognise a bytes LIST, so an `IfExp` has to agree on BOTH branches."""
+    if isinstance(node, ast.IfExp):
+        return (_is_bytes_split_struct(node.body, byteish, blist, binvars)
+                and _is_bytes_split_struct(node.orelse, byteish, blist, binvars))
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr == 'split'
-            and _is_byteish_struct(node.func.value, byteish, blist))
+            and _is_byteish_struct(node.func.value, byteish, blist, binvars))
+
+
+def _is_strish_struct(node, strish=frozenset()):
+    """A structural (pre-`Ctx`) test for "this expression is definitely a str", the counterpart of
+    `_is_byteish_struct` used only to settle a bytes-keyed dict's VALUE kind before codegen. It is
+    deliberately conservative: a shape it does not recognise leaves the value kind at INT, and the
+    store then refuses a non-int value by name rather than silently mixing kinds."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return True
+    if isinstance(node, ast.JoinedStr):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in strish
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ('decode', 'strip', 'lstrip', 'rstrip', 'lower', 'upper',
+                                   'replace', 'join', 'format', 'casefold')):
+        return True
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('str', 'chr', 'input')):
+        return True
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+        return _is_strish_struct(node.value, strish)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return (_is_strish_struct(node.left, strish)
+                and _is_strish_struct(node.right, strish))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return (_is_strish_struct(node.left, strish)
+                or _is_strish_struct(node.right, strish))
+    if isinstance(node, ast.IfExp):
+        return (_is_strish_struct(node.body, strish)
+                and _is_strish_struct(node.orelse, strish))
+    return False
 
 
 def _mark_bytes_containers(fn, byte_params=()):
@@ -3636,6 +3716,15 @@ def _mark_bytes_containers(fn, byte_params=()):
                        and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
                        and n.value.func.id in ('read_bytes', 'read_stdin_bytes')))
     set_vars, dict_vars, plain_list_vars = set(), set(), set()
+    binvars = set()
+    for n in ast.walk(fn):
+        if isinstance(n, ast.With):
+            for item in n.items:
+                if _is_binary_open_struct(item.context_expr) and isinstance(item.optional_vars, ast.Name):
+                    binvars.add(item.optional_vars.id)
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name) and _is_binary_open_struct(n.value)):
+            binvars.add(n.targets[0].id)
     blist, bkeys = set(), set()
     for n in ast.walk(fn):
         if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
@@ -3663,21 +3752,47 @@ def _mark_bytes_containers(fn, byte_params=()):
             # a plain copy of, or a direct assignment from, a byteish expression extends `byteish`
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
                     and isinstance(n.targets[0], ast.Name) and n.targets[0].id not in byteish
-                    and _is_byteish_struct(n.value, byteish, blist)):
+                    and (_is_byteish_struct(n.value, byteish, blist, binvars)
+                         or _is_binary_read_struct(n.value, binvars))):
                 byteish.add(n.targets[0].id); changed = True
+            # `for k in xs:` / `for k in sorted(xs):` over a bytes list, or `for k in d:` /
+            # `for k in d.keys():` over a bytes-keyed set/dict -- the loop target is a bytes
+            # value, so a store keyed by it names that container bytes-keyed too.
+            if (isinstance(n, ast.For) and isinstance(n.target, ast.Name)
+                    and n.target.id not in byteish):
+                it = n.iter
+                source = None
+                if isinstance(it, ast.Name):
+                    source = it.id
+                elif (isinstance(it, ast.Call) and isinstance(it.func, ast.Name)
+                        and it.func.id in ('sorted', 'list') and len(it.args) == 1
+                        and isinstance(it.args[0], ast.Name)):
+                    source = it.args[0].id
+                elif (isinstance(it, ast.Call) and isinstance(it.func, ast.Attribute)
+                        and it.func.attr == 'keys' and isinstance(it.func.value, ast.Name)):
+                    source = it.func.value.id
+                if source in blist or source in bkeys:
+                    byteish.add(n.target.id); changed = True
+            # `a, b = xs[1:]` / `a, b = xs` over a bytes list -- every unpacked name is bytes.
+            if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Tuple)
+                    and (_is_byteish_struct(n.value, byteish, blist, binvars)
+                         or (isinstance(n.value, ast.Subscript) and isinstance(n.value.slice, ast.Slice)
+                             and isinstance(n.value.value, ast.Name)
+                             and n.value.value.id in blist))):
+                for e in n.targets[0].elts:
+                    if isinstance(e, ast.Name) and e.id not in byteish:
+                        byteish.add(e.id); changed = True
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
                     and isinstance(n.targets[0], ast.Name) and n.targets[0].id not in blist
-                    and (isinstance(n.value, ast.Name) and n.value.id in blist
-                         or _is_byteish_split_struct(n.value, byteish, blist)
-                         or (isinstance(n.value, ast.IfExp)
-                             and _is_byteish_split_struct(n.value.body, byteish, blist)
-                             and _is_byteish_split_struct(n.value.orelse, byteish, blist)))):
+                    and ((isinstance(n.value, ast.Name) and n.value.id in blist)
+                         or _is_bytes_split_struct(n.value, byteish, blist, binvars))):
                 blist.add(n.targets[0].id); changed = True
             # `xs = [<bytes-ish>, ...]` -- a nonempty list literal, every element bytes-ish
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
                     and isinstance(n.targets[0], ast.Name) and n.targets[0].id not in blist
                     and isinstance(n.value, ast.List) and n.value.elts
-                    and all(_is_byteish_struct(e, byteish, blist) for e in n.value.elts)):
+                    and all(_is_byteish_struct(e, byteish, blist, binvars) for e in n.value.elts)):
                 blist.add(n.targets[0].id); changed = True
             # `ys = sorted(xs)` / `ys = list(xs)` -- a copy of a bytes list is a bytes list too,
             # the same "a copy carries the source's own shape" rule `_mark_tuple_lists` already
@@ -3695,19 +3810,19 @@ def _mark_bytes_containers(fn, byte_params=()):
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                     and n.func.attr == 'append' and isinstance(n.func.value, ast.Name)
                     and n.func.value.id in plain_list_vars and n.func.value.id not in blist
-                    and len(n.args) == 1 and _is_byteish_struct(n.args[0], byteish, blist)):
+                    and len(n.args) == 1 and _is_byteish_struct(n.args[0], byteish, blist, binvars)):
                 blist.add(n.func.value.id); changed = True
             # `s.add(<bytes-ish>)` on a name first assigned `set()`
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                     and n.func.attr == 'add' and isinstance(n.func.value, ast.Name)
                     and n.func.value.id in set_vars and n.func.value.id not in bkeys
-                    and len(n.args) == 1 and _is_byteish_struct(n.args[0], byteish, blist)):
+                    and len(n.args) == 1 and _is_byteish_struct(n.args[0], byteish, blist, binvars)):
                 bkeys.add(n.func.value.id); changed = True
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
                     and isinstance(n.targets[0], ast.Name)
                     and n.targets[0].id in set_vars and n.targets[0].id not in bkeys
                     and isinstance(n.value, ast.Set) and n.value.elts
-                    and all(_is_byteish_struct(e, byteish, blist) for e in n.value.elts)):
+                    and all(_is_byteish_struct(e, byteish, blist, binvars) for e in n.value.elts)):
                 bkeys.add(n.targets[0].id); changed = True
             # `d[<bytes-ish>] = ...` on a name first assigned `{}`
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
@@ -3715,7 +3830,7 @@ def _mark_bytes_containers(fn, byte_params=()):
                     and isinstance(n.targets[0].value, ast.Name)
                     and n.targets[0].value.id in dict_vars
                     and n.targets[0].value.id not in bkeys
-                    and _is_byteish_struct(n.targets[0].slice, byteish, blist)):
+                    and _is_byteish_struct(n.targets[0].slice, byteish, blist, binvars)):
                 bkeys.add(n.targets[0].value.id); changed = True
             # `d = {<bytes-ish>: ...}` -- a dict literal keyed by bytes throughout
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
@@ -3724,7 +3839,7 @@ def _mark_bytes_containers(fn, byte_params=()):
                     and n.targets[0].id not in bkeys
                     and isinstance(n.value, ast.Dict) and n.value.keys
                     and all(kn is not None
-                            and _is_byteish_struct(kn, byteish, blist)
+                            and _is_byteish_struct(kn, byteish, blist, binvars)
                             for kn in n.value.keys)):
                 bkeys.add(n.targets[0].id); changed = True
             # `del d[<bytes-ish>]` / `d.pop(<bytes-ish>)` -- a delete or pop alone names it too
@@ -3734,22 +3849,65 @@ def _mark_bytes_containers(fn, byte_params=()):
                     and n.targets[0].value.id in dict_vars
                     and n.targets[0].value.id not in bkeys
                     and not isinstance(n.targets[0].slice, ast.Slice)
-                    and _is_byteish_struct(n.targets[0].slice, byteish, blist)):
+                    and _is_byteish_struct(n.targets[0].slice, byteish, blist, binvars)):
                 bkeys.add(n.targets[0].value.id); changed = True
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                    and n.func.attr == 'pop' and isinstance(n.func.value, ast.Name)
+                    and n.func.attr in ('pop', 'get', 'setdefault')
+                    and isinstance(n.func.value, ast.Name)
                     and n.func.value.id in dict_vars
                     and n.func.value.id not in bkeys
-                    and n.args and _is_byteish_struct(n.args[0], byteish, blist)):
+                    and n.args and _is_byteish_struct(n.args[0], byteish, blist, binvars)):
                 bkeys.add(n.func.value.id); changed = True
+            # `d[<bytes-ish>]` -- a read alone still names it bytes-keyed
+            if (isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name)
+                    and n.value.id in dict_vars and n.value.id not in bkeys
+                    and not isinstance(n.slice, ast.Slice)
+                    and _is_byteish_struct(n.slice, byteish, blist, binvars)):
+                bkeys.add(n.value.id); changed = True
             # `<bytes-ish> in d_or_s` -- an existence test alone still names it bytes-keyed
             if (isinstance(n, ast.Compare) and len(n.ops) == 1
                     and isinstance(n.ops[0], (ast.In, ast.NotIn))
                     and isinstance(n.comparators[0], ast.Name)
                     and n.comparators[0].id in (dict_vars | set_vars) - bkeys
-                    and _is_byteish_struct(n.left, byteish, blist)):
+                    and _is_byteish_struct(n.left, byteish, blist, binvars)):
                 bkeys.add(n.comparators[0].id); changed = True
-    return blist, bkeys
+
+    # The VALUE kind of a bytes-keyed dict: one kind throughout (a dict that mixes int, bytes and
+    # str values has no single typed slot), defaulting to int for an empty/never-stored one.
+    strish = set()
+    changed = True
+    while changed:
+        changed = False
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Name)
+                    and n.targets[0].id not in strish
+                    and _is_strish_struct(n.value, strish)):
+                strish.add(n.targets[0].id); changed = True
+    bkeyvals = {}
+    for n in ast.walk(fn):
+        target, value = None, None
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Subscript)
+                and isinstance(n.targets[0].value, ast.Name)
+                and n.targets[0].value.id in bkeys):
+            target, value = n.targets[0].value.id, n.value
+        elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr in ('get', 'setdefault')
+                and isinstance(n.func.value, ast.Name)
+                and n.func.value.id in bkeys and len(n.args) == 2):
+            target, value = n.func.value.id, n.args[1]
+        if target is None:
+            continue
+        kind = (BYTES if _is_byteish_struct(value, byteish, blist, binvars)
+                else STR if _is_strish_struct(value, strish) else INT)
+        if target in bkeyvals and bkeyvals[target] != kind:
+            raise Unsupported('%r is keyed by bytes and holds values of more than one kind '
+                              '(%s and %s); a dict has one value kind throughout'
+                              % (target, _diagnostic_type(bkeyvals[target]),
+                                 _diagnostic_type(kind)))
+        bkeyvals[target] = kind
+    return blist, bkeys, bkeyvals
 
 
 def _mark_bytes_rows(fn, tstride, byteish=frozenset(), blist=frozenset(), bkeys=frozenset()):
@@ -8156,6 +8314,10 @@ def _check_utf8_codec_args(node, decode=False):
 
 
 def _is_str_expr(node, ctx):
+    if (isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice)
+            and isinstance(node.value, ast.Name)
+            and ctx.bkeyvals.get(node.value.id) == STR):
+        return True
     if _local_slist_pop(node, ctx) or _string_field_call(node, ctx) and node.func.attr == 'pop':
         return True
     if _exception_field(node, ctx):
@@ -8345,6 +8507,13 @@ def _str_value(node, ctx, *, owned_join_return=False):
     to a generic message -- SEMANTICS.md section 31 lists each ORIGINAL refusal and why its
     cannot be reproduced without a Unicode table or a locale.
     """
+    if (isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice)
+            and isinstance(node.value, ast.Name)
+            and ctx.bkeyvals.get(node.value.id) == STR):
+        if not _is_bytes_expr(node.slice, ctx):
+            raise Unsupported('%r is keyed by bytes; the key must be bytes' % node.value.id)
+        ctx.parts.add('BTAB')
+        return 'ail_btab_need_s(&%s, %s)' % (ctx.cname(node.value.id), _bytes_value(node.slice, ctx))
     if _local_slist_pop(node, ctx):
         return _method(node, ctx)
     if _string_field_call(node, ctx) and node.func.attr == 'pop':
@@ -10638,6 +10807,21 @@ def _blist_value(node, ctx):
             bounds = [bounds[0] if bounds[0] is not None else '(%s > 0 ? 0 : %s->n - 1)' % (step, source),
                       bounds[1] if bounds[1] is not None else '(%s > 0 ? %s->n : -(%s->n + 1))' % (step, source, source)]
             value = 'ail_blist_slice(%s, %s, %s, %s)' % (source, *bounds, step)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id in ('list', 'sorted') and len(node.args) == 1
+              and isinstance(node.args[0], ast.Name) and node.args[0].id in ctx.bkeys):
+            key, reverse = _sort_keywords(node)
+            if key is not None:
+                raise Unsupported('key= is not supported for sorted() of a dict\'s bytes keys')
+            ctx.parts.add('BTAB')
+            src = ctx.cname(node.args[0].id)
+            result, _ = ctx.temp(BLIST)
+            steps.append(_obj_store(result, 'ail_blist_new()', BLIST, ctx, adopt=True) + ';')
+            steps.append('for (int64_t _i = 0; _i < %s.n; _i++) ail_blist_push(%s, %s.order[_i]);'
+                         % (src, result, src))
+            if node.func.id == 'sorted':
+                steps.append('ail_blist_sort(%s, %d);' % (result, reverse))
+            return '({ %s %s; })' % (' '.join(steps), result)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('list', 'sorted'):
             if len(node.args) != 1:
                 raise Unsupported('bytes list copy takes one list')
@@ -10966,6 +11150,13 @@ def _bytes_join_value(node, ctx):
 
 
 def _bytes_value(node, ctx):
+    if (isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice)
+            and isinstance(node.value, ast.Name)
+            and ctx.bkeyvals.get(node.value.id) == BYTES):
+        if not _is_bytes_expr(node.slice, ctx):
+            raise Unsupported('%r is keyed by bytes; the key must be bytes' % node.value.id)
+        ctx.parts.add('BTAB')
+        return 'ail_btab_need_b(&%s, %s)' % (ctx.cname(node.value.id), _bytes_value(node.slice, ctx))
     if _is_fileprim_call(node, ctx, 'bytes'):
         return _fileprim_value(node, ctx)
     if _is_tcpsocket_recv(node, ctx):
@@ -11508,6 +11699,10 @@ def _is_bytes_expr(node, ctx):
     """Whether `node` denotes a bytes VALUE (not a byte read out of one) -- used to route a
     comparison to `ail_bytes_cmp`/`ail_bytes_eq` instead of plain integer comparison, and to
     recognise a bytes-producing right-hand side wherever one may appear."""
+    if (isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice)
+            and isinstance(node.value, ast.Name)
+            and ctx.bkeyvals.get(node.value.id) == BYTES):
+        return True
     if _is_fileprim_call(node, ctx, 'bytes'):
         return True
     if (_is_pcm16_scale_call(node, ctx) or _is_float64_codec_call(node, ctx, 'encode')
@@ -14456,7 +14651,13 @@ def _expr(node, ctx):
             if not _is_bytes_expr(node.slice, ctx):
                 raise Unsupported('%r is keyed by bytes; the key must be bytes' % recv_id)
             ctx.parts.add('BTAB')
-            return 'ail_btab_need(&%s, %s)' % (ctx.cname(recv_id), _bytes_value(node.slice, ctx))
+            key = _bytes_value(node.slice, ctx)
+            vk = ctx.bkeyvals.get(recv_id, INT)
+            if vk == BYTES:
+                return 'ail_btab_need_b(&%s, %s)' % (ctx.cname(recv_id), key)
+            if vk == STR:
+                return 'ail_btab_need_s(&%s, %s)' % (ctx.cname(recv_id), key)
+            return 'ail_btab_need(&%s, %s)' % (ctx.cname(recv_id), key)
         if t == DICT and recv_id in ctx.skeys:
             # `d[k]` where `d` is keyed by str (mechanisms 4/5) -- the KEY is a str value, so it
             # goes through `_str_value`/`ail_stab_need`, the STAB counterpart of the BTAB branch
@@ -19144,7 +19345,7 @@ def _pair_value_kind(src, ctx):
         holder = src.func.value.id
         kind = ctx.type_of(holder)
         if kind == DICT:
-            return INT
+            return ctx.bkeyvals.get(holder, INT) if holder in ctx.bkeys else INT
         return _mvk(kind) if kind in MAPS and kind not in SETS else INT
     return INT
 
@@ -19910,8 +20111,18 @@ def _method(node, ctx, *, as_stmt=False):
         if not _is_bytes_expr(a[0], ctx):
             raise Unsupported('%r is keyed by bytes; .get() needs a bytes key' % name)
         ctx.parts.add('BTAB')
+        key = _bytes_value(a[0], ctx)
+        vk = ctx.bkeyvals.get(name, INT)
+        if vk == BYTES:
+            ctx.parts.add('BYTES')
+            d = _bytes_value(a[1], ctx) if len(a) == 2 else '(ail_bytes){NULL, 0}'
+            return 'ail_btab_get_b(&%s, %s, %s)' % (c, key, d)
+        if vk == STR:
+            ctx.parts.add('STR')
+            d = _str_value(a[1], ctx) if len(a) == 2 else '(ail_str){NULL, 0, 1}'
+            return 'ail_btab_get_s(&%s, %s, %s)' % (c, key, d)
         d = _expr(a[1], ctx) if len(a) == 2 else '0'
-        return 'ail_btab_get(&%s, %s, %s)' % (c, _bytes_value(a[0], ctx), d)
+        return 'ail_btab_get(&%s, %s, %s)' % (c, key, d)
     if m == 'get' and t == DICT and name in ctx.skeys and len(a) in (1, 2):
         # `d.get(<str>, default)` on a dict keyed by str -- mechanisms 4/5, the STAB counterpart
         # of the BTAB branch just above.
@@ -19945,6 +20156,19 @@ def _method(node, ctx, *, as_stmt=False):
                 raise Unsupported('%r is keyed by bytes; .pop() needs a bytes key' % name)
             ctx.parts.add('BTAB')
             k = _bytes_value(a[0], ctx)
+            vk = ctx.bkeyvals.get(name, INT)
+            if vk == BYTES:
+                ctx.parts.add('BYTES')
+                get = ('ail_btab_get_b(&%s, %s, %s)' % (c, kn, _bytes_value(a[1], ctx))
+                       if len(a) == 2 else 'ail_btab_need_b(&%s, %s)' % (c, kn))
+                return ('({ ail_bytes %s = %s; ail_bytes %s = %s; ail_btab_del(&%s, %s); %s; })'
+                        % (kn, k, vv, get, c, kn, vv))
+            if vk == STR:
+                ctx.parts.add('STR')
+                get = ('ail_btab_get_s(&%s, %s, %s)' % (c, kn, _str_value(a[1], ctx))
+                       if len(a) == 2 else 'ail_btab_need_s(&%s, %s)' % (c, kn))
+                return ('({ ail_bytes %s = %s; ail_str %s = %s; ail_btab_del(&%s, %s); %s; })'
+                        % (kn, k, vv, get, c, kn, vv))
             get = ('ail_btab_get(&%s, %s, %s)' % (c, kn, _expr(a[1], ctx)) if len(a) == 2
                    else 'ail_btab_need(&%s, %s)' % (c, kn))
             return ('({ ail_bytes %s = %s; int64_t %s = %s; ail_btab_del(&%s, %s); %s; })'
@@ -25203,16 +25427,29 @@ def _setitem(target, value, ctx, ind):
         # with `_bytes_value` rather than the plain-int `_expr` the generic DICT case below uses.
         if not _is_bytes_expr(target.slice, ctx):
             raise Unsupported('%r is keyed by bytes; the key must be bytes' % name)
+        vk = ctx.bkeyvals.get(name, INT)
+        k = _bytes_value(target.slice, ctx)
+        pre = _flush(ctx, pad)
+        ctx.parts.add('BTAB')
+        if vk == BYTES:
+            if not _is_bytes_expr(value, ctx):
+                raise Unsupported('%r holds bytes values; a non-bytes value would mix types' % name)
+            ctx.parts.add('BYTES')
+            v = _bytes_value(value, ctx)
+            return pre + '%sail_btab_put_b(&%s, %s, %s);\n' % (pad, c, k, v)
+        if vk == STR:
+            if not _is_str_expr(value, ctx):
+                raise Unsupported('%r holds str values; a non-str value would mix types' % name)
+            ctx.parts.add('STR')
+            v = _str_value(value, ctx)
+            return pre + '%sail_btab_put_s(&%s, %s, %s);\n' % (pad, c, k, v)
         if _etype(value, ctx) == FLT:
             raise Unsupported('a dict holds integer values; storing a float would truncate it, '
                               'and a dict is never widened to floats (SEMANTICS.md section 13 '
                               'says why not) -- store a whole number you compute from the value')
         if _is_bytes_expr(value, ctx):
             raise Unsupported('%r holds integer values; a bytes value is not one' % name)
-        k = _bytes_value(target.slice, ctx)
         v = _expr(value, ctx)
-        pre = _flush(ctx, pad)
-        ctx.parts.add('BTAB')
         return pre + '%sail_btab_put(&%s, %s, %s);\n' % (pad, c, k, v)
     if t == DICT and name in ctx.skeys:
         # `d[<str>] = <int>` on a dict keyed by str (mechanisms 4/5, `_mark_str_containers`) --
@@ -29102,15 +29339,21 @@ def _for_inner_impl(node, ctx, ind):
             # what `.order` already walks in, the same as the plain-int TAB case above.
             ctx.parts.update(('BTAB', 'BYTES'))
             c = ctx.cname(holder)
+            vk = ctx.bkeyvals.get(holder, INT)
+            need = {BYTES: 'ail_btab_need_b', STR: 'ail_btab_need_s'}.get(vk, 'ail_btab_need')
+            if vk == BYTES:
+                ctx.parts.add('BYTES')
+            elif vk == STR:
+                ctx.parts.add('STR')
             if it.func.attr == 'items':
                 if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2):
                     raise Unsupported('.items() without a (key, value) target')
                 kname, vname = (e.id for e in node.target.elts)
                 k = ctx.declare(kname, BYTES)
-                v = ctx.declare(vname)
+                v = ctx.declare(vname, vk)
                 head = ('%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.order[%s];\n'
-                        '%s    %s = ail_btab_need(&%s, %s);\n'
-                        % (pad, idx, idx, c, idx, pad, k, c, idx, pad, v, c, k))
+                        '%s    %s = %s(&%s, %s);\n'
+                        % (pad, idx, idx, c, idx, pad, k, c, idx, pad, v, need, c, k))
             else:
                 if not isinstance(node.target, ast.Name):
                     raise Unsupported('a tuple target over .%s()' % it.func.attr)
@@ -29118,8 +29361,8 @@ def _for_inner_impl(node, ctx, ind):
                     v = ctx.declare(node.target.id, BYTES)
                     inner = '%s.order[%s]' % (c, idx)
                 else:
-                    v = ctx.declare(node.target.id)
-                    inner = 'ail_btab_need(&%s, %s.order[%s])' % (c, c, idx)
+                    v = ctx.declare(node.target.id, vk)
+                    inner = '%s(&%s, %s.order[%s])' % (need, c, c, idx)
                 head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s;\n' % (
                     pad, idx, idx, c, idx, pad, v, inner)
             return head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
@@ -32800,7 +33043,7 @@ def _caller_ctx(f, sigs, arity_seed=None, classes=None, owned_str_fns=None, owne
         ctx.hstride, ctx.hrowof = _mark_nested_rows(f, ctx.nest2arity)
         ctx.ddict = _mark_nested_dicts(f)
         ctx.dhandles = _mark_dict_handles(f, ctx.ddict)
-        ctx.blist, ctx.bkeys = _mark_bytes_containers(
+        ctx.blist, ctx.bkeys, ctx.bkeyvals = _mark_bytes_containers(
             f, {n for n, k in sigs[f.name][0] if k == BYTES})
         _pk = dict(sigs[f.name][0])
         ann = dict(_record_annotated_arity(f)[0])
@@ -33366,7 +33609,7 @@ def _settle_return_kinds_pass(fns, sigs, grid_fns, classes, arity_seeds,
             # `ctx.handles` empty is harmless there), a bytes VALUE read out of a `blist` is a
             # perfectly ordinary return and must be typed correctly here, before a single line
             # of C is written.
-            ctx.blist, ctx.bkeys = _mark_bytes_containers(
+            ctx.blist, ctx.bkeys, ctx.bkeyvals = _mark_bytes_containers(
                 f, {n for n, k in sigs[f.name][0] if k == BYTES})
             # Needed for the identical reason just above, one level further in: `return
             # order[i][0]` off a bytes-fielded row cannot be recognised as BYTES here without
@@ -33448,7 +33691,7 @@ def _clone_return_kind(f, params, sigs, generic_ret, grid_fns, classes=None,
     ctx.owned_bytes_fns = owned_bytes_fns or set()
     ctx.classes = classes or {}
     try:
-        ctx.blist, ctx.bkeys = _mark_bytes_containers(f, {n for n, k in params if k == BYTES})
+        ctx.blist, ctx.bkeys, ctx.bkeyvals = _mark_bytes_containers(f, {n for n, k in params if k == BYTES})
         _promote_floats(f, ctx)
         _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
@@ -40477,7 +40720,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.dhandles = _mark_dict_handles(fn, ctx.ddict)
     ctx.hstride, ctx.hrowof = _mark_nested_rows(fn, ctx.nest2arity)
     _byte_params = {n for n, k in sigs[fn.name][0] if k == BYTES}
-    ctx.blist, ctx.bkeys = _mark_bytes_containers(fn, _byte_params)
+    ctx.blist, ctx.bkeys, ctx.bkeyvals = _mark_bytes_containers(fn, _byte_params)
     # Locals first, with no parameter knowledge, so a copy's arity is available to the rule that
     # carries it back to the parameter it came from; then parameters; then locals again, seeded.
     _pk = dict(sigs[fn.name][0])
