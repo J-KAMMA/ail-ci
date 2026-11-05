@@ -82,16 +82,57 @@ SLOTS = '''def main():
             xs[i] = [i]
         else:
             xs[i].append(i)
+    for i in range(3):
+        if xs[i] is not None:
+            print(xs[i])
     ys = [None] * 2
     ys[1] = [7]
-    print(xs[0], xs[1], xs[2])
     if ys[0] is None:
         print("empty")
-    print(ys[1])
+    if ys[1] is not None:
+        print(ys[1])
     adj = [None] * 2
     adj.append([])
-    adj[2].append(5)
-    print(len(adj), adj[2])
+    if adj[2] is not None:
+        adj[2].append(5)
+    print(len(adj))
+    if adj[2] is not None:
+        print(adj[2])
+
+
+main()
+'''
+
+UNLOWERED = '''def isabsent(v):
+    return v is None
+
+
+def main():
+    a = [None] * 2
+    print(a[0])
+    a[1] = [9]
+    print(a[1])
+    b = [None] * 2
+    print(b[0] == None)
+    print(bool(b[0]))
+    c = [None] * 2
+    row = c[0]
+    print(row is None)
+    try:
+        row.append(3)
+        print("appended")
+    except AttributeError:
+        print("attribute-error")
+    d = [None] * 2
+    print(isabsent(d[0]))
+    d[0] = [1]
+    print(isabsent(d[0]))
+    e = [None] * 3
+    e[1] = [5]
+    del e[0]
+    print(len(e))
+    for i in range(len(e)):
+        print(e[i] is None, e[i])
 
 
 main()
@@ -170,6 +211,22 @@ class PyreachOptRet(unittest.TestCase):
                 self.assertEqual(got.returncode, reference.returncode, (name, unified))
                 self.assertEqual(got.stdout, expected, (name, unified))
 
+    def _matches_cpython(self, name, text):
+        with tempfile.TemporaryDirectory(prefix='ail-s8r-') as tmp:
+            source = Path(tmp) / (name + '.py')
+            source.write_text(text, encoding='utf8')
+            reference = subprocess.run([sys.executable, str(source)],
+                                       capture_output=True, text=True, timeout=120)
+            for unified in (False, True):
+                result, exe = build_probe(tmp, name, source, unified)
+                self.assertEqual(result.returncode, 0, (name, unified, result.stderr[-3000:]))
+                got = run(exe)
+                self.assertEqual(got.returncode, reference.returncode, (name, unified))
+                self.assertEqual(got.stdout, reference.stdout, (name, unified))
+
+    def test_unlowered_row_uses_keep_cpython_semantics(self):
+        self._matches_cpython('unlowered', UNLOWERED)
+
     def test_unannotated_int_or_none_return(self):
         self._typed('parse', PARSE, 'None\nNone\n5\nNone\n12\n')
 
@@ -177,7 +234,7 @@ class PyreachOptRet(unittest.TestCase):
         self._typed('dict_get', DICT_GET, '11\nnone\n20\nTrue\n')
 
     def test_none_slots_with_present_bit(self):
-        self._typed('slots', SLOTS, '[0] [1] [2]\nempty\n[7]\n3 [5]\n')
+        self._typed('slots', SLOTS, '[0]\n[1]\n[2]\nempty\n[7]\n3\n[5]\n')
 
     def test_optional_loop_variable_reused(self):
         self._typed('optloop', OPTIONAL_LOOP, '10\n')

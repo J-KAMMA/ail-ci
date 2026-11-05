@@ -1,3 +1,16 @@
+## 2026-11-05 -- pyreach s8 review fix: refuse unlowered `[None] * n` row uses (job-pyreachs8-11051935)
+
+The row rewrite now rejects a candidate unless every use is a shape it actually translates.  A
+plain subscript read (`print(xs[0])`, `xs[0] == None`, `row = xs[0]`, passing `xs[0]` as an
+argument), a `del xs[i]`, an augmented target and an alias assignment are refused, so the program
+keeps its old route instead of reading the empty-list sentinel where CPython has `None`.  Reads and
+`.append` on a row inside an `if xs[i] is None` / `is not None` branch (with a simple, unmodified
+index) are still lowered: the branch that knows the row is present may use it.
+
+`test_ail_pyreach_optret`'s slots probe now wraps its prints in those guards; the refused shapes are
+covered by `/tmp/rprobes/p1`, `p2`, `p3`, `p5`, `p9`, which now match CPython on both builds.
+`codegen_diff` on the ten `.ail` tasks and the five pins is byte-identical.
+
 ## 2026-11-05 -- pyreach s8: int|None helper returns, one-argument dict.get, [None]*n rows (job-pyreachs8-11051935)
 
 Landed the first three s8 shapes (owner Q1 A, Q2 B):
