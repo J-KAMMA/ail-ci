@@ -58,8 +58,11 @@ What is built:
 * `os.scandir(path)` in `for entry in os.scandir(p):` and in `with os.scandir(p) as it:`, with
   `DirEntry.name`, `.path`, `.is_dir()`, `.is_file()`, `.is_symlink()`, `.stat()`, `.lstat()` and
   `.inode()`; entries come in the order the OS returns them.
-* `os.fspath(p)` for str and bytes (identity), `os.path.normcase` (identity on POSIX, lower case
-  and `\` on the nt target), `expanduser` (`~` and `~/...` from `HOME`), `expandvars` (`$NAME`,
+* `os.fspath(p)` for str and bytes (identity); any other literal is refused by name on the typed
+  path (`os.fspath(3) raises TypeError: expected str, bytes or os.PathLike object, not int`) and
+  raised as that `TypeError` on the general path. `os.path.normcase` (identity on POSIX, lower case
+  and `\` on the nt target), `expanduser` (`~` and `~/...` from `HOME`, even when `HOME` is empty;
+  the passwd entry when `HOME` is unset), `expandvars` (`$NAME`,
   `${NAME}`, an unset name left as written), `getmtime` / `getatime` / `getctime`, `samefile`,
   `samestat`.
 
@@ -88,7 +91,8 @@ rebuilt with this compiler (`lab/stdcensus/run.py`'s `census_one`, module source
 | `uu` | uu.py:59:21: not in the subset: os.stat is not built. Built: os.getcwd chdir listdir mkdir makedirs remove unlink rmdir rename replace getenv environ walk, o... | uu.py:137:13: not in the subset: os.altsep is None on this target; there is no None str here |
 
 All 14 changed their first reason: **14 of the 23** get past their `os` reason (target: 10). Most now
-stop on the next `os` name, which is outside this task:
+stop on the next `os` name, which is outside this task. Re-run after the review fixes
+(`run.py -j 2 --only ... -o /tmp/...`): all 14 first reasons above reproduce exactly.
 
 * `filecmp` -> `os.path.normcase` passed as a value (`map(os.path.normcase, ...)`), not a call.
 * `genericpath`, `tempfile` -> `os.fstat` / `os.fsencode` (the file layer has no OS file descriptors).
@@ -113,5 +117,27 @@ The other 9 modules of the bucket (`_osx_support`, `cgitb`, `getpass`, `imghdr`,
   `st_rdev`. `st_*time` is `st_*time_ns / 1000000000` (one float division of the ns field).
 * `os.scandir` is built in `for ... in os.scandir(...)` and `with os.scandir(...) as it:`; `list()`,
   `next()` and passing the iterator around are not built.
-* `expanduser("~user")` is not expanded (only `~` and `~/...`).
+* `expanduser("~user")` is not expanded (only `~` and `~/...`); `~` follows CPython for a set,
+  empty and unset `HOME`.
 * `os.path.normcase` is the identity on POSIX; the nt target lowers case and turns `/` into `\`.
+
+## Runtime files touched
+
+Only one runtime source changed: `AIL_CURRENT/python/pkg-v12/ailfile_core.h`, the C file whose
+`ailf_scandir` already answered `os.listdir` / `os.scandir` (it gained `ailf_stat_record`, reached
+through the existing `_ail_os_scandir` primitive in mode 2/3). The prelude AIL helpers
+(`_AilStatResult`, the DirEntry/scandir classes, `normcase`, `expanduser`, `expandvars`,
+`samefile`, `samestat`, `_ail_fspath`) are registered from `filelower.py`, which is one of the
+compiler files this task allows; `filelib_prelude.py` is unchanged. `filelower.py` also holds the
+lowering.
+
+## Review fixes (second round)
+
+* `with os.scandir(p) as it:` now scopes `it` to the `with` body only; a later ordinary
+  `for x in it:` over a list/str is no longer lowered to `it.advance()`, and a nested function
+  whose parameter or local is named `it` shadows the marker.
+* `os.fspath(3)`: the typed path refuses by name, the default build falls back to the general path
+  and raises `TypeError: expected str, bytes or os.PathLike object, not int` (`q_fspath_int.py`).
+* `expanduser`: `HOME` empty gives `/` for `~` and `/x` for `~/x`; `HOME` unset falls back to the
+  passwd entry (both builds, `q_expanduser.py` with `HOME` unset, empty and with trailing slashes).
+* The four `filelib_prelude.py` snippets moved into `filelower.py` (see "Runtime files touched").

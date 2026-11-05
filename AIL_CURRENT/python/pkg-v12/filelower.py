@@ -10,6 +10,193 @@ import filelib
 import filelib_prelude
 import iterlower
 
+filelib_prelude.snippet('os_stat', '''
+class _AilStatResult:
+    def __init__(self):
+        self.st_mode = 0
+        self.st_ino = 0
+        self.st_dev = 0
+        self.st_nlink = 0
+        self.st_uid = 0
+        self.st_gid = 0
+        self.st_size = 0
+        self.st_atime = 0.0
+        self.st_mtime = 0.0
+        self.st_ctime = 0.0
+        self.st_atime_ns = 0
+        self.st_mtime_ns = 0
+        self.st_ctime_ns = 0
+
+
+def _ail_stat_from(p: str, mode: int) -> _AilStatResult:
+    f = _ail_os_scandir(p, mode).split("\\0")
+    r = _AilStatResult()
+    r.st_mode = int(f[0])
+    r.st_ino = int(f[1])
+    r.st_dev = int(f[2])
+    r.st_nlink = int(f[3])
+    r.st_uid = int(f[4])
+    r.st_gid = int(f[5])
+    r.st_size = int(f[6])
+    r.st_atime_ns = int(f[7]) * 1000000000 + int(f[8])
+    r.st_mtime_ns = int(f[9]) * 1000000000 + int(f[10])
+    r.st_ctime_ns = int(f[11]) * 1000000000 + int(f[12])
+    r.st_atime = r.st_atime_ns / 1000000000
+    r.st_mtime = r.st_mtime_ns / 1000000000
+    r.st_ctime = r.st_ctime_ns / 1000000000
+    return r
+
+
+def _ail_os_stat(p: str) -> _AilStatResult:
+    return _ail_stat_from(p, 2)
+
+
+def _ail_os_lstat(p: str) -> _AilStatResult:
+    return _ail_stat_from(p, 3)
+
+
+def _ail_os_getmtime(p: str) -> float:
+    return _ail_os_stat(p).st_mtime
+
+
+def _ail_os_getatime(p: str) -> float:
+    return _ail_os_stat(p).st_atime
+
+
+def _ail_os_getctime(p: str) -> float:
+    return _ail_os_stat(p).st_ctime
+''')
+
+filelib_prelude.snippet('scandir', '''
+class _AilDirEntry:
+    def __init__(self, path: str, name: str):
+        self.name = name
+        self.path = path
+
+    def is_dir(self) -> bool:
+        return _ail_os_kind(self.path, 1) == 2
+
+    def is_file(self) -> bool:
+        return _ail_os_kind(self.path, 1) == 1
+
+    def is_symlink(self) -> bool:
+        return _ail_os_kind(self.path, 0) == 4
+
+    def stat(self) -> _AilStatResult:
+        return _ail_os_stat(self.path)
+
+    def lstat(self) -> _AilStatResult:
+        return _ail_os_lstat(self.path)
+
+    def inode(self) -> int:
+        return _ail_os_stat(self.path).st_ino
+
+
+class _AilScandir:
+    def __init__(self, path: str, names: list[str]):
+        self.path = path
+        self.names = names
+        self.index = 0
+
+    def advance(self) -> bool:
+        if self.index >= len(self.names):
+            return False
+        self.index = self.index + 1
+        return True
+
+    def entry(self) -> _AilDirEntry:
+        name = self.names[self.index - 1]
+        return _AilDirEntry(_ail_pjoin(self.path, name), name)
+
+    def close(self) -> None:
+        return
+
+
+def _ail_scan_open(path: str) -> _AilScandir:
+    return _AilScandir(path, _ail_listdir(path))
+''', ('listdir', 'os_stat', 'pjoin'))
+
+filelib_prelude.snippet('pnormcase', '''
+def _ail_normcase(p: str) -> str:
+    return p
+
+
+def _ail_ntnormcase(p: str) -> str:
+    return p.replace("/", "\\\\").lower()
+''')
+
+filelib_prelude.snippet('pexpand', '''
+def _ail_expanduser(p: str) -> str:
+    if not p.startswith("~"):
+        return p
+    i = p.find("/", 1)
+    if i < 0:
+        i = len(p)
+    if i != 1:
+        return p
+    if _ail_os_hasenv("HOME") != 0:
+        home = _ail_os_getenv("HOME")
+        while len(home) > 0 and home[len(home) - 1] == "/":
+            home = home[0:len(home) - 1]
+        out = home + p[i:]
+        if len(out) == 0:
+            return "/"
+        return out
+    return _ail_pp_home() + p[i:]
+
+
+def _ail_expandvars(p: str) -> str:
+    out = ""
+    i = 0
+    n = len(p)
+    while i < n:
+        c = p[i]
+        if c == "$" and i + 1 < n:
+            j = i + 1
+            if p[j] == "{":
+                k = j + 1
+                name = ""
+                while k < n and p[k] != "}":
+                    name = name + p[k]
+                    k = k + 1
+                if k < n and name != "" and _ail_os_hasenv(name) != 0:
+                    out = out + _ail_os_getenv(name)
+                    i = k + 1
+                    continue
+            else:
+                k = j
+                name = ""
+                while k < n and (p[k] == "_" or "a" <= p[k] <= "z" or "A" <= p[k] <= "Z" or "0" <= p[k] <= "9"):
+                    name = name + p[k]
+                    k = k + 1
+                if name != "" and _ail_os_hasenv(name) != 0:
+                    out = out + _ail_os_getenv(name)
+                    i = k
+                    continue
+        out = out + c
+        i = i + 1
+    return out
+''')
+
+filelib_prelude.snippet('psame', '''
+def _ail_samefile(a: str, b: str) -> bool:
+    x = _ail_os_stat(a)
+    y = _ail_os_stat(b)
+    return x.st_dev == y.st_dev and x.st_ino == y.st_ino
+
+
+def _ail_samestat(x: _AilStatResult, y: _AilStatResult) -> bool:
+    return x.st_dev == y.st_dev and x.st_ino == y.st_ino
+''', ('os_stat',))
+
+filelib_prelude.snippet('fspath', '''
+def _ail_fspath(p):
+    n = type(p).__name__
+    if n == "str" or n == "bytes":
+        return p
+    raise TypeError("expected str, bytes or os.PathLike object, not " + n)
+''')
+
 # annotations that stand for the two file classes
 _TEXT_ANNOTATIONS = {'TextIO', 'TextIOWrapper'}
 _BIN_ANNOTATIONS = {'BinaryIO', 'BufferedReader', 'BufferedWriter', 'BufferedRandom', 'BufferedIOBase'}
@@ -396,7 +583,14 @@ class _Lowerer(ast.NodeTransformer):
         for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
             arg.annotation = self.annotate(arg.annotation)
         node.returns = self.annotate(node.returns)
+        shadow = {arg.arg for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs}
+        for each in ast.walk(node):
+            if isinstance(each, ast.Name) and isinstance(each.ctx, ast.Store):
+                shadow.add(each.id)
+        saved = self.scandir_names
+        self.scandir_names = saved - shadow
         node.body = self.block(node.body)
+        self.scandir_names = saved
         self.scopes.pop()
         return node
 
@@ -531,11 +725,16 @@ class _Lowerer(ast.NodeTransformer):
 
     def visit_With(self, node):
         items = node.items
+        added = []
         for item in items:
             if isinstance(item.context_expr, ast.Call) and self.qual(item.context_expr.func) == 'os.scandir' \
-                    and isinstance(item.optional_vars, ast.Name):
+                    and isinstance(item.optional_vars, ast.Name) \
+                    and item.optional_vars.id not in self.scandir_names:
                 self.scandir_names.add(item.optional_vars.id)
+                added.append(item.optional_vars.id)
         body = self.block(node.body)
+        for name in added:
+            self.scandir_names.discard(name)
         # innermost first
         for item in reversed(items):
             context = item.context_expr
@@ -563,7 +762,6 @@ class _Lowerer(ast.NodeTransformer):
                 path = self.visit(context.args[0]) if context.args else self.C('.')
                 body = [ast.Assign(targets=[item.optional_vars],
                                    value=self.call('_ail_scan_open', path))] + body
-                self.scandir_names.add(item.optional_vars.id)
                 continue
             elif self.general:
                 item.context_expr = self.visit(item.context_expr)
@@ -1006,7 +1204,14 @@ class _Lowerer(ast.NodeTransformer):
         if name == 'os.fspath':
             if len(node.args) != 1 or node.keywords:
                 self.refuse(node, 'os.fspath(path) takes one string or bytes argument')
-            return self.visit(node.args[0])
+            arg = node.args[0]
+            if self.general:
+                self.need.add('fspath')
+                return self.call('_ail_fspath', self.visit(arg))
+            if isinstance(arg, ast.Constant) and not isinstance(arg.value, (str, bytes)):
+                self.refuse(node, 'os.fspath(%s) raises TypeError: expected str, bytes or os.PathLike object, '
+                                  'not %s' % (ast.unparse(arg), type(arg.value).__name__))
+            return self.visit(arg)
         if name == 'os.makedirs':
             self.need.update(('makedirs', 'phead', 'ptail', 'pexists'))
             n, mode, exist_ok = self.bind(node, ('name', 'mode', 'exist_ok'), {'mode': 0o777, 'exist_ok': False}, required=1)
