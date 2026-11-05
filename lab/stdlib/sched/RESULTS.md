@@ -32,4 +32,41 @@ Result before: **0 built, 0 typed, 10 refused**.
 
 ## After
 
-_To be filled after the bundled module and test are in place._
+`AIL_CURRENT/stdlib/sched.py` ships CPython 3.12's `Lib/sched.py` as AIL source. Every passing
+program is built in the default build and again with `AIL_UNIFIED_FORCE=1`; stdout and the exit
+status match `python3` in both. "general" means the build succeeded on the general path (the
+compiler prints `note: ... built on the general path ...` on stderr).
+
+| program | default build | result |
+| --- | --- | --- |
+| `01_enter_and_enterabs.py` | refused | `not in the subset: using function say as a first-class value (it has defaults, *args or **kwargs)` |
+| `02_priority_and_fifo.py` | general | matches CPython (both builds) |
+| `03_cancel_pending.py` | general | matches CPython (both builds) |
+| `04_cancel_already_run.py` | general | matches CPython (both builds) |
+| `05_queue_and_empty.py` | general | matches CPython (both builds) |
+| `06_blocking_false.py` | general | matches CPython (both builds) |
+| `07_reschedule_inside.py` | general | matches CPython (both builds) |
+| `08_exception_then_resume.py` | general | matches CPython (both builds) |
+| `09_float_times.py` | general | matches CPython (both builds) |
+| `10_time_beyond_int64.py` | refused | `int64 constant out of range: 9223372036854775808` |
+
+Result after: **8 built, 0 typed, 8 general, 2 refused; 8/10 match CPython in both builds.**
+
+## Compiler follow-ups
+
+These are refusals in the compiler, not in `sched`; the module is not edited for them.
+
+1. `01_enter_and_enterabs.py`: passing a function that has defaults as a first-class value is
+   refused (`using function say as a first-class value (it has defaults, *args or **kwargs)`).
+   The program also passes `kwargs=`, and a `**kwargs` call argument is refused
+   (`not in the subset: a **kwargs call argument`), so `sched` cannot forward keyword arguments
+   to an action here; `AIL_CURRENT/stdlib/sched.py` raises `TypeError` for non-empty kwargs.
+2. `10_time_beyond_int64.py`: `2 ** 63` is refused as an int64 constant out of range, as the
+   brief allows (the program stops loudly).
+3. Taking a bound method as a first-class value (`clock.time` passed to `sched.scheduler`) is not
+   built; it raises `AttributeError: 'Clock' object has no attribute 'time'` at run time even
+   though a direct call works.  The programs therefore use module-level clock functions, which
+   exercise the same `sched` behaviour without touching this unrelated limitation.
+4. `scheduler.__init__`, `enterabs` and `enter` keep their defaults/`argument=`/`kwargs=` in
+   Python source, so the compiler builds them on the general path (it requires plain positional
+   arguments for the typed path).

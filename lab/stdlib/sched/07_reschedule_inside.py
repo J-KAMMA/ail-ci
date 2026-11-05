@@ -1,30 +1,32 @@
 import sched
 
 
-class Clock:
-    def __init__(self):
-        self.now = 0
-
-    def time(self):
-        return self.now
-
-    def delay(self, d):
-        print("delay", d)
-        self.now += d
+now = 0
 
 
-def later(queue, clock):
-    print("later", clock.now)
-    queue.enter(2, 1, finish, argument=(clock,))
+def clock_time():
+    return now
 
 
-def finish(clock):
-    print("finish", clock.now)
+def clock_delay(d):
+    global now
+    print("delay", d)
+    now += d
 
 
-clock = Clock()
-queue = sched.scheduler(clock.time, clock.delay)
-queue.enter(1, 1, later, argument=(queue, clock))
+queue = sched.scheduler(clock_time, clock_delay)
+
+
+def later():
+    print("later", now)
+    queue.enter(2, 1, finish)
+
+
+def finish():
+    print("finish", now)
+
+
+queue.enter(1, 1, later)
 queue.run()
-print("now", clock.now)
+print("now", now)
 print("empty", queue.empty())

@@ -1,28 +1,28 @@
 import sched
 
 
-class Clock:
-    def __init__(self):
-        self.now = 0
+now = 0
 
-    def time(self):
-        return self.now
 
-    def delay(self, d):
-        print("delay", d)
-        self.now += d
+def clock_time():
+    return now
+
+
+def clock_delay(d):
+    global now
+    print("delay", d)
+    now += d
 
 
 def report(name):
     print(name)
 
 
-clock = Clock()
-queue = sched.scheduler(clock.time, clock.delay)
+queue = sched.scheduler(clock_time, clock_delay)
 queue.enterabs(10, 2, report, argument=("late-priority",))
 queue.enterabs(10, 1, report, argument=("early-priority",))
 queue.enterabs(10, 1, report, argument=("same-first",))
 queue.enterabs(10, 1, report, argument=("same-second",))
 queue.enterabs(5, 5, report, argument=("sooner",))
 queue.run()
-print("now", clock.now)
+print("now", now)

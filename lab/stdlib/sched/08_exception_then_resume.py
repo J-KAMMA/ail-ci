@@ -1,16 +1,17 @@
 import sched
 
 
-class Clock:
-    def __init__(self):
-        self.now = 0
+now = 0
 
-    def time(self):
-        return self.now
 
-    def delay(self, d):
-        print("delay", d)
-        self.now += d
+def clock_time():
+    return now
+
+
+def clock_delay(d):
+    global now
+    print("delay", d)
+    now += d
 
 
 def ok(label):
@@ -22,8 +23,7 @@ def boom():
     raise RuntimeError("kaboom")
 
 
-clock = Clock()
-queue = sched.scheduler(clock.time, clock.delay)
+queue = sched.scheduler(clock_time, clock_delay)
 queue.enterabs(1, 1, ok, argument=("one",))
 queue.enterabs(2, 1, boom)
 queue.enterabs(3, 1, ok, argument=("three",))
@@ -34,4 +34,4 @@ except RuntimeError as exc:
 print("empty after error", queue.empty())
 queue.run()
 print("empty", queue.empty())
-print("now", clock.now)
+print("now", now)
