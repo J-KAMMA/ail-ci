@@ -74,6 +74,33 @@ literal; run with --strict to see why
 fields; input uses `input()` or `sys.stdin.readline()` at the call site and output uses
 `sys.stdout.write()`. Readline completion is a `complete()` stub returning `None`.
 
+## Self-check probes
+
+Extra probes were compiled and run in both builds (default and `AIL_UNIFIED_FORCE=1`) and
+compared with `python3` (stdout and exit status):
+
+| probe | covers | result |
+| --- | --- | --- |
+| `p_cmd_loop.py` | prompt, intro, arg/no-arg, multiple spaces, `default()`, `do_EOF` | matches |
+| `p_cmd_empty.py` | default `emptyline()` repeating `lastcmd`, overridden `emptyline()`, unknown command | matches |
+| `p_cmd_hooks.py` | `preloop`/`postloop`, `precmd` rewriting the line, `postcmd` stopping | matches |
+| `p_cmd_int.py` | `int()` on `42`, `0`, `-1`, `-9223372036854775808`, `9223372036854775807`; sums at the int64 boundaries | matches |
+| `p_cmd_parse.py` | `parseline()` on `?x`, `!ls`, `  spaced  args  `, empty, `cmd?`, `!`, `?`, tabs | matches when `do_shell` exists; diverges without it (below) |
+| `p_cmd_help.py` | help table, `help` via `help_*`, `help unknown`, `help` on a docstring-only command | table and `help_*` match; docstring-only help diverges (below) |
+
+The probes confirmed these two remaining differences; both need compiler reflection
+(`dir()`, a class `__dict__`, or a method value) that AIL does not offer:
+
+* `parseline("!ls")` on a subclass with no `do_shell`: CPython returns
+  `(None, None, '!ls')`; this copy parses it as `('shell', 'ls', 'shell ls')` because the
+  module must declare a `do_shell` stub for the literal `getattr(self, 'do_shell')`
+  dispatch, so `hasattr(self, 'do_shell')` is always true. `lab/stdlib/cmd/06_parseline.py`
+  defines `do_shell`, so it matches.
+* `help <name>` for a command documented only by its docstring: CPython prints the
+  docstring, this copy prints `*** No help on <name>` because a method's `__doc__` cannot
+  be read (`self.do_x` as a value is refused at run time). `lab/stdlib/cmd/05_help.py`
+  uses `help_*` methods, so it matches.
+
 ## Follow-ups (out of scope: compiler features)
 
 * The typed path refuses a `None` class attribute and method default arguments, so every

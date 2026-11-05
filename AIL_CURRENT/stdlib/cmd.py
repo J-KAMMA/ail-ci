@@ -7,16 +7,19 @@ The bundled copy keeps Cmd's public interface and every printed text exactly as 
 prints them.  It differs only where this compiler refuses a value: `sys.stdin` and
 `sys.stdout` are not stored as fields, so input is read with `input()` (or
 `sys.stdin.readline()` at the call site) and output is written with `sys.stdout.write()` at
-the call site.  A caller-supplied `stdin`/`stdout` object is still honoured when it is not
-None.  Readline completion is not available in a single-file program, so `complete()` is a
-stub that returns None.  This compiler has no `dir()` and an AIL class exposes neither
-`__dict__` nor `__mro__`, so `get_names()` cannot list a subclass's methods.  It instead
-probes a fixed vocabulary of common command names with `hasattr()` and returns only the
-`do_*`/`help_*` names that exist, sorted the way CPython sorts them.  A `getattr()` whose
-name is only known at run time cannot call a method here, so dispatch uses the same fixed
-vocabulary with literal `getattr(self, 'do_name')` calls.  Because a method's `__doc__`
-cannot be read through `getattr()` here, `do_help()` treats every `do_*` command as
-documented and detailed help comes from `help_*` methods.
+the call site.  The `stdin`/`stdout` constructor arguments are stored as in CPython, but the
+process streams are always used: `input()` when `use_rawinput` is true, `sys.stdin.readline()`
+when it is false, and `sys.stdout` for output.  Readline completion is not available in a
+single-file program, so `complete()` is a stub that returns None.  This compiler has no
+`dir()` and an AIL class exposes neither `__dict__` nor `__mro__`, so `get_names()` cannot
+list a subclass's methods.  Instead the module declares `do_*`/`help_*` stubs for a fixed
+vocabulary of common command names, and `get_names()` returns the matching names from that
+vocabulary in CPython's sorted order.  A `getattr()` whose name is only known at run time
+cannot call a method here, so `onecmd()` dispatches through literal `getattr(self,
+'do_name')` calls over the same vocabulary.  Because a method's `__doc__` cannot be read,
+`do_help()` lists every vocabulary command as documented and detailed help comes from
+`help_*` methods; a docstring-only command prints `*** No help on <name>`.  Commands named
+outside the vocabulary are neither dispatched nor listed.
 """
 
 import sys
