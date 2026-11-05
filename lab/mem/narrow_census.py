@@ -623,10 +623,10 @@ static void i32_take_ail(i32list *slot, ail_list *value) {
 /* ---- end fbnarrow1 i32 emulation ---- */
 '''
 
-NARROW_VARS = ('v_w', 'v_dep', 'v_par', 'v_keep', 'v_mp', 'v_ord', 'v_ni', 'v_cs')
-NARROW_DECLS = {'v_w': 3, 'v_dep': 3, 'v_par': 4, 'v_keep': 2, 'v_mp': 2,
+NARROW_VARS = ('v_dep', 'v_par', 'v_keep', 'v_mp', 'v_ord', 'v_ni', 'v_cs')
+NARROW_DECLS = {'v_dep': 3, 'v_par': 4, 'v_keep': 2, 'v_mp': 2,
                 'v_ord': 1, 'v_ni': 1, 'v_cs': 3}
-NARROW_FIELDS = ('f_w', 'f_dep', 'f_par')
+NARROW_FIELDS = ('f_dep', 'f_par')
 
 
 def _sub_once(text, old, new, n=1, label=''):
@@ -694,10 +694,11 @@ def compile_flags(program_c):
 def edit_i32(text):
     """Store the int32-fit lists measured in (a) as a local int32 list type.
 
-    Narrowed: the T fields ``w``/``dep``/``par`` (the peak-resident set), the compact /
-    rebuild / fold temporaries, ``keep``, ``mp``, ``ord``, ``ni`` and ``cs``.  ``sub``
-    (subtree weight sums) and the sort-key columns stay int64: their values leave int32
-    on the perf input (-sub reaches the tree's total weight) and the keysort ABI is int64.
+    Narrowed: the T fields ``dep``/``par``, the compact / rebuild / fold ``dep`` and ``par``
+    temporaries, ``keep``, ``mp``, ``ord``, ``ni`` and ``cs``.  ``w`` (both the T field and
+    every local) stays int64: ``do_fold`` accumulates ``w[j]`` into ``wt`` and pushes it,
+    so no bound smaller than int64 can be proven for it.  ``sub`` (subtree weight sums) and
+    the sort-key columns stay int64 for the same reason; the keysort ABI is int64.
     """
     lines = text.splitlines(True)
     ins = next((i + 1 for i, line in enumerate(lines)
@@ -715,14 +716,14 @@ def edit_i32(text):
                          f'i32_free(&v_self->{f});', 1, f'drop {f}')
         body = _sub_once(body, f'ail_obj_field_list_move(&v_self->{f}, {v});',
                          f'i32_take_ail(&v_self->{f}, {v});', 1, f'ctor {f}')
-    for n, f in ((10, 'f_w'), (11, 'f_dep'), (12, 'f_par'), (23, 'f_w'), (24, 'f_dep'),
-                 (25, 'f_par'), (32, 'f_w'), (33, 'f_dep'), (34, 'f_par')):
+    for n, f in ((11, 'f_dep'), (12, 'f_par'), (24, 'f_dep'), (25, 'f_par'),
+                 (33, 'f_dep'), (34, 'f_par')):
         v = 'v_' + f[2:]
         body = _sub_once(body, f'ail_obj_field_list_move(&v__t{n}->{f}, &{v});',
                          f'i32_move(&v__t{n}->{f}, &{v});', 1, f'move t{n} {f}')
 
     # parse_tree appends straight into the object fields
-    for f, nparse in (('f_w', 1), ('f_dep', 1), ('f_par', 2)):
+    for f, nparse in (('f_dep', 1), ('f_par', 2)):
         body = _sub_once(body, f'ail_numfield_list_append(&(v_t)->{f}, _argument);',
                          f'i32_push(&(v_t)->{f}, _argument);', nparse, f'parse {f}')
 
@@ -747,28 +748,26 @@ def edit_i32(text):
                             f'i32_span_get((v_t)->{f}.p, (v_t)->{f}.n,')
 
     # `X = []` on a narrowed local steals an empty int64 temp; just clear the local
-    for v, t in (('v_w', 'v__t3'), ('v_dep', 'v__t4'), ('v_par', 'v__t5'),
-                 ('v_w', 'v__t16'), ('v_dep', 'v__t17'), ('v_par', 'v__t18'),
-                 ('v_w', 'v__t9'), ('v_dep', 'v__t10'), ('v_par', 'v__t11'),
+    for v, t in (('v_dep', 'v__t4'), ('v_par', 'v__t5'),
+                 ('v_dep', 'v__t17'), ('v_par', 'v__t18'),
+                 ('v_dep', 'v__t10'), ('v_par', 'v__t11'),
                  ('v_ord', 'v__t2'), ('v_par', 'v__t4')):
         body = body.replace(f'{v} = {t}; {t} = (ail_list){{0}};', f'{t} = (ail_list){{0}};')
 
     # IR pointer aliases into the narrowed fields
     for old, new in (
             ('ail_list *ir7 = (&(v_t)->f_par);', 'i32list *ir7 = (&(v_t)->f_par);'),
-            ('ail_list *ir3 = (&(v_t)->f_w);', 'i32list *ir3 = (&(v_t)->f_w);'),
             ('ail_list *ir9 = (&(v_t)->f_par);', 'i32list *ir9 = (&(v_t)->f_par);'),
             ('ail_list *ir13 = (&(v_t)->f_par);', 'i32list *ir13 = (&(v_t)->f_par);'),
             ('ail_list *ir5 = (&(v_t)->f_dep);', 'i32list *ir5 = (&(v_t)->f_dep);'),
             ('ail_list *ir8 = (&(v_t)->f_par);', 'i32list *ir8 = (&(v_t)->f_par);'),
             ('int64_t *ir8_p = (ir7)->p;', 'int32_t *ir8_p = (ir7)->p;'),
-            ('const int64_t *ir5_s = (ir3)->p;', 'const int32_t *ir5_s = (ir3)->p;'),
             ('int64_t *ir10_p = (ir9)->p;', 'int32_t *ir10_p = (ir9)->p;'),
             ('int64_t *ir14_p = (ir13)->p;', 'int32_t *ir14_p = (ir13)->p;'),
             ('int64_t *ir9_p = (ir5)->p;', 'int32_t *ir9_p = (ir5)->p;'),
             ('int64_t *ir10_p = (ir8)->p;', 'int32_t *ir10_p = (ir8)->p;')):
         body = _sub_once(body, old, new, 1, old)
-    for p in ('ir8_p', 'ir5_s', 'ir10_p', 'ir14_p', 'ir9_p'):
+    for p in ('ir8_p', 'ir10_p', 'ir14_p', 'ir9_p'):
         body = body.replace(f'ail_list_view_get({p},', f'i32_view_get({p},')
     body = body.replace('ail_list_view_set(ir10_p,', 'i32_view_set(ir10_p,')
     body = _sub_once(body, 'ail_list_span_get((ir5)->p, (ir5)->n, ir1)',
@@ -851,20 +850,12 @@ def edit_i32(text):
     body = _sub_once(body, 'i32_free(&v_par); v__t4 = (ail_list){0};',
                      'v__t4 = (ail_list){0};', 1, 'stale par free')
 
-    # py_main: total's copy of f_w, and span pointers for the narrowed fields
-    body = _sub_once(body,
-                     '(void)({ ail_list _source = (v_t)->f_w; ail_list _copy = ail_list_snapshot('
-                     '_source.p, _source.n); ail_list_free(&v__t94); v__t94 = _copy; v__t94; });',
-                     '(void)({ i32list _source = (v_t)->f_w; ail_list_free(&v__t94); '
-                     'v__t94 = (ail_list){0}; if (_source.n) { ail_list_reserve(&v__t94, _source.n); '
-                     'for (int64_t _i = 0; _i < _source.n; _i++) v__t94.p[_i] = _source.p[_i]; '
-                     'v__t94.n = _source.n; } v__t94; });', 1, 'main total snapshot')
+    # py_main: span pointers for the narrowed fields (f_w's copy stays int64)
     for old, new in (('int64_t *_sp1 = (v_t)->f_par.p;', 'int32_t *_sp1 = (v_t)->f_par.p;'),
                      ('int64_t *_sp2 = (v_t)->f_dep.p;', 'int32_t *_sp2 = (v_t)->f_dep.p;'),
-                     ('int64_t *_sp3 = (v_t)->f_dep.p;', 'int32_t *_sp3 = (v_t)->f_dep.p;'),
-                     ('int64_t *_sp4 = (v_t)->f_w.p;', 'int32_t *_sp4 = (v_t)->f_w.p;')):
+                     ('int64_t *_sp3 = (v_t)->f_dep.p;', 'int32_t *_sp3 = (v_t)->f_dep.p;')):
         body = body.replace(old, new)
-    for p in ('_sp1', '_sp2', '_sp3', '_sp4'):
+    for p in ('_sp1', '_sp2', '_sp3'):
         body = body.replace(f'ail_list_view_get({p},', f'i32_view_get({p},')
     return head + body
 
@@ -959,8 +950,9 @@ def emulate():
     prev = HERE / 'NARROW.json'
     try:
         old = json.loads(prev.read_text())
-        if 'programs' in old:
-            final = {'census': old, 'emulate': doc}
+        census_doc = old.get('census') if 'programs' not in old else old
+        if census_doc is not None:
+            final = {'census': census_doc, 'emulate': doc}
     except Exception:
         pass
     prev.write_text(json.dumps(final, indent=1))

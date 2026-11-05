@@ -82,37 +82,32 @@
  /* `d = s[lo:hi:st]` -- a copy of the slice, with CPython's own clamping (slice.indices).
     Omitted bounds are resolved by the caller, which knows the step's sign at compile time:
     st > 0 -> lo = 0, hi = n;  st < 0 -> lo = n - 1, hi = -(n + 1) (clamps to -1, meaning
-@@ -7273,16 +7348,16 @@
- struct ail_obj_T {
+@@ -7274,15 +7349,15 @@
      ail_obj_header _ail_header;
      ail_pslist f_nm;
--    ail_list f_w;
+     ail_list f_w;
 -    ail_list f_dep;
 -    ail_list f_par;
-+    i32list f_w;
 +    i32list f_dep;
 +    i32list f_par;
  };
  static void ail_obj_drop_T(void *value) {
      ail_obj_T *v_self = value;
      ail_pslist_free(&v_self->f_nm);
--    ail_list_free(&v_self->f_w);
+     ail_list_free(&v_self->f_w);
 -    ail_list_free(&v_self->f_dep);
 -    ail_list_free(&v_self->f_par);
-+    i32_free(&v_self->f_w);
 +    i32_free(&v_self->f_dep);
 +    i32_free(&v_self->f_par);
  }
  static void ail_obj_ctor_cleanup_T(void **p) {
      ail_obj_release(p[0]);
-@@ -7294,9 +7369,9 @@
-     ail_cleanup_frame frame = {ail_cleanup_top, ail_obj_ctor_cleanup_T, resources};
+@@ -7295,8 +7370,8 @@
      ail_cleanup_top = &frame;
      ail_obj_field_slist(&v_self->f_nm, v_nm);
--    ail_obj_field_list_move(&v_self->f_w, v_w);
+     ail_obj_field_list_move(&v_self->f_w, v_w);
 -    ail_obj_field_list_move(&v_self->f_dep, v_dep);
 -    ail_obj_field_list_move(&v_self->f_par, v_par);
-+    i32_take_ail(&v_self->f_w, v_w);
 +    i32_take_ail(&v_self->f_dep, v_dep);
 +    i32_take_ail(&v_self->f_par, v_par);
      ail_cleanup_top = frame.previous;
@@ -130,13 +125,11 @@
  int64_t subw(ail_obj_T *v_t, int64_t *_out, int64_t _cap);
  void do_mirror(ail_obj_T *v_t);
  void do_sort(ail_obj_T *v_t);
-@@ -7468,12 +7542,12 @@
-                 { int64_t _r5 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r5; }
+@@ -7469,11 +7543,11 @@
              }
              (void)(({ (void)0; v__t45 = v_name; ail_sfield_append(&(v_t)->f_nm, v__t45); }));
--            ({ (void)0; int64_t _argument = v_v; ail_numfield_list_append(&(v_t)->f_w, _argument); });
+             ({ (void)0; int64_t _argument = v_v; ail_numfield_list_append(&(v_t)->f_w, _argument); });
 -            ({ (void)0; int64_t _argument = v_stack.n; ail_numfield_list_append(&(v_t)->f_dep, _argument); });
-+            ({ (void)0; int64_t _argument = v_v; i32_push(&(v_t)->f_w, _argument); });
 +            ({ (void)0; int64_t _argument = v_stack.n; i32_push(&(v_t)->f_dep, _argument); });
              if ((((v__t46 = v_stack.n), (v__t47 = 0LL), (v__t46 > v__t47)))) {
 -                ({ (void)0; int64_t _argument = ((&v_stack)->p[((v__t48 = v_stack.n), (v__t49 = 1LL), ((v__t48) - (v__t49)))]); ail_numfield_list_append(&(v_t)->f_par, _argument); });
@@ -160,8 +153,7 @@
      int64_t v__t2 = 0;
      ail_pslist v_nm = {0};
      ail_list v__t3 = {0};
--    ail_list v_w = {0};
-+    i32list v_w = {0};
+     ail_list v_w = {0};
      ail_list v__t4 = {0};
 -    ail_list v_dep = {0};
 +    i32list v_dep = {0};
@@ -171,7 +163,7 @@
      int64_t v__k1 = 0;
      int64_t v_i = 0;
      int64_t v__t6 = 0;
-@@ -7633,58 +7707,58 @@
+@@ -7633,32 +7707,32 @@
      v_n = ({ (void)0; (v_t)->f_nm.n; });
      v__t1 = 0LL;
      v__t2 = v_n;
@@ -181,8 +173,7 @@
 +    for (int64_t _i = 0; _i < v__t2; _i++) i32_push(&v_mp, v__t1);
      ail_pslist_free(&v_nm); v_nm = (ail_pslist){0};
      (void)({ ail_list_clear(&v__t3); v__t3; });
--    ail_list_free(&v_w); v_w = v__t3; v__t3 = (ail_list){0};
-+    i32_free(&v_w); v__t3 = (ail_list){0};
+     ail_list_free(&v_w); v_w = v__t3; v__t3 = (ail_list){0};
      (void)({ ail_list_clear(&v__t4); v__t4; });
 -    ail_list_free(&v_dep); v_dep = v__t4; v__t4 = (ail_list){0};
 +    i32_free(&v_dep); v__t4 = (ail_list){0};
@@ -198,11 +189,10 @@
 +        if (i32_span_get(v_keep, v_keep_len, v_i) != 0) {
 +            i32_set(&v_mp, v_i, (v_nm.n));
              (void)(ail_pslist_push(&v_nm, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); })));
--            (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
+             (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
 -            (void)(ail_list_push(&v_dep, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
 -            if ((((v__t7 = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t8 = 0LL), (v__t7 < v__t8)))) {
 -                (void)(ail_list_push(&v_par, -1LL));
-+            (void)(i32_push(&v_w, ({ (void)0; int64_t _index = v_i; i32_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
 +            (void)(i32_push(&v_dep, ({ (void)0; int64_t _index = v_i; i32_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
 +            if ((((v__t7 = ({ (void)0; int64_t _index = v_i; i32_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t8 = 0LL), (v__t7 < v__t8)))) {
 +                (void)(i32_push(&v_par, -1LL));
@@ -217,13 +207,8 @@
      (void)0;
      ail_obj_store_T(&v__t9, v_t, 0);
      ail_pslist_move(&v__t9->f_nm, &v_nm);
-     ail_pslist_free(&v_nm);
-     (void)0;
-     ail_obj_store_T(&v__t10, v_t, 0);
--    ail_obj_field_list_move(&v__t10->f_w, &v_w);
--    ail_list_free(&v_w);
-+    i32_move(&v__t10->f_w, &v_w);
-+    i32_free(&v_w);
+@@ -7669,22 +7743,22 @@
+     ail_list_free(&v_w);
      (void)0;
      ail_obj_store_T(&v__t11, v_t, 0);
 -    ail_obj_field_list_move(&v__t11->f_dep, &v_dep);
@@ -237,7 +222,7 @@
 -    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t3); ail_list_free(&v_w); ail_list_free(&v__t4); ail_list_free(&v_dep); ail_list_free(&v__t5); ail_list_free(&v_par); ail_obj_release(v__t9); ail_obj_release(v__t10); ail_obj_release(v__t11); ail_obj_release(v__t12); return;
 +    i32_move(&v__t12->f_par, &v_par);
 +    i32_free(&v_par);
-+    ail_cleanup_top = v__cleanup_frame.previous; i32_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t3); i32_free(&v_w); ail_list_free(&v__t4); i32_free(&v_dep); ail_list_free(&v__t5); i32_free(&v_par); ail_obj_release(v__t9); ail_obj_release(v__t10); ail_obj_release(v__t11); ail_obj_release(v__t12); return;
++    ail_cleanup_top = v__cleanup_frame.previous; i32_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t3); ail_list_free(&v_w); ail_list_free(&v__t4); i32_free(&v_dep); ail_list_free(&v__t5); i32_free(&v_par); ail_obj_release(v__t9); ail_obj_release(v__t10); ail_obj_release(v__t11); ail_obj_release(v__t12); return;
  }
  
  static void ail_unwind_rebuild(void **p) { ail_list_free(p[0]); ail_list_free(p[1]); ail_list_free(p[2]); ail_list_free(p[3]); ail_list_free(p[4]); ail_pslist_free(p[5]); ail_list_free(p[6]); ail_list_free(p[7]); ail_list_free(p[8]); ail_list_free(p[9]); ail_list_free(p[10]); ail_list_free(p[11]); ail_obj_release(*(ail_obj_T **)p[12]); ail_obj_release(*(ail_obj_T **)p[13]); ail_obj_release(*(ail_obj_T **)p[14]); ail_obj_release(*(ail_obj_T **)p[15]); ail_sarena_free(p[16]); }
@@ -252,7 +237,7 @@
      int64_t v__t3 = 0;
      int64_t v__t4 = 0;
      int64_t v_v = 0;
-@@ -7697,18 +7771,18 @@
+@@ -7697,7 +7771,7 @@
      int64_t v__t10 = 0;
      int64_t v__t11 = 0;
      int64_t v__t12 = 0;
@@ -261,11 +246,9 @@
      int64_t v__t13 = 0;
      int64_t v__t14 = 0;
      int64_t v__k1 = 0;
-     int64_t v__t15 = 0;
-     ail_pslist v_nm = {0};
+@@ -7706,9 +7780,9 @@
      ail_list v__t16 = {0};
--    ail_list v_w = {0};
-+    i32list v_w = {0};
+     ail_list v_w = {0};
      ail_list v__t17 = {0};
 -    ail_list v_dep = {0};
 +    i32list v_dep = {0};
@@ -299,7 +282,7 @@
                      ail_sarena_keep_roots(&v__sarena, _wmark3, _wroots3, 0);
                      (void)(ail_list_push(&v_stack, ail_list_get(&(ail_list){(int64_t *)v_cl, v_cl_len, v_cl_len}, v_k)));
                      v_k = ((v__t11 = v_k), (v__t12 = 1LL), ck_sub(v__t11, v__t12));
-@@ -7748,97 +7822,97 @@
+@@ -7748,43 +7822,43 @@
      ail_list_free(&v_stack);
      v__t13 = 0LL;
      v__t14 = v_n;
@@ -323,8 +306,7 @@
      }
      ail_pslist_free(&v_nm); v_nm = (ail_pslist){0};
      (void)({ ail_list_clear(&v__t16); v__t16; });
--    ail_list_free(&v_w); v_w = v__t16; v__t16 = (ail_list){0};
-+    i32_free(&v_w); v__t16 = (ail_list){0};
+     ail_list_free(&v_w); v_w = v__t16; v__t16 = (ail_list){0};
      (void)({ ail_list_clear(&v__t17); v__t17; });
 -    ail_list_free(&v_dep); v_dep = v__t17; v__t17 = (ail_list){0};
 +    i32_free(&v_dep); v__t17 = (ail_list){0};
@@ -338,11 +320,10 @@
 -        v_o = ail_list_get(&v_ord, v_k);
 +        v_o = i32_get(&v_ord, v_k);
          (void)(ail_pslist_push(&v_nm, ({ (void)0; int64_t _index = v_o; ail_pslist_get(&(v_t)->f_nm, _index); })));
--        (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
+         (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
 -        (void)(ail_list_push(&v_dep, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
 -        if ((((v__t20 = ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t21 = 0LL), (v__t20 < v__t21)))) {
 -            (void)(ail_list_push(&v_par, -1LL));
-+        (void)(i32_push(&v_w, ({ (void)0; int64_t _index = v_o; i32_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
 +        (void)(i32_push(&v_dep, ({ (void)0; int64_t _index = v_o; i32_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
 +        if ((((v__t20 = ({ (void)0; int64_t _index = v_o; i32_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t21 = 0LL), (v__t20 < v__t21)))) {
 +            (void)(i32_push(&v_par, -1LL));
@@ -360,13 +341,8 @@
      (void)0;
      ail_obj_store_T(&v__t22, v_t, 0);
      ail_pslist_move(&v__t22->f_nm, &v_nm);
-     ail_pslist_free(&v_nm);
-     (void)0;
-     ail_obj_store_T(&v__t23, v_t, 0);
--    ail_obj_field_list_move(&v__t23->f_w, &v_w);
--    ail_list_free(&v_w);
-+    i32_move(&v__t23->f_w, &v_w);
-+    i32_free(&v_w);
+@@ -7795,50 +7869,50 @@
+     ail_list_free(&v_w);
      (void)0;
      ail_obj_store_T(&v__t24, v_t, 0);
 -    ail_obj_field_list_move(&v__t24->f_dep, &v_dep);
@@ -380,7 +356,7 @@
 -    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_list_free(&v__t2); ail_list_free(&v_ord); ail_list_free(&v_ni); ail_pslist_free(&v_nm); ail_list_free(&v__t16); ail_list_free(&v_w); ail_list_free(&v__t17); ail_list_free(&v_dep); ail_list_free(&v__t18); ail_list_free(&v_par); ail_obj_release(v__t22); ail_obj_release(v__t23); ail_obj_release(v__t24); ail_obj_release(v__t25); ail_sarena_free(&v__sarena); return;
 +    i32_move(&v__t25->f_par, &v_par);
 +    i32_free(&v_par);
-+    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_list_free(&v__t2); i32_free(&v_ord); i32_free(&v_ni); ail_pslist_free(&v_nm); ail_list_free(&v__t16); i32_free(&v_w); ail_list_free(&v__t17); i32_free(&v_dep); ail_list_free(&v__t18); i32_free(&v_par); ail_obj_release(v__t22); ail_obj_release(v__t23); ail_obj_release(v__t24); ail_obj_release(v__t25); ail_sarena_free(&v__sarena); return;
++    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_list_free(&v__t2); i32_free(&v_ord); i32_free(&v_ni); ail_pslist_free(&v_nm); ail_list_free(&v__t16); ail_list_free(&v_w); ail_list_free(&v__t17); i32_free(&v_dep); ail_list_free(&v__t18); i32_free(&v_par); ail_obj_release(v__t22); ail_obj_release(v__t23); ail_obj_release(v__t24); ail_obj_release(v__t25); ail_sarena_free(&v__sarena); return;
  }
  
  static void ail_unwind_counts(void **p) { ail_list_free((ail_list *)p[0]); }
@@ -459,15 +435,9 @@
  }
  
  static void ail_unwind_subw(void **p) { ail_list_free((ail_list *)p[0]); }
-@@ -7880,12 +7948,12 @@
-     ail_cleanup_top = &v__cf;
-     ail_pslist *ir1 = (&(v_t)->f_nm);
-     int64_t ir2 = ((int64_t)(ir1)->n);
--    ail_list *ir3 = (&(v_t)->f_w);
-+    i32list *ir3 = (&(v_t)->f_w);
+@@ -7884,8 +7952,8 @@
      ail_list *ir4 = &v_sub;
--    { ail_list *ir5 = ir4; const int64_t *ir5_s = (ir3)->p; int64_t ir6 = (ir3)->n; if (ir5_s != ir5->p) { ir5->n = 0; ail_list_reserve(ir5, ir6); for (int64_t ir7 = 0; ir7 < ir6; ir7++) ir5->p[ir7] = ir5_s[ir7]; ir5->n = ir6; } }
-+    { ail_list *ir5 = ir4; const int32_t *ir5_s = (ir3)->p; int64_t ir6 = (ir3)->n; if (ir5_s != ir5->p) { ir5->n = 0; ail_list_reserve(ir5, ir6); for (int64_t ir7 = 0; ir7 < ir6; ir7++) ir5->p[ir7] = ir5_s[ir7]; ir5->n = ir6; } }
+     { ail_list *ir5 = ir4; const int64_t *ir5_s = (ir3)->p; int64_t ir6 = (ir3)->n; if (ir5_s != ir5->p) { ir5->n = 0; ail_list_reserve(ir5, ir6); for (int64_t ir7 = 0; ir7 < ir6; ir7++) ir5->p[ir7] = ir5_s[ir7]; ir5->n = ir6; } }
      int64_t ir8 = ((ir2) - (1LL));
 -    ail_list *ir9 = (&(v_t)->f_par);
 -    int64_t *ir10_p = (ir9)->p; int64_t ir10_n = ir10_p ? (ir9)->n : 0;
@@ -734,8 +704,7 @@
      int64_t v__t8 = 0;
      ail_pslist v_nm = {0};
      ail_list v__t9 = {0};
--    ail_list v_w = {0};
-+    i32list v_w = {0};
+     ail_list v_w = {0};
      ail_list v__t10 = {0};
 -    ail_list v_dep = {0};
 +    i32list v_dep = {0};
@@ -771,8 +740,7 @@
 +    for (int64_t _i = 0; _i < v__t8; _i++) i32_push(&v_mp, v__t7);
      ail_pslist_free(&v_nm); v_nm = (ail_pslist){0};
      (void)({ ail_list_clear(&v__t9); v__t9; });
--    ail_list_free(&v_w); v_w = v__t9; v__t9 = (ail_list){0};
-+    i32_free(&v_w); v__t9 = (ail_list){0};
+     ail_list_free(&v_w); v_w = v__t9; v__t9 = (ail_list){0};
      (void)({ ail_list_clear(&v__t10); v__t10; });
 -    ail_list_free(&v_dep); v_dep = v__t10; v__t10 = (ail_list){0};
 +    i32_free(&v_dep); v__t10 = (ail_list){0};
@@ -789,30 +757,26 @@
          }
          v_k = v_nm.n;
          ail_bl_set(&v_name, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); }));
--        v_wt = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); });
+         v_wt = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); });
 -        ((&v_mp)->p[v_i] = (v_k));
-+        v_wt = ({ (void)0; int64_t _index = v_i; i32_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); });
 +        i32_set(&v_mp, v_i, (v_k));
          if ((((v__t19 = v_i), (v__t20 = 0LL), (v__t19 > v__t20)))) {
              v_j = v_i;
              {
-@@ -8313,40 +8380,40 @@
-                     v_j = ((v__t23 = v_j), (v__t24 = 1LL), ck_add(v__t23, v__t24));
+@@ -8314,22 +8381,22 @@
                      ail_bl_append(&v_name, (ail_str){(const uint8_t *)("\x2B"), 1, 1});
                      ail_bl_append(&v_name, ({ (void)0; int64_t _index = v_j; ail_pslist_get(&(v_t)->f_nm, _index); }));
--                    v_wt = ((v__t25 = v_wt), (v__t26 = ({ (void)0; int64_t _index = v_j; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })), ck_add(v__t25, v__t26));
+                     v_wt = ((v__t25 = v_wt), (v__t26 = ({ (void)0; int64_t _index = v_j; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })), ck_add(v__t25, v__t26));
 -                    ail_list_set(&v_mp, v_j, v_k);
-+                    v_wt = ((v__t25 = v_wt), (v__t26 = ({ (void)0; int64_t _index = v_j; i32_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })), ck_add(v__t25, v__t26));
 +                    i32_set(&v_mp, v_j, v_k);
                  }
              }
          }
          (void)(ail_pslist_push(&v_nm, v_name));
--        (void)(ail_list_push(&v_w, v_wt));
+         (void)(ail_list_push(&v_w, v_wt));
 -        if ((((v__t27 = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t28 = 0LL), (v__t27 < v__t28)))) {
 -            (void)(ail_list_push(&v_par, -1LL));
 -            (void)(ail_list_push(&v_dep, 0LL));
-+        (void)(i32_push(&v_w, v_wt));
 +        if ((((v__t27 = ({ (void)0; int64_t _index = v_i; i32_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t28 = 0LL), (v__t27 < v__t28)))) {
 +            (void)(i32_push(&v_par, -1LL));
 +            (void)(i32_push(&v_dep, 0LL));
@@ -829,13 +793,8 @@
      (void)0;
      ail_obj_store_T(&v__t31, v_t, 0);
      ail_pslist_move(&v__t31->f_nm, &v_nm);
-     ail_pslist_free(&v_nm);
-     (void)0;
-     ail_obj_store_T(&v__t32, v_t, 0);
--    ail_obj_field_list_move(&v__t32->f_w, &v_w);
--    ail_list_free(&v_w);
-+    i32_move(&v__t32->f_w, &v_w);
-+    i32_free(&v_w);
+@@ -8340,13 +8407,13 @@
+     ail_list_free(&v_w);
      (void)0;
      ail_obj_store_T(&v__t33, v_t, 0);
 -    ail_obj_field_list_move(&v__t33->f_dep, &v_dep);
@@ -849,7 +808,7 @@
 -    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v_cc); ail_list_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t9); ail_list_free(&v_w); ail_list_free(&v__t10); ail_list_free(&v_dep); ail_list_free(&v__t11); ail_list_free(&v_par); ail_bl_free(&v_name); ail_obj_release(v__t31); ail_obj_release(v__t32); ail_obj_release(v__t33); ail_obj_release(v__t34); ail_sarena_free(&v__sarena); return;
 +    i32_move(&v__t34->f_par, &v_par);
 +    i32_free(&v_par);
-+    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v_cc); i32_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t9); i32_free(&v_w); ail_list_free(&v__t10); i32_free(&v_dep); ail_list_free(&v__t11); i32_free(&v_par); ail_bl_free(&v_name); ail_obj_release(v__t31); ail_obj_release(v__t32); ail_obj_release(v__t33); ail_obj_release(v__t34); ail_sarena_free(&v__sarena); return;
++    ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v_cc); i32_free(&v_mp); ail_pslist_free(&v_nm); ail_list_free(&v__t9); ail_list_free(&v_w); ail_list_free(&v__t10); i32_free(&v_dep); ail_list_free(&v__t11); i32_free(&v_par); ail_bl_free(&v_name); ail_obj_release(v__t31); ail_obj_release(v__t32); ail_obj_release(v__t33); ail_obj_release(v__t34); ail_sarena_free(&v__sarena); return;
  }
  
  static void ail_unwind_do_print(void **p) { ail_bl_free(p[0]); ail_sarena_free(p[1]); }
@@ -864,17 +823,11 @@
                  if ((((v__t6 = v_d), (v__t7 = v_pd), (v__t6 > v__t7)))) {
                      ail_bl_append(&v_out, (ail_str){(const uint8_t *)("\x5B"), 1, 1});
                  } else {
-@@ -8406,10 +8473,10 @@
-             }
-             ail_bl_append(&v_out, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); }));
-             ail_bl_append(&v_out, (ail_str){(const uint8_t *)("\x3A"), 1, 1});
--            ail_bl_append(&v_out, ail_str_from_int(&v__sarena, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
--        }
--    }
+@@ -8409,7 +8476,7 @@
+             ail_bl_append(&v_out, ail_str_from_int(&v__sarena, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
+         }
+     }
 -    v_k = ({ (void)0; int64_t _index = ((v__t14 = v_n), (v__t15 = 1LL), ((v__t14) - (v__t15))); ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); });
-+            ail_bl_append(&v_out, ail_str_from_int(&v__sarena, ({ (void)0; int64_t _index = v_i; i32_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
-+        }
-+    }
 +    v_k = ({ (void)0; int64_t _index = ((v__t14 = v_n), (v__t15 = 1LL), ((v__t14) - (v__t15))); i32_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); });
      while ((((v__t16 = v_k), (v__t17 = 0LL), (v__t16 > v__t17)))) {
          ail_bl_append(&v_out, (ail_str){(const uint8_t *)("\x5D"), 1, 1});
@@ -888,15 +841,6 @@
      }
      (void)(ail_slist_reverse(&v_parts));
      { ail_str _r2 = ail_str_return_owned(((v__t7 = ail_str_join(&v__sarena, (ail_str){(const uint8_t *)("\x2F"), 1, 1}, v_parts)), (v__t8 = (ail_str){(const uint8_t *)("\xA"), 1, 1}), ail_str_cat(&v__sarena, v__t7, v__t8))); ail_cleanup_top = v__cleanup_frame.previous; ail_slist_free(&v__t4); ail_slist_free(&v_parts); ail_sarena_free(&v__sarena); return _r2; }
-@@ -8763,7 +8830,7 @@
-         v_c = ((&v_codes)->p[v_q]);
-         if ((((v__t92 = v_c), (v__t93 = 0LL), (v__t92 == v__t93)))) {
-             v_s = 0LL;
--            (void)({ ail_list _source = (v_t)->f_w; ail_list _copy = ail_list_snapshot(_source.p, _source.n); ail_list_free(&v__t94); v__t94 = _copy; v__t94; });
-+            (void)({ i32list _source = (v_t)->f_w; ail_list_free(&v__t94); v__t94 = (ail_list){0}; if (_source.n) { ail_list_reserve(&v__t94, _source.n); for (int64_t _i = 0; _i < _source.n; _i++) v__t94.p[_i] = _source.p[_i]; v__t94.n = _source.n; } v__t94; });
-             for (v__t95 = 0; v__t95 < v__t94.n; v__t95++) {
-                 v_x = v__t94.p[v__t95];
-                 v_s = ((v__t96 = v_s), (v__t97 = v_x), ck_add(v__t96, v__t97));
 @@ -8780,7 +8847,7 @@
                  ail_list_reserve(&v_cc, v__t101);
                  for (int64_t _i = 0; _i < v__t101; _i++) ail_list_push(&v_cc, v__t100);
@@ -935,38 +879,30 @@
                              }
                      }
                      }
-@@ -8833,8 +8900,8 @@
+@@ -8833,7 +8900,7 @@
                      v_s = 0LL;
                      v_n = ({ (void)0; (v_t)->f_nm.n; });
                      {
 -                        int64_t *_sp3 = (v_t)->f_dep.p; int64_t _sn3 = _sp3 ? (v_t)->f_dep.n : 0;
--                        int64_t *_sp4 = (v_t)->f_w.p; int64_t _sn4 = _sp4 ? (v_t)->f_w.n : 0;
 +                        int32_t *_sp3 = (v_t)->f_dep.p; int64_t _sn3 = _sp3 ? (v_t)->f_dep.n : 0;
-+                        int32_t *_sp4 = (v_t)->f_w.p; int64_t _sn4 = _sp4 ? (v_t)->f_w.n : 0;
+                         int64_t *_sp4 = (v_t)->f_w.p; int64_t _sn4 = _sp4 ? (v_t)->f_w.n : 0;
                          int64_t _sc5 = _sn3; int _sc5_eq = _sn4 == _sc5;
                          if (_sc5_eq) {
-                             v__t126 = v_n;
-@@ -8849,9 +8916,9 @@
+@@ -8849,7 +8916,7 @@
                              } else {
                              for (v__k7 = 0; v__k7 < v__t126; v__k7 += 1) {
                                  v_i = v__k7;
 -                                    if ((((v__t127 = ({ int64_t _index =  v_i; ail_list_view_get(_sp3,  _sc5, _index); })), (v__t128 = ail_list_get(&v_iargs, v_q)), (v__t127 == v__t128)))) {
 +                                    if ((((v__t127 = ({ int64_t _index =  v_i; i32_view_get(_sp3,  _sc5, _index); })), (v__t128 = ail_list_get(&v_iargs, v_q)), (v__t127 == v__t128)))) {
                                          v_cnt = ((v__t129 = v_cnt), (v__t130 = 1LL), ((v__t129) + (v__t130)));
--                                        v_s = ((v__t131 = v_s), (v__t132 = ({ int64_t _index =  v_i; ail_list_view_get(_sp4,  _sc5, _index); })), ck_add(v__t131, v__t132));
-+                                        v_s = ((v__t131 = v_s), (v__t132 = ({ int64_t _index =  v_i; i32_view_get(_sp4,  _sc5, _index); })), ck_add(v__t131, v__t132));
+                                         v_s = ((v__t131 = v_s), (v__t132 = ({ int64_t _index =  v_i; ail_list_view_get(_sp4,  _sc5, _index); })), ck_add(v__t131, v__t132));
                                      }
-                             }
-                             }
-@@ -8868,9 +8935,9 @@
+@@ -8868,7 +8935,7 @@
                              } else {
                              for (v__k7 = 0; v__k7 < v__t133; v__k7 += 1) {
                                  v_i = v__k7;
 -                                    if ((((v__t134 = ({ int64_t _index =  v_i; ail_list_view_get(_sp3,  _sn3, _index); })), (v__t135 = ail_list_get(&v_iargs, v_q)), (v__t134 == v__t135)))) {
 +                                    if ((((v__t134 = ({ int64_t _index =  v_i; i32_view_get(_sp3,  _sn3, _index); })), (v__t135 = ail_list_get(&v_iargs, v_q)), (v__t134 == v__t135)))) {
                                          v_cnt = ((v__t136 = v_cnt), (v__t137 = 1LL), ((v__t136) + (v__t137)));
--                                        v_s = ((v__t138 = v_s), (v__t139 = ({ int64_t _index =  v_i; ail_list_view_get(_sp4,  _sn4, _index); })), ck_add(v__t138, v__t139));
-+                                        v_s = ((v__t138 = v_s), (v__t139 = ({ int64_t _index =  v_i; i32_view_get(_sp4,  _sn4, _index); })), ck_add(v__t138, v__t139));
+                                         v_s = ((v__t138 = v_s), (v__t139 = ({ int64_t _index =  v_i; ail_list_view_get(_sp4,  _sn4, _index); })), ck_add(v__t138, v__t139));
                                      }
-                             }
-                             }

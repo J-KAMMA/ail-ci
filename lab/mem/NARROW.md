@@ -1,8 +1,9 @@
 # fbnarrow1: how much of tree_fold's peak is 8-byte ints that would fit in 32 bits
 
 Measure-only. No compiler, runtime or C-compiler file was changed. Base `origin/integ`,
-branch `job-fbnarrow1_rr1-11060457` (re-run of fbnarrow1; the first run's agent was not logged in).
-Everything here comes from `lab/mem/narrow_census.py` and is reproduced in `lab/mem/NARROW.json`.
+branch `job-fbnarrow1_rr1-11060751` (re-run of fbnarrow1; the first run's agent was not logged in).
+Everything here comes from `lab/mem/narrow_census.py` and is reproduced in `lab/mem/NARROW.json`
+(`census` and `emulate` sections).
 
 ## Method and limits
 
@@ -30,68 +31,82 @@ Everything here comes from `lab/mem/narrow_census.py` and is reproduced in `lab/
 
 ## (a) Bytes held by `list[int]` buffers at the peak, per list
 
-tree_fold, sites that hold at least 1 MiB at the peak (MiB; `n` is the largest `len()` seen at that site):
+tree_fold, the ten sites that hold bytes at the peak of total list-buffer bytes
+(**292.67 MiB**; MiB; `n` is the largest `len()` seen at that site). Regenerated from the
+`census` section of `NARROW.json`:
 
 | list (site) | max n | min value | max value | narrowest width | MiB at peak |
 |---|---:|---:|---:|---|---:|
-| `compact: v_w` (new w) | 2,954,720 | 0 | 3,397,567 | int32 | 32.0 |
-| `compact: v_dep` (new dep) | 2,954,720 | 0 | 62 | int8 | 32.0 |
-| `compact: v_par` (new par) | 2,954,720 | 0 | 2,954,718 | int32 | 32.0 |
-| `compact: v_mp` (old→new map) | 3,000,000 (capacity) | – | – | int32 | 22.9 |
-| `rebuild: v_w` (new w) | 3,000,000 | 0 | 3,397,567 | int32 | 32.0 |
-| `rebuild: v_dep` (new dep) | 3,000,000 | 0 | 62 | int8 | 32.0 |
-| `rebuild: v_par` (new par) | 3,000,000 | 0 | 2,999,998 | int32 | 32.0 |
-| `do_prune: ir5` (`keep`, 0/1) | 3,000,000 | 0 | 1 | int8 | 32.0 |
-| runtime-internal (site 0) | – | – | – | – | 22.9 |
-| **total tracked at the peak** | | | | | **269.8** |
+| `parse_tree:(v_t) -> f_w` | 3,000,000 | 0 | 999,988 | int32 | 32.0 |
+| `parse_tree:(v_t) -> f_dep` | 3,000,000 | 0 | 62 | int8 | 32.0 |
+| `parse_tree:(v_t) -> f_par` | 3,000,000 | −1 | 2,999,998 | int32 | 32.0 |
+| `rebuild:v_ord` | 3,000,000 | 0 | 2,999,999 | int32 | 32.0 |
+| `rebuild:v_w` | 3,000,000 | 0 | 3,397,567 | int32 | 32.0 |
+| `rebuild:v_dep` | 3,000,000 | 0 | 62 | int8 | 32.0 |
+| `rebuild:v_par` | 3,000,000 | −1 | 2,999,998 | int32 | 32.0 |
+| runtime-internal (site 0) | – | – | – | not measured | 22.89 |
+| `rebuild:v_ni` | 3,000,000 | 0 | 2,999,999 | int32 | 22.89 |
+| `do_sort:v__t5` | 2,999,999 | 1 | 2,999,999 | int32 | 22.89 |
+| **total tracked at the peak** | | | | | **292.67** |
 
-The `w` rows are int32 *on this input only*; `fold` merges chains (`wt += t.w[j]`), so another input
-can exceed int32. `dep` is bounded by tree height (62 observed), `par`/`idx`/`cs`/`ord`/`ni`/`mp`/`keep`
-by `n < 2^31`. The peak of int-list bytes (269.8 MiB) falls in `compact` (the `prune` op), not in `sort`:
-at the sort peak the reconstructed `w`/`dep`/`par` have not all been allocated yet, and `cs`, `idx`,
-`sub`, `ord`, `ni` peak below that 269.8 MiB total.
+The peak is in the **sort/rebuild path**, not in `compact`: at that peak the `compact` locals and
+`do_prune`'s `keep` site hold **0 bytes**, and the live set is `parse_tree`'s `w`/`dep`/`par` fields
+plus `rebuild`'s `w`/`dep`/`par`/`ord`/`ni` and `do_sort`'s key column. `compact`/`prune` run later,
+when those rebuild temporaries have been freed.
 
-Against rc1's 384 MiB of "list buffers", 269.8 MiB of int buffers is **70%**; the remainder is the
-`list[str]` `nm` field (`ail_pslist`, 24 B/element ≈ 72 MiB at 3M) plus its sarena text and the string
-sort-key columns, which are not `list[int]` and are outside (a). The tracked sum is a capacity figure
-(the tracker sees `cap`, not resident pages), as in rc1.
+The `w` rows are int32 *on this input only*: `fold` merges chains (`wt += t.w[j]`), so another
+input can exceed int32 (the 3.4M values in `rebuild:v_w` are already folded sums). `dep` is bounded
+by tree height (62 observed; int32 is the provable bound, int8 is only this input's range), and
+`par`/`idx`/`cs`/`ord`/`ni`/`mp`/`keep` by `n < 2^31`.
 
-Other programs, same method (full table in `NARROW.json`, 38 rows ≥ 1 MiB): berth_sim 260.7 MiB
-(six 32 MiB ints, widths int8…int32), echo_pack 244.1 MiB, ledger_bin 186.0 MiB (two key columns are
-int64: 4,294,949,410), rail_transfer 23.9 MiB, term_rank 27.0 MiB, ticket_audit 1.4 MiB, chain_relax
-2.3 MiB, scar_life/tally_lang < 0.1 MiB, and the six pointer-graph rc programs (binarytrees, cfold,
-deriv, linkedlist, objscan, rbtree) have no `list[int]` buffers at all.
+Against rc1's 384 MiB of "list buffers", 292.67 MiB of int buffers is **76.2%**. The remainder is
+the `list[str]` `nm` field (`ail_pslist`, 24 B/element ≈ 72 MiB at 3M) plus its sarena text and the
+string sort-key columns, which are not `list[int]` and are outside (a). The tracked sum is a capacity
+figure (the tracker sees `cap`, not resident pages), as in rc1. **This is below the 80% done-check
+for (a)**; the check is not met by this input.
+
+Other programs, same method (39 rows ≥ 1 MiB in total, full table in `NARROW.json`):
+berth_sim 260.67 MiB, echo_pack 244.14 MiB, ledger_bin 186.0 MiB (two key columns are int64:
+4,294,949,410), term_rank 27.22 MiB, rail_transfer 23.95 MiB, ticket_audit 3.41 MiB, chain_relax
+2.29 MiB, scar_life 0.03 MiB, tally_lang < 0.01 MiB, and the six pointer-graph rc programs
+(binarytrees, cfold, deriv, linkedlist, objscan, rbtree) have no `list[int]` buffers at all.
 
 ## (b) Scratch copy with int32 buffers, measured against the plain build
 
-The edit (`lab/mem/treefold_i32.patch`) gives the local index lists `mp`, `ord` and `ni` an
-`int32_t *p` list type with its own push/get/set/reserve/free; every operation used on them is
-covered (append, index read/write, `len`, reserve, free). It is a subset of the int32-fitting lists
-in (a): the `w`/`dep`/`par` fields and the rebuild temporaries share the T struct and the runtime's
-`int64_t*` views, and converting them was not finished inside the time budget.
+The committed edit (`lab/mem/treefold_i32.patch`) gives an `int32_t *p` list type with its own
+push/get/set/reserve/free to:
 
-tree_fold, N = 3,000,000, plain vs edited:
+- the T struct fields `dep` and `par` (and their constructor/drop/move paths);
+- the local `dep`/`par` temporaries in `compact`, `rebuild` and `fold`;
+- `keep` (the `compact` 0/1 list), `mp`, `ord`, `ni` and `cs` (all index columns, `≤ n < 2^31`).
+
+It deliberately leaves **every `w` list int64**, the T field and the `compact`/`rebuild`/`fold`
+locals alike: `do_fold` accumulates `w[j]` into `wt` and pushes the sum, and `sub`/sort-key columns
+also leave int32 on the perf input, so no bound smaller than int64 can be proven for them. (The
+earlier scratch edit that narrowed `f_w` was withdrawn: storing a folded weight in an int32 would
+truncate silently on another input.)
+
+tree_fold, N = 3,000,000, plain vs edited (from the `emulate` section of `NARROW.json`):
 
 | | plain | int32 subset | change |
 |---|---:|---:|---:|
-| peak RSS, median of 3 (KiB) | 414,956 | 414,228 | **−0.18%** |
-| run instructions, `Ir` at N=300k | 893,478,193 | 925,441,599 | **+3.58%** |
-| `rss_phases.py` peak, default (MiB) | 405.7 | 404.6 | −1.1 |
-| `rss_phases.py` peak, fixed threshold (MiB) | 369.4 | 369.4 | 0.0 |
+| peak RSS, median of 3 (KiB) | 415,468 | 379,132 | **−8.75%** |
+| run instructions, `Ir` at N=300k | 893,477,046 | 945,832,434 | **+5.86%** |
+| `rss_phases.py` peak, default (MiB) | 406.2 | 370.3 | −35.9 |
+| `rss_phases.py` peak, fixed threshold (MiB) | 369.4 | 335.1 | −34.3 |
 | stdout | identical on all 55 public+hidden cases and on the perf input | | |
 
-The default peak barely moves because glibc keeps the freed int64 blocks on the brk heap; the
-fixed-threshold column (live set) shows the narrowed lists are not resident at the RSS peak, which is
-the same thing (a) says — at the sort peak the narrowed temporaries are already freed. Instructions
-rise because the narrowed path adds a cast and a second bounds-checked accessor in place of the
-inlined int64 form.
+All 55 cases match (`cases: [...]`, `cases_match: true`) and the perf input matches
+(`perf_match: true`). Instructions rise because the narrowed lists add a cast and a bounds-checked
+accessor in place of the inlined int64 form.
 
 ## Go/no-go
 
-**no-go** by the stated rule: peak RSS falls 0.18% (needs ≥ 10%) and run instructions rise 3.58%
-(needs no worse than +1%). This is the rule applied to the measured subset; the census shows the
-larger remaining opportunity is `dep`+`par` (128 MiB of the 269.8 MiB peak set), which the scratch
-edit did not convert. fbnarrow2-4 should not start on this evidence.
+**no-go** by the stated rule: peak RSS falls **8.75%** (needs ≥ 10%) and run instructions rise
+**5.86%** (needs no worse than +1%). The drop is above the 5% stop threshold, so this is a measured
+no-go rather than an early stop. fbnarrow2-4 should not start on this evidence: narrowing every
+provably-int32 list (all of `dep`, `par`, `keep`, `mp`, `ord`, `ni`, `cs`) still leaves the `w`
+columns int64, and those account for 96 MiB of the 292.67 MiB peak set.
 
 ## Operations tree_fold applies to each narrowed list (fbnarrow3 requirements)
 
@@ -108,15 +123,18 @@ edit did not convert. fbnarrow2-4 should not start on this evidence.
 | `keep` | yes (`0/1` bool list) | yes (in `compact`) | no | yes | no | no | no | yes (`compact`) |
 | `mp` | yes (`[0]*n`) | yes | yes (`mp[i] = …`) | yes | no | no | no | no |
 
-fbnarrow3 must support append, index read/write (including negative-index normalisation is not used
-here), `len`, `for x in`, `copy()`/`slice`, passing a narrowed list to a function, and — for `idx` —
-`sort(key=...)` reading other narrowed lists inside the key. Any list that cannot be proven in range
-must stay int64 (e.g. `w`, which `fold` can push past int32).
+fbnarrow3 must support append, index read/write (negative-index normalisation is not used here),
+`len`, `for x in`, `copy()`/`slice`, passing a narrowed list to a function, and — for `idx` —
+`sort(key=...)` reading other narrowed lists inside the key. **Any list that cannot be proven in
+range must stay int64: in particular `w` (both the T field and every local), because `fold`
+accumulates weights into it and can push it past int32.**
 
 ## Records
 
 - Tracked builds: 16/16 matched the plain build; no wrong output was observed, so the stop rule was
   not triggered on output.
-- (b) lowers peak RSS by 0.18%, below the 5% stop threshold: no-go, stop.
+- (b) as committed: peak RSS −8.75% (≥ the 5% stop threshold but < the 10% go bar), instructions
+  +5.86% (> the +1% bar) → no-go.
+- (a) covers 292.67 / 384 MiB = 76.2% of rc1's list buffers, below the 80% done-check.
 - `git diff --stat origin/integ` touches `lab/mem/` only (`NARROW.md`, `NARROW.json`,
   `narrow_census.py`, `treefold_i32.patch`).
