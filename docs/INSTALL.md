@@ -27,6 +27,7 @@ still not run by hand.
 On Ubuntu 24.04 (the platform the full test suite runs on) everything is in the default
 repositories. `python3-venv` is a separate package there and is easy to miss:
 
+<!-- docs-test: skip needs network, sudo and a fresh clone -->
 ```sh
 sudo apt install python3 python3-venv python3-pip gcc git
 git clone https://github.com/J-KAMMA/ail-ci.git
@@ -72,6 +73,7 @@ Continue with [the quickstart](QUICKSTART.md) or [the tutorial](tutorial.md).
 Install Python 3.12 (python.org or Homebrew: `brew install python@3.12`) and the Xcode Command
 Line Tools, which provide `cc` (Apple clang):
 
+<!-- docs-test: skip needs macOS, network and the Xcode Command Line Tools -->
 ```sh
 xcode-select --install
 git clone https://github.com/J-KAMMA/ail-ci.git
@@ -92,6 +94,7 @@ Two options:
   system (`~`), not under `/mnt/c`: it is much faster and avoids line-ending problems.
 - **Native, with MinGW-w64 or Zig.** Install Python 3.12 and a C compiler, then in PowerShell:
 
+  <!-- docs-test: skip needs Windows, MSYS2 and network -->
   ```powershell
   winget install MSYS2.MSYS2                  # then, in the MSYS2 UCRT64 shell:
   pacman -S mingw-w64-ucrt-x86_64-gcc
@@ -125,6 +128,7 @@ loads `libm`, which Windows does not have; the skip is printed with its reason.
 
 The package only bundles the compiler sources, so you can also run them in place:
 
+<!-- docs-test: skip assumes hello.py from the First program section; doctor --check runs in Check the setup -->
 ```sh
 python3 AIL_CURRENT/ail_chatgpt.py doctor --check
 python3 AIL_CURRENT/ail_chatgpt.py compile hello.py -o hello

@@ -12,6 +12,7 @@ It skips an example, naming the missing header or library, when the runner does 
 
 From the repository root:
 
+<!-- docs-test: skip needs zlib.h and -lz; the same example is run by the zlib_check block below -->
 ```sh
 export PYTHONPATH="$PWD/AIL_CURRENT"
 python3 examples/ffi/zlib_check.py
@@ -28,6 +29,7 @@ for every stub of the file that has no `lib=`.
 stubs show borrowed `bytes` input, a writable `bytearray` output, `length(...)` for a buffer length, and
 `ptr(c_ulong)` for the out-length:
 
+<!-- docs-test: ffi examples/ffi/zlib_check.py -->
 ```python
 @extern(header="zlib.h", symbol="crc32")
 def c_crc32(crc: c_ulong, buf: bytes, n: length("buf", c_uint)) -> c_ulong: ...
@@ -45,6 +47,7 @@ The `n` parameter is not in the Python call: the call supplies `len(buf)` or `le
 `cbrt`, `hypot`, `fma` and `frexp` over six values that include `-0.0`, `inf` and the subnormal `5e-324`. It shows
 the float annotations, the `ptr(c_int)` out-exponent, and printing with `repr()`:
 
+<!-- docs-test: ffi examples/ffi/libm_math.py -->
 ```python
 link("m")
 
@@ -57,6 +60,7 @@ def c_frexp(x: c_double, e: ptr(c_int)) -> c_double: ...
 `strlen` through `c_char_p`, `strtol` in base 16 and 36, and `toupper` applied over a `bytearray`. One parse is
 `int64`'s edge (`7fffffffffffffff` base 16); one is below `int64`, where `strtol` saturates and sets `ERANGE`:
 
+<!-- docs-test: ffi examples/ffi/libc_text.py -->
 ```python
 @extern(header="string.h", symbol="strlen")
 def c_strlen(s: c_char_p) -> c_size_t: ...
@@ -80,6 +84,7 @@ An in-memory SQLite database owned by a `Handle("sqlite3", free="sqlite3_close")
 inserts 1,000 rows in one transaction through `sqlite3_exec`, then reads `SELECT count(*), sum(v)` through
 `sqlite3_prepare_v2`, `sqlite3_step`, `sqlite3_column_int64` and the statement handle's `sqlite3_finalize`:
 
+<!-- docs-test: ffi examples/ffi/sqlite_count.py -->
 ```python
 Db = Handle("sqlite3", free="sqlite3_close")
 Stmt = Handle("sqlite3_stmt", free="sqlite3_finalize")
