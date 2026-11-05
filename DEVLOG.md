@@ -12,6 +12,15 @@ Tests (`par_check -j 2`): `test_ail_pyproof_report`, `test_ail_examples_crate`,
 Probes: `/tmp/probes/probe_exit3.py` and `probe_numbers.py` are `typed` with CPython-matching
 stdout and the same exit status; the five bucket reproducers match or are refused by name, and
 the two `wrong` overflow reproducers still exit 1 as their rows say.
+## 2026-11-05 -- rbsched1: re-apply the sched stdlib module on the current tree (job-rbsched1-11051643)
+
+The accepted `sched1` change (`31c9a99`..`job-sched1-11051443`) did not apply here as one patch:
+the `.github/workflows/agent-worker.yml` hunk (dropping `GH_MODELS_TOKEN`) was already the state
+of this tree, so only that file conflicted.  The rest applied cleanly: the new
+`AIL_CURRENT/stdlib/sched.py`, `test_ail_std_sched.py`, its `tests.d` registration and the ten
+`lab/stdlib/sched/` programs with `RESULTS.md`.  The `manifest.d` hunks were not applied by hand;
+`python3 tools/update_manifest.py` recomputed every pin and `--check` passes.  `tools/diff_ids.py`
+is not present on this tree.
 
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
