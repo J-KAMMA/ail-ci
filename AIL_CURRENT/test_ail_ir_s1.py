@@ -166,7 +166,7 @@ class PassTests(unittest.TestCase):
         self.assertEqual(add.attrs['mode'], 'nsw')
         self.assertNotIn('IndexError', fn.effects.raises)
 
-    def test_licm_hoists_spans_and_versions_the_loop(self):
+    def test_licm_hoists_spans_when_ranges_prove_the_loop(self):
         fn, program = fn_of(STRUCT)
         mem2reg.run(fn)
         simplify.run(fn)
@@ -177,18 +177,17 @@ class PassTests(unittest.TestCase):
         E.summarize_program(program)
         self.check(fn, program)
         self.assertEqual(stats['spans'], 1)
-        self.assertEqual(stats['versioned'], 1)
+        # the range pass now proves every list.get/list.set here (a read-only list has a stable
+        # length), so LICM hoists the span but has no slow copy to version
+        self.assertEqual(stats['versioned'], 0)
         self.assertNotIn('list.get', ops(fn))
         loops = [i for i in I.walk(fn.body) if i.op == 'for.range']
-        self.assertEqual(len(loops), 2)
-        modes = [sorted(i.attrs['mode'] for i in I.walk(l.regions[0]) if i.op.startswith('span.'))
-                 for l in loops]
-        self.assertIn(['nck', 'nck', 'nck'], modes)          # fast copy
-        self.assertIn(['ck', 'ck', 'ck'], modes)             # slow copy, unchanged
-        fast = [l for l in loops if all(i.attrs.get('mode') != 'ck'
-                                        for i in I.walk(l.regions[0]) if i.op.startswith('span.'))][0]
-        self.assertTrue(all(i.attrs.get('mode') == 'nsw' for i in I.walk(fast.regions[0]) if i.op == 'add'
-                            and i.operands[0] is fast.regions[0].args[0]))
+        self.assertEqual(len(loops), 1)
+        loop = loops[0]
+        modes = sorted(i.attrs['mode'] for i in I.walk(loop.regions[0]) if i.op.startswith('span.'))
+        self.assertEqual(modes, ['nck', 'nck', 'nck'])
+        self.assertTrue(all(i.attrs.get('mode') == 'nsw' for i in I.walk(loop.regions[0]) if i.op == 'add'
+                            and i.operands[0] is loop.regions[0].args[0]))
 
     def test_a_while_loop_with_an_induction_variable_is_versioned(self):
         src = BYTES.replace('%go = cmp.lt %iv, %n : i1', '%go = cmp.lt %iv, %m : i1').replace(

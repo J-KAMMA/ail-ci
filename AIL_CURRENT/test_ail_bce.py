@@ -285,6 +285,150 @@ fn main() -> int {
     return 0;
 }
 """),
+    ('echo_like_ok', r"""
+fn cmp(d: bytes, j: int) -> int {
+    let n = len(d);
+    let hits = 0;
+    let i = 0;
+    while i < n {
+        let maxm = n - i;
+        if maxm > 3 { maxm = 3; }
+        let m = 1;
+        while m < maxm and d[i + m] == d[j + m] { m += 1; }
+        if m > 1 { hits += m; }
+        i += 1;
+    }
+    return hits;
+}
+fn main() {
+    print(cmp(b"abababab", 0));
+    print(cmp(b"", 0));
+    print(cmp(b"a", 0));
+    print(cmp(b"abcdef", 0));
+}
+"""),
+    ('echo_like_offbyone', r"""
+fn cmp(d: bytes, j: int) -> int {
+    let n = len(d);
+    let hits = 0;
+    let i = 0;
+    while i < n {
+        let maxm = n - i + 1;
+        if maxm > 3 { maxm = 3; }
+        let m = 1;
+        while m < maxm and d[i + m] == d[j + m] { m += 1; }
+        hits += m;
+        i += 1;
+    }
+    return hits;
+}
+fn main() { print(cmp(b"aaaaaa", 0)); }
+"""),
+    ('echo_cap_n', r"""
+fn f(d: bytes) -> int {
+    let n = len(d);
+    let i = 0;
+    let s = 0;
+    while i < n {
+        let maxm = n - i;
+        if maxm > 3 { maxm = n; }
+        let m = 1;
+        while m < maxm and d[i + m] == d[m] { m += 1; }
+        s += m;
+        i += 1;
+    }
+    return s;
+}
+fn main() { print(f(b"")); print(f(b"ab")); }
+"""),
+    ('induction_zero_step', r"""
+fn main() {
+    let xs = [5, 7, 11];
+    let k = len(xs) - len(xs);
+    let i = 0;
+    let guard = 0;
+    let s = 0;
+    while i < len(xs) and guard < 10 {
+        s += xs[i];
+        i += k;
+        guard += 1;
+    }
+    print(s, i, guard);
+}
+"""),
+    ('induction_unknown_step', r"""
+fn make() -> str { return "2"; }
+fn main() {
+    let xs = [5, 7, 11, 13];
+    let k = int(make());
+    let i = 0;
+    let s = 0;
+    while i < len(xs) and i >= 0 {
+        s += xs[i];
+        i += k;
+    }
+    print(s, i);
+}
+"""),
+    ('induction_big_text', r"""
+fn make() -> str { return "9223372036854775808"; }
+fn main() {
+    let xs = [1, 2, 3];
+    let k = int(make());
+    let i = 0;
+    while i < len(xs) and i >= 0 { i += k; }
+    print(i);
+}
+"""),
+    ('list_get_guard_ok', BOX + r"""
+fn get(b: Box, i: int) -> int {
+    let n = len(b.v);
+    if i >= 0 and i < n { return b.v[i]; }
+    return 0;
+}
+fn main() {
+    let b = Box([10, 20, 30], 3);
+    print(get(b, 0), get(b, 2), get(b, 3), get(b, -1));
+}
+"""),
+    ('list_get_after_clear', BOX + r"""
+fn get(b: Box, i: int) -> int {
+    let n = len(b.v);
+    if i >= 0 and i < n {
+        b.v.clear();
+        return b.v[i];
+    }
+    return 0;
+}
+fn main() {
+    let b = Box([10, 20, 30], 3);
+    print(get(b, 2));
+}
+"""),
+    ('list_get_append_fn', BOX + r"""
+fn add(b: Box) { b.v.append(42); }
+fn get(b: Box, i: int) -> int {
+    let n = len(b.v);
+    if i >= 0 and i < n { add(b); return b.v[i]; }
+    return 0;
+}
+fn main() {
+    let b = Box([1, 2, 3], 3);
+    print(get(b, 1));
+}
+"""),
+    ('list_loop_read', BOX + r"""
+fn total(b: Box) -> int {
+    let s = 0;
+    let i = 0;
+    while i < len(b.v) { s += b.v[i]; i += 1; }
+    return s;
+}
+fn main() {
+    let b = Box([1, 2, 3, 4], 4);
+    print(total(b));
+}
+"""),
 ]
 
 DEPTH_ORACLE = {
@@ -300,6 +444,19 @@ DEPTH_STATS = {
 
 STOPS = {
     'big_text_index': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
+    'induction_big_text': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
+}
+
+S3_PROVEN = {
+    'echo_like_ok': ('cmp', 1),
+    'list_get_guard_ok': ('get', 1),
+    'list_loop_read': ('total', 1),
+}
+S3_UNPROVEN = {
+    'echo_like_offbyone': 'cmp',
+    'echo_cap_n': 'f',
+    'list_get_after_clear': 'get',
+    'list_get_append_fn': 'get',
 }
 
 
@@ -425,6 +582,23 @@ class BceProbeTests(unittest.TestCase):
                         self.assertEqual(got[1], want[1], '%s (%s) status' % (name, mode))
                         self.assertTrue(_same_last_line(got[2], want[2]),
                                         '%s (%s) stderr: %r != %r' % (name, mode, got[2], want[2]))
+
+
+    def test_s3_rules_are_visible_in_the_stats(self):
+        sources = dict(PROBES)
+        with tempfile.TemporaryDirectory(prefix='ail-bce-s3-') as directory:
+            for name, (fn, least) in S3_PROVEN.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                proven = found[-1].get('passes', {}).get('idx_ssa_proven', 0)
+                self.assertGreaterEqual(proven, least, '%s: %s' % (name, proven))
+            for name, fn in S3_UNPROVEN.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                proven = found[-1].get('passes', {}).get('idx_ssa_proven', 0)
+                self.assertEqual(proven, 0, '%s: %s' % (name, proven))
 
 
 if __name__ == '__main__':

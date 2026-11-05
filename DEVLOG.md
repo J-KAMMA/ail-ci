@@ -1,3 +1,43 @@
+## 2026-11-05 -- bce s3: stronger index proofs in the IR range pass (job-bces3-11051128)
+
+All of it behind `bce_enabled()` (`AIL_BCE=0` was checked to emit the same C as the base tree for
+echo_pack; the other branches are gated the same way):
+
+- (a) `AIL_BCE_EXPLAIN=path` appends one JSON line per access the final ranges run left checked
+  (`fn`, `op`, index fact with SSA names, `len` values, and which rule failed).
+- (b) sum rule: `index = a + b`, `b <= w + c` (up to two steps), `w = L - a` with the same SSA
+  `a` and `L` a length of the container proves `index <= L + c` when `c <= -1`.
+- (c) constant arm in joins: `if maxm > 131 { maxm = 131 }` keeps `maxm <= n - i` (and the `lb`
+  direction) when the refined constant arm proves the constant is below the other arm's bound.
+- (d) while induction: a carried value whose init is `a` and every back edge is `v + c`, `c >= 0`,
+  gets `lb {a: 0}` and `lo >= a.lo`, through nested `if`/`continue` and nested loop results.
+- (e) `list.get`/`list.set` are decided `nck` from a `list.len` of the same SSA value only when the
+  function contains no length-changing list op and no call whose effect summary may write a list
+  (or is unknown).
+
+Number: echo_pack/ail icount 6,158,284,617 -> 5,797,361,005 (ratio 0.94139, -5.86%, hand edit had
+5.9%); stripped binary 30,936 -> 30,936 (no growth); same stdout/exit. No other task's generated C
+changed (`bce_census.py check --base /tmp/base`: every other task `same C`, `tally_lang/python` and
+`tree_fold/python` same pre-existing failure, exit 0). The explain dump on echo_pack leaves only
+`d[p+m]` (`bytes.get`, lo 4, no ub) and the flush slice `span.get`; `d[i+m]` is gone.
+
+`test_ail_ir_s1.test_licm_hoists_spans_and_versions_the_loop` pinned the old LICM two-version
+shape for a read-only list; the range pass now proves all three accesses there, so the test is
+renamed `test_licm_hoists_spans_when_ranges_prove_the_loop` and asserts one loop, no versioning,
+`nck` tier and the same `nsw` index. The while-loop versioning case (`BYTES`) still versions.
+
+Checks: `par_check -j 2` over test_ail_bce, range_checks, ir_gridbounds, mixed_bounds, ir_s1,
+ir_s3, ir_rulex, safetynet, files, corpus_findings3 all green (bce 213s, ir_s1 37s after the
+edit). `AIL_BCE_AUDIT=1 run_task ... --smoke` on all ten tasks exit 0 (no exit 86).
+`difffuzz --run --start 0 --count 300 -j 2` was stopped at the 80-minute budget after 76 seeds:
+seed 12 differs on stdout in both builds, and the same seed differs the same way on the base tree
+(ValueError printing), so it is pre-existing; no audit exits. `codegen_diff` pins unchanged.
+Compile time (median of 5, `compile_phases.py`) echo_pack 0.18s head/base, tally_lang 0.17s both.
+New probes in `test_ail_bce.py`: `echo_like_ok`, `echo_like_offbyone`, `echo_cap_n`,
+`induction_zero_step`, `induction_unknown_step`, `induction_big_text`, `list_get_guard_ok`,
+`list_get_after_clear`, `list_get_append_fn`, `list_loop_read`; the proven ones are pinned through
+`AIL_IR_STATS` `idx_ssa_proven`, the neighbours must stay checked.
+
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 
 `test_ail_cpython_hybrid`, `test_ail_prog2` and `test_ail_prog21` went red when pyreachs3c
