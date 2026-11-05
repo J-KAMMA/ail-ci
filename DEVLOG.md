@@ -2,8 +2,10 @@
 
 Re-applied the accepted `relcheck1` change (`fcc4ccae33bf`..`job-relcheck1-11051335`).  The diff
 applied cleanly to the sources: `tools/release_check.py`, `AIL_CURRENT/test_ail_release_check.py`,
-`AIL_CURRENT/tests.d/test_ail_release_check.txt`, `lab/release/PREFLIGHT.md`, and the
-`.github/workflows/agent-worker.yml` hunk that drops `GH_MODELS_TOKEN` (this tree still had it).
+`AIL_CURRENT/tests.d/test_ail_release_check.txt` and `lab/release/PREFLIGHT.md`.  The fetched
+`.github/workflows/agent-worker.yml` hunk was skipped: it drops `GH_MODELS_TOKEN`, while
+`.agent/pipeline.sh` still gates `run_ghm` on `$RUNNER_TEMP/ghm.key`, so this tree keeps its
+GitHub Models key wiring (both sides' fixes).
 `AIL_CURRENT/manifest.d` was not applied by hand: `python3 tools/update_manifest.py` recomputed the
 new pins for the test module and its `tests.d` registration and `--check` passes.  `tools/diff_ids.py`
 is not present on this tree.  `test_ail_release_check`, `test_ail_safetynet`, `test_ail_files` and
