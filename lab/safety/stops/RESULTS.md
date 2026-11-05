@@ -1,6 +1,6 @@
 # Runtime-stop table: AIL vs CPython 3.12
 
-Base commit: `b679eda8` (`HEAD`); date: 2026-11-05. Each program prints values and then raises one uncaught error. Binaries run under `ulimit -v 1500000` and `timeout 20`.
+Base commit: `f4cdda42` (`HEAD`); date: 2026-11-05. Each program prints values and then raises one uncaught error. Binaries run under `ulimit -v 1500000` and `timeout 20`.
 
 | program | typed | default | general | hybrid |
 | --- | --- | --- | --- | --- |
