@@ -184,6 +184,13 @@ class _Flow(object):
         self.refs = {}            # nested def name -> [state at each load in this scope]
         self.captures = []        # (scope node, state where it is made)
         self.deleted = {n.id for n in own if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Del)}
+        # earliest `del` of each name: a sort-key lambda made before it reads the receiver value during
+        # the sort call itself, so that one shape still sees the name assigned
+        self.delete_lines = {}
+        for n in own:
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Del):
+                line = getattr(n, 'lineno', 0)
+                self.delete_lines[n.id] = min(line, self.delete_lines.get(n.id, line))
         # every load of a nested def's name inside another nested scope escapes the reference analysis
         self.escaped = set()
         for n in own:
@@ -463,6 +470,22 @@ def _irrefutable(p):
     return False
 
 
+def _sort_key_lambda(scope, parents):
+    """A lambda passed as the `key=` of sorted()/min()/max()/.sort(): the callee runs it during that
+    call, so a `del` of a name it reads afterwards does not make the read unbound."""
+    if not isinstance(scope, ast.Lambda):
+        return False
+    keyword = parents.get(id(scope))
+    if not (isinstance(keyword, ast.keyword) and keyword.arg == 'key'):
+        return False
+    call = parents.get(id(keyword))
+    if not isinstance(call, ast.Call):
+        return False
+    func = call.func
+    return ((isinstance(func, ast.Name) and func.id in ('sorted', 'min', 'max'))
+            or (isinstance(func, ast.Attribute) and func.attr == 'sort'))
+
+
 def analyze(fn):
     """The possibly-unassigned reads of function `fn` (an ast.FunctionDef), or None when it is left alone."""
     own = _own_nodes(fn)
@@ -470,6 +493,7 @@ def analyze(fn):
         return None
     flow = _Flow(fn)
     res = flow.res
+    parents = {id(child): node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
     res.script = fn.name in SCRIPT
     dynamic = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                   and n.func.id in ('locals', 'vars', 'eval', 'exec') for n in own)
@@ -479,7 +503,9 @@ def analyze(fn):
         if A is ALL:
             continue
         for name in _captured_loads(scope) & flow.tracked:
-            if name in A and name not in flow.deleted:
+            if name in A and (name not in flow.deleted
+                              or (_sort_key_lambda(scope, parents)
+                                  and getattr(scope, 'lineno', 0) < flow.delete_lines.get(name, 0))):
                 continue
             if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)) and name not in flow.deleted:
                 refs = flow.refs.get(scope.name, [])

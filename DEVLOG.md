@@ -265,6 +265,67 @@ The accepted pyreachs5c change (same-line key rebinding and key mutation in the 
 `pyfunc.py` hunks applied cleanly, the new `test_ail_pyreach_dictrows.py` / `tests.d` module were
 taken from the job branch, and the manifest was regenerated. `tools/diff_ids.py` is absent on this
 tree, so only `update_manifest.py` ran; `--check` passes.
+## 2026-11-05 -- pyreach s7 review fix 2: loop-carried guarded locals and deleted closures
+
+Review 1 found two regressions in the s7 tree.  Both are fixed and probed against CPython on the
+default and `AIL_UNIFIED_FORCE=1` builds.
+
+* `optlib.bind_guarded_locals` inserted the fallback `bw = <first value>` in front of the first
+  statement of the guard's block even when that assignment was nested inside a conditional.  In a
+  loop body it therefore reset a loop-carried `bw` on every iteration that took no new assignment
+  (`t14_stale_aux.py` printed `4 3` / `end 4 3` instead of `4 4` / `end 4 4`).  When the first
+  assignment is not itself that statement, the fallback now goes in front of the outermost enclosing
+  loop, so it runs once before the loop; only a name or literal default is hoisted there (otherwise
+  the refusal stays).  Nested loops, a reset inside the loop, a direct body assignment, a loop-variable
+  default and two companions all match CPython.
+* `unbound.py`'s line-aware capture rule let any nested def made before a `del` keep reading the name
+  (`t4_del_closure_call.py` printed the deleted `3`, exit 0).  A deleted captured name is now refused
+  by name (general path, CPython's NameError/exit 1), except the compiler's `key=xs.__getitem__`
+  lambda: it is the `key=` of `sorted`/`min`/`max`/`.sort`, which runs it during that call.  Closures
+  called before `del`, aliases called after it, and an uncalled closure match CPython; the sort-key
+  pattern stays typed and a `del` before the sort is refused.
+
+`test_ail_optional_locals` 9/9, `test_ail_unbound` 20/20, `test_ail_optional_structs` 7/7,
+`test_ail_safetynet` 5/5, `test_ail_files` 18 (1 skip), `test_ail_corpus_findings3` 2/2.
+`berth_sim` is typed again, 26/26 cases; the five codegen pins and all ten `.ail` program C files are
+byte-identical to `work`.
+
+## 2026-11-05 -- pyreach s7 review fix: whole-list uses of a `None` slot list refused by name
+
+The review found that the s7 lowering rewrote only a few slot shapes and left every other use of the
+list name seeing the lowered rows, so `for w in wait`, `a, b, c = wait`, `show(wait)`, `wait.append(..)`,
+`wait[:]`, `sort`/`clear`/`+=` and mutation during iteration silently turned `None` into `[]` or
+desynchronised the present-bit list (`IndexError` where CPython exits 0).  `optlib._check_col_name_uses`
+now runs on the transformed body and refuses the name by name unless the only remaining mentions are
+the literal assignment itself and the rewrites the transformer produced (a row subscript read, or an
+argument of the generated `_ail_none_row_*` / `_ail_none_repr_*` helper).  Those programs keep their
+old route (general path) and match CPython; the supported shapes (`is None`, `print(wait)`, present-row
+unpacking, guarded `heappush`/`heappop`/`len`/method receiver) still build typed.  Probes
+`/tmp/probes/p_*.py` (iteration, unpack, argument, append, sort, `+=`, slice, mutation during iteration,
+attribute call, present-row read, supported berth_sim-style loop) match CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds; every refused one exits 3 under `AIL_NO_GENERAL=1` with the
+"only read slot by slot" message.  `berth_sim` stays typed, 26/26 cases; the ten `.ail` C files and the
+codegen pins are byte-identical to `work`.
+
+## 2026-11-05 -- pyreach s7: None list slots and `or`/`and` narrowing (job-pyreachs7-11051129)
+
+`berth_sim` now builds typed from the unchanged `.py`: all 26 public+hidden cases match `reference.py`
+and the perf input is correct for the typed build.  Two changes in `optlib.py`:
+
+* `wait = [None, [], [], []]` becomes a list of rows plus a present bit per slot.  `is None` reads the
+  bit, `print(wait)` spells the absent slots as `None`, and unpacking present slots aliases the stored
+  rows.  An absent slot used as a list (`len`, `.append`, `heappush`) raises and exits 1 with CPython's
+  stdout; any other slot read (`x = wait[0]`) is refused by name so the general path keeps the `None`.
+* a local bound only in the blocks that give an Optional its value (`bw`) is bound once in front of
+  the earliest such block, so the possibly-unbound pass does not wrap every later read.  `or`/`and`
+  narrowing already existed in the base and is now covered by probes.
+
+Bridging the base export (which did not include s2): added the BLIST stepped-slice copy in
+`_stepped_slice_temp`/`_iter_plan`, heapq on a subscript receiver, `del name` lowering (unbound.py
+already tracks the deletion), and a line-aware capture check in unbound.py so `del keys` after
+`sorted(..., key=keys.__getitem__)` no longer refuses.  Probes in `/tmp/probes` (p1-p9) match CPython
+on the default and `AIL_UNIFIED_FORCE=1` builds; int64 overflow and `--exact-int` behave as before.
+`test_ail_optional_locals` (8 tests) passes.
 
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 

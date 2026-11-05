@@ -7506,6 +7506,17 @@ def _stepped_slice_temp(node, ctx):
     refuses it as before)."""
     if _is_slist_slice(node, ctx):
         return _slist_slice_c(node, ctx)
+    if _etype(node.value, ctx) == BLIST:
+        saved, ctx.pre = ctx.pre, []
+        try:
+            value = _blist_value(node, ctx)
+            result, logical = ctx.temp(BLIST)
+            ctx.blist.add(logical)
+            steps = [*ctx.pre, _obj_store(result, value, BLIST, ctx) + ';']
+        finally:
+            ctx.pre = saved
+        ctx.pre.extend(steps)
+        return result
     source = node.value
     if not (isinstance(source, ast.Name) and ctx.type_of(source.id) == LIST
             and all(source.id not in group for group in (
@@ -11996,6 +12007,9 @@ def _iter_plan(node, ctx):
         stepped = _stepped_slice_temp(node, ctx)
         if stepped is not None:
             pre.extend(ctx.pre); ctx.pre = []
+            if _etype(node.value, ctx) == BLIST:
+                ctx.parts.update(('BLIST', 'BYTES'))
+                return '0', '%s->n' % stepped, 'ail_blist_get(&%s, %s, @)' % (ctx.barena(), stepped), pre
             return '0', '%s.n' % stepped, '%s.p[@]' % stepped, pre
     if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
         # `sorted(xs)[1:-1]` -- the bounds move and nothing is copied, which is what iterating a
@@ -24243,6 +24257,12 @@ def _stmt_inner(node, ctx, ind):
             return _discard_value(node.value, ctx, pad)
         return _discard_value(node.value, ctx, pad)
     if isinstance(node, ast.Delete):
+        if all(isinstance(t, ast.Name) for t in node.targets):
+            # `del name`: unbound.py takes the name out of the definitely-assigned set, so a later
+            # read already raises UnboundLocalError; the C variable itself needs no release.
+            if any(t.id in ctx.modconsts for t in node.targets):
+                raise Unsupported('del of a module-level constant')
+            return ''
         for target in node.targets:
             if isinstance(target, ast.Subscript):
                 refuse_unrepresentable_delete_bounds(target)
@@ -36876,6 +36896,19 @@ class _ListLowering:
                     '%s(%s, ...) changes %r, a list parameter, which is read-only; keep the heap in a '
                     'local (`let h: list[int] = [];`) or a struct field (`heappush(self.h, x)`, '
                     '`heappush(s.h, x)`) and pass the struct') % (f, receiver.id, receiver.id))
+            computed = receiver
+            while isinstance(computed, ast.Attribute):
+                computed = computed.value
+            if isinstance(computed, ast.Subscript) and not isinstance(computed.slice, ast.Slice):
+                # `heappush(free[cls[b]], x)`: the receiver is a list of int lists indexed by a
+                # computed value (a nested-list element lowers to its `.v` field first).  The
+                # subscript must be evaluated once, as Python does, but binding the WHOLE receiver
+                # to a name would copy the inner list header and lose the sharing this heap needs.
+                # Bind only the index, then let the ordinary templates read and mutate the row's
+                # own list in place.
+                out, tag = self.build('$i = __I', call, I=computed.slice)
+                prelude.extend(out)
+                computed.slice = self.result(tag + 'i', call)
             if not self.pure(receiver):
                 return self.heapq_refuse(call, '%s(): the list must be a local name or a struct field '
                                               '(`h`, `self.h`, `s.h`), not a computed value' % f)
