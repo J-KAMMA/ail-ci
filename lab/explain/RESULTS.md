@@ -24,29 +24,29 @@ a whole function it stops early (`"incomplete": "a refusal without a position; f
 methods and nested functions the way the compiler mangles them (`Counter__snapshot`,
 `outer__inner__0`), not by their source name.
 
-| program | default build | blocker_count | names in the first blocker list | functions actually off the typed path | lists every one? |
-|---|---|---|---|---|---|
-| g01_dictbuild.py | general | 1 | counts | counts | yes |
-| g02_sorted.py | general | 1 | ordered | ordered | yes |
-| g03_generator.py | general | 1 | evens | evens | yes |
-| g04_mixed.py | general | 1 | label | label | yes |
-| g05_nonret.py | general | 1 | maybe_positive | maybe_positive | yes |
-| g06_slice.py | general | 1 | tail | tail | yes |
-| g07_reverse.py | general | 1 | flip | flip | yes |
-| g08_method_dict.py | general | 1 | Counter__snapshot | Counter.snapshot, main | no |
-| g09_nested.py | general | 1 | outer__inner__0 | outer | yes (as the nested def) |
-| g10_method_reverse.py | general | 2 | Bag__dump | Bag.dump | no (stops early) |
-| m01.py | general | 3 | label, ordering, show | ordering, label, show | yes |
-| m02.py | general | 2 | Stack__flip | Stack.flip, pick | no |
-| m03.py | general | 2 | evens, outer__inner__0 | outer, evens | yes |
-| m04.py | general | 1 | Store__as_dict | Store.as_dict, tail | no |
-| m05.py | general | 3 | evens, maybe, ordering | ordering, evens, maybe | yes |
-| m06.py | general | 2 | Box__dump | Box.dump, outer | no |
-| m07.py | general | 3 | Ledger__flip, counts | Ledger.flip, counts | no |
-| m08.py | general | 2 | Chain__grow, outer__inner__0 | Chain.grow, outer | yes |
-| m09.py | general | 3 | Vault__report, evens, outer__inner__0 | Vault.report, outer, evens | yes |
-| m10.py | general | 1 | Registry__view | Registry.view, maybe, ordered, show | no |
-| t01–t10 | typed | 0 | — | none | yes |
+| program | default build | note's `because …` (one reason only) | blocker_count | names in the first blocker list | functions actually off the typed path | lists every one? |
+|---|---|---|---|---|---|---|
+| g01_dictbuild.py | general | counts() typed dict return disagrees with its annotation | 1 | counts | counts | yes |
+| g02_sorted.py | general | returning Call as a list | 1 | ordered | ordered | yes |
+| g03_generator.py | general | yield: this language has no generators | 1 | evens | evens | yes |
+| g04_mixed.py | general | a str constant 'many' used where a number is needed | 1 | label | label | yes |
+| g05_nonret.py | general | the constant None | 1 | maybe_positive | maybe_positive | yes |
+| g06_slice.py | general | 'ys' is declared list | 1 | tail | tail | yes |
+| g07_reverse.py | general | xs.reverse(): 'xs' is a list parameter, which is read-only here | 1 | flip | flip | yes |
+| g08_method_dict.py | general | Counter__snapshot() typed dict return disagrees with its annotation | 1 | Counter__snapshot | Counter.snapshot, main | no |
+| g09_nested.py | general | a str constant 's' used where a number is needed | 1 | outer__inner__0 | outer | yes (as the nested def) |
+| g10_method_reverse.py | general | returning Call as a list | 2 | Bag__dump | Bag.dump | no (stops early) |
+| m01.py | general | returning Call as a list | 3 | label, ordering, show | ordering, label, show | yes |
+| m02.py | general | returning Call as a list | 2 | Stack__flip | Stack.flip, pick | no |
+| m03.py | general | a str constant 's' used where a number is needed | 2 | evens, outer__inner__0 | outer, evens | yes |
+| m04.py | general | Store__as_dict() typed dict return disagrees with its annotation | 1 | Store__as_dict | Store.as_dict, tail | no |
+| m05.py | general | returning Call as a list | 3 | evens, maybe, ordering | ordering, evens, maybe | yes |
+| m06.py | general | returning Call as a list | 2 | Box__dump | Box.dump, outer | no |
+| m07.py | general | counts() typed dict return disagrees with its annotation | 3 | Ledger__flip, counts | Ledger.flip, counts | no |
+| m08.py | general | a str constant 's' used where a number is needed | 2 | Chain__grow, outer__inner__0 | Chain.grow, outer | yes |
+| m09.py | general | a str constant 's' used where a number is needed | 3 | Vault__report, evens, outer__inner__0 | Vault.report, outer, evens | yes |
+| m10.py | general | Registry__view() typed dict return disagrees with its annotation | 1 | Registry__view | Registry.view, maybe, ordered, show | no |
+| t01–t10 | typed | — (no fallback note) | 0 | — | none | yes |
 
 Baseline for the number this moves: 0 of 117 functions reported individually (the command did
 not exist); the "names in the first blocker list" column names 29 of the 36 functions that are
