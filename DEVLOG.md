@@ -1,3 +1,19 @@
+## 2026-11-06 -- pyreach s6b: bytes dict/set keys on top of s5 (job-pyreachs6b-op1106)
+
+Re-applied `job-pyreachs6-11040853` (`81304ed7`: BTAB owned keys, int/str/bytes values, value-kind
+inference in `_mark_bytes_containers`) on integ after s5; the three `pyfunc.py` conflicts took the
+s6 side, which subsumes integ's `_is_byteish_split_struct` (both `IfExp` branches, plus `binvars`).
+Fixed the review's use-after-free: `del`/`pop`/`clear` freed a key buffer that a loop variable or
+another dict's value still viewed (`for k in d: keep = k; del d[k]` printed `ZZZ...`, CPython
+`BBB...`). BTAB now retires dropped buffers and frees them with the table; bytes and str VALUES are
+owned copies too (a stored `split()` view could be released by a loop checkpoint), and an
+overwritten value is retired, so `old = d[k]; d[k] = new` keeps `old`. Also `d.get(k, default)`
+of a bytes-keyed dict of str values was typed int64 (gcc error in the default build, a regression
+from base); `_btab_value_call` gives `.get`/`.pop` the dict's value kind.
+
+`ticket_audit` is still not typed: `--strict` stops at `e = events.get(ev)` (one-argument `get`,
+Optional values, s8); `events[ev] = [vc, cents, set()]` (a set inside a record list) is behind it.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this

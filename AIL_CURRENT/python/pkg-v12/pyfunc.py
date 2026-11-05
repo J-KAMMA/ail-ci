@@ -1549,6 +1549,16 @@ def _is_jd_result_call(node, ctx):
             and not node.args and not node.keywords and '_ail_jdc_result' not in ctx.funcs)
 
 
+def _btab_value_call(node, ctx):
+    """`d.get(k, ...)` / `d.pop(k, ...)` on a bytes-keyed DICT: its kind is the dict's value kind.
+    Only a dict gets a `bkeyvals` entry (from a `d[k] = v` store or a `get`/`setdefault` default),
+    and a set's `pop()` takes no argument, so no kind lookup is needed here."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ('get', 'pop') and node.args
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in ctx.bkeys and node.func.value.id in ctx.bkeyvals)
+
+
 def _etype(node, ctx):
     if _NULLABLE and isinstance(node, ast.Constant) and node.value is None:
         return NULLK
@@ -1667,6 +1677,8 @@ def _etype(node, ctx):
             and node.func.id in ('list', 'sorted') and len(node.args) == 1
             and isinstance(node.args[0], ast.Name) and node.args[0].id in ctx.bkeys):
         return BLIST
+    if _btab_value_call(node, ctx):
+        return ctx.bkeyvals.get(node.func.value.id, INT)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id in ('list', 'sorted') and node.args
             and _etype(node.args[0], ctx) == BLIST):
@@ -3771,7 +3783,8 @@ def _mark_bytes_containers(fn, byte_params=()):
                 elif (isinstance(it, ast.Call) and isinstance(it.func, ast.Attribute)
                         and it.func.attr == 'keys' and isinstance(it.func.value, ast.Name)):
                     source = it.func.value.id
-                if source in blist or source in bkeys:
+                if (source in blist or source in bkeys
+                        or _is_bytes_split_struct(it, byteish, blist, binvars)):
                     byteish.add(n.target.id); changed = True
             # `a, b = xs[1:]` / `a, b = xs` over a bytes list -- every unpacked name is bytes.
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
@@ -8318,6 +8331,8 @@ def _is_str_expr(node, ctx):
             and isinstance(node.value, ast.Name)
             and ctx.bkeyvals.get(node.value.id) == STR):
         return True
+    if _btab_value_call(node, ctx) and ctx.bkeyvals[node.func.value.id] == STR:
+        return True
     if _local_slist_pop(node, ctx) or _string_field_call(node, ctx) and node.func.attr == 'pop':
         return True
     if _exception_field(node, ctx):
@@ -11702,6 +11717,8 @@ def _is_bytes_expr(node, ctx):
     if (isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice)
             and isinstance(node.value, ast.Name)
             and ctx.bkeyvals.get(node.value.id) == BYTES):
+        return True
+    if _btab_value_call(node, ctx) and ctx.bkeyvals[node.func.value.id] == BYTES:
         return True
     if _is_fileprim_call(node, ctx, 'bytes'):
         return True

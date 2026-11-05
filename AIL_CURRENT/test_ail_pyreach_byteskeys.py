@@ -9,6 +9,9 @@ K5  A bytes-keyed dict holds bytes, str or int values, inferred or annotated, wi
 K6  A read assigned inside `if True:` (what `ail_syntax` emits for a binary `with open`) still
     makes `lines = data.split(...)` a bytes list, so `t = parts[0]` stays bytes -- the shape that
     used to be pre-bound int before this fix.
+K7  A view of a key or value the table has dropped (`del`, overwrite) still reads its old bytes:
+    the table retires such buffers and frees them with itself.
+K8  `d.get(k, default)` on a bytes-keyed dict of str values is a str (it was declared int64).
 """
 import os
 import shutil
@@ -134,6 +137,50 @@ def main():
 main()
 '''
 
+LIFETIME = '''import sys
+
+def main():
+    d = {}
+    d[b'A' * 32] = 1
+    d[b'B' * 32] = 2
+    keep = b''
+    for k in d:
+        if k[0:1] == b'B':
+            keep = k
+    del d[b'B' * 32]
+    e = {}
+    for k in d:
+        e[b'x'] = k
+    del d[b'A' * 32]
+    v = {}
+    v[b'k'] = b'first' * 8
+    old = v[b'k']
+    v[b'k'] = b'second' * 8
+    for i in range(30):
+        v[bytes([i])] = bytes([65 + i]) * 40
+    f = {}
+    for i in range(20):
+        f[bytes([90 - i]) * 32] = i
+    sys.stdout.write(keep.decode('latin-1') + "\\n")
+    sys.stdout.write(e[b'x'].decode('latin-1') + "\\n")
+    sys.stdout.write(old.decode() + " " + v[b'k'].decode() + " " + str(len(v)) + "\\n")
+main()
+'''
+
+STR_GET = '''import sys
+
+def main():
+    names = {}
+    for line in sys.stdin.buffer.read().split(b'\\n'):
+        p = line.split(b'|')
+        if len(p) == 2:
+            names[p[0]] = p[1].decode('latin-1')
+    for k in sorted(names):
+        sys.stdout.write(k.decode('latin-1') + " " + names[k] + " " + names.get(k, '?') + "\\n")
+    sys.stdout.write(names.get(b'none', 'dflt') + " " + str(len(names)) + "\\n")
+main()
+'''
+
 STDIN_IF_WRAP = '''import sys
 
 def main():
@@ -244,6 +291,18 @@ class PyreachBytesKeys(unittest.TestCase):
         expected = 'ABC XYZ\nABC Q\nhello world\n10 9 42\n1 False True\n'
         self._typed('values', VALUES, expected)
         self._both('values', VALUES, expected)
+
+    def test_views_outlive_del_and_overwrite(self):
+        # A key bound by iteration, a key stored as another dict's value, and a value read
+        # before it was overwritten must all survive the table dropping its own copy.
+        expected = 'B' * 32 + '\n' + 'A' * 32 + '\n' + 'first' * 8 + ' ' + 'second' * 8 + ' 31\n'
+        self._typed('lifetime', LIFETIME, expected)
+        self._both('lifetime', LIFETIME, expected)
+
+    def test_str_values_get_default(self):
+        stdin = b'b|bob\na|ann\n\xff|z\xe9\na|amy\n'
+        expected = 'a amy amy\nb bob bob\nÿ zé zé\ndflt 3\n'
+        self._both('str_get', STR_GET, expected, stdin)
 
     def test_stdin_read_inside_if_keeps_split_bytes(self):
         expected = 'b\na\n\x00x\n\u00ffy\n\n'
