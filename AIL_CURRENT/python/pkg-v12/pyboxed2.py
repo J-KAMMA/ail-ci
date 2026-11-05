@@ -13738,8 +13738,10 @@ def _build_once(source, report, allow_mix):
         finally:
             biggate.ON = True
     report['bigint'] = big
-    pieces = biggate.pieces_for(body) if big else set()
+    all_pieces = biggate.pieces_for(body)
+    pieces = all_pieces if big else set()
     body = biggate.resolve(body, big, pieces=pieces, all_pieces=int64)
+    body = biggate.resolve_idiv(body, 'idiv' in all_pieces)
     return biggate.strip(body)
 
 

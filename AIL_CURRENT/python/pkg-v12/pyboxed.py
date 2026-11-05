@@ -2934,7 +2934,12 @@ def build(source, report):
     filled with every function name plus '<module>' (this cut is whole-program: if the typed
     path refused ANY of it, everything here went through the runtime -- see the design doc)."""
     import cruntime
+    import biggate
     compiler = Compiler()
     body = compiler.compile(source)
     report['boxed'] = list(compiler.boxed_names)
-    return '#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n' + cruntime.emit(['OBJ']) + '\n' + body
+    # the exact int/int helper only for a program that reaches a `/` (the emitter's ail_obj_truediv)
+    needed = 'ail_obj_truediv' in body
+    runtime = cruntime.emit(['OBJ', 'IDIVEXACT'] if needed else ['OBJ'])
+    runtime = biggate.resolve_idiv(runtime, needed)
+    return '#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n' + runtime + '\n' + body
