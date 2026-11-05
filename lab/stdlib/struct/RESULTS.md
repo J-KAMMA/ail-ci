@@ -72,7 +72,12 @@ int64 cannot be represented, so a loud stop is the honest result (Appendix A rul
   so the module states the assumption in `_parse`.
 - Packing/unpacking a float raises `NotImplementedError`; exact IEEE-754 `e`/`f`/`d` conversion
   is not in the module, as the task allows.
-- `iter_unpack` validates the buffer at call time (as CPython does), then returns a generator.
+- `iter_unpack` validates the buffer at call time (as CPython does), then returns a generator
+  that reads each record from the live buffer, so a mutation between records is observed, as in
+  CPython.
+- A negative offset to `pack_into`/`unpack_from` counts from the end of the buffer; an offset
+  below `-len(buffer)` raises `offset N out of range for M-byte buffer`, and a record that does
+  not fit raises `no space to pack ...` / `not enough data to unpack ...`, matching CPython.
 - `n`/`N` are accepted only with the native prefix, matching CPython (`"=n"` is a bad char).
 - The module was also run under CPython with `sys.path` pointing at `AIL_CURRENT/stdlib`: its
   output equals the real `struct` for programs 01-13; 14 differs only because of the planned

@@ -15,7 +15,8 @@ file, so packing or unpacking one raises
 
 Values are AIL's int64. A `Q`/`N` value that does not fit int64 cannot be represented, so
 unpacking one stops loudly (as the compiler's own int arithmetic does); packing a value that
-fits is exact. `s`/`p`/`c` take bytes or bytearray; a `str` is refused with CPython's message.
+fits is exact. `s`/`p` take bytes or bytearray; `c` takes a bytes object of length 1. A `str` is
+refused with CPython's message.
 """
 
 __all__ = ["error", "pack", "unpack", "calcsize", "pack_into", "unpack_from", "iter_unpack",
@@ -54,16 +55,24 @@ def _is_bytes(value) -> bool:
 
 
 
+def _format_text(format) -> str:
+    """The format as a str. CPython accepts str or bytes; a bytearray is a TypeError."""
+    if isinstance(format, str):
+        return format
+    if isinstance(format, bytes):
+        return format.decode("ascii")
+    if isinstance(format, bytearray):
+        raise TypeError("unhashable type: 'bytearray'")
+    raise TypeError("Struct() argument 1 must be a str or bytes object, not %s"
+                    % type(format).__name__)
+
+
 def _parse(format) -> tuple:
     """(little, native, items, size, offsets) for a format string.
 
     `items` is a list of (code, count); `offsets` is the byte offset of each item and `size` the
     total size, with native alignment applied for `@` (the default)."""
-    fmt = format
-    if isinstance(fmt, bytes) or isinstance(fmt, bytearray):
-        fmt = bytes(fmt).decode("ascii")
-    if not isinstance(fmt, str):
-        raise error("format must be str or bytes")
+    fmt = _format_text(format)
     little = True   # the module targets little-endian hosts (x86-64 Linux)
     native = True
     i = 0
@@ -188,15 +197,18 @@ def _check_int(code: str, value, native: bool) -> int:
         lo, hi = -2147483648, 2147483647
     elif code == 'I':
         lo, hi = 0, 4294967295
-    elif code == 'q' or code == 'n' or (code == 'l' and native):
-        lo, hi = -9223372036854775808, 9223372036854775807
-    elif code == 'l':
+    elif code == 'L' and not native:
+        lo, hi = 0, 4294967295
+    elif code == 'l' and not native:
         lo, hi = -2147483648, 2147483647
-    else:
-        # Q, N, L native: the upper bound is beyond int64, so a non-negative int64 always fits
+    elif code == 'Q' or code == 'N' or (code == 'L' and native):
+        # The upper bound is beyond int64, so a non-negative int64 always fits
         if value < 0:
             raise error(_range_text(code, native))
         return value
+    else:
+        # q, n, and native l
+        lo, hi = -9223372036854775808, 9223372036854775807
     if value < lo or value > hi:
         raise error(_range_text(code, native))
     return value
@@ -239,7 +251,7 @@ def _pack_into_items(out: bytearray, items, offsets, native: bool, little: bool,
         elif code == 'c':
             for n in range(count):
                 v = values[index]
-                if not _is_bytes(v) or len(v) != 1:
+                if not isinstance(v, bytes) or len(v) != 1:
                     raise error("char format requires a bytes object of length 1")
                 out[pos + n] = v[0]
                 index = index + 1
@@ -345,34 +357,49 @@ def pack_into(format, buffer, offset, *values) -> None:
         raise TypeError("pack_into requires a writable buffer")
     parsed = _parse(format)
     size = parsed[3]
-    need = offset + size
-    if offset < 0 or len(buffer) < need:
+    used = offset
+    if offset < 0:
+        # A negative offset counts from the end of the buffer.
+        used = offset + len(buffer)
+        if used < 0:
+            raise error("offset %d out of range for %d-byte buffer" % (offset, len(buffer)))
+        if used + size > len(buffer):
+            raise error("no space to pack %d bytes at offset %d" % (size, offset))
+    elif len(buffer) < offset + size:
         raise error("pack_into requires a buffer of at least %d bytes for packing %d bytes at "
                     "offset %d (actual buffer size is %d)"
-                    % (need, size, offset, len(buffer)))
+                    % (offset + size, size, offset, len(buffer)))
     target = bytearray(size)
     _pack_into_items(target, parsed[2], parsed[4], parsed[1], parsed[0], values)
     for i in range(size):
-        buffer[offset + i] = target[i]
+        buffer[used + i] = target[i]
 
 
 def unpack_from(format, buffer, offset: int = 0) -> tuple:
     """unpack_from(fmt, buffer, offset=0) -> tuple: unpack starting at offset."""
     parsed = _parse(format)
     size = parsed[3]
-    need = offset + size
-    if offset < 0 or len(buffer) < need:
+    used = offset
+    if offset < 0:
+        # A negative offset counts from the end of the buffer.
+        used = offset + len(buffer)
+        if used < 0:
+            raise error("offset %d out of range for %d-byte buffer" % (offset, len(buffer)))
+        if used + size > len(buffer):
+            raise error("not enough data to unpack %d bytes at offset %d" % (size, offset))
+    elif len(buffer) < offset + size:
         raise error("unpack_from requires a buffer of at least %d bytes for unpacking %d bytes at "
                     "offset %d (actual buffer size is %d)"
-                    % (need, size, offset, len(buffer)))
-    data = bytes(buffer[offset:offset + size])
+                    % (offset + size, size, offset, len(buffer)))
+    data = bytes(buffer[used:used + size])
     return _unpack_items(data, parsed[2], parsed[4], parsed[1], parsed[0])
 
 
-def _iter_records(parsed, data, size):
+def _iter_records(parsed, buffer, size):
     i = 0
-    while i + size <= len(data):
-        yield _unpack_items(data[i:i + size], parsed[2], parsed[4], parsed[1], parsed[0])
+    while i + size <= len(buffer):
+        data = bytes(buffer[i:i + size])
+        yield _unpack_items(data, parsed[2], parsed[4], parsed[1], parsed[0])
         i = i + size
 
 
@@ -382,18 +409,20 @@ def iter_unpack(format, buffer):
     size = parsed[3]
     if size == 0:
         raise error("cannot iteratively unpack with a struct of length 0")
-    data = bytes(buffer)
-    if len(data) % size != 0:
+    if len(buffer) % size != 0:
         raise error("iterative unpacking requires a buffer of a multiple of %d bytes" % size)
-    return _iter_records(parsed, data, size)
+    return _iter_records(parsed, buffer, size)
 
 
 class Struct:
     """Struct(fmt): a format parsed once, with .format and .size and the pack/unpack methods."""
 
     def __init__(self, format):
-        parsed = _parse(format)
-        self.format = format
+        if isinstance(format, bytearray):
+            raise TypeError("Struct() argument 1 must be a str or bytes object, not bytearray")
+        text = _format_text(format)
+        parsed = _parse(text)
+        self.format = text
         self._little = parsed[0]
         self._native = parsed[1]
         self._items = parsed[2]
@@ -414,23 +443,35 @@ class Struct:
     def pack_into(self, buffer, offset, *values) -> None:
         if not isinstance(buffer, bytearray):
             raise TypeError("pack_into requires a writable buffer")
-        need = offset + self.size
-        if offset < 0 or len(buffer) < need:
+        used = offset
+        if offset < 0:
+            used = offset + len(buffer)
+            if used < 0:
+                raise error("offset %d out of range for %d-byte buffer" % (offset, len(buffer)))
+            if used + self.size > len(buffer):
+                raise error("no space to pack %d bytes at offset %d" % (self.size, offset))
+        elif len(buffer) < offset + self.size:
             raise error("pack_into requires a buffer of at least %d bytes for packing %d bytes at "
                         "offset %d (actual buffer size is %d)"
-                        % (need, self.size, offset, len(buffer)))
+                        % (offset + self.size, self.size, offset, len(buffer)))
         target = bytearray(self.size)
         _pack_into_items(target, self._items, self._offsets, self._native, self._little, values)
         for i in range(self.size):
-            buffer[offset + i] = target[i]
+            buffer[used + i] = target[i]
 
     def unpack_from(self, buffer, offset: int = 0) -> tuple:
-        need = offset + self.size
-        if offset < 0 or len(buffer) < need:
+        used = offset
+        if offset < 0:
+            used = offset + len(buffer)
+            if used < 0:
+                raise error("offset %d out of range for %d-byte buffer" % (offset, len(buffer)))
+            if used + self.size > len(buffer):
+                raise error("not enough data to unpack %d bytes at offset %d" % (self.size, offset))
+        elif len(buffer) < offset + self.size:
             raise error("unpack_from requires a buffer of at least %d bytes for unpacking %d bytes "
                         "at offset %d (actual buffer size is %d)"
-                        % (need, self.size, offset, len(buffer)))
-        data = bytes(buffer[offset:offset + self.size])
+                        % (offset + self.size, self.size, offset, len(buffer)))
+        data = bytes(buffer[used:used + self.size])
         return _unpack_items(data, self._items, self._offsets, self._native, self._little)
 
     def iter_unpack(self, buffer):
