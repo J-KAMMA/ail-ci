@@ -25,9 +25,12 @@ def beta():
 queue = sched.scheduler(clock_time, clock_delay)
 queue.enterabs(2.5, 2, beta)
 queue.enterabs(1, 1, alpha, argument=(7,))
-for event in queue.queue:
-    label = "alpha" if event[4] else "beta"
-    print(event[0], event[1], label)
+snapshot = queue.queue
+queue.enterabs(3, 3, alpha, argument=(9,))
+print("snapshot", len(snapshot), "live", len(queue.queue))
+for event in snapshot:
+    label = "alpha" if event.argument else "beta"
+    print(event.time, event.priority, label)
 print("empty", queue.empty())
 queue.run()
 print("empty", queue.empty())
