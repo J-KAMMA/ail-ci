@@ -1,0 +1,6 @@
+echo one
+
+bogus thing
+
+echo
+EOF
