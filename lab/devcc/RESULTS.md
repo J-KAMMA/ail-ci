@@ -206,11 +206,17 @@ report makes about c2m.
 
 | probe | what it checks | result |
 | --- | --- | --- |
-| `/tmp/probes/c2m_limits.py` (17 checks) | all four run modes exist and agree; `-o` alone and `-c` write binary MIR (`MIR\xe2`), not ELF; `_Generic` alone is accepted but GNU `typeof`/`__typeof__` is not implemented (even `__typeof__(x)` fails); `__int128` is rejected; `_Thread_local` and `__attribute__((always_inline))` and `_Pragma` are accepted; `__asm__` / `__builtin_unreachable` fail as unresolved imports; unsized compound literal from runtime values is rejected while the unsized declaration is accepted; `-lm` is rejected but `sqrt` resolves from `libm.so.6` | 15/15 |
+| `/tmp/probes/c2m_limits.py` (17 checks) | all four run modes exist and agree; `-o` alone and `-c` write binary MIR (`MIR\xe2`), not ELF; `_Generic` alone is accepted but GNU `typeof`/`__typeof__` is not implemented (even `__typeof__(x)` fails); `__int128` is rejected; `_Thread_local` and `__attribute__((always_inline))` and `_Pragma` are accepted; `__asm__` / `__builtin_unreachable` fail as unresolved imports; unsized compound literal from runtime values is rejected while the unsized declaration is accepted; `-lm` is rejected but `sqrt` resolves from `libm.so.6` | 17/17 |
 | `PIPE_CC` logging shim | the exact argv `$PIPE_CC` receives (all gcc-only flags) and the CLI exit for tcc and c2m | argv as quoted above; both exit 3, no artifact |
 | `c2m -O2 -o OUT prog.c` on a valid C file | a c2m "success" is binary MIR, not an executable | exit 0, magic `MIR\xe2` |
 | corpus-selection replay | the 45 candidates tried and the 5 refusals match tccprobe1 | identical list and refusals |
 | gcc determinism | 50/50 gcc `-O2` output sets identical across 3 runs | 50/50 |
+
+Required modules on this tree:
+`python3 -B -m unittest test_ail_safetynet test_ail_files test_ail_corpus_findings3` →
+**25 tests, OK (skipped=1)**. Under `ulimit -v 1500000` one general-path case (`S4_generators_gc`)
+stopped after its first line; the same case builds and matches CPython exactly (stdout and exit 0)
+without the cap, so that is the memory cap, not a regression.
 
 ## Appendix: devcc2 report (previously the content of this file)
 
