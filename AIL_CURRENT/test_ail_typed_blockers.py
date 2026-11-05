@@ -471,10 +471,13 @@ class EnumerateStartTests(Base):
     def test_enumerate_counts_from_its_start(self):
         self.typed(ENUMERATE, stdin='7 8 9')
 
-    def test_a_start_inside_a_fold_is_refused_by_name(self):
+    def test_a_start_inside_a_fold_is_typed(self):
+        # prog17: `_inline_pair_fold` types both pair bindings and adds the start with `ck_add`,
+        # so this shape is built on the typed path instead of refused by name.
         source = ('def main() -> None:\n    xs = [5, 6, 7]\n'
                   '    print(sum(i * v for i, v in enumerate(xs, start=1)))\n\nmain()\n')
-        self.both(source, 'enumerate() with a start')
+        self.same(source, typed=True)
+        self.same(source)
 
 
 GC = '''

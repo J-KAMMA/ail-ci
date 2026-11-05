@@ -18787,20 +18787,25 @@ def _pair_plan(src, ctx):
             # No iterable at all, or an argument list the boxed/general path rejects: refuse it by
             # the same name instead of indexing the argument list.
             raise Unsupported('enumerate() with other than (iterable[, start])')
-        if len(src.args) != 1 or src.keywords:
-            # `enumerate(xs, start=1)` inside a comprehension or a fold: refused by name (the
-            # index counted from 0 here, whatever the start said)
-            raise Unsupported('enumerate() with a start inside a comprehension or a fold; write '
-                              'the loop out, or add the start to the index')
+        start = _enumerate_start(src)
         lo, n, elem, pre = _iter_plan(src.args[0], ctx)
-        # `enumerate`'s index counts from zero -- always, regardless of where the underlying
-        # sequence itself starts. For most shapes (an array, a list, a range with no start) `lo` is
-        # already the literal '0' and the raw loop counter (`@`) already *is* the zero-based index.
-        # But `range(3, 8)`, a slice `xs[2:]`, or any other shape whose own first position is not
-        # zero, hands back a loop counter that runs from `lo`, not from 0 -- so the index has to be
-        # measured back from that start, not read off the counter directly.
-        kexpr = '@' if lo == '0' else '(@ - (%s))' % lo
-        return lo, n, kexpr, elem, pre
+        # `enumerate`'s index counts from zero, or from the explicit start, regardless of where the
+        # underlying sequence itself starts. For most shapes (an array, a list, a range with no
+        # start) `lo` is already the literal '0' and the raw loop counter (`@`) already *is* the
+        # zero-based position. But `range(3, 8)`, a slice `xs[2:]`, or any other shape whose own
+        # first position is not zero, hands back a loop counter that runs from `lo`, not from 0 --
+        # so the position has to be measured back from that start first.
+        position = '@' if lo == '0' else '(@ - (%s))' % lo
+        if start is None:
+            return lo, n, position, elem, pre
+        if _etype(start, ctx) != INT or _is_handle_producing(start, ctx):
+            raise Unsupported('enumerate() needs an int start')
+        # CPython evaluates the iterable before the start; `pre` already holds the iterable's
+        # one-time setup, so the assignment is appended after it.
+        first, _ = ctx.temp(INT)
+        pre = list(pre) + ['%s = %s;' % (first, _expr(start, ctx))]
+        _use(ctx.need, 'ck_add')
+        return lo, n, 'ck_add(%s, %s)' % (first, position), elem, pre
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute) \
             and isinstance(src.func.value, ast.Name) and src.func.attr == 'items' \
             and ctx.type_of(src.func.value.id) == DICT:
@@ -18917,9 +18922,15 @@ def _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager=None):
     ctx.tmp += 1
     tag = ctx.tmp
     acc, idx, seen = '_a%d' % tag, '_i%d' % tag, '_s%d' % tag
-    for nm in pair:
-        ctx.bind(nm, INT)
+    key_kind = _pair_key_kind(src, ctx)
+    value_kind = _pair_value_kind(src, ctx)
+    for nm, kind in zip(pair, (key_kind, value_kind)):
+        ctx.bind(nm, kind)
     ck, cv = ctx.cname(pair[0]), ctx.cname(pair[1])
+    key_ctype = ('ail_str' if key_kind == STR else 'double' if key_kind == FLT
+                 else 'ail_bytes' if key_kind == BYTES else 'int64_t')
+    value_ctype = ('ail_str' if value_kind == STR else 'double' if value_kind == FLT
+                   else 'ail_bytes' if value_kind == BYTES else 'int64_t')
     ct = 'double' if _etype(elt_node, ctx) == FLT else 'int64_t'
 
     if f in FOLD_INIT:
@@ -18933,8 +18944,8 @@ def _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager=None):
     if pre:
         head = '%s %s' % (' '.join(pre), head)
     body = ['for (int64_t %s = %s; %s < %s; %s++) {' % (idx, lo, idx, n, idx),
-            'int64_t %s = %s;' % (ck, kexpr.replace('@', idx)),
-            'int64_t %s = %s;' % (cv, vexpr.replace('@', idx))]
+            '%s %s = %s;' % (key_ctype, ck, kexpr.replace('@', idx)),
+            '%s %s = %s;' % (value_ctype, cv, vexpr.replace('@', idx))]
     for c in conds:
         cc = _cond(c, ctx)
         body.extend(ctx.pre); ctx.pre = []
@@ -20393,6 +20404,86 @@ def _listcomp_pair_into_temp(node, ctx):
     lines.append('%s_push(&%s, %s);' % (helper, c, val))
     lines.append('}')
     ctx.pre.append('%s_clear(&%s);' % (helper, c))
+    ctx.pre.append('{ %s }' % ' '.join(lines))
+    return c
+
+
+def _listcomp_srows_into_temp(node, ctx, fkinds):
+    """`[(i, w) for i, w in enumerate(words, start=1)]` into a private `ail_srows` temp.
+
+    The str-field row counterpart of `_listcomp_pair_into_temp`: `_pair_plan` supplies the pair
+    bindings (including an `enumerate` start), and each element tuple is built as one `ail_srow`
+    compound literal with the field kinds the destination annotation settled, then pushed. Only a
+    pair target is built; a single-name target over a row list would need a row handle, which this
+    lowering does not expose.
+    """
+    if len(node.generators) != 1 or node.generators[0].is_async:
+        raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
+    g = node.generators[0]
+    if not (isinstance(g.target, ast.Tuple) and len(g.target.elts) == 2
+            and all(isinstance(e, ast.Name) for e in g.target.elts)):
+        raise Unsupported('a str-field records comprehension needs an (i, v) target')
+    if not isinstance(node.elt, ast.Tuple) or len(node.elt.elts) != len(fkinds):
+        raise Unsupported('a %d-field str-field records list requires %d-tuple elements'
+                          % (len(fkinds), len(fkinds)))
+    key, value = (e.id for e in g.target.elts)
+    lo, n, kexpr, vexpr, pre = _pair_plan(g.iter, ctx)
+    key_kind = _pair_key_kind(g.iter, ctx)
+    value_kind = _pair_value_kind(g.iter, ctx)
+    ctx.parts.add('SROW')
+    c, _ = ctx.temp(SROWS)
+    old_type, old_kind = ctx.types.get(key), ctx.kind.get(key)
+    old_vtype, old_vkind = ctx.types.get(value), ctx.kind.get(value)
+    old_cnames = getattr(ctx, 'comprehension_cnames', {})
+    ctx.tmp += 1
+    ck, cv = '_comp_key%d' % ctx.tmp, '_comp_value%d' % ctx.tmp
+    ctx.comprehension_cnames = {**old_cnames, key: ck, value: cv}
+    for nm in (key, value):
+        ctx.kind.pop(nm, None)
+        ctx.types[nm] = key_kind if nm == key else value_kind
+    try:
+        head = 'for (int64_t _i = %s; _i < %s; _i++) {' % (lo, n)
+        if pre:
+            head = '%s %s' % (' '.join(pre), head)
+        key_ctype = ('ail_str' if key_kind == STR else 'double' if key_kind == FLT
+                     else 'ail_bytes' if key_kind == BYTES else 'int64_t')
+        value_ctype = ('ail_str' if value_kind == STR else 'double' if value_kind == FLT
+                       else 'ail_bytes' if value_kind == BYTES else 'int64_t')
+        lines = [head,
+                 '%s %s = %s;' % (key_ctype, ck, kexpr.replace('@', '_i')),
+                 '%s %s = %s;' % (value_ctype, cv, vexpr.replace('@', '_i'))]
+        for cond in g.ifs:
+            cc = _cond(cond, ctx)
+            lines.extend(ctx.pre); ctx.pre = []
+            lines.append('if (!(%s)) continue;' % cc)
+        field_c = []
+        for element, fk in zip(node.elt.elts, fkinds):
+            if fk == STR:
+                if not _is_str_expr(element, ctx):
+                    raise Unsupported('a str-field records list requires a str in every str field')
+                field_c.append('.s = %s' % _str_value(element, ctx))
+            elif fk == FLT:
+                field_c.append('.d = (double)(%s)' % _expr(element, ctx))
+            else:
+                if _etype(element, ctx) == FLT:
+                    raise Unsupported('a str-field records list requires matching tuple fields')
+                field_c.append('.i = (int64_t)(%s)' % _expr(element, ctx))
+        lit = '(ail_srow){.v = {%s}}' % ', '.join('{%s}' % v for v in field_c)
+        lines.append('ail_srows_push(&%s, %s);' % (c, lit))
+        lines.append('}')
+    finally:
+        ctx.comprehension_cnames = old_cnames
+        ctx.types.pop(key, None); ctx.kind.pop(key, None)
+        ctx.types.pop(value, None); ctx.kind.pop(value, None)
+        if old_type is not None:
+            ctx.types[key] = old_type
+        if old_kind is not None:
+            ctx.kind[key] = old_kind
+        if old_vtype is not None:
+            ctx.types[value] = old_vtype
+        if old_vkind is not None:
+            ctx.kind[value] = old_vkind
+    ctx.pre.append('ail_srows_clear(&%s);' % c)
     ctx.pre.append('{ %s }' % ' '.join(lines))
     return c
 
@@ -23222,6 +23313,14 @@ def _stmt_inner(node, ctx, ind):
                 return pre + clear + ''.join('%s%s(&%s, %s);\n' % (pad, push, c, val)
                                              for val in vals)
             if isinstance(v, ast.ListComp):
+                if kind == SROWS:
+                    # `rows: list[tuple[int, str]] = [(i, w) for i, w in ...]` -- one `ail_srow`
+                    # per element, field by field, through the same transfer the other
+                    # comprehensions below use.
+                    src = _listcomp_srows_into_temp(v, ctx, ctx.srowtypes[t.id])
+                    pre = _flush(ctx, pad)
+                    return pre + ('%s{ ail_srows _previous = %s; %s = %s; %s = _previous;'
+                                  ' ail_srows_clear(&%s); }\n' % (pad, c, c, src, src, src))
                 if kind != _listcomp_kind(v, ctx):
                     raise Unsupported('a comprehension changes the destination list element kind')
                 src = _listcomp_into_temp(v, ctx)
@@ -28572,6 +28671,46 @@ def _for_inner_impl(node, ctx, ind):
             if not isinstance(node.target, ast.Name):
                 raise Unsupported('a tuple target over reversed()')
             arg = it.args[0]
+            if _is_str_expr(arg, ctx):
+                # `for c in reversed(s):` -- the str counterpart of the index walk just below,
+                # mirroring the plain `for c in s:` door. `ail_str_prev_unit` already steps back
+                # over UTF-8 continuation bytes, so each `c` is the same one-code-point view
+                # `ail_str_index` gives in the forward walk. The source is captured once, before
+                # the loop, because Python evaluates `reversed(s)`'s argument exactly once.
+                sval = _str_value(arg, ctx)
+                ctx.parts.add('STR')
+                stmp, _ = ctx.temp(STR)
+                pre = _flush(ctx, pad)
+                pre += '%s%s = %s;\n' % (pad, stmp, sval)
+                v = ctx.declare(node.target.id, STR)
+                if ctx.rebound is not None and node.target.id not in ctx.rebound:
+                    ctx.onecp.add(node.target.id)
+                byte0 = '%s_b0' % idx
+                pre += '%s{\n%s    const uint8_t *%s_p = %s.p; const int64_t %s_n = %s.n;\n' % (
+                    pad, pad, idx, stmp, idx, stmp)
+                head = ('%s    for (int64_t %s_k = %s_n, %s_w = 0; %s_k > 0; %s_k -= %s_w) {\n'
+                        '%s        const int64_t %s_s = ail_str_prev_unit(%s, %s_k);\n'
+                        '%s        %s_w = %s_k - %s_s;\n'
+                        '%s        const uint8_t %s = %s_p[%s_s];\n'
+                        '%s        %s = (ail_str){%s_p + %s_s, %s_w, %s < 0x80};\n') % (
+                    pad, idx, idx, idx, idx, idx, idx,
+                    pad, idx, stmp, idx,
+                    pad, idx, idx, idx,
+                    pad, byte0, idx, idx,
+                    pad, v, idx, idx, idx, byte0)
+                _saved_b0 = dict(getattr(ctx, 'byte0_names', {}))
+                if node.target.id in ctx.onecp:
+                    ctx.byte0_names = dict(_saved_b0, **{node.target.id: byte0})
+                _saved = set(ctx.len1_names)
+                ctx.len1_names.add(node.target.id)
+                for _s in node.body:
+                    for _n in ast.walk(_s):
+                        if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
+                            ctx.len1_names.add(_n.id)
+                _body = _loop_stmts(node.body, ctx, ind + 2)
+                ctx.len1_names = _saved
+                ctx.byte0_names = _saved_b0
+                return pre + head + _body + pad + '    }' + chr(10) + pad + '}' + chr(10)
             if _is_slist_expr(arg, ctx):
                 c = _slist_arg_c(arg, ctx)
                 ctx.parts.add('SLIST')
@@ -29115,6 +29254,11 @@ def _check_local_assignment(name, value, ctx):
                                           'tuple fields')
             return
         if isinstance(source, ast.Name) and source.id in ctx.srowtypes:
+            return
+        if isinstance(source, ast.ListComp):
+            # A comprehension's per-field shapes are checked where it is lowered (the iteration
+            # bindings it reads do not exist yet in this pre-pass); the lowering pushes one
+            # `ail_srow` per element, field by field.
             return
         raise Unsupported('a declared str-field records list requires matching rows')
     fields = getattr(ctx, 'local_records', {}).get(name)
@@ -29913,6 +30057,16 @@ def _promote_floats(fn, ctx):
                          or ctx.kind.get(n.iter.value.id) == SLIST)):
                 # `for p in parts[1:]:` -- AIL_TASK_p3idioms_20260916.md idiom 4, the sliced
                 # counterpart of the bound-SLIST-name branch above (same reason, same fix).
+                ctx.bind(n.target.id, STR)
+                continue
+            if (isinstance(n.iter, ast.Call) and isinstance(n.iter.func, ast.Name)
+                    and n.iter.func.id == 'reversed' and n.iter.func.id not in ctx.funcs
+                    and n.iter.func.id not in ctx.classes
+                    and len(n.iter.args) == 1 and not n.iter.keywords
+                    and _is_str_expr(n.iter.args[0], ctx)):
+                # `for c in reversed(s):` -- the backwards counterpart of the plain str loop just
+                # below: `_for`'s str branch declares the target STR, so this pass must not claim
+                # it INT first. Same reason and same setdefault discipline as those branches.
                 ctx.bind(n.target.id, STR)
                 continue
             if _is_str_expr(n.iter, ctx):
