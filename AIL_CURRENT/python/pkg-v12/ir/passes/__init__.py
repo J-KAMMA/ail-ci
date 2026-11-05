@@ -13,7 +13,7 @@ import os
 
 from .. import effects as E
 from .. import ir as I
-from . import mem2reg, simplify, ranges, licm, window, specsel
+from . import mem2reg, simplify, ranges, licm, window, specsel, groupcse
 
 ALL = ('mem2reg', 'simplify', 'ranges', 'licm', 'specsel', 'window')
 
@@ -67,6 +67,11 @@ def optimize(fn, program, facts=None, check=None):
     if 'ranges' in on:
         stats.update(ranges.run(fn, facts))
         after()
+        if bce_enabled() and (facts.get('fields') or {}).get('groups'):
+            rewritten = groupcse.run(fn, facts)
+            if rewritten:
+                stats['groupcse'] = rewritten
+            after()
     if 'licm' in on and 'mem2reg' in on:
         stats.update(licm.run(fn, facts.get('summaries')))
         after()

@@ -246,6 +246,9 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         if op == 'ba.set':
             return Effects(writes=[loc], raises=[INDEX, VALUE] if ins.attrs.get('mode', 'ck') == 'ck' else [])
         return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % _root(ins.operands[0], fn, defs)], raises=[VALUE])
+    if op == 'idx.norm':
+        # bce s5: normalising an index raises exactly the access's own IndexError
+        return Effects(raises=[INDEX])
     if op in ('span.of', 'span.len'):
         return NONE if op == 'span.len' else Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
     if op in ('span.get', 'span.set'):

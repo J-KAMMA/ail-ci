@@ -28,6 +28,49 @@ import ail2py  # noqa: E402
 
 BOX = "struct Box { v: list[int]; n: int; }\n"
 
+GROUP_P = r"""
+struct P { n_op: list[int]; n_a: list[int]; n_b: list[int]; has: list[int]; val: list[int]; }
+fn add(p: P, op: int, a: int, b: int, h: int, v: int) {
+    p.n_op.append(op); p.n_a.append(a); p.n_b.append(b); p.has.append(h); p.val.append(v);
+}
+fn ev(p: P, i: int) -> int {
+    let op = p.n_op[i];
+    let a = p.n_a[i];
+    if op == 100 { return a; }
+    if op == 101 { if p.has[a] == 0 { raise ValueError("r"); } return p.val[a]; }
+    if op == 0 { return a; }
+    let l = ev(p, a);
+    let r = ev(p, p.n_b[i]);
+    return l + r;
+}
+"""
+
+GROUP_H = r"""
+struct H { has: list[int]; val: list[int]; }
+fn pick(h: H, a: int) -> int {
+    if h.has[a] == 0 { raise ValueError("r"); }
+    return h.val[a];
+}
+fn pick2(h: H, a: int) -> int {
+    let v = h.val[a];
+    if h.has[a] == 0 { raise ValueError("r"); }
+    return v;
+}
+"""
+
+GROUP_S = r"""
+struct S { s_kind: list[int]; s_j: list[int]; }
+fn store_after(s: S, t: int, v: int) -> int {
+    let k = s.s_kind[t];
+    s.s_j[t] = v;
+    return k + s.s_j[t];
+}
+fn store_first(s: S, t: int, v: int) -> int {
+    s.s_j[t] = v;
+    return s.s_kind[t];
+}
+"""
+
 PROBES = [
     ('range_read_store', r"""
 fn main() {
@@ -429,6 +472,121 @@ fn main() {
     print(total(b));
 }
 """),
+    ('group_ev_ok', GROUP_P + r"""
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 0, 0, 1, 7);
+    add(p, 0, 1, 2, 1, 0);
+    add(p, 100, 0, 0, 1, 30);
+    print(ev(p, 1));
+    print(ev(p, -1));
+    print(ev(p, -len(p.n_op)));
+}
+"""),
+    ('group_ev_len_raises', GROUP_P + r"""
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 0, 0, 1, 7);
+    print(ev(p, len(p.n_op)));
+}
+"""),
+    ('group_ev_neg_len_minus_one_raises', GROUP_P + r"""
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 0, 0, 1, 7);
+    print(ev(p, -len(p.n_op) - 1));
+}
+"""),
+    ('group_ev_big_index_raises', GROUP_P + r"""
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 0, 0, 1, 7);
+    print(ev(p, 9223372036854775807));
+}
+"""),
+    ('group_ev_big_negative_raises', GROUP_P + r"""
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 0, 0, 1, 7);
+    print(ev(p, -9223372036854775807 - 1));
+}
+"""),
+    ('group_ev_grow_between', GROUP_P + r"""
+fn evg(p: P, i: int, d: int) -> int {
+    let op = p.n_op[i];
+    let a = p.n_a[i];
+    if d > 0 {
+        p.n_op.append(0); p.n_a.append(0); p.n_b.append(7); p.has.append(0); p.val.append(0);
+    }
+    let r = p.n_b[i];
+    return a * 10 + r;
+}
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 0, 0, 1, 7);
+    add(p, 0, 1, 2, 1, 0);
+    print(evg(p, 0, 1));
+    print(evg(p, -1, 0));
+    print(len(p.n_op));
+}
+"""),
+    ('group_ev_pop_between', GROUP_P + r"""
+fn evp(p: P, i: int, d: int) -> int {
+    let op = p.n_op[i];
+    let a = p.n_a[i];
+    if d > 0 {
+        p.n_op.pop(); p.n_a.pop(); p.n_b.pop(); p.has.pop(); p.val.pop();
+    }
+    let r = p.n_b[i];
+    return a + r;
+}
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 0, 1, 2, 1, 0);
+    print(evp(p, -1, 1));
+}
+"""),
+    ('group_has_val', GROUP_H + r"""
+fn main() {
+    let h = H([], []);
+    h.has.append(1); h.val.append(11);
+    h.has.append(0); h.val.append(22);
+    print(pick(h, 0));
+    print(pick(h, -1));
+    try { print(pick(h, 1)); } except ValueError as e { print(99); }
+}
+"""),
+    ('group_val_has', GROUP_H + r"""
+fn main() {
+    let h = H([], []);
+    h.has.append(1); h.val.append(11);
+    h.has.append(0); h.val.append(22);
+    print(pick2(h, 0));
+    print(pick2(h, -2));
+    try { print(pick2(h, 1)); } except ValueError as e { print(99); }
+}
+"""),
+    ('group_two_objects', r"""
+struct Q { m: list[int]; n: list[int]; }
+fn f(p: Q, q: Q, i: int) -> int {
+    let a = p.m[i];
+    return a * 10 + q.n[i];
+}
+fn main() {
+    let p = Q([], []); p.m.append(5); p.n.append(6);
+    let q = Q([], []); q.m.append(7); q.n.append(8); q.m.append(9); q.n.append(10);
+    print(f(p, q, -1));
+}
+"""),
+    ('group_store_after_read', GROUP_S + r"""
+fn main() {
+    let s = S([], []);
+    s.s_kind.append(1); s.s_j.append(2);
+    s.s_kind.append(3); s.s_j.append(4);
+    print(store_after(s, 1, 9));
+    print(store_first(s, 0, 5));
+}
+"""),
 ]
 
 DEPTH_ORACLE = {
@@ -599,6 +757,58 @@ class BceProbeTests(unittest.TestCase):
                 self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
                 proven = found[-1].get('passes', {}).get('idx_ssa_proven', 0)
                 self.assertEqual(proven, 0, '%s: %s' % (name, proven))
+
+
+GROUP_STORE_FIRST_RAISES = GROUP_S + r"""
+fn main() {
+    let s = S([], []);
+    s.s_kind.append(1); s.s_j.append(2);
+    print(store_first(s, len(s.s_j), 9));
+}
+"""
+
+GROUP_INVALIDATED = GROUP_P + r"""
+fn extra(p: P) { p.n_a.append(0); }
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 0, 0, 1, 7);
+    print(ev(p, 0));
+    extra(p);
+    print(ev(p, 0));
+}
+"""
+
+
+@unittest.skipUnless(HAVE_CC, 'no C compiler')
+class GroupCseTests(unittest.TestCase):
+    def test_group_rewrite_visible_in_stats(self):
+        with tempfile.TemporaryDirectory(prefix='ail-groupcse-') as directory:
+            entries = _ir_stats(directory, 'group_ev_stats', dict(PROBES)['group_ev_ok'])
+            found = [e for e in entries if e.get('fn') == 'ev']
+            self.assertTrue(found, 'no IR stats for ev')
+            self.assertGreaterEqual(found[-1].get('passes', {}).get('groupcse', 0), 2,
+                                    found[-1].get('passes'))
+
+    def test_invalidated_group_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory(prefix='ail-groupcse-') as directory:
+            entries = _ir_stats(directory, 'group_invalidated_stats', GROUP_INVALIDATED)
+            found = [e for e in entries if e.get('fn') == 'ev']
+            self.assertTrue(found, 'no IR stats for ev')
+            self.assertFalse(found[-1].get('passes', {}).get('groupcse'),
+                             found[-1].get('passes'))
+
+    def test_store_first_keeps_the_store_error(self):
+        # a store that is the first access raises the store's own error (the accessor's own call);
+        # this runtime names it without CPython's suffix, so the oracle is the AIL_BCE=0 build.
+        with tempfile.TemporaryDirectory(prefix='ail-groupcse-') as directory:
+            got, err = _build_run(directory, 'store_first', GROUP_STORE_FIRST_RAISES, 'default')
+            self.assertIsNotNone(got, err)
+            want, err = _build_run(directory, 'store_first', GROUP_STORE_FIRST_RAISES,
+                                   'default', bce=0, tag='_oracle')
+            self.assertIsNotNone(want, err)
+            self.assertEqual(got[0], want[0])
+            self.assertEqual(got[1], want[1])
+            self.assertEqual(got[2], want[2])
 
 
 FACT_GROUP_POSITIVE = r"""

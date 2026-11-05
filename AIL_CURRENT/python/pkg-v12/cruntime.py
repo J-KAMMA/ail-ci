@@ -25537,6 +25537,34 @@ REQUIRES['NUMFIELD'] = ['LIST', 'FLIST', 'DIE']
 ORDER.insert(ORDER.index('NUMFIELD') + 1, 'NUMVIEW')
 SOURCE['NUMVIEW'] = NUMVIEW
 REQUIRES['NUMVIEW'] = ['NUMFIELD', 'DIE']
+IDXNORM = r'''
+/* bce s5: one index check for a group of parallel lists. The first access of the group at an
+   index normalises it here (a negative index counts from the end, exactly as the accessor it
+   replaces); every later member is read at the result, which is in [0, n). The failure is the
+   access's own: a read traps the list-index message, a store raises the same IndexError. */
+static inline __attribute__((always_inline)) int64_t ail_idx_norm_read(int64_t i, int64_t n) {
+    if (__builtin_expect((uint64_t)i < (uint64_t)n, 1)) return i;
+    if (i < 0) {                       /* a negative index counts from the end */
+        i += n;                        /* i < 0 <= n: no signed overflow */
+        if (i < 0) ail_die("list index out of range");
+        return i;
+    }
+    ail_die("list index out of range");
+    return i;                          /* not reached: ail_die never returns */
+}
+static inline __attribute__((always_inline)) int64_t ail_idx_norm_store(int64_t i, int64_t n) {
+    if (__builtin_expect((uint64_t)i < (uint64_t)n, 1)) return i;
+    if (i < 0) {
+        i += n;
+        if (i < 0) ail_raise_named(AIL_EXC_INDEX);
+        return i;
+    }
+    ail_raise_named(AIL_EXC_INDEX);
+}
+'''
+ORDER.insert(ORDER.index('NUMVIEW') + 1, 'IDXNORM')
+SOURCE['IDXNORM'] = IDXNORM
+REQUIRES['IDXNORM'] = ['DIE']
 ORDER.insert(ORDER.index('NUMFIELD') + 1, 'NUMFIELDMUT')
 SOURCE['NUMFIELDMUT'] = NUMFIELDMUT
 REQUIRES['NUMFIELDMUT'] = ['NUMFIELD', 'DIE']

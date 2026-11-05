@@ -1,3 +1,31 @@
+## 2026-11-05 -- bces5: one index check per parallel-list group (job-bces5-11060644)
+
+`facts['fields']['groups']` (bce s4) says which lists always share a length. A checked access
+`Y[i]` to another member of a group whose member `X` was already accessed at the same SSA index
+can reuse the index the first check produced. New IR op `idx.norm(i, len) -> i64` (`kind` =
+`read`/`store`) normalises a negative index and raises exactly where the replaced access did; the
+new pass `ir/passes/groupcse.py` runs right after the first `ranges` run and rewrites
+`X[i]` into `j = idx.norm(i, len X)` + unchecked `X[j]`, and every later `Y[i]` into unchecked
+`Y[j]`. The first access keeps its error, message and place; for a grow-only group no length
+change between the two is required (appends only, and the index is normalised at the first
+access). An `X` no `Y` uses is left alone; `AIL_BCE=0` leaves the C identical to the base.
+
+- `python/pkg-v12/ir/{ir,verify,effects,emit_c}.py`: the op, its typing rule (i64, i64 -> i64),
+  its effect (raises IndexError) and its C (`ail_idx_norm_read`/`ail_idx_norm_store`, in
+  `cruntime.IDXNORM`; the inserted `list.len` carries `raw`, the count the accessor's fast path
+  reads, so no slow-path layout validation is added).
+- `python/pkg-v12/ir/passes/groupcse.py` + `passes/__init__.py`: the pass, after the first
+  `ranges`.
+- `AIL_CURRENT/test_ail_bce.py`: probes for `ev` over `n_op/n_a/n_b`, `has`/`val` in both orders,
+  a store first, a store after a read, growth and popping between the accesses, two objects of
+  one struct, int64 boundary indices, and an invalidated group (no rewrite).
+
+Measured on this runner (callgrind, the perf input of `lab/beatc/bce_census.py`):
+tally_lang base 19,585,728,719 Ir, head 17,526,409,027 Ir, ratio 0.895 (-10.5%). Stripped
+binary 71896 -> 67800 bytes. Probes: `test_ail_bce` default, `AIL_UNIFIED_FORCE=1` and
+`AIL_BCE_AUDIT=1` all match CPython; the audit build never stops. `AIL_BCE=0` produces the same
+C as the base for the invalidated-group probe (no `groupcse` stat).
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
