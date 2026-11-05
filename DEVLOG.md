@@ -21,6 +21,18 @@ of this tree, so only that file conflicted.  The rest applied cleanly: the new
 `lab/stdlib/sched/` programs with `RESULTS.md`.  The `manifest.d` hunks were not applied by hand;
 `python3 tools/update_manifest.py` recomputed every pin and `--check` passes.  `tools/diff_ids.py`
 is not present on this tree.
+## 2026-11-05 -- relcheck1: re-apply the release preflight on the current tree (job-rbrelcheck1-11051610)
+
+Re-applied the accepted `relcheck1` change (`fcc4ccae33bf`..`job-relcheck1-11051335`).  The diff
+applied cleanly to the sources: `tools/release_check.py`, `AIL_CURRENT/test_ail_release_check.py`,
+`AIL_CURRENT/tests.d/test_ail_release_check.txt` and `lab/release/PREFLIGHT.md`.  The fetched
+`.github/workflows/agent-worker.yml` hunk was skipped: it drops `GH_MODELS_TOKEN`, while
+`.agent/pipeline.sh` still gates `run_ghm` on `$RUNNER_TEMP/ghm.key`, so this tree keeps its
+GitHub Models key wiring (both sides' fixes).
+`AIL_CURRENT/manifest.d` was not applied by hand: `python3 tools/update_manifest.py` recomputed the
+new pins for the test module and its `tests.d` registration and `--check` passes.  `tools/diff_ids.py`
+is not present on this tree.  `test_ail_release_check`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass on the final commit.
 
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
