@@ -1,3 +1,65 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode/deepseek-v4.1-flash-free]
+# Review: relnotice1 (HEAD `ee738067`)
+
+**What the change really does:** adds `THIRD_PARTY_NOTICES.md` (67-row inventory + follow-ups), copies the PSF-2.0 text to `AIL_CURRENT/stdlib/LICENSE-PSF.txt`, inserts one CPython-derivation line into 11 stdlib docstrings, adds `test_ail_third_party_notices.py` (6 tests; wheel check fails as documented), registers it in `tests.d/`, and regenerates the manifest. `ee738067` adds a `pkg-v12` header sweep that matches only `port of CPython` / `ported ... from CPython`.
+
+**Probes**
+- `/tmp/rprobes/use_modules.py` (imports/uses getopt, shlex, colorsys, keyword, stat, token, difflib, tomllib): `g` and `d` same stdout as CPython; `program.c` identical to base (only temp paths differ in `native_report.json`).
+- `/tmp/rprobes/doc_getopt.py`, `/tmp/rprobes/doc_tomllib.py`: `module.__doc__` is refused by name — acceptable.
+- Worker's 8 `/tmp/probes/*.py`: all same stdout on `g` and `d`.
+- `/tmp/rprobes/notice_gap.py`: shows the missing inventory entries below.
+
+**Report claims**
+- Verified: `ee738067` is HEAD; both preludes listed with `Notice = no` and a follow-up; wheel contains both preludes; test is 6/5 pass/1 fail only on `LICENSE-PSF.txt`; `update_manifest.py --check` = 0; `test_ail_packaging`, `test_ail_files`, `test_ail_corpus_findings3`, and the 7 touched `test_ail_std_*` modules pass; no push (remote still at `995aa126`).
+- **False as a completeness claim:** “Compiler sweep finds exactly `prelude_csv.py`, `prelude_format.py`; inventory now lists 13 CPython-derived files.” The sweep finds exactly those two only because its regex is too narrow; several other `pkg-v12` preludes explicitly declare CPython origins and ship in the wheel.
+- **False/unverified:** “`test_ail_safetynet`: only `S4_generators_gc` fails.” It passed on HEAD in my run.
+
+**Defects**
+
+1. The inventory and the new sweep still miss CPython-derived `pkg-v12` preludes, so the wheel ships them without a notice and the test cannot catch them.
+   Probe (first 15 lines vs. inventory):
+   ```python
+   # /tmp/rprobes/notice_gap.py
+   import re, sys
+   from pathlib import Path
+   repo = Path(sys.argv[1])
+   inv = set(re.findall(r'^\|\s*`([^`]+)`', (repo/'THIRD_PARTY_NOTICES.md').read_text(), re.M))
+   for p in sorted((repo/'AIL_CURRENT/python/pkg-v12').glob('*')):
+       if p.suffix not in ('.py','.c','.h'): continue
+       head = '\n'.join(p.read_text(errors='replace').splitlines()[:15])
+       if re.search(r"(?i)(algorithms? (?:are|is) (?:those|the ones) of CPython|CPython 3\.12's (?:Mersenne|calendar|_pydecimal|fractions|ipaddress)|follow CPython 3\.12's|error texts are those of CPython|of CPython 3\.12)", head):
+           rel = p.relative_to(repo).as_posix()
+           print(('LISTED  ' if rel in inv else 'MISSING '), rel)
+   ```
+   Expected: no `MISSING` rows (each such file inventoried with a CPython/PSF origin and a notice or follow-up).
+   Actual: `MISSING` `prelude_decimal.py`, `prelude_fraction.py`, `prelude_html.py`, `prelude_ipaddress.py`, `prelude_random.py`, `pathlib_prelude.py`; also `prelude_calendar.py` and `prelude_numbers.py` by header inspection. Their headers say, e.g., “The algorithms are those of CPython 3.12's `_pydecimal.py`”, “CPython 3.12's Mersenne Twister … bit for bit”, “follow CPython 3.12's `pathlib.py`”. I confirmed all eight are in the built `ailc` wheel. `compiler_derived()` returns only `prelude_csv.py` and `prelude_format.py`, so `test_ail_third_party_notices` does not fail for these absent entries; `test_derived_CPython_files_have_the_notice` hard-codes `len(derived) == 13`, encoding the incomplete count.
+
+**Pre-existing:** none found. `test_ail_safetynet` passed on HEAD.
+
+**Unverified:** the claim that `S4_generators_gc` fails on base `995aa126` (not reproduced; possibly flaky).
+
+VERDICT: FIX
+[cost $0.0000, opencode tokens {"total": 1698565, "input": 43744, "output": 5868, "reasoning": 22969, "cache.write": 0, "cache.read": 1625984}]
+    tool time: bash 24.8 min
+        695s bash   cd /home/runner/work/ail-ci/ail-ci; date; timeout 900 python3 tools/par_check.py -j 2 test_ail_std_colorsys te
+        234s bash   cd /home/runner/work/ail-ci/ail-ci; date; timeout 900 python3 tools/par_check.py -j 2 test_ail_packaging test_
+        176s bash   cd /home/runner/work/ail-ci/ail-ci; date; timeout 900 python3 tools/par_check.py -j 2 test_ail_third_party_not
+        145s bash   rm -rf /tmp/dh; mkdir -p /tmp/dh; cd /tmp; AIL_NO_CACHE=1 python3 /home/runner/work/ail-ci/ail-ci/AIL_CURRENT/
+        135s bash   cd /tmp; date; for p in /tmp/probes/*.py; do n=$(basename $p); r=$(timeout 60 bash ~/tools/cmp.sh $p /home/run
+         98s bash   cd /tmp/rprobes; cat > doc_getopt.py <<'EOF' import getopt print(repr(getopt.__doc__)) EOF cat > doc_tomllib.p
+          1s bash   mkdir -p /tmp/rprobes; cd /home/runner/work/ail-ci/ail-ci; date; python3 AIL_CURRENT/test_ail_third_party_noti
+          1s bash   cd /home/runner/work/ail-ci/ail-ci; python3 - <<'EOF' import sys, tempfile, zipfile from pathlib import Path s
+
+
+--- ORIGINAL TASK ---
 Lane: notice
 
 # relnotice1: third-party notices for vendored and derived code (CPython stdlib copies, typeshed), checked by a test
