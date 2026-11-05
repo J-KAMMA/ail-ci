@@ -135,6 +135,14 @@ Module refusals (deliberate, loud):
 - **F4** more than two positional arguments:
   `RuntimeError: sched actions take at most two positional arguments here`.
 
+Packaging (not in this task's file list):
+
+- **F6** `test_ail_third_party_notices.test_wheel_contains_notices` fails because
+  the wheel has no `LICENSE-PSF.txt`. This is the follow-up relnotice1 already
+  records: `packaging/ail_wheel_backend.py` (another lane) copies only the two
+  root licenses. The three new modules do ship in the wheel after
+  `tools/update_manifest.py`. Five of the six notices tests pass.
+
 ## Notices
 
 `THIRD_PARTY_NOTICES.md` lists `AIL_CURRENT/stdlib/fnmatch.py`,
