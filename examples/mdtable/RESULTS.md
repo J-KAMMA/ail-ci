@@ -42,3 +42,26 @@ stop beyond int64); 70 of 72 raw comparisons are exactly equal.
 
 No spelling change was needed to obtain a match; `mdtable.py` is the same program in both
 builds. The only deviation from CPython is the documented int64 overflow stop in `--sum`.
+
+## Boundary probes
+
+Fourteen probe inputs in `/tmp/probes/`, run with each of `default`, `--check`, `--sum 1`,
+`--sum 2` and `--sum 9` against both builds: **140 of 140 comparisons match CPython exactly**
+(stdout, stderr and exit status), 0 loud stops, 0 failures.
+
+| probe | boundary |
+|-------|----------|
+| `p01_nonl.md` | table at EOF with no trailing newline (output also has none) |
+| `p02_emptybody.md` | header and delimiter only, no body rows |
+| `p03_signed.md` | `-5`, `+7`, `10`, `1_000`; sum is `n/a` because `1_000` is not a plain int |
+| `p04_single.md` | single-column table |
+| `p05_minwidth.md` | one-dash delimiter; widths clamp to the minimum 3 |
+| `p06_escape_eol.md` | escaped trailing `|` (`b \|`) stays in the last cell |
+| `p07_negsum.md` | negative total (`-12`) |
+| `p08_crlf.md` | CRLF line endings |
+| `p09_setext.md` | `Title` + `---` setext heading, not a table |
+| `p10_mismatch.md` | delimiter with a different cell count, not a table |
+| `p11_range.md` | `--sum 9` beyond the columns: `n/a`, table widens to 9 columns |
+| `p12_bigwithin.md` | total `8000000000000000000`, exact and inside int64 |
+| `p13_center.md` | centered odd padding (`" ab  "`, matching `str.center`) |
+| `p14_two_one_fmt.md` | two tables, `--check` exits 1 on the unformatted one |
