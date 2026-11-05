@@ -2237,11 +2237,44 @@ def _stmt_block(fn):
     return loc
 
 
+def _block_parents(fn):
+    """Map id(statement list) -> (the statement that owns it, its own containing statement list)."""
+    parents = {}
+
+    def walk(stmts):
+        for s in stmts:
+            for f in ('body', 'orelse', 'finalbody'):
+                b = getattr(s, f, None)
+                if isinstance(b, list) and all(isinstance(x, ast.stmt) for x in b):
+                    parents[id(b)] = (s, stmts)
+                    walk(b)
+            for h in getattr(s, 'handlers', []) or []:
+                parents[id(h.body)] = (s, stmts)
+                walk(h.body)
+
+    walk(fn.body)
+    return parents
+
+
+def _outer_loop(block, parents):
+    """The outermost For/While statement whose body contains `block`, with its containing block."""
+    loop = None
+    while id(block) in parents:
+        stmt, parent = parents[id(block)]
+        if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+            loop = (stmt, parent)
+        block = parent
+    return loop
+
+
 def bind_guarded_locals(tree):
     """`bw` is assigned only in the blocks that give Optional `best` a value, and every read of `bw` is
-    after `if best is None: break/return`.  Bind `bw` once just before that guard to the simple value it
-    is first given, so the possibly-unbound pass does not wrap every later read; when the guard holds the
-    real assignment always wins.  Anything less regular keeps the refusal."""
+    after `if best is None: break/return`.  Bind `bw` once before the first such block to the simple
+    value it is first given, so the possibly-unbound pass does not wrap every later read; when the guard
+    holds the real assignment always wins.  When that first assignment is itself conditional inside a
+    loop, the fallback goes in front of the outermost enclosing loop instead, so a value carried by the
+    loop is not reset on an iteration that takes no new assignment.  Anything less regular keeps the
+    refusal."""
     changed = False
     fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
     fns += [m for c in tree.body if isinstance(c, ast.ClassDef) for m in c.body if isinstance(m, ast.FunctionDef)]
@@ -2256,6 +2289,7 @@ def bind_guarded_locals(tree):
             continue
         params = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
         loc = _stmt_block(fn)
+        parents = _block_parents(fn)
         loads = [n for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)]
         done = set()
         for optname in sorted(opt):
@@ -2313,7 +2347,9 @@ def bind_guarded_locals(tree):
                         if not _simple_default(first.value):
                             continue
                         # the statement of the guard's block that contains the first assignment: the
-                        # fallback goes just in front of it, so every real assignment still wins
+                        # fallback goes just in front of it, so every real assignment still wins.  A first
+                        # assignment nested in a conditional (not the statement itself) would run the
+                        # fallback on every iteration, so hoist it in front of the outermost loop instead.
                         pos = None
                         for off, stmt in enumerate(region):
                             if any(id(x) == id(first) for x in ast.walk(stmt)):
@@ -2321,20 +2357,30 @@ def bind_guarded_locals(tree):
                                 break
                         if pos is None:
                             continue
+                        target, index = b, pos
+                        if first is not b[pos]:
+                            outer = _outer_loop(b, parents)
+                            if outer is not None:
+                                # hoisting repeats the default evaluation outside the loop; only a name
+                                # or literal has no observable extra cost or effect
+                                if not isinstance(first.value, (ast.Name, ast.Constant)):
+                                    continue
+                                loop, loop_block = outer
+                                target, index = loop_block, loop_block.index(loop)
                         # no read of aux may happen before the guard
                         if any(n.id == aux and n.lineno <= guard.lineno for n in loads):
                             continue
                         before = set(params)
                         for n in nodes:
                             t = _direct_store(n) if isinstance(n, ast.stmt) else None
-                            if t is not None and n.lineno < b[pos].lineno:
+                            if t is not None and n.lineno < target[index].lineno:
                                 before.add(t)
                         if any(n.id not in before for n in _loads([first.value])):
                             continue
                         new = ast.Assign(targets=[_name(aux, ast.Store())],
                                          value=copy.deepcopy(first.value))
-                        ast.copy_location(new, b[pos])
-                        b.insert(pos, new)
+                        ast.copy_location(new, target[index])
+                        target.insert(index, new)
                         done.add(id(guard))
                         changed = True
                         break

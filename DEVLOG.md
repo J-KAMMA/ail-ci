@@ -1,3 +1,28 @@
+## 2026-11-05 -- pyreach s7 review fix 2: loop-carried guarded locals and deleted closures
+
+Review 1 found two regressions in the s7 tree.  Both are fixed and probed against CPython on the
+default and `AIL_UNIFIED_FORCE=1` builds.
+
+* `optlib.bind_guarded_locals` inserted the fallback `bw = <first value>` in front of the first
+  statement of the guard's block even when that assignment was nested inside a conditional.  In a
+  loop body it therefore reset a loop-carried `bw` on every iteration that took no new assignment
+  (`t14_stale_aux.py` printed `4 3` / `end 4 3` instead of `4 4` / `end 4 4`).  When the first
+  assignment is not itself that statement, the fallback now goes in front of the outermost enclosing
+  loop, so it runs once before the loop; only a name or literal default is hoisted there (otherwise
+  the refusal stays).  Nested loops, a reset inside the loop, a direct body assignment, a loop-variable
+  default and two companions all match CPython.
+* `unbound.py`'s line-aware capture rule let any nested def made before a `del` keep reading the name
+  (`t4_del_closure_call.py` printed the deleted `3`, exit 0).  A deleted captured name is now refused
+  by name (general path, CPython's NameError/exit 1), except the compiler's `key=xs.__getitem__`
+  lambda: it is the `key=` of `sorted`/`min`/`max`/`.sort`, which runs it during that call.  Closures
+  called before `del`, aliases called after it, and an uncalled closure match CPython; the sort-key
+  pattern stays typed and a `del` before the sort is refused.
+
+`test_ail_optional_locals` 9/9, `test_ail_unbound` 20/20, `test_ail_optional_structs` 7/7,
+`test_ail_safetynet` 5/5, `test_ail_files` 18 (1 skip), `test_ail_corpus_findings3` 2/2.
+`berth_sim` is typed again, 26/26 cases; the five codegen pins and all ten `.ail` program C files are
+byte-identical to `work`.
+
 ## 2026-11-05 -- pyreach s7 review fix: whole-list uses of a `None` slot list refused by name
 
 The review found that the s7 lowering rewrote only a few slot shapes and left every other use of the
