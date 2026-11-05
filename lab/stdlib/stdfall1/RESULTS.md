@@ -99,10 +99,32 @@ name, so a limited array repr is CPython's text instead of `repr_instance`.
 | `r_limits.py` | `Odd`, `1.5`, `[1]`, negative int, empty/singleton list indents | match | match |
 | `q_arr.py` | `reprlib.repr(array('i', [1..7]))` and `maxarray=3` | match | match |
 
-`OrderedDict` as `indent=` is refused by the compiler by name ("a collection
-passed as indent= to reprlib__Repr() is not built"), so no real
-`OrderedDict`/`UserDict` can reach `_type_label`; a program class of one of
-those names prints `__main__`.
+`OrderedDict` as `indent=` is refused by the compiler at the import, by name:
+`import of 'collections' with a use that is not built: Counter, defaultdict ...,
+OrderedDict and deque are built for str / int / tuple keys and ... the rest of the
+module is not`, so no real `OrderedDict`/`UserDict` can reach `_type_label`; a
+program class of one of those names prints `__main__`.
+
+### Fix round (review 2)
+
+`reprlib` no longer recognises `array.array` by the bare class name `_AilArray`
+(the compiler's own `pyboxed2.py` warns that a program may define a class of that
+name). A bundled module cannot `isinstance` against the prelude class (`isinstance()`
+against an unknown type is refused), so the value is tested: a prelude array holds
+a `typecode` string and a `data` list. `_type_label` and `repr1` take the same test,
+so a program class named `_AilArray` prints `__main__` and is sent to
+`repr_instance` instead of `repr_array`.
+
+| Probe | Covers | Default | Force |
+| --- | --- | --- | --- |
+| `p_ailarr.py` | a program class named `_AilArray` as `Repr(indent=...)`: `<class '__main__._AilArray'>` (was `<class 'array.array'>`) | match | match |
+| `p_ailarr2.py` | the same class with `__repr__` returning `ZZ`: `ZZ`, `[ZZ, ZZ]` (was `AttributeError ... 'typecode'`) | match | match |
+| `p_arr_edge.py` | a real `array` as `indent=` (error text), and repr of it through a dict value, a list item, `repr`, and nested/empty/single-element arrays | match | match |
+| `p_typ1.py`, `p_typ2.py`, `p_real.py`, `q_arr.py` | unchanged from review 1 | match | match |
+
+`reprlib.repr` of a program instance without `__repr__` still prints `<Foo object>`
+where CPython prints `<__main__.Foo object at 0x...>`; the address cannot match, and
+this is the same on the base commit for any class (checked with `p_inst.py`).
 
 
 ## What was rewritten, per module

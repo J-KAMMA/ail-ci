@@ -47,18 +47,36 @@ _BARE_TYPE_NAMES = (
     "ZeroDivisionError",
 )
 
+def _is_ail_array(value):
+    """True for an instance of this compiler's `array.array` prelude.
+
+    The compiler refuses `isinstance` against the prelude class from another module, so the value
+    itself is the test: every prelude array holds a `typecode` string and a `data` list, and a
+    program class named `_AilArray` need not.  The name alone is not evidence - a program may
+    define its own class of that name (`pyboxed2.py` says so too), and CPython prints
+    `__main__` for it.
+    """
+    if type(value).__name__ != "_AilArray":
+        return False
+    try:
+        typecode = value.typecode
+        data = value.data
+    except Exception:
+        return False
+    return isinstance(typecode, str) and isinstance(data, list)
+
+
 def _type_label(value):
     """CPython's `type(value)` text, rebuilt from the class name.
 
     This compiler exposes only `type(x).__name__`, not the class object or its module, so the
     module is not readable.  The builtin scalar and container types are recognised by identity;
     the collections classes and `array.array` are told from a program class of the same name by
-    their representation in this runtime - a deque is a flagged list, a Counter/defaultdict a
-    flagged dict, an array the prelude's `_AilArray` - which a class of the program does not have
-    (a class here cannot derive from a builtin), so a program class called `deque` or `Counter`
-    correctly prints `__main__`.  The builtin types the compiler cannot name (a `slice`, a
-    `memoryview`, an exception, ...) are recognised by name.  Every other class is a class of the
-    program, and CPython prints `__main__` for it.
+    the value they carry - a deque is a flagged list, a Counter/defaultdict a flagged dict, an
+    array has the prelude's `typecode`/`data` - so a program class called `deque`, `Counter` or
+    `_AilArray` correctly prints `__main__`.  The builtin types the compiler cannot name (a
+    `slice`, a `memoryview`, an exception, ...) are recognised by name.  Every other class is a
+    class of the program, and CPython prints `__main__` for it.
     """
     name = type(value).__name__
     if (type(value) is bool or type(value) is int or type(value) is str
@@ -71,7 +89,7 @@ def _type_label(value):
         return "<class 'collections.deque'>"
     if (name == "Counter" or name == "defaultdict") and isinstance(value, dict):
         return "<class 'collections." + name + "'>"
-    if name == "_AilArray":
+    if _is_ail_array(value):
         return "<class 'array.array'>"
     if name in _BARE_TYPE_NAMES:
         return "<class '" + name + "'>"
@@ -145,7 +163,7 @@ class Repr:
             return self.repr_frozenset(x, level)
         if typename == "deque":
             return self.repr_deque(x, level)
-        if typename == "_AilArray":
+        if _is_ail_array(x):
             return self.repr_array(x, level)
         return self.repr_instance(x, level)
 
