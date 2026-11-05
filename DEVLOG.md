@@ -1,3 +1,26 @@
+## 2026-11-05 -- bce s4: whole-program field facts, producer only (job-bces4-11051444)
+
+`python/pkg-v12/fieldfacts.py` walks every function of the typed program once before lowering
+and computes the s4 facts: parallel list groups (struct fields or same-function locals) with
+their grow-only flag, and non-negative int struct fields by a small fixed point.  The result is
+passed through `ir/driver.py` `facts_for()['fields']` keyed by the identity of `ctx.funcs`, and
+`AIL_BCE_FACTS=<path>` writes it as JSON.  No pass consumes it yet, so generated C is unchanged.
+
+Conservative refusal is the rule: a use the pass does not recognise drops the group/field, and
+empty facts are returned for unit/link/library/`@extern` builds, closures (including the
+`nestfn.py` and `tuplam.py` lifted names), and programs merged from user modules.
+
+Done check: `lab/beatc/bce_census.py check` reports `same C` (or the same pre-existing failure)
+for all 20 task/syntax pairs, exit 0.  tally_lang gives `{n_op,n_a,n_b}`, `{val,has}`, the
+seven `s_*` and `Lx.{tk,tv}` groups plus non-negative `Lx.pos`; ledger_bin gives the
+`ops/xs/ys/zs` local group plus non-negative `Rd.pos`.  Compile medians (5 cold builds) are
+within 0.12 s total for tally_lang, ticket_audit and tree_fold against the base worktree.
+`test_ail_bce`, `test_ail_modules` and `test_ail_strict` pass; `test_ail_ir_s3` passes alone
+without a `ulimit -v` cap (its AddressSanitizer probes cannot reserve shadow memory under the
+1.5 GB limit used for the other runs).  Probes for parallel append/pop/clear, lambda and nested
+closures, a raising append argument in `try`, a ledger-shaped non-negative field, and a user
+module import match CPython on both `cmp.sh` builds; the user-module dump is empty.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this

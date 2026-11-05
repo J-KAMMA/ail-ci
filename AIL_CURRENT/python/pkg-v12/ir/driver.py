@@ -36,6 +36,25 @@ PENDING = set()
 LISTVAL = set()
 _PROGRAM = [None]        # the program SUMMARIES belong to: its signature table (`ctx.funcs`, one
                          # object per compiled program), held so its identity cannot be reused
+# Whole-program field facts (bce s4): computed once by pyfunc before any function is lowered,
+# keyed by the identity of the same `ctx.funcs` table, so a program never sees another one's facts.
+FIELD_FACTS = {}
+_FIELD_PROGRAM = [None]
+
+
+def set_field_facts(funcs, facts):
+    """Install the facts pyfunc computed for the program whose signature table is `funcs`."""
+    _FIELD_PROGRAM[0] = funcs
+    FIELD_FACTS.clear()
+    FIELD_FACTS.update(facts or {})
+
+
+def _field_facts(ctx):
+    funcs = getattr(ctx, 'funcs', None)
+    if _FIELD_PROGRAM[0] is not funcs:
+        _FIELD_PROGRAM[0] = None
+        FIELD_FACTS.clear()
+    return FIELD_FACTS
 
 
 def _summaries(ctx):
@@ -50,7 +69,7 @@ def _summaries(ctx):
 
 def facts_for(P, fn, ctx):
     """Whole-program facts the passes may use for `fn`."""
-    return {'summaries': _summaries(ctx)}
+    return {'summaries': _summaries(ctx), 'fields': _field_facts(ctx)}
 
 
 def checked_exceptions():
