@@ -1,3 +1,65 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review of `pyreach s7` (HEAD 8228ab97, base `work`)
+
+**What the change really does:** in `optlib.py` it lowers a `[None, [], ...]` literal to a rows list plus a present-bit list, rewrites `is None`/`print`/guarded `heappush`/`heappop`/`len`/row-method reads, and refuses every other use of the name (`_check_col_name_uses`); it adds `bind_guarded_locals` (a fallback assignment for a conditionally bound local), BLIST stepped slices, `del <name>` as a no-op, heap push on a computed receiver, and loosens `unbound.py`/`aliasrefuse.py`. This matches the report's description, except the report never mentions the `bind_guarded_locals` fallback, which is where the main defect lies.
+
+**Defects (both are regressions: base matches CPython on both builds)**
+
+1. `bind_guarded_locals` inserts a fallback assignment at the top of the loop body, clobbering a loop-carried value. Probe `/tmp/rprobes/t14_stale_aux.py`:
+```
+def main() -> None:
+    best = None
+    b1 = 3
+    b2 = 4
+    for x in [2, 9]:
+        if x == 1:
+            best = b1
+            bw = b1
+        elif x == 2:
+            best = b2
+            bw = b2
+        if best is None:
+            continue
+        print(best, bw)
+    print("end", best, bw)
+main()
+```
+Rewritten AST gets `bw = b1` before the first `if` (verified by calling `optlib.bind_guarded_locals` directly). CPython and base print `4 4` / `end 4 4`; HEAD prints `4 3` / `end 4 3` on both the default and `AIL_UNIFIED_FORCE=1` builds (exit 0 both).
+
+2. The new `unbound.py` delete rule lets a nested function compiled before `del` keep seeing the value. Probe `/tmp/rprobes/t4_del_closure_call.py`:
+```
+def main() -> None:
+    x = 3
+    def f() -> int:
+        return x
+    del x
+    print("before")
+    print(f())
+main()
+```
+CPython and base: stdout `before`, exit 1 (`NameError`). HEAD default build: stdout `before` + `3`, exit 0.
+
+**Probes that do match** (typed path checked with `AIL_NO_GENERAL=1`): `p_supported`, `p1_selection`, `p4_print`, `p_present_read`, `p3_absent`, `p14_neg_absent`, `p1_oor` (out-of-range `is None` → IndexError, exit 1), `t2_bool_rows`, `t5_absent_push`, `t8_all_none`, `t3c_idx_once` (heap push evaluates the index once). Whole-list uses (`a_iter`, `e_alias`, `d_append`, `i_dict`, …) are refused by name and fall back to CPython-matching output. `t9`, `t10`, `t11b`, `t12`, `t13` are refused by name.
+
+**Report claims:** "defects 1/2 fixed by name" — verified. "supported shapes still typed" — verified for the probes above. "5/5 modules" — I ran `test_ail_optional_locals`, `test_ail_optional_structs`, `test_ail_safetynet`: 3/3 ok; `test_ail_files`/`test_ail_corpus_findings3` not run (per instructions). "all ten `.ail` C byte-identical" — verified with `tools/codegen_diff.py --base work` (all old==new). "codegen pins identical via `--pins`" — **false as stated**: this tool rejects `--pins` (rc 2). "manifest `--check` rc 0" — verified. `berth_sim` gate — verified: `ail-py path: typed`, 26/26 ok.
+
+**Unverified:** icount ratio (no perf/valgrind on this runner; wall was 5065 ms `ail-py` vs 2371 ms `ail`, 2.1x, `instructions: None`); the `p9` overflow runtime behaviour (needs stdin input); `test_ail_files`, `test_ail_corpus_findings3`.
+
+VERDICT: FIX
+1. `bind_guarded_locals` fallback (`optlib.py`, inserted `bw = <first value>` before the first assignment) silently changes a loop-carried local. Probe `t14_stale_aux.py` above: expected `4 4` / `end 4 4` (CPython, base), actual `4 3` / `end 4 3` (default and `AIL_UNIFIED_FORCE=1`), exit 0 in both.
+2. `unbound.py` `delete_lines` rule compiles a closure that reads a deleted variable. Probe `t4_del_closure_call.py` above: expected exit 1 with stdout `before` (CPython, base), actual stdout `before` + `3`, exit 0.
+[commandcode stop=end_turn turns=73 out_tokens=41690]
+
+
+--- ORIGINAL TASK ---
 Lane: pyreach-none
 
 **Owner decisions (2026-11-02):** Q1 None = **A, exact tagged None** on values and list elements, behaving as CPython does. Q2 ints wider than 64 bits = **B, exact masked u64 only where a proof shows the value fits**; otherwise the int64 default stays (overflow stops loudly). Q3: tally_lang's exec stays general / CPython hybrid.
