@@ -1,0 +1,5 @@
+scores: dict[int, int] = {1: 10, 2: 20}
+print("one", scores[1], "size", len(scores))
+print("two", scores.get(2))
+print("known", 2 in scores)
+print(scores[3])
