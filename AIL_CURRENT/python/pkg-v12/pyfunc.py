@@ -33949,6 +33949,53 @@ def _field_annotation_kind(annotation, classes):
     return kind if (kind in (LIST, FLIST, SLIST, BLIST, *MAPS) or _is_olist_kind(kind)) else None
 
 
+def _object_list_literal_kind(node, ctx):
+    """`(OLIST, X)` for a non-empty list literal whose elements are all X objects (or objects
+    with the common base X), else None -- a field value such as `self.toks = [Tok(...)]`."""
+    try:
+        kinds = {_etype(element, ctx) for element in node.elts}
+    except Unsupported:
+        return None
+    if not kinds or not all(_is_obj_kind(kind) for kind in kinds):
+        return None
+    joined = next(iter(kinds)) if len(kinds) == 1 else _obj_join_all(kinds)
+    return (OLIST, joined[1]) if joined else None
+
+
+# (class, field) -> SLIST | (OLIST, X): the element kind of a field that `__init__` sets to an empty,
+# unannotated `[]`, read from the class's own methods (`_field_list_hints`). Reset by `_scan_classes`.
+_FIELD_LIST_HINTS = {}
+
+
+def _field_list_hints(classdef, class_names):
+    """{field: kind} for `self.<field>.append(<arg>)` in the methods of `classdef` where every
+    such append whose argument kind can be read from the syntax alone agrees: a str literal or
+    f-string (SLIST) or a constructor call of one class X ((OLIST, X)). An argument whose kind
+    needs inference is ignored here; the append itself still checks it against the chosen kind,
+    so a wrong hint is a compile-time refusal, never a wrong value. Ints stay the default LIST."""
+    seen = {}
+    for method in classdef.body:
+        if not isinstance(method, ast.FunctionDef):
+            continue
+        for node in ast.walk(method):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'append' and len(node.args) == 1 and not node.keywords
+                    and isinstance(node.func.value, ast.Attribute)
+                    and isinstance(node.func.value.value, ast.Name)
+                    and node.func.value.value.id == 'self'):
+                continue
+            arg = node.args[0]
+            if isinstance(arg, ast.JoinedStr) or isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                kind = SLIST
+            elif (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name)
+                  and arg.func.id in class_names):
+                kind = (OLIST, arg.func.id)
+            else:
+                continue
+            seen.setdefault(node.func.value.attr, set()).add(kind)
+    return {field: next(iter(kinds)) for field, kinds in seen.items() if len(kinds) == 1}
+
+
 def _range_list_as_comprehension(value, ctx):
     """`list(range(...))` as the field value of a constructor: the comprehension of the same
     elements (`[i for i in range(...)]`), which a field already takes. Anything else is returned
@@ -34028,9 +34075,15 @@ def _compile_init(init_fn, info, classes):
             ftype = declared
         if isinstance(value, ast.Name) and value.id in info.numeric_list_params:
             ftype = LIST
+        if declared is None and _empty_container_literal(value) and (info.name, field) in _FIELD_LIST_HINTS:
+            ftype = _FIELD_LIST_HINTS[(info.name, field)]     # `self.xs = []`, filled with str / X later
+        if isinstance(value, ast.List) and value.elts and not _is_olist_kind(ftype):
+            ftype = _object_list_literal_kind(value, ctx) or ftype   # `self.toks = [Tok(...)]`
         if _container_literal(value, ctx) is not None and ftype not in (BLIST, LIST, FLIST, SLIST, *MAPS) and not _is_olist_kind(ftype):
-            raise Unsupported('%s.%s would hold a list, set or dict; a field is int64, float or '
-                              'bytes only (SEMANTICS.md section 25)' % (info.name, field))
+            raise Unsupported('%s.%s would hold a list, set or dict whose element kind is not known '
+                              'here; a list field holds int, float, str or one class (annotate it: '
+                              '`self.%s: list[str] = []`; SEMANTICS.md section 25)'
+                              % (info.name, field, field))
         if isinstance(value, ast.Name) and value.id in info.adopted_params:
             # The caller hands over a list of its own (a private copy, or a local it never reads
             # again) and the field takes it over: no second copy here.
@@ -34665,6 +34718,10 @@ def _scan_classes(classdefs):
         if c.name in classes:
             raise _refusal_at(c, 'class %r defined more than once' % c.name)
         classes[c.name] = ClassInfo(c.name)
+    _FIELD_LIST_HINTS.clear()
+    for c in classdefs:
+        _FIELD_LIST_HINTS.update(((c.name, field), kind)
+                                 for field, kind in _field_list_hints(c, classes).items())
     bases, seen = {}, set()
     for c in classdefs:
         bases[c.name] = (typedinherit.class_base(c, seen, Unsupported) if c.bases or c.keywords else None)
