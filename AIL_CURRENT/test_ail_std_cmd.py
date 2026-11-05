@@ -8,13 +8,19 @@ command and run beside `python3` on the same source (feeding its .in file when i
 stdout and the exit status must agree.  Nine programs must match exactly; the calculator stops
 loudly on an int beyond int64, which the task allows.
 
-The module cannot enumerate a class's methods or call a method whose name is only known at
-run time: `get_names()` returns CPython's fixed base names plus the commands of the supported
-vocabulary that the instance defines, so the no-argument `help` table and `completenames()`
-are exact for those names (and for a `get_names()` override).  The cases that need the
-missing compiler features stop with a named `NotImplementedError` instead of guessing: a
-`do_*` command outside the vocabulary, a `help_<name>` outside it, and `help <name>` for a
-docstring-only command.  Two tests pin the exact reflection cases and those loud stops.
+The module cannot enumerate a class's methods or read a method's `__doc__` or call a method
+whose name is only known at run time: `get_names()` returns CPython's fixed base names plus
+the commands of the supported vocabulary that the instance defines, so the no-argument `help`
+table and `completenames()` are exact for those names (and for a `get_names()` override).  A
+command is documented in that table when it has a `help_<name>` method or when its docstring
+is the literal in the module (the base `do_help`); otherwise it is listed as undocumented,
+which is CPython's answer for a command with no docstring.  The cases that need the missing
+compiler features stop with a named `NotImplementedError` instead of guessing: a `do_*`
+command outside the vocabulary, a `help_<name>` outside it, and `help <name>` for a
+docstring-only command.  The constructor's `stdin`/`stdout` are stored and used like
+CPython's; only the two process streams are represented by small stand-ins, because this
+compiler refuses `sys.stdin`/`sys.stdout` as values.  The tests pin the table, the streams,
+the exact reflection cases and the loud stops.
 """
 import os
 import shutil
@@ -189,8 +195,12 @@ class S(cmd.Cmd):
     def do_EOF(self, arg):
         "Exit."
         return True
+    def help_echo(self):
+        return None
+    def help_EOF(self):
+        return None
     def get_names(self):
-        return ['do_echo', 'do_EOF', 'do_help']
+        return ['do_echo', 'do_EOF', 'do_help', 'help_echo', 'help_EOF']
 S().onecmd("help")
 """,
             "empty_override.py": """import cmd
@@ -213,6 +223,104 @@ print(s.completenames("e"))
         }
         for name, text in probes.items():
             work = self.dir / ("reflect_" + name.replace(".py", ""))
+            work.mkdir(exist_ok=True)
+            program = work / name
+            program.write_text(text)
+            expected = run_cpython(program, b"")
+            for mode, extra in (("default", {}), ("unified", {"AIL_UNIFIED_FORCE": "1"})):
+                with self.subTest(probe=name, build=mode):
+                    env = dict(os.environ, AIL_NO_CACHE="1", **extra)
+                    env.pop("PYTHONPATH", None)
+                    exe = work / (name.replace(".py", "") + "." + mode + ".out")
+                    built = subprocess.run([sys.executable, "-B", CLI, "compile",
+                                            str(program), "-o", str(exe)],
+                                           cwd=str(work), capture_output=True, text=True,
+                                           timeout=600, env=env)
+                    self.assertEqual(built.returncode, 0,
+                                     "%s %s\n%s%s" % (name, mode, built.stdout, built.stderr))
+                    ran = subprocess.run([str(exe)], cwd=str(work), input=b"",
+                                         capture_output=True, timeout=120)
+                    self.assertEqual(ran.returncode, expected.returncode,
+                                     "%s %s exit\nexpected stderr: %s\nactual stderr: %s"
+                                     % (name, mode, expected.stderr, ran.stderr))
+                    self.assertEqual(ran.stdout, expected.stdout, "%s %s" % (name, mode))
+
+    def test_help_table_classification(self):
+        probes = {
+            "undoc.py": """import cmd
+class S(cmd.Cmd):
+    def do_echo(self, arg):
+        pass
+    def do_EOF(self, arg):
+        return True
+S().onecmd("help")
+""",
+            "documented.py": """import cmd
+class S(cmd.Cmd):
+    def do_echo(self, arg):
+        pass
+    def help_echo(self):
+        return None
+    def do_EOF(self, arg):
+        return True
+    def help_EOF(self):
+        return None
+S().onecmd("help")
+""",
+        }
+        for name, text in probes.items():
+            work = self.dir / ("table_" + name.replace(".py", ""))
+            work.mkdir(exist_ok=True)
+            program = work / name
+            program.write_text(text)
+            expected = run_cpython(program, b"")
+            for mode, extra in (("default", {}), ("unified", {"AIL_UNIFIED_FORCE": "1"})):
+                with self.subTest(probe=name, build=mode):
+                    env = dict(os.environ, AIL_NO_CACHE="1", **extra)
+                    env.pop("PYTHONPATH", None)
+                    exe = work / (name.replace(".py", "") + "." + mode + ".out")
+                    built = subprocess.run([sys.executable, "-B", CLI, "compile",
+                                            str(program), "-o", str(exe)],
+                                           cwd=str(work), capture_output=True, text=True,
+                                           timeout=600, env=env)
+                    self.assertEqual(built.returncode, 0,
+                                     "%s %s\n%s%s" % (name, mode, built.stdout, built.stderr))
+                    ran = subprocess.run([str(exe)], cwd=str(work), input=b"",
+                                         capture_output=True, timeout=120)
+                    self.assertEqual(ran.returncode, expected.returncode,
+                                     "%s %s exit\nexpected stderr: %s\nactual stderr: %s"
+                                     % (name, mode, expected.stderr, ran.stderr))
+                    self.assertEqual(ran.stdout, expected.stdout, "%s %s" % (name, mode))
+
+    def test_streams(self):
+        probes = {
+            "attr.py": """import cmd
+class S(cmd.Cmd):
+    def do_EOF(self, arg):
+        return True
+s = S()
+print(s.stdin is None, s.stdout is None)
+f = open("file.txt", "w")
+cmd.Cmd(stdout=f).onecmd("help")
+f.close()
+print("file:", repr(open("file.txt").read()))
+""",
+            "stream.py": """import cmd
+w = open("cmds.txt", "w")
+w.write("echo hi\\nEOF\\n")
+w.close()
+class S(cmd.Cmd):
+    use_rawinput = False
+    def do_echo(self, arg):
+        print("echo", arg)
+    def do_EOF(self, arg):
+        print("done")
+        return True
+S(stdin=open("cmds.txt")).cmdloop()
+""",
+        }
+        for name, text in probes.items():
+            work = self.dir / ("stream_" + name.replace(".py", ""))
             work.mkdir(exist_ok=True)
             program = work / name
             program.write_text(text)

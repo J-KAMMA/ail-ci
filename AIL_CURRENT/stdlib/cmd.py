@@ -4,13 +4,15 @@ This is CPython 3.12's Lib/cmd.py as AIL source.  Copyright (c) 2001 Python Soft
 Foundation; see the PSF license at https://docs.python.org/3/license.html.
 
 The bundled copy keeps Cmd's public interface and every printed text exactly as CPython
-prints them.  It differs only where this compiler refuses a value: `sys.stdin` and
-`sys.stdout` are not stored as fields, so input is read with `input()` (or
-`sys.stdin.readline()` at the call site) and output is written with `sys.stdout.write()` at
-the call site.  The `stdin`/`stdout` constructor arguments are stored as in CPython, but the
-process streams are always used: `input()` when `use_rawinput` is true,
-`sys.stdin.readline()` when it is false, and `sys.stdout` for output.  Readline completion
-is not available in a single-file program, so `complete()` is a stub that returns None.
+prints them.  It differs where this compiler refuses `sys.stdin` and `sys.stdout` as plain
+values: CPython stores the two process streams in `self.stdin` and `self.stdout`, while this
+copy stores a small `_ProcessStdin`/`_ProcessStdout` stand-in that calls
+`sys.stdin.readline()`, `sys.stdout.write()` and `sys.stdout.flush()` at the call site.
+The constructor arguments are stored exactly as CPython stores them, and `cmdloop()`,
+`default()`, `do_help()`, `print_topics()` and `columnize()` read `self.stdin` and write
+`self.stdout`, so `Cmd(stdin=..., stdout=...)` and a substitution of those attributes work
+as in CPython.  Readline completion is not available in a single-file program, so
+`complete()` is a stub that returns None.
 
 Reflection needs a word of explanation.  This compiler has no `dir()` and an AIL class
 exposes neither `__dict__` nor a method as a value, so `get_names()` cannot ask the class
@@ -40,6 +42,15 @@ every command in the supported vocabulary that the instance really defines, and 
 no-argument `help` table is built from that list with CPython's own algorithm.  A command
 whose name is outside the vocabulary cannot be seen this way and is not listed.
 
+A method's `__doc__` is not available either, so the table cannot ask it whether a `do_*`
+command is documented.  The classification is therefore: a command is documented when it
+has a `help_<name>` method (CPython's first test) or when its docstring is known statically
+(the base `do_help`); otherwise it is listed as undocumented.  This is exact for a command
+with no docstring and for one documented by a `help_<name>` method.  A command documented
+*only* by a docstring is listed as undocumented, so define a `help_<name>` method when the
+table matters.  `help <name>` for such a command cannot print the docstring and stops by
+name, as listed below.
+
 The compiler needs a literal attribute name to call a method, so the module can dispatch
 only that fixed vocabulary of command names (`_COMMAND_NAMES`).  The two cases it cannot
 make exact stop by name (a documented loud stop, never a guessed answer):
@@ -50,9 +61,10 @@ make exact stop by name (a documented loud stop, never a guessed answer):
   docstring; a `help_<name>` method, the base `help` text and `*** No help on <name>` for
   an unknown name are exact and still work.
 
-The ten lab programs use only the supported vocabulary and `help_<name>`, so nine of them
-print exactly what CPython prints, including the no-argument help table; the calculator
-stops loudly on an integer beyond int64 (as the task allows).
+The ten lab programs use only the supported vocabulary and define a `help_<name>` method for
+every documented command, so nine of them print exactly what CPython prints, including the
+no-argument help table; the calculator stops loudly on an integer beyond int64 (as the task
+allows).
 """
 
 import sys
@@ -303,6 +315,30 @@ def _call_help_shell(o):
     return o.help_shell()
 
 
+class _ProcessStdin:
+    """Stand-in for `sys.stdin`, which this compiler refuses as a plain value.
+
+    CPython stores `sys.stdin` itself in `self.stdin`; the only operation `Cmd` performs on
+    that field is `readline()`, so the stand-in performs it with the call form the compiler
+    accepts.  `size` is accepted because `cmdloop()` must pass it when the field may hold a
+    real file object (`readline(-1)` is `readline()`); the process stream is always read a
+    whole line, since the compiler refuses `sys.stdin.readline(size)`.
+    """
+
+    def readline(self, size=-1):
+        return sys.stdin.readline()
+
+
+class _ProcessStdout:
+    """Stand-in for `sys.stdout`; see `_ProcessStdin` (`write` and `flush` are what `Cmd` uses)."""
+
+    def write(self, text):
+        sys.stdout.write(text)
+
+    def flush(self):
+        sys.stdout.flush()
+
+
 class Cmd:
     """A simple framework for writing line-oriented command interpreters.
 
@@ -336,16 +372,22 @@ class Cmd:
         not specified, sys.stdin and sys.stdout are used.
 
         """
-        self.stdin = stdin
-        self.stdout = stdout
+        if stdin is not None:
+            self.stdin = stdin
+        else:
+            self.stdin = _ProcessStdin()
+        if stdout is not None:
+            self.stdout = stdout
+        else:
+            self.stdout = _ProcessStdout()
         self.cmdqueue = []
         self.completekey = completekey
 
     def _write(self, text):
-        sys.stdout.write(text)
+        self.stdout.write(text)
 
     def _flush(self):
-        sys.stdout.flush()
+        self.stdout.flush()
 
     def cmdloop(self, intro=None):
         """Repeatedly issue a prompt, accept input, parse an initial prefix
@@ -371,7 +413,7 @@ class Cmd:
                 else:
                     self._write(self.prompt)
                     self._flush()
-                    line = sys.stdin.readline()
+                    line = self.stdin.readline(-1)
                     if not len(line):
                         line = 'EOF'
                     else:
@@ -616,9 +658,11 @@ class Cmd:
         else:
             # CPython's table needs dir(self.__class__) for the names and each do_*
             # method's __doc__ to split documented from undocumented.  get_names() supplies
-            # the base names plus every supported command the instance defines; a docstring
-            # cannot be read here, so a do_* command that has no help_<name> topic is listed
-            # as documented.
+            # the base names plus every supported command the instance defines.  A method's
+            # __doc__ cannot be read, so the second test (a docstring) stands as: documented
+            # when a help_<name> method exists (the first CPython test) or when the docstring
+            # is the literal in this module (do_help); otherwise undocumented.  That is exact
+            # for a command with no docstring and for one documented by help_<name>.
             names = self.get_names()
             cmds_doc = []
             cmds_undoc = []
@@ -638,8 +682,10 @@ class Cmd:
                     if cmd in topics:
                         cmds_doc.append(cmd)
                         topics.remove(cmd)
-                    else:
+                    elif cmd == 'help':
                         cmds_doc.append(cmd)
+                    else:
+                        cmds_undoc.append(cmd)
             self._write("%s\n" % str(self.doc_leader))
             self.print_topics(self.doc_header, cmds_doc, 15, 80)
             self.print_topics(self.misc_header, sorted(topics), 15, 80)

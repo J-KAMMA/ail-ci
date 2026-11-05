@@ -109,8 +109,29 @@ That is exact for every command in the supported vocabulary and for a subclass t
 name is outside `_COMMAND_NAMES` cannot be seen this way, so it is not listed; that is the one
 remaining gap and it needs a `dir()`-like enumeration in the compiler.
 
-A method's `__doc__` also cannot be read, so a `do_*` command with no `help_<name>` topic is
-listed as documented, as CPython lists it when it has a docstring.
+A method's `__doc__` also cannot be read, so the table cannot use CPython's second test
+(`getattr(self, name).__doc__`).  A command is classified **documented** when it has a
+`help_<name>` method (CPython's first test) or when its docstring is written out in this
+module (the base `do_help`); every other `do_*` is listed as **undocumented**.  That is
+CPython's exact answer for a command with no docstring, and it is exact for a command
+documented by `help_<name>`.  A command documented *only* by a docstring is listed as
+undocumented, so `05_help.py` and `10_aliases.py` now define a `help_<name>` method for every
+command they want in the documented table (their stdout is still identical to CPython).
+
+### Streams
+
+CPython stores the two process streams in `self.stdin` and `self.stdout`.  This compiler
+refuses `sys.stdin` and `sys.stdout` as plain values, so the module stores a
+`_ProcessStdin`/`_ProcessStdout` stand-in instead (each calls `sys.stdin.readline()` /
+`sys.stdout.write()` / `sys.stdout.flush()` at the call site).  The `stdin`/`stdout`
+constructor arguments are stored exactly as CPython stores them, and `cmdloop()`,
+`default()`, `do_help()`, `print_topics()` and `columnize()` read `self.stdin` and write
+`self.stdout`.  So `Cmd(stdin=open(...), stdout=open(...))` works as in CPython, as does a
+substitution of either attribute.  The one deliberate difference is identity:
+`s.stdin is sys.stdin` is False (it is the stand-in), because the compiler refuses the value;
+`s.stdin is None` is False as in CPython, and a passed file is stored and returns itself.
+`cmdloop()` passes `-1` to `readline()`: the compiler requires the argument when the field
+may hold a real file object, and `readline(-1)` is `readline()` for files and `StringIO`.
 
 ### Refused by name instead of guessed
 
@@ -126,7 +147,11 @@ missing, in both builds:
 | `help zoom` where only `do_zoom` has a docstring | `NotImplementedError: cmd.Cmd.do_help: cannot read the docstring of do_zoom; ...` |
 | `help help` with no `help_help` | exact CPython text (the `do_help` docstring is a literal) |
 | `help <name>` with a `help_<name>` method in the vocabulary, or an unknown name | exact CPython text |
+| `help` with no argument for a `do_*` with no docstring and no `help_<name>` | exact CPython text (undocumented) |
+| `help` with no argument for a command documented only by a docstring | listed as undocumented (the docstring cannot be read) |
+| `help` with no argument when a `do_*` name is outside `_COMMAND_NAMES` | that command is omitted (no `dir()`); the rest match |
 | `help` with no argument, `get_names()`, `completenames()` | exact CPython text for the base names and the vocabulary |
+| `Cmd(stdin=f, stdout=f)`; `S().stdin is None` | stored and used; `is None` is False, a passed file returns itself; `is sys.stdin` is False (stand-in) |
 
 `lab/stdlib/cmd/05_help.py` uses `help_<name>` and an unknown topic; `10_aliases.py` uses
 `help_greet`; both call the no-argument `help` and match CPython exactly.
@@ -148,6 +173,13 @@ compare stdout and exit status with `python3`, the last three check the named re
 | `p_cmd_outside.py` | `do_exit` outside the vocabulary | named `NotImplementedError`, both builds |
 | `p_cmd_doc.py` | `help zoom` on a docstring-only command | named `NotImplementedError`, both builds |
 | `p_cmd_help_outside.py` | `help exit` with a `help_exit` outside the vocabulary | named `NotImplementedError`, both builds |
+| `p_help_undoc.py` | no-argument `help` for two docstring-less commands | matches (documented `help`, undocumented `EOF`/`echo`) |
+| `p_help_doc.py` | `help echo` on a docstring-only `do_echo` in the vocabulary | named `NotImplementedError`, both builds (no `__doc__`) |
+| `p_help_unknown_cmd.py` | `do_whistle` (outside the vocabulary) with a docstring | `whistle` omitted (no `dir()`); the rest match |
+| `p_attr2.py` | `s.stdin is None`, `s.stdout is None`, `Cmd(stdout=f).onecmd("help")` | matches (`False False`, table lands in `f`) |
+| `p_stream.py` | `use_rawinput=False`, `Cmd(stdin=open(...))` | matches (`echo hi` then `done`) |
+| `p_override.py` | a subclass overriding `do_help` | matches |
+| `p_values.py` | `onecmd` arguments through a list item and a dict value | matches |
 
 ### Remaining follow-ups (need compiler features)
 
@@ -155,10 +187,17 @@ compare stdout and exit status with `python3`, the last three check the named re
   program uses the general path. Exact note above.
 * A method list and a method's docstring are not available to AIL source.  `get_names()` is
   exact for `Cmd`'s own names and the supported vocabulary; a command name outside it is not
-  listed, and a docstring-only `help <name>` cannot print the docstring.  The compiler would
-  need a `dir()`-like enumeration and a way to read `getattr(obj, 'do_x').__doc__` (and to
-  call a method by a computed name) to close those gaps; until then the dispatch cases refuse
-  by name as shown above.
+  listed, a docstring-only command is listed as undocumented in the no-argument table, and a
+  docstring-only `help <name>` cannot print the docstring.  The compiler would need a
+  `dir()`-like enumeration and a way to read `getattr(obj, 'do_x').__doc__` (and to call a
+  method by a computed name) to close those gaps; until then the dispatch cases refuse by
+  name as shown above.
+* `sys.stdin` and `sys.stdout` cannot be compared or stored as values, so `self.stdin` and
+  `self.stdout` hold the stand-ins when the constructor argument is omitted.  `s.stdin is
+  None` and `s.stdout is None` are False as in CPython, and a passed file object is stored
+  and returns itself, but `s.stdin is sys.stdin` is False and a probe that compares them does
+  not build (`not in the subset: sys.stdin used as a plain value`).  Fixing the identity
+  needs the compiler to accept the two process streams as values.
 * The refusals are at the first call, not at build time.  This compiler builds a bundled
   module as a whole: a `dir()`/`__dir__` anywhere in `cmd.py` (even in a function no program
   calls) makes `import cmd` itself refused for every program, so a compile-time refusal here
@@ -175,15 +214,17 @@ compare stdout and exit status with `python3`, the last three check the named re
 
 Run on the job branch against the committed module (CPython 3.12.3):
 
-* `python3 AIL_CURRENT/test_ail_std_cmd.py` -- 6 tests, OK (all nine passing
-  programs plus the calculator and the reflection/dispatch probes, in the default build and
-  with `AIL_UNIFIED_FORCE=1`).
+* `python3 AIL_CURRENT/test_ail_std_cmd.py` -- 8 tests, OK (all nine passing
+  programs plus the calculator, the table classification, the streams and the
+  reflection/dispatch probes, in the default build and with `AIL_UNIFIED_FORCE=1`).
 * `python3 AIL_CURRENT/test_ail_safetynet.py` -- 5 tests, OK.
 * `python3 AIL_CURRENT/test_ail_files.py` -- 18 tests, OK (1 skipped).
 * `python3 AIL_CURRENT/test_ail_corpus_findings3.py` -- 2 tests, OK.
-* The ten probes listed under "Self-check probes" above were rebuilt with
-  `~/tools/cmp.sh`: `p_cmd_loop`, `p_cmd_empty`, `p_cmd_hooks`, `p_cmd_int`,
-  `p_cmd_parse`, `p_cmd_help` and `p_cmd_names` match CPython stdout and exit status in both
-  builds; `p_cmd_outside`, `p_cmd_doc` and `p_cmd_help_outside` stop with the named
-  `NotImplementedError` in both builds.
-* `python3 tools/update_manifest.py --check` -- OK.
+* The probes listed under "Self-check probes" above were rebuilt with `~/tools/cmp.sh`:
+  `p_cmd_loop`, `p_cmd_empty`, `p_cmd_hooks`, `p_cmd_int`, `p_cmd_parse`, `p_cmd_help`,
+  `p_cmd_names`, `p_help_undoc`, `p_attr2`, `p_stream`, `p_override` and `p_values` match
+  CPython stdout and exit status in both builds; `p_cmd_outside`, `p_cmd_doc`,
+  `p_cmd_help_outside` and `p_help_doc` stop with the named `NotImplementedError` in both
+  builds; `p_help_unknown_cmd` prints the rest of the table but omits the out-of-vocabulary
+  command (see the follow-up below).
+* `python3 tools/update_manifest.py` and `python3 tools/update_manifest.py --check` -- OK.

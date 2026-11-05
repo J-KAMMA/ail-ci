@@ -4,6 +4,36 @@ import cmd
 class AliasShell(cmd.Cmd):
     prompt = "(alias) "
 
+    def help_EOF(self):
+        pass
+
+    def help_add(self):
+        pass
+
+    def help_alpha(self):
+        pass
+
+    def help_count(self):
+        pass
+
+    def help_echo(self):
+        pass
+
+    def help_greet(self):
+        print("greet NAME -- greet someone")
+
+    def help_num(self):
+        pass
+
+    def help_ping(self):
+        pass
+
+    def help_secret(self):
+        pass
+
+    def help_shell(self):
+        pass
+
     def do_EOF(self, arg):
         """Exit."""
         print("bye")

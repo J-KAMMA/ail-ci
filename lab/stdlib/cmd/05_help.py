@@ -43,11 +43,35 @@ class HelpShell(cmd.Cmd):
         """Run a shell command."""
         print("shell", arg)
 
+    def help_EOF(self):
+        pass
+
+    def help_add(self):
+        pass
+
+    def help_alpha(self):
+        pass
+
+    def help_count(self):
+        pass
+
     def help_echo(self):
         print("echo TEXT -- custom help")
 
+    def help_greet(self):
+        pass
+
+    def help_num(self):
+        pass
+
+    def help_ping(self):
+        pass
+
     def help_secret(self):
         print("secret -- documented only by help_secret")
+
+    def help_shell(self):
+        pass
 
 
 def main():
