@@ -36,6 +36,7 @@ RUNTIME = r'''
 
 typedef struct ail_thr {
     ail_frame *frames;            /* saved while the thread does not hold the lock */
+    int64_t depth;                /* the thread's cx->call_depth while it does not hold the lock */
     ail_excslot exc;
     int exc_pending;
     ail_limitslot limit;
@@ -92,6 +93,7 @@ static void ail_gil_take_locked(ail_ctx *cx, ail_thr *t) {
     __atomic_store_n(&ail_gil_drop, 0, __ATOMIC_RELAXED);
     pthread_cond_broadcast(&ail_gil_sw_cv);
     cx->frames = t->frames;
+    cx->call_depth = t->depth;
     cx->exc = t->exc;
     cx->exc_pending = t->exc_pending;
     cx->limit = t->limit;
@@ -100,6 +102,7 @@ static void ail_gil_take_locked(ail_ctx *cx, ail_thr *t) {
 static void ail_gil_drop_locked(ail_ctx *cx, ail_thr *t, int save) {
     if (save) {
         t->frames = cx->frames;
+        t->depth = cx->call_depth;
         t->exc = cx->exc;
         t->exc_pending = cx->exc_pending;
         t->limit = cx->limit;

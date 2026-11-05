@@ -1449,6 +1449,7 @@ typedef struct ail2g {
     ail_gcobj *inst;            /* the generator object (not owned: the collector decides) */
     ail_obj args;               /* while NEW: the call's arguments (also an attribute of the object) */
     ail_frame *top;             /* the frames of the body while it is suspended */
+    int64_t depth;              /* cx->call_depth of the body while it is suspended */
     ail_obj value, sent;
     ail_st status;
     const char *name;
@@ -1460,7 +1461,7 @@ typedef struct ail2g {
     void *sp, *caller_sp;
 #endif
 } ail2g;
-typedef struct ail2g_wait { ail_frame *top; struct ail2g_wait *next; } ail2g_wait;
+typedef struct ail2g_wait { ail_frame *top; int64_t depth; struct ail2g_wait *next; } ail2g_wait;
 static ail2g **ail2g_tab; static int64_t ail2g_n, ail2g_cap;
 static ail2g *ail2g_current;
 static ail2g_wait *ail2g_waiting;    /* the callers' frames while a generator runs */
@@ -1573,13 +1574,16 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     if (g->state == AIL2G_RUNNING) return ail_raise_c(cx, AIL_B_VALUEERROR, "generator already executing");
     if (g->state == AIL2G_NEW && sendv.tag != AIL_T_NONE)
         return ail_raise_c(cx, AIL_B_TYPEERROR, "can't send non-None value to a just-started generator");
-    ail2g_wait w; w.top = cx->frames; w.next = ail2g_waiting; ail2g_waiting = &w;
+    ail2g_wait w; w.top = cx->frames; w.depth = cx->call_depth; w.next = ail2g_waiting; ail2g_waiting = &w;
     ail2g *outer = ail2g_current;
     ail2g_current = g;
     g->sent = sendv;
     int fresh = g->state == AIL2G_NEW;
     if (fresh && ++ail2g_fresh >= 256) { ail2g_fresh = 0; ail_gc_collect(cx); }
     cx->frames = fresh ? NULL : g->top;
+    /* a fresh generator body starts one level below its caller (its own activation is another
+       Python frame level); a resumed one continues from the depth it suspended at. */
+    cx->call_depth = fresh ? w.depth : g->depth;
     g->state = AIL2G_RUNNING;
 #ifdef _WIN32
     if (fresh) {
@@ -1622,6 +1626,7 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     ail2g_current = outer;
     ail2g_waiting = w.next;
     cx->frames = w.top;
+    cx->call_depth = w.depth;
     if (g->state == AIL2G_SUSPENDED) { *out = g->value; g->value = ail_box_none(); return AIL_OK; }
     ail2g_free_stack(g);
     if (g->status == AIL_OK) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
@@ -1648,6 +1653,7 @@ static inline ail_st ail2g_yield(ail_ctx *cx, ail_obj *sent, ail_obj value) {
     if (!g) ail_die("yield outside a generator");
     g->value = value;
     g->top = cx->frames;
+    g->depth = cx->call_depth;
     g->state = AIL2G_SUSPENDED;
 #ifdef _WIN32
     SwitchToFiber(g->caller);

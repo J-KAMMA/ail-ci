@@ -109,6 +109,20 @@ NESTED = '''def outer():
 print(outer())
 '''
 
+VARARGS = '''def f(*rest):
+    return f(*rest)
+
+
+print(f())
+'''
+
+GENERATOR = '''def g(n):
+    yield from g(n + 1)
+
+
+print(next(g(0)))
+'''
+
 
 def _run_cpython(directory, text):
     src = Path(directory) / "probe.py"
@@ -190,6 +204,19 @@ class RecursionStop(unittest.TestCase):
                 self.assertIsNotNone(got, err)
                 self.assertNotEqual(got.returncode, 0, mode)
                 self.assertTrue(_last_line(got.stderr).startswith("RecursionError:"), mode)
+
+    def test_varargs_and_generator_recursion_stop_by_name(self):
+        for slug, text in (("varargs", VARARGS), ("generator", GENERATOR)):
+            with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
+                want_out, want_rc = _run_cpython(directory, text)
+                self.assertNotEqual(want_rc, 0)
+                for mode, env_extra in MODES:
+                    got, err = _build_and_run(directory, "%s_%s" % (slug, mode), text, env_extra)
+                    self.assertIsNotNone(got, err)
+                    self.assertEqual(got.stdout.decode("utf-8", "replace"), want_out, "%s/%s" % (slug, mode))
+                    self.assertNotEqual(got.returncode, 0, "%s/%s" % (slug, mode))
+                    self.assertTrue(_last_line(got.stderr).startswith("RecursionError:"),
+                                    "%s/%s: %r" % (slug, mode, got.stderr[-400:]))
 
 
 if __name__ == "__main__":

@@ -62,8 +62,8 @@ FLUSH_EDITS = (
      '    {\n        const char *name = ail_exc_pyname(w);\n        ailf_flush_all();\n        fflush(stdout);\n'
      '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
      '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
-    ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
-     'static void ail_exception_uncaught(ail_exception *value) {\n    ailf_flush_all();\n    fflush(stdout);\n'),
+    ('static void ail_exception_uncaught(ail_exception *value) {\n',
+     'static void ail_exception_uncaught(ail_exception *value) {\n    ailf_flush_all();\n'),
 )
 
 

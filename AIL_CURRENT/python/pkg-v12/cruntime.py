@@ -11342,7 +11342,8 @@ typedef struct ail_frame {
    in LIFO order with any other frame. */
 #define AIL_ROOT_N(cx, fvar, ptr, N) \
     ail_frame fvar; \
-    fvar.slots = (ptr); fvar.n = (N); fvar.prev = (cx)->frames; (cx)->frames = &fvar
+    fvar.slots = (ptr); fvar.n = (N); fvar.prev = (cx)->frames; (cx)->frames = &fvar; \
+    ++(cx)->call_depth
 #define AIL_ROOT1(cx, fvar, var) AIL_ROOT_N(cx, fvar, &(var), 1)
 
 /* ===================================================================================
