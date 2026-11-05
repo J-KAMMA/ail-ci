@@ -74,6 +74,7 @@ class _Lowerer(ast.NodeTransformer):
         self.csv_file = False          # a general-path csv reader consumes a text file: it needs __iter__
         self.file_expr_names = set()
         self.walk_dirs = set()         # names bound as the `dirs` of an os.walk loop
+        self.scandir_names = set()     # names bound by `with os.scandir(p) as it:`
         self.hoist = []                # assignments to put before the statement being lowered
         self.windows = filelib.target_windows()
 
@@ -530,6 +531,10 @@ class _Lowerer(ast.NodeTransformer):
 
     def visit_With(self, node):
         items = node.items
+        for item in items:
+            if isinstance(item.context_expr, ast.Call) and self.qual(item.context_expr.func) == 'os.scandir' \
+                    and isinstance(item.optional_vars, ast.Name):
+                self.scandir_names.add(item.optional_vars.id)
         body = self.block(node.body)
         # innermost first
         for item in reversed(items):
@@ -550,6 +555,16 @@ class _Lowerer(ast.NodeTransformer):
             elif isinstance(context, ast.Name) and self.file_kind(context):
                 target = None
                 shown = self.N(context.id)
+            elif isinstance(context, ast.Call) and self.qual(context.func) == 'os.scandir' \
+                    and isinstance(item.optional_vars, ast.Name):
+                self.need.add('scandir')
+                if context.keywords or len(context.args) > 1:
+                    self.refuse(node, 'os.scandir(path) takes the path only')
+                path = self.visit(context.args[0]) if context.args else self.C('.')
+                body = [ast.Assign(targets=[item.optional_vars],
+                                   value=self.call('_ail_scan_open', path))] + body
+                self.scandir_names.add(item.optional_vars.id)
+                continue
             elif self.general:
                 item.context_expr = self.visit(item.context_expr)
                 body = [ast.With(items=[item], body=body, type_comment=None)]      # a manager: withlib.py lowers it
@@ -603,7 +618,32 @@ class _Lowerer(ast.NodeTransformer):
             return self.lower_file_loop(node, *found)
         if isinstance(node.iter, ast.Call) and self.qual(node.iter.func) == 'os.walk':
             return self.lower_walk(node)
+        if isinstance(node.iter, ast.Call) and self.qual(node.iter.func) == 'os.scandir':
+            return self.lower_scandir(node)
+        if isinstance(node.iter, ast.Name) and node.iter.id in self.scandir_names:
+            return self.lower_scandir(node)
         return self.generic_visit(node)
+
+    def lower_scandir(self, node):
+        call = node.iter
+        if not isinstance(node.target, ast.Name):
+            self.refuse(node, 'for ... in os.scandir(path): the target has to be a plain name')
+        self.need.add('scandir')
+        stmts = []
+        if isinstance(call, ast.Name):
+            it = call.id
+        else:
+            if call.keywords or len(call.args) > 1:
+                self.refuse(node, 'os.scandir(path) takes the path only')
+            path = self.visit(call.args[0]) if call.args else self.C('.')
+            it = self.fresh('sc')
+            stmts.append(ast.Assign(targets=[self.N(it, True)], value=self.call('_ail_scan_open', path)))
+        head = [ast.Assign(targets=[copy.deepcopy(node.target)],
+                           value=self.method(self.N(it), 'entry'))]
+        loop = ast.While(test=self.method(self.N(it), 'advance'),
+                         body=head + self.block(node.body), orelse=self.block(node.orelse))
+        stmts.append(loop)
+        return self.located(stmts, node)
 
     def lower_file_loop(self, node, file_node, start, enumerated):
         opened = self.is_open(file_node)
@@ -863,8 +903,17 @@ class _Lowerer(ast.NodeTransformer):
             return '_ail_phead', '_ail_ptail', ('phead', 'ptail')
         return '_ail_proot', '_ail_pext', ('pext',)
 
+    def no_bytes(self, node, shown):
+        """A bytes path: CPython accepts one, the file layer works in str; say so by name."""
+        for arg in node.args:
+            for each in ast.walk(arg):
+                if isinstance(each, ast.Constant) and isinstance(each.value, bytes):
+                    self.refuse(node, '%s() with a bytes path is not built.\n'
+                                      '  write instead: pass the path as str' % shown)
+
     def lower_path(self, node, flavor, fn):
         nt = flavor == 'nt'
+        self.no_bytes(node, self.qual(node.func))
         if fn == 'join':
             if not node.args or node.keywords:
                 self.refuse(node, 'os.path.join() takes positional string arguments')
@@ -889,12 +938,22 @@ class _Lowerer(ast.NodeTransformer):
             'abspath': ('_ail_ntabspath', ('nt_abs',)) if nt else ('_ail_pabspath', ('pabs',)),
             'normpath': ('_ail_ntnormpath', ('nt_norm',)) if nt else ('_ail_pnormpath', ('pnorm',)),
             'isabs': ('_ail_ntisabs', ('nt_abs',)) if nt else ('_ail_pisabs', ('pabs',)),
+            'normcase': ('_ail_ntnormcase', ('pnormcase',)) if nt else ('_ail_normcase', ('pnormcase',)),
+            'expanduser': ('_ail_expanduser', ('pexpand',)),
+            'expandvars': ('_ail_expandvars', ('pexpand',)),
+            'getmtime': ('_ail_os_getmtime', ('os_stat',)),
+            'getatime': ('_ail_os_getatime', ('os_stat',)),
+            'getctime': ('_ail_os_getctime', ('os_stat',)),
         }
         if fn in table:
             func, need = table[fn]
             self.need.update(need)
             (arg,) = self.bind(node, ('filename' if fn == 'getsize' else 'path',), {}, required=1)
             return self.call(func, arg)
+        if fn in ('samefile', 'samestat'):
+            self.need.add('psame')
+            a, b = self.bind(node, ('f1', 'f2'), {}, required=2)
+            return self.call('_ail_samefile' if fn == 'samefile' else '_ail_samestat', a, b)
         if fn == 'relpath' and not nt:
             self.need.add('prel')
             path, start = self.bind(node, ('path', 'start'), {'start': '.'}, required=1)
@@ -911,6 +970,8 @@ class _Lowerer(ast.NodeTransformer):
                                                                           '' if nt else ' relpath'))
 
     def lower_os(self, node, name):
+        if name != 'os.fspath':
+            self.no_bytes(node, name)
         pn = self.path_name(name)
         if pn is not None:
             return self.lower_path(node, *pn)
@@ -934,6 +995,18 @@ class _Lowerer(ast.NodeTransformer):
             self.need.add('listdir')
             (path,) = self.bind(node, ('path',), {'path': '.'}, required=0)
             return self.call('_ail_listdir', path)
+        if name in ('os.stat', 'os.lstat'):
+            self.need.add('os_stat')
+            (path,) = self.bind(node, ('path',), {}, required=1)
+            return self.call('_ail_os_stat' if name == 'os.stat' else '_ail_os_lstat', path)
+        if name == 'os.scandir':
+            self.need.add('scandir')
+            (path,) = self.bind(node, ('path',), {'path': '.'}, required=0)
+            return self.call('_ail_scan_open', path)
+        if name == 'os.fspath':
+            if len(node.args) != 1 or node.keywords:
+                self.refuse(node, 'os.fspath(path) takes one string or bytes argument')
+            return self.visit(node.args[0])
         if name == 'os.makedirs':
             self.need.update(('makedirs', 'phead', 'ptail', 'pexists'))
             n, mode, exist_ok = self.bind(node, ('name', 'mode', 'exist_ok'), {'mode': 0o777, 'exist_ok': False}, required=1)

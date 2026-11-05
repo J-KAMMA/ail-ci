@@ -1263,10 +1263,66 @@ static int ailf_chdir(const uint8_t *p, int64_t n) {
     return rc ? ailf_oserr(errno, p, n) : 0;
 }
 
+/* One integer field of a stat record, NUL separated. */
+static int ailf_put_stat_field(ailf_buf *b, int64_t v) {
+    char tmp[32];
+    int k = snprintf(tmp, sizeof tmp, "%lld", (long long)v);
+    if (k < 0) return ailf_fail(AILF_E_FATAL, "stat field");
+    if (ailf_buf_put(b, (const uint8_t *)tmp, (int64_t)k)) return -1;
+    return ailf_buf_putc(b, 0);
+}
+
+/* What os.stat(path) / os.lstat(path) report, as NUL separated decimal fields:
+   mode, ino, dev, nlink, uid, gid, size, atime_sec, atime_nsec, mtime_sec, mtime_nsec,
+   ctime_sec, ctime_nsec. `follow` 0 looks at a symlink itself (lstat). */
+static int ailf_stat_record(const uint8_t *p, int64_t n, ailf_buf *out, int follow) {
+    out->p = NULL; out->n = out->cap = 0;
+    ailf_pchar *pp = ailf_path(p, n);
+    if (!pp) return -1;
+    int64_t v[13];
+#ifdef _WIN32
+    struct _stat64 st;
+    int rc = _wstat64(pp, &st);
+    free(pp);
+    if (rc) return ailf_oserr(errno, p, n);
+    v[0] = (int64_t)st.st_mode;  v[1] = (int64_t)st.st_ino;   v[2] = (int64_t)st.st_dev;
+    v[3] = (int64_t)st.st_nlink; v[4] = (int64_t)st.st_uid;   v[5] = (int64_t)st.st_gid;
+    v[6] = (int64_t)st.st_size;
+    v[7] = (int64_t)st.st_atime; v[8] = 0;
+    v[9] = (int64_t)st.st_mtime; v[10] = 0;
+    v[11] = (int64_t)st.st_ctime; v[12] = 0;
+    (void)follow;
+#else
+    struct stat st;
+    int rc = follow ? stat(pp, &st) : lstat(pp, &st);
+    int e = errno;
+    free(pp);
+    if (rc) return ailf_oserr(e, p, n);
+    v[0] = (int64_t)st.st_mode;  v[1] = (int64_t)st.st_ino;   v[2] = (int64_t)st.st_dev;
+    v[3] = (int64_t)st.st_nlink; v[4] = (int64_t)st.st_uid;   v[5] = (int64_t)st.st_gid;
+    v[6] = (int64_t)st.st_size;
+#ifdef __APPLE__
+    v[7] = (int64_t)st.st_atimespec.tv_sec;  v[8] = (int64_t)st.st_atimespec.tv_nsec;
+    v[9] = (int64_t)st.st_mtimespec.tv_sec;  v[10] = (int64_t)st.st_mtimespec.tv_nsec;
+    v[11] = (int64_t)st.st_ctimespec.tv_sec; v[12] = (int64_t)st.st_ctimespec.tv_nsec;
+#else
+    v[7] = (int64_t)st.st_atim.tv_sec;  v[8] = (int64_t)st.st_atim.tv_nsec;
+    v[9] = (int64_t)st.st_mtim.tv_sec;  v[10] = (int64_t)st.st_mtim.tv_nsec;
+    v[11] = (int64_t)st.st_ctim.tv_sec; v[12] = (int64_t)st.st_ctim.tv_nsec;
+#endif
+#endif
+    for (int i = 0; i < 13; i++) {
+        if (ailf_put_stat_field(out, v[i])) { ailf_buf_free(out); return -1; }
+    }
+    return 0;
+}
+
 /* The entries of a directory in the order the OS returns them (what os.listdir / os.scandir give).
    Output: one record per entry, "<type><name>", records separated by NUL; type 'd' for a directory
-   (symlinks to directories included, as DirEntry.is_dir() answers), 'f' otherwise. */
+   (symlinks to directories included, as DirEntry.is_dir() answers), 'f' otherwise.
+   mode 2 (3) instead returns the stat (lstat) record of the path itself, see ailf_stat_record. */
 static int ailf_scandir(const uint8_t *p, int64_t n, ailf_buf *out, int with_type) {
+    if (with_type >= 2) return ailf_stat_record(p, n, out, with_type == 2);
     out->p = NULL; out->n = out->cap = 0;
     ailf_pchar *pp = ailf_path(p, n); if (!pp) return -1;
 #ifdef _WIN32
