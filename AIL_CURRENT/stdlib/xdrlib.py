@@ -7,8 +7,11 @@ text is kept.  What the compiler refuses is rewritten:
 
 * `io.BytesIO` becomes a list of `bytes` chunks joined in `get_buffer()`;
 * the `@raise_conversion_error` decorator (only `@staticmethod` and `@lru_cache` decorators are
-  built) becomes explicit range checks in each packing method, raising `ConversionError` with
-  CPython's `struct.pack` text (`"'L' format requires 0 <= number <= 4294967295"`, ...);
+  built) becomes explicit type and range checks in each packing method, raising
+  `ConversionError` with CPython's `struct.pack` text (`"'L' format requires 0 <= number <=
+  4294967295"`, `"required argument is not an integer"`, `"required argument is not a float"`);
+  `pack_uhyper` turns the `TypeError` from a non-integer argument into `ConversionError` with
+  CPython's shift text, so a wrong type stops loudly instead of being coerced by `math`;
 * `struct` is not a built module, so ints use `int.to_bytes`/`int.from_bytes` and floats are
   encoded/decoded from IEEE-754 fields with exactly representable power-of-two arithmetic;
 * the `0x10000000000000000` constant in `unpack_hyper` (2**64, beyond int64) becomes a
@@ -57,15 +60,19 @@ class ConversionError(Error):
 
 
 def _uint_bytes(x: int) -> bytes:
+    if not isinstance(x, int):
+        raise ConversionError("required argument is not an integer")
     if x < 0 or x > _UINT_MAX:
         raise ConversionError("'L' format requires 0 <= number <= 4294967295")
-    return x.to_bytes(4, "big")
+    return int(x).to_bytes(4, "big")
 
 
 def _int_bytes(x: int) -> bytes:
+    if not isinstance(x, int):
+        raise ConversionError("required argument is not an integer")
     if x < _INT_MIN or x > _INT_MAX:
         raise ConversionError("'l' format requires -2147483648 <= number <= 2147483647")
-    return x.to_bytes(4, "big", signed=True)
+    return int(x).to_bytes(4, "big", signed=True)
 
 
 def _pow2(n: int) -> float:
@@ -112,6 +119,8 @@ def _split(x: float):
 
 
 def _double_bytes(x: float) -> bytes:
+    if not isinstance(x, float) and not isinstance(x, int):
+        raise ConversionError("required argument is not a float")
     sign, e, n = _split(x)
     if e == 9999:
         hi = (sign << 31) | (2047 << 20)
@@ -147,6 +156,8 @@ def _round_shift(n: int, shift: int) -> int:
 
 
 def _float_bytes(x: float) -> bytes:
+    if not isinstance(x, float) and not isinstance(x, int):
+        raise ConversionError("required argument is not a float")
     sign, e, n = _split(x)
     if e == 9999:
         if n != 0:
@@ -207,8 +218,13 @@ class Packer:
             self.__buf.append(b"\0\0\0\0")
 
     def pack_uhyper(self, x):
-        self.pack_uint(x >> 32 & _UINT_MAX)
-        self.pack_uint(x & _UINT_MAX)
+        try:
+            hi = x >> 32 & _UINT_MAX
+            lo = x & _UINT_MAX
+        except TypeError as e:
+            raise ConversionError(str(e))
+        self.pack_uint(hi)
+        self.pack_uint(lo)
 
     def pack_hyper(self, x):
         self.pack_uhyper(x)

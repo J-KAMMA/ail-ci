@@ -73,8 +73,12 @@ value is exact; only the unsigned value above int64 stops, and it stops loudly r
   `unpack_double`. A follow-up could build `struct` instead; the results are already exact for
   these cases, and a compiler change is not needed for the ten programs.
 * Only `@staticmethod` and `@lru_cache` decorators are built, so the `@raise_conversion_error`
-  decorator is inlined: each packing method checks its range and raises `ConversionError` with
-  CPython's `struct.pack` text (`"'L' format requires 0 <= number <= 4294967295"`, ...).
+  decorator is inlined: each packing method checks the argument type and range and raises
+  `ConversionError` with CPython's `struct.pack` text (`"'L' format requires 0 <= number <=
+  4294967295"`, `"required argument is not an integer"`, `"required argument is not a float"`).
+  `pack_uhyper`/`pack_hyper` turn the `TypeError` raised by shifting a non-integer into
+  `ConversionError` with CPython's text (`"unsupported operand type(s) for >>: 'float' and 'int'"`),
+  so a wrong type stops loudly instead of being coerced by `math`.
 * `0x10000000000000000` (2**64) is beyond int64. `unpack_hyper` tests the sign bit of the high
   word and computes the two's-complement magnitude, `-magnitude - 1`, which stays inside int64 and
   still yields `-9223372036854775808` for `0x8000000000000000`.
@@ -82,21 +86,46 @@ value is exact; only the unsigned value above int64 stops, and it stops loudly r
   compiler (`name 'get_buffer' is not defined`), so each alias is a one-line method that calls the
   canonical one. Same names, same signatures, same behaviour.
 
+## Review fix: wrong-typed arguments
+
+The first cut delegated to `math.fabs`/`math.copysign`, which AIL silently coerces, so
+`pack_double("x")` packed a pointer value and exited 0 where CPython raises
+`ConversionError("required argument is not a float")` and exits 1. `pack_uint(1.5)` and
+`pack_uhyper(1.5)` raised `AttributeError`/`TypeError`. `_uint_bytes`, `_int_bytes`,
+`_float_bytes` and `_double_bytes` now reject non-int/non-float arguments before any arithmetic,
+and `pack_uhyper` converts its shift `TypeError` into `ConversionError`. All arguments are still
+validated at run time, so a bad value reaching a method through an argument, a list item, an
+attribute or a dict value behaves the same.
+
+Probes (`/tmp/probes/`, `bash ~/tools/cmp.sh <probe> $PWD`, default and `AIL_UNIFIED_FORCE=1`):
+
+| probe | covers | result |
+| --- | --- | --- |
+| `xd_badtypes` | 22 wrong-typed calls: `pack_uint`/`pack_int`/`pack_enum`/`pack_uhyper`/`pack_hyper`/`pack_float`/`pack_double` with float, str, `None`, list and bytes | match, both builds |
+| `xd_bounds` | `0`, `2**32-1`, `-2**31`, `2**31-1`, `-1`, `2**63-1`, `-2**63`, ints into float/double, `2**32`/`2**31`/`-2**31-1` range errors, `pack_float(1e300)` overflow | match, both builds |
+| `xd_paths` | bad values reaching the packer through an argument, a list item, an attribute and a dict value | match, both builds |
+| `xd_uncaught` | uncaught `pack_double("x")` | exit 1 and `xdrlib.ConversionError: required argument is not a float`, both builds |
+| `xd_float`, `xd_int`, `xd_bytes`, `xd_values`, `xd_pow2` | earlier float/int/byte/power-of-two probes, re-run after the fix | match, both builds |
+
+`test_ail_std_xdrlib.py` now also builds a wrong-argument program and compares its stdout and
+exit status with CPython in both builds, so the defect cannot come back silently.
+
 ## Test notes
 
-`python3 AIL_CURRENT/test_ail_std_xdrlib.py` passes (3 tests: 9 programs compared in both builds,
-the beyond-int64 program checked for a loud stop, and the program inventory).  Probe programs in
-`/tmp/probes/` (`xd_float`, `xd_int`, `xd_bytes`, `xd_values`, `xd_pow2`) match CPython in both
+`python3 AIL_CURRENT/test_ail_std_xdrlib.py` passes (4 tests: 9 programs compared in both builds,
+the beyond-int64 program checked for a loud stop, the program inventory, and the wrong-argument
+program).  Probe programs in
+`/tmp/probes/` (`xd_float`, `xd_int`, `xd_bytes`, `xd_values`, `xd_pow2`, `xd_bool`, `xd_badtypes`,
+`xd_bounds`, `xd_paths`, `xd_uncaught`) match CPython in both
 builds; they cover int widths and their error texts, hyper sign boundaries, zeros and signed
 zeros, subnormals, infinities, nan, single-precision round-half-even ties, overflowing floats,
-empty strings and arrays, and values reaching the packer through an argument, a list item, an
-attribute and a dict value.
+empty strings and arrays, wrong-typed arguments in every packing method, and values reaching the
+packer through an argument, a list item, an attribute and a dict value.
 
-`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` are the required tests.
-`test_ail_files` and `test_ail_corpus_findings3` pass.  `test_ail_safetynet` fails
-`S4_generators_gc` (only the first line of its output is produced) in this runner; the same test
-fails identically at the base commit `68eb00a`, without these changes, so it is a pre-existing
-environmental failure, not an `xdrlib` regression.
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` were run on the final
+commit: `test_ail_files` (18 tests, 1 skipped), `test_ail_corpus_findings3` (2 tests) and
+`test_ail_safetynet` (5 tests) all pass.  The `S4_generators_gc` output truncation seen in an
+earlier parallel run did not reproduce in this serial run; it does not involve `xdrlib`.
 
 ## Follow-ups (out of scope: compiler files)
 

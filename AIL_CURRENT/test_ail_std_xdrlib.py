@@ -120,5 +120,43 @@ class StdlibXdrlibTests(unittest.TestCase):
                                   % (source.name, mode, ran.stderr))
 
 
+    def test_bad_argument_types_match_cpython(self):
+        program = """import xdrlib
+
+def report(label, fn):
+    try:
+        fn()
+    except Exception as e:
+        print(label, type(e).__name__, "|", str(e))
+    else:
+        print(label, "OK")
+
+p = xdrlib.Packer()
+report("uint-float", lambda: p.pack_uint(1.5))
+report("uint-str", lambda: p.pack_uint("1"))
+report("int-none", lambda: p.pack_int(None))
+report("enum-str", lambda: p.pack_enum("1"))
+report("uhyper-float", lambda: p.pack_uhyper(1.5))
+report("uhyper-str", lambda: p.pack_uhyper("1"))
+report("hyper-list", lambda: p.pack_hyper([1]))
+report("float-str", lambda: p.pack_float("x"))
+report("float-bytes", lambda: p.pack_float(b"x"))
+report("double-str", lambda: p.pack_double("x"))
+report("double-none", lambda: p.pack_double(None))
+report("double-list", lambda: p.pack_double([1]))
+print("buffer", p.get_buffer().hex())
+"""
+        source = self.dir / "bad_argument_types.py"
+        source.write_text(program)
+        expected = run_cpython(source)
+        for mode in ("default", "forced-general"):
+            with self.subTest(build=mode):
+                ran = self.build_and_run(source, mode)
+                self.assertEqual(ran.returncode, expected.returncode,
+                                 "bad args %s exit\nexpected stderr: %s\nactual stderr: %s"
+                                 % (mode, expected.stderr, ran.stderr))
+                self.assertEqual(ran.stdout, expected.stdout, "bad args " + mode)
+
+
 if __name__ == "__main__":
     unittest.main()
