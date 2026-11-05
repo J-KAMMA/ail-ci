@@ -88,12 +88,12 @@ cc -O2 -fno-tree-slp-vectorize -ffp-contract=off -fopenmp-simd \
    -o OUT DIR/program.c -lm
 ```
 
-| program | pie | nx | relro | canary | fortify | stripped bytes | instructions |
-|---|---|---|---|---|---|---|---|
-| `csv_sum` before | yes | yes | full | yes | 1 | 18648 | n/a |
-| `csv_sum` after | yes | yes | full | yes | 0 | 18648 | n/a |
-| `dict_count` before | yes | yes | full | yes | 2 | 30936 | n/a |
-| `dict_count` after | yes | yes | full | yes | 0 | 30936 | n/a |
+| program | pie | nx | relro | canary | fortify | stripped bytes | instructions run (icount) | instructions in `.text` |
+|---|---|---|---|---|---|---|---|---|
+| `csv_sum` before | yes | yes | full | yes | 1 | 18648 | n/a | 1760 |
+| `csv_sum` after | yes | yes | full | yes | 0 | 18648 | n/a | 1743 |
+| `dict_count` before | yes | yes | full | yes | 2 | 30936 | n/a | 3825 |
+| `dict_count` after | yes | yes | full | yes | 0 | 30936 | n/a | 3760 |
 
 - **Output is unchanged** for both programs: byte-identical stdout and exit status on the fixtures,
   and the rebuilt binaries run normally.
@@ -103,13 +103,19 @@ cc -O2 -fno-tree-slp-vectorize -ffp-contract=off -fopenmp-simd \
   `_FORTIFY_SOURCE=3` at `-O2`; redefining it to 2 drops `__memcpy_chk` (`csv_sum`) and
   `__memcpy_chk`/`__memset_chk` (`dict_count`), so the counted `__*_chk` symbols go 1 -> 0 and
   2 -> 0. `__stack_chk_fail` stays.
-- **Size does not move after `strip`** (18648 / 30936 both before and after). Unstripped the hardened
-  binaries are 48 and 144 bytes smaller because those `__*_chk` dynamic symbols are gone; the code is
-  the same size.
-- **Instruction counts are unavailable on this runner.** `tools/icount.c` builds, but
+- **File size does not move after `strip`** (18648 / 30936 both before and after), and unstripped
+  the hardened binaries are 48 and 144 bytes smaller. `.text` is 48 and 192 bytes smaller; the
+  difference is absorbed by section alignment in the stripped files.
+- **Executed instruction counts are unavailable on this runner.** `tools/icount.c` builds, but
   `perf_event_open` returns `EACCES` (`perf_event_open: Permission denied`) because
-  `/proc/sys/kernel/perf_event_paranoid` is 4; `valgrind` and `qemu-x86_64` are not installed, so
-  there is no fallback counter. The counts are reported as `n/a` rather than guessed.
+  `/proc/sys/kernel/perf_event_paranoid` is 4 and the runner user cannot lower it (uid 1001, no
+  sudo); `valgrind` and `qemu-x86_64` are not installed, so there is no fallback counter. The
+  counts are reported as `n/a` rather than guessed.
+  As a substitute, the static instruction count of `.text`
+  (`objdump -d --no-show-raw-insn | count instruction lines`) is 1760 -> 1743 for `csv_sum` and
+  3825 -> 3760 for `dict_count`: the hardened builds are *smaller* because the `__memcpy_chk` /
+  `__memset_chk` call sites became plain `memcpy` / `memset`. A static count is not a run count and
+  is not comparable across programs; it is here only to show the direction of the code-size change.
 
 ### What would actually be worth doing
 
@@ -127,6 +133,7 @@ cc -O2 -fno-tree-slp-vectorize -ffp-contract=off -fopenmp-simd \
 4. **Stripping** is an orthogonal size win (`strip`: 22416 -> 18648, 35008 -> 30936 bytes here),
    with no effect on these properties.
 
-Costs: all four properties are already present, so the measured cost of the proposed flags is
-0 bytes after strip and 0 instructions of change (counts unavailable); the only measurable effect is
-the fortify regression above.
+Costs: all four properties are already present, so the proposed flags buy nothing. The stripped file
+size is unchanged (18648 / 30936 bytes) and `.text` shrinks by 48 and 192 bytes, entirely because
+`-D_FORTIFY_SOURCE=2` removed the `__*_chk` call sites; that is the one measurable effect, and it is
+a loss of fortification, not a gain. Executed instruction counts could not be taken on this runner.
