@@ -401,10 +401,11 @@ class LICM(object):
 
     def induction(self, loop, defs, inside):
         """For a `loop` (a while loop): (index arg, its value before the loop, bound, strict,
-        position of the loop test) when the body starts with the lowering's test
-        `if c {yield} {break}`, `c` implies `i < hi` (or `i <= hi`) for a carried `i` and a `hi`
-        defined outside, and every `continue` passes `i` or `i + k` (k >= 0): then every
-        instruction after the test sees lo <= i < hi (<= hi)."""
+        position of the loop test, closing pointer, first) when the body starts with the lowering's
+        test `if c {yield} {break}`, `c` implies `i < hi` (or `i <= hi`) for a carried `i` and a
+        `hi` defined outside, and every `continue` passes `i` or `i + k` (k >= 0): then every
+        instruction after the test sees lo <= i < hi (<= hi).  `first` says the matched comparison
+        is the first conjunct the test evaluates (so the test itself is in that range too)."""
         body = loop.regions[0]
         test = None
         for t, ins in enumerate(body.instrs):
@@ -420,7 +421,7 @@ class LICM(object):
             if d is None or depth > 6:
                 return []
             if d.op.startswith('cmp.') and d.operands[0].type == I.I64 and d.operands[1].type == I.I64:
-                return [(d.op[4:], d.operands[0], d.operands[1])]
+                return [(v, d.op[4:], d.operands[0], d.operands[1])]
             if d.op == 'if' and len(d.results) == 1:
                 ty, oy = d.regions[0].instrs[-1], d.regions[1].instrs[-1]
                 if ty.op == 'yield' and oy.op == 'yield' and defs.get(oy.operands[0]) is not None \
@@ -428,7 +429,9 @@ class LICM(object):
                     return atoms(d.operands[0], depth + 1) + atoms(ty.operands[0], depth + 1)
             return []
         own = [e for e in self.exits(loop) if e.op == 'continue']
-        for pred, a, b in atoms(body.instrs[test].operands[0]):
+        cond = body.instrs[test].operands[0]
+        first_cond = symbounds._first_cond(cond, defs)
+        for cv, pred, a, b in atoms(cond):
             if pred in ('gt', 'ge'):
                 pred, a, b = {'gt': 'lt', 'ge': 'le'}[pred], b, a
             if pred not in ('lt', 'le') or a not in body.args:
@@ -436,14 +439,15 @@ class LICM(object):
             k = body.args.index(a)
             if not all(self.non_decreasing(e.operands[k], a, defs) for e in own):
                 continue
+            first = cv is first_cond
             if b not in inside:
-                return a, loop.operands[k], b, pred == 'lt', test, None
+                return a, loop.operands[k], b, pred == 'lt', test, None, first
             # two pointers closing in on each other (`while a < b: ...; a += 1; b -= 1`): b is carried and
             # never increases, so a < b <= b0 (its value before the loop) in every iteration
             if b in body.args:
                 kb = body.args.index(b)
                 if all(self.non_increasing(e.operands[kb], b, defs) for e in own):
-                    return a, loop.operands[k], loop.operands[kb], pred == 'lt', test, b
+                    return a, loop.operands[k], loop.operands[kb], pred == 'lt', test, b, first
         return None
 
     @staticmethod
@@ -499,10 +503,13 @@ class LICM(object):
         else:
             found = self.induction(loop, defs, inside)
             if found is not None:
-                idx, lo, hi, strict, test, dec = found
-                if self.bce:
-                    # A `while v < e and ...` evaluates the rest of its test (and then the body)
-                    # only after `v < e` held, so accesses in the test too are in [lo, e - 1].
+                idx, lo, hi, strict, test, dec, first = found
+                # A `while v < e and ...` evaluates `v < e` before the rest of the test, so
+                # accesses in the test too are in [lo, e - 1] -- but only when the induction
+                # compare is the first conjunct.  Otherwise keep the test out of the scope (the
+                # body still runs only after the whole test held), leaving earlier-conjunct
+                # accesses checked.
+                if self.bce and first:
                     scope = loop.regions[0].instrs
                 else:
                     scope = loop.regions[0].instrs[test + 1:]

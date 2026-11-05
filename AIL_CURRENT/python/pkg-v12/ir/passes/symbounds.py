@@ -114,6 +114,24 @@ def _const_of(v, defs):
     return None
 
 
+def _first_cond(v, defs):
+    """The condition an `and`-shaped lowering evaluates first (the leftmost conjunct).  `_first_cmps`
+    skips an operand that is not an i64 comparison, so its first entry may be a later conjunct;
+    this returns the value actually tested first."""
+    d = defs.get(v)
+    while d is not None and d.op == 'if' and len(d.results) == 1:
+        ty = d.regions[0].instrs[-1] if d.regions[0].instrs else None
+        oy = d.regions[1].instrs[-1] if d.regions[1].instrs else None
+        if ty is None or oy is None or ty.op != 'yield' or oy.op != 'yield':
+            break
+        od = defs.get(oy.operands[0])
+        if not (od is not None and od.op == 'const' and od.attrs.get('value') is False):
+            break
+        v = d.operands[0]
+        d = defs.get(v)
+    return v
+
+
 def _while_index(loop, defs):
     """`(region arg, its value before the loop, the bound)` for a `while` loop (`op == 'loop'`)
     whose first test is `v < e`, `v` is carried and every `continue` keeps it non-decreasing, and
@@ -129,15 +147,21 @@ def _while_index(loop, defs):
     if test is None:
         return None
     inside = _loop_inside(loop)
-    for pred, a, b in _first_cmps(body.instrs[test].operands[0], defs):
-        if pred in ('gt', 'ge'):
-            pred, a, b = {'gt': 'lt', 'ge': 'le'}[pred], b, a
-        if pred not in ('lt', 'le') or a not in body.args or b in inside:
-            continue
-        k = body.args.index(a)
-        continues = _continues(loop)
-        if continues and all(_nondecreasing(e.operands[k], a, defs) for e in continues):
-            return a, loop.operands[k], b, pred == 'lt'
+    cmps = _first_cmps(body.instrs[test].operands[0], defs)
+    if not cmps:
+        return None
+    # Only the first conjunct bounds `v` for everything else in the test: `a and b` evaluates `a`
+    # before `b`, so an access in a later conjunct is in range but one in an earlier conjunct is
+    # not.  A `v < e` further down the chain therefore gives no bound (the loop is not versioned).
+    pred, a, b = cmps[0]
+    if pred in ('gt', 'ge'):
+        pred, a, b = {'gt': 'lt', 'ge': 'le'}[pred], b, a
+    if pred not in ('lt', 'le') or a not in body.args or b in inside:
+        return None
+    k = body.args.index(a)
+    continues = _continues(loop)
+    if continues and all(_nondecreasing(e.operands[k], a, defs) for e in continues):
+        return a, loop.operands[k], b, pred == 'lt'
     return None
 
 

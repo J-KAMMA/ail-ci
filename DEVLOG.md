@@ -1,3 +1,29 @@
+## 2026-11-05 -- bce s7 review fix: first-conjunct test scope and the missing probes (job-bces7-11060033)
+
+The whole-test versioning scope assumed the induction compare was the first conjunct, but
+`_first_cmps` can skip an operand that is not an i64 comparison: in `while d[v] == 0 and v < e`
+its first returned comparison is the second conjunct.  The `d[v]` access in the earlier conjunct
+was therefore put in `[v, e - 1]` and emitted unchecked (`f(b"abc", 5, 2)` exited 0 printing `0`
+instead of raising `IndexError`).  `symbounds._first_cond` now walks the `and`-shaped lowering to
+the condition actually evaluated first; `LICM.induction` reports whether the matched comparison is
+that value, and `LICM.version` widens the scope to the test only then, otherwise keeping the old
+body-only scope (earlier-conjunct accesses stay checked).  `symbounds._while_index` also takes
+only a first-conjunct compare.  `AIL_BCE=0` is untouched: its scope was already body-only.
+
+Probes `/tmp/probes/cond2_bytes.py` and `cond2_body.py` (the review's two) now exit 1 with empty
+stdout and `IndexError`, matching CPython in the default and forced-general builds; `/tmp/probes/
+cond2_ok.py` (`v < e` first) still matches and versions, and `entry_cond2.py`/`entry_cond2_ok.py`
+show the entry guard was already order-safe.
+
+`test_ail_bce` gains the probes task (d) required: `while_access_before_bound` (the review's shape,
+`versioned=0`), `while_bound_reassigned` (the bound grows in the loop, `versioned=0`),
+`while_list_append` (a struct-field list resized in the loop, `versioned=0`; a *list parameter* is
+read-only, pinned as a named compile refusal by `test_list_param_append_is_refused_by_name`), and
+`while_bound_bigtext` (`b` from text beyond int64, the same `int()` stop in every build).  Required
+modules pass on the final commit: `test_ail_bce`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (`-j 2`; the safetynet module needs the normal address space, not
+`ulimit -v`).  `tools/update_manifest.py` refreshed the pins.
+
 ## 2026-11-05 -- bce s7: while-loop and function-entry versioning (job-bces7-11051903)
 
 `symbounds` now derives bounds for a canonical `while v < e` (`op == 'loop'`): `v` is carried, every

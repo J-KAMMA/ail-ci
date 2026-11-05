@@ -488,7 +488,78 @@ fn main() {
     print(scan(b"abcde", 0, 3));
 }
 """),
+    ('while_access_before_bound', r"""
+fn f(d: bytes, v: int, b: int) -> int {
+    let e = b - 1;
+    let n = 0;
+    while d[v] == 0 and v < e {
+        n += 1;
+        v += 1;
+    }
+    return n;
+}
+fn main() {
+    try { print(f(b"abc", 5, 2)); } except IndexError { print("a"); }
+    try { print(f(b"\x00\x00\x00", 4, 3)); } except IndexError { print("b"); }
+    print(f(b"\x00\x00\x00", 0, 3));
+}
+"""),
+    ('while_bound_reassigned', r"""
+fn scan(d: bytes, e: int) -> int {
+    let i = 0;
+    let s = 0;
+    while i < e {
+        s += d[i];
+        i += 1;
+        if i == 1 { e = len(d) + 2; }
+    }
+    return s;
+}
+fn main() {
+    print(scan(b"abc", 1));
+}
+"""),
+    ('while_list_append', r"""
+struct Bag { xs: list[int]; }
+fn grow(b: Bag, n: int) -> int {
+    let i = 0;
+    let s = 0;
+    while i < n {
+        s += b.xs[i];
+        b.xs.append(i);
+        i += 1;
+    }
+    return s;
+}
+fn main() {
+    let b = Bag([10, 20, 30]);
+    print(grow(b, 3));
+    print(len(b.xs));
+}
+"""),
+    ('while_bound_bigtext', r"""
+fn make() -> str { return "9223372036854775808"; }
+fn emit_all(data: bytes, a: int, b: int) -> void {
+    let i = a;
+    while i < b { print(data[i]); i += 1; }
+}
+fn main() {
+    let b = int(make());
+    emit_all(b"abc", 0, b);
+}
+"""),
 ]
+
+# A list parameter is read-only in this language, so the "list param appended inside the loop"
+# shape cannot be written at all: pin the named refusal instead of a program that cannot compile.
+LIST_PARAM_APPEND = r"""
+fn grow(xs: list[int], n: int) -> int {
+    let i = 0;
+    while i < n { xs.append(i); i += 1; }
+    return len(xs);
+}
+fn main() { print(grow([1, 2], 2)); }
+"""
 
 DEPTH_ORACLE = {
     'depth_49999', 'depth_50000', 'depth_50001', 'depth_from_mutual',
@@ -504,6 +575,7 @@ DEPTH_STATS = {
 STOPS = {
     'big_text_index': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
     'induction_big_text': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
+    'while_bound_bigtext': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
 }
 
 S3_PROVEN = {
@@ -526,6 +598,9 @@ S7_WHILE = {
 }
 S7_UNVERSIONED = {
     'dec_while_guard': ('scan', 0),
+    'while_access_before_bound': ('f', 0),
+    'while_bound_reassigned': ('scan', 0),
+    'while_list_append': ('grow', 0),
 }
 
 
@@ -691,6 +766,16 @@ class BceProbeTests(unittest.TestCase):
                 self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
                 versioned = found[-1].get('passes', {}).get('versioned', 0)
                 self.assertEqual(versioned, want, '%s: %s' % (name, versioned))
+
+    def test_list_param_append_is_refused_by_name(self):
+        # Only the .ail surface has read-only list parameters; the forced Python surface is a
+        # different language surface, so pin the refusal where it exists (default and audit builds
+        # compile the same .ail source).
+        with tempfile.TemporaryDirectory(prefix='ail-bce-refuse-') as directory:
+            for mode in ('default', 'audit'):
+                got, err = _build_run(directory, 'list_param_append', LIST_PARAM_APPEND, mode)
+                self.assertIsNone(got, '%s: list parameter append compiled' % mode)
+                self.assertIn('is a list parameter, which is read-only here', err, mode)
 
 
 if __name__ == '__main__':
