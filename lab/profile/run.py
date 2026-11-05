@@ -461,8 +461,9 @@ def profile_rows(path):
         if func[0].endswith('.py'):
             row = rows.setdefault(func, {'module': module, 'function': func[2],
                                         'file': func[0], 'line': func[1],
-                                        'tottime': 0.0, 'cumtime': cumtime})
+                                        'tottime': 0.0, 'direct': 0.0, 'cumtime': cumtime})
             row['tottime'] += tottime
+            row['direct'] += tottime
             row['cumtime'] = max(row['cumtime'], cumtime)
             continue
         total = sum(entry[2] for entry in callers.values()) or 0.0
@@ -471,14 +472,36 @@ def profile_rows(path):
                 row = rows.setdefault(caller, {'module': module_of(caller),
                                                'function': caller[2], 'file': caller[0],
                                                'line': caller[1], 'tottime': 0.0,
-                                               'cumtime': 0.0})
+                                               'direct': 0.0, 'cumtime': 0.0})
                 row['tottime'] += tottime * time_in_callee / total
         else:
             row = rows.setdefault(func, {'module': module, 'function': func[2],
                                         'file': func[0], 'line': func[1],
-                                        'tottime': 0.0, 'cumtime': cumtime})
+                                        'tottime': 0.0, 'direct': 0.0, 'cumtime': cumtime})
             row['tottime'] += tottime
     return list(rows.values())
+
+
+def root_cumulative(rows, excluded):
+    """Cumulative seconds of the named front-end root, on a gcc-free basis.
+
+    `to_c` is the typed front end and does not compile C, so its cumulative time needs no
+    adjustment.  When the typed path was not taken, `build` is the general-path root and the
+    gcc wait (`excluded`) is taken out of it.  The root's cumulative time is measured directly
+    by cProfile, not summed from the per-function own rows, so it is an independent check on the
+    row partition."""
+    best = 0.0
+    name = None
+    for row in rows:
+        if row['function'] == 'to_c' and row['module'] == 'pyfunc':
+            best, name = max(best, row['cumtime']), 'pyfunc.to_c'
+    if best:
+        return name, best
+    for wanted in ('build_cached', 'build'):
+        candidates = [row['cumtime'] for row in rows if row['function'] == wanted]
+        if candidates:
+            return wanted, max(max(candidates) - excluded, 0.0)
+    return None, 0.0
 
 
 def profile_fe(path, child_non_gcc):
@@ -486,16 +509,41 @@ def profile_fe(path, child_non_gcc):
 
     cProfile also sees the child's wait inside gcc (subprocess/select), so those modules and the
     pyc compile wrappers are taken out before scaling.  The remaining own time is the front end;
-    every named row below is a fraction of child_non_gcc, so the rows add up to it."""
+    every named row below is a fraction of child_non_gcc, so the module rows add up to it.
+
+    Attribution is measured two ways before scaling, so neither number is forced to 100%:
+
+    * `row_coverage` partitions the front end over rows whose owner is a named Python function
+      (`.py` file).  C functions are charged to their callers by `profile_rows`; C functions with
+      no caller stay on a non-`.py` row and are the row residual.  `direct_python_share` and
+      `charged_c_share` split the named total into time executed directly by Python code and
+      builtin time charged to a named caller.
+    * `attributed_share` is the independent check: the cumulative time of the named front-end
+      root (`pyfunc.to_c`, or the general-path `build` with the gcc wait removed) over the
+      profiled front end.  It is read from cProfile's cumulative field, not summed from the own
+      rows, so a front end with work outside the named root would lower it.  The remaining
+      startup/import time is the residual.
+    """
     rows = profile_rows(path)
     total = sum(row['tottime'] for row in rows)
     excluded = sum(row['tottime'] for row in rows if is_gcc_row(row))
     front = max(total - excluded, 1e-9)
     scale = (child_non_gcc / front) if child_non_gcc else 1.0
+    named = sum(row['tottime'] for row in rows
+                if not is_gcc_row(row) and row['file'].endswith('.py'))
+    direct = sum(row.get('direct', 0.0) for row in rows
+                 if not is_gcc_row(row) and row['file'].endswith('.py'))
+    residual = max(front - named, 0.0)
+    root_name, root_cum = root_cumulative(rows, excluded)
+    if not root_cum:
+        root_name, root_cum = 'named rows', named
+    root_share = min(root_cum / front, 1.0)
+    attributed = root_cum * scale
     for row in rows:
         row['own_s'] = round(row['tottime'] * scale, 6)
         row['cum_s'] = round(row['cumtime'] * scale, 6)
         row['gcc'] = is_gcc_row(row)
+        row['named'] = row['file'].endswith('.py')
     front_rows = [row for row in rows if not row['gcc']]
     own_top = sorted(front_rows, key=lambda row: row['tottime'], reverse=True)[:25]
     cum_top = sorted(front_rows, key=lambda row: row['cumtime'], reverse=True)[:25]
@@ -503,14 +551,27 @@ def profile_fe(path, child_non_gcc):
     modules = {}
     for row in front_rows:
         modules[row['module']] = modules.get(row['module'], 0.0) + row['own_s']
+    functions = sorted(
+        ({'module': row['module'], 'function': row['function'], 'file': row['file'],
+          'line': row['line'], 'own_s': row['own_s'], 'cum_s': row['cum_s'],
+          'direct': round(row.get('direct', 0.0) * scale, 6), 'named': row['named']}
+         for row in front_rows),
+        key=lambda row: -row['own_s'])
     return {'profiled_total_s': round(total, 4), 'profiled_front_s': round(front, 4),
             'gcc_excluded_s': round(excluded, 4), 'scale': round(scale, 4),
             'child_non_gcc': round(child_non_gcc, 4),
             'top25_own_share': round(top25 / front, 4),
-            'attributed_own_s': round(sum(row['own_s'] for row in front_rows), 4),
-            'attributed_share': round(sum(row['own_s'] for row in front_rows)
-                                      / child_non_gcc, 4) if child_non_gcc else None,
-            'top_own': own_top, 'top_cum': cum_top,
+            'row_coverage': round(named / front, 4),
+            'row_residual_share': round(residual / front, 4),
+            'direct_python_share': round(direct / front, 4),
+            'charged_c_share': round(max(named - direct, 0.0) / front, 4),
+            'root': root_name,
+            'root_cum_s': round(root_cum, 4),
+            'attributed_own_s': round(attributed, 4),
+            'residual_own_s': round(max(child_non_gcc - attributed, 0.0), 4),
+            'attributed_share': round(root_share, 4),
+            'residual_share': round(1.0 - root_share, 4),
+            'top_own': own_top, 'top_cum': cum_top, 'functions': functions,
             'modules': {key: round(value, 4)
                         for key, value in sorted(modules.items(), key=lambda item: -item[1])}}
 
@@ -617,9 +678,12 @@ def fe_one_task(task, runs, root):
         entry['stop_rule_ratio'] = round(child_prof / child_plain, 3) if child_plain else None
         entry['stop_rule'] = bool(child_plain and child_prof / child_plain > 2.0)
     result['profile'] = entry
+    result['profile_view'] = entry
+    result['attribution_source'] = 'as-run child profile'
     # AIL_FE_JOBS profiles only the parent: with 4 workers the cProfile above sees the pipe
     # (`connection._recv`) instead of the function bodies.  One serial profile attributes the
-    # same work, scaled to a serial plain build of the same task.
+    # same work; its shape is then scaled to the as-run parallel front end so the module rows
+    # add up to the real parallel FE without the pipe-wait artifact.
     if (result.get('attempts') or {}).get('workers', 1) > 1:
         serial_env = {'AIL_FE_JOBS': '1'}
         work = root / ('%s-fe-serial-plain' % task)
@@ -642,6 +706,18 @@ def fe_one_task(task, runs, root):
             serial_entry['stop_rule'] = bool(plain_serial['child_s']
                                              and ser['child_s'] / plain_serial['child_s'] > 2.0)
         result['profile_serial'] = serial_entry
+        if serial_entry.get('ok'):
+            view = profile_fe(work / 'child.prof', child_non_gcc)
+            view.update(source='serial profile scaled to the as-run parallel FE',
+                        serial_child_non_gcc=serial_entry['child_non_gcc'],
+                        serial_profiled_child_non_gcc=serial_entry.get('profiled_child_non_gcc'),
+                        stop_rule_ratio=serial_entry.get('stop_rule_ratio'),
+                        stop_rule=serial_entry.get('stop_rule'),
+                        wall=serial_entry.get('wall'), child_s=serial_entry.get('child_s'),
+                        compile_s=serial_entry.get('compile_s'),
+                        link_s=serial_entry.get('link_s'))
+            result['profile_view'] = view
+            result['attribution_source'] = 'serial profile scaled to the as-run parallel FE'
     return result
 
 
@@ -725,6 +801,19 @@ def one_task(task, runs, root, do_profile):
     return result
 
 
+def compact_fe_row(row):
+    """Drop the full per-function table from a fe-profile result before writing it.
+
+    The JSON keeps the per-task summaries, the attempts and the top 25 own/cumulative rows the
+    brief asks for; the full profile stays in its scratch `.prof` file."""
+    out = {key: value for key, value in row.items() if key not in ('plain', 'wrapped')}
+    for key in ('profile', 'profile_serial', 'profile_view'):
+        view = out.get(key)
+        if isinstance(view, dict):
+            out[key] = {name: value for name, value in view.items() if name != 'functions'}
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--tasks', default=','.join(TASKS))
@@ -743,7 +832,7 @@ def main():
     for task in tasks:
         if args.fe_profile:
             row = fe_one_task(task, args.runs, root)
-            result['results'].append(row)
+            result['results'].append(compact_fe_row(row))
             print(task, row.get('path'),
                   json.dumps(row.get('plain_summary', {}).get('child_s')),
                   'attempts=%.3fs' % (row.get('attempts') or {}).get('wasted_s', 0.0),
