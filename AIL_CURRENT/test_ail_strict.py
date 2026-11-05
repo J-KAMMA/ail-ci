@@ -273,8 +273,11 @@ class FallbackNote(Base):
         report = json.loads(result.stdout)
         self.assertEqual(report['blocker_count'], 1)
         self.assertEqual(report['blockers'][0]['line'], 3)
-        self.assertIn('None', report['blockers'][0]['construct'])
-        self.assertIn('sentinel', report['blockers'][0]['write_instead'])
+        # s8 lowers `d.get(x)` in an Optional-returning function, so the first blocker is now the
+        # pre-existing annotation/call-site conflict (`d: dict[int, int]` with a caller supplying an
+        # int); the fallback note itself is what this test checks.
+        self.assertIn('idict', report['blockers'][0]['construct'])
+        self.assertIn('annotation', report['blockers'][0]['write_instead'])
 
 
 class AilCommand(Base):

@@ -1,3 +1,31 @@
+## 2026-11-05 -- pyreach s8: int|None helper returns, one-argument dict.get, [None]*n rows (job-pyreachs8-11051935)
+
+Landed the first three s8 shapes (owner Q1 A, Q2 B):
+
+- `optlib.annotate_none_returns` now infers `int | None` for an unannotated helper whose returns
+  are `None` and one int (it previously stopped at str/bytes/float).  The int64 default stays, so
+  a value beyond it still stops loudly; probes compare before converting.
+- A one-argument `d.get(k)` on a local dict of scalars lowers to a key temporary, `k in d` as the
+  present flag and `d[k] if present else <zero>` as the value (`optlib._dict_get_pair`).  The dict
+  value kind comes from its literal / subscript stores / `dict[K, V]` annotation, following a
+  scalar name through its other stores (`a = ids.get(ku)` beside `a = nid`).
+- New `python/pkg-v12/noneslots.py` lowers `xs = [None] * n` rows to `xs = [[] for ...]` plus a
+  `xs__p` present-bit list; `xs[i] is None` reads the bit, `xs[i] = [..]` sets it and
+  `xs.append([])` grows both.  It only runs when every use is one of those shapes.
+- Optional lowering now keeps a name present at a loop head when the body only stores plain
+  values (`x = (x * ...) & M`), allows a loop target that reuses an Optional local by storing into
+  its value half and setting the flag each iteration, and lets an Optional name appear in a
+  subscript index (`dt[a] = 1`) once it is known present.
+
+Probes `/tmp/probes/t_parse2.py`, `t_get.py`, `t_getlower*.py`, `t_slots.py`, `t_nested.py`,
+`t_wait.py`, `t_optional.py` match CPython on both builds or keep the old named refusal.
+`chain_relax` with its 64-bit literal replaced builds typed with the None code unchanged.
+`test_ail_pyreach_optret` (new, registered through tests.d) is 4/4; `test_ail_pyreach_infer`,
+`test_ail_pyreach_unpack`, `test_ail_pyreach_dictrows`, `test_ail_optint_exact`, `test_ail_strict`
+(one stale assertion updated: s8 removes the None blocker and exposes the pre-existing idict
+call-site conflict), `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+Feature 4 (dict of Optional values) and 5 (None in a tuple return) were not landed.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this
