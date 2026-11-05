@@ -136,6 +136,23 @@ class ReleaseCheckFixture(unittest.TestCase):
             self.assertTrue(row.startswith('PASS'), row)
             self.assertIn('%s is a final release' % version, row)
 
+    def test_underscore_prerelease_version_fails_check_one(self):
+        for version in ('0.1.0_rc1', '0.1.0_dev1', '0.1.0_a1'):
+            self.write('packaging/ail_lang/__init__.py', '__version__ = "%s"\n' % version)
+            self.commit('underscore pre-release ' + version)
+            row = self.statuses(self.run_check())[1]
+            self.assertTrue(row.startswith('FAIL'), row)
+            self.assertIn('%s is a development version' % version, row)
+
+    def test_tag_pointing_at_a_tree_fails_check_nine(self):
+        self.add_final_version()
+        tree = self.git('rev-parse', 'main^{tree}').stdout.strip()
+        self.git('tag', '-a', 'v0.1.0', '-m', 'release', tree)
+        result = self.run_check('--remote', '')
+        row = self.statuses(result)[9]
+        self.assertTrue(row.startswith('FAIL'), row)
+        self.assertIn('does not peel to a commit', row)
+
     def test_annotated_release_tag_on_main_passes(self):
         self.make_release_ready()
         self.git('tag', '-a', 'v0.1.0', '-m', 'release')

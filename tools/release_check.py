@@ -172,7 +172,7 @@ def main(argv=None):
     # 1. final version
     if version_error:
         add(1, "version", "FAIL", version_error)
-    elif re.search(r"(?:^|[.\-]|(?<=\d))(?:dev|a|b|rc)\d*", version.split("+", 1)[0]):
+    elif re.search(r"(?:^|[.\-_]|(?<=\d))(?:dev|a|b|rc)\d*", version.split("+", 1)[0]):
         add(1, "version", "FAIL", "%s is a development version" % version)
     else:
         add(1, "version", "PASS", "%s is a final release" % version)
@@ -280,18 +280,23 @@ def main(argv=None):
         add(9, "tag", "FAIL", "cannot check the tag without a version")
     else:
         tag = "v" + version
-        tagged = git(repo, "rev-parse", "-q", "--verify", "refs/tags/%s^{commit}" % tag)
-        if tagged.returncode != 0:
+        tag_ref = "refs/tags/%s" % tag
+        exists = git(repo, "rev-parse", "-q", "--verify", tag_ref)
+        if exists.returncode != 0:
             add(9, "tag", "PASS", "no tag %s yet" % tag)
         else:
-            tag_sha = tagged.stdout.strip()
-            on_main = git(repo, "rev-parse", "-q", "--verify", main_ref)
-            if on_main.returncode == 0 and on_main.stdout.strip() == tag_sha:
-                add(9, "tag", "PASS", "tag %s points at %s" % (tag, main_ref))
-            elif on_main.returncode == 0:
-                add(9, "tag", "FAIL", "tag %s points at %s, not %s" % (tag, tag_sha[:12], main_ref))
+            tagged = git(repo, "rev-parse", "-q", "--verify", "%s^{commit}" % tag_ref)
+            if tagged.returncode != 0:
+                add(9, "tag", "FAIL", "tag %s does not peel to a commit, so it is not on %s" % (tag, main_ref))
             else:
-                add(9, "tag", "FAIL", "tag %s exists but %s is unknown" % (tag, main_ref))
+                tag_sha = tagged.stdout.strip()
+                on_main = git(repo, "rev-parse", "-q", "--verify", main_ref)
+                if on_main.returncode == 0 and on_main.stdout.strip() == tag_sha:
+                    add(9, "tag", "PASS", "tag %s points at %s" % (tag, main_ref))
+                elif on_main.returncode == 0:
+                    add(9, "tag", "FAIL", "tag %s points at %s, not %s" % (tag, tag_sha[:12], main_ref))
+                else:
+                    add(9, "tag", "FAIL", "tag %s exists but %s is unknown" % (tag, main_ref))
 
     # 10. latest tests.yml run on the branch head
     if not args.online:
