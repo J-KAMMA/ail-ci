@@ -1,3 +1,59 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+(free quota used up; paid model from here)
+[model commandcode/deepseek-v4.1-flash]
+## Review
+
+**What the change does:** adds `python/pkg-v12/fieldfacts.py`, called from `pyfunc._to_c_once` before lowering; it computes `{'groups','nonneg'}` and (a) installs it in `ir/driver.py` keyed by `sigs` identity, (b) dumps it to `AIL_BCE_FACTS`. No pass reads `facts['fields']`, so generated C is untouched. This matches the report.
+
+**Claims checked**
+- Stable-receiver fix: **verified** — my `pick.py` dump is `{"groups": [], "nonneg": []}` and prints `1 0 0 1`, same as CPython.
+- tally/ledger facts: **verified** — `Lx.pos`, `Rd.pos`, `Rd.err`, `{val,has}`, `{n_op,n_a,n_b}`, the seven `s_*`, `{tk,tv}`, `ops/xs/ys/zs`.
+- C byte-identical: **verified** on 9 probes (`program.c` from `--debug-dir`, HEAD vs `/tmp/base`); the 20-pair census I did not rerun.
+- `test_ail_bce` + `test_ail_safetynet`: **verified**, 2/2 pass (221 s).
+- Compile time: **verified** within budget (tally +1.6%, ticket_audit +0.9%, tree_fold +1.4%).
+- `cmp.sh`: **verified** for 3 probes, both builds match CPython.
+- Manifest `--check`: passes.
+
+**Defects (both in the new pass, both unreported)**
+
+1. `fieldfacts.py:476` builds `bytes_fields` from **struct names**, not field names (`{f for f, st in self.structs.items() ...}`), and `_bytes_expr` (`:739`) then tests `node.attr in bytes_fields`. So `x.<attr>[i]` is treated as a bytes index whenever `<attr>` equals a struct name that owns a bytes field. Probe `/tmp/rp2/n_bytes_collide.ail`:
+```
+struct vals { data: bytes; }
+struct R { vals: list[int]; pos: int; }
+fn main() { let r = R([-5], 1); r.pos = r.vals[0]; print(r.pos); }
+```
+Expected `nonneg: []`; actual `{"groups": [], "nonneg": [["R","pos"]]}` while the program prints `-5`.
+
+2. `_field_still_nonneg` (`:782-793`) recognises only a single-target `Assign`, `AnnAssign` and `AugAssign`. Any other store form is **silently skipped** instead of invalidating the field, contrary to "Any AST construct the pass does not recognise invalidates the facts". Probe `/tmp/rp2/n_tuple.py`:
+```
+class R:
+    def __init__(self, pos: int) -> None: self.pos = pos
+def main() -> int:
+    r = R(0); r.pos, x = -1, 0; print(r.pos); return 0
+main()
+```
+Expected `nonneg: []`; actual `[["R","pos"]]` while the program prints `-1`. The same hole covers chained/multi-target stores and `for`/`with` attribute targets.
+
+**Pre-existing:** `g_dict.py` (storing a list in a dict) fails to build with exit 4 identically on base and HEAD.
+
+**Unverified:** the 20 census pairs (worker-run, expensive), the remaining 5 of the 7-module `par_check` list, and empty facts for `--separate`/`--object`/`--module` (I could not construct a working invocation; only `--separate` reachability was reported).
+
+Instruction counts: not measured — no generated C differs, so runtime cannot change.
+
+VERDICT: FIX
+1. `n_bytes_collide.ail`: `fieldfacts.py` compares attribute names against struct names, so `r.vals[0]` (a `list[int]` element `-5`) is treated as a bytes index. Expected `nonneg: []`; actual `nonneg: [["R","pos"]]`.
+2. `n_tuple.py`: a tuple-unpack store `r.pos, x = -1, 0` is ignored instead of invalidating the field. Expected `nonneg: []`; actual `nonneg: [["R","pos"]]`. Handle every unrecognised store form (`Assign` with `Tuple`/multiple targets, `For`, `With`) as "unknown".
+[commandcode stop=end_turn turns=37 out_tokens=43882]
+
+
+--- ORIGINAL TASK ---
 Lane: codegen
 
 **Owner decisions (2026-11-03):** stripped binary growth up to +1% is allowed only on a task whose instructions drop by at least 1%; on every other task the binary must not grow. The recursion-depth limit keeps its current counting (limit 50,000) and the same firing point; do not change how depth is counted.
