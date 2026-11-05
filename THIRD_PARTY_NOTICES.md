@@ -7,10 +7,15 @@ table below is the complete inventory of files under `third_party/` and
 
 Counts:
 
-- CPython 3.12 derived files: 11 (PSF License Version 2)
+- CPython 3.12 derived files under `AIL_CURRENT/stdlib/`: 11 (PSF License
+  Version 2), all with the notice
+- CPython-derived compiler preludes outside that directory: 2 (PSF License
+  Version 2), notice pending (see "Follow-ups")
 - typeshed files: 50, of which 48 are vendored stubs (Apache License 2.0)
 - AIL's own files under `AIL_CURRENT/stdlib/`: 3 (MIT OR Apache-2.0)
 - license texts under `AIL_CURRENT/stdlib/`: 1 (`LICENSE-PSF.txt`)
+- derived files outside those directories with a source note in their
+  docstring: 2 generated tables (listed under "Generated tables" below)
 
 ## Origins
 
@@ -22,6 +27,18 @@ Counts:
 - Status: AIL source copies or ports. Each derived file carries a first-lines
   notice naming `LICENSE-PSF.txt`; the rewrites are documented in the module
   docstrings and in `lab/stdlib/<module>/RESULTS.md`.
+
+### CPython 3.12 compiler preludes
+
+- License: Python Software Foundation License Version 2 (PSF-2.0)
+- License file: `AIL_CURRENT/stdlib/LICENSE-PSF.txt`
+- Upstream: https://github.com/python/cpython (3.12 branch)
+- Status: `AIL_CURRENT/python/pkg-v12/prelude_csv.py` is a port of
+  `Modules/_csv.c`; `AIL_CURRENT/python/pkg-v12/prelude_format.py` is a port
+  of `Objects/stringlib/unicode_format.h`. Both ship in the `ailc` wheel.
+  Their first-lines PSF notice has not been added yet: the original task limits
+  docstring edits to `AIL_CURRENT/stdlib/`, so the two files are carried with
+  `Notice` = no plus the exact line for the owning lane under "Follow-ups".
 
 ### typeshed
 
@@ -41,6 +58,28 @@ Counts:
   text.
 - `LICENSE-PSF.txt` is the upstream PSF license text, copied verbatim from
   CPython 3.12's `LICENSE`.
+
+### Generated tables
+
+Two files elsewhere in the tree are generated from third-party material. They
+are not under the two directories the inventory table covers, so they are listed
+here; both already carry a source note in their docstring.
+
+- `AIL_CURRENT/python/pkg-v12/stubsigs_table.py`: written by
+  `tools/typeshed_convert.py` from `third_party/typeshed` (Apache License 2.0,
+  `third_party/typeshed/LICENSE`; see `third_party/typeshed/VERSION.md`).
+- `AIL_CURRENT/python/pkg-v12/stararity.py`: tables of CPython 3.12's
+  `TypeError` text for built-in methods, observed from the interpreter. No
+  CPython source text is copied; any message text it reproduces is covered by
+  CPython's PSF License Version 2 (`AIL_CURRENT/stdlib/LICENSE-PSF.txt`).
+
+Besides the entries above, the "port of CPython" sweep that found the two
+preludes matches two modules that only describe them:
+`AIL_CURRENT/python/pkg-v12/csvgen.py` installs `prelude_csv.py` and
+`AIL_CURRENT/python/pkg-v12/fmtlib.py` installs `prelude_format.py`. Neither
+contains copied third-party source.
+`AIL_CURRENT/stdlib/zlib_glue.c` and `zlib_glue.h` are AIL's own glue over the
+system zlib library; they copy no zlib source.
 
 ## Inventory
 
@@ -111,8 +150,26 @@ Counts:
 | `AIL_CURRENT/stdlib/zlib.py` | AIL | MIT OR Apache-2.0 | yes |
 | `AIL_CURRENT/stdlib/zlib_glue.c` | AIL | MIT OR Apache-2.0 | yes |
 | `AIL_CURRENT/stdlib/zlib_glue.h` | AIL | MIT OR Apache-2.0 | yes |
+| `AIL_CURRENT/python/pkg-v12/prelude_csv.py` | CPython 3.12 (Modules/_csv.c) | PSF-2.0 | no |
+| `AIL_CURRENT/python/pkg-v12/prelude_format.py` | CPython 3.12 (Objects/stringlib/unicode_format.h) | PSF-2.0 | no |
 
 ## Follow-ups
+
+- `AIL_CURRENT/python/pkg-v12/prelude_csv.py` and
+  `AIL_CURRENT/python/pkg-v12/prelude_format.py` are CPython 3.12 ports that
+  ship in the wheel without a PSF notice. The task that created this inventory
+  limits docstring edits to `AIL_CURRENT/stdlib/`, so the notice belongs to the
+  lane that owns `python/pkg-v12`. Add this line to the first comment block of
+  each file, naming the source shown in the inventory row:
+
+  ```python
+  # Derived from CPython 3.12 <source>; PSF License, see stdlib/LICENSE-PSF.txt.
+  ```
+
+  `<source>` is `Modules/_csv.c` for `prelude_csv.py` and
+  `Objects/stringlib/unicode_format.h` for `prelude_format.py`. Once added, set
+  the `Notice` column for both rows to `yes`; the notices test then requires the
+  line and `LICENSE-PSF.txt` in the first 15 lines.
 
 The wheel backend (`packaging/ail_wheel_backend.py`, owned by another lane)
 currently ships only the two root licenses. To complete the PSF notice in the
