@@ -54,7 +54,7 @@
     {
       "probe": "09_eval_not_available.py",
       "expect": "refused",
-      "text": "not in the subset: the name 'eval' is not a known function/class/builtin",
+      "text": "not in the subset: the name 'eval' is not a known function/class/builtin; did you mean 'eval'?",
       "cpython": "3"
     },
     {

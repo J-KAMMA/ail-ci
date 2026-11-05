@@ -47,12 +47,13 @@ The same rule covers `-`, `*`, `//`, `%`, `**`, `abs()`, `round()` and an `int()
 `--exact-int` when a tool must handle arbitrary-sized integers. A loud stop is deliberate: AIL never
 returns a wrapped value.
 
-Probe: `lab/limits/02_int_overflow_runtime.py` (CPython prints `9223372036854775808`).
+Probe: `lab/limits/02_int_overflow_runtime.py` (CPython prints `9223372036854775807` then
+`9223372036854775808`, on two lines).
 
 ### 3. A dictionary view kept in a name
 
 A view is live in CPython: it follows a later store and a loop over it raises when the dict changes
-size. AIL has no view object, so a view kept in a name would be a snapshot and the program is refused:
+size. AIL has no view object, so the direct form `x = d.items()` would be a snapshot and is refused:
 
 ```text
 not in the subset: a dict view kept in a name, field, item or container (`x = d.items()`, line 2): a view follows its dict in CPython, but here it is a snapshot, so it would show old contents and a loop over it would not raise "dictionary changed size during iteration"; call `d.items()` where it is used, or keep `list(d.items())` for a snapshot
@@ -60,6 +61,11 @@ not in the subset: a dict view kept in a name, field, item or container (`x = d.
 
 Call `d.items()` / `d.keys()` / `d.values()` where it is used, or take `list(...)` when a snapshot is
 wanted. `docs/PORTING.md` section 1 has the before/after pair.
+
+This check covers the direct assignment form only. A view that reaches a name through a function
+return, an argument, an attribute or an item is not refused: the program builds on the general path
+and the view is a stale snapshot, which prints a different value with no error. That is recorded under
+"Silent differences found" at the end of this page.
 
 Probe: `lab/limits/03_dict_view_is_snapshot.py` (CPython prints `[('a', 1), ('b', 2)]`).
 
@@ -138,7 +144,7 @@ Probe: `lab/limits/08_module_used_as_value.py` (CPython prints `True`).
 The builtins are not available, so a program that interprets source text is refused:
 
 ```text
-not in the subset: the name 'eval' is not a known function/class/builtin
+not in the subset: the name 'eval' is not a known function/class/builtin; did you mean 'eval'?
 ```
 
 No workaround yet. Replace the dynamic form with explicit code: parse the text with `int()` /
@@ -164,7 +170,8 @@ not in the subset: argparse.ArgumentParser (not yet published in NAMES_library.j
 No workaround yet. Read `sys.argv` directly (AIL builds `len`, indexing and `int()` conversions) and
 write the usage text yourself; keep the parsing at the top of `main`, one branch per flag.
 
-Probe: `lab/limits/10_argparse_refused.py` (CPython prints `usage: 10_argparse_refused.py [-h] name`).
+Probe: `lab/limits/10_argparse_refused.py` (CPython prints nothing on stdout and exits 2; the usage
+line and `error: the following arguments are required: name` go to stderr).
 
 ### 11. `os` functions that are not built
 
@@ -193,7 +200,7 @@ the path in from the shell. The full list of what is built is in `lab/stdcensus/
 names that are built are the ones the refusal prints for `os` and the modules in
 `AIL_CURRENT/stdlib/`.
 
-Probe: `lab/limits/12_tempfile_not_built.py` (CPython prints the path of a fresh temporary directory).
+Probe: `lab/limits/12_tempfile_not_built.py` (CPython prints `True`).
 
 ### 13. `sys.stdin` kept in a name
 
@@ -222,10 +229,11 @@ uses them anywhere is compiled there and prints:
 note: ... built on the general path (about 20x slower) because threading, queue and concurrent.futures are built on the general path only (one interpreter lock, CPython's GIL semantics); this program is compiled there
 ```
 
-One interpreter lock, CPython's GIL semantics. Only `Thread` started and joined in one block,
-`ThreadPoolExecutor.map` and `Pool.map` run without the lock on the typed path; anything else keeps
-the general path. For CPU-bound work, split the input into files and run several processes from the
-shell instead.
+One interpreter lock, CPython's GIL semantics. `ThreadPoolExecutor.map` (and `Pool.map`) over a typed
+module-level function does run on the typed path; a plain `Thread` started and joined in one block, as
+in the probe, still keeps the general path and prints the note above, so a small tool that starts one
+thread pays the lock. For CPU-bound work, split the input into files and run several processes from
+the shell instead.
 
 Probe: `lab/limits/14_threads_general_path.py` (CPython prints `5`; AIL prints `5` too).
 
@@ -246,5 +254,23 @@ Probe: `lab/limits/15_untyped_json_general_path.py` (CPython prints `1`; AIL pri
 
 ## Silent differences found
 
-None. Every probe above either matches CPython's stdout and exit status or is refused by name; no
-probe printed a different value without an error.
+One gap is recorded here rather than as a limitation, because nothing stops the program: the check in
+entry 3 covers the direct `x = d.items()` form only. A view returned from a function builds on the
+general path (with the `dict.items used as a value` note) and then prints a stale snapshot with exit
+status 0:
+
+```python
+def view(d):
+    return d.items()
+
+d = {"a": 1}
+v = view(d)
+d["b"] = 2
+print(list(v))
+```
+
+CPython prints `[('a', 1), ('b', 2)]`; AIL prints `[('a', 1)]`. Keep `list(d.items())` when the result
+leaves the function, or read the dict again at the point of use.
+
+Every probe in `lab/limits/` either matches CPython's stdout and exit status or is refused by name; the
+program above is the only silent difference found.
