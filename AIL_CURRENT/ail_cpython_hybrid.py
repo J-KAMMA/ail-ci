@@ -626,6 +626,12 @@ def _wrapper_source(module, items):
         name = item['name']
         params = item['params']
         ret = item['ret']
+        # Owner decision D4 (2026-11-05): a call whose arguments include a container keeps the GIL.
+        # The list is copied into a C buffer first, but the safe default is not to release while
+        # other CPython threads may hold and mutate a container.  Scalar-only calls still release.
+        hold = any(kind in _LIST for _p, kind in params)
+        begin = [] if hold else ['    Py_BEGIN_ALLOW_THREADS']
+        end = [] if hold else ['    Py_END_ALLOW_THREADS']
         out.append('static PyObject *ail_w_%s(PyObject *self, PyObject *args) {' % name)
         out.append('    PyObject *o[%d];' % max(1, len(params)))
         out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % len(params))
@@ -702,9 +708,9 @@ def _wrapper_source(module, items):
         cargs = ', '.join(call)
         if ret == 'str':
             out.append('    int64_t need;')
-            out.append('    Py_BEGIN_ALLOW_THREADS')
+            out.extend(begin)
             out.append('    need = %s(%s%sNULL, 0);' % (item['mangled'], cargs, ', ' if cargs else ''))
-            out.append('    Py_END_ALLOW_THREADS')
+            out.extend(end)
             out.append('    if (need < 0) %s;' % fail)
             out.append('    uint8_t *sb = (uint8_t *)PyMem_Malloc((size_t)(need > 0 ? need : 1));')
             out.append('    if (!sb) {')
@@ -712,9 +718,9 @@ def _wrapper_source(module, items):
                 out.append('        PyMem_Free(%s);' % b)
             out.append('        return PyErr_NoMemory();')
             out.append('    }')
-            out.append('    Py_BEGIN_ALLOW_THREADS')
+            out.extend(begin)
             out.append('    if (need > 0) %s(%s%s(void *)sb, need);' % (item['mangled'], cargs, ', ' if cargs else ''))
-            out.append('    Py_END_ALLOW_THREADS')
+            out.extend(end)
             out.append('    PyObject *res = PyUnicode_DecodeUTF8((const char *)sb, (Py_ssize_t)need, NULL);')
             out.append('    PyMem_Free(sb);')
             for b in bufs:
@@ -723,19 +729,19 @@ def _wrapper_source(module, items):
             out.append('    return res;')
         elif ret == 'float':
             out.append('    double r;')
-            out.append('    Py_BEGIN_ALLOW_THREADS')
+            out.extend(begin)
             out.append('    r = %s(%s);' % (item['mangled'], cargs))
-            out.append('    Py_END_ALLOW_THREADS')
+            out.extend(end)
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    return PyFloat_FromDouble(r);')
         else:
             out.append('    extern __thread int %s__mix_overflow;' % item['mangled'])
             out.append('    int64_t r; int ovf;')
-            out.append('    Py_BEGIN_ALLOW_THREADS')
+            out.extend(begin)
             out.append('    r = %s(%s);' % (item['mangled'], cargs))
             out.append('    ovf = %s__mix_overflow;' % item['mangled'])
-            out.append('    Py_END_ALLOW_THREADS')
+            out.extend(end)
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    if (ovf) return ail_hybrid_fallback();')
