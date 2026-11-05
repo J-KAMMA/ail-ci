@@ -159,7 +159,10 @@ class _Checker(object):
                 handed = ins.operands[first:] if last is None else ins.operands[first:last + 1]
                 if any(o in borrowed for o in handed):
                     self.err(ins.op, 'a borrowed parameter is stored here')
-            elif ins.op in ('return', 'yield'):
+            # A `yield` hands a region's result to the region's owner; it stays inside this
+            # function (Python generators are refused by the lowering), so only `return` hands the
+            # reference to the caller.
+            elif ins.op == 'return':
                 self.err(ins.op, 'a borrowed parameter is returned here')
             elif ins.op == 'call' and 'release' in str(ins.attrs.get('callee', '')):
                 self.err(ins.op, 'a borrowed parameter is released here')

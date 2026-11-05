@@ -228,6 +228,39 @@ main()
         # the comprehension's iterable is read, and `n` is only used there
         self.assertIn("n", sets.get("pack", ()))
 
+    def test_container_literals_are_stores(self):
+        """A container literal stores its elements wherever it appears, not only as an assignment
+        value: `for q in [p, p]` keeps a reference to `p`, so `p` is not read-only."""
+        node = """
+from __future__ import annotations
+
+
+class Node:
+    def __init__(self, value: int) -> None:
+        self.value: int = value
+
+
+def scan(p: Node, n: int) -> int:
+    total = 0
+    for q in [p, p]:
+        total += q.value
+    return total + n
+
+
+def either(p: Node, n: int) -> int:
+    return p.value if n else 0
+
+
+def main() -> int:
+    return 0
+
+
+main()
+"""
+        sets = self.sets(node)
+        self.assertNotIn("p", sets.get("scan", ()))
+        self.assertIn("p", sets.get("either", ()))
+
     def test_methods_are_analysed(self):
         """A class body is a scope: a method's read-only parameters are borrowed and one stored
         into a field is refused.  `self` is a parameter like any other at analysis time."""
@@ -313,6 +346,22 @@ class VerifyTests(unittest.TestCase):
         place = I.Value(I.place(I.I64))
         fn = I.Function("f", [p], ["p"], [I.I64], I.Region(), attrs={"borrow": ["p"]})
         fn.body.instrs.append(I.Instr("store", [place, p]))
+        checker = verify._Checker(fn, None, "S1")
+        checker.check_borrowed()
+        self.assertFalse(checker.errors)
+
+    def test_region_yield_is_not_an_escape(self):
+        """A region result (`yield` inside an `if`) hands the value to the enclosing region, not to
+        the caller; Python generators are refused by the lowering, so it is never an escape."""
+        from ir import verify
+        from ir import ir as I
+        p = I.Value(I.I64, hint="p")
+        cond = I.Value(I.I1, hint="c")
+        fn = I.Function("f", [p, cond], ["p", "c"], [I.I64], I.Region(),
+                        attrs={"borrow": ["p"]})
+        fn.body.instrs.append(I.Instr("if", [cond], regions=[
+            I.Region(instrs=[I.Instr("yield", [p])]),
+            I.Region(instrs=[I.Instr("yield", [p])])]))
         checker = verify._Checker(fn, None, "S1")
         checker.check_borrowed()
         self.assertFalse(checker.errors)

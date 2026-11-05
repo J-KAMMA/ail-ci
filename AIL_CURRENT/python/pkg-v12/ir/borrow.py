@@ -174,6 +174,12 @@ def _demoted(fn, names, borrowed_of, fn_of):
                 note(node.value)
         elif isinstance(node, ast.Call):
             call(node)
+        elif isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict,
+                               ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            # A container literal stores its elements in a new object, whatever expression it
+            # appears in (`for x in [p]`, an `if` test, ...), so an element that is (or holds) a
+            # parameter is not read-only -- the IR refuses such a store.
+            note(node)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
             if node is not fn:
                 # a closure: any read of the parameter inside it captures the reference
