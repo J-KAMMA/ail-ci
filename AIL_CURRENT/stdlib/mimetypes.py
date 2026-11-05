@@ -26,9 +26,9 @@ rewrites the compiler needs; the tables, the answers and the error-free paths ar
 
 1. `urllib.parse.urlparse` is replaced by `_urlsplit` below: a small local split into
    (scheme, path).  It accepts the same ASCII scheme spelling, drops a `//netloc` part and
-   the `?query` / `#fragment` tail, and lower-cases the scheme.  The `;params` that
-   `urlparse` removes from the last path segment is NOT removed here; no program in this
-   tree passes a `http://` URL whose last segment carries `;params`.
+   the `?query` / `#fragment` tail, lower-cases the scheme, and removes `;params` from the
+   last path segment for the schemes `urlparse` lists in `uses_params` (`http`, `https`,
+   `ftp`, `imap`, `sip`, `rsync`, ...).
 2. `os.fspath(url)` is dropped: this compiler refuses `os.fspath`, so `url` must be a str
    (the same text `fspath` returns for a str).
 3. `os.path.splitdrive(url)` is dropped: the build is POSIX, where `splitdrive` is the
@@ -72,6 +72,9 @@ inited = False
 _db = None
 
 _URL_SCHEME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-."
+# urllib.parse.uses_params
+_USES_PARAMS = ("ftp", "hdl", "prospero", "http", "imap", "https", "sip", "sips",
+                "rtsp", "rtspu", "rsync")
 
 
 def _urlsplit(url):
@@ -79,7 +82,8 @@ def _urlsplit(url):
 
     The scheme is None when the text before the first ':' is not a valid URL scheme (it must
     start with an ASCII letter and contain only letters, digits, '+', '-' and '.').  A
-    leading '//netloc' and a trailing '?query' / '#fragment' are removed from the path.
+    leading '//netloc' and a trailing '?query' / '#fragment' are removed from the path, and a
+    `;params` tail is removed from the last segment for the schemes `urlparse` treats so.
     """
     scheme = None
     i = url.find(":")
@@ -105,6 +109,13 @@ def _urlsplit(url):
         url = url[end:]
     for sep in ("?", "#"):
         k = url.find(sep)
+        if k >= 0:
+            url = url[:k]
+    if scheme in _USES_PARAMS and ";" in url:
+        if "/" in url:
+            k = url.find(";", url.rfind("/"))
+        else:
+            k = url.find(";")
         if k >= 0:
             url = url[:k]
     return scheme, url
