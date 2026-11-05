@@ -52,6 +52,7 @@ def du_kib(path):
 # their ail-py build asks for the exact ints explicitly, so the comparison still measures them (on the general path).
 EXACT_INT_TASKS = ('rail_transfer', 'chain_relax')
 CURRENT_TASK = None
+TASK_BASE = HERE        # the lab directory the task lives in (lab/compare, or lab/compare_par outside the daily table)
 
 
 def build_cmd(lang, src, out, strict=False):
@@ -164,8 +165,41 @@ def build_language(lang, task_src, root):
     return rec, [str(binary)]
 
 
+def task_base(name):
+    """The lab directory that holds the task: lab/compare, or lab/compare_par for a task kept out of the daily table."""
+    if (HERE / 'src' / name).is_dir():
+        return HERE
+    alt = REPO / 'lab' / 'compare_par'
+    if (alt / 'src' / name).is_dir():
+        return alt
+    return HERE
+
+
+def task_threads(name):
+    """The task's `threads` field: `threads: N` in spec.md, else THREADS in gen.py; None when it has none.
+
+    A task with the field gets AIL_THREADS set to it for the builds and runs, and its gen.py uses it as the
+    worker count of the perf input, so every language runs that many threads. The field is read from the text
+    (gen.py is not executed here: its cases() can be expensive), and a task without it is run exactly as before.
+    """
+    base = task_base(name)
+    try:
+        text = (base / 'tasks' / name / 'spec.md').read_text()
+    except OSError:
+        text = ''
+    m = re.search(r'(?m)^threads:\s*(\d+)\s*$', text)
+    if m:
+        return int(m.group(1))
+    try:
+        text = (base / 'tasks' / name / 'gen.py').read_text()
+    except OSError:
+        return None
+    m = re.search(r'(?m)^THREADS\s*=\s*(\d+)\s*$', text)
+    return int(m.group(1)) if m else None
+
+
 def load_task(name):
-    spec = importlib.util.spec_from_file_location('gen_' + name, HERE / 'tasks' / name / 'gen.py')
+    spec = importlib.util.spec_from_file_location('gen_' + name, TASK_BASE / 'tasks' / name / 'gen.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -202,7 +236,7 @@ def reference_outputs(name, check, work):
     expected = {}
     for kind, case_name, case in check:
         out = work / 'ref.out'
-        p = exec_prog([], [sys.executable, '-B', str(HERE / 'tasks' / name / 'reference.py')], case, out, CASE_TIMEOUT)
+        p = exec_prog([], [sys.executable, '-B', str(TASK_BASE / 'tasks' / name / 'reference.py')], case, out, CASE_TIMEOUT)
         expected[(kind, case_name)] = (p.returncode, out.read_bytes())
     return expected
 
@@ -380,9 +414,14 @@ def main():
     parser.add_argument('--jobs', type=int, default=3, help='parallel callgrind runs')
     args = parser.parse_args()
     langs = [l for l in args.langs.split(',') if l]
-    global CURRENT_TASK
+    global CURRENT_TASK, TASK_BASE
     CURRENT_TASK = args.task
-    task_src = HERE / 'src' / args.task
+    TASK_BASE = task_base(args.task)
+    threads = task_threads(args.task)
+    if threads is not None:
+        os.environ['AIL_THREADS'] = str(threads)     # the task's worker count; every language reads it from its input
+        print('%s: threads %d (AIL_THREADS)' % (args.task, threads), file=sys.stderr, flush=True)
+    task_src = TASK_BASE / 'src' / args.task
     head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=REPO, capture_output=True, text=True).stdout.strip()
     with tempfile.TemporaryDirectory(prefix='compare-' + args.task + '-') as tmp:
         work = Path(tmp)
@@ -391,7 +430,7 @@ def main():
         ref_out = work / 'expected.out'
         stdin = open(case['path'], 'rb') if case['stdin'] else subprocess.DEVNULL
         with open(ref_out, 'wb') as f:
-            ref = subprocess.run([sys.executable, str(HERE / 'tasks' / args.task / 'reference.py'), *case['args']], stdin=stdin,
+            ref = subprocess.run([sys.executable, str(TASK_BASE / 'tasks' / args.task / 'reference.py'), *case['args']], stdin=stdin,
                                  stdout=f, stderr=subprocess.PIPE, timeout=3 * RUN_TIMEOUT)
         expected = dict(returncode=ref.returncode, stdout=ref_out)
         print('%s: input %d bytes, expected %d bytes, exit %d' % (args.task, case['input_bytes'], ref_out.stat().st_size, ref.returncode),
