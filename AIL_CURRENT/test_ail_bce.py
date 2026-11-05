@@ -567,6 +567,49 @@ struct R { pos: int; }
 fn main() { let r = R(6); r.pos += 1; print(r.pos); }
 """
 
+FACT_NONNEG_BYTES_COLLIDE = r"""
+struct vals { data: bytes; }
+struct R { vals: list[int]; pos: int; }
+fn main() { let r = R([-5], 1); r.pos = r.vals[0]; print(r.pos); }
+"""
+
+FACT_NONNEG_BYTES_POSITIVE = r"""
+class R:
+    def __init__(self, data: bytes, pos: int) -> None:
+        self.data = data
+        self.pos = pos
+def main() -> int:
+    r = R(b"abc", 1); r.pos = r.data[0]; print(r.pos); return 0
+main()
+"""
+
+FACT_NONNEG_UNKNOWN_STORE = {
+    'tuple': r"""
+class R:
+    def __init__(self, pos: int) -> None: self.pos = pos
+def main() -> int:
+    r = R(0); r.pos, x = -1, 0; print(r.pos); return 0
+main()
+""",
+    'chained': r"""
+class R:
+    def __init__(self, pos: int) -> None: self.pos = pos
+def main() -> int:
+    r = R(0); x = r.pos = -1; print(r.pos, x); return 0
+main()
+""",
+    'for_target': r"""
+class R:
+    def __init__(self, pos: int) -> None: self.pos = pos
+def main() -> int:
+    r = R(0)
+    for r.pos in [-1]:
+        pass
+    print(r.pos); return 0
+main()
+""",
+}
+
 FACT_NONNEG_INVALID = {
     'assign_negative': r"""
 struct R { pos: int; }
@@ -638,6 +681,19 @@ class FieldFactsTests(unittest.TestCase):
             for name, source in FACT_NONNEG_INVALID.items():
                 with self.subTest(probe=name):
                     data = _dump_facts(directory, 'nonneg_' + name, source)
+                    self.assertNotIn(['R', 'pos'], data['nonneg'])
+            # a struct name that happens to equal a list field is not a bytes field
+            data = _dump_facts(directory, 'nonneg_bytes_collide', FACT_NONNEG_BYTES_COLLIDE)
+            self.assertNotIn(['R', 'pos'], data['nonneg'])
+            # a real bytes index is still a non-negative value
+            data = _dump_facts(directory, 'nonneg_bytes_positive',
+                               FACT_NONNEG_BYTES_POSITIVE, syntax='python')
+            self.assertIn(['R', 'pos'], data['nonneg'])
+            # every store form the pass does not classify makes the field unknown
+            for name, source in FACT_NONNEG_UNKNOWN_STORE.items():
+                with self.subTest(probe='unknown_' + name):
+                    data = _dump_facts(directory, 'nonneg_unknown_' + name, source,
+                                       syntax='python')
                     self.assertNotIn(['R', 'pos'], data['nonneg'])
 
 

@@ -1,3 +1,21 @@
+## 2026-11-05 -- bces4: two field-fact soundness holes closed (job-bces4-11051929)
+
+`fieldfacts.py` built `bytes_fields` from struct names rather than bytes field names, so an
+attribute whose name matched a struct that owned a bytes field (an `R.vals` list next to a
+`struct vals { data: bytes; }`) was read as a non-negative bytes index.  It now collects the
+unambiguous bytes *field* names, and a genuine bytes index (`r.data[0]`) still counts.
+
+`_field_still_nonneg` recognised only single-target `Assign`, `AnnAssign` and `AugAssign`, and
+silently skipped every other store of the field.  It now walks the field's `Store`/`Del`
+attributes directly: a tuple/chained target, a `for`/`with`/comprehension target, `del`, an
+operator other than `+=`/`-=`, or any other unclassified form retires the fact.
+
+No pass reads `facts['fields']`, so generated C is unchanged.  The two reviewer probes now dump
+`{"groups": [], "nonneg": []}` (`n_bytes_collide.ail` prints `-5`, `n_tuple.py` prints `-1`,
+both as CPython does).  Added regression cases to `test_ail_bce.py`: the bytes/struct-name
+collision, a real bytes index, and tuple/chained/`for` stores.  `test_ail_bce` 6/6,
+`test_ail_safetynet` 5/5, and `tools/update_manifest.py --check` pass.
+
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 
 `test_ail_cpython_hybrid`, `test_ail_prog2` and `test_ail_prog21` went red when pyreachs3c

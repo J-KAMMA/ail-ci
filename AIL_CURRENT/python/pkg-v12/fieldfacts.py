@@ -473,8 +473,10 @@ class _Pass:
         if not self.int_fields:
             return []
         fields = dict(self.int_fields)
-        bytes_fields = {f for f, st in self.structs.items() for fld, kind in st.fields
-                        if self.field_struct.get(fld) == f and kind == 'bytes'}
+        # Attribute nodes carry a field name, never a struct name: collect the bytes *fields*
+        # (and only names that are unambiguous, so a shared name makes the expression unknown).
+        bytes_fields = {fld for st in self.structs.values() for fld, kind in st.fields
+                        if kind == 'bytes' and self.field_struct.get(fld) is not None}
         fn_locals = {}
         result_nonneg = {fn.name: False for fn in self.fns}
         for _ in range(32):
@@ -772,29 +774,36 @@ def _field_still_nonneg(pass_, struct, field, fn_locals, result_nonneg, bytes_fi
             if not _expr_nonneg(expr, locals_nn, result_nonneg, {}, fn.name,
                                 bytes_fields, pass_.field_struct):
                 return False
-    # direct stores, in every function except __init__ (which is the shape above)
+    # direct stores, in every function except __init__ (which is the shape above). Every store of
+    # the field is examined by the form of its target: a tuple/chained target, a `for`/`with`/
+    # comprehension target, `del`, or any other form this pass does not classify makes the field
+    # unknown rather than being skipped.
     for fn in pass_.fns:
         locals_nn = fn_locals.get(fn.name, {})
         nn = {f: (f == field) for f in pass_.int_fields}
         nn[field] = True
+        parents = _parent_map(fn)
         for node in ast.walk(fn):
-            target, value, kind = None, None, None
-            if isinstance(node, ast.Assign) and len(node.targets) == 1:
-                target, value = node.targets[0], node.value
-                kind = 'assign'
-            elif isinstance(node, ast.AnnAssign) and node.value is not None:
-                target, value = node.target, node.value
-                kind = 'assign'
-            elif isinstance(node, ast.AugAssign):
-                target, value = node.target, node.value
-                kind = 'aug_add' if isinstance(node.op, ast.Add) else (
-                    'aug_sub' if isinstance(node.op, ast.Sub) else 'other')
-            if not (isinstance(target, ast.Attribute) and target.attr == field):
+            if not (isinstance(node, ast.Attribute) and node.attr == field
+                    and isinstance(node.ctx, (ast.Store, ast.Del))):
                 continue
-            if kind == 'assign':
-                ok = _expr_nonneg(value, locals_nn, result_nonneg, nn, fn.name,
-                                  bytes_fields, pass_.field_struct)
-            elif kind == 'aug_add':
+            parent = parents.get(id(node))
+            value = None
+            if isinstance(parent, ast.Assign) and len(parent.targets) == 1 \
+                    and parent.targets[0] is node:
+                kind = 'assign'
+                value = parent.value
+            elif isinstance(parent, ast.AnnAssign) and parent.target is node \
+                    and parent.value is not None:
+                kind = 'assign'
+                value = parent.value
+            elif isinstance(parent, ast.AugAssign) and parent.target is node:
+                kind = 'aug_add' if isinstance(parent.op, ast.Add) else (
+                    'aug_sub' if isinstance(parent.op, ast.Sub) else 'other')
+                value = parent.value
+            else:
+                return False
+            if kind in ('assign', 'aug_add'):
                 ok = _expr_nonneg(value, locals_nn, result_nonneg, nn, fn.name,
                                   bytes_fields, pass_.field_struct)
             elif kind == 'aug_sub':
