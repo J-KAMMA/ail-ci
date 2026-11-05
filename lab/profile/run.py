@@ -219,7 +219,7 @@ def limit_memory():
 
 
 def env_for(work, fe=False, profile=None, fe_root=None, fe_log=None, parent_profile=None,
-            attempts=None):
+            attempts=None, extra_env=None):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('AIL_') and key not in ('PIPE_CC', 'PYTHONPATH')}
     env.update(PYTHONUTF8='1', AIL_SERVER='0', AIL_NO_CACHE='1',
@@ -242,6 +242,8 @@ def env_for(work, fe=False, profile=None, fe_root=None, fe_log=None, parent_prof
         env['AILPROF_PARENT_PROFILE'] = str(parent_profile)
     if attempts:
         env['AILPROF_ATTEMPTS'] = str(attempts)
+    if extra_env:
+        env.update(extra_env)
     return env
 
 
@@ -253,11 +255,11 @@ def read_times(path):
 
 
 def build(source, out, work, fe=False, profile=None, fe_root=None, fe_log=None,
-          parent_profile=None, attempts=None):
+          parent_profile=None, attempts=None, extra_env=None):
     for sub in ('cache', 'tmp', 'c'):
         (work / sub).mkdir(parents=True, exist_ok=True)
     env = env_for(work, fe=fe, profile=profile, fe_root=fe_root, fe_log=fe_log,
-                  parent_profile=parent_profile, attempts=attempts)
+                  parent_profile=parent_profile, attempts=attempts, extra_env=extra_env)
     rss = work / 'rss'
     driver = work / 'load_driver.py'
     driver.write_text(LOAD_DRIVER, encoding='utf8')
@@ -615,6 +617,31 @@ def fe_one_task(task, runs, root):
         entry['stop_rule_ratio'] = round(child_prof / child_plain, 3) if child_plain else None
         entry['stop_rule'] = bool(child_plain and child_prof / child_plain > 2.0)
     result['profile'] = entry
+    # AIL_FE_JOBS profiles only the parent: with 4 workers the cProfile above sees the pipe
+    # (`connection._recv`) instead of the function bodies.  One serial profile attributes the
+    # same work, scaled to a serial plain build of the same task.
+    if (result.get('attempts') or {}).get('workers', 1) > 1:
+        serial_env = {'AIL_FE_JOBS': '1'}
+        work = root / ('%s-fe-serial-plain' % task)
+        plain_serial = build(source, work / 'prog', work, extra_env=serial_env)
+        serial_non_gcc = round(max((plain_serial['child_s'] or 0.0) - plain_serial['compile']
+                                   - plain_serial['link'], 0.0), 4)
+        work = root / ('%s-fe-serial-profile' % task)
+        ser = build(source, work / 'prog', work, profile=work / 'child.prof',
+                    extra_env=serial_env)
+        serial_entry = {'ok': False, 'child_non_gcc': serial_non_gcc,
+                        'stderr': ser['stderr']}
+        if ser['ok'] and (work / 'child.prof').exists():
+            serial_entry = profile_fe(work / 'child.prof', serial_non_gcc)
+            serial_entry.update(ok=True, wall=ser['wall'], child_s=ser['child_s'],
+                                compile_s=ser['compile'], link_s=ser['link'],
+                                plain_child_s=round(plain_serial['child_s'], 4),
+                                profiled_child_s=round(ser['child_s'], 4))
+            serial_entry['stop_rule_ratio'] = round(ser['child_s'] / plain_serial['child_s'], 3) \
+                if plain_serial['child_s'] else None
+            serial_entry['stop_rule'] = bool(plain_serial['child_s']
+                                             and ser['child_s'] / plain_serial['child_s'] > 2.0)
+        result['profile_serial'] = serial_entry
     return result
 
 
