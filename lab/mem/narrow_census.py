@@ -359,6 +359,19 @@ def instrument(text):
                 continue
             sid = sites.add(f'{func}:{im.group(2)}')
             line = line[:im.start()] + f'ntrk_set({im.group(2)}, ({im.group(3)}), ({rhs}), {sid})' + line[end:]
+        # 3b. parenthesised store: ((&v_X)->p[IDX] = EXPR);
+        for pm in list(re.finditer(r'\(\((&\w+)\)->p\[\s*([^\]]+?)\s*\]\s*=\s*', line)):
+            _, rhs, end = rewrite_rhs(line, pm.end(), sites, pm.group(1))
+            if rhs is None:
+                continue
+            if rhs.endswith(')'):
+                rhs = rhs[:-1]
+            sid = sites.add(f'{func}:{pm.group(1).lstrip("&")}')
+            line = line[:pm.start()] + f'ntrk_set({pm.group(1)}, ({pm.group(2)}), ({rhs}), {sid})' + line[end:]
+        # 3c. numeric object-field append: ail_numfield_list_append(&(v_t)->f_X, ARG);
+        for nm in list(re.finditer(r'ail_numfield_list_append\((&[^,]+),\s*([^;]+?)\);', line)):
+            sid = sites.add(f'{func}:{nm.group(1).lstrip("&")}')
+            line = line[:nm.start()] + f'ntrk_push({nm.group(1)}, ({nm.group(2)}), {sid});' + line[nm.end():]
         # 4. calls
         for name, newname in (('ail_list_push', 'ntrk_push'),
                               ('ail_list_reserve', 'ntrk_reserve'),
@@ -443,7 +456,7 @@ def one_program(name, source, work, stdin_path, args, rows):
         f = line.split()
         if f[0] == 'PEAK':
             peak = int(f[1])
-        elif f[0] == 'S' and int(f[7]) > 0:
+        elif f[0] == 'S' and (int(f[7]) > 0 or int(f[6]) > 0):
             sid, nlists, maxn, mn, mx, stores, bytes_peak, has = (int(f[1]), int(f[2]), int(f[3]),
                                                                  int(f[4]), int(f[5]), int(f[6]),
                                                                  int(f[7]), int(f[8]))
@@ -456,6 +469,32 @@ def one_program(name, source, work, stdin_path, args, rows):
     entry['peak_list_bytes'] = peak
     entry['peak_list_MiB'] = round(peak / 1048576.0, 2)
     return entry
+
+
+def merge_rows(rows):
+    """One row per (program, list label): bytes come from whichever site held the buffer at
+    the peak (register/reserve), values from wherever the stores were instrumented.  This
+    keeps a list's width a measurement instead of an inference from its length."""
+    out = {}
+    for r in rows:
+        key = (r['program'], r['label'])
+        if key not in out:
+            out[key] = dict(r)
+            continue
+        o = out[key]
+        o['nlists'] = max(o['nlists'], r['nlists'])
+        o['max_n'] = max(o['max_n'], r['max_n'])
+        o['stores'] += r['stores']
+        o['peak_bytes'] = max(o['peak_bytes'], r['peak_bytes'])
+        if r['min_value'] is not None:
+            if o['min_value'] is None or r['min_value'] < o['min_value']:
+                o['min_value'] = r['min_value']
+            if o['max_value'] is None or r['max_value'] > o['max_value']:
+                o['max_value'] = r['max_value']
+    for o in out.values():
+        o['MiB'] = round(o['peak_bytes'] / 1048576.0, 2)
+        o['width'] = classify(o['min_value'], o['max_value']) if o['min_value'] is not None else 'not measured'
+    return list(out.values())
 
 
 def census(only=None):
@@ -482,9 +521,11 @@ def census(only=None):
         r = one_program(prog, REPO / 'lab' / 'rc' / 'progs' / (prog + '.py'), w, None, [], rows)
         results.append(r)
         print(prog, r.get('match'), r.get('peak_list_MiB'), 'MiB', r.get('error', ''), flush=True)
+    rows = merge_rows(rows)
     big = [x for x in rows if x['peak_bytes'] >= 1048576]
     doc = {'mode': 'census', 'programs': results,
-           'rows_at_least_1MiB': sorted(big, key=lambda x: -x['peak_bytes'])}
+           'rows_at_least_1MiB': sorted(big, key=lambda x: -x['peak_bytes']),
+           'all_measured_rows': sorted(rows, key=lambda x: (-x['peak_bytes'], x['program'], x['label']))}
     (HERE / 'NARROW.json').write_text(json.dumps(doc, indent=1))
     return results
 
@@ -508,6 +549,15 @@ def main():
 I32_TYPE = r'''
 /* ---- fbnarrow1 i32 emulation: scratch copy only ---- */
 typedef struct { int32_t *p; ail_len_t n, cap; } i32list;
+static void i32_free(i32list *L) { free(L->p); L->p = 0; L->n = L->cap = 0; }
+static void i32_reserve(i32list *L, int64_t extra) {
+    int32_t *q;
+    if (extra <= 0 || L->cap - L->n >= extra) return;
+    if (extra > (int64_t)(SIZE_MAX / sizeof(int32_t)) - L->n) ail_die("list too long");
+    q = (int32_t *)realloc(L->p, (size_t)(L->n + extra) * sizeof *q);
+    if (!q) ail_die("out of memory");
+    L->p = q; L->cap = L->n + extra;
+}
 static void i32_push(i32list *L, int64_t v) {
     if (L->n == L->cap) {
         int64_t c = L->cap ? L->cap * 2 : 8;
@@ -517,32 +567,73 @@ static void i32_push(i32list *L, int64_t v) {
     }
     L->p[L->n++] = (int32_t)v;
 }
-static void i32_reserve(i32list *L, int64_t extra) {
-    int32_t *q;
-    if (extra <= 0 || L->cap - L->n >= extra) return;
-    q = (int32_t *)realloc(L->p, (size_t)(L->n + extra) * sizeof *q);
-    if (!q) ail_die("out of memory");
-    L->p = q; L->cap = L->n + extra;
+static void i32_clear(i32list *L) { L->n = 0; }
+static __attribute__((noreturn, noinline, cold)) void i32_index_fail(void) {
+    ail_die("list index out of range");
 }
-static int64_t i32_get(const i32list *L, int64_t i) {
+static inline __attribute__((always_inline)) int64_t i32_get(const i32list *L, int64_t i) {
     if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
         if (i < 0) i += L->n;
-        if (i < 0 || i >= L->n) ail_die("list index out of range");
+        if (i < 0 || i >= L->n) i32_index_fail();
     }
     return L->p[i];
 }
-static void i32_set(i32list *L, int64_t i, int64_t v) {
+static inline __attribute__((always_inline)) void i32_set(i32list *L, int64_t i, int64_t v) {
     if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
         if (i < 0) i += L->n;
-        if (i < 0 || i >= L->n) ail_die("list index out of range");
+        if (i < 0 || i >= L->n) i32_index_fail();
     }
     L->p[i] = (int32_t)v;
 }
-static void i32_free(i32list *L) { free(L->p); L->p = 0; L->n = L->cap = 0; }
+static inline __attribute__((always_inline)) int64_t i32_span_get(const int32_t *data, int64_t count, int64_t index) {
+    if (__builtin_expect(!((uint64_t)index < (uint64_t)count), 0)) {
+        int64_t fixed = index < 0 ? index + count : index;
+        if (!((uint64_t)fixed < (uint64_t)count && data != NULL)) i32_index_fail();
+        return data[fixed];
+    }
+    return data[index];
+}
+static inline __attribute__((always_inline)) int64_t i32_view_get(const int32_t *data, int64_t count, int64_t index) {
+    if (__builtin_expect((uint64_t)index >= (uint64_t)count, 0)) {
+        int64_t fixed = index < 0 ? index + count : index;
+        if ((uint64_t)fixed >= (uint64_t)count) i32_index_fail();
+        return data[fixed];
+    }
+    return data[index];
+}
+static inline __attribute__((always_inline)) void i32_view_set(int32_t *data, int64_t count, int64_t index, int64_t value) {
+    if (__builtin_expect((uint64_t)index >= (uint64_t)count, 0)) {
+        int64_t fixed = index < 0 ? index + count : index;
+        if ((uint64_t)fixed >= (uint64_t)count) i32_index_fail();
+        data[fixed] = (int32_t)value;
+        return;
+    }
+    data[index] = (int32_t)value;
+}
+static void i32_move(i32list *slot, i32list *value) {
+    i32_free(slot); *slot = *value; *value = (i32list){0};
+}
+/* The class constructor only ever receives freshly cleared lists from py_main, so this
+   takes one over without a width conversion; it is not used on a populated int64 list. */
+static void i32_take_ail(i32list *slot, ail_list *value) {
+    i32_free(slot);
+    slot->p = (int32_t *)value->p; slot->n = value->n; slot->cap = value->cap;
+    value->p = 0; value->n = value->cap = 0;
+}
 /* ---- end fbnarrow1 i32 emulation ---- */
 '''
 
-I32_VARS = ('v_mp', 'v_ord', 'v_ni')
+NARROW_VARS = ('v_w', 'v_dep', 'v_par', 'v_keep', 'v_mp', 'v_ord', 'v_ni', 'v_cs')
+NARROW_DECLS = {'v_w': 3, 'v_dep': 3, 'v_par': 4, 'v_keep': 2, 'v_mp': 2,
+                'v_ord': 1, 'v_ni': 1, 'v_cs': 3}
+NARROW_FIELDS = ('f_w', 'f_dep', 'f_par')
+
+
+def _sub_once(text, old, new, n=1, label=''):
+    c = text.count(old)
+    if c != n:
+        raise SystemExit(f'i32 edit [{label or old[:40]}] expected {n} got {c}: {old[:80]!r}')
+    return text.replace(old, new)
 
 
 def limits():
@@ -601,30 +692,181 @@ def compile_flags(program_c):
 
 
 def edit_i32(text):
+    """Store the int32-fit lists measured in (a) as a local int32 list type.
+
+    Narrowed: the T fields ``w``/``dep``/``par`` (the peak-resident set), the compact /
+    rebuild / fold temporaries, ``keep``, ``mp``, ``ord``, ``ni`` and ``cs``.  ``sub``
+    (subtree weight sums) and the sort-key columns stay int64: their values leave int32
+    on the perf input (-sub reaches the tree's total weight) and the keysort ABI is int64.
+    """
     lines = text.splitlines(True)
-    ins = None
-    for n, line in enumerate(lines):
-        if line.startswith('static void ail_list_free(ail_list *L)'):
-            ins = n + 1
-            break
+    ins = next((i + 1 for i, line in enumerate(lines)
+                if line.startswith('static void ail_list_free(ail_list *L)')), None)
     if ins is None:
         raise SystemExit('no list runtime in program.c')
-    body = ''.join(lines)
-    for v in I32_VARS:
-        body = body.replace(f'ail_list {v} = {{0}};', f'i32list {v} = {{0}};')
-        for fn, new in (('ail_list_push', 'i32_push'), ('ail_list_get', 'i32_get'),
-                        ('ail_list_set', 'i32_set'), ('ail_list_reserve', 'i32_reserve'),
-                        ('ail_list_free', 'i32_free')):
-            body = body.replace(f'{fn}(&{v},', f'{new}(&{v},')
-            body = body.replace(f'{fn}(&{v})', f'{new}(&{v})')
-    body = body.replace('((&v_mp)->p[v_i] = (v_nm.n));', 'i32_set(&v_mp, v_i, (v_nm.n));')
-    body = body.replace('((&v_mp)->p[v_i] = (v_k));', 'i32_set(&v_mp, v_i, (v_k));')
-    body = body.replace('((&v_ord)->p[ v_k])', '((int64_t)i32_get(&v_ord, v_k))')
-    # `ord = []` steals an empty temp; keep ord as the fresh empty i32 list instead
-    body = body.replace('i32_free(&v_ord); v_ord = v__t2; v__t2 = (ail_list){0};',
-                        'i32_free(&v_ord); v__t2 = (ail_list){0};')
-    body = ''.join(body.splitlines(True)[:ins]) + I32_TYPE + ''.join(body.splitlines(True)[ins:])
-    return body
+    head = ''.join(lines[:ins])
+    body = I32_TYPE + ''.join(lines[ins:])
+
+    # T struct fields, drop, constructor
+    for f in NARROW_FIELDS:
+        v = 'v_' + f[2:]
+        body = _sub_once(body, f'    ail_list {f};', f'    i32list {f};', 1, f'decl {f}')
+        body = _sub_once(body, f'ail_list_free(&v_self->{f});',
+                         f'i32_free(&v_self->{f});', 1, f'drop {f}')
+        body = _sub_once(body, f'ail_obj_field_list_move(&v_self->{f}, {v});',
+                         f'i32_take_ail(&v_self->{f}, {v});', 1, f'ctor {f}')
+    for n, f in ((10, 'f_w'), (11, 'f_dep'), (12, 'f_par'), (23, 'f_w'), (24, 'f_dep'),
+                 (25, 'f_par'), (32, 'f_w'), (33, 'f_dep'), (34, 'f_par')):
+        v = 'v_' + f[2:]
+        body = _sub_once(body, f'ail_obj_field_list_move(&v__t{n}->{f}, &{v});',
+                         f'i32_move(&v__t{n}->{f}, &{v});', 1, f'move t{n} {f}')
+
+    # parse_tree appends straight into the object fields
+    for f, nparse in (('f_w', 1), ('f_dep', 1), ('f_par', 2)):
+        body = _sub_once(body, f'ail_numfield_list_append(&(v_t)->{f}, _argument);',
+                         f'i32_push(&(v_t)->{f}, _argument);', nparse, f'parse {f}')
+
+    for v in NARROW_VARS:
+        body = _sub_once(body, f'ail_list {v} = {{0}};', f'i32list {v} = {{0}};',
+                         NARROW_DECLS[v], f'local {v}')
+        for fn, new in (('push', 'i32_push'), ('get', 'i32_get'), ('set', 'i32_set'),
+                        ('reserve', 'i32_reserve'), ('free', 'i32_free'),
+                        ('clear', 'i32_clear')):
+            body = body.replace(f'ail_list_{fn}(&{v},', f'{new}(&{v},')
+            body = body.replace(f'ail_list_{fn}(&{v})', f'{new}(&{v})')
+    # stores through a pointer alias to a narrowed local
+    body = _sub_once(body, '((&v_mp)->p[v_i] = (v_nm.n));',
+                     'i32_set(&v_mp, v_i, (v_nm.n));', 1, 'mp store compact')
+    body = _sub_once(body, '((&v_mp)->p[v_i] = (v_k));',
+                     'i32_set(&v_mp, v_i, (v_k));', 1, 'mp store fold')
+    body = _sub_once(body, '((&v_ord)->p[ v_k])', '((int64_t)i32_get(&v_ord, v_k))', 1,
+                     'ord read')
+
+    for f in NARROW_FIELDS:
+        body = body.replace(f'ail_list_span_get((v_t)->{f}.p, (v_t)->{f}.n,',
+                            f'i32_span_get((v_t)->{f}.p, (v_t)->{f}.n,')
+
+    # `X = []` on a narrowed local steals an empty int64 temp; just clear the local
+    for v, t in (('v_w', 'v__t3'), ('v_dep', 'v__t4'), ('v_par', 'v__t5'),
+                 ('v_w', 'v__t16'), ('v_dep', 'v__t17'), ('v_par', 'v__t18'),
+                 ('v_w', 'v__t9'), ('v_dep', 'v__t10'), ('v_par', 'v__t11'),
+                 ('v_ord', 'v__t2'), ('v_par', 'v__t4')):
+        body = body.replace(f'{v} = {t}; {t} = (ail_list){{0}};', f'{t} = (ail_list){{0}};')
+
+    # IR pointer aliases into the narrowed fields
+    for old, new in (
+            ('ail_list *ir7 = (&(v_t)->f_par);', 'i32list *ir7 = (&(v_t)->f_par);'),
+            ('ail_list *ir3 = (&(v_t)->f_w);', 'i32list *ir3 = (&(v_t)->f_w);'),
+            ('ail_list *ir9 = (&(v_t)->f_par);', 'i32list *ir9 = (&(v_t)->f_par);'),
+            ('ail_list *ir13 = (&(v_t)->f_par);', 'i32list *ir13 = (&(v_t)->f_par);'),
+            ('ail_list *ir5 = (&(v_t)->f_dep);', 'i32list *ir5 = (&(v_t)->f_dep);'),
+            ('ail_list *ir8 = (&(v_t)->f_par);', 'i32list *ir8 = (&(v_t)->f_par);'),
+            ('int64_t *ir8_p = (ir7)->p;', 'int32_t *ir8_p = (ir7)->p;'),
+            ('const int64_t *ir5_s = (ir3)->p;', 'const int32_t *ir5_s = (ir3)->p;'),
+            ('int64_t *ir10_p = (ir9)->p;', 'int32_t *ir10_p = (ir9)->p;'),
+            ('int64_t *ir14_p = (ir13)->p;', 'int32_t *ir14_p = (ir13)->p;'),
+            ('int64_t *ir9_p = (ir5)->p;', 'int32_t *ir9_p = (ir5)->p;'),
+            ('int64_t *ir10_p = (ir8)->p;', 'int32_t *ir10_p = (ir8)->p;')):
+        body = _sub_once(body, old, new, 1, old)
+    for p in ('ir8_p', 'ir5_s', 'ir10_p', 'ir14_p', 'ir9_p'):
+        body = body.replace(f'ail_list_view_get({p},', f'i32_view_get({p},')
+    body = body.replace('ail_list_view_set(ir10_p,', 'i32_view_set(ir10_p,')
+    body = _sub_once(body, 'ail_list_span_get((ir5)->p, (ir5)->n, ir1)',
+                     'i32_span_get((ir5)->p, (ir5)->n, ir1)', 1, 'cut dep read')
+
+    # compact's keep span
+    body = _sub_once(body, 'void compact(ail_obj_T *v_t, const int64_t *v_keep, int64_t v_keep_len)',
+                     'void compact(ail_obj_T *v_t, const int32_t *v_keep, int64_t v_keep_len)', 2,
+                     'compact signature')
+    body = _sub_once(body,
+                     'if ((ail_list_get(&(ail_list){(int64_t *)v_keep, v_keep_len, v_keep_len}, v_i)) != 0) {',
+                     'if (i32_span_get(v_keep, v_keep_len, v_i) != 0) {', 1, 'compact keep')
+    body = _sub_once(body, 'ail_list *ir5 = &v_keep;', 'i32list *ir5 = &v_keep;', 1, 'prune keep')
+    body = _sub_once(body, 'ail_list *ir42 = &v_keep;', 'i32list *ir42 = &v_keep;', 1, 'cut keep')
+    body = body.replace('ail_list_reserve(ir42, ir43);', 'i32_reserve(ir42, ir43);')
+    body = body.replace('ail_ir_list_set(ir42, ir1, 0LL);', 'i32_set(ir42, ir1, 0);')
+    body = body.replace('ail_list_free(ir5);', 'i32_free(ir5);')
+    body = body.replace('ail_list_free(ir42);', 'i32_free(ir42);')
+    body = body.replace('ail_list_push(ir5, ir14);', 'i32_push(ir5, ir14);')
+    body = body.replace('ail_list_push(ir5, ir20);', 'i32_push(ir5, ir20);')
+
+    # counts() -> int32; cs is an index column (<= n)
+    body = _sub_once(body, 'int64_t counts(ail_obj_T *v_t, int64_t *_out, int64_t _cap);\n', '',
+                     1, 'counts fwd')
+    body = _sub_once(body, 'static\nail_list counts__irl(ail_obj_T *v_t) {',
+                     'static\ni32list counts_i32(ail_obj_T *v_t) {', 1, 'counts rename')
+    body = _sub_once(body, '    ail_list *ir4 = &v_cs;', '    i32list *ir4 = &v_cs;', 1,
+                     'counts ir4')
+    body = _sub_once(body,
+                     'ail_list_free(ir4); if (ir5 > 0) { if (ir5 > (1LL << 60)) ail_die("MemoryError"); ail_list_reserve(ir4, ir5);',
+                     'i32_free(ir4); if (ir5 > 0) { if (ir5 > (1LL << 60)) ail_die("MemoryError"); i32_reserve(ir4, ir5);',
+                     1, 'counts reserve')
+    body = _sub_once(body, '    int64_t *ir9_p = (ir4)->p;', '    int32_t *ir9_p = (ir4)->p;',
+                     1, 'counts ir9')
+    body = _sub_once(body, '    int64_t *ir22_p = (ir4)->p;', '    int32_t *ir22_p = (ir4)->p;',
+                     1, 'counts ir22')
+    body = body.replace('ail_ir_view_get(ir9_p,', 'i32_view_get(ir9_p,')
+    body = body.replace('ail_ir_view_get(ir22_p,', 'i32_view_get(ir22_p,')
+    body = _sub_once(body,
+                     '    ail_list ir_ret = *(ir4); *(ir4) = (ail_list){0};\n'
+                     '    ail_cleanup_top = v__cf.previous;\n'
+                     '    i32_free(&v_cs);\n    return ir_ret;',
+                     '    i32list ir_ret = *(ir4); *(ir4) = (i32list){0};\n'
+                     '    ail_cleanup_top = v__cf.previous;\n'
+                     '    i32_free(&v_cs);\n    return ir_ret;', 1, 'counts ret')
+    body = _sub_once(body,
+                     'int64_t counts(ail_obj_T *v_t, int64_t *_out, int64_t _cap) {\n'
+                     '    ail_list r = counts__irl(v_t);\n'
+                     '    int64_t n = ail_list_return(&r, _out, _cap);\n'
+                     '    ail_list_free(&r);\n    return n;\n}\n', '', 1, 'counts wrapper')
+    body = _sub_once(body,
+                     '    ail_list *ir3 = &v_cs;\n    ail_list ir4 = counts__irl(v_t);\n'
+                     '    { ail_list_free(ir3); *(ir3) = ir4; }',
+                     '    i32list *ir3 = &v_cs;\n'
+                     '    { i32_free(ir3); *(ir3) = counts_i32(v_t); }', 1, 'mirror cs')
+    body = _sub_once(body, 'const int64_t *ir6_s = (ir3)->p;',
+                     'const int32_t *ir6_s = (ir3)->p;', 1, 'mirror cs copy')
+    body = body.replace('ail_list_free(ir3);', 'i32_free(ir3);')
+    body = _sub_once(body,
+                     '    (void)(ail_list_free(&v__t1), v__t1 = ail_list_adopt_return(counts(v_t, NULL, 0)), v__t1);\n'
+                     '    i32_free(&v_cs); v_cs = v__t1; v__t1 = (ail_list){0};',
+                     '    v__t1 = (ail_list){0};\n    i32_free(&v_cs); v_cs = counts_i32(v_t);',
+                     1, 'sort cs')
+    body = _sub_once(body,
+                     'void rebuild(ail_obj_T *v_t, const int64_t *v_cl, int64_t v_cl_len, const int64_t *v_cs, int64_t v_cs_len)',
+                     'void rebuild(ail_obj_T *v_t, const int64_t *v_cl, int64_t v_cl_len, const int32_t *v_cs, int64_t v_cs_len)',
+                     2, 'rebuild signature')
+    body = _sub_once(body,
+                     'ail_list_get(&(ail_list){(int64_t *)v_cs, v_cs_len, v_cs_len}, ',
+                     'i32_span_get(v_cs, v_cs_len, ', 2, 'rebuild cs reads')
+
+    # do_sort's par snapshot: an int32 copy out of the field
+    body = _sub_once(body,
+                     '(void)({ ail_list _source = (v_t)->f_par; ail_list _copy = ail_list_snapshot('
+                     '_source.p, _source.n); ail_list_free(&v__t4); v__t4 = _copy; v__t4; });',
+                     '(void)({ i32list _source = (v_t)->f_par; i32_free(&v_par); '
+                     'if (_source.n) { i32_reserve(&v_par, _source.n); for (int64_t _i = 0; '
+                     '_i < _source.n; _i++) v_par.p[_i] = _source.p[_i]; v_par.n = _source.n; } '
+                     'v_par; });', 1, 'sort par snapshot')
+    body = _sub_once(body, 'i32_free(&v_par); v__t4 = (ail_list){0};',
+                     'v__t4 = (ail_list){0};', 1, 'stale par free')
+
+    # py_main: total's copy of f_w, and span pointers for the narrowed fields
+    body = _sub_once(body,
+                     '(void)({ ail_list _source = (v_t)->f_w; ail_list _copy = ail_list_snapshot('
+                     '_source.p, _source.n); ail_list_free(&v__t94); v__t94 = _copy; v__t94; });',
+                     '(void)({ i32list _source = (v_t)->f_w; ail_list_free(&v__t94); '
+                     'v__t94 = (ail_list){0}; if (_source.n) { ail_list_reserve(&v__t94, _source.n); '
+                     'for (int64_t _i = 0; _i < _source.n; _i++) v__t94.p[_i] = _source.p[_i]; '
+                     'v__t94.n = _source.n; } v__t94; });', 1, 'main total snapshot')
+    for old, new in (('int64_t *_sp1 = (v_t)->f_par.p;', 'int32_t *_sp1 = (v_t)->f_par.p;'),
+                     ('int64_t *_sp2 = (v_t)->f_dep.p;', 'int32_t *_sp2 = (v_t)->f_dep.p;'),
+                     ('int64_t *_sp3 = (v_t)->f_dep.p;', 'int32_t *_sp3 = (v_t)->f_dep.p;'),
+                     ('int64_t *_sp4 = (v_t)->f_w.p;', 'int32_t *_sp4 = (v_t)->f_w.p;')):
+        body = body.replace(old, new)
+    for p in ('_sp1', '_sp2', '_sp3', '_sp4'):
+        body = body.replace(f'ail_list_view_get({p},', f'i32_view_get({p},')
+    return head + body
 
 
 def time_run(binary, stdin_path, n=1):
