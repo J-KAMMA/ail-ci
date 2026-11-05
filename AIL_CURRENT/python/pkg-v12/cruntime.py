@@ -30435,7 +30435,9 @@ KEYSORTSTR = r"""
 KEYSORT = r"""
 #include <math.h>
 /* kind 0 int64_t, 1 double, 2 ail_str; `pre` (filled by ail_keysort_perm for a str column) holds
-   each string's first eight bytes, big-endian, so most comparisons never touch the text. */
+   each string's first eight bytes, big-endian, so most comparisons never touch the text.
+   A float key column with a NaN stops by name before sorting, with the same message
+   ail_list_sort uses (DIFFERENCES C?-job-refuzz95-10300605-1). */
 typedef struct { int kind; const void *p; int64_t n; const uint64_t *pre; } ail_keycol;
 #define AIL_KEYSORT_MAX 16
 static inline int ail_keycol_cmp(const ail_keycol *c, int nc, int64_t a, int64_t b) {
@@ -30553,7 +30555,12 @@ static void ail_keysort_perm(ail_list *out, const ail_keycol *given, int nc, int
         if (given[k].n != n) ail_die("sort keys of different lengths");
         if (given[k].kind == 1) {
             const double *d = (const double *)given[k].p;
-            for (int64_t i = 0; i < n; i++) if (isnan(d[i])) ail_raise_named(AIL_EXC_VALUE);
+            for (int64_t i = 0; i < n; i++) if (isnan(d[i])) {
+                /* The typed path can now reach a tuple sort through these columns, so this stop
+                   must name the issue exactly like ail_list_sort's boxed check does (refuzz95). */
+                static const char msg[] = "sorted()/list.sort() over a NaN key: NaN has no total order, so this build refuses rather than differ silently from CPython (DIFFERENCES C?-job-refuzz95-10300605-1)";
+                ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)msg, (int64_t)(sizeof msg - 1), 1));
+            }
         }
 #ifdef AIL_KEYSORT_STR
         if (given[k].kind == 2) {

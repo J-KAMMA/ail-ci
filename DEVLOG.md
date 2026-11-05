@@ -1,3 +1,21 @@
+## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
+
+`test_ail_refuzz95` failed on `r_tuple` (default build): after the prog18 typed reach,
+`sorted([(1.0, "a"), (nan, "b"), (0.5, "c")])` lowers to the typed KEYSORT path, whose float-column
+NaN check raised a bare `ValueError`, while the test requires the "refuzz95" name for that shape.
+The KEYSORT check in `python/pkg-v12/cruntime.py` now raises the same named `ValueError` message as
+`ail_list_sort`'s boxed check, on both builds. NaN-free tuple sorts keep their stable order and the
+typed `ail_flist_sort` stop stays a bare `ValueError` (by name only). The existing DIFFERENCES row
+`C?-job-refuzz95-10300605-1` is updated; no new row is needed.
+
+Probes `/tmp/probes/p1_nanfree_tuple.py` (sorts through a local, an argument, a list item, an
+attribute and a dict value, empty/negative/-inf/tie/reverse/int tuples), `p2`-`p5` (NaN first and
+second field, direct/reverse/key lambda), `p6`-`p9` (NaN tuple list through an argument, list item,
+attribute and dict value), `p10` (NaN elsewhere, NaN-free sort unaffected), `p11` (float list NaN)
+and `p12` (empty/negative/1-tuple) all match CPython or are refused by name on both builds.
+`test_ail_refuzz95`, `test_ail_prog18`, `test_ail_unified`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass on the final commit.
+
 ## 2026-11-05 -- prog18_rr1 review fixes 3: bool result inference and INT64_MIN width
 
 Two defects from the re-review, both on the default/typed build (the forced-general build matched
