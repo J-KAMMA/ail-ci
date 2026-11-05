@@ -1,3 +1,24 @@
+## 2026-11-05 -- pyreach s8 review fix: non-simple guard index in `[None] * n` rows
+
+`noneslots._Rewrite.visit_Compare` skipped a guard whose row subscript was not a bare name or
+constant (`xs[ix[0]] is None`, `xs[b.i] is None`, `xs[idx()] is None`) while
+`_candidate_ok.role` had already accepted it as a guard, so the compiled program compared the
+empty-list sentinel with `None` and printed `present` where CPython prints `absent`.  The compare
+now rewrites every guard whose slice is not a `Slice` (a guard evaluates its index exactly once,
+so no index is evaluated twice, and side effects in it still run once).
+
+A `[None] * n` candidate whose name is a function parameter is now refused: a guard before
+`xs = [None] * n` reads the parameter's own list, but the rewrite had moved the present-bit list
+after the init, so the earlier guard died with `UnboundLocalError: cannot access local variable
+'xs__p'`.  The candidate keeps the general route; `--strict` refuses it by name (`'xs' is a
+parameter and cannot be reassigned`).
+
+Probes `/tmp/probes/n5_guard_subscript_index.py`, `n10_attr_index_guard.py`,
+`n11_guard_call_absent.py`, `n5b_guard_isnot_simple.py`, `n5c_guard_tuple_index.py`,
+`n5d_guard_no_rewrite.py` and `n9_param_shadow.py` match CPython stdout and exit status on the
+default and `AIL_UNIFIED_FORCE=1` builds.  `test_ail_pyreach_optret`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; the five codegen pins are unchanged.
+
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 
 `test_ail_refuzz95` failed on `r_tuple` (default build): after the prog18 typed reach,

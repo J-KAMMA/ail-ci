@@ -209,6 +209,13 @@ def _candidates(fn, taken):
     for n in own:
         if isinstance(n, (ast.Global, ast.Nonlocal)):
             declared.update(n.names)
+    args = set()
+    for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs:
+        args.add(a.arg)
+    if fn.args.vararg is not None:
+        args.add(fn.args.vararg.arg)
+    if fn.args.kwarg is not None:
+        args.add(fn.args.kwarg.arg)
     init = {}
     for n in own:
         target = value = None
@@ -222,7 +229,8 @@ def _candidates(fn, taken):
     nodes = own
     parents = {id(child): parent for parent in nodes for child in ast.iter_child_nodes(parent)}
     for name, inits in init.items():
-        if len(inits) != 1 or name + '__p' in taken or name in declared:
+        if (len(inits) != 1 or name + '__p' in taken or name in declared
+                or name in args):
             continue
         init_target = inits[0].targets[0] if isinstance(inits[0], ast.Assign) else inits[0].target
         if not _candidate_ok(fn, name, init_target, parents):
@@ -351,7 +359,7 @@ class _Rewrite(ast.NodeTransformer):
             elif _is_none(left) and isinstance(right, ast.Subscript) \
                     and isinstance(right.value, ast.Name) and right.value.id == self.name:
                 sub, target_sub = right, right
-            if sub is not None and _is_simple(sub.slice):
+            if sub is not None and not isinstance(sub.slice, ast.Slice):
                 bit = ast.Subscript(value=ast.Name(id=self.pname, ctx=ast.Load()),
                                     slice=copy.deepcopy(sub.slice), ctx=ast.Load())
                 ast.copy_location(bit, node)
