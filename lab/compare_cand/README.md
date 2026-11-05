@@ -3,7 +3,8 @@
 This directory holds one candidate task, `csv_rollup`, for the language comparison in `lab/compare`.
 It is deliberately separate from `lab/compare/`: the ten-task table and everything under
 `lab/compare/` are unchanged, and the owner decides later whether the candidate joins
-`lab/compare/src/`.
+`lab/compare/src/`. A second candidate, `log_scan` (an access-log summary CLI), lives beside it with
+the same layout.
 
 Layout:
 

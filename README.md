@@ -25,6 +25,7 @@ The measured AIL/Rust comparison is in [docs/COMPARISON.md](docs/COMPARISON.md).
 
 Requirements: Python 3.10 or newer and `gcc` on `PATH`.
 
+<!-- docs-test: skip runs the whole suite, which CI does in 20 shards -->
 ```sh
 python3 tools/par_check.py            # whole suite, 8 modules at a time
 python3 tools/par_check.py -j 4 test_ail_list_ops test_ail_check   # selected modules

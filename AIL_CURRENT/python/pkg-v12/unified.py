@@ -46,6 +46,7 @@ import biggate
 import bigcap
 
 import pyfunc
+import stubcalls
 
 from pyfront import int_constant
 
@@ -919,6 +920,7 @@ def _bounds(plan, fp, tree, ints):
             return _INF
         if isinstance(e, ast.IfExp):
             return max(bits(e.body), bits(e.orelse))
+        if isinstance(e, ast.Call) and stubcalls.call_type(plan, fp, e, lambda nm: _name_type(plan, fp, nm)) == INT: return 62  # stub-typed int64
         return _INF
 
     def counter(name, n):
@@ -2174,9 +2176,9 @@ def _etype(plan, fp, n, env):
             sp = plan.spec[f]
             if (fp is None or (fp.name, id(n)) in plan.generic_sites or len(n.args) != len(sp.params)):
                 return OBJ
-            return sp.ret
+            return stubcalls.call_type(plan, fp, n, env) or sp.ret
         if not _builtin(plan, fp, f):
-            return OBJ
+            return stubcalls.call_type(plan, fp, n, env) or OBJ
         k = len(n.args)
         if f in ('len', 'ord') and k == 1:
             return INT
@@ -2201,6 +2203,10 @@ def _etype(plan, fp, n, env):
             if all(t == FLOAT for t in ts):
                 return FLOAT
         return OBJ
+    if isinstance(n, ast.Call):
+        t = stubcalls.call_type(plan, fp, n, env)
+        if t is not None:
+            return t
     return OBJ
 
 
@@ -2608,6 +2614,10 @@ def nexpr(comp, node, ctx):
         ctx.emit('%s = %s;' % (r, nexpr(comp, node.orelse, ctx)))
         _close(ctx)
         return r
+    if isinstance(node, ast.Call):
+        st = stubcalls.call_type(comp.uplan, fp, node, lambda nm: _name_type(comp.uplan, fp, nm))
+        if st is not None:
+            return stubcalls.unbox_checked(comp, ctx, node, st)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         f = node.func.id
         if f in comp.uplan.spec:
