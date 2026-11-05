@@ -140,7 +140,7 @@ def build_all(programs, workroot):
     oracle = {}
     for program in programs:
         src = HERE / program
-        cp_rc, cp_out, cp_err, cp_timeout = run_once([sys.executable, '-B', str(src)], str(HERE))
+        cp_rc, cp_out, cp_err, _ = run_once([sys.executable, '-B', str(src)], str(HERE))
         cp = (cp_rc, cp_out, cp_err)
         oracle[program] = cp
         for mode in MODES:
