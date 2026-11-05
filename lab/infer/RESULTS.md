@@ -62,6 +62,60 @@ AIL numbers do not change.
 | binary size | 106,816 B (`gpt2`) | 1,898,560 B (`llama-cli`); 27,120 B (`llama-simple`) |
 | AIL compile time | 8.34 s (`--strict`, `AIL_NO_CACHE=1`; 0.57 s warm) | n/a |
 
+## Tokens per second (`bench.sh`)
+
+One command, one table, medians of 5: `bash lab/infer/bench.sh`. Same runner
+family as above but a later, noticeably slower allocation of it - llama.cpp's
+decode is 30.1 ms/forward here against 12.93 ms in the table above, and AIL's
+is 263.7 ms against 130.6 ms, so read the ratios, not the absolute numbers.
+Both programs see `tokens.txt` (64 ids) and the same F32 weights; AIL is the
+default (release) compile, `gpt2.py` needs no `--strict` flag it does not
+already satisfy (the `--strict` and default binaries are byte-identical).
+
+| program | threads | prefill tok/s | decode tok/s | peak RSS | binary |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AIL `gpt2.py`, default build | 1 | 3.84 | 3.79 | 1053 MiB | 111,120 B |
+| llama.cpp `llama-cli` | 1 | **462.90** | **33.17** | 417 MiB | 1,898,560 B |
+| llama.cpp `llama-cli`, context row | 4 | 298.70 | 7.91 | 417 MiB | 1,898,560 B |
+
+| phase (medians of 5) | AIL | llama.cpp `-t 1` | ratio |
+| --- | ---: | ---: | ---: |
+| prefill, 64 tokens | 16.680 s (260.6 ms/token) | 138.2 ms (2.16 ms/token) | **120.5x** |
+| decode, per forward | 263.7 ms | 30.15 ms | **8.75x** |
+| load weights | 1.16 s | n/a | |
+| peak RSS | 1053 MiB | 417 MiB | 2.5x |
+| binary size | 111,120 B | 1,898,560 B | 0.06x |
+
+How the two decode tok/s are counted: AIL runs 16 decode forwards for its 16
+tokens (the last one's logits are never used); llama.cpp's first generated
+token comes out of the prefill, so its own report has 15 eval runs for 16
+tokens. Each row divides by the number of forwards it actually ran, so the
+numbers are per-forward throughput on both sides.
+
+The `-t 4` row is context only and, on this runner, slower than one thread:
+the four vCPUs are shared and the per-run spread was 75-549 prefill tok/s, so
+it is not a speedup claim and not part of the headline. Greedy ids were equal
+to `ref.py` and to `llama-cli` on all 5 runs for both `-t 1` and `-t 4`; the
+harness prints both id lists and exits non-zero if any run differs.
+llama.cpp prints generated text rather than ids, so its ids are recovered with
+`llama-tokenize` on the generated text (same model, `--no-bos`); that
+round-trip is checked to be 16 ids every run.
+
+The absolute gap from the table above is the machine: AIL and llama.cpp both
+slowed by roughly 2.3x on this allocation, so the AIL/llama ratio is the same
+story (prefill ~2x worse than before, decode slightly better). The phase
+sizes are unchanged.
+
+## Profile (`profile.sh`)
+
+`perf record` is denied on the GitHub runner (`perf_event_paranoid=4`, no
+`CAP_PERFMON`), so `profile.sh` falls back to
+`valgrind --tool=callgrind` on a one-token prompt plus 4 decode forwards -
+five copies of the same one-token forward that prefill and decode both use.
+The binary is the `--debug` build (`-g -O0`, `#line` back to `gpt2.py`), which
+is what makes the source-line column possible; the callgrind shares are of
+that `-O0` build, so they show where the work is, not the exact `-O2` split.
+
 ## Where the time goes (findings)
 
 AIL is 56.7x slower in prefill and 10.1x per decoded token, so it is well past
