@@ -120,3 +120,73 @@ import time:      1439 |       1439 | stubsigs_table
 
 **~1.68 ms** for the first lookup (under the 10 ms target). `stubsigs_table` is imported lazily on that first
 call; importing `stubsigs` alone costs ~0.24 ms.
+
+## typeshed2: stub-typed scalar calls on the general path
+
+`stubcalls.py` answers `unified._etype` for an `ast.Call` whose callee resolves to a vendored stdlib entry
+with an `int`/`float`/`bool` return and no overload disagreement. The emitter runs the general path's own call and
+unboxes the result. For lowered `_ail_math_*` helpers the qualname maps back to `math.*`; a typed `pfu_` clone is
+called with native arguments, and only a clone that already returns the scalar skips the tag check. Any other tag
+stops with `AIL stub call <name>: stub says <type>` (exit 2), so a stub can never return a value of another type.
+`AIL_STUBCALLS=0` turns the feature off. Exact-int functions and `fp.exact` keep `int` results boxed.
+
+The affected set is the 87 programs in `lab/census/programs` and `lab/stdlib` with an `int`/`float`/`bool` scalar
+site (`tools/typeshed_reach.py --list`). All builds below use `AIL_SERVER=0`, a fresh `AIL_SERVER_DIR`,
+`AIL_NO_CACHE=1` and `ulimit -v 1500000`.
+
+### Affected set (default build and forced general path)
+
+| build | before built | after built | before `unboxed_vars` | after `unboxed_vars` | change |
+|---|---:|---:|---:|---:|---:|
+| default | 80/87 | 80/87 | 530 | 654 | **+124** |
+| `AIL_UNIFIED_FORCE=1` | 78/87 | 78/87 | 1074 | 1246 | **+172** |
+
+The build failures are the same 7 (default) and 9 (force) programs before and after; no new failure or fallback.
+`program.c` changed for 25 programs in the default build and 41 in the forced general build (the forced build reaches
+more of the same sites). The changes are confined to the stdlib scalar sites and the variables they feed. A sample of
+22 programs with no scalar site has byte-identical `program.c` before and after (22/22).
+
+Output/exit-status comparison with CPython 3.12 (empty stdin, 20 s limit) over every program whose C changed:
+one program, `lab/census/programs/gdev/g02_038.py`, differs both before and after (it needs input); no program
+differs only after the change, in either build.
+
+### `probe_gcd.py`
+
+Loop body: `math.gcd(i + 1, 97)`, `math.isqrt(i)`, `math.sqrt(i)`, `int(math.floor(s))`, `math.isclose(...)`, and
+eight rounds of integer arithmetic on `g`, `r`, `fi`. `marker.append(2.5)` to a list that already holds an int makes
+the typed path refuse the program, so both builds run the general path; the forced build gives the same C.
+
+| build | instructions (callgrind `Ir`) | output |
+|---|---:|---|
+| before | 11,349,750,748 | `1500748959484`, `0.0`, `2` |
+| after | 9,300,202,901 | `1500748959484`, `0.0`, `2` |
+
+**1.220x fewer instructions** (18.1 %), same output. `tools/icount.c` could not open `perf_event_open` on this
+runner (`kernel.perf_event_paranoid=4`, no privilege to lower it), so the numbers are callgrind's user-space
+instruction count (`Ir`); both counters measure the same quantity. The generated C has an unboxed `int64_t` for the
+`math.gcd` result (the compiler's `pfu__ail_math_gcd` clone, marked `/* AIL stub call math.gcd: typed clone */`)
+and checked unboxes for `math.isqrt` / `math.sqrt`.
+
+### Probes
+
+| probe | before | after |
+|---|---|---|
+| `probe_gcd.py` | matched CPython, both builds | matched CPython, both builds |
+| `probe_shadow.py` (local `gcd`, lambda local, canonical `import math`) | matched CPython, both builds | matched CPython, both builds |
+| `probe_types.py` (floor/sqrt/isqrt/bisect/random types) | matched CPython, both builds | matched CPython, both builds |
+| `probe_big.py` (factorial/comb/perm/prod/lcm) | stopped with `integer overflow in *` | byte-identical stop; `DENY` keeps these boxed |
+| `probe_text.py` (huge int text into `math.gcd`) | stopped with `integer overflow in int()` | byte-identical stop |
+
+`probe_big.py` and `probe_text.py` cannot print CPython's big values in this build even before the change (AIL ints
+are int64 on the general path), so "stop exactly as before" is the invariant they test. `DENY` lists
+`math.factorial`, `math.comb`, `math.perm`, `math.prod`, `math.lcm`.
+
+### Compile time (`lab/compare/src`, 16 sources that build, median of 3 each)
+
+Median before 2.908 s, after 3.050 s: **+0.98 %** (under the 2 % target). Four sources fail to build in both trees
+and are excluded equally. `stubcalls` imports `stubsigs` only when a stdlib call is present; these programs have no
+scalar stub site.
+
+`test_ail_stubcalls.py` builds all five probes in both builds, compares with CPython where the compiler can represent
+the value, checks the identical big-int stops, and checks the `math.gcd` / `math.isqrt` / `math.sqrt` markers and the
+`AIL_STUBCALLS=0` opt-out.
