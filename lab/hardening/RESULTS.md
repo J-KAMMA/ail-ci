@@ -61,6 +61,27 @@ byte-identical to the default binary (same SHA-256).
   `__memset_chk`; the two-line C programs mostly do not. AIL `str_build` gets none.
 - Nothing is stripped: AIL keeps `.symtab` (and any debug info in it).
 
+## Rust
+
+`rustc` on PATH is the rustup shim, and `rustup toolchain list` says `no installed toolchains`;
+with no default toolchain, `rustc` fails with
+`error: rustup could not choose a version of rustc to run, because one wasn't specified explicitly,
+and no default is configured.` The ten `lab/compare/src/*/main.rs` programs were not built (no
+toolchain was downloaded), so every Rust row is `n/a`:
+
+| binary | pie | nx | relro | canary | fortify | stripped | bytes |
+|---|---|---|---|---|---|---|---|
+| `rust/berth_sim` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/chain_relax` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/echo_pack` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/ledger_bin` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/rail_transfer` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/scar_life` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/tally_lang` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/term_rank` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/ticket_audit` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| `rust/tree_fold` | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+
 ## Proposal
 
 Rebuild the generated C by hand (`--debug-dir DIR` -> `DIR/program.c`) with the flags AIL uses, then
