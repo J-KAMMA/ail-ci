@@ -9,7 +9,9 @@ S="${AGENT_TMP:-$RUNNER_TEMP}"   # per-task scratch dir (two tasks can share one
 OC="$HOME/opt/opencode/opencode"
 log=.agent/pipeline.md
 git branch -f work HEAD            # the reviewer diffs work..HEAD, as in the sandbox
-echo "# job $(git rev-parse --abbrev-ref HEAD)  started $(date -u +%FT%TZ)  worker=oc reviewer=oc (GitHub)" > "$log"
+# (2026-11-05) the chain picks the model per stage (free OC, then Command Code, ...): "chain" here, the real model is
+# each section's [model ...] tag; the old fixed "oc" made the logs look like OpenCode ran every job
+echo "# job $(git rev-parse --abbrev-ref HEAD)  started $(date -u +%FT%TZ)  worker=chain reviewer=chain (GitHub)" > "$log"
 
 # the same key also serves OpenCode Zen's free models: add that provider entry to the auth file (nothing is printed)
 python3 - <<'EOF'
@@ -107,11 +109,14 @@ run_cc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; return
   python3 - "$S/$2.cc.json" <<'PY'
 import json, sys
 final = None
+tools = []   # the last tool events, shown when the run ends permission_denied (2026-11-05: what was denied went unrecorded)
 for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
     try:
         e = json.loads(line)
     except ValueError:
         continue
+    if 'tool' in line:
+        tools = (tools + [line.strip()[:300]])[-3:]
     if isinstance(e, dict) and (e.get('type') == 'result' or 'result' in e):
         # the last line is {"type": "result", ..., "finalText": "..."} (command-code 1.88.0)
         final = e.get('finalText') or final
@@ -128,6 +133,9 @@ print(final.strip() if final and final.strip() else '(no final text)')
 s_ = globals().get('stop'); print("[commandcode stop=%s turns=%s out_tokens=%s%s]" % (
     s_[0] if s_ else '?', s_[1] if s_ else '?', s_[2] if s_ else '?',
     (" error=" + str(globals().get('err'))[:200]) if globals().get('err') else ''))
+if s_ and s_[0] == 'permission_denied':
+    for t in tools:
+        print("    [denied near] " + t)
 PY
   grep -qs '"type":"result"' "$S/$2.cc.json" && ! grep -qs '"type":"result","subtype":"error"' "$S/$2.cc.json"
 }
@@ -222,7 +230,9 @@ rules=$(cat .agent/rules.txt 2>/dev/null)
 # nearly all of them were cut off mid-work and judged FIX (2026-10-26), so they get a longer first pass and the time
 # left decides whether a second review still fits. They also skip the full suite here: their base (the bigint export)
 # fails ~70 modules until all fixes are in, and the merged result runs the full suite in the private repo.
-W0=100; RV=60; W1=60; SUITE=1; T_END=$(( $(date +%s) + ${PIPE_MIN:-320} * 60 ))
+# (2026-11-05) RV/W1 60 -> 40: 29 reviews sat a full 60 min with no answer at a usage limit, and 21 of 300 runs neared
+# the 331-min cancel; a review that needs more than 40 min ends in FIX, which fix_cont.sh continues
+W0=100; RV=40; W1=40; SUITE=1; T_END=$(( $(date +%s) + ${PIPE_MIN:-320} * 60 ))
 case "$(git rev-parse --abbrev-ref HEAD)" in job-bigint-*) W0=170; RV=50; W1=70; SUITE=0;; esac
 left() { echo $(( (T_END - $(date +%s)) / 60 )); }
 cat .agent/task.md > "$S/work0.md"
