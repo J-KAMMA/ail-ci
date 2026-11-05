@@ -37,3 +37,32 @@ Geomean speed-up over CPython (default build): **1.04x**.
 * **sudoku**: note: sudoku.py:30:5: built on the general path (about 20x slower) because 'best' is a _AilT_i_i instance and is being assigned an int; a local's kind is settled by its FIRST assignment and never changes afterwards -- give the second kind a different name, or use the value inline without binding it to one; run with --strict to see why
 * **topo**: note: topo.py:2:1: built on the general path (about 20x slower) because import of 'collections' with a use that is not built: Counter, defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and deque are built for str / int / tuple keys and int / float / str / tuple elements; the rest of the module is not (namedtuple and ChainMap are built by the library pass) -- the notes below name the use; run with --strict to see why
 * **wordfreq**: note: wordfreq.py:4:1: built on the general path (about 20x slower) because `in` with a str; a str is never an element of a list, set or dict of numbers, so `in` only works when BOTH sides are str (substring search). write instead: `"a" in text` for substrings; for membership in a collection of str use a `set[str]` or `dict[str, int]`; to test a byte value, compare ints (`b == 97`); run with --strict to see why
+
+## Ranked blockers
+
+Every default build is general and every `--strict` build is refused. The buckets below
+combine the first refusal line with the default fallback note for each program (name text
+replaced); a program must have every bucket that mentions it cleared before it can build
+typed.
+
+| rank | bucket | programs affected | programs |
+| ---: | --- | ---: | --- |
+| 1 | module-level script state: a name assigned to a Call, Compare, IfExp or Name, an empty list, or a module table | 12 | all |
+| 2 | `in` with a `str` (`"--small" in sys.argv`) | 4 | knapsack, mandelbrot, sieve, wordfreq |
+| 3 | int-keyed dict of containers (`graph[node] = []`, then append tuples) | 2 | dijkstra, topo |
+| 4 | tuple target over a sequence (`for left, right in pairs`) | 1 | life |
+| 5 | call to `min()` with three arguments | 1 | levenshtein |
+| 6 | tuple/list constructor needs `str` (`_AilT_i_s()`) | 1 | lcs |
+| 7 | local kind settled by its first assignment (`best`) | 1 | sudoku |
+| 8 | expression returns `str` on one path and a number on another | 1 | rpn |
+| 9 | `collections` import with a use not built (`deque` in this context) | 1 | topo |
+| 10 | heap element is a 3-tuple, not a number | 1 | huffman |
+
+### Reproducers for the top three
+
+Each file under `repro/` is 7-13 lines and was compiled with
+`python3 AIL_CURRENT/ail_chatgpt.py compile <file> -o /tmp/<name>.out --syntax python --strict`.
+
+* `repro/01_module_scope.py` -> refused: `'edges' is a module-level name assigned to a Call, not a literal`.
+* `repro/02_str_membership.py` -> refused: `` `in` with a str; a str is never an element of a list, set or dict of numbers``.
+* `repro/03_dict_of_lists.py` -> refused: `` `graph[node] = []` uses `graph` as a dict of containers``.
