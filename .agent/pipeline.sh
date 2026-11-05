@@ -169,7 +169,44 @@ print(" ".join("%s[%s,%s]" % (x.get("id"), x.get("rate_limit_tier"), (x.get("lim
   fi
   cat "$S/$2.ghm.out"
 }
+run_claude() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; returns 1 if Claude Code could not run
+  # (2026-11-06 owner) agent=opus: Claude Code on the owner's subscription. Opus writes (work*, worksuite), Sonnet
+  # reviews. The token lives only in this process's environment; the key scan covers it before any push.
+  [ -s "$RUNNER_TEMP/claude.key" ] || return 1
+  [ -x "$S/claude/node_modules/.bin/claude" ] || npm install --prefix "$S/claude" --no-fund --no-audit @anthropic-ai/claude-code@2.1.310 >/dev/null 2>&1 || return 1
+  local cm=$3 model=opus; lm=$(( $(left) - 10 )); [ "$cm" -gt "$lm" ] && cm=$lm; [ "$cm" -lt 5 ] && return 1
+  case "$2" in review*) model=sonnet;; esac
+  echo "[model claude/$model $("$S/claude/node_modules/.bin/claude" --version 2>/dev/null | head -1)]"
+  CLAUDE_CODE_OAUTH_TOKEN=$(cat "$RUNNER_TEMP/claude.key") timeout "${cm}m" "$S/claude/node_modules/.bin/claude" -p \
+    --model "$model" --dangerously-skip-permissions --max-turns 250 --output-format json \
+    < <(printf 'Do the task described below, in this directory. Commit your work; do not push. When finished, reply with a short final report.\n\n'; cat "$1") \
+    > "$S/$2.claude.json" 2> "$S/$2.claude.err"
+  local rc=$?
+  python3 - "$S/$2.claude.json" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding='utf-8', errors='replace'))
+except Exception:
+    print('(no final text)'); sys.exit(0)
+r = d.get('result') if isinstance(d, dict) else None
+print(r.strip() if isinstance(r, str) and r.strip() else '(no final text)')
+u = (d.get('usage') or {}) if isinstance(d, dict) else {}
+print("[claude subtype=%s turns=%s out_tokens=%s]" % (d.get('subtype'), d.get('num_turns'), u.get('output_tokens')))
+PY
+  [ $rc = 0 ] || { echo "(Claude Code exit $rc; stderr tail:)"; tail -c 400 "$S/$2.claude.err" | sed 's/^/    /'; } >&2
+  # (2026-11-06) a bad token still exits 0 with subtype=success and the result "Not logged in · Please run /login":
+  # treat that, and a run with no output tokens, as a failure so the chain takes over
+  grep -qsE 'Not logged in|Please run /login|"output_tokens": ?0[,}]' "$S/$2.claude.json" && return 1
+  [ $rc = 0 ] && grep -qs '"result"' "$S/$2.claude.json"
+}
 run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
+  # agent=opus runs go to Claude Code only, no fallback, so the arms stay clean
+  # (2026-11-06) but when Claude Code cannot run (usage limit, login), fall back to the chain below for the rest of
+  # the job instead of losing it
+  if [ "${AIL_WORKER:-auto}" = opus ] && [ ! -f "$S/claude_out" ]; then
+    run_claude "$1" "$2" "$3" && return 0
+    touch "$S/claude_out"; echo "(Claude Code failed: the free/flat-rate chain takes over)" >&2
+  fi
   # The free Zen build of the model first (zero retention, not used for training); the paid Go model when it fails.
   # When the free quota is used up OpenCode does not exit, it retries silently (2026-10-24), so a watchdog reads
   # OpenCode's own log and switches at once.
