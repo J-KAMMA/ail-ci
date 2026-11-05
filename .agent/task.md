@@ -5,67 +5,57 @@
 3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
 
 --- LAST REVIEW ---
-## review 0
-(free quota used up; paid model from here)
+## review 1
 [model commandcode/deepseek-v4.1-flash]
-Findings are in. The worker's final report is empty ("no final text"), so I judged the diff and `lab/stdlib/stdfall1/RESULTS.md`.
+I have enough. Final report.
 
-**What the change really does:** adds three bundled stdlib modules (`fnmatch.py`, `reprlib.py`, `sched.py`) rewritten from CPython 3.12, 18 lab programs, a test module, notices entries, and (stacked relnotice1) license/notices plumbing. `fnmatch` is not a transcription: matching walks the pattern by hand; `sched.Event` is a mutable class and actions are dispatched by argument count.
+## What the change really does
 
-**Probes** (`/tmp/rprobes`, each run with `tools/cmp.sh`, general + default build):
+`3ec03c5` restores CPython's `os.path.normcase` type check in `fnmatch` (a `_normcase` helper used by `fnmatch()` and `filter()`), makes `recursive_repr` remove its guard entry by identity, and had `_join` use a name-based `_type_label` instead of `type(x).__name__`; it also adds two license files to the wheel in `packaging/ail_wheel_backend.py`. `87ececb` extends `_type_label` with a `_BARE_TYPE_NAMES`/`_MODULE_TYPE_NAMES` table. That matches the report, except the report's "Diff:" line covers only the last commit (the branch diff also has `fnmatch.py`, `manifest.d/34.txt`, `packaging/ail_wheel_backend.py`).
 
-| probe | result |
-|---|---|
-| p_fnclass.py (23 patterns × 16 names + `translate`) | same stdout, both builds |
-| p_fntypes2.py (bytes/latin-1, filter on list/tuple/generator, 6 TypeError texts, translate text) | same stdout |
-| p_sched.py (sequence, queue fields, equal time/priority, cancel, nonblocking, empty run) | same stdout |
-| p_reprec2.py / p_nt.py (guard through factory, namedtuple in repr_instance) | same stdout |
-| **p_filter.py** (`fnmatch.filter([], 5)`) | **DIFF, both builds** |
-| **p_reprec3.py** (distinct-but-equal objects nested under `recursive_repr`) | **DIFF, both builds** |
-| **p_replim2.py** (`Repr(indent=Odd())`) | **DIFF, both builds** |
-| p_plain2.py (no feature) | `program.c` byte-identical to `/tmp/base` build |
+**Review defect 1 (fnmatch normcase)** — verified. `p_fnm1` (`filter([], 5)`, `fnmatch("a", 5)`, `fnmatch(5, "a*")`), `p_fnm3` (`filter([5],"*")`, `filter([b"ab"],"a*")`, `filter(["a"], b"a*")`), `p_fnm2` (bytes pattern/name, `filter(bytes, str)`), `p_fnm4` (program-class instance, `{}`) all match CPython in both builds, message text included.
 
-Required test modules: `test_ail_safetynet` OK (5 tests); `test_ail_third_party_notices` 5/6, one failure; the `test_ail_std_stdfall1` run did not finish inside 10 min (unverified).
+**Review defect 2 (recursive_repr identity)** — verified. `p_reprrec4`: distinct-but-equal `[7]`/`[7]` nested three deep gives `f(7,f(7,f(7,leaf)))`, same in both builds.
 
-**Defects**
+**Review defect 3 (full `type()` text)** — **not fully fixed**, see defect below. `Odd`, `1.5`, `slice`, `-3` match.
 
-1. `fnmatch.filter` (and `fnmatch`) dropped `os.path.normcase`, which is identity on POSIX but still type-checks. Probe `p_filter.py`:
-   ```
-   expected: A TypeError: expected str, bytes or os.PathLike object, not int
-   actual:   A []
-   ```
-   Same root cause makes `fnmatch("a", 5)` raise `object of type 'int' has no len()` and `fnmatch(5, "a*")` raise `expected string or bytes-like object, got 'int'` instead of CPython's normcase message (read from the code, not separately compiled).
+**Review defect 4 (notices)** — verified: `test_ail_third_party_notices` 6/6 OK.
 
-2. `reprlib.recursive_repr` detects recursion by identity (`seen is self`) but leaves the guard with `running.remove(self)`, which compares by `==`. Two distinct equal objects corrupt the guard. Probe `p_reprec3.py`:
-   ```
-   expected: A(same,A(same),...)
-   actual:   A(same,A(same),A(same,...,...))
-   ```
-   This contradicts RESULTS' "the only visible difference is concurrent threads".
+**No-feature C unchanged** — verified: `p_plain3.py` built with `--debug-dir` on HEAD and `/tmp/base` (d3ed7ed); `program.c` byte-identical (only temp paths in `native_report.json` differ).
 
-3. `reprlib._join` formats the message with `type(indent).__name__`; CPython uses `{type(indent)}`. Probe `p_replim2.py` line 3:
-   ```
-   expected: TypeError Repr.indent must be a str, int or None, not <class '__main__.Odd'>
-   actual:   TypeError Repr.indent must be a str, int or None, not <class 'Odd'>
-   ```
-   The task required keeping every message text.
+**Tests** — `test_ail_std_stdfall1` OK 2/2 (838 s); `test_ail_safetynet` OK 5/5 when run alone (151 s). In my first parallel run with a 6 GB `ulimit` it failed `S4_generators_gc` by truncating stdout — memory contention, passes alone, unrelated to the diff.
 
-4. Done-check not met: `test_ail_third_party_notices.test_wheel_contains_notices` fails ("the wheel does not contain LICENSE-PSF.txt"). It comes from the stacked relnotice1 base (`packaging/ail_wheel_backend.py` untouched here), so it is not a stdfall1 regression, but it is in this PR and the done-check says it must pass.
+## Defect
 
-**Claim check** (RESULTS.md is the only report): translate/`fnmatchcase` texts verified; sched ordering verified; "16/18 both builds" partially verified (3 lab programs matched; full run timed out); "0/18 before" unverified; notice-test failure true and was disclosed.
+1. `_type_label` classifies by *name*, so a program class whose name collides with a builtin/collections name is labelled with the stdlib module. `/tmp/rprobes/p_typ2.py`:
+```python
+import reprlib
 
-**Pre-existing:** the wheel-notices failure (relnotice1). Also `reprlib.repr_instance` uses `hash(x)` where CPython uses `id(x)` (deterministic only up to the address, so not probed).
+class Counter:
+    def __init__(self):
+        self.n = 5
 
-**Unverified:** full `test_ail_std_stdfall1`, remaining lab programs, the 0/18 baseline, speed (no compiler/runtime change, so no icount run).
+def main():
+    try:
+        print(reprlib.Repr(indent=Counter()).repr([1]))
+    except Exception as e:
+        print("counter", e)
+
+main()
+```
+expected: `counter Repr.indent must be a str, int or None, not <class '__main__.Counter'>`
+actual:   `counter Repr.indent must be a str, int or None, not <class 'collections.Counter'>`
+Same in both builds; `p_typ1.py` (`class deque`) gives `<class 'collections.deque'>` instead of `<class '__main__.deque'>`. This contradicts the docstring's "Every other class is a class of the program" and the task's "never leave a silent difference". It is fixable without module info: `isinstance`/identity against the real `collections`/`array` types (AIL models `collections`), and only then fall back to `__main__.Name`.
+
+**Scope note (not counted):** `packaging/ail_wheel_backend.py` is outside the task's file list; review 0 defect 4 demanded it and it makes the done-check pass, but it edits the relnotice1 lane's file.
+
+**Pre-existing:** `S4_generators_gc` under parallel memory pressure; `reprlib.repr_instance` uses `hash(x)` where CPython uses `id(x)`.
+
+**Unverified:** the 0/18 baseline, the two refused `reprlib` lab programs beyond what `test_ail_std_stdfall1` covers, and `test_ail_files`/`test_ail_corpus_findings3`/`test_ail_std_shlex` (not re-run).
 
 VERDICT: FIX
-1. `fnmatch.filter`/`fnmatch`: restore CPython's normcase type check (`filter([], 5)` must raise TypeError, not return `[]`).
-2. `reprlib.recursive_repr`: key the guard by object identity for removal too, so equal-but-distinct objects do not defeat it.
-3. `reprlib._join`: use the full `type(indent)` text (`<class '__main__.Odd'>`).
-4. `test_ail_third_party_notices` fails in this PR (wheel missing LICENSE-PSF.txt); fix or unstack relnotice1 before merge.
-[commandcode stop=end_turn turns=24 out_tokens=32109]
-
-## fix round skipped: only 27 minutes left
+1. `reprlib._type_label` guesses the class's module from its name: a program class named `Counter`/`deque` prints `<class 'collections.Counter'>` / `<class 'collections.deque'>` where CPython prints `<class '__main__.Counter'>` / `<class '__main__.deque'>` (probe `/tmp/rprobes/p_typ2.py`, `p_typ1.py`, both builds). Classify by identity/isinstance against the actual `collections`/`array` types before falling back to `__main__.Name`.
+[commandcode stop=end_turn turns=24 out_tokens=29447]
 
 
 --- ORIGINAL TASK ---
