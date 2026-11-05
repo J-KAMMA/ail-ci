@@ -1,6 +1,6 @@
 """The pyproof census runner on three tiny fixture programs.
 
-The full census (54 programs) is not run here.  A temporary directory holds one
+The full census (55 programs) is not run here.  A temporary directory holds one
 typed, one general and one refused program; report.py writes results.jsonl and
 RESULTS.md for them, and this test checks the record fields and the blocker
 bucket counts.

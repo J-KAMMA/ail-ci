@@ -40,6 +40,7 @@ lab/pyperf/bench/richards.py	argv:2000
 lab/pyperf/bench/scimark_fft.py	argv:256
 lab/pyperf/bench/scimark_sor.py	argv:40
 lab/pyperf/bench/spectral_norm.py	argv:60
+lab/pyperf/run.py	argv:--help
 lab/compare/src/berth_sim/main.py	gen:lab/compare/tasks/berth_sim
 lab/compare/src/chain_relax/main.py	gen:lab/compare/tasks/chain_relax
 lab/compare/src/echo_pack/main.py	gen:lab/compare/tasks/echo_pack

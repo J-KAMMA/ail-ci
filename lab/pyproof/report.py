@@ -212,8 +212,6 @@ def census_one(program, spec):
             return rec
         general = 'built on the general path' in (err or '')
         rec['default_path'] = 'general' if general else 'typed'
-        if not strict_typed:
-            rec['strict_path'] = 'typed' if not general else 'general'
         if general:
             note = ''
             for line in (err or '').splitlines():
@@ -267,6 +265,9 @@ def strip_location(line):
 
 def normalise(line):
     s = strip_location(line)
+    s = re.sub(r'^built on the general path \(about \d+x slower\) because ', '', s)
+    s = re.sub(r'; run with --strict to see why$', '', s)
+    s = re.sub(r'\.?\s*write instead:.*$', '', s)
     s = re.sub(r' \(the general path could not build this program either\)', '', s)
     s = re.sub(r'; general path:.*$', '', s)
     s = s.strip()
@@ -274,6 +275,25 @@ def normalise(line):
         return ''
     rules = [
         (r'^import of \'([^\']+)\' is not available:.*$', "import of 'X' is not available"),
+        (r"^'[^']+' is a list parameter, which is read-only;.*$", 'a list parameter is read-only'),
+        (r'^the constant None;.*$', 'the constant None'),
+        (r'^yield: this language has no generators\.?.*$', 'this language has no generators'),
+        (r'^a generator expression saved as a value.*$',
+         'a generator expression saved as a value'),
+        (r'^`[^`]*` uses `[^`]*` as a dict of containers.*$',
+         'a dict of containers (lists, sets or dicts as values)'),
+        (r'^line \d+: `[^`]*` makes a second reference to the same container.*$',
+         'a second reference to the same container'),
+        (r"^'[^']+' is a module-level constant; storing into it.*$",
+         'a module-level constant is stored into'),
+        (r'^field `[^`]+` requires a class instance.*$', 'a field requires a class instance'),
+        (r'^main: .* is read by a nested lambda.*$',
+         'a name is read by a nested lambda before assignment'),
+        (r'^fields returns a tuple on one path and a single value on another.*$',
+         'a function returns a tuple on one path and a single value on another'),
+        (r'^Markdown\.__init__ must take plain positional arguments.*$',
+         'a method must take plain positional arguments'),
+        (r'^a int holds integers;.*$', 'an int field holds integers, a float would truncate'),
         (r'^int64 (?:literal )?out of range: .*$',
          'an integer literal or constant expression overflows int64'),
         (r'^int64 constant expression out of range.*$',
@@ -356,7 +376,7 @@ def rec_reasons(rec):
 def bucket_counts(recs):
     buckets = {}
     for r in recs:
-        if r.get('result') != 'refused':
+        if r.get('result') not in ('refused', 'general'):
             continue
         bs = []
         for line in rec_reasons(r):
