@@ -1,3 +1,24 @@
+## 2026-11-05 -- fnvfix1: pyproof builds the two declared-flag programs (job-fnvfix1-11052323)
+
+`lab/pyproof` reported `wrong 2`. Both rows are programs that need exact ints by design; they
+compile and only stop at run time under the int64 default (owner decision 2026-10-31). The
+compiler is unchanged: the programs are now built with the flags they declare.
+
+- `examples/crate/fnvhash/main.py`: the crate README and `test_ail_examples_crate.py` already
+  declare `--exact-int` (its empty-string FNV-1a hash is 14695981039346656037, above `2**63`).
+  `report.py`'s mirrored `CRATE_CASES` carried `flags: []`; it now carries the declared flag and
+  `_build` passes it. The flag applies to the crate's example `main.py` (the program the crate
+  test builds), not to `bench.py`.
+- `lab/compare/src/scar_life/main.py`: compare-lab's `EXACT_INT_TASKS` does not include it, and
+  the program needs `W*H`-bit masks, so its first line declares
+  `# ail-build: --exact-int -- ...`; `report.py` reads that comment (leading `-` words are the
+  flags, the rest is the reason) and uses it for both builds.
+- `docs/tutorial.md` records that a program needing exact ints is built with the flag.
+
+pyproof on the two rows: `examples/crate/fnvhash/main.py` typed and matching,
+`lab/compare/src/scar_life/main.py` general and matching. The full run below is `wrong 0`, with
+typed 29, general 16 and refused 8 unchanged.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this
