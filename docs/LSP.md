@@ -15,6 +15,7 @@ normal `ail` installation.
 | `textDocument/didClose` | Clears the diagnostics for the closed document. |
 | `textDocument/publishDiagnostics` | Diagnostics from the same `ail check` front end that `ail build` uses. |
 | `textDocument/hover` | On a diagnostic: its `write instead:` rewrite. Elsewhere: a function signature, an annotation, a certain literal type, or nothing. |
+| `textDocument/definition` | The binding of the name at the cursor: a local, parameter, function, class, method through `self.m()` (or an instance), or a name imported from another module. Every binding of a name with several assignments is returned; when the target is not certain the answer is `null`. |
 
 Diagnostics carry the compiler message and its `write instead:` text. A source that does not load,
 parse or type-check is an **Error**. A program the typed path refuses but the general path builds is
@@ -37,6 +38,12 @@ Hover shows a type only when it is certain:
 Every other name shows nothing, including a name assigned from arithmetic or a call (for example the
 five names in the review probe), `b"a b".split()`, `range(3)`, an attribute (`obj.x`) or a keyword
 label (`f(x=x)`), and any position inside a string or a comment. A wrong type is worse than no type.
+
+Go-to-definition uses the same scope analysis. It follows the compiler's import search order (the
+program's directory, then `AIL_PATH`, then the bundled `AIL_CURRENT/stdlib/`) and reads the open
+buffer of every open document. A name with several assignments in one scope answers all of them; an
+attribute of an unknown object, a builtin, a name inside a string or a comment, and any target that
+is not certain answer `null`.
 
 ## Prerequisites
 
@@ -168,8 +175,8 @@ then use `cmd = { "python3", "-m", "ail_lang", "lsp" }`.
 
 ## Notes and troubleshooting
 
-- The server is intentionally small: open/change/save/close, diagnostics and hover. It does not
-  provide completion, definitions, formatting or code actions.
+- The server is intentionally small: open/change/save/close, diagnostics, hover and definitions. It
+  does not provide completion, formatting or code actions.
 - Diagnostics for an imported module are published on that module's file, not only on the entry
   file.
 - If nothing appears, check the server log of your editor and run `ail check path/to/file.py`
