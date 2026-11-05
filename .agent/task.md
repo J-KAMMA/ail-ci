@@ -1,3 +1,50 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: shdeps1 dependency-graph tool
+
+**What the change really does:** adds an offline `ast`-only import-graph tool (`tools/selfhost_deps.py`), its generated JSON/report, a 7-file fixture with a test, and manifest entries. No compiler/runtime file is touched, nothing is compiled. That matches the report.
+
+**Verification**
+- Re-ran the tool: output matches `lab/selfhost/deps.json` exactly except `base_commit` (fresh run writes `6cf41f6` = HEAD, not the recorded export `9326971`; `origin/integ` is absent in this checkout). Not a graph error, but `Reproduce: python3 tools/selfhost_deps.py` does not reproduce that field.
+- Captured numbers all verified: full 163 modules / 215,462 lines / 419 edges / 9 layers / cycles `[2,2,60,5]`; eager 6 / 17,006 / 6 edges / 3 layers / no cycles; layer sizes `62,22,7,3,60,2,1,1,5`; `ail_syntax` 5,811 lines; 20 dynamic imports, 16 with targets; 3 unresolved lines are real missing modules.
+- Wrote an independent scanner: edge sets and eager/lazy classification agree on all 153 statically reachable modules (only the intentional dynamic edges differ). Independent Kosaraju/Kahn check reproduces every `layer_full` and the four cycle sizes.
+- Cycle-merge claim verified: dropping the two `ail_syntax` dynamic edges gives cycles `[2,2,4,5,13,40]`.
+- In-degree top-15, census (21 accepted in exactly the six named files), and "none of the first 20 accepted" verified.
+- `test_ail_selfhost_deps` passes (`par_check -j 2`). `update_manifest.py --check` rc=0; diff limited to the 14 permitted files.
+- `test_ail_safetynet` fails on HEAD at `S4_generators_gc` (truncated stdout) and fails identically on `/tmp/base` → **pre-existing**.
+
+**Probes (tool boundaries, /tmp/rprobes)**
+- `f5`: imports in module-level `class`/`try` bodies eager, in a function lazy — correct (the scope fix works).
+- `f3`: `import alpha as al`, `from pkg import leaf as lf` — correct.
+- `f1` (`import a.b`, both files exist) — CPython loads `a` and `a.b`; tool lists only `a.b`, omitting module `a`.
+- `f4` (`import pkg.mod`) — `pkg/__init__.py` omitted for the same reason.
+- `f2v` (`pkg/__init__.py`: `CONST = 1` then `from . import CONST`) — CPython imports cleanly; tool reports `pkg eager ['pkg']`, a spurious self-edge.
+- `f6` (`Path(__file__).resolve().parents[99] / 'nothing.py'`) — tool exits with an uncaught `IndexError` traceback instead of an unresolved entry.
+
+Neither resolution bug changes the current real numbers (no front-end module uses `import pkg.sub`; every relative import names a submodule), but both are wrong graphs on valid input, and the fixture does not cover either.
+
+**Verdict defects**
+1. Dotted import drops the parent package. Probe `/tmp/rprobes/f1/entry.py` = `import a.b`, with `a/__init__.py`, `a/b.py`. CPython executes `a/__init__.py`, so `a` is reachable. Expected modules `{a, a.b, entry}` with `entry→a`; actual `{a.b, entry}`.
+2. `from . import NAME` in a package's own `__init__` creates a self-loop. Probe `/tmp/rprobes/f2v` → expected `pkg` eager `[]`; actual `pkg` eager `['pkg']` (a non-existent edge, and `self_loops` would report it).
+3. (Minor) `_path_static` crashes on an out-of-range `parents[N]`. Probe `/tmp/rprobes/f6/entry.py` → expected an unresolved `nothing` entry; actual `IndexError`, rc=1.
+
+**Unverified:** `test_ail_files` and `test_ail_corpus_findings3` (not re-run per review instructions); CI status (worker says not pushed). Speed not measured — no compiler/runtime code path is touched.
+
+VERDICT: FIX
+1. `import a.b` omits reachable parent package `a` (probe `/tmp/rprobes/f1`: expected modules `a`, `a.b`, `entry`; actual `a.b`, `entry`).
+2. `from . import NAME` in `pkg/__init__.py` yields a spurious `pkg→pkg` edge (probe `/tmp/rprobes/f2v`: expected `pkg` eager `[]`; actual `['pkg']`).
+3. Out-of-range `parents[N]` in `spec_from_file_location` raises `IndexError` instead of an unresolved target (probe `/tmp/rprobes/f6`: expected unresolved entry/rc=0; actual traceback, rc=1).
+[commandcode stop=end_turn turns=52 out_tokens=43704]
+
+
+--- ORIGINAL TASK ---
 Lane: shdeps
 
 # shdeps1: self-hosting prep, the import graph of the compiler's front-end modules (measurement only)
