@@ -97,7 +97,8 @@ def checkcache(filename=None):
         size, mtime, lines, fullname = entry
         fresh = _read_lines(fullname)
         if fresh is None or fresh != lines:
-            cache.pop(filename, None)
+            if filename in cache:
+                del cache[filename]
 
 
 def updatecache(filename: str, module_globals=None):
@@ -107,7 +108,7 @@ def updatecache(filename: str, module_globals=None):
     """
     if filename in cache:
         if len(cache[filename]) != 1:
-            cache.pop(filename, None)
+            del cache[filename]
     if not filename or (filename.startswith("<") and filename.endswith(">")):
         return []
 

@@ -69,6 +69,19 @@ Result after: **10 built, 0 typed, 0 refused; 10 build and match**.
 * `lazycache` and the `module_globals` loader path are dropped (no module loader); the argument
   is accepted and ignored.
 
+## Int64 boundary
+
+`lineno` is an `int`. A line number at `9223372036854775807` returns `""`, as in CPython. A value
+built beyond int64 at run time (`int(str(10 ** 18) + str(10 ** 18))`) stops loudly before
+`getline` is reached:
+
+```
+OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)
+```
+
+CPython returns `""` there. This is the repository-wide int64 rule, not a `linecache` difference;
+with `--exact-int` the value is exact (not measured here).
+
 ## Follow-ups
 
 None: no compiler file needs to change.
