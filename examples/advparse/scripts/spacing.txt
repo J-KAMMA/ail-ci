@@ -10,6 +10,8 @@
    X   COIN
    DROP  THE COIN
    I
+   SCORE
+   X   APPLE
    TAKE   THE    COIN
    
    QUIT

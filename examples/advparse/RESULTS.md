@@ -1,7 +1,7 @@
 # advparse results
 
 - Date: 2026-11-05
-- App: `examples/advparse/advparse.py` (303 lines)
+- App: `examples/advparse/advparse.py` (302 lines)
 - Oracle: CPython 3.12.3
 - Host: GitHub Actions runner, Linux, 4 cores
 - Modes: default build and `AIL_UNIFIED_FORCE=1`
@@ -27,14 +27,14 @@ Each case was run as `python3 -B examples/advparse/advparse.py < scripts/NAME.tx
 status with `$?`. Standard error was empty in every run. All eight scripts match in both
 builds (8 of 8).
 
-| Script | commands | stdout bytes | exit | CPython == default | CPython == forced |
+| Script | input lines | stdout bytes | exit | CPython == default | CPython == forced |
 | --- | --- | --- | --- | --- | --- |
 | `scripts/win.txt` | 21 | 1,496 | 0 | yes | yes |
-| `scripts/synonyms.txt` | 25 | 2,118 | 0 | yes | yes |
-| `scripts/ambiguous.txt` | 16 | 1,096 | 0 | yes | yes |
-| `scripts/containers.txt` | 24 | 1,426 | 0 | yes | yes |
+| `scripts/synonyms.txt` | 26 | 2,118 | 0 | yes | yes |
+| `scripts/ambiguous.txt` | 17 | 1,096 | 0 | yes | yes |
+| `scripts/containers.txt` | 25 | 1,426 | 0 | yes | yes |
 | `scripts/errors.txt` | 26 | 1,201 | 0 | yes | yes |
-| `scripts/spacing.txt` | 15 | 851 | 0 | yes | yes |
+| `scripts/spacing.txt` | 17 | 917 | 0 | yes | yes |
 | `scripts/quiet.txt` | 16 | 1,049 | 0 | yes | yes |
 | `scripts/locked.txt` | 19 | 1,467 | 3 | yes | yes |
 
