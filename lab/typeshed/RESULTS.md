@@ -197,16 +197,16 @@ the value, checks the identical big-int stops, and checks the `math.gcd` / `math
 built twice, once with `AIL_STUBCALLS=0` and once with the default (on), and each built program was run beside
 `python3` 3.12 with empty stdin (15 s limit), comparing stdout and exit status.
 
-The corpus is 1022 programs (`lab/census/programs/` 686, `lab/stdlib/` 336). A full double build was judged over the
-40-minute limit (the 187-program sample below took ~13 minutes of builds and runs, so 1022 would take ~70), so the
-measure uses the 87 programs `tools/typeshed_reach.py --list` marks as having an `int`/`float`/`bool` site plus a
-random 100 of the remaining 935 (`random.Random(1)`), 187 in total.
+The corpus is 1032 programs (`lab/census/programs/` 686, `lab/stdlib/` 346). A full double build was judged over the
+40-minute limit (the 187-program sample below took ~34 minutes of builds and runs on this runner, so 1032 would take
+~3 hours), so the measure uses the 87 programs `tools/typeshed_reach.py --list` marks as having an `int`/`float`/`bool`
+site plus a random 100 of the remaining 945 (`random.Random(1)`), 187 in total.
 
 | set | built (both modes) | `unboxed_vars` off | on | gain | `program.c` changed |
 |---|---:|---:|---:|---:|---:|
-| sample, all | 171 / 187 | 1334 | 1420 | **+86** | **41** |
+| sample, all | 171 / 187 | 1323 | 1409 | **+86** | **41** |
 | affected 87 | 78 | 537 | 623 | +86 | 41 |
-| random rest 100 | 93 | 797 | 797 | 0 | 0 |
+| random rest 100 | 93 | 786 | 786 | 0 | 0 |
 
 The same 16 programs fail to build in both modes (`dev/t472`, `gdev/g02_010`, `g13_002`, `g14_010`, `g14_038`,
 `g15_020`, `g15_024`, `stdlib/array/float32_readings`, `csv/field_size_limit`, `difflib/04_unified_edges`,
@@ -230,24 +230,28 @@ stop rule for a wrong `typeshed2` type was not triggered.
 
 ### Default-build typed / general / refused split
 
-Measured on the same 187 programs with `lab/census/fallback_census.py` (compile only, serial, 90 s alarm):
+Measured on the same 187 programs with `lab/census/fallback_census.py` (compile only, 60 s alarm, `AIL_SERVER=0`;
+the pool workers are daemonic, so the 32 records that failed with "daemonic processes are not allowed to have
+children" were rerun in the main process):
 
 | typed | general | refused by both | census error |
 |---:|---:|---:|---:|
-| 74 | 98 | 12 | 2 |
+| 75 | 94 | 12 | 6 |
 
-186 of the 187 records completed (`gdev/g12_006` hit the census's 90 s alarm, `gdev/g13_002` raised a census
-`KeyError`, and `tomllib/09_big_int` hung, so it was stopped and is not counted; 184 are classified above).
+181 of the 187 records are classified (`gdev/g05_020`, `re/redact`, `gdev/g19_008` hit the 60 s alarm,
+`gdev/g13_002` raised a census `KeyError`, and `gdev/g17_030` / `colorsys/04_hls_to_rgb` kept the daemonic-worker
+error). The earlier 90 s run classified 184 with 74/98/12.
 
 This lane changes no compiler file (the `AIL_STUBCALLS=0` switch already exists in `stubcalls.py`), so the split
-cannot move; any difference from the pre-`typeshed3` split would be noise in the census, not a code change.
+cannot move; any difference from the pre-`typeshed3` split is noise in the census (the sample's random rest and the
+shorter alarm), not a code change.
 
 ## Follow-ups: stdlib call sites still boxed or refused
 
 Every stdlib call site in `lab/census/programs/` and `lab/stdlib/` whose vendored return is not a usable scalar
 (`obj`, `str`/`bytes`, missing, overload set, `None`, or a scalar the hook refuses), ranked by count. 216 distinct
-callees, 2026 call sites: generic 1429, str/bytes result 226, not vendored 206, method of a returned object 100,
-overload 27, keyword/star args 20, denied 18. (The 122 `None`-returning sites are excluded: there is nothing to
+callees, 2025 call sites: generic 1429, str/bytes result 226, not vendored 206, method of a returned object 100,
+denied 23, overload 22, keyword/star args 19. (The 122 `None`-returning sites are excluded: there is nothing to
 unbox. `not vendored` means `lookup` has no entry, e.g. `sys.stdin.read`.)
 
 | rank | count | call site | reason | where a rule would go | example |
@@ -288,8 +292,9 @@ unbox. `not vendored` means `lookup` has no entry, e.g. `sys.stdin.read`.)
 | 34 | 12 | `sqlite3.connect` | not vendored | `third_party/typeshed/` + `tools/typeshed_convert.py` | `lab/stdlib/sqlite3/01_basic_crud.py:5` |
 | 35 | 11 | `heapq.nsmallest` | generic | `stubcalls.call_type` (generic/TypeVar rule) with `unified._etype` | `lab/census/programs/dev/t130.py:21` |
 
-The full 216-row list ranks `denied` sites at 18 (the five `stubsigs.DENY` callees, `math.factorial/comb/perm/prod/lcm`),
-`overload` at 27 (e.g. `re.sub`, `re.match`), and `keyword/star args` at 20 (e.g. `random.uniform(..., k=...)`).
+The full 216-row list ranks `denied` sites at 23 (the five `stubsigs.DENY` callees, `math.factorial/comb/perm/prod/lcm`;
+`math.prod` is also an overload set, and stubcalls refuses at `DENY` first), `overload` at 22 (e.g. `re.sub`,
+`re.match`), and `keyword/star args` at 19 (e.g. `random.uniform(..., k=...)`).
 `stubcalls.call_type` is where all but the vendoring and `DENY` rows would gain support; the typed path
 (`pyfunc.py`) would carry the object-returning constructors (`decimal.Decimal`, `fractions.Fraction`, `datetime.*`,
 `io.*`, `re.compile`) for the pyreach lane.
