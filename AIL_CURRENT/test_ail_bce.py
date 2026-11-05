@@ -475,16 +475,31 @@ fn main() { let p = P([], []); p.a.append(1); p.b.append(2); p.a[0:1] = [9]; pri
 """,
     'unequal_construction': r"""
 struct P { a: list[int]; b: list[int]; }
-fn main() { let p = P([1], []); print(len(p.a)); }
+fn main() { let p = P([1], []); p.a.append(1); p.b.append(2); print(len(p.a)); }
 """,
     'raising_between_appends': r"""
 struct P { a: list[int]; b: list[int]; }
 fn main() {
     let p = P([], []);
     let s = "not a number";
-    p.a.append(1);
-    try { p.b.append(int(s)); } except ValueError as e { print(0); }
+    try { p.a.append(1); p.b.append(int(s)); } except ValueError as e { print(0); }
     print(len(p.a));
+}
+""",
+    'side_effect_receiver': r"""
+struct P { a: list[int]; b: list[int]; }
+struct S { sel: list[int]; }
+fn pick(items: list[P], s: S) -> P {
+    let i = s.sel[0];
+    s.sel[0] += 1;
+    return items[i];
+}
+fn main() {
+    let items: list[P] = [P([], []), P([], [])];
+    let s = S([0]);
+    pick(items, s).a.append(1);
+    pick(items, s).b.append(2);
+    print(len(items[0].a), len(items[1].b));
 }
 """,
 }

@@ -48,6 +48,18 @@ def _is_simple_arg(node):
     return False
 
 
+def _is_stable_receiver(node):
+    """A name or a field chain rooted at a name.
+
+    Two equal source texts are not necessarily the same object: a call with side effects can
+    return a different struct each time.  Only a receiver that denotes one stable place -- a
+    local/parameter or a chain of field reads from one -- may take part in a group block.
+    """
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return isinstance(node, ast.Name)
+
+
 class _Struct:
     def __init__(self, name):
         self.name = name
@@ -174,7 +186,7 @@ class _Pass:
 
     def _member_of(self, target, fn_name):
         if isinstance(target, ast.Attribute):
-            if target.attr in self.list_fields:
+            if target.attr in self.list_fields and _is_stable_receiver(target.value):
                 return ('field', target.attr), ast.dump(target.value)
             return None, None
         if isinstance(target, ast.Name) and target.id in self.local_lists.get(fn_name, ()):

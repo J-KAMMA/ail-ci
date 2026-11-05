@@ -21,6 +21,15 @@ without a `ulimit -v` cap (its AddressSanitizer probes cannot reserve shadow mem
 closures, a raising append argument in `try`, a ledger-shaped non-negative field, and a user
 module import match CPython on both `cmp.sh` builds; the user-module dump is empty.
 
+Review fix: a group block now requires a stable receiver -- a name or a field chain rooted at a
+name -- so `pick(items, s).a.append(1); pick(items, s).b.append(2)` no longer joins the two
+appends merely because their source text is equal; each call can return a different object.
+The `unequal_construction` and `raising_between_appends` probes now include a balanced append
+run, and a new `side_effect_receiver` probe pins the reviewer's shape.  After the fix the
+reviewer's program dumps `{"groups":[],"nonneg":[]}` and still prints `1 0 0 1`; the census is
+still `same C` for all 20 pairs, and the seven required/targeted modules pass under
+`tools/par_check.py -j 2`.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this
