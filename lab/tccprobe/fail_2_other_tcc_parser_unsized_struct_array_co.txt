@@ -1,0 +1,7 @@
+program: lab/compare/src/berth_sim/main.ail (compare)
+bucket: other (tcc parser)
+construct: unsized struct-array compound literal from runtime values
+tcc stderr:
+  /tmp/tccprobe-iqb2g_nm/gen-main-85a1379b/dbg/program.c:6539: error: index too large
+generated C line 6539: ail_stdout_parts((ail_str[]){ir848, ir849}, 2);
+emitted by: AIL_CURRENT/python/pkg-v12/pyfunc.py:24481 (ail_stdout_parts((ail_str[]){...}, n))

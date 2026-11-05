@@ -1,0 +1,7 @@
+program: corpus/gdev/g12_008.py (corpus)
+bucket: unsupported builtin or intrinsic
+construct: __int128
+tcc stderr:
+  /tmp/tccprobe-iqb2g_nm/gen-g12_008-04d5ec25/dbg/program.c:556: error: ';' expected (got "ail_rand_floordiv")
+generated C line 556: static __int128 ail_rand_floordiv(__int128 a, __int128 b) {
+emitted by: AIL_CURRENT/python/pkg-v12/cruntime.py:29709 (static __int128 ail_rand_floordiv(__int128 a, __int128 b))
