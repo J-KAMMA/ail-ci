@@ -170,3 +170,20 @@ compare stdout and exit status with `python3`, the last three check the named re
   which the compiler rewrites to `obj.do_x(...)` and resolves statically. This is why the
   module spells one helper per name rather than writing CPython's single
   `func = getattr(self, 'do_' + cmd)` line.
+
+## Final verification
+
+Run on the job branch against the committed module (CPython 3.12.3):
+
+* `python3 AIL_CURRENT/test_ail_std_cmd.py` -- 6 tests, OK (all nine passing
+  programs plus the calculator and the reflection/dispatch probes, in the default build and
+  with `AIL_UNIFIED_FORCE=1`).
+* `python3 AIL_CURRENT/test_ail_safetynet.py` -- 5 tests, OK.
+* `python3 AIL_CURRENT/test_ail_files.py` -- 18 tests, OK (1 skipped).
+* `python3 AIL_CURRENT/test_ail_corpus_findings3.py` -- 2 tests, OK.
+* The ten probes listed under "Self-check probes" above were rebuilt with
+  `~/tools/cmp.sh`: `p_cmd_loop`, `p_cmd_empty`, `p_cmd_hooks`, `p_cmd_int`,
+  `p_cmd_parse`, `p_cmd_help` and `p_cmd_names` match CPython stdout and exit status in both
+  builds; `p_cmd_outside`, `p_cmd_doc` and `p_cmd_help_outside` stop with the named
+  `NotImplementedError` in both builds.
+* `python3 tools/update_manifest.py --check` -- OK.
