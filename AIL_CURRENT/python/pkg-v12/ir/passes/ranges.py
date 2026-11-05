@@ -22,6 +22,9 @@ interpreter over the structured regions:
 Only the final (stable) visit of each instruction decides its mode, so every decision holds for
 every execution that reaches it.
 """
+import json
+import os
+
 from .. import ir as I
 
 MIN, MAX = -(1 << 63), (1 << 63) - 1
@@ -92,14 +95,25 @@ class _Loop(object):
 
 
 class Analysis(object):
-    def __init__(self, fn, facts):
+    def __init__(self, fn, facts, bce=True):
         self.fn = fn
         self.facts = facts or {}
+        self.bce = bce
         self.defs = {r: ins for ins in I.walk(fn.body) for r in ins.results}
         self.decision = {}          # instr -> new mode (final visit wins)
         self.cmps = {}              # cmp instr -> True/False/None (final visit wins)
         self.index_facts = {}       # checked index instr -> (lo, hi) of its index (final visit)
         self.lens = {}
+        self.explain = {}           # access instr -> dict for AIL_BCE_EXPLAIN
+        self._list_safe = None
+        self._names = {}
+
+    def vname(self, v):
+        n = self._names.get(v)
+        if n is None:
+            n = v.hint or ('v%d' % len(self._names))
+            self._names[v] = n
+        return n
 
     # ------------------------------------------------------------------ facts
     def const(self, v):
@@ -134,6 +148,123 @@ class Analysis(object):
     def set(self, env, v, f):
         if v.type in (I.I64, I.I1):
             env[v] = f
+
+    # ------------------------------------------------------------------ bce s3 rules
+    def list_lengths_safe(self):
+        """Whether every `list.len` in this function sees a length no list op can change."""
+        if self._list_safe is not None:
+            return self._list_safe
+        unsafe = False
+        summaries = self.facts.get('summaries') or {}
+        changing = ('list.push', 'list.pop', 'list.insert', 'list.del', 'list.clear',
+                    'list.extend', 'list.slice', 'list.lit', 'list.move', 'list.copy',
+                    'list.share', 'list.rt', 'list.repeat', 'list.reserve',
+                    'rec.push', 'rec.pop')
+        for ins in I.walk(self.fn.body):
+            op = ins.op
+            if op in changing:
+                unsafe = True
+                break
+            if op == 'list.reset' and not ins.attrs.get('drop'):
+                unsafe = True
+                break
+            if op in ('call', 'ba.call', 'obj.call', 'list.call'):
+                eff = summaries.get(ins.attrs.get('callee'))
+                if eff is None or eff.unknown:
+                    unsafe = True
+                    break
+                if any(w.startswith(('Elem(', 'Spine(', 'Rebind(')) for w in eff.writes):
+                    unsafe = True
+                    break
+        self._list_safe = not unsafe
+        return self._list_safe
+
+    def upper_steps(self, env, b):
+        """Pairs (w, c) with b <= w + c, through up to two symbolic steps."""
+        out = []
+        fb = self.get(env, b)
+        for w, c in fb.ub.items():
+            if w is b:
+                continue
+            out.append((w, c))
+            if w in env:
+                for w2, c2 in env[w].ub.items():
+                    if w2 is not w and w2 is not b:
+                        out.append((w2, c + c2))
+        return out
+
+    def sum_in_bounds(self, env, base, index):
+        """index = a + b, b <= w + c, w = L - a  =>  index <= L + c."""
+        d = self.defs.get(index)
+        if d is None or d.op != 'add' or d.attrs.get('mode') not in ('ck', 'nsw'):
+            return False
+        lens = self.lengths_of(base)
+        for a, b in ((d.operands[0], d.operands[1]), (d.operands[1], d.operands[0])):
+            for w, c in self.upper_steps(env, b):
+                dw = self.defs.get(w)
+                if dw is not None and dw.op == 'sub' and dw.operands[1] is a:
+                    if dw.operands[0] in lens and c <= -1:
+                        return True
+        return False
+
+    def explain_access(self, ins, env, base, index):
+        f = self.get(env, index)
+        lo, hi = self.bounds(env, index)
+        lens = self.lengths_of(base)
+        reason = self.fail_reason(env, base, index, lo, lens)
+        return {'fn': self.fn.name, 'op': ins.op,
+                'index': {'name': self.vname(index), 'lo': lo, 'hi': hi,
+                          'ub': {self.vname(w): c for w, c in f.ub.items()},
+                          'lb': {self.vname(w): c for w, c in f.lb.items()}},
+                'len': [self.vname(L) for L in lens], 'reason': reason}
+
+    def fail_reason(self, env, base, index, lo, lens):
+        if lo < 0:
+            return 'index may be negative'
+        if base.type.head == 'obj' and base.type.args[0].head == 'list' and not self.list_lengths_safe():
+            return 'list length may change (length-changing op or unknown call)'
+        if not lens:
+            return 'no length value of this container'
+        d = self.defs.get(index)
+        if d is not None and d.op == 'add':
+            for a, b in ((d.operands[0], d.operands[1]), (d.operands[1], d.operands[0])):
+                for w, c in self.upper_steps(env, b):
+                    dw = self.defs.get(w)
+                    if dw is not None and dw.op == 'sub' and dw.operands[1] is a \
+                            and dw.operands[0] in lens and c > -1:
+                        return 'sum rule needs the offset at most -1'
+        return 'no upper bound against a length'
+
+    def join_arms(self, arms):
+        """Join the (env, yielded value, fact) triples of the arms of an `if`.  When one arm
+        yields a constant and the other's refined env proves the constant is below a bound the
+        other arm keeps, keep that symbolic bound (`if maxm > 131 { maxm = 131 }`)."""
+        facts = [a[2] for a in arms]
+        f = None
+        for x in facts:
+            f = join(f, x)
+        if not self.bce or len(arms) != 2:
+            return f
+        for ci in (0, 1):
+            oi = 1 - ci
+            fc = facts[ci]
+            if fc.lo != fc.hi or fc.ub or fc.lb:
+                continue
+            ce, cv, _ = arms[ci]
+            oe, ov, fo = arms[oi]
+            if self.const(ov) is not None:
+                continue
+            for w, c in list(fo.ub.items()) + [(ov, 0)]:
+                if c < fo.ub.get(w, 0):
+                    continue
+                if self.le(ce, cv, w, c):
+                    f.ub[w] = max(f.ub.get(w, c), c)
+            for w, c in list(fo.lb.items()) + [(ov, 0)]:
+                if c > fo.lb.get(w, 0):
+                    continue
+                if self.le(ce, w, cv, -c):
+                    f.lb[w] = min(f.lb.get(w, c), c)
+        return f
 
     # ------------------------------------------------------------------ refinement
     def atoms(self, v, truth, depth=0):
@@ -222,6 +353,9 @@ class Analysis(object):
             self.decide(ins, ok)
             return Fact(*_clip(lo, hi))
         b = ins.operands[1]
+        if self.bce and op == 'sub' and a is b:
+            self.decide(ins, True)
+            return Fact(0, 0)
         blo, bhi = self.bounds(env, b)
         if op == 'add':
             lo, hi = alo + blo, ahi + bhi
@@ -259,10 +393,16 @@ class Analysis(object):
         return f
 
     def lengths_of(self, base):
-        """Every `bytes.len` value of `base` (all equal: bytes are immutable)."""
+        """Every length value of `base` that cannot have changed (bytes/span are immutable; a
+        list's length only when no list op or call in the function can resize one)."""
         out = self.lens.get(base)
         if out is None:
-            out = [r for r, d in self.defs.items() if d.op in ('bytes.len', 'span.len') and d.operands[0] is base]
+            out = [r for r, d in self.defs.items()
+                   if d.op in ('bytes.len', 'span.len') and d.operands[0] is base]
+            if self.bce and base.type.head == 'obj' and base.type.args[0].head == 'list' \
+                    and self.list_lengths_safe():
+                out += [r for r, d in self.defs.items()
+                        if d.op == 'list.len' and d.operands[0] is base]
             self.lens[base] = out
         return out
 
@@ -285,6 +425,8 @@ class Analysis(object):
         for L in lens:
             if L in env and env[L].lo > hi:
                 return True
+        if self.bce and self.sum_in_bounds(env, base, index):
+            return True
         return False
 
     def decide(self, ins, ok):
@@ -351,6 +493,21 @@ class Analysis(object):
                     vlo, vhi = self.bounds(env, ins.operands[2])
                     val_ok = 0 <= vlo and vhi <= 255
                 self.decision[ins] = 'nck' if idx_ok and val_ok else 'vck' if idx_ok and byte else 'ck'
+                if self.bce:
+                    if self.decision[ins] == 'ck':
+                        self.explain[ins] = self.explain_access(ins, env, ins.operands[0], ins.operands[1])
+                    else:
+                        self.explain.pop(ins, None)
+            return
+        if op == 'list.set' and self.bce:
+            if ins.attrs.get('mode') == 'ck' or ins in self.decision:
+                ok = self.in_bounds(env, ins.operands[0], ins.operands[1], ins)
+                self.decision[ins] = 'nck' if ok else 'ck'
+                if ok:
+                    self.explain.pop(ins, None)
+                else:
+                    self.explain[ins] = self.explain_access(
+                        ins, env, ins.operands[0], ins.operands[1])
             return
         if not ins.results or ins.regions:
             return
@@ -431,12 +588,31 @@ class Analysis(object):
         if op == 'bytes.get':
             env[r] = Fact(0, 255)
             if ins.attrs.get('mode') == 'ck' or ins in self.decision:
-                self.decision[ins] = 'nck' if self.in_bounds(env, o[0], o[1], ins) else 'ck'
+                ok = self.in_bounds(env, o[0], o[1], ins)
+                self.decision[ins] = 'nck' if ok else 'ck'
+                if self.bce:
+                    if ok:
+                        self.explain.pop(ins, None)
+                    else:
+                        self.explain[ins] = self.explain_access(ins, env, o[0], o[1])
             return
         if op in ('span.get', 'list.get') and ins.attrs.get('mode') == 'ck' or (
                 op == 'span.get' and ins in self.decision):
             if op == 'span.get':
-                self.decision[ins] = 'nck' if self.in_bounds(env, o[0], o[1], ins) else 'ck'
+                ok = self.in_bounds(env, o[0], o[1], ins)
+                self.decision[ins] = 'nck' if ok else 'ck'
+                if self.bce:
+                    if ok:
+                        self.explain.pop(ins, None)
+                    else:
+                        self.explain[ins] = self.explain_access(ins, env, o[0], o[1])
+            elif self.bce:
+                ok = self.in_bounds(env, o[0], o[1], ins)
+                self.decision[ins] = 'nck' if ok else 'ck'
+                if ok:
+                    self.explain.pop(ins, None)
+                else:
+                    self.explain[ins] = self.explain_access(ins, env, o[0], o[1])
             return
         if op in ('bytes.len', 'list.len', 'span.len'):
             env[r] = Fact(0, LEN_MAX)
@@ -484,7 +660,7 @@ class Analysis(object):
             out = self.region(arm, sub, loops)
             if out is not None:
                 outs.append(out)
-                yields.append([self.get(out, v) for v in arm.instrs[-1].operands])
+                yields.append([(out, v, self.get(out, v)) for v in arm.instrs[-1].operands])
         if not outs:
             # nothing falls through: the rest of the region is dead; keep analysing it under the
             # pre-if state (its decisions only matter if it is reachable, which it is not)
@@ -498,10 +674,75 @@ class Analysis(object):
         env.clear()
         env.update(merged)
         for j, r in enumerate(ins.results):
-            f = None
-            for y in yields:
-                f = join(f, y[j])
-            self.set(env, r, f)
+            self.set(env, r, self.join_arms([y[j] for y in yields]))
+
+    def loop_edges(self, loop):
+        out = []
+
+        def walk(region):
+            for ins in region.instrs:
+                if ins.op in ('continue', 'break'):
+                    out.append(ins)
+                elif ins.op in I.LOOP_OPS:
+                    continue
+                elif ins.op == 'if':
+                    for r in ins.regions:
+                        walk(r)
+        walk(loop.regions[0])
+        return out
+
+    def nondec(self, value, base, env, depth=0):
+        """Whether `value` is `base` plus a non-negative amount, through if/loop joins."""
+        if value is base:
+            return True
+        if depth > 16:
+            return False
+        d = self.defs.get(value)
+        if d is None:
+            return False
+        op = d.op
+        if op == 'add':
+            x, y = d.operands
+            if x is base or self.nondec(x, base, env, depth + 1):
+                return self.bounds(env, y)[0] >= 0
+            if y is base or self.nondec(y, base, env, depth + 1):
+                return self.bounds(env, x)[0] >= 0
+            return False
+        if op == 'select':
+            return (self.nondec(d.operands[1], base, env, depth + 1)
+                    and self.nondec(d.operands[2], base, env, depth + 1))
+        if op == 'if':
+            try:
+                idx = d.results.index(value)
+            except ValueError:
+                return False
+            for r in d.regions:
+                term = r.instrs[-1]
+                if term.op == 'yield':
+                    if not self.nondec(term.operands[idx], base, env, depth + 1):
+                        return False
+                elif term.op not in ('break', 'continue', 'return', 'raise', 'reraise', 'unreachable'):
+                    return False
+            return True
+        if op == 'loop':
+            try:
+                idx = d.results.index(value)
+            except ValueError:
+                return False
+            return self.loop_result_nondecreasing(d, idx, base, env, depth + 1)
+        return False
+
+    def loop_result_nondecreasing(self, loop, idx, base, env, depth):
+        if depth > 16 or loop.op != 'loop' or idx >= len(loop.operands):
+            return False
+        init = loop.operands[idx]
+        if not (init is base or self.nondec(init, base, env, depth + 1)):
+            return False
+        arg = loop.regions[0].args[idx]
+        for edge in self.loop_edges(loop):
+            if idx >= len(edge.operands) or not self.nondec(edge.operands[idx], arg, env, depth + 1):
+                return False
+        return True
 
     def do_loop(self, ins, env, loops):
         body = ins.regions[0]
@@ -512,6 +753,16 @@ class Analysis(object):
         else:
             init, idx, args = ins.operands, None, body.args
         carried = [self.get(env, v) for v in init]
+        if self.bce and ins.op == 'loop':
+            edges = [e for e in self.loop_edges(ins) if e.op == 'continue']
+            for j, initv in enumerate(init):
+                if j >= len(carried) or initv.type != I.I64:
+                    continue
+                if all(j < len(e.operands) and self.nondec(e.operands[j], args[j], env)
+                       for e in edges):
+                    f = carried[j]
+                    f.lb[initv] = max(f.lb.get(initv, 0), 0)
+                    f.lo = max(f.lo, self.get(env, initv).lo)
         rounds = 0
         while True:
             rounds += 1
@@ -556,9 +807,23 @@ class Analysis(object):
         return TOP
 
 
+def _bce_enabled():
+    return os.environ.get('AIL_BCE', '1').strip().lower() not in ('0', 'off', 'no', 'false')
+
+
+def dump_explain(fn):
+    """AIL_BCE_EXPLAIN=path: one JSON line per access the last ranges run left checked."""
+    target = os.environ.get('AIL_BCE_EXPLAIN')
+    if not target:
+        return
+    for rec in getattr(fn, '_range_explain', ()):
+        with open(target, 'a') as handle:
+            handle.write(json.dumps(rec, sort_keys=True) + '\n')
+
+
 def run(fn, facts=None):
     """Decide the mode of every checked + - * and unary -, and of // and % by constants."""
-    analysis = Analysis(fn, facts)
+    analysis = Analysis(fn, facts, bce=_bce_enabled())
     env = {}
     params = (facts or {}).get('params') or {}
     for p, n in zip(fn.params, fn.param_names):
@@ -567,6 +832,7 @@ def run(fn, facts=None):
             env[p] = Fact(lo, hi)
     analysis.region(fn.body, env, [])
     fn.index_facts = analysis.index_facts
+    fn._range_explain = list(analysis.explain.values())
     folded = 0
     for ins, truth in analysis.cmps.items():
         if truth is not None:
@@ -586,7 +852,7 @@ def run(fn, facts=None):
                 proven += 1
         if ins.op in ('floordiv', 'floormod') and analysis.decision.get(ins) == 'nonneg':
             ins.attrs['mode'] = 'nonneg'
-        if ins.op in ('bytes.get', 'span.get', 'span.set'):
+        if ins.op in ('bytes.get', 'span.get', 'span.set', 'list.get', 'list.set'):
             if ins.op == 'span.set' and ins.attrs.get('mode') in ('ck', 'vck'):
                 idx_total += 1
                 d = analysis.decision.get(ins)

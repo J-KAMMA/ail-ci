@@ -90,6 +90,8 @@ def optimize(fn, program, facts=None, check=None):
         stats['windows'] = window.run(fn)
         after()
     E.summarize_program(program)
+    if os.environ.get('AIL_BCE_EXPLAIN') and 'ranges' in on:
+        ranges.dump_explain(fn)
     if os.environ.get('AIL_IR_DUMP_FINAL'):
         from .. import text
         open(os.environ['AIL_IR_DUMP_FINAL'], 'a').write('--- final\n' + text.print_function(fn))
