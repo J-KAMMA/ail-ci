@@ -12,7 +12,10 @@ The wheel holds three things:
                                         leaves out (experiments/, docs/design, tasks-novel, evidence/ ...)
                                         cannot get into the wheel.
 * ailc-<version>.dist-info/             METADATA, WHEEL, entry_points.txt, RECORD,
-                                        licenses/LICENSE-APACHE and licenses/LICENSE-MIT
+                                        licenses/LICENSE-APACHE, licenses/LICENSE-MIT,
+                                        licenses/LICENSE-PSF.txt (the CPython-derived
+                                        stdlib modules) and licenses/LICENSE-typeshed.txt
+                                        (the vendored typeshed stubs)
 
 Only a wheel is built (`pip install .`, `pip wheel .`, `python -m build --wheel`). An sdist would have to
 carry the whole private repository, so build_sdist refuses.
@@ -41,6 +44,10 @@ REQUIRES_PYTHON = ">=3.10"
 PACKAGE_FILES = ("__init__.py", "__main__.py", "cli.py", "project.py", "lsp.py")
 LICENSE_EXPRESSION = "MIT OR Apache-2.0"
 LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")      # repository root; pyproject.toml license-files lists the same
+BUNDLED_LICENSES = (                                   # license texts of the third-party code the wheel ships (source path)
+    ("LICENSE-PSF.txt", SOURCE / "stdlib" / "LICENSE-PSF.txt"),
+    ("LICENSE-typeshed.txt", REPO / "third_party" / "typeshed" / "LICENSE"),
+)
 ENTRY_POINTS = "[console_scripts]\nail = ail_lang.cli:main\n"
 
 
@@ -163,6 +170,8 @@ def collect(work):
     entries[info + "/entry_points.txt"] = ENTRY_POINTS.encode("utf-8")
     for name in LICENSE_FILES:
         entries["%s/licenses/%s" % (info, name)] = (REPO / name).read_bytes()
+    for name, source in BUNDLED_LICENSES:
+        entries["%s/licenses/%s" % (info, name)] = source.read_bytes()
     return entries
 
 
@@ -201,6 +210,8 @@ def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):
     (info / "licenses").mkdir(exist_ok=True)
     for name in LICENSE_FILES:
         (info / "licenses" / name).write_bytes((REPO / name).read_bytes())
+    for name, source in BUNDLED_LICENSES:
+        (info / "licenses" / name).write_bytes(source.read_bytes())
     return info.name
 
 

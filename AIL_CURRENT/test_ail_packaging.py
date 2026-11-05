@@ -31,6 +31,7 @@ REPO = ROOT.parent
 BACKEND = REPO / "packaging" / "ail_wheel_backend.py"
 PRIVATE_PARTS = ("experiments", "tasks-novel", "evidence", "design", "bench", "tests")
 LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")
+BUNDLED_LICENSES = ("LICENSE-PSF.txt", "LICENSE-typeshed.txt")
 PACKAGE_FILES = ("__init__.py", "__main__.py", "cli.py", "project.py", "lsp.py")
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
 
@@ -83,7 +84,7 @@ class WheelContents(unittest.TestCase):
         package = {"ail_lang/" + name for name in PACKAGE_FILES}
         info = "ailc-%s.dist-info/" % source_version()
         dist = {info + name for name in ("METADATA", "WHEEL", "entry_points.txt", "RECORD")}
-        dist |= {info + "licenses/" + name for name in LICENSE_FILES}
+        dist |= {info + "licenses/" + name for name in LICENSE_FILES + BUNDLED_LICENSES}
         self.assertEqual(self.names - sdk - package - dist, set(), "files outside the SDK selection")
         self.assertEqual((sdk | package | dist) - self.names, set(), "selected files missing from the wheel")
         self.assertEqual(len(self.zip.namelist()), len(self.names), "duplicate members")
@@ -163,6 +164,9 @@ class WheelContents(unittest.TestCase):
             self.assertIn("License-File: " + name, header)
             self.assertEqual(self.zip.read(info + "licenses/" + name), (REPO / name).read_bytes())
             self.assertEqual(self.zip.read("ail_lang/sdk/" + name), (REPO / name).read_bytes())
+        for name, source in (("LICENSE-PSF.txt", ROOT / "stdlib" / "LICENSE-PSF.txt"),
+                             ("LICENSE-typeshed.txt", REPO / "third_party" / "typeshed" / "LICENSE")):
+            self.assertEqual(self.zip.read(info + "licenses/" + name), source.read_bytes())
         pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('license = "MIT OR Apache-2.0"', pyproject)
         self.assertIn('license-files = ["LICENSE-APACHE", "LICENSE-MIT"]', pyproject)

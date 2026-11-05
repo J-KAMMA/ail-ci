@@ -1,3 +1,26 @@
+## 2026-11-05 -- rbrelnotice1: ship the PSF and typeshed licences in the wheel (job-rbrelnotice1-11052205)
+
+On today's integration tree the relnotice change's own `test_ail_third_party_notices` still failed
+its wheel check: `NoticesTest.test_wheel_contains_notices` found no `LICENSE-PSF.txt` member,
+because `packaging/ail_wheel_backend.py` copied only the two root licences into
+`.dist-info/licenses/`.  The documented follow-up in `THIRD_PARTY_NOTICES.md` is now applied:
+`BUNDLED_LICENSES` maps `LICENSE-PSF.txt` (`AIL_CURRENT/stdlib/LICENSE-PSF.txt`) and
+`LICENSE-typeshed.txt` (`third_party/typeshed/LICENSE`) into `collect()` and
+`prepare_metadata_for_build_wheel()`, beside `LICENSE-APACHE`/`LICENSE-MIT`.  The SDK payload is
+unchanged (`tools/update_manifest.py` pins only `.py`/`.c`/`.h`, so neither text becomes an SDK
+file) and the follow-up text now describes the landed state.
+
+`test_ail_packaging` learned the two new members: `test_file_list_is_the_sdk_selection` counts them
+in the dist-info set and `test_license_metadata_and_files` asserts their bytes equal the sources.
+No compiler or runtime behaviour changed; `test_ail_obj_refs`, `test_ail_safetynet`,
+`test_ail_unified` and `test_ail_virtual_dispatch` already passed on this tree and still do.
+`test_ail_third_party_notices` 6/6, `test_ail_packaging` 21/21, `test_ail_safetynet` 5/5,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
+Probes in `/tmp/probes` (`p1_wheel_licenses`, `p2_metadata_licenses`, `p3_sdk_unchanged`,
+`p4_reproducible`) pass under `python3` and are refused by name under `cmp.sh` (`import of
+'ail_wheel_backend' is not available`), as expected for Python-only packaging code.
+
 ## 2026-11-05 -- relnotice1: re-apply the third-party notices inventory (job-relnotice1-11051608)
 
 Re-applied the accepted `relnotice1` change (the `995aa12`..`job-relnotice1-11051608` diff minus

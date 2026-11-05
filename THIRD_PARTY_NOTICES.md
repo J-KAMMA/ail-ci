@@ -204,30 +204,16 @@ system zlib library; they copy no zlib source.
   column for those rows to `yes`; the notices test then requires the line and
   `LICENSE-PSF.txt` in the first 15 lines.
 
-The wheel backend (`packaging/ail_wheel_backend.py`, owned by another lane)
-currently ships only the two root licenses. To complete the PSF notice in the
-published `ailc` wheel, change the license copy loop in `collect()` from:
+The wheel backend (`packaging/ail_wheel_backend.py`) copies `LICENSE-PSF.txt`
+(the CPython-derived stdlib modules) and `LICENSE-typeshed.txt` (the vendored
+stubs) into `.dist-info/licenses/` beside the two root licenses, in both
+`collect()` and `prepare_metadata_for_build_wheel()`, so a published `ailc`
+wheel carries the PSF and typeshed texts.
+`test_ail_third_party_notices.py` checks for the PSF copy and
+`test_ail_packaging.py` pins both files' bytes.
 
-```python
-    for name in LICENSE_FILES:
-        entries["%s/licenses/%s" % (info, name)] = (REPO / name).read_bytes()
-```
-
-to:
-
-```python
-    for name in LICENSE_FILES:
-        entries["%s/licenses/%s" % (info, name)] = (REPO / name).read_bytes()
-    entries["%s/licenses/LICENSE-PSF.txt" % info] = (SOURCE / "stdlib" / "LICENSE-PSF.txt").read_bytes()
-    entries["%s/licenses/LICENSE-typeshed.txt" % info] = (REPO / "third_party" / "typeshed" / "LICENSE").read_bytes()
-```
-
-Until that lands, `test_ail_third_party_notices.py` reports the missing
-`LICENSE-PSF.txt` in the wheel as a test failure, not a skip.
-
-Two further files decide what an exported SDK carries, and both are owned by
-other lanes. `tools/update_manifest.py` marks an SDK file only when it ends in
-`.py`, `.c` or `.h` (`sdk_source()` and `is_compiler_source()`), so
-`AIL_CURRENT/stdlib/LICENSE-PSF.txt` cannot be pinned as one; widening those
-suffix sets would carry it under `ail_lang/sdk/stdlib/`. The `collect()`
-change above is enough for the wheel check as written.
+`tools/update_manifest.py` marks an SDK file only when it ends in `.py`, `.c`
+or `.h` (`sdk_source()` and `is_compiler_source()`), so
+`AIL_CURRENT/stdlib/LICENSE-PSF.txt` is not pinned as an SDK file and does not
+appear under `ail_lang/sdk/stdlib/`; the `.dist-info/licenses/` copy above is
+how the license reaches a wheel user.
