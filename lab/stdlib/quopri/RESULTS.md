@@ -36,8 +36,8 @@ Result before: **0 built, 0 typed, 10 refused**.
 ## After
 
 All ten build and match CPython in the default build and with `AIL_UNIFIED_FORCE=1`. Every one uses
-the general path (bytes indexing and `bytes((n,))` construction fall back; the note says the typed
-path cannot pin the return kind). `AIL_CURRENT/test_ail_std_quopri.py` builds each one in both
+the general path: the typed path cannot pin the return kind of `needsquoting`, which returns a bool
+on some paths and a number on others (the build note points at `needsquoting`). `AIL_CURRENT/test_ail_std_quopri.py` builds each one in both
 builds and compares stdout and the exit status with `python3`.
 
 | program | default build | forced general | matches CPython stdout + exit |
