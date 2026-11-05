@@ -2,6 +2,6 @@ program: corpus/gdev/g01_010.py (corpus)
 bucket: attribute or pragma
 construct: C11 _Thread_local storage class
 tcc stderr:
-  /tmp/tccprobe-xs9jamka/gen-g01_010-7f629767/dbg/program.c:5981: error: ';' expected (got "void")
+  /tmp/tccprobe-iqb2g_nm/gen-g01_010-6e270bba/dbg/program.c:5981: error: ';' expected (got "void")
 generated C line 5981: static _Thread_local void *ail__rep_stk[512];
 emitted by: AIL_CURRENT/python/pkg-v12/cruntime.py:17245-17246 (static _Thread_local void *ail__rep_stk[512]); also cruntime.py:30362, jsonrt.py:858

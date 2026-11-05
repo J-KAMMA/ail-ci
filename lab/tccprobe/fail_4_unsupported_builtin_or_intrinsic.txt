@@ -6,4 +6,4 @@ tcc stderr:
   tcc: error: undefined symbol '__builtin_add_overflow'
   tcc: error: undefined symbol '__builtin_sub_overflow'
 generated C line None: 
-emitted by: (see the C line above)
+emitted by: AIL_CURRENT/python/pkg-v12/cruntime.py:433,4044,4065 (__builtin_unreachable), cruntime.py:3917-3919 and bigint_obj.py:403-411 (__builtin_*_overflow)

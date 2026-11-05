@@ -237,6 +237,18 @@ def c_line(path, number):
     return None
 
 
+def index_too_large_construct(line_text):
+    """tcc reports two different unsized aggregate forms as `index too large`."""
+    text = line_text or ''
+    # (ail_str[]){...}: an unsized compound literal built from runtime values.
+    if re.search(r'\(\s*(?:struct\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\[\s*\]\s*\)\s*\{', text):
+        return 'unsized struct-array compound literal from runtime values'
+    # ail_bytes spans[] = {...};: an unsized array variable initialized from runtime values.
+    if re.search(r'\b[A-Za-z_][A-Za-z0-9_]*\s+[A-Za-z_][A-Za-z0-9_]*\s*\[\s*\]\s*=\s*\{', text):
+        return 'unsized struct-array variable declaration from runtime values'
+    return 'index too large (see the C line)'
+
+
 def classify(lowered, line_text):
     """(bucket, construct) from tcc's stderr and the generated C line it pointed at."""
     haystack = (line_text or '').lower() + '\n' + lowered
@@ -251,7 +263,7 @@ def classify(lowered, line_text):
     if '__attribute__' in haystack or '#pragma' in haystack or 'attribute' in haystack:
         return 'attribute or pragma', None
     if 'index too large' in lowered:
-        return 'other (tcc parser)', 'unsized struct-array compound literal from runtime values'
+        return 'other (tcc parser)', index_too_large_construct(line_text)
     if any(word in lowered for word in ('undefined symbol', 'unresolved', 'undefined reference',
                                         'cannot find', 'file not found', 'relocation')):
         return 'link error', None
@@ -264,10 +276,15 @@ def diagnose(stderr, c_files):
     """(bucket, construct, c line number, c line text) for one tcc failure."""
     text = stderr or ''
     line_no, line_text = None, None
-    match = re.search(r'\.c:(\d+):\s*(?:error|warning)', text)
+    match = re.search(r'(\S+\.c):(\d+):\s*(?:error|warning)', text)
     if match:
-        line_no = int(match.group(1))
-        for c_file in c_files:
+        line_no = int(match.group(2))
+        # A multi-unit build compiles each translation unit separately, so tcc names the one
+        # that failed; try that file before the others (line numbers overlap between units).
+        named = pathlib.Path(match.group(1)).name
+        ordered = ([p for p in c_files if pathlib.Path(p).name == named]
+                   + [p for p in c_files if pathlib.Path(p).name != named])
+        for c_file in ordered:
             found = c_line(c_file, line_no)
             if found:
                 line_text = found
@@ -349,7 +366,13 @@ def measure(source, name, kind, case, root, gcc, tcc, runs):
             record['runs'][label]['stderr_sha'] = hashlib.sha256(stderr).hexdigest()[:16]
     bucket, construct, line_no, line_text = diagnose(records['tcc'].get('build_error', ''),
                                                      generated['c_files'])
-    record['tcc_bucket'] = bucket if (not records['tcc']['build_ok'] or not records['tcc'].get('match')) else None
+    # A tcc build that runs and disagrees with gcc -O2 is the stop condition, not a parse failure.
+    if not records['tcc']['build_ok']:
+        record['tcc_bucket'] = bucket
+    elif not records['tcc'].get('match'):
+        record['tcc_bucket'] = 'wrong output'
+    else:
+        record['tcc_bucket'] = None
     record['tcc_construct'] = construct
     record['tcc_error'] = first_error(records['tcc'].get('build_error', ''))
     record['tcc_error_line'] = line_no
@@ -381,7 +404,7 @@ def main():
     if args.from_json:
         result = json.loads(pathlib.Path(args.from_json).read_text(encoding='utf-8'))
         for record in result['programs'] + result.get('skipped', []):
-            if record.get('tcc_bucket'):
+            if record.get('tcc_bucket') and record['tcc_bucket'] != 'wrong output':
                 record['tcc_bucket'], record['tcc_construct'] = classify(
                     (record.get('tcc_error') or '').lower(), record.get('tcc_error_line_text'))
         pathlib.Path(args.out).write_text(json.dumps(result, indent=1) + '\n', encoding='utf-8')
@@ -456,10 +479,20 @@ CONSTRUCT_EMITTER = {
     'unsized struct-array compound literal from runtime values':
         'AIL_CURRENT/python/pkg-v12/pyfunc.py:24481 '
         "(ail_stdout_parts((ail_str[]){...}, n))",
-    'tcc does not implement the builtin':
+    'unsized struct-array variable declaration from runtime values':
+        'AIL_CURRENT/python/pkg-v12/cruntime.py:6450,6508,6538 '
+        "(ail_bytes spans[] = {h, old, repl}; and the translate/remove_edge variants)",
+    '__int128':
+        'AIL_CURRENT/python/pkg-v12/cruntime.py:29709 '
+        '(static __int128 ail_rand_floordiv(__int128 a, __int128 b))',
+    'unsupported builtin or intrinsic':
         'AIL_CURRENT/python/pkg-v12/cruntime.py:433,4044,4065 (__builtin_unreachable), '
         'cruntime.py:3917-3919 and bigint_obj.py:403-411 (__builtin_*_overflow)',
 }
+
+
+EXCERPT_ORDER = {'attribute or pragma': 0, 'other (tcc parser)': 1,
+                 'unsupported builtin or intrinsic': 2}
 
 
 def write_excerpts(result, directory):
@@ -472,7 +505,9 @@ def write_excerpts(result, directory):
             continue
         construct = record.get('tcc_construct') or ''
         seen.setdefault((bucket, construct), record)
-    for number, ((bucket, construct), record) in enumerate(sorted(seen.items()), 1):
+    ordered = sorted(seen.items(),
+                     key=lambda kv: (EXCERPT_ORDER.get(kv[0][0], 9), kv[0][1]))
+    for number, ((bucket, construct), record) in enumerate(ordered, 1):
         slug = re.sub(r'[^a-z0-9]+', '_', (bucket + '_' + construct).lower()).strip('_')[:40]
         stderr = record.get('tcc_error') or record.get('ail_error') or ''
         lines = [
@@ -482,7 +517,8 @@ def write_excerpts(result, directory):
             'tcc stderr:',
             *('  ' + line for line in stderr.splitlines()[:8]),
             'generated C line %s: %s' % (record.get('tcc_error_line'), record.get('tcc_error_line_text')),
-            'emitted by: %s' % CONSTRUCT_EMITTER.get(construct, '(see the C line above)'),
+            'emitted by: %s' % (CONSTRUCT_EMITTER.get(construct) or CONSTRUCT_EMITTER.get(bucket)
+                                or '(see the C line above)'),
         ]
         (directory / ('fail_%d_%s.txt' % (number, slug))).write_text('\n'.join(lines) + '\n', encoding='utf-8')
 

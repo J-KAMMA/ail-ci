@@ -9,10 +9,20 @@ input and compares stdout, stderr and exit status.
 
 Result with tcc 0.9.27 (Ubuntu package): 0 of 50 build; 0 binaries ran, so nothing was compared at
 run time and the wrong-output stop condition did not trigger. All 50 build with gcc -O2 and
-gcc -O0; median C-compile wall time gcc -O2 1.2416 s, gcc -O0 0.4574 s, tcc not available. First
-blockers: 23 unsized struct-array compound literals from runtime values (`pyfunc.py:24481`),
-19 `static _Thread_local` (`cruntime.py:17245-17246`), 7 `__builtin_unreachable`, 1 `__int128`.
-Details, corpus list, per-task timings and the four excerpts are in `lab/tccprobe/RESULTS.md`.
+gcc -O0; median C-compile wall time gcc -O2 1.2092 s, gcc -O0 0.4434 s, tcc not available. First
+blockers: 23 unsized aggregates from runtime values -- 15 unsized compound literals
+(`pyfunc.py:24481`) and 8 unsized array declarations (`cruntime.py:6450,6508,6538`) -- 19
+`static _Thread_local` (`cruntime.py:17245-17246`), 7 `__builtin_unreachable`, 1 `__int128`.
+Details, corpus list, per-task timings and the five excerpts are in `lab/tccprobe/RESULTS.md`.
+
+A fix round corrected the attribution: tcc reports both unsized aggregate forms as `index too
+large`, and `classify()` now separates them by the C line it points at (an `(T[]){...}` compound
+literal versus a `T x[] = {...};` declaration) instead of mapping all 23 to the compound literal.
+`diagnose()` also prefers the translation unit tcc names in multi-unit builds, a tcc build that
+runs but differs is labelled `wrong output` rather than a parse failure, and the excerpt set is
+`fail_1`..`fail_5` (adding the declaration form). Re-measured with 3 repetitions: the headline
+0/50, the 23/19/8 bucket split and the 40-program corpus list are unchanged; the 3-run
+determinism claim and the `program.c` sha256 (`facf9d98...`) were re-verified.
 
 No compiler, runtime or default C compiler is changed (release stays `gcc -O2`), so no DIFFERENCES
 row and no new test module: the artifact is the measurement script plus its report. Two bugs in the
