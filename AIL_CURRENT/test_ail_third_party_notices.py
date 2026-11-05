@@ -120,7 +120,7 @@ class NoticesTest(unittest.TestCase):
 
     def test_derived_CPython_files_have_the_notice(self):
         derived = derived_files(self.rows)
-        self.assertEqual(len(derived), 13, "the CPython-derived file count changed")
+        self.assertEqual(len(derived), 17, "the CPython-derived file count changed")
         followups = followups_text()
         for path in derived:
             origin, license_name, notice = self.rows[path]

@@ -7,8 +7,8 @@ table below is the complete inventory of files under `third_party/` and
 
 Counts:
 
-- CPython 3.12 derived files under `AIL_CURRENT/stdlib/`: 11 (PSF License
-  Version 2), all with the notice
+- CPython 3.12 derived files under `AIL_CURRENT/stdlib/`: 15 (PSF License
+  Version 2), 14 with the notice and `quopri.py` pending (see "Follow-ups")
 - CPython-derived compiler preludes outside that directory: 2 (PSF License
   Version 2), notice pending (see "Follow-ups")
 - typeshed files: 50, of which 48 are vendored stubs (Apache License 2.0)
@@ -137,8 +137,12 @@ system zlib library; they copy no zlib source.
 | `third_party/typeshed/stdlib/zlib.pyi` | typeshed bd58d637aaa73ec8d7a9ec5e2ad8809a5dd86272 | Apache-2.0 | yes |
 | `AIL_CURRENT/stdlib/colorsys.py` | CPython 3.12 (Lib/colorsys.py) | PSF-2.0 | yes |
 | `AIL_CURRENT/stdlib/difflib.py` | CPython 3.12 (Lib/difflib.py) | PSF-2.0 | yes |
+| `AIL_CURRENT/stdlib/fnmatch.py` | CPython 3.12 (Lib/fnmatch.py) | PSF-2.0 | yes |
 | `AIL_CURRENT/stdlib/getopt.py` | CPython 3.12 (Lib/getopt.py) | PSF-2.0 | yes |
 | `AIL_CURRENT/stdlib/keyword.py` | CPython 3.12 (Lib/keyword.py) | PSF-2.0 | yes |
+| `AIL_CURRENT/stdlib/quopri.py` | CPython 3.12 (Lib/quopri.py) | PSF-2.0 | no |
+| `AIL_CURRENT/stdlib/reprlib.py` | CPython 3.12 (Lib/reprlib.py) | PSF-2.0 | yes |
+| `AIL_CURRENT/stdlib/sched.py` | CPython 3.12 (Lib/sched.py) | PSF-2.0 | yes |
 | `AIL_CURRENT/stdlib/shlex.py` | CPython 3.12 (Lib/shlex.py) | PSF-2.0 | yes |
 | `AIL_CURRENT/stdlib/stat.py` | CPython 3.12 (Lib/stat.py) | PSF-2.0 | yes |
 | `AIL_CURRENT/stdlib/token.py` | CPython 3.12 (Lib/token.py) | PSF-2.0 | yes |
@@ -155,6 +159,17 @@ system zlib library; they copy no zlib source.
 
 ## Follow-ups
 
+- `AIL_CURRENT/stdlib/quopri.py` came from the `quopri1` lane, which landed
+  after this inventory was written. It is a copy of CPython 3.12
+  `Lib/quopri.py` without the first-lines notice; add
+
+  ```python
+  Derived from CPython 3.12 Lib/quopri.py; PSF License, see stdlib/LICENSE-PSF.txt.
+  ```
+
+  to its docstring and set the `Notice` column for its row to `yes`. The
+  `quopri1` lane owns the file; the stdfall1 lane only added the row so the
+  inventory test passes.
 - `AIL_CURRENT/python/pkg-v12/prelude_csv.py` and
   `AIL_CURRENT/python/pkg-v12/prelude_format.py` are CPython 3.12 ports that
   ship in the wheel without a PSF notice. The task that created this inventory
