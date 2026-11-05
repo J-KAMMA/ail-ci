@@ -1,0 +1,7 @@
+program: lab/compare/src/echo_pack/main.ail (compare)
+bucket: other (tcc parser)
+construct: unsized struct-array variable declaration from runtime values
+tcc stderr:
+  /tmp/tccprobe-iqb2g_nm/gen-main-d9ddc70b/dbg/program.c:4503: error: index too large
+generated C line 4503: ail_bytes spans[] = {h, old, repl};
+emitted by: AIL_CURRENT/python/pkg-v12/cruntime.py:6450,6508,6538 (ail_bytes spans[] = {h, old, repl}; and the translate/remove_edge variants)

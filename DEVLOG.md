@@ -69,6 +69,58 @@ fact. No pass reads `facts['fields']`, so generated C is unchanged.
 Tests: `test_ail_bce` 11/11, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass. Probes: the dump is `{"groups": [], "nonneg": []}` for
 `n_bytes_collide.ail` (prints `-5`) and `n_tuple.py` (prints `-1`), both as CPython does.
+## 2026-11-05 -- tccprobe1: measure whether the generated C builds with tcc (measurement only) (job-tccprobe1-11051609)
+
+`lab/tccprobe/run.py` takes the ten `lab/compare` tasks and forty `corpus/gdev` programs (seed
+20261105; the first forty of the shuffled list whose C builds), emits the C once with
+`compile --debug-dir` (the saved `program.c` is byte-identical to what the compiler was handed, and
+`native_report.json` records its command line), then builds that same C with `gcc -O2`, `gcc -O0`
+and `tcc` (median of three builds, fresh directory each), runs each build three times on the same
+input and compares stdout, stderr and exit status.
+
+Result with tcc 0.9.27 (Ubuntu package): 0 of 50 build; 0 binaries ran, so nothing was compared at
+run time and the wrong-output stop condition did not trigger. All 50 build with gcc -O2 and
+gcc -O0; median C-compile wall time gcc -O2 1.2092 s, gcc -O0 0.4434 s, tcc not available. First
+blockers: 23 unsized aggregates from runtime values -- 15 unsized compound literals
+(`pyfunc.py:24481`) and 8 unsized array declarations (`cruntime.py:6450,6508,6538`) -- 19
+`static _Thread_local` (`cruntime.py:17245-17246`), 7 `__builtin_unreachable`, 1 `__int128`.
+Details, corpus list, per-task timings and the five excerpts are in `lab/tccprobe/RESULTS.md`.
+
+A fix round corrected the attribution: tcc reports both unsized aggregate forms as `index too
+large`, and `classify()` now separates them by the C line it points at (an `(T[]){...}` compound
+literal versus a `T x[] = {...};` declaration) instead of mapping all 23 to the compound literal.
+`diagnose()` also prefers the translation unit tcc names in multi-unit builds, a tcc build that
+runs but differs is labelled `wrong output` rather than a parse failure, and the excerpt set is
+`fail_1`..`fail_5` (adding the declaration form). Re-measured with 3 repetitions: the headline
+0/50, the 23/19/8 bucket split and the 40-program corpus list are unchanged; the 3-run
+determinism claim and the `program.c` sha256 (`facf9d98...`) were re-verified.
+
+No compiler, runtime or default C compiler is changed (release stays `gcc -O2`), so no DIFFERENCES
+row and no new test module: the artifact is the measurement script plus its report. Two bugs in the
+measurement itself were found and fixed before the final run: `-lm` was placed before the source
+(breaking links under `--as-needed`) and multi-unit general-path builds lost their link libraries.
+`python3 tools/update_manifest.py` and `--check` pass.
+
+## 2026-11-05 -- rbtccprobe1: re-apply the tcc build probe on the current tree (job-rbtccprobe1-11052322)
+
+Re-applied the accepted `tccprobe1` change (`c5ca5c0d`..`job-tccprobe1-11052026`).  Everything
+applied: `lab/tccprobe/` (`run.py`, `RESULTS.md`, five `fail_*.txt` excerpts), the `tccprobe1`
+measurement entry above and the `.github/workflows/agent-worker.yml` hunks, which drop
+`GH_MODELS_TOKEN` and `$RUNNER_TEMP/ghm.key` from the key-file and key-scan steps.  That removal
+is harmless: `.agent/pipeline.sh` already no-ops `run_ghm` when `$RUNNER_TEMP/ghm.key` is absent
+(`[ -s "$RUNNER_TEMP/ghm.key" ] ... || return 1`).  No compiler, runtime or default build is
+changed (release stays `gcc -O2`), so no DIFFERENCES row and no new test module.
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran;
+`--check` passes.
+Tests (`par_check -j 2`): `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass.
+Probes: `/tmp/probes/tccprobe_logic.py` (29 checks) covers `classify()` on both real `index too
+large` forms (declaration vs compound literal) and the sized forms that must not match, attribute,
+`__thread`, `__int128`, `__builtin_*`, asm, link error, `diagnose()` picking the unit tcc names in
+a multi-unit build, the `-O0`/tcc flag rewrites, single vs multi `parse_report`, `write_excerpts`
+ordering and emitters, and the `--from-json` reclassification: 29/29.
+`/tmp/probes/tccprobe_smoke.py` matches CPython under `cmp.sh` in both the general and default
+builds.  tcc 0.9.27 is not installed on this runner, so the 0/50 build numbers in `RESULTS.md`
+were not re-measured here; they are the accepted job's recorded measurement.
 
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
