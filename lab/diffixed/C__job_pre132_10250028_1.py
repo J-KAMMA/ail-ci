@@ -1,0 +1,10 @@
+# C?-job-pre132-10250028-1: alternate form on a type-less float field
+print(format(1e300, "#"))
+print(format(1e300, "#\x00"))
+print(format(1.5, "#"))
+print(format(1e300, "#.0"))
+print(format(1e300, "#10.2"))
+print(format(1.0, "#"))
+print(f"{1e300:#}")
+print(f"{2.0:#.0}")
+print(format(1e300, "+#"))
