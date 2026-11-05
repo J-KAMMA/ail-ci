@@ -34,6 +34,12 @@ class SelfhostSeedEstimate(unittest.TestCase):
                 self.assertIn(key, record)
             self.assertGreater(record["c_bytes"], 0)
             self.assertGreater(record["binary_bytes"], 0)
+        compiler = self.corpus.get("compiler")
+        self.assertIsNotNone(compiler, "the corpus records no compiler stats")
+        for key in ("files", "lines", "ast_nodes", "top_functions", "top_classes"):
+            self.assertIsInstance(compiler[key], int)
+        self.assertGreater(compiler["files"], 0)
+        self.assertGreater(compiler["ast_nodes"], 0)
 
     def test_seed_md_matches_tool(self):
         done = subprocess.run(

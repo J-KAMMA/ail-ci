@@ -1,3 +1,16 @@
+## 2026-11-05 -- shseed1: the C-seed estimate comes from the corpus, not the live compiler (job-shseed1-11060533)
+
+`test_ail_selfhost_seed` failed when the shseed1 change was applied to today's integ: `--report-only`
+counted the compiler's lines and AST nodes from the working tree, so every merged compiler edit
+moved the computed estimates away from the numbers recorded in `lab/selfhost/SEED.md` (the
+"estimates" comment no longer matched on integ: binary high 5,730,451,312 vs 5,673,710,177).  `--run` now records the compiler scope (`files`, `lines`, `ast_nodes`,
+`top_functions`, `top_classes`) in `lab/selfhost/seed_corpus.json`, and `--report-only` reads that
+snapshot; the committed snapshot is the one the SEED.md numbers were measured with, so the file is
+unchanged and the test is stable across later compiler edits.  A corpus without the snapshot is
+refused by name ("re-run --run to record them").  `test_ail_selfhost_seed` also asserts the
+snapshot is present and positive.  `test_ail_selfhost_seed` 2 OK on both this branch and a worktree
+of today's integ with the change applied.
+
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 
 `test_ail_refuzz95` failed on `r_tuple` (default build): after the prog18 typed reach,

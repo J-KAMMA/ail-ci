@@ -11,9 +11,10 @@ functions and classes, typed/general path, generated ``program.c`` bytes, its gz
 stripped binary bytes.  Two bare programs (one typed, one general) give the fixed runtime part.
 
 ``--report-only`` reads the corpus JSON, subtracts the fixed runtime part, fits C bytes per AST
-node and per source line through the origin (separately for typed and general builds), counts the
-compiler's own lines and AST nodes over the scope of ``lab/selfhost/CENSUS.md`` without compiling
-it, and prints the low/mid/high estimates as JSON.  It builds nothing.
+node and per source line through the origin (separately for typed and general builds), and prints
+the low/mid/high estimates as JSON.  It builds nothing.  The compiler's own lines and AST nodes
+(over the scope of ``lab/selfhost/CENSUS.md``, never compiled) are part of the corpus, recorded
+by ``--run``, so a later compiler edit does not silently change the committed estimate.
 
 Measurement only: no compiler file is edited.  Builds run under a 1.5 GB address-space limit and
 at most two at a time.
@@ -244,6 +245,7 @@ def run(jobs):
         "rows": rows,
         "fixed": fixed,
         "failures": failures,
+        "compiler": _compiler_stats(),
     }
     return corpus
 
@@ -332,7 +334,9 @@ def report(corpus):
             "fixed_c_bytes": fixed["c_bytes"],
             "fixed_binary_bytes": fixed["binary_bytes"],
         }
-    compiler = _compiler_stats()
+    compiler = corpus.get("compiler")
+    if not compiler:
+        raise SystemExit("corpus has no compiler stats; re-run --run to record them")
     nodes = compiler["ast_nodes"]
     lines = compiler["lines"]
 

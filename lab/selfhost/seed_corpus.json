@@ -1,5 +1,12 @@
 {
   "base_commit": "02796a50b344bf219af144c190b148b797e8876c",
+  "compiler": {
+    "ast_nodes": 1508278,
+    "files": 160,
+    "lines": 188365,
+    "top_classes": 346,
+    "top_functions": 3266
+  },
   "failures": [
     {
       "error": "note: examples/algos/run.py:545: os.path.getsize() with these arguments is not built; os.cpu_count() is built; the rest of os (environ, path, ...) is not",
