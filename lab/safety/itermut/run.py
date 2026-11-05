@@ -32,12 +32,22 @@ NAMED = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*(: .*)?$")
 
 
 def base_commit():
-    for rev in ("origin/integ", "HEAD"):
+    for rev in ("origin/integ", "staging/integ"):
         got = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", rev],
                              capture_output=True, text=True)
         if got.returncode == 0:
             return got.stdout.strip(), rev
-    return "unknown", "unknown"
+    got = subprocess.run(["git", "-C", str(REPO), "log", "--format=%H", "--reverse",
+                          "HEAD", "--", "lab/safety/itermut"], capture_output=True, text=True)
+    first = (got.stdout.split() or [""])[0]
+    if first:
+        parent = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", first + "^"],
+                                capture_output=True, text=True)
+        if parent.returncode == 0:
+            return parent.stdout.strip(), "branch base"
+    got = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
+                         capture_output=True, text=True)
+    return (got.stdout.strip() or "unknown"), "HEAD"
 
 
 def last_line(text):
@@ -63,6 +73,14 @@ def run_limited(cmd, cwd, env):
                 "timed_out": True}
 
 
+def build_detail(text):
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    for line in lines:
+        if "not in the subset" in line:
+            return line
+    return last_line(text)
+
+
 def build(source, mode, work):
     out = work / mode / "bin"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +102,7 @@ def build(source, mode, work):
                              timeout=600, env=env)
     except subprocess.TimeoutExpired:
         return False, out, "build timed out"
-    return got.returncode == 0, out, last_line(got.stderr)
+    return got.returncode == 0, out, build_detail(got.stderr)
 
 
 def executable(out, source, mode):
@@ -263,6 +281,24 @@ def main():
     lines.append("")
     lines.append("%d programs x %d modes = %d cells."
                  % (len(sources), len(MODES), len(sources) * len(MODES)))
+    lines.append("")
+    lines.append("## Notes")
+    lines.append("")
+    lines.append("- `sorted(xs, key=f)` with `f` appending to `xs` does **not** raise in CPython "
+                 "3.12 (`sorted` sorts a copy); probe 17 therefore matches. Only in-place "
+                 "`xs.sort(key=f)` raises `ValueError: list modified during sort` (probe 18).")
+    lines.append("- `d.pop(k); d[k] = v` on the current key raises `RuntimeError: dictionary keys "
+                 "changed during iteration` in CPython 3.12 only when the re-add moves the key: "
+                 "with two keys (probe 25) it does; with three keys the position is unchanged and "
+                 "it does not.")
+    lines.append("- The set probes 26 and 27 are `silent-wrong` on the default and typed paths: "
+                 "no `RuntimeError: Set changed size during iteration`, and iteration runs to the "
+                 "50-step counter. The general path raises as CPython does.")
+    lines.append("- Probes 18 and 25 are `silent-wrong` on the default and general paths: no "
+                 "`ValueError: list modified during sort` for `list.sort(key=...)`, and no "
+                 "`RuntimeError: dictionary keys changed during iteration` on a key re-add.")
+    lines.append("- Every `silent-wrong` row above names its probe file and prints both outputs; "
+                 "that file is the minimal repro. This lane edits no compiler file.")
     lines.append("")
     if hybrid_error:
         lines.append("Hybrid column is `n/a`: %s" % hybrid_error)
