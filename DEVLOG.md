@@ -1,3 +1,28 @@
+## 2026-11-05 -- bces7 re-apply: while-loop and entry versioning (job-rbbces7-11060244)
+
+Re-applied the accepted `bces7` change (`6eb82e0c`..`job-bces7-11060033`). All source hunks
+applied cleanly: `ir/passes/licm.py` (+163), `ir/passes/symbounds.py` (+159), `test_ail_bce.py`
+(+177), plus the three `manifest.d` pins. The `.github/workflows/agent-worker.yml` hunks were
+already the state of this tree (GH Models key, the 312-minute Worker limit and the cut-worker
+push fallback were all present), and the two `DEVLOG.md` hunks conflicted with newer entries at
+the top, so this entry replaces them.
+
+`tools/diff_ids.py` is not present on this tree. `python3 tools/update_manifest.py` recomputed
+the three pins and `--check` passes.
+
+Probes in `/tmp/probes/` (both the default and `AIL_UNIFIED_FORCE=1` general builds, compared
+with CPython via `cmp.sh`): `entry_bytes` (entry guard at a = 0, len, len+1, -1, 3 and -6),
+`cond_first` (an access in an earlier conjunct stays checked; `v < e` first versions),
+`bound_transports` (the bound reaching the loop through an attribute, a list item and a dict
+value, each including one out-of-range call and an empty loop), `le_and_negative` (`i <= e`,
+negative init, empty bytes), `dec_guard` (decreasing `i -= 1`, including `d[-6]`) and
+`resize_and_reassign` (a list appended in the loop and a bound grown in the loop). All six match
+CPython's stdout and exit status in both builds; the two expected `IndexError` cases raise.
+
+Required modules on this content (`par_check -j 2`): `test_ail_bce` 226.7 s,
+`test_ail_safetynet` 176.8 s, `test_ail_files` 104.3 s, `test_ail_corpus_findings3` 227.2 s --
+4/4 pass.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this

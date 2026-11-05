@@ -429,7 +429,137 @@ fn main() {
     print(total(b));
 }
 """),
+    ('entry_emit_guard', r"""
+fn emit_all(data: bytes, a: int, b: int) -> void {
+    let i = a;
+    while i < b {
+        print(data[i]);
+        i += 1;
+        let j = i;
+        while j < b {
+            print(data[j]);
+            j += 1;
+        }
+    }
+}
+fn main() {
+    let data = b"abc";
+    emit_all(data, 0, len(data));
+    emit_all(data, len(data), len(data));
+    try { emit_all(data, 0, len(data) + 1); } except IndexError { print("hi"); }
+    emit_all(data, -1, 3);
+    try { emit_all(data, 3, 4); } except IndexError { print("lo"); }
+}
+"""),
+    ('echo_while_guard', r"""
+fn run_match(d: bytes, p: int, like: bytes, maxm: int) -> int {
+    let m = 0;
+    let n = 0;
+    while m < maxm and d[p + m] == like[m] {
+        n += 1;
+        m += 1;
+    }
+    return n;
+}
+fn main() {
+    let data = b"abcabc";
+    let pat = b"abc";
+    print(run_match(data, 0, pat, 3));
+    print(run_match(data, 3, pat, 3));
+    print(run_match(data, -1, pat, 1));
+    print(run_match(data, -2, pat, 2));
+    try { print(run_match(data, 0, pat, len(data) + 1)); } except IndexError { print("hi"); }
+}
+"""),
+    ('dec_while_guard', r"""
+fn scan(d: bytes, a: int, b: int) -> int {
+    let i = a + 1;
+    let count = 0;
+    let s = 0;
+    while i < b {
+        if count == 3 { break; }
+        s += d[i];
+        i -= 1;
+        count += 1;
+    }
+    return s;
+}
+fn main() {
+    print(scan(b"abcde", 0, 3));
+}
+"""),
+    ('while_access_before_bound', r"""
+fn f(d: bytes, v: int, b: int) -> int {
+    let e = b - 1;
+    let n = 0;
+    while d[v] == 0 and v < e {
+        n += 1;
+        v += 1;
+    }
+    return n;
+}
+fn main() {
+    try { print(f(b"abc", 5, 2)); } except IndexError { print("a"); }
+    try { print(f(b"\x00\x00\x00", 4, 3)); } except IndexError { print("b"); }
+    print(f(b"\x00\x00\x00", 0, 3));
+}
+"""),
+    ('while_bound_reassigned', r"""
+fn scan(d: bytes, e: int) -> int {
+    let i = 0;
+    let s = 0;
+    while i < e {
+        s += d[i];
+        i += 1;
+        if i == 1 { e = len(d) + 2; }
+    }
+    return s;
+}
+fn main() {
+    print(scan(b"abc", 1));
+}
+"""),
+    ('while_list_append', r"""
+struct Bag { xs: list[int]; }
+fn grow(b: Bag, n: int) -> int {
+    let i = 0;
+    let s = 0;
+    while i < n {
+        s += b.xs[i];
+        b.xs.append(i);
+        i += 1;
+    }
+    return s;
+}
+fn main() {
+    let b = Bag([10, 20, 30]);
+    print(grow(b, 3));
+    print(len(b.xs));
+}
+"""),
+    ('while_bound_bigtext', r"""
+fn make() -> str { return "9223372036854775808"; }
+fn emit_all(data: bytes, a: int, b: int) -> void {
+    let i = a;
+    while i < b { print(data[i]); i += 1; }
+}
+fn main() {
+    let b = int(make());
+    emit_all(b"abc", 0, b);
+}
+"""),
 ]
+
+# A list parameter is read-only in this language, so the "list param appended inside the loop"
+# shape cannot be written at all: pin the named refusal instead of a program that cannot compile.
+LIST_PARAM_APPEND = r"""
+fn grow(xs: list[int], n: int) -> int {
+    let i = 0;
+    while i < n { xs.append(i); i += 1; }
+    return len(xs);
+}
+fn main() { print(grow([1, 2], 2)); }
+"""
 
 DEPTH_ORACLE = {
     'depth_49999', 'depth_50000', 'depth_50001', 'depth_from_mutual',
@@ -445,6 +575,7 @@ DEPTH_STATS = {
 STOPS = {
     'big_text_index': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
     'induction_big_text': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
+    'while_bound_bigtext': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
 }
 
 S3_PROVEN = {
@@ -457,6 +588,19 @@ S3_UNPROVEN = {
     'echo_cap_n': 'f',
     'list_get_after_clear': 'get',
     'list_get_append_fn': 'get',
+}
+
+S7_ENTRY = {
+    'entry_emit_guard': ('emit_all', 1, 2),
+}
+S7_WHILE = {
+    'echo_while_guard': ('run_match', 1),
+}
+S7_UNVERSIONED = {
+    'dec_while_guard': ('scan', 0),
+    'while_access_before_bound': ('f', 0),
+    'while_bound_reassigned': ('scan', 0),
+    'while_list_append': ('grow', 0),
 }
 
 
@@ -599,6 +743,39 @@ class BceProbeTests(unittest.TestCase):
                 self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
                 proven = found[-1].get('passes', {}).get('idx_ssa_proven', 0)
                 self.assertEqual(proven, 0, '%s: %s' % (name, proven))
+
+    def test_s7_while_and_entry_versioning_are_visible_in_the_stats(self):
+        sources = dict(PROBES)
+        with tempfile.TemporaryDirectory(prefix='ail-bce-s7-') as directory:
+            for name, (fn, least_entry, least_idx) in S7_ENTRY.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                passes = found[-1].get('passes', {})
+                self.assertGreaterEqual(passes.get('entry_versioned', 0), least_entry, name)
+                self.assertGreaterEqual(passes.get('idx_ssa_proven', 0), least_idx, name)
+            for name, (fn, least) in S7_WHILE.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                versioned = found[-1].get('passes', {}).get('versioned', 0)
+                self.assertGreaterEqual(versioned, least, '%s: %s' % (name, versioned))
+            for name, (fn, want) in S7_UNVERSIONED.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                versioned = found[-1].get('passes', {}).get('versioned', 0)
+                self.assertEqual(versioned, want, '%s: %s' % (name, versioned))
+
+    def test_list_param_append_is_refused_by_name(self):
+        # Only the .ail surface has read-only list parameters; the forced Python surface is a
+        # different language surface, so pin the refusal where it exists (default and audit builds
+        # compile the same .ail source).
+        with tempfile.TemporaryDirectory(prefix='ail-bce-refuse-') as directory:
+            for mode in ('default', 'audit'):
+                got, err = _build_run(directory, 'list_param_append', LIST_PARAM_APPEND, mode)
+                self.assertIsNone(got, '%s: list parameter append compiled' % mode)
+                self.assertIn('is a list parameter, which is read-only here', err, mode)
 
 
 if __name__ == '__main__':
