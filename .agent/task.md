@@ -1,3 +1,50 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode/deepseek-v4.1-flash-free]
+## Review: relcheck1 fix
+
+**What the diff really does.** The two commits only change `tools/release_check.py`: check 9 peels `refs/tags/v<version>^{commit}`, check 1 splits off `+local` and anchors pre-release markers, check 2 replaces the `\b` boundary with exact lookarounds; four fixture tests and one manifest line are added. This matches the report.
+
+**Runs**
+- `test_ail_release_check`: 12/12 pass.
+- `par_check -j 2 test_ail_release_check test_ail_safetynet`: release check ok; safetynet `S4_generators_gc` fails under the 1.5 GB cap, uncapped 5/5 passes -> pre-existing, no compiler/runtime files changed.
+- `update_manifest.py --check` 0; `ci_shards.py --check` 0 (module unassigned but spread by `--shard`; not a defect).
+- `release_check.py --branch origin/integ` matches `lab/release/PREFLIGHT.md` exactly; `--branch HEAD --build` PASS 11.
+- No C probes needed: the diff is only the six allowed non-compiler files.
+
+**Probes** (fixture repos in `/tmp/rprobes`, `--branch main --remote ''`)
+- Claimed fixes verified: annotated tag on main PASS 9, annotated tag on old commit FAIL 9; `## 0.1.0.dev0` FAIL 2, `## v0.1.0` PASS 2, `## [0.1.0]` PASS 2; `0.1.0+local`/`0.1.0+ubuntu` PASS 1, `0.1.0.dev0+local` FAIL 1.
+- Defect: `0.1.0_rc1` (also `_dev1`, `_a1`) -> check 1 `PASS ... is a final release`; expected FAIL. PEP 440 accepts `_` separators; old `b8a302c` FAILed these, so the new boundary regex `(?:^|[.\-]|(?<=\d))` regressed it.
+- Defect: `v0.1.0` tagged on a tree object -> check 9 `PASS ... no tag v0.1.0 yet`; expected FAIL (a tag exists and does not point at main). Old `b8a302c` FAILed; `^{commit}` failure is treated as absence.
+
+**Claims**: all report claims verified except `test_ail_files`/`test_ail_corpus_findings3` (not rerun) and `--online` (not run).
+
+**Pre-existing**: uppercase `0.1.0.RC1` passes check 1 on both old and new; `S4` under the cap; the check 7 15-vs-17 open-cell observation is unchanged.
+
+**Unverified**: `--online`; `test_ail_files`; `test_ail_corpus_findings3`.
+
+VERDICT: FIX
+1. Check 1 misses underscore-separated PEP 440 pre-release markers. Probe: fixture with `__version__ = "0.1.0_rc1"`. Expected `FAIL 1 ... development version`; actual `PASS 1 ... final release` (same for `0.1.0_dev1`, `0.1.0_a1`). Allow `_` before `dev|a|b|rc`.
+2. Check 9 treats a tag that does not peel to a commit as absent. Probe: `git tag -a v0.1.0 -m rel <tree>` in a fixture. Expected `FAIL 9 ... not main`; actual `PASS 9 ... no tag v0.1.0 yet`. Check for the tag first, then compare its peeled commit; FAIL when peeling fails.
+[cost $0.0000, opencode tokens {"total": 1106849, "input": 87904, "output": 5795, "reasoning": 25758, "cache.write": 0, "cache.read": 987392}]
+    tool time: bash 9.9 min
+        312s bash   cd /home/runner/work/_temp/w2/AIL_CURRENT && timeout 500 python3 test_ail_safetynet.py 2>&1 | tail -8; echo "e
+        254s bash   date; cd /home/runner/work/_temp/w2/AIL_CURRENT && ulimit -v 1500000; timeout 700 python3 ../tools/par_check.p
+         15s bash   mkdir -p /tmp/rprobes && cat > /tmp/rprobes/probe_release.py <<'PY' import os, subprocess, sys, tempfile, shut
+          6s bash   date; cd /home/runner/work/_temp/w2 && ulimit -v 1500000; timeout 300 python3 tools/release_check.py --branch 
+          4s bash   cd /home/runner/work/_temp/w2 && python3 AIL_CURRENT/test_ail_release_check.py -v 2>&1 | tail -22; echo "exit=
+          3s bash   cd /home/runner/work/_temp/w2 && git show b8a302c:tools/release_check.py > /tmp/rprobes/old_release_check.py &
+          1s bash   cd /home/runner/work/_temp/w2 && python3 tools/update_manifest.py --check; echo manifest=$?; python3 tools/ci_
+          0s bash   cd /home/runner/work/_temp/w2 && timeout 120 python3 tools/release_check.py --branch origin/integ > /tmp/rprob
+
+
+--- ORIGINAL TASK ---
 Lane: relcheck
 
 # relcheck1: `tools/release_check.py`, a release-0.1 preflight that prints every P0/P3 condition as PASS or FAIL
