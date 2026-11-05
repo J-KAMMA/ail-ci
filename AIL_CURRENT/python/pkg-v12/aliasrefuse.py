@@ -58,6 +58,13 @@ def _ann_container(a):
     if a is None:
         return False
     if isinstance(a, ast.Subscript):
+        # a returned list of containers (a list of rows) is shared row by row on the typed path;
+        # the outer name is not a second-reference site there, unlike a list of scalars.  Nested
+        # rows are spelled with a row wrapper name (`_AilRow_int`) after the row lowering.
+        inner = a.slice
+        if (isinstance(inner, ast.Subscript) and _ann_container(inner)) \
+                or (isinstance(inner, ast.Name) and inner.id.startswith('_AilRow_')):
+            return False
         a = a.value
     if isinstance(a, ast.Attribute):
         return a.attr in _CONT_ANN
@@ -426,11 +433,6 @@ class _Walk(object):
         if isinstance(e, ast.Name):
             return {e.id} if e.id in self.cont else set()
         if isinstance(e, ast.Attribute):
-            # `row.v` (a container field read out of `rows[i]`) is the row's own container, not a
-            # second name for the outer list: the typed path shares rows in place, so writing the
-            # row does not rewrite `rows`.
-            if isinstance(e.value, ast.Subscript):
-                return set()
             b = _base(e)
             return {b} if b and e.attr in self.mod.cf else set()
         if isinstance(e, ast.IfExp):

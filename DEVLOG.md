@@ -1,3 +1,25 @@
+## 2026-11-05 -- pyreach s7 compatibility: whole-row-list aliases and row-field element aliases
+
+Two regressions from the s7 alias scan are fixed in `aliasrefuse.py`.
+
+* `_ann_container` normalized every returned `__ail_checked_list[...]` to a container, so the
+  result of a function returning `list[list[int]]` became a second-reference site (`alias = rows`)
+  and `test_ail_prog5` fell to the general path. A returned list whose element is a row (nested
+  container or `_AilRow_*` wrapper) is shared row by row on the typed path, so the outer name is
+  no longer treated as a second-reference container; a returned list of scalars still is (the
+  `return_element` alias case stays refused).
+* `refs` ignored the base of a row-field read (`gi = grid[i].v`), so an element alias was no
+  longer seen and `scimark_sor` took the typed path with a copied row (`38.0` instead of
+  `0.412217351`). The special case is removed, so that shape is refused by name and stays on the
+  sharing general path.
+
+Probes `/tmp/probes/p_alias_rows_whole.py`, `p_alias_rows_return.py`, `p_alias_rows_element.py`,
+`p_alias_return_element.py`, `p_alias_scalar_list.py` and `p_alias_rows_shapes.py` (argument, list
+item, attribute, dict value, empty and negative cases) match CPython on both builds.
+`test_ail_prog5` 7/7, `test_ail_pyperf_lab` 3/3, `test_ail_optional_locals`, `test_ail_unbound`,
+`test_ail_fuzz_findings`, `test_ail_refusal_messages`, `test_ail_ir_rulex`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-11-05 -- pyreach s7 review fix 2: loop-carried guarded locals and deleted closures
 
 Review 1 found two regressions in the s7 tree.  Both are fixed and probed against CPython on the
