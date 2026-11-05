@@ -2102,6 +2102,8 @@ _BORROWED_PARAMS = {}
 # rc2 (ir/borrow.py): True while the read-only-parameter rule is on. It then decides the elision
 # for every managed reference kind, not only the class instances the legacy scan covered.
 _BORROW_WIDE = False
+# rc3 (ir/borrow.py): {function: cursor locals}, set by the same hook as _BORROWED_PARAMS.
+_CURSORS = {}
 
 
 def _scan_borrowed_params(tree, library, entries=()):
@@ -23808,6 +23810,10 @@ def _stmt_inner(node, ctx, ind):
         if ctx.type_of(t.id) == NSUM and vt == FLT:
             ctx.parts.add('FSUM')
             v = 'ail_nsum_from_float((double)(%s))' % v
+        if _is_obj_kind(vt) and t.id in _CURSORS.get(getattr(ctx, 'fn_node', None).name, ()):
+            # rc3: a cursor is a plain pointer copy. The object it points into is kept alive by
+            # the owner the chain started from (proved in ir/borrow.py), so no retain/release.
+            return pre + '%s%s = %s;\n' % (pad, c, v)
         return pre + '%s%s;\n' % (pad, _obj_store(c, v, vt, ctx, adopt=adopt)
                                   if _managed_obj(vt, ctx) else '%s = %s' % (c, v))
 
@@ -38304,10 +38310,14 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         raise Unsupported('%s: a module variable rebound with `global` is built only into a whole '
                           'program, not a library or a separately compiled module'
                           % ', '.join(sorted(_MODCONSTS.vars)))
-    global _BORROWED_PARAMS, _BORROW_WIDE
+    global _BORROWED_PARAMS, _BORROW_WIDE, _CURSORS
     from ir import borrow as _borrow          # rc2: the read-only-parameter rule (ir/borrow.py)
     _BORROW_WIDE = _borrow.enabled()
     _BORROWED_PARAMS = _borrow.analyze(tree, library, {name, entry}) if _BORROW_WIDE else {}
+    # rc3: cursor locals. A cursor parameter is borrowed too (no entry retain, no exit release).
+    _CURSORS = _borrow.analyze_cursors(tree, _BORROWED_PARAMS, library) if _BORROW_WIDE else {}
+    for _fname, _cnames in _CURSORS.items():
+        _BORROWED_PARAMS[_fname] = _BORROWED_PARAMS.get(_fname, frozenset()) | _cnames
     # Nested functions (pkg-closure): lifted to ordinary top-level siblings, spliced into
     # `tree.body` immediately before the function that used to contain them, BEFORE anything below
     # inspects `tree.body` -- see the module note above `_lift_nested_functions`. A program with no
@@ -40808,6 +40818,9 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # rule on, that covers every managed reference kind (class instance, object list, bytes list,
     # bytearray, exception, ...); with it off the legacy class-instance-only elision is unchanged.
     # A method's `self` stays owned (the receiver path borrows it separately, below).
+    # rc3: a cursor owns nothing at all -- no entry retain, no exit release, no loop-point
+    # release, no cleanup-frame entry -- so it is also a borrowed alias for this function.
+    ctx.borrowed_aliases |= set(_CURSORS.get(fn.name, ()))
     _borrowed = _BORROWED_PARAMS.get(fn.name, ())
     object_params = [v for v, kind in ctx.params if _managed_obj(kind, ctx)
                      and not (v in _borrowed and (

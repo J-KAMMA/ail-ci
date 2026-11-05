@@ -258,3 +258,228 @@ def analyze(tree, library=False, entries=()):
                 borrowed[f.name] = keep
                 changed = True
     return {k: frozenset(v) for k, v in borrowed.items() if v}
+
+
+# ---------------------------------------------------------------------------
+# rc3: cursor inference for loop traversal variables
+#
+# A local is a *cursor* when every binding of it is a read out of another object (a field
+# read `n = n.next`, an element read `n = xs[i]`, a `for` element), another cursor, or a
+# parameter (which the caller keeps alive for the whole call).  It is never stored,
+# returned or captured, and nothing in the function can release what it points at: no
+# field store, no element store, no call except a read-only builtin.  Under those
+# conditions the object is kept alive by the owner the cursor was read from, so the
+# cursor itself needs no reference: no retain on entry, no store retain/release, no
+# release at exit.
+#
+# The keep-alive half is deliberately whole-function and conservative.  A cursor that
+# would need a path-sensitive proof (a write on another branch, a call that may write)
+# is not inferred; the local stays owning, which is always correct.
+# ---------------------------------------------------------------------------
+
+def _deepest_name(node):
+    """The root local of a field/element path (`a.b[i].c` -> 'a'), or None."""
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _cursor_function_safe(fn):
+    """Whether nothing in `fn` can release an object a cursor points at: no field or
+    element store, no call except a read-only builtin, no del/global/nonlocal, no closure."""
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.Delete, ast.Global, ast.Nonlocal)):
+            return False
+        if node is not fn and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                                 ast.Lambda, ast.ClassDef)):
+            return False
+        if isinstance(node, ast.Call):
+            f = node.func
+            if not (isinstance(f, ast.Name) and f.id in READ_ONLY_CALLS):
+                return False
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, (ast.Attribute, ast.Subscript)) and isinstance(sub.ctx, ast.Store):
+                        return False
+        if isinstance(node, ast.With):
+            return False
+        if isinstance(node, ast.For) and not isinstance(node.target, ast.Name):
+            return False
+    return True
+
+
+def _bindings(fn):
+    """{name: [(kind, expression)]} for every simple binding statement of a name.
+
+    kind is 'field' (attribute read), 'elem' (subscript read), 'for' (loop element) or
+    'name' (another name)."""
+    out = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out.setdefault(target.id, []).append(_source(node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None \
+                and isinstance(node.target, ast.Name):
+            out.setdefault(node.target.id, []).append(_source(node.value))
+        elif isinstance(node, ast.For) and isinstance(node.target, ast.Name):
+            out.setdefault(node.target.id, []).append(('for', node.iter))
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            out.setdefault(node.target.id, []).append(_source(node.value))
+    return out
+
+
+def _source(node):
+    if isinstance(node, ast.Attribute):
+        return ('field', node)
+    if isinstance(node, ast.Subscript):
+        return ('elem', node)
+    if isinstance(node, ast.Name):
+        return ('name', node.id)
+    return ('bad', node)
+
+
+def _store_counts(fn):
+    counts = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            counts[node.id] = counts.get(node.id, 0) + 1
+    return counts
+
+
+def _base_of(kind, source):
+    if kind == 'for':
+        return _deepest_name(source)
+    if kind in ('field', 'elem'):
+        return _deepest_name(source.value)
+    return None
+
+
+def _roots_ok(name, candidates, cursors, params, stores, seen=None):
+    """Every chain a cursor name can be reached from starts at a parameter or a local that is
+    bound exactly once (so nothing can replace or release it while the cursor lives)."""
+    if name in params:
+        return True
+    seen = set() if seen is None else seen
+    if name in seen:
+        return True
+    seen.add(name)
+    found = False
+    for kind, source in candidates.get(name, ()):
+        if kind in ('field', 'elem', 'for'):
+            base = _base_of(kind, source)
+            if base is None:
+                return False
+            if base == name or base in seen:
+                continue
+            if base in cursors:
+                if not _roots_ok(base, candidates, cursors, params, stores, seen):
+                    return False
+                found = True
+            elif base in params or stores.get(base, 0) == 1:
+                found = True
+            else:
+                return False
+        elif kind == 'name':
+            if source == name or source in seen:
+                continue
+            if source in cursors:
+                if not _roots_ok(source, candidates, cursors, params, stores, seen):
+                    return False
+                found = True
+            elif source in params or stores.get(source, 0) == 1:
+                found = True
+            else:
+                return False
+        else:
+            return False
+    return found
+
+
+def _loads_ok(fn, name):
+    """Every read of the name is a read through it or a test, never a hand-off."""
+    parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    for node in ast.walk(fn):
+        if not (isinstance(node, ast.Name) and node.id == name
+                and isinstance(node.ctx, ast.Load)):
+            continue
+        parent = parents.get(node)
+        if isinstance(parent, ast.Attribute) and parent.value is node:
+            continue                                    # n.next / n.value
+        if isinstance(parent, ast.Subscript) and parent.value is node:
+            continue                                    # n.kids[i]
+        if isinstance(parent, ast.Compare):
+            continue                                    # n is not None
+        if isinstance(parent, (ast.If, ast.While)) and parent.test is node:
+            continue                                    # while n:
+        if isinstance(parent, ast.UnaryOp) and isinstance(parent.op, ast.Not):
+            continue                                    # not n
+        if isinstance(parent, ast.BoolOp):
+            continue
+        if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is node:
+            continue                                    # m = n (m is a cursor)
+        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
+                and parent.func.id in READ_ONLY_CALLS:
+            continue                                    # len(n) / print(n)
+        if isinstance(parent, ast.IfExp) and parent.test is node:
+            continue
+        return False
+    return True
+
+
+def _cursors_in(fn, borrowed):
+    if not _cursor_function_safe(fn):
+        return set()
+    candidates = _bindings(fn)
+    stores = _store_counts(fn)
+    params = set(param_names(fn))
+    names = [n for n, sources in candidates.items()
+             if stores.get(n, 0) == len(sources)
+             and all(kind != 'bad' for kind, _ in sources)]
+    cursors = set()
+    changed = True
+    while changed:
+        changed = False
+        for name in names:
+            if name in cursors:
+                continue
+            ok = True
+            for kind, source in candidates[name]:
+                if kind in ('field', 'elem', 'for'):
+                    continue
+                if kind == 'name' and (source in cursors or source in params):
+                    continue
+                ok = False
+                break
+            if not ok or not _loads_ok(fn, name):
+                continue
+            if _roots_ok(name, candidates, cursors, params, stores):
+                cursors.add(name)
+                changed = True
+    return cursors
+
+
+def analyze_cursors(tree, borrowed=None, library=False):
+    """`{function name: frozenset(cursor locals)}` for one module.
+
+    `borrowed` is rc2's `analyze` result.  Same-named functions are ambiguous at the emit
+    point, so no cursor is claimed for them."""
+    if library:
+        return {}
+    borrowed = borrowed or {}
+    groups = {}
+    for fn in _functions(tree):
+        groups.setdefault(fn.name, []).append(fn)
+    out = {}
+    for name, fns in groups.items():
+        if len(fns) != 1:
+            continue
+        found = _cursors_in(fns[0], set(borrowed.get(name, ())))
+        if found:
+            out[name] = frozenset(found)
+    return out
