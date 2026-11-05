@@ -68,7 +68,7 @@ or a tiny extension of your own. A minimal extension with `vscode-languageclient
 ```json
 {
   "name": "ail-lsp",
-  "version": "0.1.0",
+  "version": "0.1.0.dev0",
   "engines": { "vscode": "^1.80.0" },
   "activationEvents": ["onLanguage:python"],
   "main": "./extension.js",
