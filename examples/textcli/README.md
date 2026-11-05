@@ -29,7 +29,7 @@ on the same input for comparison.
 |----------|-------|-----------------|------------|----------------|
 | `csvcut` | typed | 71,896 B        | 847 ms     | 572 ms         |
 | `uniqc`  | typed | 22,744 B        | 68 ms      | 227 ms         |
-| `tsort`  | typed | 47,320 B        | 493 ms     | 872 ms         |
+| `tsort`  | typed | 47,320 B        | 519 ms     | 865 ms         |
 
 All three also produce byte-identical output to CPython on the 20 MB inputs.
 
