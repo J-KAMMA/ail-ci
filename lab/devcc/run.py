@@ -218,8 +218,10 @@ def c2m_diagnose(stderr, c_files):
         if 'asm' in name:
             return 'inline asm', name, line_no, line_text
         return 'link error', name, line_no, line_text
+    if '__typeof__' in line_lower or re.search(r'\btypeof\b', line_lower):
+        return 'other (c2m parser)', 'GNU __typeof__ (ail_len_t typedef)', line_no, line_text
     if '_generic' in message or '_generic' in line_lower:
-        return 'other (c2m parser)', '_Generic inside __typeof__ (ail_len_t typedef)', line_no, line_text
+        return 'other (c2m parser)', '_Generic', line_no, line_text
     if 'excess elements in scalar initializer' in message and line_text and re.search(
             r'\(\s*(?:struct\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\[\s*\]\s*\)\s*\{', line_text):
         return 'other (c2m parser)', 'unsized struct-array compound literal from runtime values', line_no, line_text
@@ -343,9 +345,10 @@ def diff_excerpts(reference, other):
 
 
 EMITTER = {
-    '_Generic inside __typeof__ (ail_len_t typedef)':
+    'GNU __typeof__ (ail_len_t typedef)':
         'AIL_CURRENT/python/pkg-v12/cruntime.py:199-200 '
         '(typedef __typeof__(_Generic(...)) ail_len_t;)',
+    '_Generic': 'AIL_CURRENT/python/pkg-v12/cruntime.py:200',
     '__int128': 'AIL_CURRENT/python/pkg-v12/cruntime.py:16893 (__int128 nn = (__int128)n; range slice)',
     '__uint128_t': 'AIL_CURRENT/python/pkg-v12/cruntime.py:3841-3844 (128-bit shift helper)',
     '__builtin_unreachable': 'AIL_CURRENT/python/pkg-v12/cruntime.py:433,4044,4065',
@@ -363,7 +366,7 @@ def write_excerpts(result, directory):
         if not bucket or bucket == 'wrong output':
             continue
         seen.setdefault((bucket, record.get('c2m_construct') or ''), record)
-    short = {'_Generic inside __typeof__ (ail_len_t typedef)': 'generic_in_typeof',
+    short = {'GNU __typeof__ (ail_len_t typedef)': 'typeof', '_Generic': 'generic',
              '__int128': 'int128', '__uint128_t': 'uint128'}
     for number, ((bucket, construct), record) in enumerate(sorted(seen.items()), 1):
         slug = short.get(construct) or re.sub(
@@ -464,9 +467,11 @@ def main():
                     record['c2m_bucket'], record['c2m_construct'] = 'unsupported builtin or intrinsic', '__uint128_t'
                 elif '__int128' in text:
                     record['c2m_bucket'], record['c2m_construct'] = 'unsupported builtin or intrinsic', '__int128'
-                elif '_generic' in text:
+                elif '__typeof__' in text or 'typeof' in text:
                     record['c2m_bucket'] = 'other (c2m parser)'
-                    record['c2m_construct'] = '_Generic inside __typeof__ (ail_len_t typedef)'
+                    record['c2m_construct'] = 'GNU __typeof__ (ail_len_t typedef)'
+                elif '_generic' in text:
+                    record['c2m_bucket'], record['c2m_construct'] = 'other (c2m parser)', '_Generic'
         pathlib.Path(args.out).write_text(json.dumps(result, indent=1) + '\n', encoding='utf-8')
         if args.excerpts:
             write_excerpts(result, pathlib.Path(args.excerpts))

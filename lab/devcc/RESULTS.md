@@ -98,7 +98,7 @@ literals come first and are ignored). Bucket names follow tccprobe1; `other (tcc
 
 | bucket | count | generated C construct | emitted by |
 | --- | --- | --- | --- |
-| other (c2m parser) | **32** (10 compare + 22 corpus) | `typedef __typeof__(_Generic((int64_t)0, long: (long long)0, default: (long)0)) ail_len_t;` — c2m accepts `_Generic` and `__typeof__(expr)` separately but not this combination; the failed typedef makes `ail_list` unknown and every later `ail_list *` a syntax error | `AIL_CURRENT/python/pkg-v12/cruntime.py:199-200` |
+| other (c2m parser) | **32** (10 compare + 22 corpus) | `typedef __typeof__(_Generic((int64_t)0, long: (long long)0, default: (long)0)) ail_len_t;` — **c2m has no GNU `typeof`/`__typeof__`** (it rejects even `__typeof__(x)`; `_Generic` alone is accepted). The failed typedef leaves `ail_len_t` undefined, so `ail_list` fails and every later `ail_list *` is a syntax error | `AIL_CURRENT/python/pkg-v12/cruntime.py:199-200` |
 | unsupported builtin or intrinsic | **13** (corpus) | `__int128 nn = (__int128)n;` in the range-slice path | `AIL_CURRENT/python/pkg-v12/cruntime.py:16893` |
 | unsupported builtin or intrinsic | **5** (corpus) | `__uint128_t num, den;` in the 128-bit shift helper | `AIL_CURRENT/python/pkg-v12/cruntime.py:3841-3844` |
 | attribute or pragma | 0 | (c2m accepts `_Thread_local` with a warning, and `__attribute__`/`_Pragma`/unknown pragmas) | — |
@@ -110,10 +110,10 @@ literals come first and are ignored). Bucket names follow tccprobe1; `other (tcc
 "No executable output" is a property of every c2m invocation, not a per-program first blocker, so it
 is counted once globally and not in the 32+13+5 = 50 per-program buckets.
 
-One excerpt per construct: `fail_1_generic_in_typeof.txt`, `fail_2_int128.txt`,
+One excerpt per construct: `fail_1_typeof.txt`, `fail_2_int128.txt`,
 `fail_3_uint128.txt`. Programs by construct:
 
-- `_Generic` (32): all 10 compare tasks; corpus `g18_038 g25_038 g04_016 g17_002 g06_000 g04_038
+- GNU `__typeof__` (32): all 10 compare tasks; corpus `g18_038 g25_038 g04_016 g17_002 g06_000 g04_038
   g17_026 g19_018 g09_026 g22_022 g13_038 g04_008 g00_000 g09_002 g22_014 g09_032 g06_004 g04_034
   g03_006 g12_008 g18_016 g02_000`.
 - `__int128` (13): `g01_010 g02_002 g05_016 g00_004 g04_004 g13_014 g18_006 g16_004 g21_032 g20_000
@@ -122,7 +122,7 @@ One excerpt per construct: `fail_1_generic_in_typeof.txt`, `fail_2_int128.txt`,
 
 The complement is worth noting: c2m accepts two forms tcc 0.9.27 rejects — `_Thread_local` (with a
 warning) and an unsized struct-array **declaration** from runtime values — and rejects one tcc accepts,
-`_Generic` inside `__typeof__`. Both reject `__int128`/`__uint128_t` and an unsized struct-array
+GNU `__typeof__` (tcc supports it). Both reject `__int128`/`__uint128_t` and an unsized struct-array
 **compound literal** from runtime values (`excess elements in scalar initializer`).
 
 ## The sample
@@ -132,16 +132,16 @@ warning) and an unsized struct-array **declaration** from runtime values — and
 
 | task | gcc -O2 build | gcc -O2 run | c2m first blocker |
 | --- | --- | --- | --- |
-| berth_sim | 1.1959 s | 2.2210 s | `_Generic` in `__typeof__` |
-| chain_relax | 0.4465 s | 1.1180 s | `_Generic` in `__typeof__` |
-| echo_pack | 0.4202 s | 0.9151 s | `_Generic` in `__typeof__` |
-| ledger_bin | 0.8439 s | 0.7194 s | `_Generic` in `__typeof__` |
-| rail_transfer | 0.9718 s | 0.0693 s | `_Generic` in `__typeof__` |
-| scar_life | 0.5267 s | 25.4418 s | `_Generic` in `__typeof__` |
-| tally_lang | 0.9835 s | 1.1717 s | `_Generic` in `__typeof__` |
-| term_rank | 1.1320 s | 1.8676 s | `_Generic` in `__typeof__` |
-| ticket_audit | 2.4331 s | 2.5368 s | `_Generic` in `__typeof__` |
-| tree_fold | 1.3090 s | 1.2964 s | `_Generic` in `__typeof__` |
+| berth_sim | 1.1959 s | 2.2210 s | GNU `__typeof__` |
+| chain_relax | 0.4465 s | 1.1180 s | GNU `__typeof__` |
+| echo_pack | 0.4202 s | 0.9151 s | GNU `__typeof__` |
+| ledger_bin | 0.8439 s | 0.7194 s | GNU `__typeof__` |
+| rail_transfer | 0.9718 s | 0.0693 s | GNU `__typeof__` |
+| scar_life | 0.5267 s | 25.4418 s | GNU `__typeof__` |
+| tally_lang | 0.9835 s | 1.1717 s | GNU `__typeof__` |
+| term_rank | 1.1320 s | 1.8676 s | GNU `__typeof__` |
+| ticket_audit | 2.4331 s | 2.5368 s | GNU `__typeof__` |
+| tree_fold | 1.3090 s | 1.2964 s | GNU `__typeof__` |
 
 **40 corpus programs**, the same list and order as tccprobe1:
 `g01_010 g02_002 g18_038 g25_038 g05_016 g00_004 g03_018 g04_016 g17_002 g04_004 g06_000 g04_038
@@ -179,15 +179,15 @@ If one fast dev compiler is added, **prefer tcc**, and treat mir as a later opti
   `compile -o`. (The owner decision allows `--cc=tcc|mir` only if the output is byte-identical; a
   run-only mode cannot satisfy that contract on the compile path.)
 - tcc's blockers are 4 generated-C constructs with local fixes, and `lab/tccdev` already has 511-case
-  evidence; c2m's blockers are in the runtime preamble and include a construct c2m cannot parse at all
-  (`__typeof__(_Generic(...))`).
+  evidence; c2m's blockers are in the runtime preamble and include `__typeof__`, which c2m does not
+  implement at all.
 
 Refusal lists the mode must implement:
 - **tcc mode** must refuse a program whose generated C contains: `_Thread_local` (tcc has no TLS),
   an unsized struct-array compound literal from runtime values, an unsized struct-array declaration
   from runtime values, `__builtin_unreachable` (and any `__builtin_*` tcc lacks), `__int128` /
   `__uint128_t`, and inline asm. (tccprobe1's buckets, 0/50 today.)
-- **mir/c2m mode** must refuse: `_Generic` inside `__typeof__` (the `ail_len_t` typedef),
+- **mir/c2m mode** must refuse: GNU `__typeof__` (the `ail_len_t` typedef),
   `__int128`, `__uint128_t`, unsized struct-array compound literals, and unresolved builtins/asm —
   i.e. all 50 today. It can only `run`, not produce an executable.
 
@@ -206,7 +206,7 @@ report makes about c2m.
 
 | probe | what it checks | result |
 | --- | --- | --- |
-| `/tmp/probes/c2m_limits.py` (15 checks) | all four run modes exist and agree; `-o` alone and `-c` write binary MIR (`MIR\xe2`), not ELF; `_Generic` alone is accepted but `__typeof__(_Generic(...))` is rejected; `__int128` is rejected; `_Thread_local` and `__attribute__((always_inline))` and `_Pragma` are accepted; `__asm__` / `__builtin_unreachable` fail as unresolved imports; unsized compound literal from runtime values is rejected while the unsized declaration is accepted; `-lm` is rejected but `sqrt` resolves from `libm.so.6` | 15/15 |
+| `/tmp/probes/c2m_limits.py` (17 checks) | all four run modes exist and agree; `-o` alone and `-c` write binary MIR (`MIR\xe2`), not ELF; `_Generic` alone is accepted but GNU `typeof`/`__typeof__` is not implemented (even `__typeof__(x)` fails); `__int128` is rejected; `_Thread_local` and `__attribute__((always_inline))` and `_Pragma` are accepted; `__asm__` / `__builtin_unreachable` fail as unresolved imports; unsized compound literal from runtime values is rejected while the unsized declaration is accepted; `-lm` is rejected but `sqrt` resolves from `libm.so.6` | 15/15 |
 | `PIPE_CC` logging shim | the exact argv `$PIPE_CC` receives (all gcc-only flags) and the CLI exit for tcc and c2m | argv as quoted above; both exit 3, no artifact |
 | `c2m -O2 -o OUT prog.c` on a valid C file | a c2m "success" is binary MIR, not an executable | exit 0, magic `MIR\xe2` |
 | corpus-selection replay | the 45 candidates tried and the 5 refusals match tccprobe1 | identical list and refusals |

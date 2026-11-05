@@ -1,6 +1,6 @@
 program: lab/compare/src/berth_sim/main.ail (compare)
 bucket: other (c2m parser)
-construct: _Generic inside __typeof__ (ail_len_t typedef)
+construct: GNU __typeof__ (ail_len_t typedef)
 c2m stderr:
   /tmp/devcc-slirwl46/gen-main-85a1379b/dbg/program.c:18:20: syntax error on _Generic (expected 'identifier'):
   /tmp/devcc-slirwl46/gen-main-85a1379b/dbg/program.c:18:20: syntax error on _Generic (expected '<declarator>'):
