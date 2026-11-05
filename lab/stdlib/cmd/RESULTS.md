@@ -43,27 +43,26 @@ Result: **0 built, 0 typed, 10 refused**.
 | `02_unknown_and_empty.py` | general, matches | general, matches | same, exit 0 |
 | `03_emptyline_override.py` | general, matches | general, matches | same, exit 0 |
 | `04_hooks.py` | general, matches | general, matches | same, exit 0 |
-| `05_help.py` | general, stops loudly | general, stops loudly | CPython prints the help table, exit 0 |
+| `05_help.py` | general, matches | general, matches | same, exit 0 |
 | `06_parseline.py` | general, matches | general, matches | same, exit 0 |
 | `07_cmdqueue.py` | general, matches | general, matches | same, exit 0 |
 | `08_onecmd.py` | general, matches | general, matches | same, exit 0 |
 | `09_calculator.py` | general, stops loudly | general, stops loudly | CPython prints the value and continues, exit 0 |
-| `10_aliases.py` | general, stops loudly | general, stops loudly | CPython prints the help table, exit 0 |
+| `10_aliases.py` | general, matches | general, matches | same, exit 0 |
 
-Result: **7 built and matching, 0 typed, 0 refused, 3 loud stops** (7/10, required 7).
+Result: **9 built and matching, 0 typed, 0 refused, 1 loud stop** (9/10, required 7).
 `09_calculator.py` reaches `99999999999999999999`, which is beyond int64; AIL prints
 `OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)`
 and exits 1. The task allows the calculator shell to stop loudly there. `05_help.py` and
-`10_aliases.py` also call the no-argument help table, which needs a method list and every
-method's docstring; they print the named `cmd.Cmd.get_names(): ...` refusal and exit 1. Those
-values cannot be computed without a compiler feature (below), so the loud stop is the
-documented fallback rather than a wrong table.
+`10_aliases.py` call the no-argument `help` table; `get_names()` supplies CPython's fixed base
+names plus the supported commands the instance defines, so both print the same table as
+CPython (verified in both builds).
 
 The default build falls back to the general path for every program because `Cmd.__init__`
 has default arguments and the class has a `None` class attribute:
 
 ```
-note: AIL_CURRENT/stdlib/cmd.py:253:5: built on the general path (about 20x slower) because
+note: AIL_CURRENT/stdlib/cmd.py:319:5: built on the general path (about 20x slower) because
 class attribute cmd.Cmd.identchars = cmd.IDENTCHARS; a class attribute here is an int, float,
 str or bool literal. write instead: a module-level constant, or set the value in __init__
 (`self.identchars = ...`); run with --strict to see why
@@ -99,29 +98,43 @@ That makes the previously wrong cases behave like CPython:
   `('shell', 'ls', 'shell ls')` when it does;
 * `hasattr(shell, 'do_add')` is False for a subclass that does not define `do_add`.
 
+### `get_names()` and the help table
+
+CPython's `get_names()` is `dir(self.__class__)`.  `dir()` is refused, so the module keeps the
+fixed list of `Cmd`'s own names and finds a subclass command with the computed `hasattr()`
+above, which tests exactly the classes in the program.  `help` with no argument then runs
+CPython's own table algorithm over that list, and `completenames()` filters it the same way.
+That is exact for every command in the supported vocabulary and for a subclass that overrides
+`get_names()`, so `05_help.py` and `10_aliases.py` match CPython exactly.  A command whose
+name is outside `_COMMAND_NAMES` cannot be seen this way, so it is not listed; that is the one
+remaining gap and it needs a `dir()`-like enumeration in the compiler.
+
+A method's `__doc__` also cannot be read, so a `do_*` command with no `help_<name>` topic is
+listed as documented, as CPython lists it when it has a docstring.
+
 ### Refused by name instead of guessed
 
 The compiler can only call a method whose attribute name is a literal, and it cannot read a
 method's `__doc__` or enumerate a class's methods (no `dir()`, `__dict__` or `__mro__`).  The
-module makes every case that needs one of those a loud `NotImplementedError` naming what is
+cases that need one of those names stop with a loud `NotImplementedError` naming what is
 missing, in both builds:
 
 | program shape | result |
 | --- | --- |
 | `onecmd('exit now')` with a real `do_exit` outside `_COMMAND_NAMES` | `NotImplementedError: cmd.Cmd.onecmd: cannot dispatch do_exit: ...` |
-| `get_names()`, `completenames()`, or `help` with no argument | `NotImplementedError: cmd.Cmd.get_names(): this compiler cannot enumerate ...` |
+| `help exit` with a `help_exit` outside `_COMMAND_NAMES` | `NotImplementedError: cmd.Cmd.do_help: cannot call help_exit ...` |
 | `help zoom` where only `do_zoom` has a docstring | `NotImplementedError: cmd.Cmd.do_help: cannot read the docstring of do_zoom; ...` |
 | `help help` with no `help_help` | exact CPython text (the `do_help` docstring is a literal) |
-| `help <name>` with a `help_<name>` method, or an unknown name | exact CPython text |
+| `help <name>` with a `help_<name>` method in the vocabulary, or an unknown name | exact CPython text |
+| `help` with no argument, `get_names()`, `completenames()` | exact CPython text for the base names and the vocabulary |
 
 `lab/stdlib/cmd/05_help.py` uses `help_<name>` and an unknown topic; `10_aliases.py` uses
-`help_greet`.  Both also call the no-argument `help`, so both stop loudly with the
-`get_names()` refusal; the help topics themselves are exact when the table is not requested.
+`help_greet`; both call the no-argument `help` and match CPython exactly.
 
 ## Self-check probes
 
-Compiled and run in both builds (default and `AIL_UNIFIED_FORCE=1`); the first six probes
-compare stdout and exit status with `python3`, the last four check the named refusals.
+Compiled and run in both builds (default and `AIL_UNIFIED_FORCE=1`); the first seven probes
+compare stdout and exit status with `python3`, the last three check the named refusals.
 
 | probe | covers | result |
 | --- | --- | --- |
@@ -130,20 +143,22 @@ compare stdout and exit status with `python3`, the last four check the named ref
 | `p_cmd_hooks.py` | `preloop`/`postloop`, `precmd` rewriting, `postcmd` stopping | matches |
 | `p_cmd_int.py` | `int()` on `42`, `0`, `-1`, `-9223372036854775808`, `9223372036854775807`, sums at the boundaries | matches |
 | `p_cmd_parse.py` | `parseline()` on `?x`, `!ls`, spaced args, empty, tabs | matches with and without `do_shell` |
-| `p_cmd_help.py` | `help` via `help_*`, `help help`, `help unknown` | matches; no-argument table refused as below |
+| `p_cmd_help.py` | `help` via `help_*`, `help help`, `help unknown`, the no-argument table | matches |
+| `p_cmd_names.py` | `get_names()`/`completenames()` for the supported vocabulary and a `get_names()` override | matches |
 | `p_cmd_outside.py` | `do_exit` outside the vocabulary | named `NotImplementedError`, both builds |
-| `p_cmd_table.py` | the generated help table | named `NotImplementedError`, both builds |
 | `p_cmd_doc.py` | `help zoom` on a docstring-only command | named `NotImplementedError`, both builds |
-| `p_cmd_names.py` | `get_names()`/`completenames()` for an extra `do_foo` | named `NotImplementedError`, both builds |
+| `p_cmd_help_outside.py` | `help exit` with a `help_exit` outside the vocabulary | named `NotImplementedError`, both builds |
 
 ### Remaining follow-ups (need compiler features)
 
 * The typed path refuses a `None` class attribute and method default arguments, so every
   program uses the general path. Exact note above.
-* A method list and a method's docstring are not available to AIL source.  The compiler
-  would need a `dir()`-like enumeration and a way to read `getattr(obj, 'do_x').__doc__`
-  (and to call a method by a computed name) to make the table, `get_names()` and arbitrary
-  `do_*` dispatch exact; until then those paths refuse by name as shown above.
+* A method list and a method's docstring are not available to AIL source.  `get_names()` is
+  exact for `Cmd`'s own names and the supported vocabulary; a command name outside it is not
+  listed, and a docstring-only `help <name>` cannot print the docstring.  The compiler would
+  need a `dir()`-like enumeration and a way to read `getattr(obj, 'do_x').__doc__` (and to
+  call a method by a computed name) to close those gaps; until then the dispatch cases refuse
+  by name as shown above.
 * The refusals are at the first call, not at build time.  This compiler builds a bundled
   module as a whole: a `dir()`/`__dir__` anywhere in `cmd.py` (even in a function no program
   calls) makes `import cmd` itself refused for every program, so a compile-time refusal here

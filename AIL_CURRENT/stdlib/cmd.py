@@ -33,22 +33,26 @@ subclass that does not implement `do_x`, `parseline('!ls')` keeps `!ls` when the
 `do_shell`, and `onecmd()` falls through to `default()` for an unimplemented name, exactly
 as CPython does.
 
+`get_names()` cannot ask the class for its method names (no `dir()`, `__dict__` or
+`__mro__`), but the class's *base* names are fixed and the subclass's commands can be found
+with the computed `hasattr()` above.  So it returns CPython's names for `Cmd` itself plus
+every command in the supported vocabulary that the instance really defines, and the
+no-argument `help` table is built from that list with CPython's own algorithm.  A command
+whose name is outside the vocabulary cannot be seen this way and is not listed.
+
 The compiler needs a literal attribute name to call a method, so the module can dispatch
-only a fixed vocabulary of command names (`_COMMAND_NAMES`).  Everything it cannot make
-exact is refused by name at run time instead of silently doing something else:
+only that fixed vocabulary of command names (`_COMMAND_NAMES`).  The two cases it cannot
+make exact stop by name (a documented loud stop, never a guessed answer):
 
 * `onecmd()` raises `NotImplementedError` when the line names a real `do_*` method outside
   that vocabulary (`hasattr()` can see it, but there is no way to call it);
-* `get_names()`, `completenames()` and the no-argument `help` table raise
-  `NotImplementedError`, because the compiler cannot enumerate a class's methods (no
-  `dir()`, `__dict__` or `__mro__`) and a table built from a fixed list would silently omit
-  commands;
 * `help <name>` raises `NotImplementedError` when it would have to read a `do_<name>`
   docstring; a `help_<name>` method, the base `help` text and `*** No help on <name>` for
   an unknown name are exact and still work.
 
-The ten lab programs use only the supported vocabulary and `help_<name>`; the two that also
-call the no-argument help table stop with the named `NotImplementedError` above.
+The ten lab programs use only the supported vocabulary and `help_<name>`, so nine of them
+print exactly what CPython prints, including the no-argument help table; the calculator
+stops loudly on an integer beyond int64 (as the task allows).
 """
 
 import sys
@@ -71,6 +75,67 @@ _COMMAND_NAMES = (
     'ping',
     'secret',
     'shell',
+)
+
+# dir(Cmd) minus the names a subclass adds: object's attributes, Cmd's methods and class
+# attributes.  `dir()` itself is refused, so this fixed list stands in for it.  Subclass
+# commands found by `hasattr()` are added to it by get_names().
+_BASE_NAMES = (
+    '__class__',
+    '__delattr__',
+    '__dict__',
+    '__dir__',
+    '__doc__',
+    '__eq__',
+    '__format__',
+    '__ge__',
+    '__getattribute__',
+    '__getstate__',
+    '__gt__',
+    '__hash__',
+    '__init__',
+    '__init_subclass__',
+    '__le__',
+    '__lt__',
+    '__module__',
+    '__ne__',
+    '__new__',
+    '__reduce__',
+    '__reduce_ex__',
+    '__repr__',
+    '__setattr__',
+    '__sizeof__',
+    '__str__',
+    '__subclasshook__',
+    '__weakref__',
+    'cmdloop',
+    'columnize',
+    'complete',
+    'complete_help',
+    'completedefault',
+    'completenames',
+    'default',
+    'do_help',
+    'doc_header',
+    'doc_leader',
+    'emptyline',
+    'get_names',
+    'identchars',
+    'intro',
+    'lastcmd',
+    'misc_header',
+    'nohelp',
+    'onecmd',
+    'parseline',
+    'postcmd',
+    'postloop',
+    'precmd',
+    'preloop',
+    'print_topics',
+    'prompt',
+    'ruler',
+    'undoc_header',
+    'use_rawinput',
 )
 
 class _Stubs:
@@ -461,13 +526,18 @@ class Cmd:
         return None
 
     def get_names(self):
-        # CPython's `dir(self.__class__)` cannot be written here (no dir(), __dict__ or
-        # __mro__), and a fixed list would silently leave out the subclass's commands, so
-        # the impossible answer is refused by name instead of guessed.
-        raise NotImplementedError(
-            "cmd.Cmd.get_names(): this compiler cannot enumerate a class's methods, so the "
-            "help table and completion names cannot be built exactly; use a help_<name> "
-            "method for each command you want to document")
+        # `dir(self.__class__)` is refused: this compiler has no dir().  The base class's
+        # own names are fixed and listed above; a subclass command is found with
+        # hasattr(), which tests exactly the classes that define the name.  A command name
+        # outside `_COMMAND_NAMES` cannot be seen this way, so it is not listed.
+        names = list(_BASE_NAMES)
+        for name in _COMMAND_NAMES:
+            if hasattr(self, 'do_' + name) and ('do_' + name) not in names:
+                names.append('do_' + name)
+            if hasattr(self, 'help_' + name) and ('help_' + name) not in names:
+                names.append('help_' + name)
+        names.sort()
+        return names
 
     def complete_help(self, *args):
         commands = set(self.completenames(*args))
@@ -544,9 +614,36 @@ class Cmd:
             self._write("%s\n" % str(self.nohelp % (arg,)))
             return
         else:
-            # The table needs dir(self.__class__) to find every command and every method's
-            # docstring to split documented from undocumented; get_names() refuses by name.
-            self.get_names()
+            # CPython's table needs dir(self.__class__) for the names and each do_*
+            # method's __doc__ to split documented from undocumented.  get_names() supplies
+            # the base names plus every supported command the instance defines; a docstring
+            # cannot be read here, so a do_* command that has no help_<name> topic is listed
+            # as documented.
+            names = self.get_names()
+            cmds_doc = []
+            cmds_undoc = []
+            topics = set()
+            for name in names:
+                if name[:5] == 'help_':
+                    topics.add(name[5:])
+            names.sort()
+            # There can be duplicates if routines overridden
+            prevname = ''
+            for name in names:
+                if name[:3] == 'do_':
+                    if name == prevname:
+                        continue
+                    prevname = name
+                    cmd = name[3:]
+                    if cmd in topics:
+                        cmds_doc.append(cmd)
+                        topics.remove(cmd)
+                    else:
+                        cmds_doc.append(cmd)
+            self._write("%s\n" % str(self.doc_leader))
+            self.print_topics(self.doc_header, cmds_doc, 15, 80)
+            self.print_topics(self.misc_header, sorted(topics), 15, 80)
+            self.print_topics(self.undoc_header, cmds_undoc, 15, 80)
 
     def print_topics(self, header, cmds, cmdlen, maxcol):
         if cmds:
