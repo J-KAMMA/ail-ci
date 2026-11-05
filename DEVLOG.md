@@ -1,3 +1,27 @@
+## 2026-11-05 -- rbbces4: re-apply the field-fact soundness fixes (job-rbbces4-11052320)
+
+The accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`) did not apply as one patch:
+`DEVLOG.md`, `AIL_CURRENT/DEVLOG.md` and `test_ail_bce.py` conflicted, and the `manifest.d` hunks
+were not applied by hand. The source hunks applied cleanly: the new
+`AIL_CURRENT/python/pkg-v12/fieldfacts.py`, its install in `pyfunc._to_c_once` and
+`ir/driver.py` `facts_for()['fields']`. The new `FieldFactsTests` cases were inserted into the
+current `test_ail_bce.py`. `tools/diff_ids.py` is not present on this tree; `python3
+tools/update_manifest.py` regenerated every pin and `--check` passes.
+
+The change closes two soundness holes. `fieldfacts.py` built `bytes_fields` from struct names
+rather than bytes field names, so an attribute whose name matched a struct that owned a bytes
+field (an `R.vals` list next to a `struct vals { data: bytes; }`) was read as a non-negative
+bytes index; it now collects the unambiguous bytes *field* names, and a genuine bytes index
+(`r.data[0]`) still counts. `_field_still_nonneg` recognised only single-target `Assign`,
+`AnnAssign` and `AugAssign` and silently skipped every other store; it now walks the field's
+`Store`/`Del` attributes directly, so a tuple/chained target, a `for`/`with`/comprehension
+target, `del`, an operator other than `+=`/`-=`, or any other unclassified form retires the
+fact. No pass reads `facts['fields']`, so generated C is unchanged.
+
+Tests: `test_ail_bce` 11/11, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass. Probes: the dump is `{"groups": [], "nonneg": []}` for
+`n_bytes_collide.ail` (prints `-5`) and `n_tuple.py` (prints `-1`), both as CPython does.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this

@@ -601,5 +601,275 @@ class BceProbeTests(unittest.TestCase):
                 self.assertEqual(proven, 0, '%s: %s' % (name, proven))
 
 
+FACT_GROUP_POSITIVE = r"""
+struct P { a: list[int]; b: list[int]; }
+fn push(p: P) { p.a.append(1); p.b.append(2); }
+fn main() { let p = P([], []); push(p); print(len(p.a)); }
+"""
+
+FACT_GROUP_INVALID = {
+    'pass_list': r"""
+struct P { a: list[int]; b: list[int]; }
+fn take(x: list[int]) -> int { return len(x); }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); print(take(p.a)); }
+""",
+    'bind_name': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); let q = p.a; print(len(q)); }
+""",
+    'return_list': r"""
+struct P { a: list[int]; b: list[int]; }
+fn bad(p: P) -> list[int] { return p.a; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); print(len(bad(p))); }
+""",
+    'store_in_field': r"""
+struct Box { v: list[int]; }
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); let box = Box(p.a); print(len(box.v)); }
+""",
+    'insert': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); p.a.insert(0, 3); print(len(p.a)); }
+""",
+    'extend': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); p.a.extend([3]); print(len(p.a)); }
+""",
+    'pop_index': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); p.a.pop(0); print(len(p.a)); }
+""",
+    'remove': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); p.a.remove(1); print(len(p.a)); }
+""",
+    'slice_store': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([], []); p.a.append(1); p.b.append(2); p.a[0:1] = [9]; print(len(p.a)); }
+""",
+    'unequal_construction': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() { let p = P([1], []); p.a.append(1); p.b.append(2); print(len(p.a)); }
+""",
+    'raising_between_appends': r"""
+struct P { a: list[int]; b: list[int]; }
+fn main() {
+    let p = P([], []);
+    let s = "not a number";
+    try { p.a.append(1); p.b.append(int(s)); } except ValueError as e { print(0); }
+    print(len(p.a));
+}
+""",
+    'side_effect_receiver': r"""
+struct P { a: list[int]; b: list[int]; }
+struct S { sel: list[int]; }
+fn pick(items: list[P], s: S) -> P {
+    let i = s.sel[0];
+    s.sel[0] += 1;
+    return items[i];
+}
+fn main() {
+    let items: list[P] = [P([], []), P([], [])];
+    let s = S([0]);
+    pick(items, s).a.append(1);
+    pick(items, s).b.append(2);
+    print(len(items[0].a), len(items[1].b));
+}
+""",
+}
+
+FACT_LOCAL = r"""
+fn main() {
+    let ops: list[int] = [];
+    let xs: list[int] = [];
+    let ys: list[int] = [];
+    let zs: list[int] = [];
+    let i = 0;
+    while i < 3 { ops.append(i); xs.append(i); ys.append(i); zs.append(i); i += 1; }
+    print(len(ops), len(xs), len(ys), len(zs));
+}
+"""
+
+FACT_LOCAL_EXTRA = r"""
+fn main() {
+    let ops: list[int] = [];
+    let xs: list[int] = [];
+    let ys: list[int] = [];
+    let zs: list[int] = [];
+    let i = 0;
+    while i < 3 { ops.append(i); xs.append(i); ys.append(i); zs.append(i); i += 1; }
+    xs.append(7);
+    print(len(ops), len(xs), len(ys), len(zs));
+}
+"""
+
+FACT_PYTHON = r"""
+class P:
+    def __init__(self):
+        self.a = []
+        self.b = []
+    def add(self, x: int, y: int) -> None:
+        self.a.append(x)
+        self.b.append(y)
+
+def main() -> int:
+    p = P()
+    p.add(1, 2)
+    print(len(p.a))
+    return 0
+
+main()
+"""
+
+FACT_PYTHON_LAMBDA = r"""
+class P:
+    def __init__(self):
+        self.a = []
+        self.b = []
+def main() -> int:
+    p = P()
+    p.a.append(1)
+    p.b.append(2)
+    f = lambda: len(p.a)
+    print(f())
+    return 0
+main()
+"""
+
+FACT_NONNEG_POSITIVE = r"""
+struct R { pos: int; }
+fn main() { let r = R(6); r.pos += 1; print(r.pos); }
+"""
+
+FACT_NONNEG_BYTES_COLLIDE = r"""
+struct vals { data: bytes; }
+struct R { vals: list[int]; pos: int; }
+fn main() { let r = R([-5], 1); r.pos = r.vals[0]; print(r.pos); }
+"""
+
+FACT_NONNEG_BYTES_POSITIVE = r"""
+class R:
+    def __init__(self, data: bytes, pos: int) -> None:
+        self.data = data
+        self.pos = pos
+def main() -> int:
+    r = R(b"abc", 1); r.pos = r.data[0]; print(r.pos); return 0
+main()
+"""
+
+FACT_NONNEG_UNKNOWN_STORE = {
+    'tuple': r"""
+class R:
+    def __init__(self, pos: int) -> None: self.pos = pos
+def main() -> int:
+    r = R(0); r.pos, x = -1, 0; print(r.pos); return 0
+main()
+""",
+    'chained': r"""
+class R:
+    def __init__(self, pos: int) -> None: self.pos = pos
+def main() -> int:
+    r = R(0); x = r.pos = -1; print(r.pos, x); return 0
+main()
+""",
+    'for_target': r"""
+class R:
+    def __init__(self, pos: int) -> None: self.pos = pos
+def main() -> int:
+    r = R(0)
+    for r.pos in [-1]:
+        pass
+    print(r.pos); return 0
+main()
+""",
+}
+
+FACT_NONNEG_INVALID = {
+    'assign_negative': r"""
+struct R { pos: int; }
+fn main() { let r = R(6); if len(sys.argv) > 1 { r.pos = -1; } print(r.pos); }
+""",
+    'minus_equals': r"""
+struct R { pos: int; }
+fn main() { let r = R(6); r.pos -= 1; print(r.pos); }
+""",
+    'int_of_text': r"""
+struct R { pos: int; }
+fn main() { let text = "9223372036854775808"; let r = R(6); r.pos = int(text); print(r.pos); }
+""",
+}
+
+
+def _dump_facts(directory, name, source, syntax='ail'):
+    src = Path(directory) / (name + ('.py' if syntax == 'python' else '.ail'))
+    src.write_text(source, encoding='utf-8')
+    exe = Path(directory) / ('exe_' + name)
+    facts = Path(directory) / (name + '.facts.json')
+    env = dict(os.environ, AIL_NO_CACHE='1', AIL_BCE_FACTS=str(facts))
+    cmd = [sys.executable, '-B', CHATGPT, 'compile', src.name, '-o', exe.name]
+    if syntax == 'python':
+        cmd += ['--syntax', 'python']
+    built = subprocess.run(cmd, cwd=directory, capture_output=True, text=True,
+                           timeout=900, env=env)
+    if built.returncode:
+        raise AssertionError('%s failed\n%s' % (name, (built.stdout + built.stderr)[-2000:]))
+    return json.loads(facts.read_text(encoding='utf-8'))
+
+
+@unittest.skipUnless(HAVE_CC, 'no C compiler')
+class FieldFactsTests(unittest.TestCase):
+    def test_parallel_groups_positive(self):
+        with tempfile.TemporaryDirectory(prefix='ail-facts-') as directory:
+            data = _dump_facts(directory, 'positive', FACT_GROUP_POSITIVE)
+            self.assertIn({'struct': 'P', 'fn': None, 'members': ['a', 'b'], 'grow_only': True},
+                          data['groups'])
+
+    def test_parallel_groups_invalidated(self):
+        with tempfile.TemporaryDirectory(prefix='ail-facts-') as directory:
+            for name, source in FACT_GROUP_INVALID.items():
+                with self.subTest(probe=name):
+                    data = _dump_facts(directory, 'bad_' + name, source)
+                    self.assertEqual(data['groups'], [], name)
+
+    def test_local_group_and_extra_append(self):
+        with tempfile.TemporaryDirectory(prefix='ail-facts-') as directory:
+            data = _dump_facts(directory, 'local', FACT_LOCAL)
+            self.assertTrue(any(g['fn'] == 'main' and g['struct'] is None
+                                and {'ops', 'xs', 'ys', 'zs'} <= set(g['members'])
+                                for g in data['groups']), data['groups'])
+            data = _dump_facts(directory, 'local_extra', FACT_LOCAL_EXTRA)
+            self.assertEqual(data['groups'], [])
+
+    def test_python_syntax_group_and_lambda(self):
+        with tempfile.TemporaryDirectory(prefix='ail-facts-') as directory:
+            data = _dump_facts(directory, 'python', FACT_PYTHON, syntax='python')
+            self.assertIn({'struct': 'P', 'fn': None, 'members': ['a', 'b'], 'grow_only': True},
+                          data['groups'])
+            data = _dump_facts(directory, 'python_lambda', FACT_PYTHON_LAMBDA, syntax='python')
+            self.assertEqual(data['groups'], [])
+
+    def test_nonneg_fields(self):
+        with tempfile.TemporaryDirectory(prefix='ail-facts-') as directory:
+            data = _dump_facts(directory, 'nonneg', FACT_NONNEG_POSITIVE)
+            self.assertIn(['R', 'pos'], data['nonneg'])
+            for name, source in FACT_NONNEG_INVALID.items():
+                with self.subTest(probe=name):
+                    data = _dump_facts(directory, 'nonneg_' + name, source)
+                    self.assertNotIn(['R', 'pos'], data['nonneg'])
+            # a struct name that happens to equal a list field is not a bytes field
+            data = _dump_facts(directory, 'nonneg_bytes_collide', FACT_NONNEG_BYTES_COLLIDE)
+            self.assertNotIn(['R', 'pos'], data['nonneg'])
+            # a real bytes index is still a non-negative value
+            data = _dump_facts(directory, 'nonneg_bytes_positive',
+                               FACT_NONNEG_BYTES_POSITIVE, syntax='python')
+            self.assertIn(['R', 'pos'], data['nonneg'])
+            # every store form the pass does not classify makes the field unknown
+            for name, source in FACT_NONNEG_UNKNOWN_STORE.items():
+                with self.subTest(probe='unknown_' + name):
+                    data = _dump_facts(directory, 'nonneg_unknown_' + name, source,
+                                       syntax='python')
+                    self.assertNotIn(['R', 'pos'], data['nonneg'])
+
+
 if __name__ == '__main__':
     unittest.main()

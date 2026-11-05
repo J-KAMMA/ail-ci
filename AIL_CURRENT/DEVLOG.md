@@ -1,3 +1,20 @@
+## 2026-11-05 -- rbbces4: two field-fact soundness holes closed, re-applied (job-rbbces4-11052320)
+
+Re-applied the accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`). `fieldfacts.py`
+built `bytes_fields` from struct names rather than bytes field names, so an attribute whose name
+matched a struct that owned a bytes field (an `R.vals` list next to a `struct vals { data: bytes; }`)
+was read as a non-negative bytes index. It now collects the unambiguous bytes *field* names, and a
+genuine bytes index (`r.data[0]`) still counts.
+
+`_field_still_nonneg` recognised only single-target `Assign`, `AnnAssign` and `AugAssign`, and
+silently skipped every other store of the field. It now walks the field's `Store`/`Del` attributes
+directly: a tuple/chained target, a `for`/`with`/comprehension target, `del`, an operator other
+than `+=`/`-=`, or any other unclassified form retires the fact.
+
+No pass reads `facts['fields']`, so generated C is unchanged. Added regression cases to
+`test_ail_bce.py`: the bytes/struct-name collision, a real bytes index, and tuple/chained/`for`
+stores. `tools/diff_ids.py` is not present on this tree, so only `update_manifest.py` ran.
+
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 
 `test_ail_refuzz95` failed on `r_tuple` (default build): after the prog18 typed reach,

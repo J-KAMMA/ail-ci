@@ -38452,6 +38452,32 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         'scc': _recursion_scc,
         'direct': _direct_calls,
     }
+    # bce s4: whole-program field facts, computed once here, before any function is lowered,
+    # beside the call graph just above. They are only computed and dumped in this step: no pass
+    # reads them yet (s5 and s6 will). The result is kept per program by identity of `sigs`
+    # (`ctx.funcs`) in ir/driver.py, exactly like SUMMARIES.
+    try:
+        from ir.passes import bce_enabled as _bce_enabled
+        import fieldfacts as _fieldfacts
+        _field_facts = _fieldfacts.compute(fns, classes, classdefs, library=library,
+                                           external=external, info=info,
+                                           enabled=_bce_enabled(),
+                                           closures=bool(nested_captures))
+    except Exception:
+        _field_facts = {'groups': [], 'nonneg': []}
+    try:
+        from ir import driver as _facts_driver
+        _facts_driver.set_field_facts(sigs, _field_facts)
+    except Exception:
+        pass
+    _facts_target = os.environ.get('AIL_BCE_FACTS')
+    if _facts_target:
+        try:
+            with open(_facts_target, 'w') as _facts_handle:
+                json.dump(_field_facts, _facts_handle, sort_keys=True)
+                _facts_handle.write('\n')
+        except OSError:
+            pass
     owned_str_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                      and f.returns.id == '__ail_checked_str__'}
     owned_str_fns.update(key for key, signature in external_exports.items() if signature['owned_str'])
