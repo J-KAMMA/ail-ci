@@ -76,6 +76,26 @@ Result after: **10 built, 10 match CPython in both builds**.
   stdout and the exit status with `python3`; it is registered in
   `AIL_CURRENT/tests.d/test_ail_std_mimetypes.txt`.
 
+## Review fixes
+
+Two differences from `urlparse` in `_urlsplit` were reported and fixed.  Probes in `/tmp/probes`
+(`pA_urls.py`, `pE_ipv6.py`, `pF_data.py`, `pG_bracket_raise.py`) match CPython in the default
+build and with `AIL_UNIFIED_FORCE=1`:
+
+* `urlsplit`'s pre-processing is mirrored: `url.lstrip(_WHATWG_C0_CONTROL_OR_SPACE)` and then
+  removal of every `\t`, `\r` and `\n`.  `guess_type(" http://h/a.txt?x=1")` and
+  `guess_type("http://h/a.txt\t")` now return `('text/plain', None)`, not `(None, None)`.
+* A `[`/`]`-unbalanced netloc raises `ValueError("Invalid IPv6 URL")`, as `urlsplit` does:
+  `guess_type("http://[::1/x.txt")` raises and exits 1.  The structural checks of
+  `_check_bracketed_netloc` are mirrored too (`x[::1]`, `[a]b`, `[foo]`, `[1.2.3.4]`,
+  `[v]`, `[vz.x]`).
+
+Known limitation (not a new program failure): `ipaddress.IPv6Address` is not built, so a
+bracketed hostname is accepted when it contains a `:`; CPython would still reject a malformed
+IPv6 spelling such as `[:::]` or `[gggg::1]`.  No program in this directory uses one.  A
+compiler change to support `ipaddress.IPv6Address` would let `_check_bracketed_netloc` validate
+the address exactly.
+
 ## Follow-ups (out of scope: compiler files)
 
 None: all ten programs pass without a compiler change.  The typed path could take

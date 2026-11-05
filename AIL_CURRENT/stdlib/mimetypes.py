@@ -25,10 +25,15 @@ This is CPython 3.12's Lib/mimetypes.py as AIL source.  The differences are the 
 rewrites the compiler needs; the tables, the answers and the error-free paths are CPython's.
 
 1. `urllib.parse.urlparse` is replaced by `_urlsplit` below: a small local split into
-   (scheme, path).  It accepts the same ASCII scheme spelling, drops a `//netloc` part and
-   the `?query` / `#fragment` tail, lower-cases the scheme, and removes `;params` from the
-   last path segment for the schemes `urlparse` lists in `uses_params` (`http`, `https`,
-   `ftp`, `imap`, `sip`, `rsync`, ...).
+   (scheme, path).  It performs `urlsplit`'s pre-processing (lstrip the C0-control and
+   space characters, then remove every `\t`, `\r` and `\n`), accepts the same ASCII scheme
+   spelling, drops a `//netloc` part (raising `ValueError` for an unbalanced `[`/`]`, as
+   `urlsplit` does) and the `?query` / `#fragment` tail, lower-cases the scheme, and removes
+   `;params` from the last path segment for the schemes `urlparse` lists in `uses_params`
+   (`http`, `https`, `ftp`, `imap`, `sip`, `rsync`, ...).  The address in a balanced bracket
+   pair is checked locally because `ipaddress.IPv6Address` is not built: an IPv6 spelling is
+   accepted when it contains a ':' (no valid IPv6 address is rejected), and an IPvFuture
+   address when it has the `v<hex>.<text>` shape.
 2. `os.fspath(url)` is dropped: this compiler refuses `os.fspath`, so `url` must be a str
    (the same text `fspath` returns for a str).
 3. `os.path.splitdrive(url)` is dropped: the build is POSIX, where `splitdrive` is the
@@ -75,16 +80,81 @@ _URL_SCHEME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456
 # urllib.parse.uses_params
 _USES_PARAMS = ("ftp", "hdl", "prospero", "http", "imap", "https", "sip", "sips",
                 "rtsp", "rtspu", "rsync")
+# urllib.parse._WHATWG_C0_CONTROL_OR_SPACE: chr(0)..chr(31) plus a space.
+_C0_CONTROL_OR_SPACE = (
+    "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
+    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f "
+)
+# urllib.parse._UNSAFE_URL_BYTES_TO_REMOVE
+_UNSAFE_URL_BYTES_TO_REMOVE = ("\t", "\r", "\n")
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+_DEC_DIGITS = "0123456789"
+
+
+def _looks_like_ipv4(text):
+    """True for the dotted-quad spellings `ipaddress.IPv4Address` accepts."""
+    parts = text.split(".")
+    if len(parts) != 4:
+        return False
+    for part in parts:
+        if not part or len(part) > 3:
+            return False
+        for c in part:
+            if c not in _DEC_DIGITS:
+                return False
+        if part[0] == "0" and len(part) > 1:
+            return False
+        if len(part) == 3 and part > "255":
+            return False
+    return True
+
+
+def _check_bracketed_netloc(netloc):
+    """The structural checks of urllib.parse._check_bracketed_netloc.
+
+    `ipaddress.IPv6Address` is not built, so the final address test is local: an
+    IPv6 spelling is accepted when it contains a ':', and an IPvFuture address
+    when it has the `v<hex>.<text>` shape.  That never rejects a valid IPv6
+    address; like the other rewrites this is noted in the module docstring.
+    """
+    hostname_and_port = netloc.rpartition("@")[2]
+    before_bracket, have_open_br, bracketed = hostname_and_port.partition("[")
+    if have_open_br:
+        if before_bracket:
+            raise ValueError("Invalid IPv6 URL")
+        hostname, _, port = bracketed.partition("]")
+        if port and not port.startswith(":"):
+            raise ValueError("Invalid IPv6 URL")
+    else:
+        hostname, _, port = hostname_and_port.partition(":")
+    if hostname.startswith("v"):
+        body = hostname[1:]
+        dot = body.find(".")
+        if dot <= 0 or dot == len(body) - 1:
+            raise ValueError("IPvFuture address is invalid")
+        for c in body[:dot]:
+            if c not in _HEX_DIGITS:
+                raise ValueError("IPvFuture address is invalid")
+    elif ":" not in hostname:
+        if _looks_like_ipv4(hostname):
+            raise ValueError("An IPv4 address cannot be in brackets")
+        raise ValueError(repr(hostname) + " does not appear to be an IPv4 or IPv6 address")
 
 
 def _urlsplit(url):
     """Split `url` into (scheme, path) the way `urllib.parse.urlparse` does for this module.
 
-    The scheme is None when the text before the first ':' is not a valid URL scheme (it must
-    start with an ASCII letter and contain only letters, digits, '+', '-' and '.').  A
-    leading '//netloc' and a trailing '?query' / '#fragment' are removed from the path, and a
-    `;params` tail is removed from the last segment for the schemes `urlparse` treats so.
+    Like `urlsplit` it first lstrips C0-control/space characters and removes every tab,
+    CR and LF, then looks for a scheme.  The scheme is None when the text before the first
+    ':' is not a valid URL scheme (it must start with an ASCII letter and contain only
+    letters, digits, '+', '-' and '.').  A leading '//netloc' and a trailing '?query' /
+    '#fragment' are removed from the path, and a `;params` tail is removed from the last
+    segment for the schemes `urlparse` treats so.  An unbalanced '[' / ']' in the netloc
+    raises `ValueError`, as `urlsplit` does.
     """
+    url = url.lstrip(_C0_CONTROL_OR_SPACE)
+    for b in _UNSAFE_URL_BYTES_TO_REMOVE:
+        url = url.replace(b, "")
     scheme = None
     i = url.find(":")
     if i > 0:
@@ -106,6 +176,11 @@ def _urlsplit(url):
             k = url.find(sep, 2)
             if k >= 0 and k < end:
                 end = k
+        netloc = url[2:end]
+        if ("[" in netloc) != ("]" in netloc):
+            raise ValueError("Invalid IPv6 URL")
+        if "[" in netloc and "]" in netloc:
+            _check_bracketed_netloc(netloc)
         url = url[end:]
     for sep in ("?", "#"):
         k = url.find(sep)
