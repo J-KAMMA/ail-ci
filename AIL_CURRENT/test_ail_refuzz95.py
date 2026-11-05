@@ -3,15 +3,12 @@
 An old job (fuzz95) found that ``sorted()`` / ``.sort()`` over floats (or keys) that contain a
 NaN returns a different permutation from CPython 3.12 with no error: CPython's Timsort keeps a
 specific, input-dependent order because every comparison with a NaN is false, while the runtime's
-stable merge sort produces another.  The typed path already stops by name for a plain float list
-(``ail_flist_sort`` / the KEYSORT float column check raise ``ValueError``); the boxed path
-(``ail_list_sort``, python/pkg-v12/cruntime.py) did not.  It now scans the decorate keys -- a key
-function's result, and a tuple/list key item by item -- and raises a named ``ValueError``
-(DIFFERENCES C?-job-refuzz95-10300605-1) instead of returning the wrong order.  NaN-free keys keep
-the same stable merge sort and the same order as before (compared here against CPython).
-
-The boxed refusal carries the "refuzz95" name in its message; the typed KEYSORT/flist stop is a
-bare ``ValueError`` (by name only), so the message is only required for the cases that stay boxed.
+stable merge sort produces another.  Both the boxed path (``ail_list_sort``) and the typed
+KEYSORT float column check (python/pkg-v12/cruntime.py) now scan the keys -- a key function's
+result, and a tuple/list key item by item -- and raise a named ``ValueError`` (DIFFERENCES
+C?-job-refuzz95-10300605-1) instead of returning the wrong order.  The typed ``ail_flist_sort``
+stop keeps its bare ``ValueError`` (by name only).  NaN-free keys keep the same stable merge sort
+and the same order as before (compared here against CPython).
 """
 import os
 import subprocess
@@ -83,9 +80,9 @@ REFUSED = {
     'r_dictvalue': 'nan = float("nan")\nd = {"k": [9.0, nan, 0.0]}\nprint(sorted(d["k"]))\n',
 }
 
-# Of those, the ones the boxed runtime refuses (both builds) and whose message names the issue.
-# r_keyfn / r_method may lower to the typed KEYSORT/flist stop on the default build, a bare
-# ValueError, so they are only required to be refused by name (ValueError), not by message.
+# Of those, the ones refused with a message that names the issue.  r_keyfn / r_method may lower
+# to the typed ail_flist_sort stop on the default build, a bare ValueError, so they are only
+# required to be refused by name (ValueError), not by message.
 NAMED = ('r_direct', 'r_reverse', 'r_tuple', 'r_listkey', 'r_allnan', 'r_arg',
          'r_listitem', 'r_attribute', 'r_dictvalue')
 

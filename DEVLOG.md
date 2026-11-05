@@ -93,6 +93,111 @@ both probes, as on the base. Tests: `test_ail_span_cache`, `test_ail_numeric_loo
 `test_ail_native_diagnostics`, `test_ail_build_reports`, `test_ail_nested_lists`,
 `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (8 modules, 0 failed), and
 all 76 `tally_lang` public/hidden/perf cases match. Manifest `--check` passes.
+## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
+
+`test_ail_refuzz95` failed on `r_tuple` (default build): after the prog18 typed reach,
+`sorted([(1.0, "a"), (nan, "b"), (0.5, "c")])` lowers to the typed KEYSORT path, whose float-column
+NaN check raised a bare `ValueError`, while the test requires the "refuzz95" name for that shape.
+The KEYSORT check in `python/pkg-v12/cruntime.py` now raises the same named `ValueError` message as
+`ail_list_sort`'s boxed check, on both builds. NaN-free tuple sorts keep their stable order and the
+typed `ail_flist_sort` stop stays a bare `ValueError` (by name only). The existing DIFFERENCES row
+`C?-job-refuzz95-10300605-1` is updated; no new row is needed.
+
+Probes `/tmp/probes/p1_nanfree_tuple.py` (sorts through a local, an argument, a list item, an
+attribute and a dict value, empty/negative/-inf/tie/reverse/int tuples), `p2`-`p5` (NaN first and
+second field, direct/reverse/key lambda), `p6`-`p9` (NaN tuple list through an argument, list item,
+attribute and dict value), `p10` (NaN elsewhere, NaN-free sort unaffected), `p11` (float list NaN)
+and `p12` (empty/negative/1-tuple) all match CPython or are refused by name on both builds.
+`test_ail_refuzz95`, `test_ail_prog18`, `test_ail_unified`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass on the final commit.
+
+## 2026-11-05 -- prog18_rr1 review fixes 3: bool result inference and INT64_MIN width
+
+Two defects from the re-review, both on the default/typed build (the forced-general build matched
+CPython):
+
+- A bool `max`/`min(..., default=...)` reached through unannotated parameters printed `1`/`0`
+  instead of `True`/`False`.  The fold itself was exact; boolkind's result candidates were shrunk
+  round by round before the parameters that make the return a bool had settled, and never regrew,
+  so the helper was typed `-> int` and its callers printed the number.  `_infer` now reconsiders
+  every result once the parameter and field facts are final, adding `bool` when all `return`s are
+  bools, to a fixed point (a bool result can make another return bool through a call).
+- A nested width of `INT64_MIN` (`w = -9223372036854775808; f"{9:>{w}}"`) killed the program with
+  `allocation too large`.  CPython parses the spliced width as a `Py_ssize_t` and raises
+  `ValueError: Too many decimal digits in format string` -- for int, float and str alike, before
+  the str sign check, since `abs(INT64_MIN)` is not representable.  `_fmt_width_c` now raises that
+  ValueError instead of rewriting the width to `INT64_MAX`.
+
+`test_ail_prog18.py` gains two tests (18 total: the reviewer's unannotated-parameter bool case and
+the INT64_MIN width case).  Ten probes under `/tmp/probes/` (p1-p10) match CPython on both builds,
+covering widths through an argument, a list item, an attribute and a dict value, negative/zero
+widths, int/float/str/bool values, bool defaults through parameters/attributes/dict values, and
+the empty/non-empty int/float fold boundaries.
+
+## 2026-11-04 -- prog18_rr1 review fixes 2: nested-width order and spec, bool fold elements
+
+Three defects from the re-review, all on the typed path (the forced-general build matched CPython):
+
+- `f"{v():>{w()}}"` evaluated the width before the value: the formatter takes both as C arguments
+  and gcc evaluates right to left.  The value is now bound to a `_fvN` local inside the formatter
+  call's statement expression (`_fmt_value_first`), so CPython's order (value, then the spec's
+  field) holds for the small formatters and for `ail_fmt_gen`/`ail_fmt_gen_str`.
+- A nested width field's own spec was silently dropped: `f"{9:>{w:>3}}"` padded where CPython
+  splices the formatted text and raises `ValueError: Invalid format specifier '>  5' ...`.  It is
+  now refused by name.  An empty spec or a conversion is still accepted (same decimal text).
+- `max`/`min(xs, default=...)` over a list of bools printed `1`/`0` instead of `True`/`False`; the
+  guard only looked at the default's kind.  The element kind is tested too: a bool walk with a
+  bool default is typed and exact, a bool walk with an int default is refused by name, and
+  boolkind's max/min predicate now accepts `default=`.
+
+The generated C of the ten `lab/compare` tasks is byte-identical to HEAD (six emit C; four fail
+or fall back identically).  `test_ail_prog18.py` gains four tests (16 total).
+
+## 2026-11-04 -- prog18_rr1 review fixes: a bool is not an int in a width or a default
+
+Two escape hatches let a bool through where CPython refuses it or keeps it a bool (both only on the
+default build; the forced-general build was correct):
+
+- `f"{9:>{flag}}"` with `flag: bool` was rendered `[9]`; CPython raises
+  `ValueError: Invalid format specifier '>True' for object of type 'int'`.  `_fmt_width_c` now
+  refuses a bool width by name (also through a parameter or an attribute).
+- `max(xs, default=True)` / `min(xs, default=False)` folded the bool to `1`/`0`; CPython returns
+  the bool itself and prints `True`/`False`.  Both `max`/`min` default folds now refuse a bool
+  default by name.
+
+`_etype()` says INT for a bool (it is an int64 0/1 in C); `_is_bool_expr` (boolkind.py) is the
+extra test in the two places.  Probes p10/p13/p19/p20/p21 in `/tmp/probes/` match CPython on both
+builds, and `test_ail_prog18.py` gains two named-refusal tests plus a whole-program bool-edges
+test (12 tests).
+
+## 2026-11-04 -- prog18_rr1: typed reach of the eight prog18 hot functions (job-prog18_rr1-11050044)
+
+Profiled the eight programs (CPython 3.12, cProfile own time, largest input; `lab/progfix/prog18.md`
+has the table).  Four were already whole-program typed (`t443`, `t198`, `t210`, `g02_038`).  Three
+`pyfunc.py` fixes move two more onto the typed path and unblock a construct several tasks needed:
+
+- `_script_entry` only looked at top-level expression statements, so the usual
+  `if __name__ == '__main__': main()` script (whose generated repr/deque helpers are appended after
+  it) found no entry and refused with `the entry function cannot return checked str`.  The guard
+  body is searched now.
+- `_numeric_expression_needed` called any expression with a numeric local a numeric binding, so
+  `_numeric_assign` declared `visited: list[tuple[int, int]] = [(x, y)]` as an int and refused it
+  (`'visited' is declared ('olist', '_AilT_i_i'); assigning int is unsupported`).  A container
+  display is never a numeric binding.
+- `max(xs, default=d)` / `min(xs, default=d)` (numeric, list-of-instances and list-of-lists walks;
+  int or float `d` of the elements' kind) and an f-string nested width `f"{v:>{width}}"` (int width,
+  fill/alignment prefix, optional grouping/precision/type; a negative width is CPython's sign
+  option: int/float use `abs(w)`, a str raises `ValueError`).
+
+`t219` and `g11_014` are now whole-program typed and match CPython 3.12 on their inputs; 6 of 8
+programs and 9 of 11 hot functions are typed (was 4 and 6).  `t391` (`random.Random` prelude:
+methods with optional parameters, then `mt = self.mt`, a list field and `subscripting Attribute`)
+and `g19_014` (`datetime`/`timedelta`) stay named follow-ups in `lab/progfix/prog18.md`.  The ten
+`lab/compare` tasks keep byte-identical generated C (16 builds compared with `--debug-dir`; the
+four `main.py` variants the general path refuses fail identically and emit no C).  Probes in
+`/tmp/probes/` (`p_default`, `p_width`, `p_container`, `p_entry`, plus two named refusals) match
+CPython on the default and forced-general builds.  Added `test_ail_prog18.py` (9 tests) registered
+in `tests.d`, and DIFFERENCES row `C?-job-rbprog18_rr1-11050842-1`.
 
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 
