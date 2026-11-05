@@ -16,8 +16,12 @@ compiler is unchanged: the programs are now built with the flags they declare.
 - `docs/tutorial.md` records that a program needing exact ints is built with the flag.
 
 pyproof on the two rows: `examples/crate/fnvhash/main.py` typed and matching,
-`lab/compare/src/scar_life/main.py` general and matching. The full run below is `wrong 0`, with
-typed 29, general 16 and refused 8 unchanged.
+`lab/compare/src/scar_life/main.py` general and matching. The full census (base work `ff1dcc2`)
+is `wrong 0`: the two rows leave `wrong` and join their paths (typed 29 -> 30, general 16 -> 17),
+no other row changed and refused stays 8.  Required tests on the final commit
+(`par_check -j 2`): `test_ail_pyproof_report`, `test_ail_examples_crate`, `test_ail_tutorial`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`compileall` and `tools/update_manifest.py --check` are clean.
 
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
