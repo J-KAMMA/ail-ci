@@ -1,3 +1,4 @@
+# ail-build: --exact-int -- the W*H cell bitmasks are wider than int64, so the general path must keep exact ints
 import sys
 import re
 

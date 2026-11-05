@@ -1,3 +1,52 @@
+## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
+
+Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
+apostrophe in the prose after the flags (`-- the program's masks ...`) raised
+`ValueError: No closing quotation`; the row became `not run` with no comparison while the headline
+still said `wrong 0`.
+
+- `lab/pyproof/report.py`: split the flag part off at a whitespace `--` separator and tokenize it
+  with plain whitespace splitting, so the reason is never shell-parsed. Only the leading `-...`
+  words are flags; the first `--` or non-flag word ends them. Existing directives (fnvhash's crate
+  config and scar_life's first line) parse as before.
+- `AIL_CURRENT/test_ail_pyproof_report.py`: regression test for a directive whose reason has an
+  apostrophe, one with a bare `because it's ...` reason, and a plain flag-only directive.
+
+Probes (`/tmp/probes`, `report.py -j 1` over four rows): `flagged.py` (directive line 1, values
+through `sys.argv`, a list item, an attribute and a dict value) -> `build_flags ["--exact-int"]`,
+general, `stdout_equal true`; `case/prog.py` (directive on line 3, same big-int body) -> same;
+`case6/prog.py` (directive on line 6) -> not honoured, `refused` by name
+(`int64 constant expression out of range`); `plain_int64.py` -> typed, matching. `cmp.sh`:
+`plain_int64.py` matches on both builds; `big_plain.py` (same big values, no directive) is refused
+on both builds with `OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives
+exact ints)`; `flagged.py` matches both builds under `AIL_EXACT_INT=1` and is refused without it.
+The two target rows still match: fnvhash typed, scar_life general, `stdout_equal true`.
+
+## 2026-11-05 -- fnvfix1: pyproof builds the two declared-flag programs (job-fnvfix1-11052323)
+
+`lab/pyproof` reported `wrong 2`. Both rows are programs that need exact ints by design; they
+compile and only stop at run time under the int64 default (owner decision 2026-10-31). The
+compiler is unchanged: the programs are now built with the flags they declare.
+
+- `examples/crate/fnvhash/main.py`: the crate README and `test_ail_examples_crate.py` already
+  declare `--exact-int` (its empty-string FNV-1a hash is 14695981039346656037, above `2**63`).
+  `report.py`'s mirrored `CRATE_CASES` carried `flags: []`; it now carries the declared flag and
+  `_build` passes it. The flag applies to the crate's example `main.py` (the program the crate
+  test builds), not to `bench.py`.
+- `lab/compare/src/scar_life/main.py`: compare-lab's `EXACT_INT_TASKS` does not include it, and
+  the program needs `W*H`-bit masks, so its first line declares
+  `# ail-build: --exact-int -- ...`; `report.py` reads that comment (leading `-` words are the
+  flags, the rest is the reason) and uses it for both builds.
+- `docs/tutorial.md` records that a program needing exact ints is built with the flag.
+
+pyproof on the two rows: `examples/crate/fnvhash/main.py` typed and matching,
+`lab/compare/src/scar_life/main.py` general and matching. The full census (base work `ff1dcc2`)
+is `wrong 0`: the two rows leave `wrong` and join their paths (typed 29 -> 30, general 16 -> 17),
+no other row changed and refused stays 8.  Required tests on the final commit
+(`par_check -j 2`): `test_ail_pyproof_report`, `test_ail_examples_crate`, `test_ail_tutorial`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`compileall` and `tools/update_manifest.py --check` are clean.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this

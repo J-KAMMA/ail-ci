@@ -246,6 +246,13 @@ print(10 ** 30)
 1000000000000000000000000000000
 ```
 
+A program that needs exact ints by design is built with the flag rather than left to stop at run
+time. `examples/crate/fnvhash` prints u64 hashes above `2**63`, so its README and
+`test_ail_examples_crate.py` build it with `--exact-int`; `lab/compare/src/scar_life/main.py`
+uses `W*H`-bit cell masks and declares the same flag on its first line
+(`# ail-build: --exact-int`), which `lab/pyproof` reads so the census builds it the way it is
+meant to be built.
+
 ## 5. Lists, dicts and strings
 
 <!-- sample: text -->
