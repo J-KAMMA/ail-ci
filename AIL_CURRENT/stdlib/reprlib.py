@@ -47,38 +47,34 @@ _BARE_TYPE_NAMES = (
     "ZeroDivisionError",
 )
 
-_MODULE_TYPE_NAMES = {
-    "deque": "collections.deque",
-    "OrderedDict": "collections.OrderedDict",
-    "defaultdict": "collections.defaultdict",
-    "Counter": "collections.Counter",
-    "UserDict": "collections.UserDict",
-    "UserList": "collections.UserList",
-    "UserString": "collections.UserString",
-    "array": "array.array",
-}
-
-
 def _type_label(value):
     """CPython's `type(value)` text, rebuilt from the class name.
 
-    This compiler exposes only `type(x).__name__`, not the class object, so the module is not
-    readable.  The builtin scalar and container types are recognised by identity, the builtin
-    types the compiler cannot name (a `slice`, a `memoryview`, an exception, ...) by name, and
-    the collections/array classes by name with their module.  Every other class is a class of
-    the program, and CPython prints `__main__` for it.
+    This compiler exposes only `type(x).__name__`, not the class object or its module, so the
+    module is not readable.  The builtin scalar and container types are recognised by identity;
+    the collections classes and `array.array` are told from a program class of the same name by
+    their representation in this runtime - a deque is a flagged list, a Counter/defaultdict a
+    flagged dict, an array the prelude's `_AilArray` - which a class of the program does not have
+    (a class here cannot derive from a builtin), so a program class called `deque` or `Counter`
+    correctly prints `__main__`.  The builtin types the compiler cannot name (a `slice`, a
+    `memoryview`, an exception, ...) are recognised by name.  Every other class is a class of the
+    program, and CPython prints `__main__` for it.
     """
-    name = value.__class__.__name__
+    name = type(value).__name__
     if (type(value) is bool or type(value) is int or type(value) is str
             or type(value) is float or type(value) is complex or type(value) is bytes
             or type(value) is bytearray or type(value) is list or type(value) is tuple
             or type(value) is dict or type(value) is set or type(value) is frozenset
             or type(value) is range):
         return "<class '" + name + "'>"
+    if name == "deque" and isinstance(value, list):
+        return "<class 'collections.deque'>"
+    if (name == "Counter" or name == "defaultdict") and isinstance(value, dict):
+        return "<class 'collections." + name + "'>"
+    if name == "_AilArray":
+        return "<class 'array.array'>"
     if name in _BARE_TYPE_NAMES:
         return "<class '" + name + "'>"
-    if name in _MODULE_TYPE_NAMES:
-        return "<class '" + _MODULE_TYPE_NAMES[name] + "'>"
     return "<class '__main__." + name + "'>"
 
 
@@ -149,7 +145,7 @@ class Repr:
             return self.repr_frozenset(x, level)
         if typename == "deque":
             return self.repr_deque(x, level)
-        if typename == "array":
+        if typename == "_AilArray":
             return self.repr_array(x, level)
         return self.repr_instance(x, level)
 

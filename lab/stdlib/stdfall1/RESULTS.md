@@ -82,6 +82,28 @@ The review's three failing probes now agree with CPython in both builds:
 | `p_reprec3.py` | `recursive_repr` guard with distinct-but-equal values (`[1]` and `[1]`); removal is by identity, so the outer guard survives the inner call | match | match |
 | `p_replim2.py` | `_join` invalid indents: `Odd()` -> `<class '__main__.Odd'>`, `1.5` -> `<class 'float'>`, `[1]` -> `<class 'list'>`, negative int `ValueError`, empty/singleton lists | match | match |
 
+### Fix round (review 1)
+
+`_type_label` no longer guesses the module from the class name: a program class
+called `deque`/`Counter` now prints `__main__`, while a real collections value
+is recognised by its representation in this runtime (a deque is a flagged list,
+a Counter/defaultdict a flagged dict) and `array.array` by its prelude class
+name `_AilArray`. `repr1` dispatches an array to `repr_array` on that same
+name, so a limited array repr is CPython's text instead of `repr_instance`.
+
+| Probe | Covers | Default | Force |
+| --- | --- | --- | --- |
+| `p_typ1.py`, `p_typ2.py` | a program class named `deque` / `Counter` as `Repr(indent=...)`: `<class '__main__.deque'>` / `<class '__main__.Counter'>` (was `collections.*`) | match | match |
+| `r_names.py` | program classes named `deque`, `Counter`, `defaultdict`, `OrderedDict`, `UserDict`, `UserList`, `UserString`, `array` | match | match |
+| `r_real.py` | real `deque`, `Counter`, `defaultdict`, `array` as `Repr(indent=...)`: `collections.*` / `array.array` | match | match |
+| `r_limits.py` | `Odd`, `1.5`, `[1]`, negative int, empty/singleton list indents | match | match |
+| `q_arr.py` | `reprlib.repr(array('i', [1..7]))` and `maxarray=3` | match | match |
+
+`OrderedDict` as `indent=` is refused by the compiler by name ("a collection
+passed as indent= to reprlib__Repr() is not built"), so no real
+`OrderedDict`/`UserDict` can reach `_type_label`; a program class of one of
+those names prints `__main__`.
+
 
 ## What was rewritten, per module
 
@@ -103,11 +125,14 @@ by the compiler and are described in each module docstring.
   removal compare with `is`, so equal-but-distinct objects do not defeat it. The only visible
   difference is concurrent threads, which this runtime does not have. `_join`'s invalid-indent
   message needs CPython's full `type(indent)` text; this compiler exposes only
-  `type(x).__name__`, so `_type_label` rebuilds it from the class name: builtin scalar/container
-  types are recognised by identity and print bare, the builtin types the compiler cannot name
-  (`slice`, `memoryview`, exceptions, ...) and the collections/array classes are recognised by
-  name (`<class 'slice'>`, `<class 'collections.deque'>`), and every other class is a class of
-  the program, printed as `<class '__main__.Name'>`. A class defined in another program module
+  `type(x).__name__`, so `_type_label` rebuilds it: builtin scalar/container types are recognised
+  by identity and print bare, a real collections value and `array.array` are told from a program
+  class of the same name by the runtime representation (a deque is a flagged list, a
+  Counter/defaultdict a flagged dict, an array the prelude class `_AilArray`), the builtin types
+  the compiler cannot name (`slice`, `memoryview`, exceptions, ...) are recognised by name, and
+  every other class - including a program class called `deque` or `Counter` - is a class of the
+  program, printed as `<class '__main__.Name'>`. `repr1` dispatches an array on `_AilArray` too,
+  so `repr_array` applies the `maxarray` limit. A class defined in another program module
   would still be printed as `__main__`; the compiler exposes no module for an instance's class,
   so that one case cannot be made exact.
 - `sched.py`: `threading.RLock` is not available, so the scheduler is not
