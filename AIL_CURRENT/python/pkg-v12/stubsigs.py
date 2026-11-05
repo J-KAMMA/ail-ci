@@ -16,6 +16,18 @@ does not pay for the import.
 
 _SIGS = None
 
+# A stub `int` is int64 in AIL but unbounded in CPython.  These are the entries whose int result
+# leaves int64 for int64 arguments, where the boxed path today prints the exact big value; a
+# checked unbox would stop instead, so they stay boxed.  (`math.gcd` / `math.isqrt` cannot leave
+# int64 for int64 arguments, so they stay typed; see stubcalls.call_type.)
+DENY = {
+    'math.factorial': 'int result leaves int64 from a small int argument',
+    'math.comb': 'int result leaves int64 from small int arguments',
+    'math.perm': 'int result leaves int64 from small int arguments',
+    'math.prod': 'int result leaves int64 from int64 elements',
+    'math.lcm': 'int result leaves int64 from int64 arguments',
+}
+
 
 def lookup(qualname):
     global _SIGS
