@@ -2099,6 +2099,229 @@ _VTARGET = {}
 # `_call_user_func`). The retain/release pair per call was 15% of an LLM-written JSON parser that
 # passes its state struct to a helper per token.
 _BORROWED_PARAMS = {}
+# fclist1: `{fname: frozenset(params)}`, the flat list parameters a function writes element by
+# element (`xs[i] = v`). CPython passes the list object, so the caller sees the stores; such a
+# parameter is passed as a writable pointer into the caller's own buffer. `_scan_written_lists`
+# lists only shapes proven safe; any other written list parameter keeps the read-only refusal.
+_WRITTEN_LISTS = {}
+
+
+def _scan_written_lists(tree, library, entries=()):
+    """The proof for `_WRITTEN_LISTS`. A parameter qualifies when the callee only indexes it
+    (stores only as `xs[i] = v`, never resizing it), takes `len()` of it, iterates it, or hands it
+    to another user function -- never keeps it (no store into a name, field, container, global or
+    closure) and never returns it. Every call to such a function must pass, for each written
+    parameter, a local list of the caller (or the caller's own written parameter) or a fresh list
+    display; and nothing else in the calling expression may read a list (no subscript, no other
+    mention of the passed names, no other call that writes a list), so C's unspecified operand
+    order cannot be observed. Functions used as values, entries, methods and library builds keep
+    the read-only rule."""
+    if library:
+        return {}
+    fns = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    as_value = {n.id for n in ast.walk(tree)
+                if isinstance(n, ast.Name) and n.id in fns and id(n) not in called}
+    parent = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent[id(child)] = node
+    nested = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.Global,
+              ast.Nonlocal, ast.Yield, ast.YieldFrom, ast.Await)
+    facts = {}
+    for f in fns.values():
+        a = f.args
+        if (f.name in as_value or f.name in entries or f.decorator_list or a.vararg or a.kwarg
+                or a.kwonlyargs or a.posonlyargs or a.defaults
+                or any(isinstance(n, nested) and n is not f for n in ast.walk(f))):
+            continue
+        params = [p.arg for p in a.args]
+        stored = {n.id for n in ast.walk(f) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+        ok, direct, passes = set(params) - stored, set(), []
+        for n in ast.walk(f):
+            if not (isinstance(n, ast.Name) and n.id in ok):
+                continue
+            up = parent.get(id(n))
+            if isinstance(up, ast.Subscript) and up.value is n and not isinstance(up.slice, ast.Slice):
+                if isinstance(up.ctx, ast.Load):
+                    continue
+                stmt = parent.get(id(up))
+                if (isinstance(up.ctx, ast.Store) and isinstance(stmt, ast.Assign)
+                        and len(stmt.targets) == 1 and stmt.targets[0] is up):
+                    direct.add(n.id)
+                    continue
+            elif isinstance(up, ast.Call) and any(x is n for x in up.args) and not up.keywords:
+                if isinstance(up.func, ast.Name) and up.func.id == 'len' and len(up.args) == 1:
+                    continue
+                if isinstance(up.func, ast.Name) and up.func.id in fns:
+                    passes.append((up.func.id, next(i for i, x in enumerate(up.args) if x is n), n.id))
+                    continue
+            elif isinstance(up, ast.For) and up.iter is n:
+                continue
+            ok.discard(n.id)
+        facts[f.name] = (params, ok, direct & ok, passes)
+    dropped = set()
+    while True:
+        written = {g: set(fact[2]) for g, fact in facts.items() if g not in dropped}
+        changed = True
+        while changed:
+            changed = False
+            for f, (params, ok, _direct, passes) in facts.items():
+                if f in dropped:
+                    continue
+                for g, k, p in passes:
+                    if g in written and k < len(facts[g][0]) and facts[g][0][k] in written[g]:
+                        if p not in ok:
+                            dropped.add(g)
+                        elif p not in written[f]:
+                            written[f].add(p)
+                            changed = True
+            if any(g in written for g in dropped):
+                break
+        if any(g in written for g in dropped):
+            continue
+        break
+    written = {g: w for g, w in written.items() if w}
+
+    def scope_names(scope):
+        if scope is None:
+            return set(), set()
+        params = {p.arg for p in scope.args.args + scope.args.kwonlyargs + scope.args.posonlyargs}
+        return params, {n.id for n in ast.walk(scope) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+
+    def simple(e):
+        return not any(isinstance(n, (ast.NamedExpr, ast.Lambda, ast.comprehension))
+                       or isinstance(n, ast.Call) and not (isinstance(n.func, ast.Name) and n.func.id == 'len')
+                       for n in ast.walk(e))
+
+    def fresh(e):
+        lit = lambda x: isinstance(x, ast.List) and all(isinstance(y, ast.Constant) for y in x.elts)
+        if lit(e):
+            return True
+        return (isinstance(e, ast.BinOp) and isinstance(e.op, ast.Mult)
+                and (lit(e.left) and simple(e.right) or lit(e.right) and simple(e.left)))
+
+    def check(call, scope):
+        g = call.func.id
+        params = facts[g][0]
+        if call.keywords or len(call.args) != len(params) or any(isinstance(x, ast.Starred) for x in call.args):
+            return False
+        own, local = scope_names(scope)
+        names = set()
+        for k, arg in enumerate(call.args):
+            if params[k] not in written[g]:
+                if not simple(arg):
+                    return False
+                continue
+            if isinstance(arg, ast.Name):
+                if scope is None or arg.id not in own | local:
+                    return False
+                if arg.id in own and arg.id not in written.get(scope.name, ()):
+                    return False
+                if arg.id in own and fns.get(scope.name) is not scope:
+                    return False
+                names.add(arg.id)
+            elif not fresh(arg):
+                return False
+        stmt, up = call, parent.get(id(call))
+        while up is not None and not isinstance(up, ast.stmt):
+            if isinstance(up, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+                               ast.NamedExpr)):
+                return False
+            stmt, up = up, parent.get(id(up))
+        if up is None:
+            return False
+        if isinstance(up, (ast.Expr, ast.Return)):
+            roots = [up.value]
+        elif isinstance(up, ast.Assign):
+            roots = up.targets + [up.value]
+        elif isinstance(up, ast.AugAssign):
+            roots = [up.target, up.value]
+        elif isinstance(up, (ast.If, ast.While)):
+            roots = [up.test]
+        elif isinstance(up, ast.For):
+            roots = [up.target, up.iter]
+        else:
+            return False
+        inside = {id(n) for n in ast.walk(call)}
+        for root in roots:
+            for n in ast.walk(root):
+                if id(n) in inside:
+                    continue
+                if (isinstance(n, (ast.Subscript, ast.NamedExpr, ast.Starred))
+                        or isinstance(n, ast.Name) and n.id in names
+                        or isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in written):
+                    return False
+        return True
+
+    def visit(node, scope):
+        for child in ast.iter_child_nodes(node):
+            if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                    and child.func.id in written and child.func.id not in dropped
+                    and not check(child, scope)):
+                dropped.add(child.func.id)
+            visit(child, child if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else
+                  None if isinstance(child, (ast.ClassDef, ast.Lambda)) else scope)
+
+    visit(tree, None)
+    if dropped & set(written):
+        # a dropped callee can strand a caller's forwarded parameter; recompute without it
+        return _scan_written_lists_retry(tree, library, entries, dropped)
+    return {g: frozenset(w) for g, w in written.items()}
+
+
+def _scan_written_lists_retry(tree, library, entries, dropped):
+    return _scan_written_lists(tree, library, set(entries) | set(dropped))
+
+
+def _hoist_written_list_displays(tree, written):
+    """fclist1: `print(solve(n, 0, [False] * n))` -- a fresh `[c] * k` handed to a written list
+    parameter is bound to a new local right before the statement (`_scan_written_lists` already
+    proved `k` runs no code), so the call passes that local in place. Only statements that run
+    once (an expression, an assignment, a return) are rewritten; any other shape is left alone."""
+    if not written:
+        return
+    counter = [0]
+    fns = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+    def operands_local(e):
+        return all(isinstance(n, (ast.Constant, ast.List, ast.BinOp, ast.UnaryOp, ast.Name, ast.Load,
+                                  ast.operator, ast.unaryop))
+                   for n in ast.walk(e))
+
+    def rewrite(body, scope):
+        out = []
+        for stmt in body:
+            for field in ('body', 'orelse', 'finalbody'):
+                inner = getattr(stmt, field, None)
+                if isinstance(inner, list) and inner and isinstance(inner[0], ast.stmt):
+                    setattr(stmt, field, rewrite(inner, stmt if isinstance(stmt, ast.FunctionDef) else scope))
+            if isinstance(stmt, ast.Try):
+                for h in stmt.handlers:
+                    h.body = rewrite(h.body, scope)
+            if scope is not None and isinstance(stmt, (ast.Expr, ast.Assign, ast.AugAssign, ast.Return)):
+                own = {a.arg for a in scope.args.args}
+                for call in [n for n in ast.walk(stmt) if isinstance(n, ast.Call)
+                             and isinstance(n.func, ast.Name) and n.func.id in written]:
+                    params = [a.arg for a in fns[call.func.id].args.args]
+                    for k, arg in enumerate(call.args):
+                        if (k < len(params) and params[k] in written[call.func.id]
+                                and isinstance(arg, ast.BinOp) and operands_local(arg)
+                                and not any(isinstance(n, ast.Name) and n.id not in own
+                                            and not any(isinstance(m, ast.Name) and m.id == n.id
+                                                        and isinstance(m.ctx, ast.Store)
+                                                        for m in ast.walk(scope))
+                                            for n in ast.walk(arg))):
+                            counter[0] += 1
+                            name = '_ail_fcl%d' % counter[0]
+                            out.append(ast.copy_location(ast.Assign(
+                                targets=[ast.Name(id=name, ctx=ast.Store())], value=arg), stmt))
+                            call.args[k] = ast.copy_location(ast.Name(id=name, ctx=ast.Load()), arg)
+            out.append(stmt)
+        return out
+
+    tree.body = rewrite(tree.body, None)
+    ast.fix_missing_locations(tree)
 
 
 def _scan_borrowed_params(tree, library, entries=()):
@@ -16744,6 +16967,32 @@ def _refuse_int_in_float_slot(node, where):
                       % (where, ast.unparse(node) + '.0' if isinstance(node, ast.Constant) else 'float(%s)' % ast.unparse(node)))
 
 
+def _written_list_argument(arg, fname, pname, kind, ctx):
+    """fclist1: `fname` writes its list parameter `pname` in place (`_WRITTEN_LISTS`), so the
+    argument must be storage the caller owns and CPython would hand over as the same object: a
+    plain local list, this function's own written list parameter, or a fresh list display. Any
+    other shape (a field, a row, a module constant, a copy) keeps the old refusal."""
+    if kind not in ('array', FLIST):
+        raise Unsupported('%s() changes its list parameter %r, which is %s here' % (fname, pname, _a(kind)))
+    if not isinstance(arg, ast.Name):
+        if isinstance(arg, ast.List) or isinstance(arg, ast.BinOp):
+            return
+        raise Unsupported('%s() changes its list parameter %r; pass a local list' % (fname, pname))
+    name = arg.id
+    t = ctx.type_of(name)
+    special = (name in ctx.optional or name in ctx.stdin_unbound or name in ctx.handles
+               or name in ctx.modconsts or name in ctx.tstride or name in ctx.nlist
+               or name in ctx.rowparam or name in ctx.rowof or name in ctx.gridparam
+               or name in ctx.gridrow or name in ctx.blist or name in ctx.strlist
+               or name in ctx.byterow)
+    own = name in getattr(ctx, 'written_lists', ())
+    if special or not (t == LIST and kind == 'array' and name in ctx.locals and not own
+                       or t == 'array' and kind == 'array' and own
+                       or t == FLIST and kind == FLIST and (own or name in ctx.locals)):
+        raise Unsupported('%s() changes its list parameter %r; %r cannot be handed over in place '
+                          'here, so pass a local list' % (fname, pname, name))
+
+
 def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dynamic=None, owned_result=False, grid_result=False,
                     proven_self=False, tuple_result=False, tuple_out=None):
     """The C for calling another compiled function (or method, under its mangled name) by name,
@@ -16813,6 +17062,8 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                 or isinstance(arg, ast.Name) and arg.id in ctx.blist):
             raise _argument_type_error('bytes-list parameter across a function boundary is unsupported; pass joined bytes or an int', fname, params[index][0], index, params[index][1], BLIST)
         pname, kind = params[index]
+        if dynamic is None and pname in _WRITTEN_LISTS.get(fname, ()):
+            _written_list_argument(arg, fname, pname, kind, ctx)
         if _is_map_expr(arg, ctx) and kind != (actual := _map_kind(arg, ctx)):
             raise _argument_type_error('passing a typed dict to a parameter of another kind', fname, pname, index, kind, actual)
         out = []
@@ -25375,6 +25626,13 @@ def _setitem(target, value, ctx, ind):
         if fast is not None:
             return pre + '%sAIL_GS(%s&%s, %s, %s, %s);\n' % (pad, _range_mark(target, ctx), c, k, fast, v)
         return pre + '%sail_list_set(%s&%s, %s, %s);\n' % (pad, _range_mark(target, ctx), c, k, v)
+    if (t == 'array' and name in getattr(ctx, 'written_lists', ()) and name not in ctx.tstride
+            and name not in ctx.gridparam and name not in ctx.byterow):
+        # fclist1: a proven element-written list parameter points into the caller's own buffer
+        # (`_scan_written_lists`); the store is bounds-checked like any list store, never resizes.
+        ctx.parts.add('LIST')
+        return pre + '%sail_list_set(&(ail_list){%s, %s, %s}, %s, %s);\n' % (
+            pad, ctx.cname(name), ctx.alen(name), ctx.alen(name), k, v)
     if t == 'array':
         raise Unsupported('%r is a list parameter, which is read-only; to change it in a '
                           'helper, ' 'keep the list in a struct field and pass the struct (`s.xs[i] = v` and `s.xs.append(v)` work), or build and return a new list' % name)
@@ -29398,7 +29656,8 @@ def signature(params, ctx, name, ret=INT):
             # `const double *`, the exact ABI shape an int records parameter already uses with
             # `int64_t` in place of `double` -- see FROWS in cruntime.py and `ctx.trowsf`.
             ctype = 'double' if p in ctx.trowsf else 'int64_t'
-            decl = 'const %s *%s, int64_t %s' % (ctype, ctx.cname(p), ctx.alen(p))
+            decl = '%s%s *%s, int64_t %s' % (
+                '' if p in getattr(ctx, 'written_lists', ()) else 'const ', ctype, ctx.cname(p), ctx.alen(p))
             if p in ctx.gridparam:
                 decl += ', int64_t %s' % ctx.acols(p)
             if p in ctx.byterow:
@@ -38303,6 +38562,9 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                           % ', '.join(sorted(_MODCONSTS.vars)))
     global _BORROWED_PARAMS
     _BORROWED_PARAMS = _scan_borrowed_params(tree, library, {name, entry})
+    global _WRITTEN_LISTS
+    _WRITTEN_LISTS = _scan_written_lists(tree, library or any(external.values()), {name, entry})
+    _hoist_written_list_displays(tree, _WRITTEN_LISTS)
     # Nested functions (pkg-closure): lifted to ordinary top-level siblings, spliced into
     # `tree.body` immediately before the function that used to contain them, BEFORE anything below
     # inspects `tree.body` -- see the module note above `_lift_nested_functions`. A program with no
@@ -40427,12 +40689,15 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                               for name in g.names if name in ctx.modconsts.vars)
     ctx.bool_names = _BOOLS.locals.get(fn.name, frozenset())
     ctx.bool_lists = _BOOLS.lists.get(fn.name, frozenset())
+    # fclist1: this function's proven element-written list parameters (`_scan_written_lists`)
+    ctx.written_lists = (frozenset() if is_method else _WRITTEN_LISTS.get(fn.name, frozenset()))
     float_params = {name for name, kind in ctx.params if kind == FLIST}
     if float_params:
         ctx.parts.add('FLIST')
         for node in ast.walk(fn):
             if (isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del))
-                    and isinstance(node.value, ast.Name) and node.value.id in float_params):
+                    and isinstance(node.value, ast.Name) and node.value.id in float_params
+                    and not (isinstance(node.ctx, ast.Store) and node.value.id in ctx.written_lists)):
                 raise Unsupported('list[float] parameters are read-only')
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                     and isinstance(node.func.value, ast.Name) and node.func.value.id in float_params
