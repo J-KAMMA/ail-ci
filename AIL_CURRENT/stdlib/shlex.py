@@ -1,5 +1,7 @@
 """G5a: the standard-library `shlex` module (split, quote, join and the `shlex` lexer class).
 
+Derived from CPython 3.12 Lib/shlex.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 A program compiled by AIL finds this file when its own directory has no `shlex.py`
 (`ail_modules.py` searches the bundled `stdlib/` last).  The tokenizer follows CPython 3.12's
 `shlex.py`; a POSIX end-of-file is `None` in `get_token()`, `read_token()` and `eof`, as in

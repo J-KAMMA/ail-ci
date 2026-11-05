@@ -1,5 +1,7 @@
 """A generally useful event scheduler class.
 
+Derived from CPython 3.12 Lib/sched.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 Each instance of this class manages its own queue.
 No multi-threading is implied; you are supposed to hack that
 yourself, or use a single instance per application.
