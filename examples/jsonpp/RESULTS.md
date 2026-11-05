@@ -1,7 +1,7 @@
 # jsonpp results
 
 - Date: 2026-11-05
-- App commit: `80919a5` (`examples/jsonpp/jsonpp.py`, 482 lines)
+- App commit: `8f48578` (`examples/jsonpp/jsonpp.py`, 482 lines)
 - Oracle: CPython 3.12 on the same source
 - Host: GitHub Actions runner, Linux, 4 cores
 
