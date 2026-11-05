@@ -8,7 +8,8 @@ def main() -> None:
     print(math.prod(factors))
     words = [0] * 21
     print(math.factorial(len(words) - 1))
-    print(math.factorial(len(words)))
+    sevens = [7] * 25
+    print(math.prod(sevens), math.factorial(len(words)))
 
 
 main()

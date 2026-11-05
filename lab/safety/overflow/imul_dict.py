@@ -6,7 +6,8 @@ def main() -> None:
     for i in range(58):
         counts["total"] *= 2
     print(counts["total"])
-    counts["total"] *= 2
+    for i in range(1):
+        counts["total"] += counts["total"]
     print(counts["total"])
 
 
