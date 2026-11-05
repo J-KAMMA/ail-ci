@@ -6,4 +6,5 @@ import delta
 
 def run():
     from pkg import leaf
-    return leaf.value() + len(os.sep)
+    import pkg.leaf as dotted
+    return leaf.value() + dotted.value() + len(os.sep)

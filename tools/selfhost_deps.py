@@ -152,8 +152,17 @@ def _path_static(node, file_dir: Path):
     walk(node)
     if base is None or not parts:
         return None
+    if ascend < 0 or ascend > len(file_dir.parents):
+        return None
     directory = file_dir.parents[ascend - 1] if ascend else file_dir
     return directory.joinpath(*parts)
+
+
+def _path_shaped(n) -> bool:
+    """True when an expression is a ``Path(__file__)``-rooted path expression."""
+    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div):
+        return _path_shaped(n.left) or _path_shaped(n.right)
+    return _from_file(n)
 
 
 def _enclosing_scope(tree, lineno: int):
@@ -181,7 +190,10 @@ def _assigned_expr(tree, name: str, lineno: int):
 
 
 def dynamic_imports(tree, file_path: Path):
-    """Yield (line, form, shown value, resolved path or None) for every dynamic import."""
+    """Yield (line, form, shown value, resolved path or None, lost target or None).
+
+    ``lost target`` names a literal module whose ``Path(__file__)``-shaped path could not be
+    evaluated (an out-of-range ``parents[N]``, say)."""
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -190,6 +202,7 @@ def dynamic_imports(tree, file_path: Path):
         if name == "spec_from_file_location":
             path = None
             shown = ""
+            lost = None
             if len(node.args) >= 2:
                 arg = node.args[1]
                 expr = arg
@@ -200,17 +213,21 @@ def dynamic_imports(tree, file_path: Path):
                     shown = ast.unparse(arg)
                 except Exception:
                     shown = "<unparsed>"
-            yield node.lineno, "spec_from_file_location", shown, path
+                if path is None and _path_shaped(expr) and node.args \
+                        and isinstance(node.args[0], ast.Constant) \
+                        and isinstance(node.args[0].value, str):
+                    lost = node.args[0].value
+            yield node.lineno, "spec_from_file_location", shown, path, lost
         elif name in ("__import__", "import_module") and node.args:
             arg = node.args[0]
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                yield node.lineno, name, arg.value, None
+                yield node.lineno, name, arg.value, None, None
             else:
                 try:
                     shown = ast.unparse(arg)
                 except Exception:
                     shown = "<unparsed>"
-                yield node.lineno, name, shown, None
+                yield node.lineno, name, shown, None, None
 
 
 def import_targets(node: ast.AST, module: str, is_pkg: bool, resolver: Resolver):
@@ -222,6 +239,11 @@ def import_targets(node: ast.AST, module: str, is_pkg: bool, resolver: Resolver)
     def add(dotted: str):
         if resolver.resolve(dotted):
             resolved.append(dotted)
+            parts = dotted.split(".")
+            for i in range(1, len(parts)):
+                parent = ".".join(parts[:i])
+                if parent != module and resolver.is_package(parent):
+                    resolved.append(parent)
         elif dotted.split(".")[0] in STDLIB:
             stdlib.append(dotted)
         else:
@@ -233,10 +255,8 @@ def import_targets(node: ast.AST, module: str, is_pkg: bool, resolver: Resolver)
             return
         sub = f"{base}.{name}" if base else name
         if resolver.resolve(sub):
-            resolved.append(sub)
-            if base and base != module and resolver.is_package(base):
-                resolved.append(base)
-        else:
+            add(sub)
+        elif base and base != module:
             add(base)
 
     if isinstance(node, ast.Import):
@@ -422,7 +442,7 @@ def analyse_tree(root: Path, entry: Path):
         is_pkg = path.name == "__init__.py"
         eager, lazy, stdlib, unresolved = scan(tree, name, is_pkg, resolver)
         dynamic = []
-        for line, form, value, dyn_path in dynamic_imports(tree, path):
+        for line, form, value, dyn_path, lost in dynamic_imports(tree, path):
             if form == "spec_from_file_location":
                 target_name = resolver.module_name(dyn_path) if dyn_path is not None and dyn_path.is_file() else None
             else:
@@ -433,6 +453,8 @@ def analyse_tree(root: Path, entry: Path):
                 "value": value,
                 "module": target_name,
             })
+            if lost:
+                unresolved.append(f"{line}:{lost}")
             if target_name and target_name != name:
                 lazy.add(target_name)
         records[name] = {

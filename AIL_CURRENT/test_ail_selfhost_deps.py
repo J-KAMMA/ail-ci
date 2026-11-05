@@ -117,6 +117,20 @@ class SelfhostDepsTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0][3], Path("/repo/AIL_CURRENT/ail_syntax.py"))
 
+    def test_static_path_out_of_range_is_unresolved(self):
+        tool = load_tool()
+        expr = ast.parse(
+            "pathlib.Path(__file__).resolve().parents[99] / 'nothing.py'",
+            mode="eval").body
+        self.assertIsNone(tool._path_static(expr, Path("/repo/AIL_CURRENT")))
+        tree = ast.parse(
+            "import importlib.util\n"
+            "import pathlib\n"
+            "p = pathlib.Path(__file__).resolve().parents[99] / 'nothing.py'\n"
+            "spec = importlib.util.spec_from_file_location('nothing', p)\n")
+        found = list(tool.dynamic_imports(tree, Path("/repo/AIL_CURRENT/demo.py")))
+        self.assertEqual(found, [(4, "spec_from_file_location", "p", None, "nothing")])
+
 
 if __name__ == "__main__":
     unittest.main()
