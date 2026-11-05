@@ -1,3 +1,54 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I have enough. Final report:
+
+## What the change really does
+
+Adds 10 lab programs, `AIL_CURRENT/stdlib/sched.py` (CPython 3.12 `sched` rewritten: sorted list instead of heapq, identity-based `cancel`, `_invoke` arity dispatch, `time` wrappers for defaults), a test, and manifest pins. **No compiler or runtime file is touched** (`git diff --stat work..HEAD` over `ail_chatgpt.py`, `ir/`, `python/`, `packaging/`, `tools/`, `bench/` is empty), so generated C for non-`sched` programs cannot change — confirmed by probe 08 matching on both builds and by `--debug-dir`-free logic. Diff is confined to the permitted file list; `update_manifest.py --check` rc=0.
+
+## Probes (all in /tmp/rprobes, `cmp.sh`, general + default builds)
+
+| probe | what | result |
+|---|---|---|
+| p3_args9 | action with 9 positional args | **DIVERGES**: CPython `act 45/done`; AIL `TypeError sched: more than eight action arguments...` (both builds) |
+| p2b_kwargs | `enterabs(..., kwargs={"b":20})` | **DIVERGES**: CPython `act 10 20/delay 0/done 1`; AIL `TypeError sched: keyword arguments to actions are not built by this compiler` |
+| p1_cancel_equal | `s1.cancel(event_from_s2)` with identical fields | **DIVERGES**: CPython `equal True / cancelled ok / s1 len 0`; AIL `equal False / ValueError ... / s1 len 1` |
+| p4_event_api | Event fields, index, unpack, order, hash | match except `e1.action is len` → False |
+| p5b, p6, p8, p10, p11, p12 | no-arg defaults, delayfunc mutating queue, non-sched program, ordering/cancel/reinsert, 8 args, past+negative times/list argument | all match both builds |
+| p9, p15 | plain tuple/`len` equality, namedtuple `isinstance`/repr, bound method as value | identical on HEAD and `/tmp/base` (pre-existing) |
+
+## Claims in the report
+
+- Event is a real namedtuple (attrs/index/unpack/order) — **verified** (p4).
+- `cancel` removes the event object; queue is a fresh-list property; `scheduler()` defaults work — **verified** (p6, p10, p5b, lab 05 in the passing test).
+- 8/10 build and match in both builds; 01 and 10 refused with the quoted messages — **verified** (test 111.9s OK; exact refusals reproduced).
+- `test_ail_safetynet` OK — **verified** (180.8s OK). Note: it fails S4_generators_gc under `ulimit -v 1500000`; that is my cap, not the change.
+- Manifest check rc=0, commit touches only permitted files — **verified**.
+- "Cancelling another scheduler's event now raises the exact ValueError" — **false in general**: CPython 3.12 `cancel` uses `list.remove` (tuple equality), so a field-equal foreign event is removed, not rejected (p1). Root cause is the compiler's broken function/tuple equality (p9/p15 identical on base), so `sched.py` cannot match CPython here.
+- ">8 args … compiler follow-up" — **misleading**: it is a limit chosen in `sched.py`, not a compiler refusal.
+
+## Defects (fixable in the permitted file)
+
+1. `_invoke` refuses a 9th positional action argument at run time. The dispatch in `AIL_CURRENT/stdlib/sched.py:74-100` stops at 8 although the action could simply be called with more positional arguments; the compiler's refusal is only of `*argument` unpacking, not of arity. Probe `/tmp/rprobes/p3_args9.py` (action `act(a..i)`, `argument=(1,...,9)`): expected CPython `act 45` / `done`; actual `TypeError sched: more than eight action arguments are not built by this compiler` (both builds, exit 0 with the TypeError caught; uncaught it exits 1).
+
+Known, documented divergences (needs compiler files, recorded in RESULTS.md; not counted against the module): `kwargs=` actions raise `TypeError` instead of being called (p2b), and bound-method actions still hit `AttributeError` (p13=p15 on base). Pre-existing (identical on base): function/tuple equality, `isinstance(tuple)`, function repr — p1/p4/p9/p13/p14/p15.
+
+Not checked: instruction counts (no compiler/runtime change); per-program `typed` vs `general` classification; behaviour at thousands of events (sorted-list insert is O(n) vs CPython's heap).
+
+VERDICT: FIX
+
+1. **9+ positional action arguments**: `/tmp/rprobes/p3_args9.py` — expected `act 45` + `done`; actual `TypeError sched: more than eight action arguments are not built by this compiler` in both builds. Extend the `_invoke` dispatch (or make the limit a compile-time refusal).
+[commandcode stop=end_turn turns=28 out_tokens=37129]
+
+
+--- ORIGINAL TASK ---
 Lane: sched
 
 # sched1: `import sched` in compiled programs, shipped as AIL source (`AIL_CURRENT/stdlib/sched.py`)
