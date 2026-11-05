@@ -23,7 +23,7 @@ Every number below is copied from a committed result file, linked on the same li
 
 ## Safety
 
-- Integers are int64. Out-of-range arithmetic stops with a named error instead of wrapping: the corpus run records 4 overflow stops among 338 runs. [source: lab/corpus/RESULTS.md](../lab/corpus/RESULTS.md)
+- Integers are int64. Out-of-range arithmetic stops with a named error instead of wrapping: the corpus run records 4 overflow stops and 338 outputs matching CPython. [source: lab/corpus/RESULTS.md](../lab/corpus/RESULTS.md)
 - Five exact-big-integer programs build and print exactly what CPython prints, 5/5 equal. [source: lab/bigbench/RESULTS.md](../lab/bigbench/RESULTS.md)
 - All 40 refusal programs in the errux corpus use a clean status (exit 2 or 3), never a Python traceback or a C compiler error. [source: lab/errux/RESULTS.md](../lab/errux/RESULTS.md)
 - An 8-byte unsigned `int.from_bytes` leaves int64 and stops with `OverflowError`, not a wrong value. [source: lab/stdlib/hashlib/RESULTS.md](../lab/stdlib/hashlib/RESULTS.md)
@@ -53,7 +53,6 @@ Every number below is copied from a committed result file, linked on the same li
 Two committed files disagree on the same measure, so neither figure is a claim here. [source: docs/ROADMAP.md](ROADMAP.md) [source: docs/COMPARISON.md](COMPARISON.md)
 
 - Wall time: docs/ROADMAP.md says 2.1× faster than the best other, while docs/COMPARISON.md says 1.00x. [source: docs/ROADMAP.md](ROADMAP.md) [source: docs/COMPARISON.md](COMPARISON.md)
-- Build disk: docs/ROADMAP.md says 10× smaller than the best other, while one `csv_rollup` task measures 9.50x larger than C. [source: docs/ROADMAP.md](ROADMAP.md) [source: lab/compare_cand/RESULTS.md](../lab/compare_cand/RESULTS.md)
 
 ## Summary
 
