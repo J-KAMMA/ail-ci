@@ -5380,7 +5380,8 @@ class _RecordTransformer(ast.NodeTransformer):
                     raise _RecordUnsupported()
                 left = self.visit(node.left)
                 field = self._field(self._row_slot(row), 0)
-                return _r_cmp(left, node.ops[0], field)
+                row_value = ast.List(elts=[field], ctx=ast.Load())
+                return _r_cmp(left, node.ops[0], row_value)
         node.left = self.visit(node.left)
         node.comparators = [self.visit(item) for item in node.comparators]
         return node
@@ -5439,7 +5440,7 @@ class _RecordTransformer(ast.NodeTransformer):
         if row is not None:
             if self.arity != 1:
                 raise _RecordUnsupported()
-            value = self._field(self._row_slot(row), 0)
+            value = ast.List(elts=[self._field(self._row_slot(row), 0)], ctx=ast.Load())
             if inject:
                 temp = self.fresh('_riter')
                 return _r_load(temp), target, [_r_assign(_r_store(temp), value)], []

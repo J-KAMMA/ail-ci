@@ -133,6 +133,51 @@ DEL_ALIAS = '''def main():
 main()
 '''
 
+ARITY1_ITER = '''def main():
+    d = {}
+    d[1] = [5]
+    d[2] = [6]
+    for x in d[1]:
+        print(x)
+    for key, row in d.items():
+        for v in row:
+            print(key, v)
+    for item in d.values():
+        for w in item:
+            print("v", w)
+    r = d.get(1)
+    for y in r:
+        print("g", y)
+
+
+main()
+'''
+
+ARITY1_CONTAINS = '''def main():
+    d = {}
+    d[1] = [5]
+    d[2] = [6]
+    print(5 in d[1], 3 in d[1], 5 not in d[1], len(d[1]))
+    r = d.get(1)
+    print(5 in r, 3 in r)
+    for key, row in d.items():
+        print(key, 5 in row, 6 in row)
+
+
+main()
+'''
+
+ARITY1_STR = '''def main():
+    d = {}
+    d[1] = ["abc"]
+    for x in d[1]:
+        print(x)
+    print("abc" in d[1], "a" in d[1], "ab" not in d[1], len(d[1]))
+
+
+main()
+'''
+
 SORTED_ITEMS_NO_KEY = '''def main():
     d = {}
     d[2] = ["b", 1, True]
@@ -259,6 +304,19 @@ class PyreachDictRows(unittest.TestCase):
     def test_alias_survives_del(self):
         self._typed('del_alias', DEL_ALIAS, 'a 6 True 0\n')
         self._both('del_alias', DEL_ALIAS, 'a 6 True 0\n')
+
+    def test_arity_one_rows_iterate_as_one_element_lists(self):
+        expected = '5\n1 5\n2 6\nv 5\nv 6\ng 5\n'
+        self._typed('arity1_iter', ARITY1_ITER, expected)
+        self._both('arity1_iter', ARITY1_ITER, expected)
+
+    def test_arity_one_row_membership_uses_the_one_element_row(self):
+        expected = 'True False False 1\nTrue False\n1 True False\n2 False True\n'
+        self._both('arity1_contains', ARITY1_CONTAINS, expected)
+
+    def test_arity_one_str_row_iterates_once_and_compares_whole_value(self):
+        expected = 'abc\nTrue False True 1\n'
+        self._both('arity1_str', ARITY1_STR, expected)
 
     def test_items_sort_without_key_refuses(self):
         with tempfile.TemporaryDirectory(prefix='ail-s5-') as tmp:

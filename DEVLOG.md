@@ -1,3 +1,15 @@
+## 2026-11-05 -- rbpyreachs5c review fix: arity-1 rows are one-element lists (job-rbpyreachs5c_rr1-11051128)
+
+The review of 6d2ed1f3 found that a one-element record row (`d[k] = [v]`) was lowered to its
+scalar field wherever CPython sees the row as a list: `for x in d[k]` iterated the scalar
+(`TypeError` for int, one character at a time for str), and `x in d[k]` tested the scalar instead
+of the one-element row (`TypeError`, or wrong str membership: `"a" in ["abc"]` must be False).
+`_for_iter` now iterates `[field]` and `visit_Compare` compares against `[field]`, so both match
+CPython; arity > 1 keeps the existing refusal. `test_ail_pyreach_dictrows` gains three regression
+tests (iteration via `d[k]`, `d.items()` and `d.values()`; membership via `d[k]`, `d.get(k)` and
+`d.items()`; and a str row) run on both builds. `tools/diff_ids.py` is still absent, so only
+`update_manifest.py` ran; `--check` passes.
+
 ## 2026-11-05 -- rbpyreachs5c re-run: pyreachs5c on the current tree (job-rbpyreachs5c_rr1-11051128)
 
 The previous review of rbpyreachs5c ended ERROR (reviewer permission_denied), so its re-apply
