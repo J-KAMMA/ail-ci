@@ -1,3 +1,19 @@
+## 2026-11-05 -- pyreach s7 review fix 3b: share-safe row sources are not refused
+
+The repeated/loop-invariant row-source refusal in `nested_lists` also caught sources that never
+lose Python identity, breaking `test_ail_stdlib5` (`calendar` slices), `test_ail_stdlib_batch3`
+(`chain.from_iterable([xs, ys, xs])`) and `test_ail_stdlib_batch4` (`csv`'s
+`rows.append(fields); fields = []`).  A slice is a fresh list at every evaluation, a rows list a
+lowering pass built itself (`_ail_synth` pool) is read-only machinery, and a source rebound after
+its row is a new list, so none of these are refused now.  Rebinding state is tracked per statement
+block with both branches of an `if` merged (a source wrapped on either path stays flagged), so
+`rows.append(r); if c: r = []; rows.append(r)` is still refused.  Two regression cases in
+`test_ail_nested_lists` still pass.
+
+`test_ail_stdlib5`, `test_ail_stdlib_batch3`, `test_ail_stdlib_batch4`, `test_ail_nested_lists`,
+`test_ail_prog5`, `test_ail_pyperf_lab`, `test_ail_safetynet` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` exit 0.
+
 ## 2026-11-05 -- pyreach s7 review fix 3: repeated row objects stay off the typed path
 
 Review found that the previous row-list exemption was too broad: `nested_lists` copies a plain
