@@ -59,7 +59,7 @@ sort-key columns, which are not `list[int]` and are outside (a). The tracked sum
 Other programs, same method (full table in `NARROW.json`, 38 rows ≥ 1 MiB): berth_sim 260.7 MiB
 (six 32 MiB ints, widths int8…int32), echo_pack 244.1 MiB, ledger_bin 186.0 MiB (two key columns are
 int64: 4,294,949,410), rail_transfer 23.9 MiB, term_rank 27.0 MiB, ticket_audit 1.4 MiB, chain_relax
-2.3 MiB, scar_life/tally_lang < 0.1 MiB, and the four pointer-graph rc programs (binarytrees, cfold,
+2.3 MiB, scar_life/tally_lang < 0.1 MiB, and the six pointer-graph rc programs (binarytrees, cfold,
 deriv, linkedlist, objscan, rbtree) have no `list[int]` buffers at all.
 
 ## (b) Scratch copy with int32 buffers, measured against the plain build
