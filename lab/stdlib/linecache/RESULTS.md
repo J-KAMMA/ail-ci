@@ -65,10 +65,16 @@ Result after: **10 built, 0 typed, 0 refused; 10 build and match**.
   `st_mtime`. `08_checkcache_rewrite.py` changes the file's size as well, so both implementations
   drop the entry. Because the comparison uses that private snapshot rather than the list in the
   cache, a caller that mutates the list returned by `getlines` keeps its mutation across
-  `checkcache`, as in CPython. A file that still exists but can no longer be opened keeps its
-  entry, matching `os.stat` succeeding in CPython.
-* The cache entry keeps CPython's `(size, mtime, lines, fullname)` shape with `size` the number
-  of characters read and `mtime` always `0` (`None` inside a tuple is not built).
+  `checkcache`, as in CPython. An entry replaced in `cache` after it was filled is dropped, and
+  an entry whose file can no longer be decoded as UTF-8 is dropped, as CPython drops it when
+  `st_size` or `st_mtime` moved. A file that still exists but can no longer be opened (no read
+  permission) keeps its entry, matching `os.stat` succeeding in CPython. An entry installed with
+  `mtime is None` (as a loader would) is left alone, and a one-element lazy entry is skipped,
+  both as in CPython.
+* The cache entry keeps CPython's `(size, mtime, lines, fullname)` shape. `size` is the number
+  of characters read, not counting the `"\n"` added to a last line that lacked one (CPython
+  records `st_size`, in bytes); `mtime` is `0` for entries the module fills. Tuples do hold
+  `None`, so a seeded entry keeps whatever `mtime` it was given.
 * No `sys.path` search for a relative filename that is not in the working directory.
 * `lazycache` and the `module_globals` loader path are dropped (no module loader); the argument
   is accepted and ignored.

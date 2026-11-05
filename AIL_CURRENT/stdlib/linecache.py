@@ -13,18 +13,24 @@ Behaviour differences from CPython, each forced by what the compiler builds:
   coding cookie and a UTF-8 BOM; here a file that is not UTF-8 is read as UTF-8 and a decode
   error gives the empty result, where CPython decodes it.
 * `os.stat` is not built, so freshness is the file's *content*: `checkcache` re-reads the file
-  and compares it with a snapshot of the lines taken when the entry was filled, and drops the
-  entry when the content differs or the path is no longer a readable regular file, where CPython
-  compares `st_size` and `st_mtime` and drops only when `os.stat` fails or either value moved.  A
-  rewrite that leaves the content identical is a hit here (CPython would drop the entry on a
-  changed mtime); a rewrite to different content of the same size is a miss here (CPython would
-  keep the entry when the mtime has not moved).  The comparison uses that private snapshot, not
-  the list in the cache, so a caller that mutates the list returned by `getlines` keeps its
-  mutation across `checkcache`, as in CPython.  A file that still exists but can no longer be
-  opened keeps its entry, matching `os.stat` succeeding in CPython.
-* The entry tuple keeps CPython's shape `(size, mtime, lines, fullname)`; `size` is the number
-  of characters read and `mtime` is always `0` (there is no mtime to record, and `None` inside
-  a tuple is not built).  A `MemoryError` from a huge file is not caught in `getlines`.
+  and compares it with a snapshot of the lines taken when the entry was filled.  It drops the
+  entry when the content differs, when the entry in `cache` was replaced after it was filled,
+  when the path is no longer a readable regular file, or when the file can no longer be decoded
+  as UTF-8.  CPython compares `st_size` and `st_mtime` and drops only when `os.stat` fails or
+  either value moved.  A rewrite that leaves the content identical is a hit here (CPython would
+  drop the entry on a changed mtime); a rewrite to different content of the same size is a miss
+  here (CPython would keep the entry when the mtime has not moved).  The comparison uses that
+  private snapshot, not the list in the cache, so a caller that mutates the list returned by
+  `getlines` keeps its mutation across `checkcache`, as in CPython.  A file that still exists
+  but can no longer be opened keeps its entry, matching `os.stat` succeeding in CPython.  An
+  entry with `mtime is None` (installed by a caller, as a loader would) is left alone, and a
+  one-element lazy entry is skipped, both as in CPython.
+* The entry tuple keeps CPython's shape `(size, mtime, lines, fullname)`.  `size` is the number
+  of characters read, not counting the `"\n"` this module adds to a last line that lacked one
+  (CPython records the file's `st_size`, which is in bytes), and `mtime` is `0` for entries this
+  module fills because there is no mtime to record.  Tuples do hold `None`, so an entry seeded
+  directly in `cache` keeps whatever `mtime` it was given.  A `MemoryError` from a huge file is
+  not caught in `getlines`.
 * A relative filename that is not found is not looked up through `sys.path` (`sys.path` used as
   a plain value is not in the subset); `updatecache` returns `[]` instead.  A filename that is
   relative to the working directory still works.
@@ -40,8 +46,9 @@ __all__ = ["getline", "getlines", "clearcache", "checkcache", "updatecache", "ca
 
 cache = {}
 
-# The lines of each `cache` entry as they were when it was filled, used by `checkcache` so that
-# a mutation of the list the caller received does not make the entry look out of date.
+# Each `cache` entry as it was when this module filled it, paired with a copy of its lines.
+# `checkcache` uses the pair so that a mutation of the list the caller received does not make
+# the entry look out of date, while a replacement of the entry itself is noticed.
 _snapshots = {}
 
 
@@ -75,17 +82,30 @@ def getlines(filename: str, module_globals=None):
 
 
 def _read_lines(fullname: str):
-    """The normalised lines of `fullname`, or None when the file cannot be read."""
+    """Read `fullname` as UTF-8.
+
+    Returns `(status, lines, size)`.  Status 1 means `lines` are the normalised lines and
+    `size` is the number of characters read before a final newline was added; status 0 means
+    the file cannot be opened; status 2 means the file exists but is not valid UTF-8.
+    """
     if not os.path.isfile(fullname):
-        return None
+        return 0, None, 0
     try:
         with open(fullname, encoding="utf-8") as fp:
             lines = fp.readlines()
-    except (OSError, ValueError):
-        return None
+    except (UnicodeDecodeError, ValueError):
+        # The typed runtime raises UnicodeDecodeError and the general path raises its parent
+        # ValueError with the same text; the only ValueError `open` raises here is a decode
+        # failure, the mode and encoding being fixed.
+        return 2, None, 0
+    except OSError:
+        return 0, None, 0
+    size = 0
+    for line in lines:
+        size += len(line)
     if lines and not lines[-1].endswith("\n"):
         lines[-1] += "\n"
-    return lines
+    return 1, lines, size
 
 
 def _drop(filename: str):
@@ -111,21 +131,29 @@ def checkcache(filename=None):
     for filename in filenames:
         entry = cache[filename]
         if len(entry) == 1:
+            # A lazy entry, leave it lazy.
             continue
         size, mtime, lines, fullname = entry
-        fresh = _read_lines(fullname)
-        if fresh is None:
+        if mtime is None:
+            # No stat was recorded (an entry seeded by a loader), leave it alone.
+            continue
+        status, fresh, fresh_size = _read_lines(fullname)
+        if status == 2:
+            # The file exists but is no longer valid UTF-8: its content cannot be used.
+            _drop(filename)
+            continue
+        if status == 0:
             # The content cannot be read now.  CPython's os.stat still succeeds for a file
             # that exists but cannot be opened (no read permission), so keep the entry; drop
             # it only when the path is gone or is no longer a regular file.
             if not os.path.isfile(fullname):
                 _drop(filename)
             continue
-        if filename in _snapshots:
-            snapshot = _snapshots[filename]
-        else:
-            snapshot = None
-        if snapshot is None or fresh != snapshot:
+        if filename not in _snapshots:
+            _drop(filename)
+            continue
+        snapshot_entry, snapshot_lines = _snapshots[filename]
+        if snapshot_entry != entry or fresh != snapshot_lines:
             _drop(filename)
 
 
@@ -141,14 +169,10 @@ def updatecache(filename: str, module_globals=None):
         return []
 
     fullname = filename
-    if not os.path.isfile(fullname):
+    status, lines, size = _read_lines(fullname)
+    if status != 1:
         return []
-    lines = _read_lines(fullname)
-    if lines is None:
-        return []
-    size = 0
-    for line in lines:
-        size += len(line)
-    cache[filename] = size, 0, lines, fullname
-    _snapshots[filename] = list(lines)
+    entry = (size, 0, lines, fullname)
+    cache[filename] = entry
+    _snapshots[filename] = (entry, list(lines))
     return lines
