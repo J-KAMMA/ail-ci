@@ -172,7 +172,7 @@ def main(argv=None):
     # 1. final version
     if version_error:
         add(1, "version", "FAIL", version_error)
-    elif re.search(r"[.\-+]?(?:a|b|rc|dev)\d*", version):
+    elif re.search(r"(?:^|[.\-]|(?<=\d))(?:dev|a|b|rc)\d*", version.split("+", 1)[0]):
         add(1, "version", "FAIL", "%s is a development version" % version)
     else:
         add(1, "version", "PASS", "%s is a final release" % version)
@@ -184,7 +184,7 @@ def main(argv=None):
     elif version is None:
         add(2, "changelog", "FAIL", "cannot look up a version heading without a version")
     else:
-        heading = re.search(r"^#{1,6}\s+.*(?:\[|\b)%s(?:\)|\b|\])" % re.escape(version), changelog, re.M)
+        heading = re.search(r"^#{1,6}\s+.*?(?<![\w.])v?%s(?![\w.])" % re.escape(version), changelog, re.M)
         if heading:
             add(2, "changelog", "PASS", "CHANGELOG.md has a heading for %s" % version)
         else:
@@ -280,7 +280,7 @@ def main(argv=None):
         add(9, "tag", "FAIL", "cannot check the tag without a version")
     else:
         tag = "v" + version
-        tagged = git(repo, "rev-parse", "-q", "--verify", "refs/tags/" + tag)
+        tagged = git(repo, "rev-parse", "-q", "--verify", "refs/tags/%s^{commit}" % tag)
         if tagged.returncode != 0:
             add(9, "tag", "PASS", "no tag %s yet" % tag)
         else:

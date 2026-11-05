@@ -112,6 +112,38 @@ class ReleaseCheckFixture(unittest.TestCase):
         self.assertTrue(row.startswith('PASS'), row)
         self.assertIn('0.1.0 is a final release', row)
 
+    def test_changelog_rejects_prerelease_heading_for_final_version(self):
+        self.add_final_version()
+        self.write('CHANGELOG.md', '# Changelog\n\n## 0.1.0.dev0\n\n- Pre-release.\n')
+        self.commit('pre-release heading')
+        row = self.statuses(self.run_check())[2]
+        self.assertTrue(row.startswith('FAIL'), row)
+        self.assertIn('no heading for 0.1.0', row)
+
+    def test_changelog_accepts_v_prefixed_heading(self):
+        self.add_final_version()
+        self.write('CHANGELOG.md', '# Changelog\n\n## v0.1.0\n\n- Release.\n')
+        self.commit('v-prefixed heading')
+        row = self.statuses(self.run_check())[2]
+        self.assertTrue(row.startswith('PASS'), row)
+        self.assertIn('has a heading for 0.1.0', row)
+
+    def test_local_version_label_is_a_final_release(self):
+        for version in ('0.1.0+local', '0.1.0+ubuntu'):
+            self.write('packaging/ail_lang/__init__.py', '__version__ = "%s"\n' % version)
+            self.commit('local version ' + version)
+            row = self.statuses(self.run_check())[1]
+            self.assertTrue(row.startswith('PASS'), row)
+            self.assertIn('%s is a final release' % version, row)
+
+    def test_annotated_release_tag_on_main_passes(self):
+        self.make_release_ready()
+        self.git('tag', '-a', 'v0.1.0', '-m', 'release')
+        result = self.run_check('--remote', '')
+        row = self.statuses(result)[9]
+        self.assertTrue(row.startswith('PASS'), row)
+        self.assertIn('points at main', row)
+
     def test_missing_p0_merge_fails_and_names_the_job(self):
         result = self.run_check()
         row = self.statuses(result)[5]
