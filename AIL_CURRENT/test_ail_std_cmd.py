@@ -11,6 +11,11 @@ stops loudly on an int beyond int64, which the task allows.
 Nine of the ten programs are expected to match.  The tenth, 09_calculator.py, is built and run
 only to check that the overflow is loud (non-zero exit), because CPython prints the arbitrary
 precision value.
+
+Three extra probes pin the dispatch semantics the module gets right without a base-class stub:
+an unimplemented command falls through to `default()` (and `emptyline()` repeats it),
+`parseline('!ls')` keeps `!ls` when there is no `do_shell`, and `hasattr`/`get_names` report
+only the commands the subclass really defines.
 """
 import os
 import shutil
@@ -114,6 +119,68 @@ class StdlibCmdTests(unittest.TestCase):
                                      capture_output=True, timeout=120)
                 self.assertNotEqual(ran.returncode, 0)
                 self.assertIn(b"OverflowError", ran.stderr)
+
+    def test_dispatch_semantics(self):
+        probes = {
+            "default_fallback.py": """import cmd
+class D(cmd.Cmd):
+    def do_echo(self, arg):
+        print("echo:", arg)
+    def do_EOF(self, arg):
+        return True
+s = D()
+print("has add", hasattr(s, 'do_add'))
+print("has shell", hasattr(s, 'do_shell'))
+s.onecmd("echo a")
+s.onecmd("")
+s.onecmd("ping")
+s.onecmd("")
+s.onecmd("EOF")
+""",
+            "parseline.py": """import cmd
+class C(cmd.Cmd):
+    def do_EOF(self, arg):
+        return True
+s = C()
+for line in ["!ls", "?", "x?", "!"]:
+    print("parsed", repr(s.parseline(line)))
+s.onecmd("!ls")
+""",
+            "names.py": """import cmd
+class E(cmd.Cmd):
+    def do_greet(self, arg):
+        pass
+    def do_EOF(self, arg):
+        return True
+s = E()
+print("do_add", hasattr(s, 'do_add'))
+print("do_greet", hasattr(s, 'do_greet'))
+print("names", s.get_names())
+""",
+        }
+        for name, text in probes.items():
+            work = self.dir / ("probe_" + name.replace(".py", ""))
+            work.mkdir(exist_ok=True)
+            program = work / name
+            program.write_text(text)
+            expected = run_cpython(program, b"")
+            for mode, extra in (("default", {}), ("unified", {"AIL_UNIFIED_FORCE": "1"})):
+                with self.subTest(probe=name, build=mode):
+                    env = dict(os.environ, AIL_NO_CACHE="1", **extra)
+                    env.pop("PYTHONPATH", None)
+                    exe = work / (name.replace(".py", "") + "." + mode + ".out")
+                    built = subprocess.run([sys.executable, "-B", CLI, "compile",
+                                            str(program), "-o", str(exe)],
+                                           cwd=str(work), capture_output=True, text=True,
+                                           timeout=600, env=env)
+                    self.assertEqual(built.returncode, 0,
+                                     "%s %s\n%s%s" % (name, mode, built.stdout, built.stderr))
+                    ran = subprocess.run([str(exe)], cwd=str(work), input=b"",
+                                         capture_output=True, timeout=120)
+                    self.assertEqual(ran.returncode, expected.returncode,
+                                     "%s %s exit\nexpected stderr: %s\nactual stderr: %s"
+                                     % (name, mode, expected.stderr, ran.stderr))
+                    self.assertEqual(ran.stdout, expected.stdout, "%s %s" % (name, mode))
 
 
 if __name__ == "__main__":

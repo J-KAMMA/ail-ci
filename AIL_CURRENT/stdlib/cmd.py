@@ -8,18 +8,33 @@ prints them.  It differs only where this compiler refuses a value: `sys.stdin` a
 `sys.stdout` are not stored as fields, so input is read with `input()` (or
 `sys.stdin.readline()` at the call site) and output is written with `sys.stdout.write()` at
 the call site.  The `stdin`/`stdout` constructor arguments are stored as in CPython, but the
-process streams are always used: `input()` when `use_rawinput` is true, `sys.stdin.readline()`
-when it is false, and `sys.stdout` for output.  Readline completion is not available in a
-single-file program, so `complete()` is a stub that returns None.  This compiler has no
-`dir()` and an AIL class exposes neither `__dict__` nor `__mro__`, so `get_names()` cannot
-list a subclass's methods.  Instead the module declares `do_*`/`help_*` stubs for a fixed
-vocabulary of common command names, and `get_names()` returns the matching names from that
-vocabulary in CPython's sorted order.  A `getattr()` whose name is only known at run time
-cannot call a method here, so `onecmd()` dispatches through literal `getattr(self,
-'do_name')` calls over the same vocabulary.  Because a method's `__doc__` cannot be read,
-`do_help()` lists every vocabulary command as documented and detailed help comes from
-`help_*` methods; a docstring-only command prints `*** No help on <name>`.  Commands named
-outside the vocabulary are neither dispatched nor listed.
+process streams are always used: `input()` when `use_rawinput` is true,
+`sys.stdin.readline()` when it is false, and `sys.stdout` for output.  Readline completion
+is not available in a single-file program, so `complete()` is a stub that returns None.
+
+Reflection needs a word of explanation.  This compiler has no `dir()` and an AIL class
+exposes neither `__dict__` nor a method as a value, so `get_names()` cannot ask the class
+for its methods and `getattr(obj, name)` with a name computed at run time cannot find a
+method.  Two things work, and the module is built on them:
+
+* `hasattr(obj, name)` accepts a computed `name`, and the compiler answers it by matching
+  the name against the methods of every class in the program (a literal `hasattr` is the
+  same test for one name).  That answer is exact, including whether a class overrides a
+  name it inherits.
+* An attribute call on a parameter whose type is unknown -- `o.do_x(arg)` in a module-level
+  helper -- is compiled to a run-time check against every class that defines `do_x`, so it
+  dispatches to the subclass's own method.  A literal name is required, which is why the
+  module spells one small helper per command name.
+
+The helpers refer to a private `_Stubs` class that is not a base of `Cmd`; it exists only so
+that the compiler sees a definition of each name and accepts the helpers.  Because `Cmd`
+does not inherit it and no program instantiates it, `hasattr(self, 'do_x')` is false for a
+subclass that does not implement `do_x`, `parseline('!ls')` keeps `!ls` when there is no
+`do_shell`, and `onecmd()` falls through to `default()` for an unimplemented name, exactly
+as CPython does.  `_COMMAND_NAMES` is the fixed vocabulary the module can spell this way;
+a `do_*` method outside it is not dispatched or listed.  A method's `__doc__` cannot be
+read, so the `help` table lists every `do_*` command as documented and `help <name>` with
+no `help_<name>` method prints `*** No help on <name>`.
 """
 
 import sys
@@ -29,8 +44,8 @@ __all__ = ["Cmd"]
 PROMPT = '(Cmd) '
 IDENTCHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'
 
-
-_CANDIDATE_NAMES = (
+# The command names the module can dispatch: one module-level helper each (below).
+_COMMAND_NAMES = (
     'EOF',
     'add',
     'alpha',
@@ -43,6 +58,232 @@ _CANDIDATE_NAMES = (
     'secret',
     'shell',
 )
+
+# dir(Cmd) minus the names a subclass adds: object's attributes, Cmd's methods and class
+# attributes.  `dir()` itself is refused, so this fixed list stands in for it.  Subclass
+# commands found by `hasattr()` are added to it by get_names().
+_BASE_NAMES = (
+    '__class__',
+    '__delattr__',
+    '__dict__',
+    '__dir__',
+    '__doc__',
+    '__eq__',
+    '__format__',
+    '__ge__',
+    '__getattribute__',
+    '__getstate__',
+    '__gt__',
+    '__hash__',
+    '__init__',
+    '__init_subclass__',
+    '__le__',
+    '__lt__',
+    '__module__',
+    '__ne__',
+    '__new__',
+    '__reduce__',
+    '__reduce_ex__',
+    '__repr__',
+    '__setattr__',
+    '__sizeof__',
+    '__str__',
+    '__subclasshook__',
+    '__weakref__',
+    'cmdloop',
+    'columnize',
+    'complete',
+    'complete_help',
+    'completedefault',
+    'completenames',
+    'default',
+    'do_help',
+    'doc_header',
+    'doc_leader',
+    'emptyline',
+    'get_names',
+    'identchars',
+    'intro',
+    'lastcmd',
+    'misc_header',
+    'nohelp',
+    'onecmd',
+    'parseline',
+    'postcmd',
+    'postloop',
+    'precmd',
+    'preloop',
+    'print_topics',
+    'prompt',
+    'ruler',
+    'undoc_header',
+    'use_rawinput',
+)
+
+
+class _Stubs:
+    """Compile-time definitions of the command names; never instantiated.
+
+    `Cmd` does not inherit this class.  It only gives the compiler a definition for each
+    name used by the helper functions below, so that `o.do_add(arg)` on an untyped `o` is
+    accepted and compiled to a run-time check against the classes that really define it.
+    """
+
+    def __init__(self):
+        self.ready = 0
+
+    def do_EOF(self, arg):
+        pass
+
+    def do_add(self, arg):
+        pass
+
+    def do_alpha(self, arg):
+        pass
+
+    def do_count(self, arg):
+        pass
+
+    def do_echo(self, arg):
+        pass
+
+    def do_greet(self, arg):
+        pass
+
+    def do_num(self, arg):
+        pass
+
+    def do_ping(self, arg):
+        pass
+
+    def do_secret(self, arg):
+        pass
+
+    def do_shell(self, arg):
+        pass
+
+    def help_EOF(self):
+        pass
+
+    def help_add(self):
+        pass
+
+    def help_alpha(self):
+        pass
+
+    def help_count(self):
+        pass
+
+    def help_echo(self):
+        pass
+
+    def help_greet(self):
+        pass
+
+    def help_help(self):
+        pass
+
+    def help_num(self):
+        pass
+
+    def help_ping(self):
+        pass
+
+    def help_secret(self):
+        pass
+
+    def help_shell(self):
+        pass
+
+
+# One helper per name: an untyped receiver makes the compiler dispatch to the class that
+# defines the method at run time.
+def _call_do_EOF(o, arg):
+    return o.do_EOF(arg)
+
+
+def _call_do_add(o, arg):
+    return o.do_add(arg)
+
+
+def _call_do_alpha(o, arg):
+    return o.do_alpha(arg)
+
+
+def _call_do_count(o, arg):
+    return o.do_count(arg)
+
+
+def _call_do_echo(o, arg):
+    return o.do_echo(arg)
+
+
+def _call_do_greet(o, arg):
+    return o.do_greet(arg)
+
+
+def _call_do_help(o, arg):
+    return o.do_help(arg)
+
+
+def _call_do_num(o, arg):
+    return o.do_num(arg)
+
+
+def _call_do_ping(o, arg):
+    return o.do_ping(arg)
+
+
+def _call_do_secret(o, arg):
+    return o.do_secret(arg)
+
+
+def _call_do_shell(o, arg):
+    return o.do_shell(arg)
+
+
+def _call_help_EOF(o):
+    return o.help_EOF()
+
+
+def _call_help_add(o):
+    return o.help_add()
+
+
+def _call_help_alpha(o):
+    return o.help_alpha()
+
+
+def _call_help_count(o):
+    return o.help_count()
+
+
+def _call_help_echo(o):
+    return o.help_echo()
+
+
+def _call_help_greet(o):
+    return o.help_greet()
+
+
+def _call_help_help(o):
+    return o.help_help()
+
+
+def _call_help_num(o):
+    return o.help_num()
+
+
+def _call_help_ping(o):
+    return o.help_ping()
+
+
+def _call_help_secret(o):
+    return o.help_secret()
+
+
+def _call_help_shell(o):
+    return o.help_shell()
 
 
 class Cmd:
@@ -58,7 +299,7 @@ class Cmd:
 
     """
     prompt = '(Cmd) '
-    identchars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'
+    identchars = IDENTCHARS
     ruler = '='
     lastcmd = ''
     intro = None
@@ -186,30 +427,39 @@ class Cmd:
             self.lastcmd = ''
         if cmd == '':
             return self.default(line)
-        else:
-            if cmd == 'EOF':
-                return getattr(self, 'do_EOF')(arg)
-            elif cmd == 'add':
-                return getattr(self, 'do_add')(arg)
-            elif cmd == 'alpha':
-                return getattr(self, 'do_alpha')(arg)
-            elif cmd == 'count':
-                return getattr(self, 'do_count')(arg)
-            elif cmd == 'echo':
-                return getattr(self, 'do_echo')(arg)
-            elif cmd == 'greet':
-                return getattr(self, 'do_greet')(arg)
-            elif cmd == 'help':
-                return getattr(self, 'do_help')(arg)
-            elif cmd == 'num':
-                return getattr(self, 'do_num')(arg)
-            elif cmd == 'ping':
-                return getattr(self, 'do_ping')(arg)
-            elif cmd == 'secret':
-                return getattr(self, 'do_secret')(arg)
-            elif cmd == 'shell':
-                return getattr(self, 'do_shell')(arg)
-            return self.default(line)
+        if cmd == 'EOF':
+            if hasattr(self, 'do_EOF'):
+                return _call_do_EOF(self, arg)
+        elif cmd == 'add':
+            if hasattr(self, 'do_add'):
+                return _call_do_add(self, arg)
+        elif cmd == 'alpha':
+            if hasattr(self, 'do_alpha'):
+                return _call_do_alpha(self, arg)
+        elif cmd == 'count':
+            if hasattr(self, 'do_count'):
+                return _call_do_count(self, arg)
+        elif cmd == 'echo':
+            if hasattr(self, 'do_echo'):
+                return _call_do_echo(self, arg)
+        elif cmd == 'greet':
+            if hasattr(self, 'do_greet'):
+                return _call_do_greet(self, arg)
+        elif cmd == 'help':
+            return _call_do_help(self, arg)
+        elif cmd == 'num':
+            if hasattr(self, 'do_num'):
+                return _call_do_num(self, arg)
+        elif cmd == 'ping':
+            if hasattr(self, 'do_ping'):
+                return _call_do_ping(self, arg)
+        elif cmd == 'secret':
+            if hasattr(self, 'do_secret'):
+                return _call_do_secret(self, arg)
+        elif cmd == 'shell':
+            if hasattr(self, 'do_shell'):
+                return _call_do_shell(self, arg)
+        return self.default(line)
 
     def emptyline(self):
         """Called when an empty line is entered in response to the prompt.
@@ -251,14 +501,14 @@ class Cmd:
         return None
 
     def get_names(self):
-        # `dir(self.__class__)` is refused: this compiler has no dir() and an AIL class
-        # has no __dict__.  Probe a fixed vocabulary of command names instead and keep
-        # CPython's sorted order.
-        names = []
-        for name in _CANDIDATE_NAMES:
-            if hasattr(self, 'do_' + name):
+        # `dir(self.__class__)` is refused: this compiler has no dir().  The base class's
+        # own names are fixed and listed above; a subclass command is found with
+        # hasattr(), which tests exactly the classes that define the name.
+        names = list(_BASE_NAMES)
+        for name in _COMMAND_NAMES:
+            if hasattr(self, 'do_' + name) and ('do_' + name) not in names:
                 names.append('do_' + name)
-            if hasattr(self, 'help_' + name):
+            if hasattr(self, 'help_' + name) and ('help_' + name) not in names:
                 names.append('help_' + name)
         names.sort()
         return names
@@ -269,139 +519,54 @@ class Cmd:
                      if a.startswith('help_' + args[0]))
         return list(commands | topics)
 
-    def do_EOF(self, arg):
-        pass
-
-    def do_add(self, arg):
-        pass
-
-    def do_alpha(self, arg):
-        pass
-
-    def do_count(self, arg):
-        pass
-
-    def do_echo(self, arg):
-        pass
-
-    def do_greet(self, arg):
-        pass
-
-    def do_num(self, arg):
-        pass
-
-    def do_ping(self, arg):
-        pass
-
-    def do_secret(self, arg):
-        pass
-
-    def do_shell(self, arg):
-        pass
-
-    def help_EOF(self):
-        pass
-
-    def help_add(self):
-        pass
-
-    def help_alpha(self):
-        pass
-
-    def help_count(self):
-        pass
-
-    def help_echo(self):
-        pass
-
-    def help_greet(self):
-        pass
-
-    def help_help(self):
-        pass
-
-    def help_num(self):
-        pass
-
-    def help_ping(self):
-        pass
-
-    def help_secret(self):
-        pass
-
-    def help_shell(self):
-        pass
-
     def do_help(self, arg):
         'List available commands with "help" or detailed help with "help cmd".'
         if arg:
             # XXX check arg syntax
             if arg == 'EOF':
                 if hasattr(self, 'help_EOF'):
-                    getattr(self, 'help_EOF')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_EOF(self)
+                    return
             elif arg == 'add':
                 if hasattr(self, 'help_add'):
-                    getattr(self, 'help_add')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_add(self)
+                    return
             elif arg == 'alpha':
                 if hasattr(self, 'help_alpha'):
-                    getattr(self, 'help_alpha')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_alpha(self)
+                    return
             elif arg == 'count':
                 if hasattr(self, 'help_count'):
-                    getattr(self, 'help_count')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_count(self)
+                    return
             elif arg == 'echo':
                 if hasattr(self, 'help_echo'):
-                    getattr(self, 'help_echo')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_echo(self)
+                    return
             elif arg == 'greet':
                 if hasattr(self, 'help_greet'):
-                    getattr(self, 'help_greet')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_greet(self)
+                    return
             elif arg == 'help':
                 if hasattr(self, 'help_help'):
-                    getattr(self, 'help_help')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_help(self)
+                    return
             elif arg == 'num':
                 if hasattr(self, 'help_num'):
-                    getattr(self, 'help_num')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_num(self)
+                    return
             elif arg == 'ping':
                 if hasattr(self, 'help_ping'):
-                    getattr(self, 'help_ping')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_ping(self)
+                    return
             elif arg == 'secret':
                 if hasattr(self, 'help_secret'):
-                    getattr(self, 'help_secret')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_secret(self)
+                    return
             elif arg == 'shell':
                 if hasattr(self, 'help_shell'):
-                    getattr(self, 'help_shell')()
-                else:
-                    self._write("%s\n" % str(self.nohelp % (arg,)))
-                return
+                    _call_help_shell(self)
+                    return
             self._write("%s\n" % str(self.nohelp % (arg,)))
             return
         else:
