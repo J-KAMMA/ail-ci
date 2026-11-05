@@ -330,7 +330,14 @@ def main():
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     table = markdown(result)
-    (out_dir / "RESULTS.md").write_text(table)
+    old = out_dir / "RESULTS.md"
+    preserved = ""
+    if old.exists():
+        text = old.read_text(encoding="utf-8")
+        marker = "\n## Ranked blockers"
+        if marker in text:
+            preserved = text[text.index(marker):]
+    (out_dir / "RESULTS.md").write_text(table + preserved)
     print()
     print(table)
 
