@@ -62,10 +62,11 @@ not in the subset: a dict view kept in a name, field, item or container (`x = d.
 Call `d.items()` / `d.keys()` / `d.values()` where it is used, or take `list(...)` when a snapshot is
 wanted. `docs/PORTING.md` section 1 has the before/after pair.
 
-This check covers the direct assignment form only. A view that reaches a name through a function
-return, an argument, an attribute or an item is not refused: the program builds on the general path
-and the view is a stale snapshot, which prints a different value with no error. That is recorded under
-"Silent differences found" at the end of this page.
+The refusal fires when the view is stored: bound to a name, assigned to a field or an item, or put in
+a list or dict container (`b.v = d.items()`, `m["k"] = d.items()`, `xs = [d.items()]`). It does not
+catch a view passed straight into a call (`f(d.items())`) or returned from a function: those build on
+the general path, with the `dict.items used as a value` note, and can then print a stale snapshot
+with no error. That case is recorded under "Silent differences found" at the end of this page.
 
 Probe: `lab/limits/03_dict_view_is_snapshot.py` (CPython prints `[('a', 1), ('b', 2)]`).
 
@@ -181,9 +182,9 @@ Only a fixed set of `os` names is available; the refusal lists what is built:
 not in the subset: os.system is not built. Built: os.getcwd chdir listdir mkdir makedirs remove unlink rmdir rename replace getenv environ walk, os.sep linesep name curdir, and os.path join exists isfile isdir islink getsize basename dirname split splitext abspath normpath isabs relpath
 ```
 
-Use the listed functions. Running a child process (`os.system`, `os.spawn*`, `os.fork`) has no
-workaround yet; `subprocess` is built on the general path, so keep the call at a point the typed
-path can leave to the general build.
+Use the listed functions. `os.system`, `os.spawn*` and `os.fork` are not built; run a child process
+with `subprocess.run([...])` or `subprocess.check_output([...])`, which are built on the typed path
+and need no general-path fallback (`subprocess.Popen` is still refused).
 
 Probe: `lab/limits/11_os_system_not_built.py` (CPython prints `0` then `True`).
 
@@ -246,18 +247,22 @@ is built on the general path:
 note: ... built on the general path (about 20x slower) because json.loads(s): the type of the result is not declared here; write the type down: `data: dict[str, int] = json.loads(s)` (the types are int, float, str, bool, list[T], list[list[T]], dict[str, T])
 ```
 
-Annotate the result (`data: dict[str, int] = json.loads(text)`) and the typed path is used. The
-output is the same either way; only the speed changes, and `--strict` turns the note into a refusal
-so a build script can catch it.
+Write the type down inside a function: an annotated local (`data: dict[str, int] = json.loads(text)`
+in a `def`), an annotated parameter (`def use(data: dict[str, int])` called with `json.loads(...)`),
+or an annotated return type (`def load(text) -> dict[str, int]: return json.loads(text)`). An
+annotation on a module-level assignment is not read by the lowering, so `data: dict[str, int] =
+json.loads(text)` at the top of a file still takes the general path. The output is the same either
+way; only the speed changes, and `--strict` turns the note into a refusal so a build script can catch
+it.
 
 Probe: `lab/limits/15_untyped_json_general_path.py` (CPython prints `1`; AIL prints `1` too).
 
 ## Silent differences found
 
 One gap is recorded here rather than as a limitation, because nothing stops the program: the check in
-entry 3 covers the direct `x = d.items()` form only. A view returned from a function builds on the
-general path (with the `dict.items used as a value` note) and then prints a stale snapshot with exit
-status 0:
+entry 3 catches a view stored in a name, field, item or container, but not one returned straight from
+a function. A view returned from a function builds on the general path (with the `dict.items used as
+a value` note) and then prints a stale snapshot with exit status 0:
 
 ```python
 def view(d):
