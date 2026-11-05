@@ -429,6 +429,48 @@ fn main() {
     print(total(b));
 }
 """),
+    ('entry_emit_guard', r"""
+fn emit_all(data: bytes, a: int, b: int) -> void {
+    let i = a;
+    while i < b {
+        print(data[i]);
+        i += 1;
+        let j = i;
+        while j < b {
+            print(data[j]);
+            j += 1;
+        }
+    }
+}
+fn main() {
+    let data = b"abc";
+    emit_all(data, 0, len(data));
+    emit_all(data, len(data), len(data));
+    try { emit_all(data, 0, len(data) + 1); } except IndexError { print("hi"); }
+    emit_all(data, -1, 3);
+    try { emit_all(data, 3, 4); } except IndexError { print("lo"); }
+}
+"""),
+    ('echo_while_guard', r"""
+fn run_match(d: bytes, p: int, like: bytes, maxm: int) -> int {
+    let m = 0;
+    let n = 0;
+    while m < maxm and d[p + m] == like[m] {
+        n += 1;
+        m += 1;
+    }
+    return n;
+}
+fn main() {
+    let data = b"abcabc";
+    let pat = b"abc";
+    print(run_match(data, 0, pat, 3));
+    print(run_match(data, 3, pat, 3));
+    print(run_match(data, -1, pat, 1));
+    print(run_match(data, -2, pat, 2));
+    try { print(run_match(data, 0, pat, len(data) + 1)); } except IndexError { print("hi"); }
+}
+"""),
 ]
 
 DEPTH_ORACLE = {
@@ -457,6 +499,13 @@ S3_UNPROVEN = {
     'echo_cap_n': 'f',
     'list_get_after_clear': 'get',
     'list_get_append_fn': 'get',
+}
+
+S7_ENTRY = {
+    'entry_emit_guard': ('emit_all', 1, 2),
+}
+S7_WHILE = {
+    'echo_while_guard': ('run_match', 1),
 }
 
 
@@ -599,6 +648,23 @@ class BceProbeTests(unittest.TestCase):
                 self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
                 proven = found[-1].get('passes', {}).get('idx_ssa_proven', 0)
                 self.assertEqual(proven, 0, '%s: %s' % (name, proven))
+
+    def test_s7_while_and_entry_versioning_are_visible_in_the_stats(self):
+        sources = dict(PROBES)
+        with tempfile.TemporaryDirectory(prefix='ail-bce-s7-') as directory:
+            for name, (fn, least_entry, least_idx) in S7_ENTRY.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                passes = found[-1].get('passes', {})
+                self.assertGreaterEqual(passes.get('entry_versioned', 0), least_entry, name)
+                self.assertGreaterEqual(passes.get('idx_ssa_proven', 0), least_idx, name)
+            for name, (fn, least) in S7_WHILE.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                versioned = found[-1].get('passes', {}).get('versioned', 0)
+                self.assertGreaterEqual(versioned, least, '%s: %s' % (name, versioned))
 
 
 if __name__ == '__main__':

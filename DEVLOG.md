@@ -1,3 +1,36 @@
+## 2026-11-05 -- bce s7: while-loop and function-entry versioning (job-bces7-11051903)
+
+`symbounds` now derives bounds for a canonical `while v < e` (`op == 'loop'`): `v` is carried, every
+`continue` passes `v` or `v + c` with a non-negative constant, and `e` is defined outside the loop.
+The lower bound is `0` with `v`'s entry bound forms as guard side conditions (so `while i < b` after
+`let i = a` costs `a >= 0`), and the high bound is `e - 1` for a strict test. `LICM` passes
+`while_bounds` only while BCE is enabled, and its versioning scope now includes the rest of an
+`and`-shaped test (the `d[p + m]` in `while m < maxm and d[p + m] == d[i + m]`), which is what elides
+the inner echo check; `AIL_BCE=0` keeps the old scope and bounds.
+
+`LICM.entry_version` wraps the function body in `if (a >= 0 and b <= len(data)) <fast body> else
+<body>` when a loop starts at an integer parameter and a checked `bytes.get` indexes that loop's own
+induction argument. The fast arm gets the range facts directly, the slow arm is the old code, and
+`local.alloc` stays in the body region (the verifier requires it there); the entry `if` is followed
+by `unreachable` because it is not a terminator. Loops in both arms are frozen afterwards: the slow
+copy must stay the old code, and re-versioning the fast clone doubled `term_rank`'s `emit_line`.
+
+On the ten census tasks every program's output is unchanged, `AIL_BCE=0` generated C is identical to
+base for both changed tasks, and stripped binaries are byte-size identical (`term_rank` 71,896 ->
+71,896, `echo_pack` 30,936 -> 30,936; all ten +0.00%). Generated C changes only for `term_rank`
+(`emit_line` `entry_versioned=1`, `idx_ssa_proven=2`) and `echo_pack` (`pack` `versioned=1`) --
+compile times stayed within noise (max +3.1%). Instruction counts could not be measured on this
+runner (`perf_event_open` is denied and valgrind is not installed), so the census icount gate and
+the s7 `-2%` / `-1.5%` targets remain unverified here.
+
+`test_ail_bce` gained `entry_emit_guard` and `echo_while_guard` (parameter boundaries, `len`,
+`len+1`, negative `a`/`p`, and an entry guard that must fall back to the checked body) plus a stats
+check for `entry_versioned`/`versioned`. Required modules all pass: `test_ail_bce`,
+`test_ail_ir_gridbounds`, `test_ail_range_checks`, `test_ail_ir_s1`, `test_ail_ir_s3`,
+`test_ail_ir_rulex`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(9/9, 382 s with `-j 2`; the sanitizer modules need the normal address space, not `ulimit -v`).
+`tools/update_manifest.py` refreshed the three pins.
+
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 
 The accepted `prog17_rr1` diff (`97f0f9a`..`job-prog17_rr1-11050712`) no longer applied to this

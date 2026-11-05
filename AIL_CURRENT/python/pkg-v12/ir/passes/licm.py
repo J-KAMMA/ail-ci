@@ -26,9 +26,15 @@ A bytearray local (a place) is read with `load` inside the loop; that load is in
 nothing in the loop names the place except loads and the place holds a bytearray wherever the loop
 starts, so it moves in front of the loop and the bytearray gets a span like a list.
 """
+import os
+
 from .. import ir as I
 from .. import effects as E
 from . import simplify, symbounds
+
+
+def _bce_enabled():
+    return os.environ.get('AIL_BCE', '1').strip().lower() not in ('0', 'off', 'no', 'false')
 
 RESIZING = ('list.push', 'list.pop', 'list.clear', 'rec.push', 'rec.pop', 'ba.push', 'ba.clear', 'ba.extend_lit')
 # what can resize a bytearray (whose span a loop may now hold: a bytearray local's load is hoisted)
@@ -99,6 +105,8 @@ class LICM(object):
         self.hoisted = 0
         self.spans = 0
         self.versioned = 0
+        self.entry_versioned = 0
+        self.bce = _bce_enabled()
         self.frozen = set()          # loops never to version (slow copies)
 
     # ------------------------------------------------------------------ helpers
@@ -492,7 +500,12 @@ class LICM(object):
             found = self.induction(loop, defs, inside)
             if found is not None:
                 idx, lo, hi, strict, test, dec = found
-                scope = loop.regions[0].instrs[test + 1:]
+                if self.bce:
+                    # A `while v < e and ...` evaluates the rest of its test (and then the body)
+                    # only after `v < e` held, so accesses in the test too are in [lo, e - 1].
+                    scope = loop.regions[0].instrs
+                else:
+                    scope = loop.regions[0].instrs[test + 1:]
         ranges = {}           # container -> [cmin, cmax]
         down = {}             # container -> [cmin, cmax] of the accesses at the closing pointer `dec + c`
         absolute = {}         # container -> largest index known from the range pass (index >= 0)
@@ -519,8 +532,10 @@ class LICM(object):
                 if c is None and ins.attrs.get('mode') == 'ck':
                     if bounds is None:
                         order = symbounds.value_order(self.fn)
-                        elements = symbounds.ElementFacts(self.fn, defs, order).for_loop(loop)
-                        bounds = symbounds.Bounds(self.fn, inside, defs, order, elements)
+                        elements = symbounds.ElementFacts(
+                            self.fn, defs, order, while_bounds=self.bce).for_loop(loop)
+                        bounds = symbounds.Bounds(self.fn, inside, defs, order, elements,
+                                                  while_bounds=self.bce)
                     b = bounds.of(index)
                     if b is not None and all(f.terms or f.const >= 0 for f in b[0]) \
                             and all(f.terms or f.const >= 0 for f in b[2]):
@@ -684,6 +699,117 @@ class LICM(object):
             conds.append(emit('cmp.lt', [value(f), lens[id(base)]], I.I1))
         return conds
 
+    # ------------------------------------------------------------------ function entry
+    def entry_version(self):
+        """Wrap the body in `if (guard on parameters) <fast body> else <body>` when the loops
+        contain checked accesses a parameter fact would prove.  The second ranges pass proves them
+        in the fast arm; the slow arm is the old code, so an out-of-range call behaves exactly as
+        before.  At most `symbounds`' term cap (4) and 200 cloned instructions."""
+        if not self.bce:
+            return False
+        body = self.fn.body
+        if len(list(I.walk(body))) > 200:
+            return False
+        defs = _defs(self.fn)
+        pname = dict(zip(self.fn.params, self.fn.param_names))
+        lowers, uppers = [], []
+        seen_lower, seen_upper = set(), set()
+        found_ck = False
+        for loop in I.walk(body):
+            if loop.op not in I.LOOP_OPS:
+                continue
+            if loop.op == 'for.range':
+                init, hi = loop.operands[0], loop.operands[1]
+                target = loop.regions[0].args[0]
+            else:
+                region = loop.regions[0]
+                test = None
+                for t, ins in enumerate(region.instrs):
+                    if ins.op == 'if' and not ins.results \
+                            and [r.instrs[-1].op for r in ins.regions] == ['yield', 'break'] \
+                            and len(ins.regions[0].instrs) == 1 and len(ins.regions[1].instrs) == 1:
+                        test = t
+                        break
+                if test is None:
+                    continue
+                inside = symbounds._loop_inside(loop)
+                init = hi = None
+                for pred, a, b in symbounds._first_cmps(region.instrs[test].operands[0], defs):
+                    if pred in ('gt', 'ge'):
+                        pred, a, b = {'gt': 'lt', 'ge': 'le'}[pred], b, a
+                    if pred == 'lt' and a in region.args and b not in inside:
+                        init, hi = loop.operands[region.args.index(a)], b
+                        break
+                if init is None:
+                    continue
+                target = a
+            if init not in pname:
+                continue
+            if hi not in pname:
+                continue
+            for ins in I.walk(loop.regions[0]):
+                if ins.op != 'bytes.get' or ins.attrs.get('mode') != 'ck':
+                    continue
+                base = ins.operands[0]
+                if base not in pname or base.type.head != 'bytes':
+                    continue
+                if ins.operands[1] is not target:
+                    continue
+                found_ck = True
+                if init in pname and init not in seen_lower:
+                    seen_lower.add(init)
+                    lowers.append(init)
+                key = (hi, base)
+                if key not in seen_upper:
+                    seen_upper.add(key)
+                    uppers.append(key)
+        terms = len(lowers) + len(uppers)
+        if not found_ck or not uppers or terms > 4:
+            return False
+        pre = []
+
+        def emit(op, operands, t, attrs=None):
+            ins = I.Instr(op, operands, [I.Value(t)] if t is not None else [], attrs or {})
+            pre.append(ins)
+            return ins.results[0] if t is not None else None
+
+        zero = emit('const', [], I.I64, {'value': 0})
+        conds = []
+        for v in lowers:
+            conds.append(emit('cmp.ge', [v, zero], I.I1))
+        lens = {}
+        for hi, base in uppers:
+            if id(base) not in lens:
+                lens[id(base)] = emit('bytes.len', [base], I.I64)
+            conds.append(emit('cmp.le', [hi, lens[id(base)]], I.I1))
+        guard = conds[-1]
+        for c in reversed(conds[:-1]):
+            then = I.Region([], [I.Instr('yield', [guard])])
+            other = I.Region([], [I.Instr('const', [], [I.Value(I.I1)], {'value': False})])
+            other.instrs.append(I.Instr('yield', [other.instrs[0].result]))
+            ins = I.Instr('if', [c], [I.Value(I.I1)], {}, [then, other])
+            pre.append(ins)
+            guard = ins.result
+        # `local.alloc` lives only in the function's top region: keep those outside the two arms
+        # (the fast clone keeps using the same places, and only one arm runs).
+        allocs = [ins for ins in body.instrs if ins.op == 'local.alloc']
+        rest = [ins for ins in body.instrs if ins.op != 'local.alloc']
+        cl = Cloner()
+        fast = cl.region(I.Region([], rest))
+        slow = I.Region([], rest)
+        choose = I.Instr('if', [guard], [], {}, [fast, slow])
+        body.instrs = allocs + pre + [choose, I.Instr('unreachable', [], [], {})]
+        # The entry guard's facts let the range pass drop the checks in the fast arm directly; do
+        # not version its loops again (that would clone the body a second time).
+        for ins in I.walk(fast):
+            if ins.op in I.LOOP_OPS:
+                self.frozen.add(ins)
+        for ins in I.walk(slow):
+            if ins.op in I.LOOP_OPS:
+                self.frozen.add(ins)
+        self.entry_versioned += 1
+        return True
+
     def replace_uses(self, loop, results):
         m = dict(zip(loop.results, results))
         if not m:
@@ -707,8 +833,10 @@ def run(fn, summaries=None):
     simplify.run(fn)
     licm.span_hoist(fn.body)
     licm.pure_licm(fn.body)
+    entry = licm.entry_version()
     licm.version_all(fn.body)
-    if licm.versioned:
+    if licm.versioned or entry:
         simplify.run(fn)
         licm.pure_licm(fn.body)
-    return {'hoisted': licm.hoisted, 'spans': licm.spans, 'versioned': licm.versioned}
+    return {'hoisted': licm.hoisted, 'spans': licm.spans, 'versioned': licm.versioned,
+            'entry_versioned': licm.entry_versioned}
