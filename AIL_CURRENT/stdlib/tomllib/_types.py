@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Type aliases from CPython's tomllib, kept for readers of the source.
+Derived from CPython 3.12 Lib/tomllib/_types.py; PSF License, see stdlib/LICENSE-PSF.txt.
 
 CPython declares
 
