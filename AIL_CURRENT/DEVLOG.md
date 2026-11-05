@@ -1,3 +1,22 @@
+## 2026-11-05 -- pyreach s8 suite fix: one-argument `d.get(k)` is a local-dict Optional
+
+`optlib._scan_dict_kinds` also recorded the value kind of `dict[K, V]` function PARAMETERS, so
+`find(d: dict[int, int], k: int) -> int | None: return d.get(k)` was lowered to a tag/value pair.
+That hid the `int | None` annotation from `pyfunc._strip_nullable` and the typed path then refused
+the call `find({1: 2}, 1)` with a bogus `idict` vs `int` call-site conflict instead of the
+annotation, while the default build fell back to the general path over the REWRITTEN source (its
+DWARF lines were renumbered).  The kind scan now covers only local dicts, as `_dict_get_kind`'s
+own docstring says: a local literal, a subscript store, or an annotated local.  A dict parameter's
+`get(k)` is not a typed Optional again -- it is refused by name ("cannot show that `d.get(k)` is
+not None") and `int | None` is refused as before, so `test_ail_debug_lines`, `test_ail_fallback_note`,
+`test_ail_lsp`, `test_ail_project`, `test_ail_quirks`, `test_ail_refusal_messages`,
+`test_ail_spec_fixes` and `test_ail_strict` pass again.
+
+A local one-argument `d.get(k)` is still the s8 Optional (the job's `test_ail_pyreach_optret`
+`dict_get` case).  The obsolete `dict_get_one_argument` refusal case in
+`test_ail_refusal_messages` now uses a dict built by a helper call, which the pass does not type
+and `_ONE_ARG_GET` still refuses.
+
 ## 2026-11-05 -- pyreach s8 review fix: non-simple guard index in `[None] * n` rows
 
 `noneslots._Rewrite.visit_Compare` skipped a guard whose row subscript was not a bare name or

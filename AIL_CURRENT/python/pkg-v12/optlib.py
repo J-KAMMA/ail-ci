@@ -677,9 +677,6 @@ class Lowerer:
                         add(target.value.id, node.value)
             elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                 annotated(node.target.id, node.annotation)
-        for arg in self.fn.args.args + self.fn.args.kwonlyargs:
-            if arg.annotation is not None:
-                annotated(arg.arg, arg.annotation)
         return {name: next(iter(kinds)) for name, kinds in found.items()
                 if len(kinds) == 1 and None not in kinds}
 
