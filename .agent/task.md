@@ -1,3 +1,56 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+(free quota used up; paid model from here)
+[model commandcode/deepseek-v4.1-flash]
+## Review — bce s7 (work..HEAD)
+
+**What the change really does.** `symbounds` gains while-loop bounds (`_while_index`, `while_of`), `LICM.version` widens its versioning scope to the whole loop region whenever BCE is on, and `LICM.entry_version` clones a function body under an `if (params)` guard. `_nondecreasing` now only accepts `v = a + c`, `c >= 0`.
+
+**Verified claims.**
+- `sub` rejected in `_nondecreasing`; `dec_neg2`, `list_append`, `le_entry_oob` match CPython in both builds (re-ran).
+- `dec_while_guard` added and asserts `versioned=0`; `test_ail_bce` + `test_ail_safetynet` pass (`-j 2`, 155 s).
+- `update_manifest.py --check` passes.
+- `AIL_BCE=0` generated C is byte-identical to base (cond2_bytes); a no-feature program's C is identical to base.
+- `.ail` added: `entry_emit_guard`, `echo_while_guard`, `dec_while_guard`.
+
+**False / not done.**
+- Task (d) required probes for a while bound reassigned in the loop and a list param appended in the loop to be appended to `test_ail_bce.py`; only `dec_while_guard` was added (those two were run only as throwaway `/tmp` probes). No big-text bound probe either.
+
+**Defects**
+1. The whole-test scope widening assumes the induction compare is the **first** conjunct, but `_while_index`/`_first_cmps` (and `entry_version`) accept it anywhere in the `and` chain. An access in an earlier conjunct is then versioned as if it were inside `[init, e-1]` and emitted unchecked.
+   Probe `/tmp/rprobes2/cond2_bytes.py`:
+   ```python
+   def f(d, v, b):
+       e = b - 1
+       n = 0
+       while d[v] == 0 and v < e:
+           n += 1
+           v += 1
+       return n
+   print(f(b"abc", 5, 2))
+   ```
+   Expected (CPython, and base): exit 1, empty stdout, `IndexError: index out of range`.
+   Actual (HEAD default build): exit 0, stdout `0`. Generated C's fast arm does `v_d.p[ir8]` with no check. `AIL_BCE=0` restores the correct exit 1; `AIL_BCE_AUDIT=1` exits 86 (`removed check would fire in f site 0`), confirming the guard is unsound.
+   Second instance `/tmp/rprobes2/cond2_body.py` (`f(b"\x00\x00\x00", 4, 3)`): expected stdout `2` + exit 1; actual stdout `2\n0`, exit 0. Same root cause.
+2. (Task compliance) missing required regression probes in `test_ail_bce.py` (loop bound reassigned inside the loop; list param appended inside the loop), so the required shape is not pinned.
+
+**Pre-existing:** none observed — the two probes above match CPython on `/tmp/base`.
+
+**Unverified:** the central numbers (term_rank ≤0.98, echo_pack ≤0.985) and stripped-byte sizes — `perf_event_open` is denied and valgrind is absent; DEVLOG itself says icount was not measured. Compile-time gate (DEVLOG reports max +3.1%, i.e. not clearly within the 3% done-check). Census outputs/10 tasks not re-run.
+
+VERDICT: FIX
+1. `while <access> and v < e` over-elides: induction compare accepted from any conjunct while the versioning scope is widened to the whole test; access in the first conjunct is unchecked. Probe `/tmp/rprobes2/cond2_bytes.py`: expected exit 1 + empty stdout (`IndexError`), actual exit 0 + `0`. Restrict the versioned scope/bound to a first-conjunct `v < e` (in `_while_index` and `version`), or leave earlier-conjunct accesses checked.
+2. (Compliance) add the required loop-bound-reassignment and list-append probes to `AIL_CURRENT/test_ail_bce.py`, per task (d).
+[commandcode stop=end_turn turns=51 out_tokens=49507]
+
+
+--- ORIGINAL TASK ---
 Lane: bce-ranges
 
 **Owner decisions (2026-11-03):** stripped binary growth up to +1% is allowed only on a task whose instructions drop by at least 1%; on every other task the binary must not grow. The recursion-depth limit keeps its current counting (limit 50,000) and the same firing point; do not change how depth is counted.
