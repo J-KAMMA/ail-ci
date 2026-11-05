@@ -97,7 +97,10 @@ def run(binary, case, extra_env=None, timed=False):
     env = dict(os.environ)
     env.update(extra_env or {})
     stdin = open(case['path'], 'rb') if case['stdin'] else subprocess.DEVNULL
-    p = subprocess.run(cmd, stdin=stdin, capture_output=True, env=env)
+    try:
+        p = subprocess.run(cmd, stdin=stdin, capture_output=True, env=env, timeout=RUN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return 'timeout', b'', None
     rss = None
     if timed:
         m = re.search(rb'Maximum resident set size \(kbytes\): (\d+)', p.stderr)
@@ -118,17 +121,27 @@ def icount(binary, case):
         return None
 
 
+class BuildError(Exception):
+    pass
+
+
 def build(task, d):
-    src = ROOT / 'lab/compare/src' / task / 'typed.py'
     dbg, out = d / 'dbg', d / 'plain'
-    shutil.rmtree(dbg, ignore_errors=True)
-    if out.exists():
-        out.unlink()
     env = dict(os.environ, AIL_UNIFIED_FORCE='1', AIL_NO_CACHE='1', PYTHONHASHSEED='0')
-    p = sh(['python3', '-B', str(ROOT / 'AIL_CURRENT/ail_chatgpt.py'), 'compile', str(src), '-o', str(out),
-            '--debug-dir', str(dbg)], env=env, cwd=str(ROOT))
-    if p.returncode:
-        raise SystemExit('%s: build failed\n%s' % (task, p.stderr.decode()[-2000:]))
+    errs = []
+    for name in ('typed.py', 'main.py'):
+        src = ROOT / 'lab/compare/src' / task / name
+        shutil.rmtree(dbg, ignore_errors=True)
+        if out.exists():
+            out.unlink()
+        p = sh(['python3', '-B', str(ROOT / 'AIL_CURRENT/ail_chatgpt.py'), 'compile', str(src), '-o', str(out),
+                '--debug-dir', str(dbg)], env=env, cwd=str(ROOT))
+        if p.returncode == 0:
+            break
+        errs.append('%s: %s' % (name, p.stderr.decode()[-300:]))
+    else:
+        raise BuildError(' | '.join(errs))
+    BUILT[task] = name
     rep = json.loads((dbg / 'native_report.json').read_text())
     cmd = rep['operations'][0]['command']
     c = (dbg / 'program.c').read_text()
@@ -149,9 +162,15 @@ def build(task, d):
 
 # Inputs scaled down so one process stays under the 1.5 GB cap (the general path keeps 32 B per element):
 # task -> (generator function, perf size in gen.py, size used here).
+# tree_fold is also slow on the general path (n=200000 runs over 180 s; n=50000 about 20 s).
+# berth_sim's and echo_pack's full perf inputs stop with "out of memory" under a 1.7 GB address-space cap.
 SCALE = {
-    'tree_fold': ('random_tree', 3000000, 1000000),
+    'tree_fold': ('random_tree', 3000000, int(os.environ.get('GENLIST_TREE_N', '50000'))),
+    'berth_sim': ('perf_harbour', 'ns', 1000000),
+    'echo_pack': ('perf_data', 'size', 10000000),
 }
+BUILT = {}
+RUN_TIMEOUT = int(os.environ.get('GENLIST_TIMEOUT', '600'))
 
 
 def make_case(task, d):
@@ -161,8 +180,12 @@ def make_case(task, d):
     module = run_task.load_task(task)
     orig = getattr(module, fn)
 
-    def scaled(rng, n, *a, **kw):
-        return orig(rng, small if n == big else n, *a, **kw)
+    def scaled(rng, *a, **kw):
+        if isinstance(big, str):        # a keyword parameter with a default: perf_harbour(rng, ns=...)
+            kw[big] = small
+        elif a and a[0] == big:         # the size passed positionally: random_tree(rng, 3000000, ...)
+            a = (small,) + a[1:]
+        return orig(rng, *a, **kw)
     setattr(module, fn, scaled)
     import random
     _pub, _hid, perf = module.cases(random.Random('%s-20261012' % task))
@@ -171,7 +194,7 @@ def make_case(task, d):
     path.write_bytes(data)
     case = dict(name='perf-scaled', stdin=bool(getattr(module, 'STDIN', False)), path=path,
                 args=[a.replace('{input}', str(path)) for a in args], input_bytes=len(data))
-    return case, '%s n=%d (perf uses %d)' % (fn, small, big)
+    return case, '%s %s=%d (scaled down from the perf input)' % (fn, big if isinstance(big, str) else 'n', small)
 
 
 def one(task):
@@ -179,14 +202,26 @@ def one(task):
     d.mkdir(parents=True, exist_ok=True)
     case, scale_note = make_case(task, d)
     wait_mem()
-    plain, census = build(task, d)
-    rec = dict(task=task, source='lab/compare/src/%s/typed.py' % task, env='AIL_UNIFIED_FORCE=1',
+    try:
+        plain, census = build(task, d)
+    except BuildError as e:
+        return dict(task=task, error='build failed: %s' % e)
+    rec = dict(task=task, source='lab/compare/src/%s/%s' % (task, BUILT[task]), env='AIL_UNIFIED_FORCE=1',
                input_bytes=case['input_bytes'], args=case['args'], input=scale_note or 'perf')
     rss = []
     out0 = None
-    for _ in range(3):
+    for k in range(3):
         wait_mem()
+        t0 = time.time()
         st, out, r = run(plain, case, timed=True)
+        if k == 0:
+            rec['first_run_seconds'] = round(time.time() - t0, 1)
+        if st == 'timeout':
+            rec['error'] = 'plain build ran over %d s' % RUN_TIMEOUT
+            return rec
+        if os.environ.get('GENLIST_PROBE'):
+            rec.update(exit=st, rss_kb=r, probe=True, stdout_bytes=len(out))
+            return rec
         rss.append(r)
         out0 = (st, out) if out0 is None else out0
         if (st, out) != out0:
@@ -217,21 +252,37 @@ def one(task):
     except subprocess.TimeoutExpired:
         rec['cpython_same_output'] = 'timeout'
     c = rec['census']
-    if c:
-        rss_b = rec['rss_kb'] * 1024
-        save = 0.75 * c['int_cap_bytes']
-        rec['list_share_of_rss'] = round(c['cap_bytes'] / rss_b, 4)
-        rec['int_list_share_of_rss'] = round(c['int_cap_bytes'] / rss_b, 4)
-        rec['projected_rss_kb'] = round((rss_b - save) / 1024)
-        rec['projected_gain'] = round(rss_b / (rss_b - save), 4)
-        rec['projected_gain_halved'] = round(rss_b / (rss_b - save / 2), 4)
+    project(rec)
     return rec
+
+
+def project(rec):
+    """Projected peak RSS with all-int lists at 8 B per slot. The saving counted is 24 B per USED element
+    (int_elems), not 24/32 of the buffer capacity: a doubled buffer's unused tail is mostly untouched pages that never
+    reach RSS (echo_pack's list capacity is larger than its whole peak RSS)."""
+    c = rec.get('census')
+    if not c:
+        return
+    rss_b = rec['rss_kb'] * 1024
+    save = 24 * c['int_elems']
+    rec['list_cap_share_of_rss'] = round(c['cap_bytes'] / rss_b, 4)
+    rec['int_elem_bytes_share_of_rss'] = round(32 * c['int_elems'] / rss_b, 4)
+    rec['projected_rss_kb'] = round((rss_b - save) / 1024)
+    rec['projected_gain'] = round(rss_b / (rss_b - save), 4)
+    rec['projected_gain_halved'] = round(rss_b / (rss_b - save / 2), 4)
+    for k in ('list_share_of_rss', 'int_list_share_of_rss'):
+        rec.pop(k, None)
 
 
 def main():
     tasks = sys.argv[1:] or TASKS
     path = ROOT / 'lab/mem/GENLIST.json'
     data = json.loads(path.read_text()) if path.exists() else {}
+    if tasks == ['--recompute']:
+        for rec in data.values():
+            project(rec)
+        path.write_text(json.dumps(data, indent=1, sort_keys=True) + '\n')
+        return
     for t in tasks:
         print('==', t, flush=True)
         rec = one(t)
