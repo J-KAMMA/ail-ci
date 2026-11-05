@@ -55,6 +55,11 @@ Result before: **0 built, 0 typed, 10 refused**.
 
 Result after: **9 built, 0 typed, 1 refused; 9 build and match**.
 
+`python3 -B AIL_CURRENT/test_ail_std_chunk.py` rebuilds all nine passing programs in both modes and
+compares stdout and the exit status with `python3`: 2 tests, OK. Every passing program lands on the
+general path because `Chunk.__init__` takes defaulted positional arguments, which the typed path
+does not model.
+
 ### Compiler follow-up: `08_errors.py`
 
 ```
