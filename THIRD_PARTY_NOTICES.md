@@ -11,6 +11,8 @@ Counts:
 - typeshed files: 50, of which 48 are vendored stubs (Apache License 2.0)
 - AIL's own files under `AIL_CURRENT/stdlib/`: 3 (MIT OR Apache-2.0)
 - license texts under `AIL_CURRENT/stdlib/`: 1 (`LICENSE-PSF.txt`)
+- derived files outside those two directories: 2, both with a source note in
+  their docstring (listed under "Generated tables" below)
 
 ## Origins
 
@@ -41,6 +43,25 @@ Counts:
   text.
 - `LICENSE-PSF.txt` is the upstream PSF license text, copied verbatim from
   CPython 3.12's `LICENSE`.
+
+### Generated tables
+
+Two files elsewhere in the tree are generated from third-party material. They
+are not under the two directories the inventory table covers, so they are listed
+here; both already carry a source note in their docstring.
+
+- `AIL_CURRENT/python/pkg-v12/stubsigs_table.py`: written by
+  `tools/typeshed_convert.py` from `third_party/typeshed` (Apache License 2.0,
+  `third_party/typeshed/LICENSE`; see `third_party/typeshed/VERSION.md`).
+- `AIL_CURRENT/python/pkg-v12/stararity.py`: tables of CPython 3.12's
+  `TypeError` text for built-in methods, observed from the interpreter. No
+  CPython source text is copied; any message text it reproduces is covered by
+  CPython's PSF License Version 2 (`AIL_CURRENT/stdlib/LICENSE-PSF.txt`).
+
+No other file under `AIL_CURRENT`, `packaging`, `tools`, `lab` or `examples`
+says it is copied, derived, vendored or adapted from a third-party project.
+`AIL_CURRENT/stdlib/zlib_glue.c` and `zlib_glue.h` are AIL's own glue over the
+system zlib library; they copy no zlib source.
 
 ## Inventory
 
@@ -134,3 +155,10 @@ to:
 
 Until that lands, `test_ail_third_party_notices.py` reports the missing
 `LICENSE-PSF.txt` in the wheel as a test failure, not a skip.
+
+Two further files decide what an exported SDK carries, and both are owned by
+other lanes. `tools/update_manifest.py` marks an SDK file only when it ends in
+`.py`, `.c` or `.h` (`sdk_source()` and `is_compiler_source()`), so
+`AIL_CURRENT/stdlib/LICENSE-PSF.txt` cannot be pinned as one; widening those
+suffix sets would carry it under `ail_lang/sdk/stdlib/`. The `collect()`
+change above is enough for the wheel check as written.
