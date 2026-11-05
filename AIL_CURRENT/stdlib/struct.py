@@ -54,13 +54,25 @@ def _is_bytes(value) -> bool:
     return isinstance(value, bytes) or isinstance(value, bytearray)
 
 
+def _check_buffer(buffer) -> None:
+    """Refuse anything but bytes/bytearray with CPython's TypeError text.
+
+    `bytes(buffer)` would happily accept a list of ints, which CPython rejects."""
+    if not (isinstance(buffer, bytes) or isinstance(buffer, bytearray)):
+        raise TypeError("a bytes-like object is required, not '%s'" % type(buffer).__name__)
+
+
 
 def _format_text(format) -> str:
-    """The format as a str. CPython accepts str or bytes; a bytearray is a TypeError."""
+    """The format as a str. CPython accepts str or bytes; a bytearray is a TypeError.
+
+    A bytes format is decoded byte-for-byte as latin-1 so a non-ASCII byte stays a
+    single character and is rejected by the format parser as `bad char in struct
+    format`, exactly as CPython does."""
     if isinstance(format, str):
         return format
     if isinstance(format, bytes):
-        return format.decode("ascii")
+        return format.decode("latin-1")
     if isinstance(format, bytearray):
         raise TypeError("unhashable type: 'bytearray'")
     raise TypeError("Struct() argument 1 must be a str or bytes object, not %s"
@@ -106,7 +118,7 @@ def _parse(format) -> tuple:
         if digits != "":
             count = int(digits)
         if i >= len(fmt):
-            raise error("bad char in struct format")
+            raise error("repeat count given without format specifier")
         c = fmt[i]
         i = i + 1
         if c not in _SIZES_NATIVE:
@@ -271,15 +283,14 @@ def _pack_into_items(out: bytearray, items, offsets, native: bool, little: bool,
             if not _is_bytes(v):
                 raise error("argument for 'p' must be a bytes object")
             raw = bytes(v)
-            limit = count - 1
-            if limit < 0:
-                limit = 0
-            n = len(raw)
-            if n > limit:
-                n = limit
-            out[pos] = n
-            for m in range(n):
-                out[pos + 1 + m] = raw[m]
+            if count > 0:
+                limit = count - 1
+                n = len(raw)
+                if n > limit:
+                    n = limit
+                out[pos] = n
+                for m in range(n):
+                    out[pos + 1 + m] = raw[m]
             index = index + 1
         else:
             width = _item_size(code, native)
@@ -345,6 +356,7 @@ def pack(format, *values) -> bytes:
 def unpack(format, buffer) -> tuple:
     """unpack(fmt, buffer) -> tuple: the values the buffer holds, one item per format item."""
     parsed = _parse(format)
+    _check_buffer(buffer)
     data = bytes(buffer)
     if len(data) != parsed[3]:
         raise error("unpack requires a buffer of %d bytes" % parsed[3])
@@ -354,7 +366,8 @@ def unpack(format, buffer) -> tuple:
 def pack_into(format, buffer, offset, *values) -> None:
     """pack_into(fmt, buffer, offset, v1, ...): write the values into a writable buffer."""
     if not isinstance(buffer, bytearray):
-        raise TypeError("pack_into requires a writable buffer")
+        raise TypeError("argument must be read-write bytes-like object, not %s"
+                        % type(buffer).__name__)
     parsed = _parse(format)
     size = parsed[3]
     used = offset
@@ -378,6 +391,7 @@ def pack_into(format, buffer, offset, *values) -> None:
 def unpack_from(format, buffer, offset: int = 0) -> tuple:
     """unpack_from(fmt, buffer, offset=0) -> tuple: unpack starting at offset."""
     parsed = _parse(format)
+    _check_buffer(buffer)
     size = parsed[3]
     used = offset
     if offset < 0:
@@ -406,6 +420,7 @@ def _iter_records(parsed, buffer, size):
 def iter_unpack(format, buffer):
     """iter_unpack(fmt, buffer) -> iterator of tuples, one per record."""
     parsed = _parse(format)
+    _check_buffer(buffer)
     size = parsed[3]
     if size == 0:
         raise error("cannot iteratively unpack with a struct of length 0")
@@ -435,6 +450,7 @@ class Struct:
         return bytes(out)
 
     def unpack(self, buffer) -> tuple:
+        _check_buffer(buffer)
         data = bytes(buffer)
         if len(data) != self.size:
             raise error("unpack requires a buffer of %d bytes" % self.size)
@@ -442,7 +458,8 @@ class Struct:
 
     def pack_into(self, buffer, offset, *values) -> None:
         if not isinstance(buffer, bytearray):
-            raise TypeError("pack_into requires a writable buffer")
+            raise TypeError("argument must be read-write bytes-like object, not %s"
+                            % type(buffer).__name__)
         used = offset
         if offset < 0:
             used = offset + len(buffer)
@@ -460,6 +477,7 @@ class Struct:
             buffer[used + i] = target[i]
 
     def unpack_from(self, buffer, offset: int = 0) -> tuple:
+        _check_buffer(buffer)
         used = offset
         if offset < 0:
             used = offset + len(buffer)
