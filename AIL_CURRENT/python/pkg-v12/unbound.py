@@ -184,6 +184,12 @@ class _Flow(object):
         self.refs = {}            # nested def name -> [state at each load in this scope]
         self.captures = []        # (scope node, state where it is made)
         self.deleted = {n.id for n in own if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Del)}
+        # earliest `del` of each name: a nested scope made before it still sees the name assigned
+        self.delete_lines = {}
+        for n in own:
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Del):
+                line = getattr(n, 'lineno', 0)
+                self.delete_lines[n.id] = min(line, self.delete_lines.get(n.id, line))
         # every load of a nested def's name inside another nested scope escapes the reference analysis
         self.escaped = set()
         for n in own:
@@ -479,7 +485,8 @@ def analyze(fn):
         if A is ALL:
             continue
         for name in _captured_loads(scope) & flow.tracked:
-            if name in A and name not in flow.deleted:
+            if name in A and (name not in flow.deleted
+                              or getattr(scope, 'lineno', 0) < flow.delete_lines.get(name, 0)):
                 continue
             if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)) and name not in flow.deleted:
                 refs = flow.refs.get(scope.name, [])

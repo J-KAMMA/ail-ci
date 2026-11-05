@@ -372,6 +372,11 @@ class _Walk(object):
                 for t in n.targets:
                     if isinstance(t, ast.Name) and src and src != t.id and not (
                             isinstance(n.value, ast.Subscript) and isinstance(n.value.slice, ast.Slice)):
+                        # `xs[i]` reaches a container only when the result is itself a container
+                        # (`rows[i]` is a row); `xs[i]` of a scalar list is a scalar value, not an
+                        # alias of `xs`.
+                        if isinstance(n.value, ast.Subscript) and t.id not in self.cont:
+                            continue
                         derived.setdefault(t.id, src)
             elif isinstance(n, (ast.For, ast.AsyncFor)):
                 src = source(n.iter)
@@ -412,6 +417,11 @@ class _Walk(object):
         if isinstance(e, ast.Name):
             return {e.id} if e.id in self.cont else set()
         if isinstance(e, ast.Attribute):
+            # `row.v` (a container field read out of `rows[i]`) is the row's own container, not a
+            # second name for the outer list: the typed path shares rows in place, so writing the
+            # row does not rewrite `rows`.
+            if isinstance(e.value, ast.Subscript):
+                return set()
             b = _base(e)
             return {b} if b and e.attr in self.mod.cf else set()
         if isinstance(e, ast.IfExp):

@@ -1,3 +1,23 @@
+## 2026-11-05 -- pyreach s7: None list slots and `or`/`and` narrowing (job-pyreachs7-11051129)
+
+`berth_sim` now builds typed from the unchanged `.py`: all 26 public+hidden cases match `reference.py`
+and the perf input is correct for the typed build.  Two changes in `optlib.py`:
+
+* `wait = [None, [], [], []]` becomes a list of rows plus a present bit per slot.  `is None` reads the
+  bit, `print(wait)` spells the absent slots as `None`, and unpacking present slots aliases the stored
+  rows.  An absent slot used as a list (`len`, `.append`, `heappush`) raises and exits 1 with CPython's
+  stdout; any other slot read (`x = wait[0]`) is refused by name so the general path keeps the `None`.
+* a local bound only in the blocks that give an Optional its value (`bw`) is bound once in front of
+  the earliest such block, so the possibly-unbound pass does not wrap every later read.  `or`/`and`
+  narrowing already existed in the base and is now covered by probes.
+
+Bridging the base export (which did not include s2): added the BLIST stepped-slice copy in
+`_stepped_slice_temp`/`_iter_plan`, heapq on a subscript receiver, `del name` lowering (unbound.py
+already tracks the deletion), and a line-aware capture check in unbound.py so `del keys` after
+`sorted(..., key=keys.__getitem__)` no longer refuses.  Probes in `/tmp/probes` (p1-p9) match CPython
+on the default and `AIL_UNIFIED_FORCE=1` builds; int64 overflow and `--exact-int` behave as before.
+`test_ail_optional_locals` (8 tests) passes.
+
 ## 2026-11-04 -- pyr3fix: the hybrid accelerates unannotated str helpers again (job-pyr3fix-11050045)
 
 `test_ail_cpython_hybrid`, `test_ail_prog2` and `test_ail_prog21` went red when pyreachs3c
