@@ -138,13 +138,9 @@ class VersionConsistency(unittest.TestCase):
         text = WHEEL_REPORT.read_text(encoding="utf-8")
         self.assertRegex(text, r"(?im)^Date: \d{4}-\d{2}-\d{2}")
         self.assertIn("Base branch:", text)
-        # The report measures an older wheel, so its old version is historical, not a current
-        # statement; it must not appear as a literal anywhere else.
-        found = sorted(set(VERSION_TOKEN.findall(text)))
-        self.assertTrue(found, "the report no longer carries a measured version")
-        # Its version is a measurement, not a current statement, so an old value is allowed here.
-        for value in found:
-            self.assertRegex(text, r"(?im)^Date: \d{4}-\d{2}-\d{2}")
+        # Its version is a measurement, not a current statement, so an old value is allowed here
+        # only because the report is dated.
+        self.assertTrue(VERSION_TOKEN.search(text), "the report no longer carries a measured version")
 
 
 if __name__ == "__main__":
