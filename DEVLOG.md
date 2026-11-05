@@ -5,9 +5,11 @@ inference in `_mark_bytes_containers`) on integ after s5; the three `pyfunc.py` 
 s6 side, which subsumes integ's `_is_byteish_split_struct` (both `IfExp` branches, plus `binvars`).
 Fixed the review's use-after-free: `del`/`pop`/`clear` freed a key buffer that a loop variable or
 another dict's value still viewed (`for k in d: keep = k; del d[k]` printed `ZZZ...`, CPython
-`BBB...`). BTAB now retires dropped buffers and frees them with the table; bytes and str VALUES are
-owned copies too (a stored `split()` view could be released by a loop checkpoint), and an
-overwritten value is retired, so `old = d[k]; d[k] = new` keeps `old`. Also `d.get(k, default)`
+`BBB...`). BTAB now copies keys and bytes/str VALUES into a per-table bump arena (a list of
+growing blocks, freed only with the table), so a dropped or overwritten copy stays readable:
+`old = d[k]; d[k] = new` keeps `old`. The value array is sized for the table's one value kind.
+A per-key malloc first cost +22% icount and +39% RSS on a 1e6-distinct-key word count; the arena
+brings it to +2.9% icount / +3.5% RSS (50k keys over 1e6 words: +0.4% / +0.3%). Also `d.get(k, default)`
 of a bytes-keyed dict of str values was typed int64 (gcc error in the default build, a regression
 from base); `_btab_value_call` gives `.get`/`.pop` the dict's value kind.
 
