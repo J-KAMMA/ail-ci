@@ -17,6 +17,22 @@ def _py_repr(x):
     return "%r" % x
 
 
+def _type_label(value):
+    """CPython's `type(value)` text, rebuilt from the class name.
+
+    This compiler exposes only `type(x).__name__`, not the class object, so the module is not
+    readable.  The builtin scalar and container types are recognised by identity and print bare;
+    every other class is a program class, and CPython prints `__main__` for it.
+    """
+    name = value.__class__.__name__
+    if (type(value) is float or type(value) is complex or type(value) is bytes
+            or type(value) is bytearray or type(value) is list or type(value) is tuple
+            or type(value) is dict or type(value) is set or type(value) is frozenset
+            or type(value) is range):
+        return "<class '" + name + "'>"
+    return "<class '__main__." + name + "'>"
+
+
 def recursive_repr(fillvalue="..."):
     """Decorator to make a repr function return fillvalue for a recursive call."""
 
@@ -31,7 +47,10 @@ def recursive_repr(fillvalue="..."):
             try:
                 result = user_function(self)
             finally:
-                running.remove(self)
+                for i in range(len(running) - 1, -1, -1):
+                    if running[i] is self:
+                        running.pop(i)
+                        break
             return result
 
         return wrapper
@@ -101,8 +120,8 @@ class Repr:
             sep = ",\n" + (self.maxlevel - level + 1) * indent
         except TypeError:
             raise TypeError(
-                "Repr.indent must be a str, int or None, not <class '%s'>"
-                % type(indent).__name__
+                "Repr.indent must be a str, int or None, not %s"
+                % _type_label(indent)
             )
         allpieces = [""]
         allpieces.extend(pieces)

@@ -72,24 +72,39 @@ with `python3` (stdout and exit status). All six match in both builds.
 | `p_sched_edge.py` | empty queue and `run()` on it, equal time+priority ordering, `queue` copy isolation, `cancel` twice (`ValueError` text), `enterabs`, 0/1/2-argument actions, non-blocking return value | match | match |
 | `p_sched_args.py` | arguments reaching actions through a list, a tuple and a dict value; `sequence` fields | match | match |
 
+### Fix round (review 0)
+
+The review's three failing probes now agree with CPython in both builds:
+
+| Probe | Covers | Default | Force |
+| --- | --- | --- | --- |
+| `p_filter.py` | `fnmatch()`/`filter()` normcase type check (`expected str, bytes or os.PathLike object, not int` for `filter([], 5)`, `fnmatch("a", 5)`, `fnmatch(5, "a*")`), bytes/str mixing, list/tuple/generator names | match | match |
+| `p_reprec3.py` | `recursive_repr` guard with distinct-but-equal values (`[1]` and `[1]`); removal is by identity, so the outer guard survives the inner call | match | match |
+| `p_replim2.py` | `_join` invalid indents: `Odd()` -> `<class '__main__.Odd'>`, `1.5` -> `<class 'float'>`, `[1]` -> `<class 'list'>`, negative int `ValueError`, empty/singleton lists | match | match |
+
+
 ## What was rewritten, per module
 
 All three keep CPython 3.12's logic and message text. The rewrites are forced
 by the compiler and are described in each module docstring.
 
-- `fnmatch.py`: `os.path.normcase` is the identity on POSIX and is not called.
-  CPython compiles `translate()`'s regular expression at run time; this
-  compiler accepts only a literal pattern in `re.compile`, so matching walks
-  the pattern directly, with `translate()` still returning CPython's exact
-  regex text. Bytes patterns and names are matched as ISO-8859-1 text, and the
-  mixed-type and non-string argument errors reproduce CPython's `TypeError`
-  texts. The `functools.lru_cache` on `_compile_pattern` is dropped (no
-  visible effect).
-- `reprlib.py`: `builtins.repr` is not available, so `_py_repr` asks `%r` for
-  the builtin representation. `recursive_repr` keeps the guard but keys it by
-  object identity instead of `(id(self), get_ident())`, because `id()` is not
-  available; the only visible difference is concurrent threads, which this
-  runtime does not have.
+- `fnmatch.py`: `os.path.normcase` is `os.fspath` on POSIX; `_normcase` reproduces it - str and
+  bytes pass unchanged, anything else raises CPython's
+  `expected str, bytes or os.PathLike object, not <name>` TypeError from `fnmatch()` and `filter()`.
+  A `__fspath__` class is refused by the compiler at the class definition, so no PathLike value can
+  reach it. CPython compiles `translate()`'s regular expression at run time; this compiler accepts
+  only a literal pattern in `re.compile`, so matching walks the pattern directly, with
+  `translate()` still returning CPython's exact regex text. Bytes patterns and names are matched as
+  ISO-8859-1 text, and the mixed-type and non-string argument errors reproduce CPython's `TypeError`
+  texts. The `functools.lru_cache` on `_compile_pattern` is dropped (no visible effect).
+- `reprlib.py`: `builtins.repr` is not available, so `_py_repr` asks `%r` for the builtin
+  representation. `recursive_repr` keeps the guard but keys it by object identity instead of
+  `(id(self), get_ident())`, because `id()` is not available; both the membership test and the
+  removal compare with `is`, so equal-but-distinct objects do not defeat it. The only visible
+  difference is concurrent threads, which this runtime does not have. `_join`'s invalid-indent
+  message needs CPython's full `type(indent)` text; this compiler exposes only
+  `type(x).__name__`, so `_type_label` rebuilds `<class '__main__.Name'>` from the class name
+  (builtin scalar/container types are recognised by identity and print bare).
 - `sched.py`: `threading.RLock` is not available, so the scheduler is not
   thread-safe. `Event` is a plain class and the queue is kept sorted by
   `(time, priority, sequence)` - the same key CPython's `heapq` orders the
@@ -135,13 +150,13 @@ Module refusals (deliberate, loud):
 - **F4** more than two positional arguments:
   `RuntimeError: sched actions take at most two positional arguments here`.
 
-Packaging (not in this task's file list):
+Packaging (fixed in this PR):
 
-- **F6** `test_ail_third_party_notices.test_wheel_contains_notices` fails because
-  the wheel has no `LICENSE-PSF.txt`. This is the follow-up relnotice1 already
-  records: `packaging/ail_wheel_backend.py` (another lane) copies only the two
-  root licenses. The three new modules do ship in the wheel after
-  `tools/update_manifest.py`. Five of the six notices tests pass.
+- **F6** `test_ail_third_party_notices.test_wheel_contains_notices` used to fail
+  because the wheel had no `LICENSE-PSF.txt`: `packaging/ail_wheel_backend.py`
+  copied only the two root licenses. `collect()` now also copies the PSF text
+  (`AIL_CURRENT/stdlib/LICENSE-PSF.txt`) and the typeshed license into
+  `.dist-info/licenses/`; the notices test passes 6/6.
 
 ## Notices
 

@@ -1,8 +1,10 @@
 """Derived from CPython 3.12 Lib/fnmatch.py; PSF License, see stdlib/LICENSE-PSF.txt.
 
 Filename matching with shell patterns.  `fnmatch()` and `filter()` case-normalize their arguments
-with `os.path.normcase`, which is the identity on POSIX (this file is POSIX-only), so it is not
-called.  CPython compiles `translate()`'s regular expression at run time; this compiler only accepts
+with `os.path.normcase`, which on POSIX is `os.fspath` (this file is POSIX-only): it returns str and
+bytes unchanged and rejects anything else with CPython's TypeError text; `_normcase` reproduces it.
+A PathLike object cannot be built here (this compiler refuses an `__fspath__` method at the class
+definition), so the non-str/bytes case always raises.  CPython compiles `translate()`'s regular expression at run time; this compiler only accepts
 a literal pattern in `re.compile`, so matching walks the pattern directly.  `translate()` still
 returns CPython's exact regular-expression text.  Bytes patterns and names are matched as
 ISO-8859-1 text, as CPython does when it compiles them; mixing bytes with str, or passing a
@@ -108,6 +110,13 @@ def _as_text(value) -> str:
     return value
 
 
+def _normcase(value):
+    if isinstance(value, str) or isinstance(value, bytes):
+        return value
+    raise TypeError("expected str, bytes or os.PathLike object, not %s"
+                    % type(value).__name__)
+
+
 def _check_type(name, pat):
     if isinstance(pat, bytes):
         if isinstance(name, str):
@@ -138,13 +147,15 @@ def fnmatch(name, pat):
     if the operating system requires it.
     If you don't want this, use fnmatchcase(FILENAME, PATTERN).
     """
-    _check_type(name, pat)
-    return fnmatchcase(_as_text(name), _as_text(pat))
+    name = _normcase(name)
+    pat = _normcase(pat)
+    return fnmatchcase(name, pat)
 
 
 def filter(names, pat):
     """Construct a list from those elements of the iterable NAMES that match PAT."""
     result = []
+    pat = _normcase(pat)
     for name in names:
         if fnmatchcase(name, pat):
             result.append(name)

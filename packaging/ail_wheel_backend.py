@@ -163,6 +163,8 @@ def collect(work):
     entries[info + "/entry_points.txt"] = ENTRY_POINTS.encode("utf-8")
     for name in LICENSE_FILES:
         entries["%s/licenses/%s" % (info, name)] = (REPO / name).read_bytes()
+    entries["%s/licenses/LICENSE-PSF.txt" % info] = (SOURCE / "stdlib" / "LICENSE-PSF.txt").read_bytes()
+    entries["%s/licenses/LICENSE-typeshed.txt" % info] = (REPO / "third_party" / "typeshed" / "LICENSE").read_bytes()
     return entries
 
 
