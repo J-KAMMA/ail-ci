@@ -376,6 +376,40 @@ in-bounds and race-free?
   default build.  `AIL_BCE_AUDIT=1` on a loop over a proved-in-range list emits one
   `ail_bce_audit_fail("py_main", 0)` site, which is the existing "runtime check kept" for a
   removed bound check.
+## 2026-11-06 -- robo1 review fix: par_range blocker and jitter tail (job-robo1-11070123)
+
+Review fix, docs only; no compiler or runtime change. `RESULTS.md` §2 still carried the stale
+`pthread_mutex_t` first error. Reproduced the bare-metal build: the measured first error (and
+`results.json`) is `program.c:516:38: 'CLOCK_MONOTONIC' undeclared`. newlib does declare the pthread
+types (line 473 compiles), but `_POSIX_THREADS` is off, so `PTHREAD_MUTEX_INITIALIZER` /
+`PTHREAD_COND_INITIALIZER` (lines 568/571) are undefined too. Same correction in the
+`census_par.py` docstring. `RESULTS.md` §3 now reports the true per-run worst miss, C 198-312 us
+and AIL 203-636 us (the 636 us is one alloc run), instead of 271-406 us.
+
+## 2026-11-06 -- robo1: AIL on ARM/Cortex-M3 and 1 kHz control-loop jitter (job-robo1-11062354)
+
+Measurement probe for the owner's "could AIL be a robot language" question. No compiler or runtime
+file changed; the change is new `lab/robo/` only (README, RESULTS, run.py, progs, harness, results.json).
+
+- Cross builds: `pid.py`, `ringbuf.py`, `kin2.py` emit C that cross-compiles unchanged at `-O2` to
+  `aarch64-linux-gnu`, `arm-linux-gnueabihf` and `arm-none-eabi` Cortex-M3 (newlib-nano + rdimon,
+  QEMU `mps2-an385`), and stdout matches CPython 3.12 byte for byte in all 12 cells. Bare metal needs
+  `-u _printf_float`; without it every float silently prints `0.0`. Sizes 44-49 KB text, 11 KB bss.
+- Blocker census, first error per subsystem: `threading` forces the boxed path and stops at
+  `__int128`; `par_range` at `CLOCK_MONOTONIC` (the pthread types exist; the initializer macros
+  and `clock_gettime` do not); `tcp_listen` at `sys/socket.h`; a >1 MiB
+  `read_bytes` at `sys/mman.h`; `time.perf_counter`/`sleep` at `CLOCK_MONOTONIC` (newlib-nano has
+  no `clock_gettime` or `nanosleep`). `read_bytes`/`write_bytes` and `get_env` build and run;
+  bare metal `getenv` returns NULL, so `get_env("PATH","missing")` prints `PATH = missing`.
+- 1 kHz, 20 000 iterations, median of 3: p50 59/60/61 us, p99 66/68/71, p99.9 98/108/114, max
+  271/247/5596 us, overruns 0/0/5 (C / AIL / MicroPython 1.22.1). The C row is the noise floor of a
+  shared runner.
+- RAM: native peak RSS 1.6-2.2 MB; bare-metal heap high-water 20-224 B.
+
+Probes: `bash ~/tools/cmp.sh` on all three programs: the general path and the default build both
+report "same stdout" (3/3 programs x 2 builds). No compiler behaviour changed, so no new
+DIFFERENCES row.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
