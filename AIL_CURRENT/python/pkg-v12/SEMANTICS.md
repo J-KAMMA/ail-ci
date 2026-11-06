@@ -2456,6 +2456,39 @@ reporting the flat slot count rather than the row count) that this section alone
 that was already wrong, identically, on unmodified `pkg-v3` -- section 23, merged alongside this
 one, is what closes that family.
 
+### 26a. Single-kind call-site inference (job callinf1, 2026-11-06)
+
+An unannotated parameter that every call site hands the SAME kind takes that kind; sites that
+disagree keep the rule above (clones for scalar kinds, else the old compile and its refusal by
+name). Added kinds and where they come from:
+
+- **list[float], list[str], one class C, list[C]** (`_claim`): read through the caller's typed
+  context like every other claim. They are *single-kind* claims (`_single_kind_claim`): they move
+  only an unannotated parameter (`_override_from_site`; an annotated one keeps its annotation and
+  the call guard checks the argument), they never make a clone (`_plan_clones` drops their sites
+  when a parameter also sees another kind), and when the callee's body contradicts one the other
+  claims fold exactly as before. A class claim counts only for a slot still at the int default (or
+  already that class), a list-of-class claim for an int/sequence default.
+- **method parameters**: `recv.m(...)` is read as a call of `C__m` when the caller already knows
+  `recv` is a C outside any hierarchy (`_method_call_target`). An int claim beside one class claim,
+  for a parameter whose body reads `param.attr`, is dropped (`_drop_int_against_class`): it is a
+  caller's provisional int return, not an int; a site that really passes an int is still refused
+  by the call's argument guard.
+- **constructor parameters** (`_constructor_claims`, `_ctor_param_kinds`): `__init__` is typed
+  before any function, so only argument kinds the source spells are read -- str / f-string, float,
+  int, bool literals, `X(...)`, and list displays of float or str literals. A parameter the body
+  leaves at the int default (or at a plain sequence, for a list claim) takes the claim when every
+  such site agrees; any other site is silence and is checked by the constructor's argument guard.
+  A bool site never joins int; a class used as a value, a class in a hierarchy, a `**` call or a
+  library build gets nothing.
+- **forwarded sequences** (`_keep_forwarded_arrays`): a parameter only handed on to another
+  function's sequence slot (marked 'array' before propagation) is no longer put back to int when a
+  round re-derives the function's kinds from its body.
+
+int never widens to float and bool never merges with int: int vs float sites stay a disagreement
+(clones or the old refusal), and no claim converts a value. Recursive functions are still not
+propagation targets.
+
 ## 27. A Subscript applied to an expression receiver, not a Name (`pkg-chainsub`, 2026-09-14)
 
 Before this section, `_expr`'s `ast.Subscript` handling recognised a receiver (the thing before the
