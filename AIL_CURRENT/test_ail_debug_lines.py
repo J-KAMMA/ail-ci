@@ -223,7 +223,9 @@ class DebugLines(unittest.TestCase):
                     self.assertNotIn("AIL_DBG_SITE(\"", release)
                     stripped = "\n".join(line for line in debug.splitlines()
                                          if not line.startswith("#line")
-                                         and not line.strip().startswith("AIL_DBG_SITE(\""))
+                                         and not line.strip().startswith("AIL_DBG_SITE(\"")
+                                         # a Python-named copy of a local for gdb (ir/emit_c.py DEBUG_LOCAL)
+                                         and not line.endswith("/* --debug: the Python local */"))
                     self.assertEqual([l for l in stripped.splitlines() if l.strip()],
                                      [l for l in release.splitlines() if l.strip()])
                 for each in ("rel", "dbg"):
