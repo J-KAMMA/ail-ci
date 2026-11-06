@@ -188,9 +188,12 @@ lowering.
 * A multi-target `Assign` now rebinds every target of a scanner name: `a = it = [1, 2]` after
   `with os.scandir(p) as it:` drops the scanner marker for both names and matches CPython
   (`f2_chainassign.py`, `1/1/2/a 1/a 2`).
-* The close-on-`with` try/finally no longer puts a `def` or `class` inside a `try`: those stay at
-  their place in the body and the surrounding statements keep a try of their own, so a nested
-  function in the `with` body builds and matches CPython (`f1_definscan.py`, `3/2`).
+* The close-on-`with` try/finally never puts a `def` or `class` inside a `try`: a body that defines
+  one is emitted unchanged and closed once after it, so a definition anywhere in the body (not only
+  first) keeps the scanner open for the statements that follow and matches CPython
+  (`f1_definscan.py` `3/2`; `g10_defmidunused.py`, `g8_defmidpartial.py`,
+  `g9_classmidpartial.py`, `b2_classin.py`, `b3_defafter.py`). Splitting the body and closing each
+  segment would close the scanner at the definition; moving the definition would reorder it.
 * The `if True:` the surface leaves in place of a rewritten `with open(...) as name:` now drops
   only the actual target name. The target is read back from the original source line through the
   line map `ail_chatgpt.py` writes next to the combined source (`lines.json`); an unrelated

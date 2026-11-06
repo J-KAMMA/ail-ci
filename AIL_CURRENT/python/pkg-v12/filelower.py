@@ -884,25 +884,16 @@ class _Lowerer(ast.NodeTransformer):
 
     def guard_scanner(self, body, close):
         """Wrap a `with os.scandir(...)` body in try/finally so the scanner closes on every exit.
-        AIL cannot compile a `def` or `class` inside a `try`, so those stay outside; the statements
-        around them get a try of their own and the close after a trailing definition."""
-        out, segment, after_def = [], [], False
-        for stmt in body:
-            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                if segment:
-                    out.append(ast.Try(body=segment, handlers=[], orelse=[],
-                                       finalbody=[copy.deepcopy(close)]))
-                    segment = []
-                out.append(stmt)
-                after_def = True
-            else:
-                segment.append(stmt)
-                after_def = False
-        if segment:
-            out.append(ast.Try(body=segment, handlers=[], orelse=[], finalbody=[copy.deepcopy(close)]))
-        elif after_def:
-            out.append(ast.Expr(value=copy.deepcopy(close.value)))
-        return out
+        AIL cannot compile a `def` or `class` inside a `try`, so a body that defines one is emitted
+        unchanged and closed once after it: splitting the body would close the scanner before the
+        statements that follow the definition (and would reorder them if the definition moved)."""
+        defines = any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                      for stmt in body for n in ast.walk(stmt))
+        if defines:
+            return list(body) + [ast.Expr(value=copy.deepcopy(close.value))]
+        if not body:
+            return [ast.Expr(value=copy.deepcopy(close.value))]
+        return [ast.Try(body=body, handlers=[], orelse=[], finalbody=[copy.deepcopy(close)])]
 
     def visit_Try(self, node):
         return self.generic_visit(node)
