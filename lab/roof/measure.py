@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Roof measurement: wall, instructions, LLC misses for each compare program (AIL and C).
 
-    python3 lab/roof/measure.py --out lab/roof/data
+    python3 lab/roof/measure.py --out lab/roof/data --langs ail,ail-py,c
 
-For each of the ten `lab/compare/src/<task>` programs it builds the C source with gcc -O2 and the
-AIL source exactly as lab/compare's run_task.py does (`compile --syntax python`), runs each binary
-three times on the task's perf input (median wall), and counts instructions and cache misses.
+For each of the ten `lab/compare/src/<task>` programs it builds the C source with gcc -O2 and both
+AIL sources compare-lab reports: `typed.py` (compare-lab column `ail`, the annotated source) and
+`main.py` (compare-lab column `ail-py`, the plain CPython source the task names). Both are built
+with `compile --syntax python`, and `main.py` gets `--exact-int` for the two tasks that need big
+ints (`rail_transfer`, `chain_relax`), exactly as run_task.py does. Each binary runs three times on
+the task's perf input (median wall), and instructions and cache misses are counted.
 
 Counters: this runner's vCPUs expose no hardware PMU (`/sys/bus/event_source/devices/` has no
 `cpu`), so perf_event_open and tools/icount.c fail and the fallback is valgrind's cachegrind with
@@ -22,6 +25,30 @@ REPO = HERE.parents[1]
 AIL = REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'
 TASKS_SRC = REPO / 'lab' / 'compare' / 'src'
 TASKS_GEN = REPO / 'lab' / 'compare' / 'tasks'
+# compare-lab's two AIL columns: `ail` builds the annotated typed.py, `ail-py` builds main.py.
+SOURCE = {'c': 'main.c', 'ail': 'typed.py', 'ail-py': 'main.py'}
+LANGS = ['ail', 'ail-py', 'c']
+# These programs use big ints by design (a `1 << 200` sentinel, a 64-bit modular LCG); compare-lab
+# passes --exact-int for their main.py build, so the roof harness must too or the build is refused.
+EXACT_INT_TASKS = ('rail_transfer', 'chain_relax')
+BUILD_DIRECTIVE = re.compile(r'^#\s*ail-build:\s*(.*)$')
+
+
+def wants_exact_int(task, src):
+    """--exact-int when compare-lab names it or the source's `# ail-build:` line asks for it."""
+    if task in EXACT_INT_TASKS:
+        return True
+    try:
+        with open(src, encoding='utf8', errors='replace') as fh:
+            for _ in range(3):
+                m = BUILD_DIRECTIVE.match(fh.readline())
+                if m:
+                    return '--exact-int' in m.group(1)
+    except OSError:
+        pass
+    return False
+
+
 CACHEGRIND = ['valgrind', '--tool=cachegrind', '--cache-sim=yes', '--branch-sim=no',
               '--I1=32768,8,64', '--D1=32768,8,64', '--L2=524288,8,64', '--LL=33554432,16,64']
 IR_ONLY = ['valgrind', '--tool=cachegrind', '--cache-sim=no', '--branch-sim=no']
@@ -51,13 +78,20 @@ def make_case(name, work):
                 args=[a.replace('{input}', str(path)) for a in args], bytes=len(data))
 
 
-def build(task, lang, out):
-    src = TASKS_SRC / task / ('main.c' if lang == 'c' else 'typed.py')
+def build_cmd(task, lang, src, out, strict=False):
     if lang == 'c':
-        cmd = ['gcc', '-O2', '-std=c11', '-o', str(out), str(src), '-lm']
-    else:
-        cmd = [sys.executable, '-B', str(AIL), 'compile', str(src), '--syntax', 'python', '-o', str(out)]
-    p = subprocess.run(cmd, capture_output=True, timeout=1800)
+        return ['gcc', '-O2', '-std=c11', '-o', str(out), str(src), '-lm']
+    cmd = [sys.executable, '-B', str(AIL), 'compile', str(src), '--syntax', 'python']
+    if lang == 'ail-py' and wants_exact_int(task, src):
+        cmd.append('--exact-int')
+    if strict:
+        cmd.append('--strict')
+    return cmd + ['-o', str(out)]
+
+
+def build(task, lang, out, strict=False):
+    src = TASKS_SRC / task / SOURCE[lang]
+    p = subprocess.run(build_cmd(task, lang, src, out, strict), capture_output=True, timeout=1800)
     return p.returncode == 0 and out.is_file(), p
 
 
@@ -123,29 +157,31 @@ def cachegrind(binary, case, out_file, timeout):
         dict(icount_method='failed', instructions=None)
 
 
-def one_task(task, work, runs, timeout, want_cache):
+def one_task(task, work, runs, timeout, want_cache, langs):
     case = make_case(task, work)
     row = dict(task=task, input_bytes=case['bytes'])
     bins = {}
-    for lang in ('c', 'ail'):
-        out = work / ('%s_%s' % (task, lang))
+    for lang in langs:
+        out = work / ('%s_%s' % (task, lang.replace('-', '_')))
         ok, p = build(task, lang, out)
         row[lang + '_build_ok'] = ok
+        row[lang + '_source'] = SOURCE[lang]
         if not ok:
             row[lang + '_build_error'] = p.stderr.decode('utf8', 'replace')[-400:]
         bins[lang] = out
-        if lang == 'ail' and ok:
-            strict = subprocess.run([sys.executable, '-B', str(AIL), 'compile', str(TASKS_SRC / task / 'typed.py'),
-                                     '--syntax', 'python', '--strict', '-o', str(work / ('%s_strict' % task))],
+        if lang.startswith('ail') and ok:
+            strict = subprocess.run(build_cmd(task, lang, TASKS_SRC / task / SOURCE[lang],
+                                              work / ('%s_%s_strict' % (task, lang.replace('-', '_'))),
+                                              strict=True),
                                     capture_output=True, timeout=1800)
-            row['ail_path'] = 'typed' if strict.returncode == 0 else 'general'
+            row[lang + '_path'] = 'typed' if strict.returncode == 0 else 'general'
             if strict.returncode != 0:
                 lines = strict.stderr.decode('utf8', 'replace').splitlines()
                 for i, line in enumerate(lines):
                     if 'why not typed' in line:
-                        row['ail_why_not_typed'] = ((lines[i - 1] if i else '') + ' | ' + line).strip()[:300]
+                        row[lang + '_why_not_typed'] = ((lines[i - 1] if i else '') + ' | ' + line).strip()[:300]
                         break
-    for lang in ('c', 'ail'):
+    for lang in langs:
         if not row.get(lang + '_build_ok'):
             continue
         t = time_runs(bins[lang], case, runs)
@@ -155,7 +191,7 @@ def one_task(task, work, runs, timeout, want_cache):
         row[lang + '_cpu_s'] = round(t['cpu_s'], 4) if t['cpu_s'] is not None else None
         row[lang + '_cores'] = t['cores']
         if want_cache:
-            row[lang] = cachegrind(bins[lang], case, work / ('%s_%s.cg' % (task, lang)), timeout)
+            row[lang] = cachegrind(bins[lang], case, work / ('%s_%s.cg' % (task, lang.replace('-', '_'))), timeout)
         else:
             row[lang] = dict(icount_method='skipped', instructions=None)
     return row
@@ -168,37 +204,48 @@ def main():
                                        'tally_lang,term_rank,ticket_audit,tree_fold')
     ap.add_argument('--runs', type=int, default=3)
     ap.add_argument('--jobs', type=int, default=2)
+    ap.add_argument('--langs', default=','.join(LANGS))
     ap.add_argument('--cache-timeout', type=int, default=1200)
     ap.add_argument('--no-cache', action='store_true')
+    ap.add_argument('--merge', action='store_true',
+                    help='update the existing programs.json instead of replacing it (keep other languages)')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     tasks = [t for t in args.tasks.split(',') if t]
+    langs = [l for l in args.langs.split(',') if l]
     print('hardware PMU (perf_event_open instructions):', 'yes' if perf_available() else 'no -> valgrind cachegrind',
           flush=True)
     with tempfile.TemporaryDirectory(prefix='roof-') as tmp:
         work = Path(tmp)
         rows = {}
+        if args.merge and (out / 'programs.json').is_file():
+            try:
+                rows = json.loads((out / 'programs.json').read_text())
+            except ValueError:
+                rows = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futs = {pool.submit(one_task, t, work, args.runs, args.cache_timeout, not args.no_cache): t for t in tasks}
+            futs = {pool.submit(one_task, t, work, args.runs, args.cache_timeout, not args.no_cache, langs): t
+                    for t in tasks}
             for fut in concurrent.futures.as_completed(futs):
                 t = futs[fut]
                 try:
-                    rows[t] = fut.result()
+                    fresh = fut.result()
                 except Exception as e:
-                    rows[t] = dict(task=t, error='%s: %s' % (type(e).__name__, e))
+                    fresh = dict(task=t, error='%s: %s' % (type(e).__name__, e))
+                rows.setdefault(t, {}).update(fresh)
                 (out / 'programs.json').write_text(json.dumps(rows, indent=1) + '\n')
                 print('done', t, flush=True)
     (out / 'programs.json').write_text(json.dumps(rows, indent=1) + '\n')
-    cols = ['task', 'lang', 'wall_s', 'instructions', 'llc_misses', 'd1_misses', 'icount_method', 'path']
+    cols = ['task', 'lang', 'source', 'wall_s', 'instructions', 'llc_misses', 'd1_misses', 'icount_method', 'path']
     print('\t'.join(cols))
     for t in tasks:
         r = rows.get(t, {})
-        for lang in ('ail', 'c'):
+        for lang in langs:
             sub = r.get(lang) or {}
-            print('\t'.join(str(x) for x in [t, lang, r.get(lang + '_wall_s'), sub.get('instructions'),
-                                             sub.get('lld_misses'), sub.get('d1_misses'), sub.get('icount_method'),
-                                             r.get('ail_path', '') if lang == 'ail' else '']))
+            print('\t'.join(str(x) for x in [t, lang, r.get(lang + '_source'), r.get(lang + '_wall_s'),
+                                             sub.get('instructions'), sub.get('lld_misses'), sub.get('d1_misses'),
+                                             sub.get('icount_method'), r.get(lang + '_path', '')]))
 
 
 if __name__ == '__main__':

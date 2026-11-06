@@ -58,19 +58,21 @@ def run(binary, c, out=subprocess.DEVNULL):
             stdin.close()
 
 
-def build_ail(task, work):
-    dbg = work / (task + '.d')
+def build_ail(task, work, source='typed.py', tag='ail'):
+    dbg = work / (task + '.' + tag + '.d')
     if dbg.exists():
         import shutil
         shutil.rmtree(dbg)
-    out = work / (task + '_ail')
-    p = subprocess.run([sys.executable, '-B', str(AIL), 'compile', str(SRC / task / 'typed.py'),
-                        '--syntax', 'python', '-o', str(out), '--debug-dir', str(dbg)],
-                       capture_output=True, timeout=1800)
+    out = work / (task + '_' + tag)
+    cmd = [sys.executable, '-B', str(AIL), 'compile', str(SRC / task / source),
+           '--syntax', 'python', '-o', str(out), '--debug-dir', str(dbg)]
+    if source == 'main.py' and task in ('rail_transfer', 'chain_relax', 'scar_life'):
+        cmd.insert(4, '--exact-int')
+    p = subprocess.run(cmd, capture_output=True, timeout=1800)
     csrc = dbg / 'program.c'
     if p.returncode != 0 or not csrc.is_file():
         return None, None
-    exe = work / (task + '_ail_g')
+    exe = work / (task + '_' + tag + '_g')
     r = subprocess.run(['gcc'] + AIL_CFLAGS + ['-o', str(exe), str(csrc), '-lm'], capture_output=True)
     return (csrc, exe) if r.returncode == 0 else (csrc, None)
 

@@ -54,7 +54,8 @@ facts() {
 }
 
 programs() {
-    python3 "$HERE/measure.py" --out "$DATA" --runs 3 --jobs 2 "$@"
+    # Both AIL columns the task and compare-lab name: `ail` = typed.py (annotated), `ail-py` = main.py.
+    python3 "$HERE/measure.py" --out "$DATA" --runs 3 --jobs 2 --langs ail,ail-py,c --merge "$@"
 }
 
 case "$STAGE" in

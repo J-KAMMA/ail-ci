@@ -1,8 +1,9 @@
 # roof: how close is each compare program to the hardware limit, and what limits it
 
 Measurement only. Nothing in the compiler changed. Runner: GitHub Actions, 4 vCPU, shared with up
-to five agents; every number below was measured in the same job, on the same runner, with
-`bash lab/roof/run.sh`.
+to five agents; the machine facts, the typed-source column and the C column were measured in the
+same job with `bash lab/roof/run.sh`, and the task's `main.py` column was measured in the fix job on
+the same runner type with `measure.py --langs ail-py` (the section below names it).
 
 ## The machine (measured here, not from a datasheet)
 
@@ -24,7 +25,26 @@ The chasing load costs 116.5 ns on a DRAM miss, so a program that serialises its
 8.6 M loads/s no matter how much bandwidth is idle. `%STREAM` below divides by the DRAM-resident
 triad rate, **25.099 GB/s**.
 
-## Method and what is simulated
+## Two AIL sources (the fix from review 1)
+
+The task names `lab/compare/src/<task>/main.py` as the AIL input. compare-lab reports two AIL
+columns: `ail` builds `typed.py` (the annotated source) and `ail-py` builds `main.py` (the plain
+CPython source). Review 1 found that the first version of this file measured only `typed.py`, so
+the `boxed general path` verdict class was empty by construction. Both columns are now measured
+and every row names its source. `main.py` is built with `--syntax python`; it also gets
+`--exact-int` for `rail_transfer`, `chain_relax` (as compare-lab does) and for `scar_life`, whose
+`# ail-build: --exact-int` directive asks for it (without it the binary builds but dies at runtime
+with `OverflowError: ... --exact-int`, not a measurement).
+
+Result: **the `main.py` column is a different machine.** Of the eight builds that compile, six are
+on the general path and only `berth_sim` and `echo_pack` are typed; AIL's `main.py` build is
+**1.6x-143x C's wall** (median 9.9x), not the 0.67x-1.98x the annotated source shows. Two programs
+do not compile at all and are named refusals (below), not silent rows.
+
+C: `gcc -O2 -std=c11`. AIL: `compile --syntax python` exactly as `lab/compare/run_task.py` builds
+the `ail`/`ail-py` columns. In the typed-source table all ten builds took the typed path
+(`--strict` accepted every one); in the task's `main.py` table that is true of `berth_sim` and
+`echo_pack` only.
 
 The vCPUs expose no hardware PMU (`/sys/bus/event_source/devices/` has no `cpu`), so `perf stat`,
 `tools/icount.c` and `perf annotate` all fail: **instructions and LLC misses here come from
@@ -40,16 +60,68 @@ wall gives the average busy cores (`data/cores.json`). Every program reads 0.98-
 a thread.
 
 Vectorisation is measured two ways (`lab/roof/vec.py`, `data/vec.json`): `gcc -fopt-info-vec-all`
-on the emitted C for all ten programs, and `objdump -d` of each emitted binary counting instructions
-that touch an xmm/ymm register. The loop count answers "how much hot code is vectorised" (none);
-the mnemonic share shows the residual SIMD moves outside vectorised loops. For the five attributed
-programs the hot functions' disassembly is in `data/attrib/attrib.json` (`hot_simd_share`).
+on the emitted C for all ten programs in both AIL columns, and `objdump -d` of each emitted binary
+counting instructions that touch an xmm/ymm register. The loop count answers "how much hot code is
+vectorised" (none in the typed column; one loop in two `main.py` builds); the mnemonic share shows
+the residual SIMD moves outside vectorised loops. For the five attributed programs the hot
+functions' disassembly is in `data/attrib/attrib.json` (`hot_simd_share`).
 
-C: `gcc -O2 -std=c11`. AIL: `compile --syntax python` exactly as `lab/compare/run_task.py` builds
-the `ail` column. **All ten AIL builds took the typed path** (`--strict` accepted every one), so
-no row below is a boxed general-path build.
+## The task's source: `main.py` (compare-lab's `ail-py` column)
 
-## The table
+Wall is the median of 3 runs; counters are cachegrind (3.22), on the same input, `callgrind-sim`
+where the cache simulation finished and `callgrind-ir` (instructions only, LLC `n/m`) where it
+did not. `refused` means the compiler refused the source by name; `n/m` means the cachegrind run
+exceeded the 20-minute cap (the general path executes so much more code that the simulation does
+not finish in budget — the typed column's counters are given in the next table for comparison).
+`%phys min` and IPC need instructions, so they are `n/m` there; `cycles*` is wall x 3.211 GHz and
+is always available.
+
+| task | source | wall s | instr | cycles* | IPC | LLC miss | GB/s | %STREAM | %peakIPC | vec loops | SIMD | cores | verdict | %phys min |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| berth_sim | main.py | 5.118 | 33.476e9 | 16.43e9 | 2.04 | 250.6M | 3.13 | 12% | 51% | 0 | 2.2% | 1.00 | compute-bound (scalar) | 51% |
+| chain_relax | main.py | 153.767 | n/m | 493.7e9 | n/m | n/m | n/m | n/m | n/m | 0 | 13.8% | 1.00 | boxed general path | n/m |
+| echo_pack | main.py | 5.770 | 18.231e9 | 18.53e9 | 0.98 | 36.4M | 0.40 | 2% | 25% | 0 | 0.8% | 1.00 | compute-bound (scalar) | 25% |
+| ledger_bin | main.py | 48.847 | n/m | 156.8e9 | n/m | n/m | n/m | n/m | n/m | 0 | 18.7% | 1.00 | boxed general path | n/m |
+| rail_transfer | main.py | 0.962 | 3.704e9 | 3.09e9 | 1.20 | 23.3M | 1.55 | 6% | 30% | 0 | 20.0% | 0.99 | boxed general path | 30% |
+| scar_life | main.py | 30.904 | n/m | 99.2e9 | n/m | n/m | n/m | n/m | n/m | 1 | 23.9% | 1.00 | boxed general path | n/m |
+| tally_lang | main.py | refused | - | - | - | - | - | - | - | - | - | - | build refused (regex pattern used as a value) | - |
+| term_rank | main.py | 28.836 | 111.51e9 | 92.6e9 | 1.20 | n/m | n/m | n/m | 30% | 1 | 23.2% | 1.00 | boxed general path | 30% |
+| ticket_audit | main.py | 56.998 | n/m | 183.0e9 | n/m | n/m | n/m | n/m | n/m | 0 | 25.3% | 1.00 | boxed general path | n/m |
+| tree_fold | main.py | refused | - | - | - | - | - | - | - | - | - | - | build refused (compiled pattern used as a value; tuple element type) | - |
+
+The two refusals are the compiler's own, unchanged by this lane:
+`tally_lang/main.py:22` — "the compiled pattern TOK is used as a value"; `tree_fold/main.py:20` —
+"the compiled pattern NODE is used as a value", then line 89 "cannot tell the type of element 0 of
+this tuple". They are pre-existing build refusals (the same in the base tree), so they are reported
+as refusals, not as measurements. For the eight builds that do compile, the `main.py` binary's
+stdout and exit code on the perf input are byte-identical to the C build's (checked for all eight:
+`/tmp/roofchk/equiv.py`).
+
+### What the `main.py` table says
+
+- **Compiling the plain source can cost 1-2 orders of magnitude.** `chain_relax` 153.8 s vs 1.263 s
+  for the annotated source (122x; exact big ints on the general path), `ledger_bin` 48.8 s vs
+  0.884 s (55x), `ticket_audit` 57.0 s vs 1.760 s (32x), `term_rank` 28.8 s vs 2.348 s (12x),
+  `rail_transfer` 0.962 s vs 0.069 s (14x). Against C the eight builds that compile are 1.6x-143x
+  (median 9.9x).
+- **The annotated source is not a proxy.** `berth_sim` on `main.py` executes 33.5e9 instructions
+  against 8.46e9 for `typed.py` (4.0x), `echo_pack` 18.2e9 vs 5.54e9 (3.3x), `rail_transfer`
+  3.70e9 vs 0.391e9 (9.5x) — over the same inputs and with the same stdout. The two columns
+  answer different questions: `typed.py` asks how fast the same algorithm can be if typed by hand;
+  `main.py`, which the task asks for, measures what AIL does to ordinary Python.
+- **The general path is the reason the verdict class was empty.** Six of the eight compiled builds
+  (`chain_relax`, `ledger_bin`, `rail_transfer`, `scar_life`, `term_rank`, `ticket_audit`) are on
+  the boxed general path. `scar_life` needs exact big ints (its bitmasks are wider than int64);
+  without `--exact-int` the binary builds but exits at runtime with the compiler's named
+  `OverflowError ... --exact-int`, so that flag is part of a correct build.
+- **The typed `main.py` builds are not close to the roof either.** `berth_sim` is 51% of the
+  4-IPC floor and 12% of STREAM; `echo_pack` 25% of the floor at IPC 0.98. Their limit is the
+  emitted instruction stream, as in the typed table, not bandwidth.
+- **A little vectorisation appears on the general path** (1 loop in `scar_life` and `term_rank`;
+  SIMD share 13-25%, `ticket_audit` 25.3% with 0 vectorised loops), from list/bytes helper loops,
+  not from the program's hot loop. The typed builds still have none.
+
+## The annotated source table (`typed.py`, compare-lab's `ail` column)
 
 `cycles*` = wall x 3.211 GHz. `GB/s` = LLC misses x 64 B / wall. `%STREAM` = GB/s / 25.099.
 `%peakIPC` = IPC / 4. `vec loops` = loops the C compiler vectorised (`-fopt-info-vec-all`).
@@ -89,27 +161,29 @@ IR-only run and records `icount_method=timeout-ir` (`data/programs.json`). Its w
 
 ### What the table says
 
-- **AIL is 0.67x-1.98x C's wall**; the sorted ratios are 0.67, 0.85, 1.18, 1.27, 1.30, 1.31, 1.44,
+- **In the typed column AIL is 0.67x-1.98x C's wall**; the sorted ratios are 0.67, 0.85, 1.18, 1.27, 1.30, 1.31, 1.44,
   1.56, 1.58, 1.98 (**median 1.31x**). Seven are between 1.0x and 1.6x, two are faster than C
   (`rail_transfer` 0.67x, `term_rank` 0.85x) and one is above 1.6x (`ticket_audit` 1.98x, which
   also executes 5.4x C's instructions; `echo_pack` is 1.58x wall and 2.9x instructions).
-- **Nothing is vectorised.** `-fopt-info-vec-all` on every emitted C: 0 loops vectorised and
+- **Nothing in the typed column is vectorised.** `-fopt-info-vec-all` on every emitted C: 0 loops vectorised and
   **35-139 "not vectorized" reports per program** (`scar_life` 35, `echo_pack` 47, `tally_lang` 51,
   `chain_relax` 53, `rail_transfer` 65, `ledger_bin` 68, `term_rank` 84, `berth_sim` 101,
   `ticket_audit` 133, `tree_fold` 139; `data/vec.json`). The residual SIMD mnemonics in the
   binaries are 0.6-3.6% of instructions (and 0.9-11.1% in the hottest functions of the attributed
   programs); they are scalar register moves (`pxor`, spills), not vectorised hot loops.
-- **Only `tree_fold` is near a memory roof** (19% of STREAM, 5.3x C's LLC misses). Every other
-  program is below 9% of STREAM: they are not bandwidth-bound, they are issue/latency-bound.
+- **Only `tree_fold` is near a memory roof in the typed column** (19% of STREAM, 5.3x C's LLC
+  misses). Every other typed program is below 9% of STREAM: they are not bandwidth-bound, they are
+  issue/latency-bound.
 - **`berth_sim` is latency-bound, not bandwidth-bound**: 78M LLC misses at only 2.08 GB/s means the
   misses are not overlapped; at 116.5 ns each a serial chain would need 9.1 s, so ~3-4 are in flight.
 - **`tally_lang` and `chain_relax` have almost no memory traffic** and IPCs of 3.2-4.3 and 0.42: the
   former is a dense interpreter loop (close to the dispatch limit), the latter is bound by
   division/modulo and float formatting in `fmt`, not by instruction count.
 
-## Subtraction: where AIL's extra instructions go
+## Subtraction: where the typed source's extra instructions go
 
-Method (`lab/roof/attrib.py`): emit the C that AIL generates (`--debug-dir`), rebuild it with `-g`
+Method (`lab/roof/attrib.py`): emit the C that AIL generates from `typed.py` (compare-lab's `ail`
+column; the `main.py` general-path builds are too large to annotate in budget), rebuild it with `-g`
 and the compiler's own flags, and run callgrind; do the identical line attribution on the C build's
 `main.c`; then subtract line by line. `callgrind_annotate` gives Ir per emitted source line, so a
 bounds check, an overflow check, a refcount update, an allocation, a copy or a box is read off the
@@ -140,8 +214,8 @@ not finish). Coverage is 5 of 10, so the largest gaps (`ticket_audit` +10.6e9 Ir
 
 Ranked by measured share of the extra (all five attributed programs):
 
-1. **`other` (the shape of the emitted code): 54-95% of the extra** — 53.8% of `rail_transfer`,
-   61.7% of `ledger_bin`, 76.2% of `berth_sim`, 95.0% of `echo_pack`. This is the AIL-minus-C
+1. **`other` (the shape of the emitted code): 54-100% of the extra** — 53.8% of `rail_transfer`,
+   61.7% of `ledger_bin`, 76.2% of `berth_sim`, 95.0% of `echo_pack`, 100% of `chain_relax`. This is the AIL-minus-C
    difference in lines no check pattern matches: extra moves, reloads and one-statement-per-Python-
    operation temporaries. It is the largest term but it is not a removable check.
 2. **Overflow/range checks: up to 29.3%** — `ledger_bin` 796.5M Ir (29.3% of its extra, 15.2% of
@@ -155,52 +229,71 @@ Ranked by measured share of the extra (all five attributed programs):
    instructions, 1.09x); `berth_sim` 2.8% (sarena/list churn); negligible in `ledger_bin`.
 5. **Copies: up to 4.1%** (`rail_transfer`), 2.1% `berth_sim`, 0.2% `ledger_bin`.
 6. **Refcount: up to 2.3%** (`rail_transfer`), 0.2% `berth_sim`, 0.1% `ledger_bin`.
-7. **Boxing: 0 everywhere** — all five attributed builds are typed.
+7. **Boxing: 0 in the attributed column** — all five attributed builds are `typed.py`. No
+   `main.py` general-path build was attributed, so the boxing share of *that* column is measured
+   only by its total (below); it is where the missing 8-143x must be.
 
 ## Ranked list: what would move how many programs, and by how much
 
-"Programs moved" counts programs where the feature is worth >2% of wall. The speedup bound is
-Amdahl on the share of AIL's *own* instructions (the programs are instruction-issue-bound, at
-10-108% of the 4-IPC floor), not on the share of the extra.
+"Programs moved" counts programs where the feature is worth >2% of wall. For items 2-9 the
+speedup bound is Amdahl on the share of AIL's *own* instructions (the programs are
+instruction-issue-bound, at 10-108% of the 4-IPC floor), not on the share of the extra. Item 1's
+bound is the measured wall ratio between the two sources, not an Amdahl estimate.
 
-1. **Cheaper emitted code / fewer temporaries for straight-line Python** (not a hardware feature,
-   but the largest measured term: 54-95% of the extra in the attributed programs). Would move
+1. **Land `main.py` on the typed path (remove the general path's boxing/refcounts) — the largest
+   measured lever.** The task's source is general-path in six of eight compiled builds, and those
+   builds are 1.6x-143x C while their `typed.py` counterparts are 0.67x-1.98x. The measured wall
+   bound if the plain source reached the typed source's speed: `chain_relax` 153.8 s -> 1.263 s
+   (**122x**), `ledger_bin` 48.8 -> 0.884 (**55x**), `ticket_audit` 57.0 -> 1.760 (**32x**),
+   `rail_transfer` 0.962 -> 0.069 (**14x**), `term_rank` 28.8 -> 2.348 (**12x**), `scar_life`
+   30.9 -> 29.9 (1.03x). Moves 6 programs, and is worth more than every hardware feature below
+   combined. This is a compiler feature (typing/escape analysis over the plain source), not a
+   hardware one.
+2. **Cheaper emitted code / fewer temporaries for straight-line Python** (not a hardware feature,
+   but the largest measured term within the typed column: 54-100% of the extra in the attributed
+   programs). Would move
    `ticket_audit` (5.4x instructions, 1.98x wall), `echo_pack` (2.9x), `tree_fold` (2.0x),
    `ledger_bin` (1.9x), `tally_lang` (1.7x), `berth_sim` (1.4x). Bound: up to ~2x wall on
    `ticket_audit`. Needs better C emission (fewer temporaries, better aliasing information).
-2. **Overflow checks with range facts (provable no-overflow / small int types)**: `ledger_bin`
+3. **Overflow checks with range facts (provable no-overflow / small int types)**: `ledger_bin`
    1.18x, `rail_transfer` 1.03x, `berth_sim` 1.02x — moves 3 measurably. Needs the int64 range
    analysis the compiler already has, applied to accumulators whose bound is provable, or
    `i32`/`u32` element types.
-3. **Bounds checks from ownership/length proofs**: `rail_transfer` 1.11x, `berth_sim` 1.09x,
+4. **Bounds checks from ownership/length proofs**: `rail_transfer` 1.11x, `berth_sim` 1.09x,
    `ledger_bin` 1.04x, `echo_pack` 1.03x — moves 4. The owner's "restrict from ownership proofs"
    idea is worth ~1.1x here, not more.
-4. **Allocation reduction (arena/stack lists)**: `rail_transfer` 1.09x; `berth_sim` 1.02x. Moves 2.
-5. **Copy and refcount elision**: `rail_transfer` 1.04x and 1.02x; `berth_sim` 1.02x and 1.00x.
+5. **Allocation reduction (arena/stack lists)**: `rail_transfer` 1.09x; `berth_sim` 1.02x. Moves 2.
+6. **Copy and refcount elision**: `rail_transfer` 1.04x and 1.02x; `berth_sim` 1.02x and 1.00x.
    Moves 1-2 by >2%; small everywhere else.
-6. **SIMD guarantees / "why not vectorised"**: **moves 0 programs today** — 0 vectorised loops in
-   10/10, and the hot loops are data-dependent byte parsers. Worth doing for *messages*, not for
-   speed on this suite.
-7. **GIL-free `par for`, loop tiling, GPU offload**: all ten programs are single-threaded (measured
+7. **SIMD guarantees / "why not vectorised"**: **moves 0 programs today** — 0 vectorised loops in
+   the typed builds, and the hot loops are data-dependent byte parsers. Worth doing for *messages*,
+   not for speed on this suite.
+8. **GIL-free `par for`, loop tiling, GPU offload**: all ten programs are single-threaded (measured
    0.98-1.00 cores) with <19% of STREAM and <1% of the machine's 4-core compute; they would need a
    different algorithm (parallel decomposition of a serial parser) before any of these pay. Not
    measurable as headroom here.
-8. **Small int/float types**: no float hot loop exists (only `chain_relax`'s `fmt`); int64 is
+9. **Small int/float types**: no float hot loop exists (only `chain_relax`'s `fmt`); int64 is
    already the element type. No measured headroom.
 
-The headline for the owner: **the physical minimum is not the limit for these programs — the
-instruction stream is.** All ten run at 10-108% of the 4-IPC floor and at most 19% of STREAM. AIL
-is faster than C on two programs and within 1.6x on five more; the one 2x outlier (`ticket_audit`)
-executes 5.4x C's instructions. The largest measured lever is the emitted instruction count, and
-within the removable checks the order is overflow (up to 29% of the extra) > bounds (up to 19%) >
-allocation (up to 15%) > copies (up to 4%) > refcount (up to 2%); boxing is 0 because every build
-is typed.
+The headline for the owner: **there are two answers, and the task's source is the one that matters.**
+On `main.py` the physical minimum is not the limit at all: six of eight compiled builds are on the
+boxed general path and run at 1.6x-143x C (median 9.9x; up to 122x the same program's annotated
+source), so the first lever is getting ordinary Python onto the typed path, not any hardware
+feature. On the annotated source (`typed.py`) all ten builds are typed and the physical minimum is
+still not the limit — 0.67x-1.98x C, 10-108% of the 4-IPC floor, at most 19% of STREAM — so there
+the instruction stream is the limit. Within the removable typed-path checks the measured order is
+overflow (up to 29% of the extra) > bounds (up to 19%) > allocation (up to 15%) > copies (up to 4%)
+> refcount (up to 2%); boxing is 0 there because every attributed build is typed, and boxing is
+where the uncounted 8-143x of the `main.py` column lives.
 
 ## Files
 
 - `lab/roof/clock.c`, `stream.c`, `chase.c` — the filter, measured in the same job.
 - `lab/roof/run.sh`, `measure.py`, `attrib.py`, `vec.py`, `cores.py` — the harness.
-- `lab/roof/data/` — raw microbenchmark output, `programs.json` (all counters, including
-  `scar_life`'s wall and `timeout-ir` marker), `vec.json`, `cores.json`, and
-  `attrib/attrib.json` (per-category AIL and C line costs, the AIL-C delta, and hot-function
+- `lab/roof/data/` — raw microbenchmark output, `programs.json` (all counters for both AIL
+  sources, including `scar_life`'s wall and the `n/m` rows), `vec.json` (both sources), `cores.json`,
+  and `attrib/attrib.json` (per-category AIL and C line costs, the AIL-C delta, and hot-function
   disassembly).
+- `measure.py` builds `typed.py` for `--langs ail` and `main.py` for `--langs ail-py`, honouring
+  `--exact-int` for the tasks compare-lab names and for any source with an `# ail-build: --exact-int`
+  directive. `--merge` keeps the other columns when one column is re-measured.

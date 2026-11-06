@@ -34,6 +34,23 @@
    "d1_misses": null,
    "ll_misses": 40720,
    "lld_misses": 39098
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "general",
+  "ail-py_why_not_typed": "construct:     the constant None |    why not typed: the constant None; this language has no null value, so nothing holds one",
+  "ail-py_wall_s": 153.7665,
+  "ail-py_wall_runs": [
+   153.7665,
+   153.1567,
+   155.7601
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 153.73,
+  "ail-py_cores": 1.0,
+  "ail-py": {
+   "icount_method": "skipped",
+   "instructions": null
   }
  },
  "echo_pack": {
@@ -71,6 +88,26 @@
    "d1_misses": null,
    "ll_misses": 11185268,
    "lld_misses": 11183753
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "typed",
+  "ail-py_wall_s": 5.7701,
+  "ail-py_wall_runs": [
+   5.6225,
+   5.7701,
+   5.8655
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 5.76,
+  "ail-py_cores": 1.0,
+  "ail-py": {
+   "icount_method": "callgrind-sim",
+   "instructions": 18231483997,
+   "d_refs": 6804342855,
+   "d1_misses": 267589246,
+   "ll_misses": 36379347,
+   "lld_misses": 36377689
   }
  },
  "berth_sim": {
@@ -108,6 +145,26 @@
    "d1_misses": null,
    "ll_misses": 78431252,
    "lld_misses": 78429290
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "typed",
+  "ail-py_wall_s": 5.1177,
+  "ail-py_wall_runs": [
+   5.5791,
+   5.0826,
+   5.1177
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 5.1,
+  "ail-py_cores": 1.0,
+  "ail-py": {
+   "icount_method": "callgrind-sim",
+   "instructions": 33475770343,
+   "d_refs": 10497544999,
+   "d1_misses": 328920425,
+   "ll_misses": 250645634,
+   "lld_misses": 250643573
   }
  },
  "rail_transfer": {
@@ -145,6 +202,27 @@
    "d1_misses": null,
    "ll_misses": 490681,
    "lld_misses": 488771
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "general",
+  "ail-py_why_not_typed": "construct:     the constant None |    why not typed: the constant None; this language has no null value, so nothing holds one",
+  "ail-py_wall_s": 0.9618,
+  "ail-py_wall_runs": [
+   0.9618,
+   0.9627,
+   0.958
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 0.95,
+  "ail-py_cores": 0.99,
+  "ail-py": {
+   "icount_method": "callgrind-sim",
+   "instructions": 3703988406,
+   "d_refs": 1928341974,
+   "d1_misses": 31589983,
+   "ll_misses": 23331395,
+   "lld_misses": 23327834
   }
  },
  "ledger_bin": {
@@ -182,6 +260,23 @@
    "d1_misses": null,
    "ll_misses": 14447744,
    "lld_misses": 14445755
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "general",
+  "ail-py_why_not_typed": "construct:     a nested def inside a loop ('rv') is not available |    why not typed: this lowering builds one shared C function for a nested def, not a fresh one per iteration; define it once, outside the loop, or as a direct statement of the loop body",
+  "ail-py_wall_s": 48.8466,
+  "ail-py_wall_runs": [
+   48.8466,
+   48.4223,
+   49.0586
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 48.83,
+  "ail-py_cores": 1.0,
+  "ail-py": {
+   "icount_method": "skipped",
+   "instructions": null
   }
  },
  "tally_lang": {
@@ -219,7 +314,10 @@
    "d1_misses": null,
    "ll_misses": 3812,
    "lld_misses": 1842
-  }
+  },
+  "ail-py_build_ok": false,
+  "ail-py_source": "main.py",
+  "ail-py_build_error": "S X A, literals . classes \\d \\w \\s anchors ^ $ \\A \\Z \\b \\B * + ? {m,n} lazy variants | groups (capturing, (?:), (?P<name>)); lookaround, backreferences, atomic / possessive forms and conditionals are not built\nnote: lab/compare/src/tally_lang/main.py:22: the compiled pattern TOK is used as a value; only TOK.match / fullmatch / search / findall / finditer / split / sub / subn (...) calls are built\n"
  },
  "term_rank": {
   "task": "term_rank",
@@ -256,6 +354,27 @@
    "d1_misses": null,
    "ll_misses": 3983438,
    "lld_misses": 3981429
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "general",
+  "ail-py_why_not_typed": "construct:     's' is annotated bytes in the source |    why not typed: 's' is annotated bytes in the source, but the caller also supplies int; refusing rather than silently choosing one.",
+  "ail-py_wall_s": 28.8361,
+  "ail-py_wall_runs": [
+   28.8361,
+   29.35,
+   28.7555
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 28.82,
+  "ail-py_cores": 1.0,
+  "ail-py": {
+   "icount_method": "callgrind-ir",
+   "instructions": 111510726621,
+   "d_refs": null,
+   "d1_misses": null,
+   "ll_misses": null,
+   "lld_misses": null
   }
  },
  "ticket_audit": {
@@ -293,6 +412,23 @@
    "d1_misses": null,
    "ll_misses": 10692417,
    "lld_misses": 10689953
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "general",
+  "ail-py_why_not_typed": "construct:     events[ev] = [vc, cents, set()] |    why not typed: `events[ev] = [vc, cents, set()]` uses `events` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused.",
+  "ail-py_wall_s": 56.998,
+  "ail-py_wall_runs": [
+   58.4027,
+   56.998,
+   56.9622
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 56.99,
+  "ail-py_cores": 1.0,
+  "ail-py": {
+   "icount_method": "skipped",
+   "instructions": null
   }
  },
  "tree_fold": {
@@ -330,7 +466,10 @@
    "d1_misses": null,
    "ll_misses": 106140957,
    "lld_misses": 106138129
-  }
+  },
+  "ail-py_build_ok": false,
+  "ail-py_source": "main.py",
+  "ail-py_build_error": "pe); give it a name with an annotation\nnote: lab/compare/src/tree_fold/main.py:89: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: lab/compare/src/tree_fold/main.py:20: the compiled pattern NODE is used as a value; only NODE.match / fullmatch / search / findall / finditer / split / sub / subn (...) calls are built\n"
  },
  "scar_life": {
   "task": "scar_life",
@@ -362,6 +501,23 @@
   "ail_cores": 1.0,
   "ail": {
    "icount_method": "timeout-ir",
+   "instructions": null
+  },
+  "ail-py_build_ok": true,
+  "ail-py_source": "main.py",
+  "ail-py_path": "general",
+  "ail-py_why_not_typed": "construct:     'out' is appended both a str and a non-str value |    why not typed: 'out' is appended both a str and a non-str value; a list of str holds one kind of value throughout, exactly like a plain list of numbers",
+  "ail-py_wall_s": 30.9041,
+  "ail-py_wall_runs": [
+   30.7674,
+   40.7602,
+   30.9041
+  ],
+  "ail-py_rc": 0,
+  "ail-py_cpu_s": 30.89,
+  "ail-py_cores": 1.0,
+  "ail-py": {
+   "icount_method": "skipped",
    "instructions": null
   }
  }
