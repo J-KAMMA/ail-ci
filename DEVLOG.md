@@ -1,3 +1,14 @@
+## 2026-11-06 -- rbfdinf1: re-apply the inference bench and profile scripts (job-rbfdinf1-11061515)
+
+Re-applied the accepted `fdinf1` change on the current tree. `.github/workflows/agent-worker.yml`
+drops the `agent` input, the Claude subscription token (`claude.key`, its scan and cleanup) and the
+`AIL_WORKER` export; `lab/infer/bench.sh` and `lab/infer/profile.sh` are new, with the matching
+"Bench and profile" README section and RESULTS tables. Only the workflow hunk conflicted (the tree
+had a newer whitespace-strip line for the removed token); the result is the accepted blob.
+
+No compiler file or test module changed, so no language probe applies. `tools/diff_ids.py` is not
+present on this tree. `python3 tools/update_manifest.py --check` passes.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
