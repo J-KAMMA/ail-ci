@@ -40,6 +40,58 @@ different, class `absolute path hash`, 13 not built, executable differences only
 Program probes p1-p3 (`__file__` basename/slices/`os.path` through an argument, a list item, an
 attribute and a dict value; long path literals; the empty string boundary) match CPython on both
 builds.
+## 2026-11-06 -- rbrelnotice1_rr1: notices re-applied on today's integ, imghdr and netrc added (job-relnotice1_rr1-rb1106)
+
+The accepted relnotice1_rr1 work (`3c92b58e`..`job-relnotice1_rr1-11060525`) no longer applied to integ.
+Re-applied only its own files: `THIRD_PARTY_NOTICES.md`, `stdlib/LICENSE-PSF.txt`, the one-line docstring
+notes, `test_ail_third_party_notices.py`, the wheel's PSF copy in `packaging/ail_wheel_backend.py` and
+`test_ail_packaging.py`'s expectation for it. Since the last attempt integ added `stdlib/imghdr.py` and
+`stdlib/netrc.py`, both CPython 3.12 modules as AIL source, so both got the docstring note and a CPython
+row (16 CPython-derived files now). The test already globbed `stdlib/` and `third_party/` rather than
+counting; `THIRD_PARTY_NOTICES.md` now says its counts are informational and that the test fails only on
+a file with no row.
+
+## 2026-11-05 -- relnotice1_rr1 suite fix: integ's linecache and struct join the notices (job-relnotice1_rr1-11060525)
+
+Merged today's integ into the branch (conflicts only in `DEVLOG.md`, `DIFFERENCES.md` and one
+`manifest.d` shard; pins refreshed). On that tree `test_ail_third_party_notices` failed
+`test_every_file_is_listed`: integ added `AIL_CURRENT/stdlib/linecache.py` and
+`AIL_CURRENT/stdlib/struct.py` after the notices inventory was written, so neither had a row.
+`linecache.py` is a reduction of CPython 3.12's `Lib/linecache.py`, so its docstring now names
+`stdlib/LICENSE-PSF.txt`; `struct.py` is AIL's own implementation, so its row is AIL-owned under
+`MIT OR Apache-2.0`. The inventory counts changed from 13/3/67 to 14/4/69 (CPython-derived /
+AIL-owned / total). The other five listed modules (`test_ail_obj_refs`, `test_ail_packaging`,
+`test_ail_safetynet`, `test_ail_unified`, `test_ail_virtual_dispatch`) pass on the merged tree.
+No compiler or runtime code changed.
+
+Tests on the merged tree: `test_ail_third_party_notices` 7 OK, `test_ail_packaging` 21 OK,
+`test_ail_obj_refs` 3 OK, `test_ail_safetynet` 5 OK, `test_ail_unified` 14 OK,
+`test_ail_virtual_dispatch` 6 OK, plus `test_ail_files` and `test_ail_corpus_findings3`.
+Probes: `p1_linecache.py` (getline/getlines/checkcache on an existing, missing, empty and
+no-final-newline file) and `p2_struct.py` (pack/unpack/calcsize/Struct incl. error texts) match
+CPython 3.12 on both builds; `p3_notices_inventory.py` (stdlib): every stdlib/third_party file is
+covered, each CPython row names LICENSE-PSF.txt, and the named license files exist.
+
+## 2026-11-05 -- relnotice1_rr1: the wheel carries the PSF notice (job-relnotice1_rr1-11060319)
+
+`test_ail_third_party_notices` failed on integ on `test_psf_license_is_in_the_wheel`: the notices
+inventory and its test were added, but the documented follow-up was never done, so
+`packaging/ail_wheel_backend.py` copied only `LICENSE-APACHE`/`LICENSE-MIT`. `collect()` and
+`prepare_metadata_for_build_wheel()` now also copy `AIL_CURRENT/stdlib/LICENSE-PSF.txt` to
+`.dist-info/licenses/LICENSE-PSF.txt` (new `PSF_NOTICE` constant; module docstring updated).
+`test_ail_packaging`'s exact wheel member list gained `NOTICE_FILES` and
+`test_license_metadata_and_files` checks the copied bytes; `THIRD_PARTY_NOTICES.md` Follow-ups
+and the notices test docstring now describe the wheel as carrying the notice. No compiler or
+runtime code changed. `manifest.d` pins were refreshed with `tools/update_manifest.py`
+(`--check` passes).
+
+Tests on the final commit: `test_ail_third_party_notices` 7 OK, `test_ail_packaging` 21 OK,
+`test_ail_obj_refs` 3 OK, `test_ail_safetynet` 5 OK, `test_ail_unified` 14 OK,
+`test_ail_virtual_dispatch` 6 OK, `test_ail_files` and `test_ail_corpus_findings3` OK.
+Probes: `/tmp/probes/p1_psf_stdlib_a.py` (colorsys, keyword, quopri, stat, token) and
+`p2_psf_stdlib_b.py` (difflib, getopt, shlex, tomllib) match CPython stdout and exit on both
+builds; `/tmp/probes/p3_wheel_psf.py` shows one `LICENSE-PSF.txt` member (2715 bytes, byte-equal),
+RECORD covering 555 members, and the prepared metadata copy byte-equal.
 
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 

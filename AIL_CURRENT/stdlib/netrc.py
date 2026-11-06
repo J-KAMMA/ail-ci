@@ -1,5 +1,7 @@
 """An object-oriented interface to .netrc files.
 
+Derived from CPython 3.12 Lib/netrc.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 CPython 3.12's ``Lib/netrc.py`` as AIL source.  A compiled program finds this file
 when its own directory has no ``netrc.py`` (``ail_modules.py`` searches the bundled
 ``stdlib/`` last), so ``import netrc`` works without installing the module.

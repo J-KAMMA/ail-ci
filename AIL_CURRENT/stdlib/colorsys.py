@@ -1,5 +1,7 @@
 """Conversion functions between RGB and other color systems.
 
+Derived from CPython 3.12 Lib/colorsys.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 This modules provides two functions for each color system ABC:
 
   rgb_to_abc(r, g, b) --> a, b, c
