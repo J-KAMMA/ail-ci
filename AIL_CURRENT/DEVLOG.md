@@ -1,3 +1,35 @@
+## 2026-11-06 -- proof1: census + design for "Rust's safety without writing lifetimes" (job-proof1-11070008)
+
+Measurement and design only; **no compiler behaviour changes** (no file under `AIL_CURRENT/` was
+edited).  The question: how much of real Python does today's analysis already prove memory-safe,
+in-bounds and race-free?
+
+- `lab/proof/census.py`: imports the compiler's own analyses and reports, per typed function of
+  three corpora, what they prove.  Ownership from `ir/borrow.analyze` (rc2); bounds from the
+  `AIL_IR_STATS` pass statistics of `ir/passes/ranges.py` plus the `AIL_BCE_EXPLAIN` per-site
+  reason; races from `typedpar.rewrite_text` and `parallel._Body`/`check_callee`.  Builds use the
+  real Python surface (`ail_chatgpt._load_sources`) with `PIPE_CC=/bin/true` and
+  `AIL_FE_JOBS=1`, so it is compile-only and reproducible.  Where an analysis has no API to ask,
+  the census records a blocker (`NO_API`) instead of patching it.
+- Corpora: 20 `lab/compare/src` programs, the 55 `lab/pyproof` programs, the first 200
+  `corpus/gdev` programs (306 programs, 4958 functions), plus the 31 `lab/race` probes.
+- Result: 80.9% of reference-parameter RC pairs (1658/2050) are already elided; 13.6% of the index
+  sites in IR-lowered functions (166/1221) have their check removed and 4744 more sites are in
+  functions the IR never lowers; 79 of 123 shared accesses in parallel regions are classified safe,
+  25 refused by a named rule, 19 unknown.  Only 1552 of 4958 functions (31.3%) are on the typed
+  path; 1703 are boxed and 1703 are in refused programs.  The top 14 blockers are ranked in
+  `lab/proof/RESULTS.md`.
+- `docs/design/SAFETY_PROOF.md` (216 lines): the claim, the precise rule for each of the three
+  properties grounded in the module that implements it, the degrade-to-runtime-check policy, the
+  `file:line: could not prove <property>: <reason>; runtime check kept` diagnostic and its three
+  delivery modes, the module map, a nine-job plan ordered by blockers removed, and what Rust still
+  proves that this cannot.
+- Probes (`/tmp/probes`, `cmp.sh`, both builds): `own1.py` (class instance through an argument, a
+  global and an attribute), `bnd1.py` (in-range and boundary index reads), `race1.py` (executor
+  map), `race2.py` (`global` increment under threads) — all match CPython on the general and the
+  default build.  `AIL_BCE_AUDIT=1` on a loop over a proved-in-range list emits one
+  `ail_bce_audit_fail("py_main", 0)` site, which is the existing "runtime check kept" for a
+  removed bound check.
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
 str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
