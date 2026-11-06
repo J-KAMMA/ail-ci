@@ -7,43 +7,43 @@
 --- LAST REVIEW ---
 ## review 1
 [model commandcode/deepseek-v4.1-flash]
-## Review: vibe1 benchmark
+## Review: vibe1 (review 3)
 
-**What the change really does.** Adds only `lab/vibe/` (harness `run.py`, `AIL_FOR_AI.md`, `README.md`, `results.json`, `vibe.yml`, two captured programs) and a DEVLOG entry. No compiler/runtime change. The harness is a real, working driver; the recorded rows are genuine (I replayed both `berth_sim` Python programs against `gen.py` + `reference.py`: 52/52 case runs match CPython). But step 1 is incomplete and steps 2–3 were not done at all.
+**What the change really does.** Lab-only: fills `lab/vibe/` with 42 recorded mixing runs (`results.json`), `RESULTS.md`, rewritten `AIL_FOR_AI.md`, harness fixes (`pump()` deadline, per-build unlink, seed-outer order, timeout = give up), and a DEVLOG entry. Zero compiler/runtime files changed (`git diff work..HEAD --name-only | grep -c AIL_CURRENT` = 0), so every compiler difference below is pre-existing.
 
 **Claims vs observation**
-- DEVLOG/README: harness, brief, proposed workflow — verified (files exist; `task_list()` returns the 11 tasks; `AIL_FOR_AI.md` is 30 lines; `--syntax python`/`--strict` flags valid).
-- README: "`results.json` ... per-language summary" — true but nearly empty; "`RESULTS.md` — the report" — **false**, file absent.
-- DEVLOG: implies the ten tasks + csv_rollup are written in three languages — **false**; only Python, one task.
-- `AIL_FOR_AI.md` refusal claims — partly **false** (defect 3).
-- Worker report: empty ("no final text"); nothing to verify.
+- `RESULTS.md` exists with per-language/per-task/AIL-error tables — verified; numbers match `results.json` (seed-0 python 9/11, rust 11/11, ail 7/11; summary n=19/12/11; 66 scheduled / 42 recorded).
+- Full run — seed 0 complete for all 11×3; seed 1 partial (python 8, rust 1, ail 0) — verified and disclosed. Acceptable under the budget rule.
+- `pump()` fix (pull before deadline) — verified by code reading and consistency of `stopped_early=true` with 42<66; not executed against a live model.
+- `@classmethod`/`@property`/`@property.setter`/`@lru_cache`/`@cache` build and match — verified.
+- Brief's "`with` around a `yield` is refused" — **false as written**.
+- Brief's "`x = d.items()` is fine" — **false once the dict is mutated after binding**.
+- Brief's "a decorator on a class falls back to the general path instead" (with "same output") — **false**.
 
-**Probes** (`bash ~/tools/cmp.sh`, HEAD; base is identical since no compiler change)
+**Probes** (`bash ~/tools/cmp.sh`, HEAD; compiler identical on base)
 | probe | result |
 |---|---|
-| `dictview.py` (`x = d.items()`) | default build **compiles, exit 0, same stdout**; only `--strict` refuses |
-| `property_dec.py` (`@property`) | **compiles typed, exit 0, same stdout**; `--strict` builds |
-| `deco.py` (custom decorator) | refused at compile time (as documented) |
-| `stdoutbuf.py` (`sys.stdin/stdout.buffer`) | matches CPython |
-| `overflow_arg.py` | inconclusive: `cmp.sh` passes no argv |
+| `withyield_builtin.py` (`with open(...): ... yield`) | g,d build, exit 0, same stdout |
+| `withyield_user.py` (user CM around yield) | refused by name (both) |
+| `items_nomut.py` (`x=d.items()`, no mutation) | builds, same stdout |
+| `items_aftermut.py` (`x=d.items()` then `d['c']=3`) | refused by name, exit 2/3 (both) |
+| `keys_aftermut.py` / `values_only.py` | same boundary: refused after mutation, builds without |
+| `classmethod_dec.py`, `property_dec.py`, `prop_setter.py`, `static_dec.py`, `lru_top.py`, `cache_top.py` | build, same stdout |
+| `deco.py` (real wrapper), `bigint.py`, `multi.py` | refused by name |
+| `class_deco.py` (`@deco` on class) | g,d build, run exit 1, `AttributeError: ... has no attribute 'tag'` (CPython prints `x`) |
+| `stdin_buffer.py` (`sys.stdin.buffer.read` + `sys.stdout.buffer.write`) | builds; output order differs (pre-existing) |
 
-**Tests.** `test_ail_safetynet` on HEAD: `ok [1/1]`, 0 failed. No test modules added/edited. Manifest `--check` passes.
+**Tests.** `par_check.py -j 2 test_ail_safetynet`: `ok 191s`, 0 failed. `tools/update_manifest.py --check`: rc 0. No test module added/edited.
 
-**Defects**
-1. **Benchmark not run.** `results.json` has 2 rows (`berth_sim`/python/seeds 0,1) out of 11 tasks × 3 languages × 3 (or 2) seeds. Expected: Python, Rust and AIL columns, per-task rows, AIL path counts and the error table. Actual: Python only, one task. Consequently the AIL error table (`ail_errors`) is empty and no silent-wrong/loud-stop comparison exists.
-2. **`lab/vibe/RESULTS.md` is missing** although `README.md` lists it and sub-step 3 requires the per-language table, per-task detail and a 5-line verdict. Expected: file with the table; actual: absent (dangling README link).
-3. **`AIL_FOR_AI.md` misstates compile-time refusals** (this brief is fed to the model, so wrong guidance is part of the deliverable). Line "a dict view kept in a name (`x = d.items()`) ... refuses at compile time, exit status 2 or 3": probe `dictview.py` builds and runs, exit 0, same output as CPython (general-path fallback). Line "decorators other than @staticmethod and @lru_cache/@cache": probe `property_dec.py` (`@property`) builds typed and prints `3`, matching CPython. Expected per doc: named refusal, exit 2/3. Actual: successful build.
-4. **Report is empty**, so the mandatory self-check/probes and the "say so if the budget ran short" disclosure are absent, while DEVLOG/README describe a full benchmark.
+**Pre-existing.** `stdin_buffer.py` interleaving (CPython `hello` then `0 b''`; AIL reverse) and the class-decorator drop are compiler behaviour, unchanged by this diff. User-CM with/yield and dict-view refusals are likewise pre-existing.
 
-**Pre-existing:** none (no compiler change; probes that do not use new features are unaffected).
-**Unverified:** AIL/Rust harness paths never exercised (no such rows); overflow via `argv` (cmp.sh has no argv support); `test_ail_files`/`test_ail_corpus_findings3` not run (reviewer scope is added modules + safetynet).
+**Unverified.** Live `pump()` run (no model CLI invocation); seed-1 completeness beyond the recorded rows; Rust programs were not recompiled.
 
 VERDICT: FIX
-1. Full run missing: only `berth_sim`/python/seeds {0,1} in `results.json`; expected 11 tasks × 3 languages (all columns populated) — actual Python only, no AIL/Rust rows, empty `ail_errors`.
-2. `lab/vibe/RESULTS.md` required by sub-step 3 and linked from `README.md`; expected the per-language table + per-task detail + 5-line verdict; actual: file does not exist.
-3. `AIL_FOR_AI.md` "what AIL refuses" is false for `x = d.items()` (probe `dictview.py`: expected named refusal exit 2/3, actual build succeeds exit 0, same stdout) and for `@property` (probe `property_dec.py`: expected refusal, actual typed build, prints `3`).
-4. Worker report has no text; the mandatory probe self-check and any budget/shortfall disclosure are missing.
-[commandcode stop=end_turn turns=33 out_tokens=13236]
+1. `AIL_FOR_AI.md` (lines 3–4 and 22) says "a `with` block around a `yield` inside a generator is refused". Probe `/tmp/rprobes/withyield_builtin.py`: expected a named refusal (exit 2/3) per the brief; actual g and d build, exit 0, same stdout as CPython. Only a user context manager is refused (`withyield_user.py`). The brief must say "user context manager", not `with open`.
+2. `AIL_FOR_AI.md` (lines 30–31) says "Dict views work: `x = d.items()` is fine" and the refusal list omits the dict-view case. Probe `/tmp/rprobes/items_aftermut.py` (`x = d.items(); d['c'] = 3`): expected a build per the brief; actual both builds refuse by name ("not in the subset: a dict view kept in a name ... a view follows its dict ... it is a snapshot"), exit 2/3. `items_nomut.py` builds, so the claim needs the mutation boundary.
+3. `AIL_FOR_AI.md` (lines 18–20 together with 23–24) says a class decorator "falls back to the general path instead" and that the general path gives "the same output". Probe `/tmp/rprobes/class_deco.py`: expected CPython output `x`, exit 0; actual both builds succeed but run exits 1 with `AttributeError: type object 'C' has no attribute 'tag'` — the decorator is dropped, not applied. (The compiler bug is pre-existing; the new brief claim is false.)
+[commandcode stop=end_turn turns=33 out_tokens=19707]
 
 
 --- ORIGINAL TASK ---
