@@ -29,8 +29,23 @@ data structure is changed, and AIL's sources are never touched. No patch was nee
 `run.py` reuses `lab/compare/run_task.py`: the perf input and every public/hidden case come from the task's
 `gen.py`, the oracle is its `reference.py`, wall time is the median of 5 runs, peak RSS is `/usr/bin/time -v`,
 instructions are callgrind Ir (or `perf_event_open` when the runner exposes it), and each tool gets one cold
-build in a fresh directory that also holds its caches (compile time, build disk, artifact size). The one
-difference from compare-lab is one cold build instead of three: a Nuitka onefile build takes minutes.
+build in a fresh directory that also holds its caches (compile time, build disk, artifact size).
+
+It does **not** use compare-lab's settings unchanged. The reductions are deliberate and are repeated in
+`results.json` and above the tables in `RESULTS.md`:
+
+- one cold build instead of `BUILD_RUNS=3` (a Nuitka onefile build takes minutes);
+- `RUN_TIMEOUT` 180 s instead of 1500 s, so a rival slower than 3 minutes is recorded as `timeout`, not a number;
+  two rival rows are measured that way and would have a value under `run_task.py`'s timeout;
+- `CASE_TIMEOUT` 30 s instead of 120 s;
+- `CALLGRIND_TIMEOUT` 120 s instead of 7000 s;
+- instructions are skipped when the wall time exceeds 4 s (callgrind is 50-100x slower);
+- the public/hidden cases have a 240 s per-tool budget; unreached cases count as not matched.
+
+The consequence is in the tables, not hidden: 59 of the 70 rows have `-` for instructions (37 of the 48 builds
+that succeeded), and the instruction verdict rests on n=1. Restoring the reference timeouts means re-measuring
+all ten tasks, not just regenerating the report. The two `timeout` rows are `cython-typed` on `scar_life` and
+`tree_fold`.
 
 "Single exe" means the artifact is one file that runs without the source tree. Cython's `--embed` binary is
 one file but links `libpython3.12`; mypyc leaves a CPython extension module that needs the interpreter and the
@@ -40,7 +55,13 @@ one file but links `libpython3.12`; mypyc leaves a CPython extension module that
 
 `safety/*.py` are five probes (int64 overflow, index out of range, negative index past the start, division by
 zero, 100000-level recursion). Every tool builds and runs each one; stdout and exit status are compared with
-CPython. A compiled program that exits 0 with a different answer is counted as **silently wrong**.
+CPython. The classification is the one `classify()` implements:
+
+- `same as CPython`: same exit status and same stdout;
+- `stops loudly`: non-zero exit that still reproduces a non-empty prefix of CPython's stdout;
+- `stops loudly (stdout differs)`: non-zero exit whose stdout does not match that prefix (usually buffered away);
+- `silently wrong output`: zero exit with a different answer — the number that matters most;
+- `crash (signal N)`: killed by a signal.
 
 ## Running
 

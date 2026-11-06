@@ -2391,7 +2391,7 @@
    },
    "overflow": {
     "build_ok": true,
-    "result": "stops loudly",
+    "result": "stops loudly (stdout differs)",
     "exit": 1,
     "bytes_out": 0,
     "ref_exit": 0
@@ -2414,7 +2414,7 @@
    },
    "index": {
     "build_ok": true,
-    "result": "stops loudly",
+    "result": "stops loudly (stdout differs)",
     "exit": 1,
     "bytes_out": 0,
     "ref_exit": 1
@@ -2451,7 +2451,7 @@
    },
    "index": {
     "build_ok": true,
-    "result": "stops loudly",
+    "result": "stops loudly (stdout differs)",
     "exit": 1,
     "bytes_out": 0,
     "ref_exit": 1

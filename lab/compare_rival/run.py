@@ -15,8 +15,14 @@ Measurement reuses lab/compare/run_task.py: the perf input and every public/hidd
 the task's gen.py, the oracle is its reference.py, wall time is the median of 5 runs, instructions
 come from callgrind (or perf_event when the runner exposes it), peak RSS from `/usr/bin/time -v`,
 and the build is one cold build in a fresh directory (compile time, build disk, artifact size).
-The one deliberate difference from compare-lab: rivals get one cold build, not three, because a
-Nuitka onefile build is minutes, not seconds; the README says so.
+Deliberate reductions from compare-lab's settings, each recorded in results.json and RESULTS.md:
+one cold build instead of three (a Nuitka onefile build is minutes); RUN_TIMEOUT 180 s instead of
+1500 s, so a rival slower than 3 min is recorded as "timeout" rather than measured; CASE_TIMEOUT
+30 s instead of 120 s; CALLGRIND_TIMEOUT 120 s instead of 7000 s; callgrind skipped when the wall
+time exceeds 4 s; and a 240 s per-tool budget for the public/hidden cases.  The consequence is
+visible in the tables: most instruction cells are "-", the instruction verdict has n=1, and the
+two "timeout" rows would have been measured under run_task.py's 1500 s.  Restoring the reference
+timeouts means re-measuring all ten tasks, not just regenerating the report.
 
 Safety probes in safety/*.py are built by every tool and run without arguments; their stdout and
 exit status are compared with CPython's.  A compiled program that exits 0 with a different answer
@@ -342,7 +348,12 @@ def classify(rc, out, ref_rc, ref_out):
         return 'same as CPython'
     if rc == 0:
         return 'silently wrong output'
-    return 'stops loudly'
+    # "Stops loudly" is the documented rule: a non-zero exit that still reproduces CPython's stdout
+    # up to the error.  A non-empty prefix counts; empty stdout against non-empty CPython output does
+    # not, because that is a different partial answer (usually buffered away) and must stay visible.
+    if out == ref_out or (out and ref_out.startswith(out)):
+        return 'stops loudly'
+    return 'stops loudly (stdout differs)'
 
 
 def run_safety(tools, root, jobs):
@@ -455,6 +466,13 @@ def render(result):
              '"single exe" is yes when the artifact is one file that runs without the source tree; mypyc needs the '
              'CPython interpreter and the `ail` module at run time.' % data['icount_method'])
     L.append('')
+    L.append('Measurement reductions from `lab/compare/run_task.py` (see the `run.py` docstring): one cold build '
+             'instead of three; RUN_TIMEOUT 180 s instead of 1500 s (a slower rival is "timeout", not a number); '
+             'CASE_TIMEOUT 30 s instead of 120 s; CALLGRIND_TIMEOUT 120 s instead of 7000 s; instructions skipped '
+             'when wall > 4 s; and a 240 s per-tool case budget.  So most instruction cells are "-" '
+             '(59 of the 70 rows; 37 of the 48 builds that succeeded) and the instruction verdict has n=1.  '
+             'Restoring the reference timeouts requires re-measuring every task.')
+    L.append('')
     L.append('| tool | version |')
     L.append('|---|---|')
     for k, v in data['tools'].items():
@@ -498,10 +516,10 @@ def render(result):
     def verdict(key):
         g, nwin, n = wins[key]
         if g is None:
-            return '- %s: not measured.' % LABEL[key]
+            return '%s: not measured.' % LABEL[key]
         if g < 1:
-            return '- %s: AIL is %.2fx better than the best rival (%d/%d tasks).' % (LABEL[key], 1 / g, nwin, n)
-        return '- %s: AIL is %.2fx worse than the best rival (%d/%d tasks).' % (LABEL[key], g, nwin, n)
+            return '%s: AIL is %.2fx better than the best rival (%d/%d tasks).' % (LABEL[key], 1 / g, nwin, n)
+        return '%s: AIL is %.2fx worse than the best rival (%d/%d tasks).' % (LABEL[key], g, nwin, n)
 
     L.append('**Five-line verdict**')
     L.append('')
@@ -544,8 +562,10 @@ def render(result):
     L.append('')
     L.append('Probes: `safety/overflow.py` (int64 wrap), `safety/index.py` (index out of range), '
              '`safety/negindex.py` (negative index past the start), `safety/divzero.py` (division by zero), '
-             '`safety/recursion.py` (100000 levels). "stops loudly" means a non-zero exit with the same stdout '
-             'prefix as CPython; "silently wrong" is a zero exit with a different answer.')
+             '`safety/recursion.py` (100000 levels). "stops loudly" means a non-zero exit that reproduces a '
+             'non-empty CPython stdout prefix; "stops loudly (stdout differs)" means a non-zero exit whose '
+             'stdout does not match that prefix (often buffered away); "silently wrong" is a zero exit with a '
+             'different answer; a negative exit is a crash by signal.')
     L.append('')
     return '\n'.join(L) + '\n'
 
@@ -562,23 +582,32 @@ def main():
     ap.add_argument('--merge', metavar='DIR', help='merge the result-*.json files in DIR into --out')
     args = ap.parse_args()
     if args.merge:
+        # actions/download-artifact with `pattern:` writes each artifact under results/<artifact>/,
+        # so the parts are nested; rglob also finds a flat layout.
+        parts = [json.loads(f.read_text()) for f in sorted(Path(args.merge).rglob('*.json'))]
         merged = None
-        for f in sorted(Path(args.merge).glob('*.json')):
-            part = json.loads(f.read_text())
-            if merged is None:
-                # Keep the part's metadata but start from empty containers; never mutate `part` itself,
-                # because when the first part sorts first its tasks/safety would be wiped before the update.
+        for part in parts:
+            if part.get('tasks'):
+                # Metadata (instruction method, versions, date) must come from a measured task part:
+                # the safety part has the same tools but icount_method 'none', and sorts in the middle.
                 merged = {k: v for k, v in part.items() if k not in ('tasks', 'safety')}
                 merged['tasks'], merged['safety'] = {}, {}
                 merged.setdefault('safety_probes', [])
+                break
+        for part in parts:
+            if merged is None:
+                break
             merged['tasks'].update(part.get('tasks') or {})
             merged['safety'].update(part.get('safety') or {})
             for p in part.get('safety_probes') or []:
                 if p not in merged['safety_probes']:
                     merged['safety_probes'].append(p)
-        Path(args.out).write_text(json.dumps(merged or {}, indent=1) + '\n', encoding='utf8')
+        if merged is None or not merged.get('tasks'):
+            print('no result-*.json parts with tasks under %s; nothing merged' % args.merge, file=sys.stderr)
+            raise SystemExit(2)
+        Path(args.out).write_text(json.dumps(merged, indent=1) + '\n', encoding='utf8')
         (HERE / 'RESULTS.md').write_text(render(merged), encoding='utf8')
-        print('merged %d tasks into %s' % (len(merged.get('tasks') or {}), args.out), file=sys.stderr)
+        print('merged %d tasks into %s' % (len(merged['tasks']), args.out), file=sys.stderr)
         return
     tasks = [t for t in args.tasks.split() if t]
     tools = [t for t in args.tools.split(',') if t]

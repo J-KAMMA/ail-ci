@@ -1,3 +1,33 @@
+## 2026-11-06 -- cmprival1: AIL against the Python compilers Nuitka, Cython, mypyc and Codon
+
+New measurement lab, `lab/compare_rival/`, answering the owner's 2026-11-06 question: does AIL still win any
+column against tools that compile the same Python sources? No compiler or runtime file changed. Each of the ten
+`lab/compare/src/<task>` programs is built by `ail` (from `typed.py`), `ail-py` (`main.py`), plain and annotated
+Cython, Nuitka, mypyc and Codon (both sources), then every public and hidden case is checked against the task's
+`reference.py`. Versions are pinned in `toolchains.env` (Cython 3.3.1, mypy 2.4.1, Nuitka 4.3.4, Codon 0.20.6,
+Apache-2.0). Mojo is "not measured: needs an account". The tables are in `RESULTS.md` / `results.json`; the
+manual workflow proposal is `compare-rival.yml` (outside `.github/`).
+
+Headline, stated as plainly as the losses: AIL wins wall time (5.06x geomean against the best rival, 9/10 tasks),
+peak RSS (3.06x, 9/10), artifact size (8.09x, 10/10) and build disk (7.2x, 10/10); it loses instructions
+(1.87x worse, n=1 because callgrind is capped) and build time (1.09x better, 6/10). Codon compiles neither
+`typed.py` (the `ail` runtime is unimportable) nor most `main.py` files and is the only tool with silent wrong
+answers (both overflow and deep recursion, 2/5 probes). mypyc is silently wrong on deep recursion too.
+
+Review fix (cmprival1-fix1):
+- `run.py --merge` used `glob('*.json')`, but `actions/download-artifact` writes `results/<artifact>/*.json`;
+  it is now `rglob` and an empty merge exits 2 with a message instead of `render(None)` crashing.
+- The five-line verdict printed `- - ` because `verdict()` already returned a leading `- `; the prefix now lives
+  only in `render()`.
+- `classify()` now implements the documented test: a non-zero exit is `stops loudly` only when it reproduces a
+  non-empty CPython stdout prefix; otherwise it is `stops loudly (stdout differs)`. The safety table was re-run
+  under the new rule.
+- `README.md` and the `run.py` docstring now spell out every reduction from `lab/compare/run_task.py`
+  (one cold build, RUN_TIMEOUT 180 s, CASE_TIMEOUT 30 s, CALLGRIND_TIMEOUT 120 s, the 4 s callgrind skip and the
+  240 s case budget) and the consequence: 59 of 70 rows have `-` for instructions and the instruction verdict is
+  n=1 (the two `timeout` rows are `cython-typed` on `scar_life` and `tree_fold`).
+  Restoring the reference timeouts means re-measuring, so the text was corrected instead.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
