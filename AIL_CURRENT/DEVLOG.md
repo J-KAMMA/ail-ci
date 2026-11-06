@@ -1,3 +1,25 @@
+## 2026-11-06 -- rbfdfmt1: re-apply `ail fmt --check` (job-fdfmt1-11060907)
+
+Re-applied the accepted `fdfmt1` change (`20f813f2c671`..`job-fdfmt1-11060907`): it adds
+`packaging/ail_lang/fmt.py`, `AIL_CURRENT/test_ail_fmt.py`, `AIL_CURRENT/tests.d/test_ail_fmt.txt`,
+`docs/FORMAT.md`, `lab/fmt/check_build.py` and `lab/fmt/RESULTS.md`. `ail fmt --check FILE...` asks
+`ruff format` (else `black`) whether a file would change: exit 0 formatted, 1 would change with the
+unified diff on stdout and no write, 2 no formatter or formatter failure; the nearest `[fmt]
+line-length` in `ail.toml` is passed through, relative arguments included.
+
+Only `.github/workflows/agent-worker.yml` conflicted: this tree carries a CR/LF-stripping fix for
+the opus Claude token, but the accepted change removes the whole opus input/token path, so the fix
+goes with the feature it served. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` pinned the new test module and test file and `--check` passes.
+
+Tests on the final commit, with `ruff 0.14.4` and `black 25.11.0` on PATH:
+`test_ail_fmt`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+Probes: `/tmp/probes/fmt_cli_probe.py` (24/24: ruff and black answers, no write, line length from
+`ail.toml` above relative and nested arguments, missing formatter message, argument/option errors,
+formatter failures, ruff preferred; fake tools pin the argv order), and six `cmp.sh` runs over three
+programs (negative ints, attributes, list items, dict values) unformatted and ruff-formatted; every
+run matched CPython on both builds.
+
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
 str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
