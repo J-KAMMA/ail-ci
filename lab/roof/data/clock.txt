@@ -1,0 +1,15 @@
+dependent_add_ghz 3.208
+scalar_add_per_cycle 2.657
+avx2_vector_add_per_cycle 2.671
+avx2_double_add_per_cycle 10.683
+#
+dependent_add_ghz 3.211
+scalar_add_per_cycle 2.657
+avx2_vector_add_per_cycle 2.669
+avx2_double_add_per_cycle 10.677
+#
+dependent_add_ghz 3.210
+scalar_add_per_cycle 2.667
+avx2_vector_add_per_cycle 2.669
+avx2_double_add_per_cycle 10.677
+#

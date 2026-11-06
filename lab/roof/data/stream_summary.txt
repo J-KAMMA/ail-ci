@@ -1,0 +1,4 @@
+1572864 bytes: best median triad 46.378 GB/s
+12582912 bytes: best median triad 46.053 GB/s
+100663296 bytes: best median triad 25.440 GB/s
+402653184 bytes: best median triad 25.099 GB/s
