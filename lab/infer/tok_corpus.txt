@@ -1,0 +1,2010 @@
+	one leading tab	    data = handle.read()
+Visit https://example.com/docs/tokenizer for the guide.
+　句読点、読点。括弧（丸括弧）と「かぎ括弧」。   	Devanagari digits ०१२३४५६७८९
+The phone number 555-0100 is fictional.
+10 100 1000 10000 100000 1000000
+Negative numbers: -1 -22 -333 -4444 -55555.	長音符ーと波ダッシュ〜と全角チルダ～。
+THE PHONE NUMBER 555-0100 IS FICTIONAL.1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+半角カナのｱｲｳｴｵも含まれます。   
+-0 -1 -10 -100 -1000
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
++0 +1 +10 +100 +1000
+    A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.	
+　夏は暑くて冬は寒いです。  
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+The JSON {"key": "value", "n": 42} is valid.
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+0o0 0o7 0o17 0o777
+Possessives: the dog's bone, the cats' toys, James's book.
+　0 1 2 3 4 5 6 7 8 9  
+富士山は日本で一番高い山です。
+    def __init__(self, vocab, merges):
+1,000 10,000 100,000 1,000,000
+Roman numerals I II III IV V VI VII VIII IX X.
+1e10 1e-10 6.022e23 9.109e-31
+A quote: "To be, or not to be, that is the question."  ideographic　space in Japanese
+const value = items.reduce((acc, x) => acc + x, 0);
+ MAC address 00:1A:2B:3C:4D:5E.	
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+Café naïve résumé coöperate — these accents matter.
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+Tabs, spaces, and newlines are whitespace characters.
+FNV_OFFSET = 1469598103934665603
+Roman numerals I II III IV V VI VII VIII IX X.
+public static void main(String[] args) {
+USE GIT COMMIT -M "FIX TOKENIZER EDGE CASE" TO SAVE WORK.
+The symbol © and ® and ™ are not letters.
+Backslashes: C:\Users\bluec\ail-work and /tmp/probes.
+def main() -> int:
+Contractions: isn't aren't wasn't weren't hasn't haven't. line one
+line two
+A list: apple, banana, cherry, date, elderberry.
+Version 3.14159 is close to pi, but not exact. 句読点、読点。括弧（丸括弧）と「かぎ括弧」。
+このプログラムは正しく動作します。
+The hash is deadbeef and the checksum is 0xc0ffee.
+A glob lab/**/*.py and src/[abc].c.
+An option -o /tmp/output and -j 2.
+PERCENT SIGNS: 5% 12.5% 99.9% 100%.	🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+git status --short && git diff --stat origin/integ
+ import json	
+Visit https://example.com/docs/tokenizer for the guide.
+   three leading spaces
+Roman numerals I II III IV V VI VII VIII IX X.A nested quote: 'He said "hi" to me.'
+　It's a small world, and we'll keep it that way.		🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+        sys.exit(main())	
+A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+}
+The string 'it''s' looks odd but is valid Python.
+  both sides  
+She said she'd call, but they've not heard from her.
+半角カナのｱｲｳｴｵも含まれます。
+Café naïve résumé coöperate — these accents matter.
+1_000_000 and 1_2_3_4_5
+データを保存してから終了してください。
+A glob lab/**/*.py and src/[abc].c.
+日本語の文字はひらがな、カタカナ、漢字があります。
+FNV_OFFSET = 1469598103934665603
+let xs = [1, 2, 3];
+  the temperature fell from 21.5c to -4.0c overnight. 
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+A very long number: 123456789012345678901234567890.
+コンピュータは計算を高速に行います。  0 1 2 3 4 5 6 7 8 9
+uppercase 's and 'll are not the same contractions.
+A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc. The road is 12 km long and 3.5 m wide.
+Uppercase 'S and 'LL are not the same contractions.
+class Tokenizer:
+payload = json.dumps({'ok': True, 'n': 3}, ensure_ascii=False)
+	  both sides   
+An option -o /tmp/output and -j 2.
+    Ellipses... and more ellipses… and em dashes — like that. 
+The XML <tag attr="value">text</tag> is valid.
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+start and end	🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+  Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.
+数値は12,345円です。
+  both sides  
+HTML entities &amp; &lt; &gt; &quot; are escaped.
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+the function returns none when the input is empty.
+A glob lab/**/*.py and src/[abc].c.				
+        self.merges = merges
+        j += 1
+FNV_OFFSET = 1469598103934665603
+Music notes C D E F G A B and chords Cmaj7 G7.
+Devanagari digits ०१२३४५६७८९
+INSERT INTO logs (level, message) VALUES ('info', 'ready');
+let xs = [1, 2, 3];  このプログラムは正しく動作します。
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯  10 100 1000 10000 100000 1000000
+日本語の文字はひらがな、カタカナ、漢字があります。
+データを保存してから終了してください。
+Half of 0.5 is 0.25, and one third is 0.3333.
+    value = int(text)
+0b0 0b1 0b1010 0b11111111
+	The phone number 555-0100 is fictional.  
+Roman numerals I II III IV V VI VII VIII IX X.
+1,000 10,000 100,000 1,000,000
+A command with flags --strict --debug --gpu.
+ORDINALS: 1ST 2ND 3RD 4TH 11TH 12TH 13TH 21ST 22ND 23RD.
+Music notes C D E F G A B and chords Cmaj7 G7.
++0 +1 +10 +100 +1000
+Angle 45° and 90° and 180° and 360°.
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+An IP address 192.0.2.1 and a port 8080.
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+Version 1.2.3 and version 10.20.30.	const value = items.reduce((acc, x) => acc + x, 0);
+1e10 1e-10 6.022e23 9.109e-31
+    Cyrillic words: привет мир and добрый день.     trailing tab	
+新しい技術を学ぶのは楽しいです。
+This sentence has  two  spaces in  the middle.
+three trailing spaces   
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+A newline is '\n' and a carriage return is '\r'.
+An option -o /tmp/output and -j 2.
+3.14 2.718 1.414 1.732 0.577	let xs = [1, 2, 3];
+	コンピュータは計算を高速に行います。	
+東京は日本の首都です。
+There are 42 apples in the basket and 7 pears.
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+A long word: pneumonoultramicroscopicsilicovolcanoconiosis.
+Don't stop believing; we'll find the missing number.
+The 1st, 2nd, 3rd, and 4th places went to team 7.
+A mix of CASE and lowercase and MiXeD words.
+#include <stdio.h>
+int main(void) { printf("%d\n", 42); return 0; }
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨 	one leading tab
+SELECT ID, NAME FROM USERS WHERE AGE >= 18 ORDER BY NAME;
+An option -o /tmp/output and -j 2.
+CamelCase names like ByteLevelBPE and GPT2Tokenizer.
+句読点、読点。括弧（丸括弧）と「かぎ括弧」。An abbreviation e.g. this, i.e. that, etc. and so on.
+return ''.join(reversed(parts))
+Mixed text with 😀 and 日本語 and code x = 1.
+新しい技術を学ぶのは楽しいです。
+A newline is '\n' and a carriage return is '\r'.
+ひらがなだけのぶんしょうもあります。
+start and end  コンピュータは計算を高速に行います。
+A glob lab/**/*.py and src/[abc].c.
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭  for i in range(10):
+    while j < len(chars) and chars[j] == chars[i]:
+0x0 0x1 0xFF 0xDEADBEEF 0xCAFEBABE
+電車が遅れているので、待ちましょう。
+The Greek letters alpha β gamma γ and delta δ appear here.
+ A command with flags --strict --debug --gpu. 
+私は昨日、新しい本を読みました。
+A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.
+バージョン3.2のリリースを祝います。
+The phone number 555-0100 is fictional.
+class Tokenizer:	❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+東京は日本の首都です。  
+Don't stop believing; we'll find the missing number.今日は良い天気ですね。
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+データを保存してから終了してください。
+    print(exc, file=sys.stderr)
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+hash_value = ((hash_value ^ byte) * 1099511628211) & mask   
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+数字と単位：3.5キロメートル、100パーセント。
+return ''.join(reversed(parts))
+Email hello@example.com or support@example.org for help. Dates 1999 2000 2001 2010 2020 2025 2026.
+A list of symbols: α, β, γ, δ, ε, ζ, η, θ.
+A nested quote: 'He said "hi" to me.'
+End of a sentence.  Another sentence follows.
+半角カナのｱｲｳｴｵも含まれます。
+The XML <tag attr="value">text</tag> is valid.  句読点、読点。括弧（丸括弧）と「かぎ括弧」。
+A LIST OF ANIMALS: DOG, CAT, BIRD, FISH, HORSE, COW.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+全角数字の１２３と半角数字の123。
+CamelCase names like ByteLevelBPE and GPT2Tokenizer.A time 12:34:56.789 and a duration 1h2m3s.
+let xs = [1, 2, 3];
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100. The plural of child is children, not childs.
+Email hello@example.com or support@example.org for help.
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.
+The plural of child is children, not childs.
+}
+ 	 	 	 MIXED WHITESPACE
+富士山は日本で一番高い山です。
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+数字と単位：3.5キロメートル、100パーセント。
+The temperature fell from 21.5C to -4.0C overnight.
+The file 日本語.txt contains UTF-8 text.
+int main(void) { printf("%d\n", 42); return 0; }
+trailing tab and spaces 	 
+PUBLIC STATIC VOID MAIN(STRING[] ARGS) {
+長音符ーと波ダッシュ〜と全角チルダ～。
+数字と単位：3.5キロメートル、100パーセント。
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+The ratio 1:2:3 and the score 3-2.
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+東京は日本の首都です。
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+Quotes: "double" and 'single' and `backtick`.   
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+Cyrillic words: привет мир and добрый день. 
+An IP address 192.0.2.1 and a port 8080.
+A list of symbols: α, β, γ, δ, ε, ζ, η, θ.
+The file 日本語.txt contains UTF-8 text.
+この文章はトークナイザのテスト用です。Email hello@example.com or support@example.org for help.
+CamelCase names like ByteLevelBPE and GPT2Tokenizer.
+LINE ONE
+LINE TWO
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+ Access code: A1B2-C3D4-E5F6.   
+Currencies ¥1000 $20 €15 £12 ₹500. multiple   spaces   between   words
+A mix of CASE and lowercase and MiXeD words.
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.  Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.
+items = [{'id': 1, 'name': 'one'}, {'id': 2, 'name': 'two'}]
+A LIST OF LANGUAGES: PYTHON, RUST, C, C++, GO, JAVA, SWIFT.
+今日は良い天気ですね。
+A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.  The phone number 555-0100 is fictional.
+  
+　The O'Reilly factor is not a book about bears. 
+Roman numerals I II III IV V VI VII VIII IX X.
+Access code: A1B2-C3D4-E5F6.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎  -0 -1 -10 -100 -1000
+An IP address 192.0.2.1 and a port 8080.
+Dates 1999 2000 2001 2010 2020 2025 2026.
+An empty string is written as "" in most languages.
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+Version 3.14159 is close to pi, but not exact.
+a price of $1,234.56 includes tax of 8.25%.
+   
+hash_value = ((hash_value ^ byte) * 1099511628211) & MASK
+Dates 1999 2000 2001 2010 2020 2025 2026.
+数字と単位：3.5キロメートル、100パーセント。
+FNV_OFFSET = 1469598103934665603
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+The file is named report_final_v17.txt.A glob lab/**/*.py and src/[abc].c.
+SELECT id, name FROM users WHERE age >= 18 ORDER BY name;
+ひらがなだけのぶんしょうもあります。
+0 1 2 3 4 5 6 7 8 9
+夏は暑くて冬は寒いです。	   three leading spaces
+one space between words
+Half of 0.5 is 0.25, and one third is 0.3333.
+  数値は12,345円です。     0b0 0b1 0b1010 0b11111111
+trailing tab and spaces 	 
+quotes: "double" and 'single' and `backtick`.
+a glob lab/**/*.py and src/[abc].c.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+ulimit -v 1500000
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+10 100 1000 10000 100000 1000000
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.
+A very long number: 123456789012345678901234567890.  Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+The string 'it''s' looks odd but is valid Python.  ひらがなだけのぶんしょうもあります。
+Roman numerals I II III IV V VI VII VIII IX X.
+    sys.exit(main())
+items = [{'id': 1, 'name': 'one'}, {'id': 2, 'name': 'two'}]
+数値は12,345円です。
+A list of units: mm, cm, m, km, mg, g, kg, t.
+INSERT INTO logs (level, message) VALUES ('info', 'ready');
+1,000 10,000 100,000 1,000,000
+    print(exc, file=sys.stderr)
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+　			  
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64. Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+    print(i, i * i, i ** 2)🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+Rock'n'roll was never the same after 1955.
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+The function returns None when the input is empty.
+A pangram: The five boxing wizards jump quickly.
+Quotes: "double" and 'single' and `backtick`.
+three trailing spaces   
+The file is named report_final_v17.txt.    while j < len(chars) and chars[j] == chars[i]:
+この文章はトークナイザのテスト用です。
+3.14 2.718 1.414 1.732 0.577
+明日の会議は午後三時からです。
+1e10 1e-10 6.022e23 9.109e-31
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+Percentages 0% 1% 10% 50% 99% 100%.
+ideographic　space in Japanese
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+      j = i + 1	
+The phone number 555-0100 is fictional.桜の花が春に咲きます。
+    INSERT INTO logs (level, message) VALUES ('info', 'ready');	
+fn main() -> int {
+The road is 12 km long and 3.5 m wide.
+The sum of 1 through 100 is 5050.
+let xs = [1, 2, 3];
+The road is 12 km long and 3.5 m wide.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+The string 'it''s' looks odd but is valid Python.
+Roman numerals I II III IV V VI VII VIII IX X.
+A list of colors: red, green, blue, cyan, magenta, yellow.
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+A mix of CASE and lowercase and MiXeD words.
+Currencies ¥1000 $20 €15 £12 ₹500.
+　with open('data.txt', 'r', encoding='utf-8') as handle:	
+A nested quote: 'He said "hi" to me.'
+Don't stop believing; we'll find the missing number.
+fn main() -> int {
+Tabs, spaces, and newlines are whitespace characters.	🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+  A list of punctuation: . , ; : ! ? … ‽ ¿ ¡   
+Subscripts like H2O and CO2 use plain digits.
+  An acronym: NASA, ESA, JAXA, and ISRO.   
+    return a + b
+エラーメッセージを確認しました。
+1e10 1e-10 6.022e23 9.109e-31
+夏は暑くて冬は寒いです。
+hash_value = ((hash_value ^ byte) * 1099511628211) & MASK
+A path /home/runner/work/_temp/w2 with underscores.
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.
+MIXED TEXT WITH 😀 AND 日本語 AND CODE X = 1.
+顔文字(^^)と(´・ω・`)も時々使います。 	 	 	 mixed whitespace
+　コンピュータは計算を高速に行います。 
+multiple   spaces   between   words
+Version 3.14159 is close to pi, but not exact.
+FNV_OFFSET = 1469598103934665603
+  An option -o /tmp/output and -j 2.	 one space between words
+A time 12:34:56.789 and a duration 1h2m3s.
+start and endEnd of a sentence.  Another sentence follows.
+    print(exc, file=sys.stderr) An acronym: NASA, ESA, JAXA, and ISRO.
+this sentence has  leading spaces before it.
+	It's a small world, and we'll keep it that way.
+We can't fix what we don't measure. 顔文字(^^)と(´・ω・`)も時々使います。
+A title: The Lord of the Rings: The Fellowship of the Ring.
+カタカナの外来語：コンピューター、アルゴリズム。
+  a  b   c    d     e  
+Percent signs: 5% 12.5% 99.9% 100%.
+漢字の熟語：情報処理、人工知能、自然言語。
+ Version 1.2.3 and version 10.20.30.
+one space between words
+#include <stdio.h>
+    j = i + 1
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+ONE SPACE BETWEEN WORDS
+00 01 007 0008 00009
+　the word 'a' and the word "a" differ only in quotes.    currencies ¥1000 $20 €15 £12 ₹500.
+新しい技術を学ぶのは楽しいです。
+   three leading spaces  このプログラムは正しく動作します。
+      return bpe.encode(text)   
+Uppercase 'S and 'LL are not the same contractions.
+for i in range(10):
+The temperature is 20°C or 68°F.
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+The cat's toys are under the table, isn't that odd?
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+A UUID looks like 123e4567-e89b-12d3-a456-426614174000.
+　3.14 2.718 1.414 1.732 0.577	
+Percentages 0% 1% 10% 50% 99% 100%.
+Math: 2 + 2 = 4, 2 * 3 = 6, 2 / 3 ≈ 0.6667.
+A very long number: 123456789012345678901234567890.
+The formula a^2 + b^2 = c^2 is the Pythagorean theorem.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+1e10 1e-10 6.022e23 9.109e-31  Contractions: isn't aren't wasn't weren't hasn't haven't.
+a	 b		c			d
+A price of $1,234.56 includes tax of 8.25%.
+       
+This sentence has  leading spaces before it.	数値は12,345円です。
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+　curl -L --retry 3 -o vocab.json https://example.com/vocab.json	
+A long word: pneumonoultramicroscopicsilicovolcanoconiosis.
+let result = await fetch('/api/v1/tokenize');
+Currencies ¥1000 $20 €15 £12 ₹500.
+This sentence has  leading spaces before it.hash_value = ((hash_value ^ byte) * 1099511628211) & MASK
+	全角数字の１２３と半角数字の123。
+one trailing space 
+半角カナのｱｲｳｴｵも含まれます。
+The ratio 1:2:3 and the score 3-2.
+夏は暑くて冬は寒いです。
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.
+	A list of languages: Python, Rust, C, C++, Go, Java, Swift.  
+A list of colors: red, green, blue, cyan, magenta, yellow.
+    sys.exit(main())
+句読点、読点。括弧（丸括弧）と「かぎ括弧」。MAC address 00:1A:2B:3C:4D:5E.
+Units: 5 kg, 3 m, 10 s, 2 A, 7 V, 100 W, 50 Hz.  			
+    one space between words  
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.  	 	 	 mixed whitespace
+assert len(xs) == 3, f'expected 3, got {len(xs)}'
+	This sentence has  two  spaces in  the middle. 
+MULTIPLE   SPACES   BETWEEN   WORDS
+The file is named report_final_v17.txt.return ''.join(reversed(parts))
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.
+私は昨日、新しい本を読みました。
+ Music notes C D E F G A B and chords Cmaj7 G7.  
+今日は良い天気ですね。
+A command with flags --strict --debug --gpu.
+0o0 0o7 0o17 0o777
+	電車が遅れているので、待ちましょう。 
+	one leading tab
+データを保存してから終了してください。
+a	 b		c			d  A path /home/runner/work/_temp/w2 with underscores.
+数値は12,345円です。
+The temperature fell from 21.5C to -4.0C overnight.
+Devanagari digits ०१२३४५६७८९
+while i < len(chars):
+WITH OPEN('DATA.TXT', 'R', ENCODING='UTF-8') AS HANDLE:
+The O'Reilly factor is not a book about bears.
+  -0 -1 -10 -100 -1000  
+Tabs, spaces, and newlines are whitespace characters.
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd. A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+全角数字の１２３と半角数字の123。
+ローマ字のTokyoと日本語の東京。
+a long word: pneumonoultramicroscopicsilicovolcanoconiosis.
+        self.merges = merges	👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+    0b0 0b1 0b1010 0b11111111  
+-0 -1 -10 -100 -1000
+if x is None:
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+　❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+The JSON {"key": "value", "n": 42} is valid. 0b0 0b1 0b1010 0b11111111
+end of a sentence.  another sentence follows.
+このプログラムは正しく動作します。
+全角数字の１２３と半角数字の123。	Ellipses... and more ellipses… and em dashes — like that.
+She scored 10/10 on the test, or 100%.
+ 漢字の熟語：情報処理、人工知能、自然言語。
+with open('data.txt', 'r', encoding='utf-8') as handle:
+import json
+数値は12,345円です。
+An IP address 192.0.2.1 and a port 8080.
+    	
+FNV_OFFSET = 1469598103934665603
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.
+A path /home/runner/work/_temp/w2 with underscores.
+A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.  curl -L --retry 3 -o vocab.json https://example.com/vocab.json
+エラーメッセージを確認しました。one space between words
+漢字の熟語：情報処理、人工知能、自然言語。
+A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+The phone number 555-0100 is fictional.
+Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+A range 1..10 and a range 1...10 differ by one dot.
+Tabs, spaces, and newlines are whitespace characters.
+バージョン3.2のリリースを祝います。
+Dates 1999 2000 2001 2010 2020 2025 2026.
+　THE RATIO 16:9 AND THE TIME 09:30 ARE DIFFERENT.
+MASK = (1 << 64) - 1
+trailing tab	
+result = {k: v for k, v in pairs.items() if v > 0}
+The file 日本語.txt contains UTF-8 text.
+A list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.
+	コンピュータは計算を高速に行います。   
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.   
+An acronym: NASA, ESA, JAXA, and ISRO.
+trailing tab and spaces 	 
+Version 1.2.3 and version 10.20.30.
+MASK = (1 << 64) - 1
+1,000 10,000 100,000 1,000,000
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+The JSON {"key": "value", "n": 42} is valid.
+Subscripts like H2O and CO2 use plain digits.
+Access code: A1B2-C3D4-E5F6.
+	one leading tab
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.
+新しい技術を学ぶのは楽しいです。
+このプログラムは正しく動作します。
+    return 0;
+A nested quote: 'He said "hi" to me.'
+She scored 10/10 on the test, or 100%.  +0 +1 +10 +100 +1000
+start and end
+明日の会議は午後三時からです。
+    value = int(text)
+An option -o /tmp/output and -j 2.
+  
+It's a small world, and we'll keep it that way.Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳 カタカナの外来語：コンピューター、アルゴリズム。
+The word 'a' and the word "a" differ only in quotes.-0 -1 -10 -100 -1000
+CamelCase names like ByteLevelBPE and GPT2Tokenizer.
+a  b   c    d     e
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+ Dates 1999 2000 2001 2010 2020 2025 2026. 
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+The temperature is 20°C or 68°F.
+    j = i + 1
+        value = int(text)     バージョン3.2のリリースを祝います。
+The string 'it''s' looks odd but is valid Python.    j = i + 1
+ 	 	 	 mixed whitespace
+Music notes C D E F G A B and chords Cmaj7 G7.
+MAC address 00:1A:2B:3C:4D:5E.
+assert len(xs) == 3, f'expected 3, got {len(xs)}'
+SELECT id, name FROM users WHERE age >= 18 ORDER BY name;
+A glob lab/**/*.py and src/[abc].c.
+A list of animals: dog, cat, bird, fish, horse, cow.
+エラーメッセージを確認しました。
+Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.  👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+HYPHENATED WORDS LIKE STATE-OF-THE-ART AND WELL-KNOWN.
+Ellipses... and more ellipses… and em dashes — like that.
+　A  B   C    D     E  
+a b c d e f g h i j k l m n o p q r s t u v w x y z.
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+An IP address 192.0.2.1 and a port 8080.
+A sentence with a footnote[1] and another[2].
+Email hello@example.com or support@example.org for help.
+A pangram: The five boxing wizards jump quickly.
+Binary 1010 equals decimal 10 and hex 0xA.
+A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.
+trailing tab and spaces 	 
+数字と単位：3.5キロメートル、100パーセント。
+10 100 1000 10000 100000 1000000
+        self.vocab = vocab
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+trailing tab	
+    The JSON {"key": "value", "n": 42} is valid.   
+    DATES 1999 2000 2001 2010 2020 2025 2026.   
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+	😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩	 non-breaking space and thin space
+今日は良い天気ですね。  🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+non-breaking space and thin space
+漢字の熟語：情報処理、人工知能、自然言語。
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+We can't fix what we don't measure.
+電車が遅れているので、待ちましょう。
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈  An empty string is written as "" in most languages.
+The formula a^2 + b^2 = c^2 is the Pythagorean theorem.
+UPPERCASE 'S AND 'LL ARE NOT THE SAME CONTRACTIONS.
+The sum of 1 through 100 is 5050.
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭 A pangram: The five boxing wizards jump quickly.
+ 桜の花が春に咲きます。
+CamelCase names like ByteLevelBPE and GPT2Tokenizer.
+　半角カナのｱｲｳｴｵも含まれます。	
+漢字の熟語：情報処理、人工知能、自然言語。
+Chemical formula C6H12O6 and NaCl.
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩0O0 0O7 0O17 0O777
+ideographic　space in Japanese
+桜の花が春に咲きます。
+Café naïve résumé coöperate — these accents matter.  0o0 0o7 0o17 0o777
+hash_value = ((hash_value ^ byte) * 1099511628211) & MASK
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.
+電車が遅れているので、待ちましょう。
+    0x0 0x1 0xFF 0xDEADBEEF 0xCAFEBABE  
+A quote: "To be, or not to be, that is the question."
+A newline is '\n' and a carriage return is '\r'.	Dates 1999 2000 2001 2010 2020 2025 2026.
+for i in range(10):
+絵文字😀や🎉も文章に含まれます。
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+An option -o /tmp/output and -j 2.
+1e10 1e-10 6.022e23 9.109e-31
+Abbreviations: etc. e.g. i.e. vs. cf. approx.
+An abbreviation e.g. this, i.e. that, etc. and so on.
+		 two leading tabs
+0 1 2 3 4 5 6 7 8 9
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+　There are 42 apples in the basket and 7 pears.  
+Units: 5 kg, 3 m, 10 s, 2 A, 7 V, 100 W, 50 Hz.
+line one
+line two
+数値は12,345円です。
+A list: apple, banana, cherry, date, elderberry. assert len(xs) == 3, f'expected 3, got {len(xs)}'
+python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/infer/bpe.py -o /tmp/bpe --strict
+line one
+line two
+1_000_000 and 1_2_3_4_5          eight leading spaces
+ An acronym: NASA, ESA, JAXA, and ISRO.	
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+Mixed text with 😀 and 日本語 and code x = 1.	assert len(xs) == 3, f'expected 3, got {len(xs)}'
+An empty string is written as "" in most languages.
+	
+	one leading tab
+Quotes: "double" and 'single' and `backtick`.
+Line one has a comma, a colon: and a semicolon; done.
+漢字の熟語：情報処理、人工知能、自然言語。	Version 1.2.3 and version 10.20.30.
+The road is 12 km long and 3.5 m wide.
+    The function returns None when the input is empty.  
+A title: The Lord of the Rings: The Fellowship of the Ring.	    def __init__(self, vocab, merges):
+秋の紅葉はとても美しいです。
+End of a sentence.  Another sentence follows.👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+start and end
+Tabs, spaces, and newlines are whitespace characters.
+Devanagari digits ०१२३४५६७८९
+	one leading tab
+Line one has a comma, a colon: and a semicolon; done.コンピュータは計算を高速に行います。
+No trailing newline in this sentence does not matter.  two words here
+この文章はトークナイザのテスト用です。
+Coordinates: 35.6812N, 139.7671E.
+    sys.exit(main())
+　0 1 2 3 4 5 6 7 8 9   
+if x is None:
+a	 b		c			d
+0 1 2 3 4 5 6 7 8 9
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.  1e10 1e-10 6.022e23 9.109e-31
+Cyrillic words: привет мир and добрый день.
+class Tokenizer:
+non-breaking space and thin space
+A newline is '\n' and a carriage return is '\r'.
+Dates 1999 2000 2001 2010 2020 2025 2026.
+import json
+hash_value = ((hash_value ^ byte) * 1099511628211) & MASK Contractions: isn't aren't wasn't weren't hasn't haven't.
+Use git commit -m "fix tokenizer edge case" to save work.
+夏は暑くて冬は寒いです。
+0 1 2 3 4 5 6 7 8 9
+00 01 007 0008 00009
+3.14 2.718 1.414 1.732 0.577
+I'm sure you're right about the answer.
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+1_000_000 and 1_2_3_4_5
+The ratio 1:2:3 and the score 3-2.
+The hash is deadbeef and the checksum is 0xc0ffee.three trailing spaces   
+word	word	word
+データを保存してから終了してください。  A path /home/runner/work/_temp/w2 with underscores.
+int main(void) { printf("%d\n", 42); return 0; }🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+The interval [0, 1) excludes the right endpoint. A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.
+1,000 10,000 100,000 1,000,000
+An escape sequence \n is two characters, not a newline.
+Percent signs: 5% 12.5% 99.9% 100%.
+A long word: pneumonoultramicroscopicsilicovolcanoconiosis.  one space between words
+An option -o /tmp/output and -j 2.
+The 1000000th visitor won 250000 points.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+ひらがなだけのぶんしょうもあります。
+She scored 10/10 on the test, or 100%.
+Hyphenated words like state-of-the-art and well-known.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+a	 b		c			d
+one trailing space 
+桜の花が春に咲きます。    j = i + 1
+Uppercase 'S and 'LL are not the same contractions.
+Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.
+全角数字の１２３と半角数字の123。
+except ValueError as exc:
+エラーメッセージを確認しました。
+電車が遅れているので、待ちましょう。
+Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+ORDINALS: 1ST 2ND 3RD 4TH 11TH 12TH 13TH 21ST 22ND 23RD.
+Version 1.2.3 and version 10.20.30.
+Devanagari digits ०१२३४५६७८९
+Tabs, spaces, and newlines are whitespace characters.
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+A tweet with #hashtag and @mention and example.org.
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.
+A pangram: The five boxing wizards jump quickly.
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.  Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+access code: a1b2-c3d4-e5f6.
+ MULTIPLE   SPACES   BETWEEN   WORDS   
+Angle 45° and 90° and 180° and 360°.
+-0 -1 -10 -100 -1000
+A PALINDROME: RACECAR AND NEVER ODD OR EVEN.
+ひらがなだけのぶんしょうもあります。
+public static void main(String[] args) {
+except ValueError as exc:
+This sentence has  two  spaces in  the middle.
+        self.merges = merges
+新しい技術を学ぶのは楽しいです。
+The temperature is 20°C or 68°F.
+Email hello@example.com or support@example.org for help.
+富士山は日本で一番高い山です。
+Café naïve résumé coöperate — these accents matter.
+An escape sequence \n is two characters, not a newline.
+A UUID looks like 123e4567-e89b-12d3-a456-426614174000.
+let xs = [1, 2, 3];
+    print("hello, world");
+Use git commit -m "fix tokenizer edge case" to save work.
+The phone number 555-0100 is fictional.
+　A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.	
+The XML <tag attr="value">text</tag> is valid. A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.
+      return a + b  
+コンピュータは計算を高速に行います。Units: 5 kg, 3 m, 10 s, 2 A, 7 V, 100 W, 50 Hz.
+富士山は日本で一番高い山です。
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.
+	
+Version 1.2.3 and version 10.20.30.
+	make -j 2 all   
+Angle 45° and 90° and 180° and 360°.
+Music notes C D E F G A B and chords Cmaj7 G7.
+ ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 
+Math: 2 + 2 = 4, 2 * 3 = 6, 2 / 3 ≈ 0.6667.
+	電車が遅れているので、待ちましょう。  
+one space between words
+a repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.
+THE GREEK LETTERS ALPHA Β GAMMA Γ AND DELTA Δ APPEAR HERE.
+start and end
+payload = json.dumps({'ok': True, 'n': 3}, ensure_ascii=False)
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.  
+私は昨日、新しい本を読みました。
+The character ' ' is a space and '\t' is a tab.
+The year 2026 begins on a Thursday.
+長音符ーと波ダッシュ〜と全角チルダ～。
+while i < len(chars):
+The string 'it''s' looks odd but is valid Python.
+Angle 45° and 90° and 180° and 360°.
+This sentence has  two  spaces in  the middle.
+A list of colors: red, green, blue, cyan, magenta, yellow.
+Cyrillic words: привет мир and добрый день.	🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+A mix of CASE and lowercase and MiXeD words.
+Don't stop believing; we'll find the missing number.
+  items = [{'id': 1, 'name': 'one'}, {'id': 2, 'name': 'two'}]	
+A path /home/runner/work/_temp/w2 with underscores.    print("hello, world");
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+A quote: "To be, or not to be, that is the question."
+CONTRACTIONS: ISN'T AREN'T WASN'T WEREN'T HASN'T HAVEN'T.
+-0 -1 -10 -100 -1000
+A list of animals: dog, cat, bird, fish, horse, cow.
+10 100 1000 10000 100000 1000000
+　	one leading tab   
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+CamelCase names like ByteLevelBPE and GPT2Tokenizer. The ratio 1:2:3 and the score 3-2.
+curl -L --retry 3 -o vocab.json https://example.com/vocab.json
+A time 12:34:56.789 and a duration 1h2m3s.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+Symbols: !@#$%^&*()_+-=[]{}|;:'",.<>/?`~
+The temperature fell from 21.5C to -4.0C overnight.
+Music notes C D E F G A B and chords Cmaj7 G7.  
+　A mix of CASE and lowercase and MiXeD words.   
+A glob lab/**/*.py and src/[abc].c.
+	
+Roman numerals I II III IV V VI VII VIII IX X.
+The quick brown fox jumps over the lazy dog.	Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+line one has a comma, a colon: and a semicolon; done.
+A palindrome: racecar and Never odd or even.	line one
+line two
+This sentence has  leading spaces before it.
+1,000 10,000 100,000 1,000,000
+The file 日本語.txt contains UTF-8 text.
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+0 1 2 3 4 5 6 7 8 9
+Binary 1010 equals decimal 10 and hex 0xA.
+    while j < len(chars) and chars[j] == chars[i]:
+    return bpe.encode(text)
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.
+私は昨日、新しい本を読みました。
+def add(a, b):
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇 彼女は毎朝コーヒーを飲みます。
+　A command with flags --strict --debug --gpu.  
+The string 'it''s' looks odd but is valid Python.  
+The XML <tag attr="value">text</tag> is valid.
+The year 2026 begins on a Thursday.
+Percentages 0% 1% 10% 50% 99% 100%.
+The 1st, 2nd, 3rd, and 4th places went to team 7.An acronym: NASA, ESA, JAXA, and ISRO.
+The file is named report_final_v17.txt.
+The file is named report_final_v17.txt.
+データを保存してから終了してください。
+Hyphenated words like state-of-the-art and well-known.
+今日は良い天気ですね。
+A mix of CASE and lowercase and MiXeD words.
+She scored 10/10 on the test, or 100%.
+		 two leading tabs
+明日の会議は午後三時からです。
+}
+私は昨日、新しい本を読みました。
+The cat's toys are under the table, isn't that odd?
+半角カナのｱｲｳｴｵも含まれます。
+The character ' ' is a space and '\t' is a tab.
+Version 3.14159 is close to pi, but not exact.	try:
+Dates: 2026-11-06, 06/11/2026, and November 6, 2026.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+	import json	
+He'll bring the coffee, and they'll bring the bread.
+This sentence has  two  spaces in  the middle.
+Music notes C D E F G A B and chords Cmaj7 G7.
+def main() -> int:
+この文章はトークナイザのテスト用です。
+The quick brown fox jumps over the lazy dog.
+バージョン3.2のリリースを祝います。
+return ''.join(reversed(parts))
+-0 -1 -10 -100 -1000
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+A sentence with a footnote[1] and another[2].
+ideographic　space in Japanese
+word	word	word
+An abbreviation e.g. this, i.e. that, etc. and so on.
+Rock'n'roll was never the same after 1955.
+1_000_000 AND 1_2_3_4_5
+A RANGE 1..10 AND A RANGE 1...10 DIFFER BY ONE DOT.
+　one space between words   
+MAC address 00:1A:2B:3C:4D:5E.
+ The interval [0, 1) excludes the right endpoint.	
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.  A list of animals: dog, cat, bird, fish, horse, cow.
+A list of symbols: α, β, γ, δ, ε, ζ, η, θ.
+    System.out.println("Hello");
+		 two leading tabs
+The character ' ' is a space and '\t' is a tab.
+ローマ字のTOKYOと日本語の東京。
+コンピュータは計算を高速に行います。
+明日の会議は午後三時からです。
+The symbol © and ® and ™ are not letters.
+電車が遅れているので、待ちましょう。
+A tweet with #hashtag and @mention and example.org. return ''.join(reversed(parts))
+The interval [0, 1) excludes the right endpoint.
+        j += 1
+trailing tab and spaces 	 
+	 日本語の文字はひらがな、カタカナ、漢字があります。
+Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.  🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+　The quick brown fox jumps over the lazy dog.   
+A list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.
+two words here
+A newline is '\n' and a carriage return is '\r'.
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+A quote: "To be, or not to be, that is the question."	1_000_000 and 1_2_3_4_5
+Roman numerals I II III IV V VI VII VIII IX X.
+-0 -1 -10 -100 -1000 
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈hash_value = ((hash_value ^ byte) * 1099511628211) & MASK
+MAC address 00:1A:2B:3C:4D:5E.
+エラーメッセージを確認しました。
+	A regex ^[a-z]+\d{2,4}$ is tricky to tokenize. 
+git status --short && git diff --stat origin/integ
+この文章はトークナイザのテスト用です。
+	A UUID looks like 123e4567-e89b-12d3-a456-426614174000.
+Abbreviations: etc. e.g. i.e. vs. cf. approx.
+trailing tab	
+Symbols: !@#$%^&*()_+-=[]{}|;:'",.<>/?`~   1,000 10,000 100,000 1,000,000
+今日は良い天気ですね。
+This sentence has  two  spaces in  the middle.
+Line one has a comma, a colon: and a semicolon; done.
+　She scored 10/10 on the test, or 100%. 
+			
+カタカナの外来語：コンピューター、アルゴリズム。
+git status --short && git diff --stat origin/integ 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+ Fractions 1/2 1/3 2/3 3/4 7/8 99/100.  
+夏は暑くて冬は寒いです。
+    return 0;
+    print(exc, file=sys.stderr)
+I'm sure you're right about the answer.
+    j = i + 1
+Music notes C D E F G A B and chords Cmaj7 G7.
+Rock'n'roll was never the same after 1955.	A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+The function returns None when the input is empty.
+The ratio 1:2:3 and the score 3-2. start and end
+秋の紅葉はとても美しいです。
+The JSON {"key": "value", "n": 42} is valid.
+    return 0;
+私は昨日、新しい本を読みました。
+0x0 0x1 0xFF 0xDEADBEEF 0xCAFEBABE
+東京は日本の首都です。
+A pangram: The five boxing wizards jump quickly.
+A pangram: The five boxing wizards jump quickly.
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+trailing tab and spaces 	 
+ A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+句読点、読点。括弧（丸括弧）と「かぎ括弧」。
+The interval [0, 1) excludes the right endpoint.
+    j = i + 1
+Currencies ¥1000 $20 €15 £12 ₹500.
+    	 
+The 1000000th visitor won 250000 points.
+Contractions: isn't aren't wasn't weren't hasn't haven't.
+A list of symbols: α, β, γ, δ, ε, ζ, η, θ.
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+桜の花が春に咲きます。
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+ one trailing space    
+A newline is '\n' and a carriage return is '\r'.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+日本語の文字はひらがな、カタカナ、漢字があります。
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+1_000_000 and 1_2_3_4_5
+A tweet with #hashtag and @mention and example.org.
+A time 12:34:56.789 and a duration 1h2m3s.
+日本語の文字はひらがな、カタカナ、漢字があります。
+新しい技術を学ぶのは楽しいです。
+Math: 2 + 2 = 4, 2 * 3 = 6, 2 / 3 ≈ 0.6667.
+データを保存してから終了してください。      return a + b
+SHE SAID SHE'D CALL, BUT THEY'VE NOT HEARD FROM HER.
+A list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.
+An option -o /tmp/output and -j 2.
+    0 1 2 3 4 5 6 7 8 9
+The temperature fell from 21.5C to -4.0C overnight.
+A quote: "To be, or not to be, that is the question."
+The temperature fell from 21.5C to -4.0C overnight.
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+A tweet with #hashtag and @mention and example.org.  👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+新しい技術を学ぶのは楽しいです。
+    print(exc, file=sys.stderr)
+Underscored names like token_id and byte_level_bpe.
+the o'reilly factor is not a book about bears.
+multiple   spaces   between   words
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+数字と単位：3.5キロメートル、100パーセント。 }
+    sys.exit(main())
+A UUID looks like 123e4567-e89b-12d3-a456-426614174000.
+	Cyrillic words: привет мир and добрый день.   	Mixed text with 😀 and 日本語 and code x = 1.
+git status --short && git diff --stat origin/integ  both sides  
+    return 0;  		 two leading tabs
+return ''.join(reversed(parts))
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.
+The 1st, 2nd, 3rd, and 4th places went to team 7.	Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+Hyphenated words like state-of-the-art and well-known.
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+    System.out.println("Hello");Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+   
+trailing tab and spaces 	 
+DATES 1999 2000 2001 2010 2020 2025 2026.   
+    try:  
+No trailing newline in this sentence does not matter.
+新しい技術を学ぶのは楽しいです。
+	Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.  
+	The Greek letters alpha β gamma γ and delta δ appear here.  Mixed text with 😀 and 日本語 and code x = 1.
+The temperature is 20°C or 68°F.
+A long word: pneumonoultramicroscopicsilicovolcanoconiosis.
+A palindrome: racecar and Never odd or even.
+    🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+assert len(xs) == 3, f'expected 3, got {len(xs)}'  Tabs, spaces, and newlines are whitespace characters.
+A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.	明日の会議は午後三時からです。
+秋の紅葉はとても美しいです。
+The JSON {"key": "value", "n": 42} is valid.
+payload = json.dumps({'ok': True, 'n': 3}, ensure_ascii=False) Percentages 0% 1% 10% 50% 99% 100%.
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.
+a	 b		c			d
+1_000_000 and 1_2_3_4_5
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+Room 101 is down the hall on the left.
+00 01 007 0008 00009
+INSERT INTO logs (level, message) VALUES ('info', 'ready');
+    System.out.println("Hello");
+    print(i, i * i, i ** 2)
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+def main() -> int:
+1e10 1e-10 6.022e23 9.109e-31
+ A list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.  
+End of a sentence.  Another sentence follows.
+Percentages 0% 1% 10% 50% 99% 100%.
+import json
+Mixed text with 😀 and 日本語 and code x = 1.
+新しい技術を学ぶのは楽しいです。
+class Tokenizer:
+THE O'REILLY FACTOR IS NOT A BOOK ABOUT BEARS.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+Roman numerals I II III IV V VI VII VIII IX X.
+	絵文字😀や🎉も文章に含まれます。   
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+Line one has a comma, a colon: and a semicolon; done.
+  An option -o /tmp/output and -j 2.  
+a	 b		c			d
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+def main() -> int:
+multiple   spaces   between   words
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+class Tokenizer:
+私は昨日、新しい本を読みました。  			
+	
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+three trailing spaces      	👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+with open('data.txt', 'r', encoding='utf-8') as handle:
+A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+Abbreviations: etc. e.g. i.e. vs. cf. approx.
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.
+let result = await fetch('/api/v1/tokenize');
+one space between words
+A list of animals: dog, cat, bird, fish, horse, cow.   
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+class tokenizer:
+Version 1.2.3 and version 10.20.30.
+AN EMPTY STRING IS WRITTEN AS "" IN MOST LANGUAGES.  🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+今日は良い天気ですね。
+  word	word	word  
+10 100 1000 10000 100000 1000000
+明日の会議は午後三時からです。
+The file 日本語.txt contains UTF-8 text.
+return ''.join(reversed(parts))
+a b c d e f g h i j k l m n o p q r s t u v w x y z.	two words here
+The function returns None when the input is empty.
+A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+Use git commit -m "fix tokenizer edge case" to save work.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨	
+			
+There are 42 apples in the basket and 7 pears.
+0x0 0x1 0xFF 0xDEADBEEF 0xCAFEBABE
+-0 -1 -10 -100 -1000
+カタカナの外来語：コンピューター、アルゴリズム。
+富士山は日本で一番高い山です。	  
+The temperature is 20°C or 68°F.
+    A mix of CASE and lowercase and MiXeD words.    one space between words
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z.
+    sys.exit(main())
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎Hyphenated words like state-of-the-art and well-known.
+A nested quote: 'He said "hi" to me.'
+    one space between words    The year 2026 begins on a Thursday.
+Roman numerals I II III IV V VI VII VIII IX X.
+    print("hello, world");半角カナのｱｲｳｴｵも含まれます。
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+句読点、読点。括弧（丸括弧）と「かぎ括弧」。
+payload = json.dumps({'ok': True, 'n': 3}, ensure_ascii=False)
+A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.
+trailing tab and spaces 	   全角数字の１２３と半角数字の123。
+Café naïve résumé coöperate — these accents matter.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+multiple   spaces   between   words
+THE EMOJI FAMILY 👨‍👩‍👧‍👦 IS ONE GRAPHEME BUT SEVERAL CODE POINTS.
+1e10 1e-10 6.022e23 9.109e-31
+  trailing tab and spaces 	   
+    j = i + 1  絵文字😀や🎉も文章に含まれます。
+ひらがなだけのぶんしょうもあります。
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+Currencies ¥1000 $20 €15 £12 ₹500.
+The 1st, 2nd, 3rd, and 4th places went to team 7.
+コンピュータは計算を高速に行います。
+ I'M SURE YOU'RE RIGHT ABOUT THE ANSWER.  
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩	-0 -1 -10 -100 -1000
+The ratio 16:9 and the time 09:30 are different.
+Uppercase 'S and 'LL are not the same contractions.  半角カナのｱｲｳｴｵも含まれます。
+	A UUID looks like 123e4567-e89b-12d3-a456-426614174000.
+int main(void) { printf("%d\n", 42); return 0; }
+コンピュータは計算を高速に行います。
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
++0 +1 +10 +100 +1000
+  both sides  
+Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+Percentages 0% 1% 10% 50% 99% 100%.
+Underscored names like token_id and byte_level_bpe.
+00 01 007 0008 00009
+Access code: A1B2-C3D4-E5F6.
+items = [{'id': 1, 'name': 'one'}, {'id': 2, 'name': 'two'}]
+絵文字😀や🎉も文章に含まれます。
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+trailing tab	
+コンピュータは計算を高速に行います。
+   three leading spaces
+	
+A palindrome: racecar and Never odd or even.
+three trailing spaces   
+ideographic　space in Japanese
+Parentheses (like these), brackets [like these], and braces {like these}.1e10 1e-10 6.022e23 9.109e-31
+  non-breaking space and thin space
+  curl -L --retry 3 -o vocab.json https://example.com/vocab.json trailing tab and spaces 	 
+This sentence has  leading spaces before it.
+3.14 2.718 1.414 1.732 0.577
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬 A list of symbols: α, β, γ, δ, ε, ζ, η, θ.
+A list of animals: dog, cat, bird, fish, horse, cow.  全角数字の１２３と半角数字の123。
+A quote: "To be, or not to be, that is the question."
+        eight leading spaces
+The ratio 1:2:3 and the score 3-2.
+Visit https://example.com/docs/tokenizer for the guide.int main(void) { printf("%d\n", 42); return 0; }
+A list of units: mm, cm, m, km, mg, g, kg, t.
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.
+	  Dates 1999 2000 2001 2010 2020 2025 2026.
+A command with flags --strict --debug --gpu.
+        eight leading spaces
+　two words here
+No trailing newline in this sentence does not matter.	result = {k: v for k, v in pairs.items() if v > 0}
+Binary 1010 equals decimal 10 and hex 0xA.A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.
+   three leading spaces
+Rock'n'roll was never the same after 1955.
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.
+ローマ字のTokyoと日本語の東京。
+The O'Reilly factor is not a book about bears.	while i < len(chars):
+public static void main(String[] args) {
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+The formula a^2 + b^2 = c^2 is the Pythagorean theorem.
+A title: The Lord of the Rings: The Fellowship of the Ring.
+0o0 0o7 0o17 0o777  Angle 45° and 90° and 180° and 360°.
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.
+word	word	word
+	items = [{'id': 1, 'name': 'one'}, {'id': 2, 'name': 'two'}]	
+	
+ 	 	 	 mixed whitespace
+git status --short && git diff --stat origin/integ
+MASK = (1 << 64) - 1 Subscripts like H2O and CO2 use plain digits.
+A MIX OF CASE AND LOWERCASE AND MIXED WORDS.  WHILE I < LEN(CHARS):
+A REGEX ^[A-Z]+\D{2,4}$ IS TRICKY TO TOKENIZE.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+    A long word: pneumonoultramicroscopicsilicovolcanoconiosis.	
+東京は日本の首都です。
+Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+The symbol © and ® and ™ are not letters.
+このプログラムは正しく動作します。
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+桜の花が春に咲きます。FN MAIN() -> INT {
+An abbreviation e.g. this, i.e. that, etc. and so on.
+Angle 45° and 90° and 180° and 360°.
+The road is 12 km long and 3.5 m wide.
+HTML entities &amp; &lt; &gt; &quot; are escaped. A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+A mix of CASE and lowercase and MiXeD words.
+-0 -1 -10 -100 -1000
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+Chemical formula C6H12O6 and NaCl.
+FNV_OFFSET = 1469598103934665603
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+Roman numerals I II III IV V VI VII VIII IX X.
+私は昨日、新しい本を読みました。
+	A sentence with a footnote[1] and another[2].   
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+The JSON {"key": "value", "n": 42} is valid.
+He'll bring the coffee, and they'll bring the bread.
+Cyrillic words: привет мир and добрый день.
+   
+trailing tab	
+The symbol © and ® and ™ are not letters.	def main() -> int:
+1e10 1e-10 6.022e23 9.109e-31
+1e10 1e-10 6.022e23 9.109e-31	
+A list of animals: dog, cat, bird, fish, horse, cow.
+10 100 1000 10000 100000 1000000
+今日は良い天気ですね。
+More contractions: could've should've would've might've.
+The phone number 555-0100 is fictional.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+A newline is '\n' and a carriage return is '\r'.
+The road is 12 km long and 3.5 m wide.
+Room 101 is down the hall on the left.
+The XML <tag attr="value">text</tag> is valid.
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+non-breaking space and thin space
+Half of 0.5 is 0.25, and one third is 0.3333.
+An option -o /tmp/output and -j 2.
+このプログラムは正しく動作します。
+顔文字(^^)と(´・ω・`)も時々使います。
+Version 1.2.3 and version 10.20.30.🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭  3.14 2.718 1.414 1.732 0.577
+A list of colors: red, green, blue, cyan, magenta, yellow.
+chess moves 1. e4 e5 2. nf3 nc6 3. bb5 a6.
+I'm sure you're right about the answer.
+The temperature is 20°C or 68°F.
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+Mixed text with 😀 and 日本語 and code x = 1.
+    def __init__(self, vocab, merges):
+payload = json.dumps({'ok': True, 'n': 3}, ensure_ascii=False)
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.
+Percentages 0% 1% 10% 50% 99% 100%.
+    1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟  
+	Tabs, spaces, and newlines are whitespace characters.  
+She said she'd call, but they've not heard from her.
+A time 12:34:56.789 and a duration 1h2m3s.
+00 01 007 0008 00009
+  Line one has a comma, a colon: and a semicolon; done.	
+The word 'a' and the word "a" differ only in quotes.
+エラーメッセージを確認しました。
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+　Negative numbers: -1 -22 -333 -4444 -55555.
+MAC address 00:1A:2B:3C:4D:5E.
+　Underscored names like token_id and byte_level_bpe.  
+　Version 1.2.3 and version 10.20.30.   
+a  b   c    d     e😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+A TIME 12:34:56.789 AND A DURATION 1H2M3S.
+#include <stdio.h>
+She said she'd call, but they've not heard from her.
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100. 電車が遅れているので、待ちましょう。
+        self.merges = merges
+MUSIC NOTES C D E F G A B AND CHORDS CMAJ7 G7.
+    return 0;  a  b   c    d     e
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡ 😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+The O'Reilly factor is not a book about bears. ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+We can't fix what we don't measure.
+Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+夏は暑くて冬は寒いです。
+The year 2026 begins on a Thursday.
+	int main(void) { printf("%d\n", 42); return 0; }
+non-breaking space and thin space
+半角カナのｱｲｳｴｵも含まれます。
+このプログラムは正しく動作します。
+Dates 1999 2000 2001 2010 2020 2025 2026.
+	Chemical formula C6H12O6 and NaCl. 	🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+An IP address 192.0.2.1 and a port 8080.
+新しい技術を学ぶのは楽しいです。
+  
+The symbol © and ® and ™ are not letters.
+データを保存してから終了してください。
+半角カナのｱｲｳｴｵも含まれます。
+この文章はトークナイザのテスト用です。
+let result = await fetch('/api/v1/tokenize');
+私は昨日、新しい本を読みました。
+INSERT INTO logs (level, message) VALUES ('info', 'ready');
+  👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬	
+Tabs, spaces, and newlines are whitespace characters.
+A mix of CASE and lowercase and MiXeD words.
+    ローマ字のTokyoと日本語の東京。   
+新しい技術を学ぶのは楽しいです。
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+        raise ValueError('x is None') 
+The year 2026 begins on a Thursday.
+　		
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+今日は良い天気ですね。
+顔文字(^^)と(´・Ω・`)も時々使います。
+  
+新しい技術を学ぶのは楽しいです。
+Half of 0.5 is 0.25, and one third is 0.3333.
+        j += 1
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z.      print(i, i * i, i ** 2)
+ Mixed text with 😀 and 日本語 and code x = 1.   
+Chemical formula C6H12O6 and NaCl.
+int main(void) { printf("%d\n", 42); return 0; }
+The interval [0, 1) excludes the right endpoint. a  b   c    d     e
+Coordinates: 35.6812N, 139.7671E.
+ 0b0 0b1 0b1010 0b11111111 
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+Percent signs: 5% 12.5% 99.9% 100%.
+import json  trailing tab and spaces 	 
+Coordinates: 35.6812N, 139.7671E.
+Line one has a comma, a colon: and a semicolon; done.
+データを保存してから終了してください。
+0 1 2 3 4 5 6 7 8 9
+THE RATIO 16:9 AND THE TIME 09:30 ARE DIFFERENT.
+Angle 45° and 90° and 180° and 360°.
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+   
+東京は日本の首都です。Dates: 2026-11-06, 06/11/2026, and November 6, 2026.
+assert len(xs) == 3, f'expected 3, got {len(xs)}'
+　カタカナの外来語：コンピューター、アルゴリズム。	
+The sum of 1 through 100 is 5050.
+    Half of 0.5 is 0.25, and one third is 0.3333.
+let result = await fetch('/api/v1/tokenize');
+A glob lab/**/*.py and src/[abc].c.
+trailing tab	
+start and end
+A range 1..10 and a range 1...10 differ by one dot.
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+Tabs, spaces, and newlines are whitespace characters.
+数字と単位：3.5キロメートル、100パーセント。
+データを保存してから終了してください。     j = i + 1
+A list of colors: red, green, blue, cyan, magenta, yellow.
+return ''.join(reversed(parts))
+line one
+line two
+A tweet with #hashtag and @mention and example.org.
+    10 100 1000 10000 100000 1000000
+今日は良い天気ですね。
+a time 12:34:56.789 and a duration 1h2m3s.
+INSERT INTO LOGS (LEVEL, MESSAGE) VALUES ('INFO', 'READY');
+The Greek letters alpha β gamma γ and delta δ appear here.
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.	1e10 1e-10 6.022e23 9.109e-31
+    Uppercase 'S and 'LL are not the same contractions.
+Currencies ¥1000 $20 €15 £12 ₹500.
+    The O'Reilly factor is not a book about bears. 
+ひらがなだけのぶんしょうもあります。
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+The character ' ' is a space and '\t' is a tab.
+Roman numerals I II III IV V VI VII VIII IX X.
+The formula a^2 + b^2 = c^2 is the Pythagorean theorem.	👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+three trailing spaces   ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+DEVANAGARI DIGITS ०१२३४५६७८९  ANGLE 45° AND 90° AND 180° AND 360°.
+数字と単位：3.5キロメートル、100パーセント。
+Email hello@example.com or support@example.org for help.
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+The temperature fell from 21.5C to -4.0C overnight.				
+ A path /home/runner/work/_temp/w2 with underscores.   	She said she'd call, but they've not heard from her.
+room 101 is down the hall on the left.
+A quote: "To be, or not to be, that is the question."
+A nested quote: 'He said "hi" to me.'
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+  both sides  
+A UUID looks like 123e4567-e89b-12d3-a456-426614174000.
+The string 'it''s' looks odd but is valid Python.
+The 1st, 2nd, 3rd, and 4th places went to team 7.
+A mix of CASE and lowercase and MiXeD words.
+subscripts like h2o and co2 use plain digits.
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+Abbreviations: etc. e.g. i.e. vs. cf. approx.
+	Currencies ¥1000 $20 €15 £12 ₹500.   
+    AN ARRAY [1, 2, 3] HAS LENGTH 3 AND INDICES 0, 1, 2.  ONE SPACE BETWEEN WORDS
+The temperature fell from 21.5C to -4.0C overnight.
+Angle 45° and 90° and 180° and 360°.
+An abbreviation e.g. this, i.e. that, etc. and so on.
+The sum of 1 through 100 is 5050.
+数字と単位：3.5キロメートル、100パーセント。
+version 3.14159 is close to pi, but not exact.
+python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/infer/bpe.py -o /tmp/bpe --strict
+ROOM 101 IS DOWN THE HALL ON THE LEFT.
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+		 two leading tabs
+私は昨日、新しい本を読みました。
+one space between words
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.
+The sum of 1 through 100 is 5050.
+An empty string is written as "" in most languages.
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z.
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.
+Uppercase 'S and 'LL are not the same contractions.   	A list of units: mm, cm, m, km, mg, g, kg, t.
+　DEF MAIN() -> INT:
+We can't fix what we don't measure.
+Percentages 0% 1% 10% 50% 99% 100%.
+The year 2026 begins on a Thursday.
+A nested quote: 'He said "hi" to me.'
+MORE CONTRACTIONS: COULD'VE SHOULD'VE WOULD'VE MIGHT'VE.
+ 数字と単位：3.5キロメートル、100パーセント。	
+	東京は日本の首都です。	
+We can't fix what we don't measure.
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+Quotes: "double" and 'single' and `backtick`.
+ひらがなだけのぶんしょうもあります。
+Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+PERCENTAGES 0% 1% 10% 50% 99% 100%.
+　I'm sure you're right about the answer.  
+Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+    カタカナの外来語：コンピューター、アルゴリズム。	
+私は昨日、新しい本を読みました。
+    return bpe.encode(text)
+I'm sure you're right about the answer.
+import json
+新しい技術を学ぶのは楽しいです。
+  both sides  	with open('data.txt', 'r', encoding='utf-8') as handle:
+We can't fix what we don't measure.
+    顔文字(^^)と(´・ω・`)も時々使います。
+    RAISE VALUEERROR('X IS NONE')
+Don't stop believing; we'll find the missing number.
+Chemical formula C6H12O6 and NaCl.
+    j = i + 1
+def main() -> int:  1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+  MASK = (1 << 64) - 1 
+for i in range(10):
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+    Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 	ONE LEADING TAB
+カタカナの外来語：コンピューター、アルゴリズム。
+Tabs, spaces, and newlines are whitespace characters.
+ANGLE 45° AND 90° AND 180° AND 360°.
+バージョン3.2のリリースを祝います。
+Half of 0.5 is 0.25, and one third is 0.3333.
+return ''.join(reversed(parts))
+    data = handle.read()顔文字(^^)と(´・ω・`)も時々使います。
+if x is None:
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z.
+The O'Reilly factor is not a book about bears.
+Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+ 秋の紅葉はとても美しいです。 ulimit -v 1500000
+A tweet with #hashtag and @mention and example.org.
+let result = await fetch('/api/v1/tokenize');
+1e10 1e-10 6.022e23 9.109e-31
+エラーメッセージを確認しました。
+Version 1.2.3 and version 10.20.30.
+the quick brown fox jumps over the lazy dog.
+ローマ字のTokyoと日本語の東京。
+Don't stop believing; we'll find the missing number.
+  The Greek letters alpha β gamma γ and delta δ appear here.	one trailing space 
+The file 日本語.txt contains UTF-8 text.
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+富士山は日本で一番高い山です。
+数字と単位：3.5キロメートル、100パーセント。
+The Greek letters alpha β gamma γ and delta δ appear here.
+Coordinates: 35.6812N, 139.7671E.
+   three leading spaces
+The hash is deadbeef and the checksum is 0xc0ffee.
+More contractions: could've should've would've might've.
+An IP address 192.0.2.1 and a port 8080.
+#include <stdio.h>
+絵文字😀や🎉も文章に含まれます。
+An empty string is written as "" in most languages.
+one trailing space Percentages 0% 1% 10% 50% 99% 100%.
+Mixed text with 😀 and 日本語 and code x = 1.
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+HTML entities &amp; &lt; &gt; &quot; are escaped.
+A list of colors: red, green, blue, cyan, magenta, yellow.
+   three leading spaces
+A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.
+Underscored names like token_id and byte_level_bpe.
+An acronym: NASA, ESA, JAXA, and ISRO.
+Rock'n'roll was never the same after 1955.
+return ''.join(reversed(parts))
+電車が遅れているので、待ちましょう。  🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+except ValueError as exc:  
+#include <stdio.h>	🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.
+Roman numerals I II III IV V VI VII VIII IX X.
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+エラーメッセージを確認しました。
+Mixed text with 😀 and 日本語 and code x = 1.
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+More contractions: could've should've would've might've.
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+ a	 b		c			d   このプログラムは正しく動作します。
+秋の紅葉はとても美しいです。
+MAC address 00:1A:2B:3C:4D:5E.
+	one leading tab
+A LIST OF LANGUAGES: PYTHON, RUST, C, C++, GO, JAVA, SWIFT.
+func tokenize(_ text: String) -> [Int] {
+An escape sequence \n is two characters, not a newline.
+ローマ字のTokyoと日本語の東京。 Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+items = [{'id': 1, 'name': 'one'}, {'id': 2, 'name': 'two'}] 漢字の熟語：情報処理、人工知能、自然言語。
+An acronym: NASA, ESA, JAXA, and ISRO.
+1_000_000 and 1_2_3_4_5
+ 秋の紅葉はとても美しいです。	
+	顔文字(^^)と(´・ω・`)も時々使います。 
+        j += 1
+a  b   c    d     e
+A list of names: Alice, Bob, Carol, Dave, Eve, Frank. Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+-0 -1 -10 -100 -1000
+An empty string is written as "" in most languages.
+non-breaking space and thin space  Half of 0.5 is 0.25, and one third is 0.3333.
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+A long word: pneumonoultramicroscopicsilicovolcanoconiosis.	   
+　Mixed text with 😀 and 日本語 and code x = 1. 
+Don't stop believing; we'll find the missing number.
+秋の紅葉はとても美しいです。
+three trailing spaces   
+数値は12,345円です。
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+A sentence with a footnote[1] and another[2].
+	Roman numerals I II III IV V VI VII VIII IX X. 
+A sentence with a footnote[1] and another[2].
+	A range 1..10 and a range 1...10 differ by one dot.
+A pangram: The five boxing wizards jump quickly.
+	PUBLIC STATIC VOID MAIN(STRING[] ARGS) {	
+  🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+    mr. smith and dr. jones met ms. brown at 5 p.m.  
+Possessives: the dog's bone, the cats' toys, James's book.  10 100 1000 10000 100000 1000000
+int main(void) { printf("%d\n", 42); return 0; } 
+python3 -b ail_current/ail_chatgpt.py compile lab/infer/bpe.py -o /tmp/bpe --strict
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.
+	A nested quote: 'He said "hi" to me.'   
+ The file is named report_final_v17.txt.	
+The quick brown fox jumps over the lazy dog.数字と単位：3.5キロメートル、100パーセント。
+CYRILLIC WORDS: ПРИВЕТ МИР AND ДОБРЫЙ ДЕНЬ.
+明日の会議は午後三時からです。
+ A nested quote: 'He said "hi" to me.'	
+顔文字(^^)と(´・ω・`)も時々使います。
+Use git commit -m "fix tokenizer edge case" to save work.
+A list of colors: red, green, blue, cyan, magenta, yellow.
+0o0 0o7 0o17 0o777
+Version 1.2.3 and version 10.20.30.	😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+	An acronym: NASA, ESA, JAXA, and ISRO.  	python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/infer/bpe.py -o /tmp/bpe --strict
+The sum of 1 through 100 is 5050.
+1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 🔟
+A list of colors: red, green, blue, cyan, magenta, yellow.
+Version 1.2.3 and version 10.20.30.
+Dates 1999 2000 2001 2010 2020 2025 2026.	Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+A command with flags --strict --debug --gpu.
+-0 -1 -10 -100 -1000
+Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+	0o0 0o7 0o17 0o777  
+We can't fix what we don't measure.
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.
+	a	 b		c			d
+数字と単位：3.5キロメートル、100パーセント。
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.    j = i + 1
+The cat's toys are under the table, isn't that odd?
+	one leading tab
+Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+  a list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.       
++0 +1 +10 +100 +1000
+The ratio 16:9 and the time 09:30 are different.
+　A list of animals: dog, cat, bird, fish, horse, cow.
+        self.vocab = vocab
+trailing tab and spaces 	 
+  Email hello@example.com or support@example.org for help.	
+Dates 1999 2000 2001 2010 2020 2025 2026.
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+try:半角カナのｱｲｳｴｵも含まれます。
+class Tokenizer:
+A sentence with a footnote[1] and another[2].
+Currencies ¥1000 $20 €15 £12 ₹500.
+カタカナの外来語：コンピューター、アルゴリズム。
+夏は暑くて冬は寒いです。
+      PRINT(EXC, FILE=SYS.STDERR)	
+A very long number: 123456789012345678901234567890.
+Angle 45° and 90° and 180° and 360°.
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+MASK = (1 << 64) - 1
+dates 1999 2000 2001 2010 2020 2025 2026.
+The file is named report_final_v17.txt.  Dates 1999 2000 2001 2010 2020 2025 2026.
+The temperature fell from 21.5C to -4.0C overnight.
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+THIS SENTENCE HAS  TWO  SPACES IN  THE MIDDLE.
+word	word	word English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+two words here
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+数値は12,345円です。
+result = {k: v for k, v in pairs.items() if v > 0}
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z.👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+An acronym: NASA, ESA, JAXA, and ISRO.
+Version 1.2.3 and version 10.20.30.
+	Coordinates: 35.6812N, 139.7671E. 
+Use git commit -m "fix tokenizer edge case" to save work.	東京は日本の首都です。
+Cyrillic words: привет мир and добрый день.
+int main(void) { printf("%d\n", 42); return 0; }
+    while j < len(chars) and chars[j] == chars[i]:
+Currencies ¥1000 $20 €15 £12 ₹500.
+Binary 1010 equals decimal 10 and hex 0xA.
+A UUID looks like 123e4567-e89b-12d3-a456-426614174000.
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.
+A very long number: 123456789012345678901234567890.
+let xs = [1, 2, 3];
+   
+The word 'a' and the word "a" differ only in quotes.	
+A quote: "To be, or not to be, that is the question."
+The word 'a' and the word "a" differ only in quotes.
+ 新しい技術を学ぶのは楽しいです。  
+while i < len(chars):  trailing tab	
+私は昨日、新しい本を読みました。
+カタカナの外来語：コンピューター、アルゴリズム。
+fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+Negative numbers: -1 -22 -333 -4444 -55555.
+桜の花が春に咲きます。
+git status --short && git diff --stat origin/integ
+ENGLISH と JAPANESE が 混ざった TEXT WITH NUMBERS 42 AND EMOJI 🎌.
+A list: apple, banana, cherry, date, elderberry.
+return ''.join(reversed(parts))  both sides  
+A list of animals: dog, cat, bird, fish, horse, cow.
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇  both sides  
+彼女は毎朝コーヒーを飲みます。
+one space between words
+データを保存してから終了してください。
+a b c d e f g h i j k l m n o p q r s t u v w x y z.
+桜の花が春に咲きます。
+func tokenize(_ text: String) -> [Int] { 	 	 	 mixed whitespace
+Email hello@example.com or support@example.org for help.
+顔文字(^^)と(´・ω・`)も時々使います。
+ローマ字のTokyoと日本語の東京。
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+The ratio 1:2:3 and the score 3-2.
+電車が遅れているので、待ちましょう。	The year 2026 begins on a Thursday.
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+バージョン3.2のリリースを祝います。
+Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.	明日の会議は午後三時からです。
+00 01 007 0008 00009
+ The road is 12 km long and 3.5 m wide.  
+The file is named report_final_v17.txt.
+	
+    A palindrome: racecar and Never odd or even.
+THE TEMPERATURE IS 20°C OR 68°F.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+The Greek letters alpha β gamma γ and delta δ appear here.
+a	 b		c			dA list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.
+Half of 0.5 is 0.25, and one third is 0.3333.
+non-breaking space and thin space
+数値は12,345円です。
+    multiple   spaces   between   words	The file 日本語.txt contains UTF-8 text.
+HYPHENATED WORDS LIKE STATE-OF-THE-ART AND WELL-KNOWN.
+	non-breaking space and thin space	
+two words here
+Chemical formula C6H12O6 and NaCl.
+        J += 1 カタカナの外来語：コンピューター、アルゴリズム。
+A quote: "To be, or not to be, that is the question."
+A mix of CASE and lowercase and MiXeD words.
+She scored 10/10 on the test, or 100%.
+    data = handle.read()
+1_000_000 and 1_2_3_4_5with open('data.txt', 'r', encoding='utf-8') as handle:
+ideographic　space in Japanese	👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+    print("hello, world");
+A very long number: 123456789012345678901234567890.
+    System.out.println("Hello");
++0 +1 +10 +100 +1000
+Powers 2^0 2^1 2^2 2^8 2^10 2^16 2^32 2^64.
+An array [1, 2, 3] has length 3 and indices 0, 1, 2.
+	ideographic　space in Japanese   
+ひらがなだけのぶんしょうもあります。
+　He'll bring the coffee, and they'll bring the bread.	
+    print("hello, world");
+  both sides  
+def main() -> int:
+Backslashes: C:\Users\bluec\ail-work and /tmp/probes.
+日本語の文字はひらがな、カタカナ、漢字があります。   
+Rock'n'roll was never the same after 1955.     Abbreviations: etc. e.g. i.e. vs. cf. approx.
+    def __init__(self, vocab, merges):
+SELECT id, name FROM users WHERE age >= 18 ORDER BY name;
+a	 b		c			d
+00 01 007 0008 00009ANGLE 45° AND 90° AND 180° AND 360°.
+東京は日本の首都です。1_000_000 AND 1_2_3_4_5
+An empty string is written as "" in most languages.  Mixed text with 😀 and 日本語 and code x = 1.
+   
+SELECT id, name FROM users WHERE age >= 18 ORDER BY name;
+		 two leading tabs
+	
+ A list of punctuation: . , ; : ! ? … ‽ ¿ ¡  
+		 two leading tabs ひらがなだけのぶんしょうもあります。
+	
+The formula a^2 + b^2 = c^2 is the Pythagorean theorem.
+    return 0;
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇     three leading spaces
+a title: the lord of the rings: the fellowship of the ring.
+Email hello@example.com or support@example.org for help.
+The O'Reilly factor is not a book about bears. while i < len(chars):
+A command with flags --strict --debug --gpu.
+The function returns None when the input is empty.
+A newline is '\n' and a carriage return is '\r'.
+multiple   spaces   between   words
+}
+このプログラムは正しく動作します。
+A list of places: Tokyo, Osaka, Kyoto, Nagoya, Sapporo.
+The hash is deadbeef and the checksum is 0xc0ffee.
+ひらがなだけのぶんしょうもあります。
+A list of units: mm, cm, m, km, mg, g, kg, t.
+The hash is deadbeef and the checksum is 0xc0ffee.
+ The formula a^2 + b^2 = c^2 is the Pythagorean theorem.   
+    sys.exit(main())
+ローマ字のTokyoと日本語の東京。
+　Half of 0.5 is 0.25, and one third is 0.3333.
+Mixed text with 😀 and 日本語 and code x = 1.
+Hyphenated words like state-of-the-art and well-known.
+public static void main(String[] args) {
+秋の紅葉はとても美しいです。
+全角数字の１２３と半角数字の123。
+The ratio 1:2:3 and the score 3-2.
+絵文字😀や🎉も文章に含まれます。
+line one
+line two
+   three leading spaces😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+ 1e10 1e-10 6.022e23 9.109e-31
+Symbols: !@#$%^&*()_+-=[]{}|;:'",.<>/?`~
+半角カナのｱｲｳｴｵも含まれます。
+assert len(xs) == 3, f'expected 3, got {len(xs)}'
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+明日の会議は午後三時からです。
+}
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬	東京は日本の首都です。
+0o0 0o7 0o17 0o777word	word	word
+A time 12:34:56.789 and a duration 1h2m3s.
+A price of $1,234.56 includes tax of 8.25%. The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+The temperature is 20°C or 68°F.
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+Devanagari digits ०१२३४५६७८९
+Mixed text with 😀 and 日本語 and code x = 1.
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV. one space between words
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+今日は良い天気ですね。Parentheses (like these), brackets [like these], and braces {like these}.
+	if x is None: 
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+0X0 0X1 0XFF 0XDEADBEEF 0XCAFEBABE
+3.14 2.718 1.414 1.732 0.577
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+mac address 00:1a:2b:3c:4d:5e.
+　with open('data.txt', 'r', encoding='utf-8') as handle: 
+電車が遅れているので、待ちましょう。 👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+Subscripts like H2O and CO2 use plain digits.
+        print(exc, file=sys.stderr)
+I'm sure you're right about the answer.
+ Use git commit -m "fix tokenizer edge case" to save work.	
+Negative numbers: -1 -22 -333 -4444 -55555.
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩コンピュータは計算を高速に行います。
+A sentence with a footnote[1] and another[2]. ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+1e10 1e-10 6.022e23 9.109e-31 #include <stdio.h>
+This sentence has  leading spaces before it.
+桜の花が春に咲きます。
+}
+ローマ字のTokyoと日本語の東京。  0x0 0x1 0xFF 0xDEADBEEF 0xCAFEBABE
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+one trailing space 
+result = {k: v for k, v in pairs.items() if v > 0}
+try:
+A very long number: 123456789012345678901234567890.
+この文章はトークナイザのテスト用です。
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+Angle 45° and 90° and 180° and 360°.
+  🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+A list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.
+0b0 0b1 0b1010 0b11111111
+Tabs, spaces, and newlines are whitespace characters.
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+A TITLE: THE LORD OF THE RINGS: THE FELLOWSHIP OF THE RING.
+　An option -o /tmp/output and -j 2.  
+Cyrillic words: привет мир and добрый день.
+The plural of child is children, not childs.
+秋の紅葉はとても美しいです。	 	 	 	 mixed whitespace
+class Tokenizer:
+数値は12,345円です。
+A LIST OF ANIMALS: DOG, CAT, BIRD, FISH, HORSE, COW.
+数値は12,345円です。
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+    j = i + 1
+新しい技術を学ぶのは楽しいです。
+Music notes C D E F G A B and chords Cmaj7 G7.
+　A list of symbols: α, β, γ, δ, ε, ζ, η, θ. The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+ELLIPSES... AND MORE ELLIPSES… AND EM DASHES — LIKE THAT.
+Use git commit -m "fix tokenizer edge case" to save work.
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+Devanagari digits ०१२३४५६७८९
+The interval [0, 1) excludes the right endpoint. result = {k: v for k, v in pairs.items() if v > 0}
+0 1 2 3 4 5 6 7 8 9
+この文章はトークナイザのテスト用です。
+fn main() -> int {
+I'm sure you're right about the answer.
+Roman numerals I II III IV V VI VII VIII IX X.
+The symbol © and ® and ™ are not letters.
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+桜の花が春に咲きます。
+3.14 2.718 1.414 1.732 0.577
+Don't stop believing; we'll find the missing number.
+SELECT id, name FROM users WHERE age >= 18 ORDER BY name;	3.14 2.718 1.414 1.732 0.577
+ローマ字のTokyoと日本語の東京。
+for i in range(10):
+Backslashes: C:\Users\bluec\ail-work and /tmp/probes.	import json
+word	word	word
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.    raise ValueError('x is None')
+バージョン3.2のリリースを祝います。
+An empty string is written as "" in most languages.
+桜の花が春に咲きます。
++0 +1 +10 +100 +1000	trailing tab	
+git status --short && git diff --stat origin/integ
+The 1st, 2nd, 3rd, and 4th places went to team 7. Music notes C D E F G A B and chords Cmaj7 G7.
+    A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.
+A list of arrows: ←, ↑, →, ↓, ↔, ↕, ⇐, ⇒.
+    raise ValueError('x is None')
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+The year 2026 begins on a Thursday.
+int main(void) { printf("%d\n", 42); return 0; }	👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+	one leading tab
+Units: 5 kg, 3 m, 10 s, 2 A, 7 V, 100 W, 50 Hz.
+#include <stdio.h>
+The 1000000th visitor won 250000 points.
+A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.
+The temperature fell from 21.5C to -4.0C overnight.
+数字と単位：3.5キロメートル、100パーセント。
+Units: 5 kg, 3 m, 10 s, 2 A, 7 V, 100 W, 50 Hz.	
+	one leading tab
+FRACTIONS 1/2 1/3 2/3 3/4 7/8 99/100.
+    return bpe.encode(text)
+Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+SELECT id, name FROM users WHERE age >= 18 ORDER BY name;
+Room 101 is down the hall on the left.
+　A path /home/runner/work/_temp/w2 with underscores.    Email hello@example.com or support@example.org for help.
+An abbreviation e.g. this, i.e. that, etc. and so on.  1_000_000 and 1_2_3_4_5
+ローマ字のTokyoと日本語の東京。	1_000_000 and 1_2_3_4_5
+Hyphenated words like state-of-the-art and well-known.
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+ Contractions: isn't aren't wasn't weren't hasn't haven't.  
+A nested quote: 'He said "hi" to me.'
+}
+A palindrome: racecar and Never odd or even.
+Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.
+word	word	word
+今日は良い天気ですね。
+A price of $1,234.56 includes tax of 8.25%.
+	one leading tab
+We can't fix what we don't measure.
+A list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.  Coordinates: 35.6812N, 139.7671E.
+the formula a^2 + b^2 = c^2 is the pythagorean theorem.
+    A nested quote: 'He said "hi" to me.' 
+a b c d e f g h i j k l m n o p q r s t u v w x y z.
+00 01 007 0008 00009
+A long word: pneumonoultramicroscopicsilicovolcanoconiosis.
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+She said she'd call, but they've not heard from her.Mixed text with 😀 and 日本語 and code x = 1.
+夏は暑くて冬は寒いです。
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+There are 42 apples in the basket and 7 pears.	An acronym: NASA, ESA, JAXA, and ISRO.
+Mixed text with 😀 and 日本語 and code x = 1.
+An option -o /tmp/output and -j 2.
+    data = handle.read()
+長音符ーと波ダッシュ〜と全角チルダ～。 A list of animals: dog, cat, bird, fish, horse, cow.
+漢字の熟語：情報処理、人工知能、自然言語。
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+秋の紅葉はとても美しいです。
+non-breaking space and thin space  import json
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+A palindrome: racecar and Never odd or even.	    def __init__(self, vocab, merges):
+Don't stop believing; we'll find the missing number.
+Possessives: the dog's bone, the cats' toys, James's book.  1_000_000 and 1_2_3_4_5
+A pangram: The five boxing wizards jump quickly.
+新しい技術を学ぶのは楽しいです。
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎	ASSERT LEN(XS) == 3, F'EXPECTED 3, GOT {LEN(XS)}'
+    10 100 1000 10000 100000 1000000  
+Devanagari digits ०१२३४५६७८९
+ひらがなだけのぶんしょうもあります。
+    j = i + 1 Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩
+if x is none:a list of symbols: α, β, γ, δ, ε, ζ, η, θ.
+    print("hello, world");電車が遅れているので、待ちましょう。
+INSERT INTO logs (level, message) VALUES ('info', 'ready');  0o0 0o7 0o17 0o777
+彼女は毎朝コーヒーを飲みます。
+10 100 1000 10000 100000 1000000
+			
+全角数字の１２３と半角数字の123。
+She scored 10/10 on the test, or 100%.
+Music notes C D E F G A B and chords Cmaj7 G7.
+　        j += 1  
+A very long number: 123456789012345678901234567890.
+🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+全角数字の１２３と半角数字の123。
+明日の会議は午後三時からです。
+Dates 1999 2000 2001 2010 2020 2025 2026.
+バージョン3.2のリリースを祝います。CamelCase names like ByteLevelBPE and GPT2Tokenizer.
+An abbreviation e.g. this, i.e. that, etc. and so on.
+		 two leading tabs
+Chess moves 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6.
+Percentages 0% 1% 10% 50% 99% 100%.
+while i < len(chars):東京は日本の首都です。
+	email hello@example.com or support@example.org for help.	
+富士山は日本で一番高い山です。
+ひらがなだけのぶんしょうもあります。word	word	word
+A quote: "To be, or not to be, that is the question."👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+multiple   spaces   between   words
+The road is 12 km long and 3.5 m wide.
+漢字の熟語：情報処理、人工知能、自然言語。
+数値は12,345円です。  🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+コンピュータは計算を高速に行います。
+顔文字(^^)と(´・ω・`)も時々使います。
+Mixed text with 😀 and 日本語 and code x = 1.
+The symbol © and ® and ™ are not letters.
+句読点、読点。括弧（丸括弧）と「かぎ括弧」。try:
+3.14 2.718 1.414 1.732 0.577
+ A command with flags --strict --debug --gpu.	
+A LIST OF MATH SYMBOLS: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.
+		 two leading tabs
+A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.
+        eight leading spaces
+3.14 2.718 1.414 1.732 0.577
+line one
+line two
+Hyphenated words like state-of-the-art and well-known. 
+10 100 1000 10000 100000 1000000
+const value = items.reduce((acc, x) => acc + x, 0);
+no trailing newline in this sentence does not matter.
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈
+Arabic-Indic digits ٠١٢٣٤٥٦٧٨٩  ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
+長音符ーと波ダッシュ〜と全角チルダ～。
+ A list of units: mm, cm, m, km, mg, g, kg, t.
+I'm sure you're right about the answer.  1e10 1e-10 6.022e23 9.109e-31
+    def __init__(self, vocab, merges):
+The plural of child is children, not childs.
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.
+漢字の熟語：情報処理、人工知能、自然言語。 import json
+Room 101 is down the hall on the left.
+❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎
++0 +1 +10 +100 +1000  EMAIL HELLO@EXAMPLE.COM OR SUPPORT@EXAMPLE.ORG FOR HELP.
+ひらがなだけのぶんしょうもあります。
+Angle 45° and 90° and 180° and 360°.
+The string 'it''s' looks odd but is valid Python.
+	The year 2026 begins on a Thursday.
+An escape sequence \n is two characters, not a newline.
+今日は良い天気ですね。
+An acronym: NASA, ESA, JAXA, and ISRO.
+  A time 12:34:56.789 and a duration 1h2m3s.    コンピュータは計算を高速に行います。
+PUBLIC STATIC VOID MAIN(STRING[] ARGS) {
+　電車が遅れているので、待ちましょう。
+Symbols: !@#$%^&*()_+-=[]{}|;:'",.<>/?`~
+今日は良い天気ですね。
+	There are 42 apples in the basket and 7 pears.	  バージョン3.2のリリースを祝います。
+明日の会議は午後三時からです。
+コンピュータは計算を高速に行います。
+A palindrome: racecar and Never odd or even.
+0b0 0b1 0b1010 0b11111111  Ordinals: 1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd.
+A title: The Lord of the Rings: The Fellowship of the Ring.
+新しい技術を学ぶのは楽しいです。
+数値は12,345円です。
+A command with flags --strict --debug --gpu.
+Units: 5 kg, 3 m, 10 s, 2 A, 7 V, 100 W, 50 Hz.
+except ValueError as exc:
+    System.out.println("Hello");   
+multiple   spaces   between   words
+顔文字(^^)と(´・ω・`)も時々使います。
+Roman numerals I II III IV V VI VII VIII IX X.
+🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈  line one
+line two
+A REPEATED LETTER: AAAAAAAAAABBBBBBBBBBCCCCCCCCCC.
+An abbreviation e.g. this, i.e. that, etc. and so on.
+A nested quote: 'He said "hi" to me.'
+A list of punctuation: . , ; : ! ? … ‽ ¿ ¡
+trailing tab and spaces 	 
+	Cyrillic words: привет мир and добрый день.  
+start and end
+A list of math symbols: ∑, ∏, ∫, √, ∞, ≈, ≠, ≤, ≥.
+End of a sentence.  Another sentence follows.A tweet with #hashtag and @mention and example.org.
+A list of units: mm, cm, m, km, mg, g, kg, t.
+ dates 1999 2000 2001 2010 2020 2025 2026.   
+Possessives: the dog's bone, the cats' toys, James's book.
+with open('data.txt', 'r', encoding='utf-8') as handle:
+  Possessives: the dog's bone, the cats' toys, James's book.
+non-breaking space and thin space
+Math: 2 + 2 = 4, 2 * 3 = 6, 2 / 3 ≈ 0.6667.
+    An array [1, 2, 3] has length 3 and indices 0, 1, 2.  
+秋の紅葉はとても美しいです。
+10 100 1000 10000 100000 1000000
+ #include <stdio.h> 
+A mix of CASE and lowercase and MiXeD words.  
+He'll bring the coffee, and they'll bring the bread.
+        j = i + 1 
+絵文字😀や🎉も文章に含まれます。
+An option -o /tmp/output and -j 2.
+今日は良い天気ですね。
+コンピュータは計算を高速に行います。
+An IP address 192.0.2.1 and a port 8080.
+The interval [0, 1) excludes the right endpoint.
+A B C D E F G H I J K L M N O P Q R S T U V W X Y Z.
+このプログラムは正しく動作します。A list of names: Alice, Bob, Carol, Dave, Eve, Frank.
+    print("hello, world");
+word	word	word
+Skin tone modifiers 👍🏽 👍🏿 and flags 🏳️‍🌈 are sequences.
+The Greek letters alpha β gamma γ and delta δ appear here.non-breaking space and thin space
+The temperature fell from 21.5C to -4.0C overnight.
+Café naïve résumé coöperate — these accents matter.	a	 b		c			d
+富士山は日本で一番高い山です。	line one
+line two
+More contractions: could've should've would've might've.
+🇯🇵 🇺🇸 🇬🇧 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇰🇷 🇨🇳
+A list of colors: red, green, blue, cyan, magenta, yellow.
+Room 101 is down the hall on the left. Roman numerals I II III IV V VI VII VIII IX X.
+This sentence has  two  spaces in  the middle.
+ Roman numerals I II III IV V VI VII VIII IX X.
+Dates 1999 2000 2001 2010 2020 2025 2026.
+class Tokenizer:
+    The file 日本語.txt contains UTF-8 text. 
+Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.
+a  b   c    d     e
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+The ratio 1:2:3 and the score 3-2. The formula a^2 + b^2 = c^2 is the Pythagorean theorem.
+    Mr. Smith and Dr. Jones met Ms. Brown at 5 p.m.  
+fnv_offset = 1469598103934665603
+An option -o /tmp/output and -j 2.
+Possessives: the dog's bone, the cats' toys, James's book.
+  長音符ーと波ダッシュ〜と全角チルダ～。 
+A command with flags --strict --debug --gpu.
+one space between words
+私は昨日、新しい本を読みました。
+        raise ValueError('x is None')	  Roman numerals I II III IV V VI VII VIII IX X.
+Math: 2 + 2 = 4, 2 * 3 = 6, 2 / 3 ≈ 0.6667.
+the xml <tag attr="value">text</tag> is valid.
+Backslashes: C:\Users\bluec\ail-work and /tmp/probes.
+A list of formats: JSON, XML, YAML, TOML, CSV, TSV.
+👨‍👩‍👧‍👦 👩‍💻 🧑‍🔬 🧑‍🚀 🧑‍🎨
+The symbol © and ® and ™ are not letters.
+A repeated letter: aaaaaaaaaabbbbbbbbbbcccccccccc.
+The ratio 16:9 and the time 09:30 are different.A path /home/runner/work/_temp/w2 with underscores.
+The emoji family 👨‍👩‍👧‍👦 is one grapheme but several code points.
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+  both sides  
+curl -L --retry 3 -o vocab.json https://example.com/vocab.json
+A list of units: mm, cm, m, km, mg, g, kg, t.
+Coordinates: 35.6812N, 139.7671E.
+The word 'a' and the word "a" differ only in quotes.
+with open('data.txt', 'r', encoding='utf-8') as handle:
+ The file 日本語.txt contains UTF-8 text.  
+An option -o /tmp/output and -j 2.
+ 	 	 	 mixed whitespace 
+        self.merges = merges
+The plural of child is children, not childs. 半角カナのｱｲｳｴｵも含まれます。
+payload = json.dumps({'ok': True, 'n': 3}, ensure_ascii=False)
+0x0 0x1 0xFF 0xDEADBEEF 0xCAFEBABE
+A path /home/runner/work/_temp/w2 with underscores.
+0x0 0x1 0xFF 0xDEADBEEF 0xCAFEBABE
+English と Japanese が 混ざった text with numbers 42 and emoji 🎌.
+ideographic　space in Japanese
+ROCK'N'ROLL WAS NEVER THE SAME AFTER 1955.
+ 	 	 	 mixed whitespace
++0 +1 +10 +100 +1000
+Tabs, spaces, and newlines are whitespace characters.
+日本語の文字はひらがな、カタカナ、漢字があります。
+Subscripts like H2O and CO2 use plain digits.
+An abbreviation e.g. this, i.e. that, etc. and so on.
+Possessives: the dog's bone, the cats' toys, James's book. A regex ^[a-z]+\d{2,4}$ is tricky to tokenize.
+Roman numerals I II III IV V VI VII VIII IX X.
+東京は日本の首都です。
+An abbreviation e.g. this, i.e. that, etc. and so on.
+Angle 45° and 90° and 180° and 360°.
+The word 'a' and the word "a" differ only in quotes.
+SELECT id, name FROM users WHERE age >= 18 ORDER BY name;
+I'm sure you're right about the answer.
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+def add(a, b):	An option -o /tmp/output and -j 2.
+The phone number 555-0100 is fictional.
+MIXED TEXT WITH 😀 AND 日本語 AND CODE X = 1.	MASK = (1 << 64) - 1
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+😍 🥰 😘 😗 😙 😚 🙂 🤗 🤩
+    PRINT(EXC, FILE=SYS.STDERR)
+ 	 	 	 mixed whitespace
+Music notes C D E F G A B and chords Cmaj7 G7.
+A palindrome: racecar and Never odd or even.
+    raise ValueError('x is None')
+The 1000000th visitor won 250000 points.
+1e10 1e-10 6.022e23 9.109e-31
+A list of languages: Python, Rust, C, C++, Go, Java, Swift. assert len(xs) == 3, f'expected 3, got {len(xs)}'
+A sentence with a footnote[1] and another[2].
+A nested quote: 'He said "hi" to me.'
+The hash is deadbeef and the checksum is 0xc0ffee.
+A QUOTE: "TO BE, OR NOT TO BE, THAT IS THE QUESTION."
+three trailing spaces   
+An acronym: NASA, ESA, JAXA, and ISRO.	
+Email hello@example.com or support@example.org for help.
+  both sides  
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.	End of a sentence.  Another sentence follows.
+全角数字の１２３と半角数字の123。
+The function returns None when the input is empty.
+👍 👎 👏 🙌 🤝 💪 🧠 👀 🗣️ 💬
+長音符ーと波ダッシュ〜と全角チルダ～。Angle 45° and 90° and 180° and 360°.
+Fractions 1/2 1/3 2/3 3/4 7/8 99/100.     j = i + 1
+秋の紅葉はとても美しいです。
+It's a small world, and we'll keep it that way.
+    	one leading tab 
+A list of languages: Python, Rust, C, C++, Go, Java, Swift.
+int main(void) { printf("%d\n", 42); return 0; }
+バージョン3.2のリリースを祝います。
+Access code: A1B2-C3D4-E5F6.
+    富士山は日本で一番高い山です。 	0o0 0o7 0o17 0o777
+句読点、読点。括弧（丸括弧）と「かぎ括弧」。
+富士山は日本で一番高い山です。
+	🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭 
+1,000 10,000 100,000 1,000,000  	one leading tab
+while i < len(chars):
+MAC address 00:1A:2B:3C:4D:5E.payload = json.dumps({'ok': True, 'n': 3}, ensure_ascii=False)
+漢字の熟語：情報処理、人工知能、自然言語。
+This sentence has  two  spaces in  the middle.
+trailing tab	
+Symbols: !@#$%^&*()_+-=[]{}|;:'",.<>/?`~
+日本語の文字はひらがな、カタカナ、漢字があります。
+The temperature is 20°C or 68°F.
+trailing tab	
+    print(i, i * i, i ** 2)
+A sentence with a footnote[1] and another[2].
+		 two leading tabs
+for i in range(10):
+A nested quote: 'He said "hi" to me.'
+hash_value = ((hash_value ^ byte) * 1099511628211) & MASK   
+🚀 🌟 ✨ 🔥 💡 📦 🧪 🔧 ⚙️ 🧭
+😀 😃 😄 😁 😆 😅 😂 🤣 ☺️ 😊 😇
+an acronym: nasa, esa, jaxa, and isro.
+      
+1E10 1E-10 6.022E23 9.109E-31   
