@@ -270,8 +270,10 @@ class WhiteBox(unittest.TestCase):
 
 
 REFUSED = [
-    ("2-D int32", "import ail_array as ta\na = ta.zeros((2, 3), ta.int32)\n", "f64 in this stage"),
-    ("2-D int32 literal", "import ail_array as ta\na = ta.array([[1, 2], [3, 4]], ta.int32)\n", "f64 in this stage"),
+    # 2-D int32 and f32 are built since fdarr2 (construction, indexing, matmul); f16 is still stage T3
+    ("2-D f16", "import ail_array as ta\na = ta.zeros((2, 3), ta.f16)\n", "stage T3"),
+    ("2-D int32 element-wise", "import ail_array as ta\na = ta.array([[1, 2], [3, 4]], ta.int32)\nb = a + a\n",
+     "not built"),
     ("3-D", "import ail_array as ta\na = ta.zeros((2, 3, 4), ta.f64)\n", "ta.zeros((rows, cols)"),
     ("matmul of 1-D", "import ail_array as ta\na = ta.zeros(3, ta.f64)\nb = ta.matmul(a, a)\n", "2-D f64"),
     ("matmul int32", "import ail_array as ta\na = ta.zeros(3, ta.int32)\nb = ta.matmul(a, a)\n", "2-D f64"),
@@ -296,7 +298,7 @@ REFUSED = [
      "loop over the rows"),
     ("wrapping on 2-D", "import ail_array as ta\na = ta.zeros((2, 3), ta.f64)\nb = ta.wrapping_add(a, a)\n", "one row"),
     ("bare Matrix annotation", "import ail_array as ta\ndef f(a: ta.Matrix):\n    return 1\n", "ta.Matrix[ta.f64]"),
-    ("Matrix int32 annotation", "import ail_array as ta\ndef f(a: ta.Matrix[ta.int32]):\n    return 1\n", "ta.Matrix[ta.f64]"),
+    ("Matrix f16 annotation", "import ail_array as ta\ndef f(a: ta.Matrix[ta.f16]):\n    return 1\n", "stage T3"),
     ("param kinds", "import ail_array as ta\ndef f(a):\n    return a\nf(ta.zeros(1, ta.f64))\nf(ta.zeros((1, 1), ta.f64))\n",
      "annotate"),
 ]
