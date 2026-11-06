@@ -1,0 +1,495 @@
+{
+ "versions": {
+  "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "aarch64-gcc": "aarch64-linux-gnu-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "armhf-gcc": "arm-linux-gnueabihf-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "arm-none-eabi-gcc": "arm-none-eabi-gcc (15:13.2.rel1-2) 13.2.1 20231009",
+  "qemu": "qemu-aarch64 version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+  "qemu-system-arm": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+  "cpython": "Python 3.12.3",
+  "ail-commit": "dd878bf57fe8063b944db288cf367282bfb4d67e",
+  "micropython": "3.4.0; MicroPython v1.22.1+ds-1build2 on 2024-04-01",
+  "os": "VERSION_ID=\"24.04\"",
+  "gcc-arm-none-eabi-package": "15:13.2.rel1-2"
+ },
+ "programs": {
+  "pid": {
+   "cpython": {
+    "rc": 0,
+    "stdout": "steps 4000\nstate -1.05777\nx 0 -0.132221\nx 1 -0.132221\nx 2 -0.132221\nx 3 -0.132221\nx 4 -0.132221\nx 5 -0.132221\nx 6 -0.132221\nx 7 -0.132221\nintegral -0.093622 -0.093622\nprev -0.118125 -0.118125\n"
+   },
+   "targets": {
+    "native": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 12750,
+      "data": 848,
+      "bss": 4968
+     },
+     "rc": 0,
+     "rss_kb": 1644
+    },
+    "aarch64-linux-gnu": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 17853,
+      "data": 944,
+      "bss": 20256
+     },
+     "rc": 0,
+     "rss_kb": 10552,
+     "stderr_tail": "RSSKB 10552"
+    },
+    "arm-linux-gnueabihf": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 9787,
+      "data": 468,
+      "bss": 25376
+     },
+     "rc": 0,
+     "rss_kb": 9484,
+     "stderr_tail": "RSSKB 9484"
+    },
+    "arm-none-eabi": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 44636,
+      "data": 468,
+      "bss": 11036
+     },
+     "rc": 0,
+     "heap_peak_bytes": 224,
+     "compile_warnings": 1
+    }
+   },
+   "ail_build_note": "{\"output\": \"pid\", \"bytes\": 25896, \"sha256\": \"9e4240b53cf2ed36096e1afcae8843a5d4188c867bed7653146e6bf08c0aecf5\"}"
+  },
+  "ringbuf": {
+   "cpython": {
+    "rc": 0,
+    "stdout": "count 8\nhead 0\naverage 5.125\npeak 7.3125\nchecksum 68.09375\nslot 0 6.75\nslot 1 6.5\nslot 2 6.25\nslot 3 8.5\nslot 4 8.25\nslot 5 8.0\nslot 6 -1.5\nslot 7 -1.75\n"
+   },
+   "targets": {
+    "native": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 11518,
+      "data": 848,
+      "bss": 4968
+     },
+     "rc": 0,
+     "rss_kb": 1704
+    },
+    "aarch64-linux-gnu": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 17035,
+      "data": 944,
+      "bss": 20256
+     },
+     "rc": 0,
+     "rss_kb": 10608,
+     "stderr_tail": "RSSKB 10608"
+    },
+    "arm-linux-gnueabihf": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 10239,
+      "data": 472,
+      "bss": 25376
+     },
+     "rc": 0,
+     "rss_kb": 9408,
+     "stderr_tail": "RSSKB 9408"
+    },
+    "arm-none-eabi": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 44636,
+      "data": 468,
+      "bss": 11036
+     },
+     "rc": 0,
+     "heap_peak_bytes": 88,
+     "compile_warnings": 1
+    }
+   },
+   "ail_build_note": "{\"output\": \"ringbuf\", \"bytes\": 21760, \"sha256\": \"2ab53dfb8ff262d42306ae052ddf7c4530859f64826482c055d23296de58044f\"}"
+  },
+  "kin2": {
+   "cpython": {
+    "rc": 0,
+    "stdout": "3998.489116\n"
+   },
+   "targets": {
+    "native": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 11519,
+      "data": 984,
+      "bss": 5000
+     },
+     "rc": 0,
+     "rss_kb": 2272
+    },
+    "aarch64-linux-gnu": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 16443,
+      "data": 1080,
+      "bss": 20264
+     },
+     "rc": 0,
+     "rss_kb": 10976,
+     "stderr_tail": "RSSKB 10976"
+    },
+    "arm-linux-gnueabihf": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 8437,
+      "data": 532,
+      "bss": 25376
+     },
+     "rc": 0,
+     "rss_kb": 10620,
+     "stderr_tail": "RSSKB 10620"
+    },
+    "arm-none-eabi": {
+     "builds": true,
+     "first_error": "",
+     "runs": true,
+     "matches_cpython": true,
+     "first_diff": "",
+     "size": {
+      "text": 48820,
+      "data": 468,
+      "bss": 11036
+     },
+     "rc": 0,
+     "heap_peak_bytes": 20,
+     "compile_warnings": 1
+    }
+   },
+   "ail_build_note": "{\"output\": \"kin2\", \"bytes\": 21864, \"sha256\": \"23b10f184495fd2d228f2f79684adda2d9360da0bf42e121399c8f018b283f14\"}"
+  }
+ },
+ "bare_metal": {},
+ "census": {
+  "thread": {
+   "ail_builds": true,
+   "bare_builds": false,
+   "first_error": "program.c:5972:9: error: expected expression before '__int128'",
+   "undefined": [],
+   "c_function": "ail_op_getslice",
+   "runtime_file": "cruntime.py"
+  },
+  "par": {
+   "ail_builds": true,
+   "bare_builds": false,
+   "first_error": "program.c:473:5: error: unknown type name 'pthread_mutex_t'",
+   "undefined": [],
+   "c_function": "ail_par_job / ail_par_pool_main (parallel runtime)",
+   "runtime_file": "cruntime.py"
+  },
+  "net": {
+   "ail_builds": true,
+   "bare_builds": false,
+   "first_error": "program.c:18:10: fatal error: sys/socket.h: No such file or directory",
+   "undefined": [],
+   "c_function": "ail_tcpsocket_connect",
+   "runtime_file": "cruntime.py"
+  },
+  "time": {
+   "ail_builds": true,
+   "bare_builds": false,
+   "first_error": "program.c:479:23: error: 'CLOCK_MONOTONIC' undeclared (first use in this function)",
+   "undefined": [],
+   "c_function": "ail_perf_counter_ns",
+   "runtime_file": "cruntime.py"
+  },
+  "file": {
+   "ail_builds": true,
+   "bare_builds": true,
+   "first_error": "",
+   "undefined": [],
+   "runs": true,
+   "stdout": "bytes 13\nfirst 104\n",
+   "heap_peak_bytes": 65576
+  },
+  "os": {
+   "ail_builds": true,
+   "bare_builds": true,
+   "first_error": "",
+   "undefined": [],
+   "runs": true,
+   "stdout": "env True\ncpus 1\n",
+   "heap_peak_bytes": 36
+  },
+  "mmap_big": {
+   "ail_builds": true,
+   "note": "read_bytes() of a 2 MiB file iterated forward selects the IR window (mmap) runtime",
+   "bare_builds": false,
+   "first_error": "program.c:3448:10: fatal error: sys/mman.h: No such file or directory",
+   "undefined": [],
+   "mmap_refs_in_c": 2,
+   "c_function": "ail_win_map / ail_win_drop",
+   "runtime_file": "cruntime.py"
+  }
+ },
+ "jitter": {
+  "iters": 20000,
+  "reps": 3,
+  "tools": {
+   "noalloc": {
+    "c": {
+     "p50_us": 60.0,
+     "p99_us": 66.0,
+     "p999_us": 106.0,
+     "max_us": 604.106,
+     "overruns": 0.0,
+     "runs": [
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 68.0,
+       "p999": 127.0,
+       "max": 3884.028,
+       "overruns": 6.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 66.0,
+       "p999": 106.0,
+       "max": 237.846,
+       "overruns": 0.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 66.0,
+       "p999": 100.0,
+       "max": 604.106,
+       "overruns": 0.0
+      }
+     ]
+    },
+    "ail": {
+     "p50_us": 61.0,
+     "p99_us": 68.0,
+     "p999_us": 96.0,
+     "max_us": 331.354,
+     "overruns": 0.0,
+     "runs": [
+      {
+       "iters": 20000.0,
+       "p50": 61.0,
+       "p99": 68.0,
+       "p999": 103.0,
+       "max": 1222.267,
+       "overruns": 1.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 61.0,
+       "p99": 68.0,
+       "p999": 96.0,
+       "max": 331.354,
+       "overruns": 0.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 67.0,
+       "p999": 95.0,
+       "max": 284.571,
+       "overruns": 0.0
+      }
+     ]
+    },
+    "micropython": {
+     "p50_us": 62.0,
+     "p99_us": 72.0,
+     "p999_us": 102.0,
+     "max_us": 5332.0,
+     "overruns": 5.0,
+     "runs": [
+      {
+       "iters": 20000.0,
+       "p50": 62.0,
+       "p99": 80.0,
+       "p999": 133.0,
+       "max": 5302.0,
+       "overruns": 9.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 62.0,
+       "p99": 69.0,
+       "p999": 96.0,
+       "max": 5434.0,
+       "overruns": 5.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 62.0,
+       "p99": 72.0,
+       "p999": 102.0,
+       "max": 5332.0,
+       "overruns": 5.0
+      }
+     ]
+    }
+   },
+   "alloc": {
+    "c": {
+     "p50_us": 60.0,
+     "p99_us": 68.0,
+     "p999_us": 95.0,
+     "max_us": 627.565,
+     "overruns": 0.0,
+     "runs": [
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 68.0,
+       "p999": 95.0,
+       "max": 627.565,
+       "overruns": 0.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 68.0,
+       "p999": 103.0,
+       "max": 723.269,
+       "overruns": 0.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 59.0,
+       "p99": 67.0,
+       "p999": 90.0,
+       "max": 257.66,
+       "overruns": 0.0
+      }
+     ]
+    },
+    "ail": {
+     "p50_us": 60.0,
+     "p99_us": 69.0,
+     "p999_us": 98.0,
+     "max_us": 307.288,
+     "overruns": 0.0,
+     "runs": [
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 69.0,
+       "p999": 98.0,
+       "max": 353.661,
+       "overruns": 0.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 68.0,
+       "p999": 88.0,
+       "max": 307.288,
+       "overruns": 0.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 60.0,
+       "p99": 69.0,
+       "p999": 106.0,
+       "max": 255.482,
+       "overruns": 0.0
+      }
+     ]
+    },
+    "micropython": {
+     "p50_us": 61.0,
+     "p99_us": 72.0,
+     "p999_us": 122.0,
+     "max_us": 5586.0,
+     "overruns": 5.0,
+     "runs": [
+      {
+       "iters": 20000.0,
+       "p50": 61.0,
+       "p99": 71.0,
+       "p999": 108.0,
+       "max": 4612.0,
+       "overruns": 4.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 61.0,
+       "p99": 72.0,
+       "p999": 122.0,
+       "max": 5586.0,
+       "overruns": 5.0
+      },
+      {
+       "iters": 20000.0,
+       "p50": 62.0,
+       "p99": 72.0,
+       "p999": 139.0,
+       "max": 5728.0,
+       "overruns": 5.0
+      }
+     ]
+    }
+   }
+  },
+  "c_build_error": "",
+  "ail_build_note": ""
+ },
+ "rss": {}
+}

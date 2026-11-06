@@ -1,3 +1,25 @@
+## 2026-11-06 -- robo1: AIL on ARM/Cortex-M3 and 1 kHz control-loop jitter (job-robo1-11062354)
+
+Measurement probe for the owner's "could AIL be a robot language" question. No compiler or runtime
+file changed; the change is new `lab/robo/` only (README, RESULTS, run.py, progs, harness, results.json).
+
+- Cross builds: `pid.py`, `ringbuf.py`, `kin2.py` emit C that cross-compiles unchanged at `-O2` to
+  `aarch64-linux-gnu`, `arm-linux-gnueabihf` and `arm-none-eabi` Cortex-M3 (newlib-nano + rdimon,
+  QEMU `mps2-an385`), and stdout matches CPython 3.12 byte for byte in all 12 cells. Bare metal needs
+  `-u _printf_float`; without it every float silently prints `0.0`. Sizes 44-49 KB text, 11 KB bss.
+- Blocker census, first error per subsystem: `threading` forces the boxed path and stops at
+  `__int128`; `par_range` at `pthread_mutex_t`; `tcp_listen` at `sys/socket.h`; a >1 MiB
+  `read_bytes` at `sys/mman.h`; `time.perf_counter`/`sleep` at `CLOCK_MONOTONIC` (newlib-nano has
+  no `clock_gettime` or `nanosleep`). `read_bytes`/`write_bytes` and `get_env` build and run.
+- 1 kHz, 20 000 iterations, median of 3: p50 60/61/62 us, p99 66/68/72, p99.9 106/96/102, max
+  604/331/5332 us, overruns 0/0/5 (C / AIL / MicroPython 1.22.1). The C row is the noise floor of a
+  shared runner.
+- RAM: native peak RSS 1.6-2.2 MB; bare-metal heap high-water 20-224 B.
+
+Probes: `bash ~/tools/cmp.sh` on all three programs: the general path and the default build both
+report "same stdout" (3/3 programs x 2 builds). No compiler behaviour changed, so no new
+DIFFERENCES row.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
