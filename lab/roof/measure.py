@@ -97,7 +97,8 @@ def cachegrind(binary, case, out_file, timeout):
             if case['stdin']:
                 stdin.close()
             Path(cg).unlink(missing_ok=True)
-        counts = {m.group(1).strip(): int(m.group(2).replace(',', '')) for m in NUM.finditer(p.stderr.decode('utf8', 'replace'))}
+        counts = {' '.join(m.group(1).split()): int(m.group(2).replace(',', ''))
+                  for m in NUM.finditer(p.stderr.decode('utf8', 'replace'))}
         if p.returncode == 0 and 'I refs' in counts:
             rec = dict(icount_method='callgrind-' + label, instructions=counts.get('I refs'),
                        d_refs=counts.get('D refs'), d1_misses=counts.get('D1 misses'),
