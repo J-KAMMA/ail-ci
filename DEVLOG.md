@@ -48,6 +48,28 @@ Checks: `test_ail_bce` (10/10), `test_ail_range_checks`, `test_ail_ir_s1`, `test
 `p5_cursor_negative` match CPython on both builds; `p6_cursor_bigtext` stops at `int()` on both
 builds as today. Not run, for the record: the callgrind census over all ten tasks (only ledger_bin
 was measured; tally_lang's change is removals only), the 300-seed difffuzz, and compile timing.
+## 2026-11-06 -- fz235: the try/else exception leak does not reproduce; no code changed (job-fz235-11062253)
+
+The daily fuzzer (seed `2076311105`, CPython 3.12, default+ir) reported
+`DIFF|exit code cpython=1 ail=0; cpython='242' ail='4 4 0'`.  The extra line is an
+`IndexError: string index out of range` raised by `'q q'[3]` in the `else` clause of a
+`try` (inside the `while` in that `else`): the try's own `except IndexError` ran and
+printed `4 4 0`, where CPython lets the exception propagate through `finally` and exits 1.
+That is the fz1 defect already fixed on 2026-10-28 (seed `2075200054`), and
+`test_ail_fz1.py` already pins it.  Nothing was changed.
+
+On this tree the program is refused by name before that path can run: the dead
+`except ValueError:` branch holds two out-of-int64 constant expressions
+(`v12[-8 * 4611686018427387904]` and `-9223372036854775807 - 82`), so both builds stop with
+`int64 index out of range` / `constant integer expression overflows int64`.  With those
+two dead constants in range (they are in never-executed handlers), the whole program
+matches CPython on both builds, and building the unmodified text with `AIL_EXACT_INT=1`
+also matches: 16 stdout lines, exit 1 on both builders.  Probes in `/tmp/probes` on both
+builds via `cmp.sh`: `fz235c` (full program, dead constants in range) matches; `q1`-`q4`
+(`raise` in `else`, matching/non-matching type, call, `'abc'[7]` in `else`) match; `r1`-`r5`
+(runtime `IndexError`/`KeyError`/`ZeroDivisionError` in `else`, sourced from an argument, a
+list item, an attribute and a dict value, plus one inside a `while`) match.  No other
+differences were seen in this reproducer.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
