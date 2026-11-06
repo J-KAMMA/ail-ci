@@ -65,6 +65,7 @@ local) and is refused by name with a `write instead:` line.
 | `p_inner` | `+=` inside a nested inner loop | matches | `120` |
 | `p_bigchunk` | 2000 items, overflow at a chunk boundary | matches (loud `OverflowError`) | rc 1 |
 | `p_excmany` | 1000 items, overflow at 500, exception at 900 | matches (overflow wins) | rc 1 |
+| `p_sumover` | `sum(ex.map(f, range(4)))`, every result `BIG` | matches (loud `OverflowError` at every thread count) | rc 1 |
 | `p_float` | float accumulator | refused: "must be an int local ... write instead:" | - |
 | `p_read` | `out[i] = acc` in the body | refused: "read before the body assigns it" | - |
 | `p_mixed` | `acc += i` and `acc -= 1` | refused: "read before the body assigns it" | - |
