@@ -17207,10 +17207,13 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                 # takes a sequence, so build the select into a temp local first (exactly what
                 # `_numeric_field_value` does for a list literal just above). The fill statements
                 # move into `staged` in argument order: `_bind_call_args` refuses a call whose
-                # arguments leave statements behind.
+                # arguments leave statements behind. `staged` entries are emitted inside a comma
+                # expression, so the statements must be wrapped in a statement expression -- the
+                # same `({ ... (void)0; })` the listcomp branch below uses; a bare `x = 1;` there
+                # ends the comma expression early and emits invalid C.
                 before = len(ctx.pre)
                 temporary, _ = _heapq_select(arg, ctx)
-                staged.extend(ctx.pre[before:])
+                staged.append('({ %s (void)0; })' % ' '.join(ctx.pre[before:]))
                 del ctx.pre[before:]
                 arg = ast.Name(id=next(n for n in ctx.locals if ctx.cname(n) == temporary),
                                ctx=ast.Load())
@@ -17414,10 +17417,11 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
         elif kind == SLIST:
             if _is_heapq_select(arg, ctx):
                 # `_ail_lrepr_s(heapq.nsmallest(k, words))`: the select's temp, with its fill
-                # statements moved into `staged` in argument order.
+                # statements moved into `staged` in argument order -- wrapped in a statement
+                # expression for the same reason as the LIST branch above.
                 before = len(ctx.pre)
                 temporary, _ = _heapq_select(arg, ctx)
-                staged.extend(ctx.pre[before:])
+                staged.append('({ %s (void)0; })' % ' '.join(ctx.pre[before:]))
                 del ctx.pre[before:]
                 out.append(temporary)
                 ctx.parts.add('SLIST')

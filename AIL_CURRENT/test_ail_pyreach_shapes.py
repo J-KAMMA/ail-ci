@@ -317,6 +317,54 @@ def main():
 main()
 '''
 
+NSMALLEST_ARGUMENT = '''import heapq
+
+
+def total(xs: list[int]) -> int:
+    t = 0
+    for x in xs:
+        t += x
+    return t
+
+
+def pair(a: list[int], b: list[int]) -> int:
+    return total(a) * 100 + total(b)
+
+
+def longest(words: list[str]) -> str:
+    best = ""
+    for w in words:
+        if len(w) > len(best):
+            best = w
+    return best
+
+
+class Holder:
+    def __init__(self) -> None:
+        self.n = 0
+
+    def total(self, xs: list[int]) -> int:
+        t = 0
+        for x in xs:
+            t += x
+        return t
+
+
+def main():
+    ys = [5, 2, 8]
+    print(total(heapq.nsmallest(2, ys)))
+    print(total(heapq.nsmallest(0, ys)))
+    print(total(heapq.nlargest(9, ys)))
+    print(pair(heapq.nsmallest(1, ys), heapq.nlargest(1, ys)))
+    words = ["fig", "apple", "kiwi"]
+    print(longest(heapq.nsmallest(2, words)))
+    h = Holder()
+    print(h.total(heapq.nlargest(2, ys)))
+
+
+main()
+'''
+
 EXTEND_REVERSED_STR = '''def main():
     words: list[str] = ['a', 'b']
     words.extend(reversed(words))
@@ -497,6 +545,11 @@ class PyreachShapes(unittest.TestCase):
         expected = '[1, 2]\n3\na\nb\n[\'c\', \'b\']\n'
         self._typed('nsmallest_param', NSMALLEST_PARAM, expected)
         self._both('nsmallest_param', NSMALLEST_PARAM, expected)
+
+    def test_nsmallest_passed_directly_as_a_call_argument(self):
+        expected = '7\n0\n15\n208\napple\n13\n'
+        self._typed('nsmallest_argument', NSMALLEST_ARGUMENT, expected)
+        self._both('nsmallest_argument', NSMALLEST_ARGUMENT, expected)
 
     def test_extend_reversed_list_of_str(self):
         expected = "['a', 'b', 'b', 'a']\n['y', 'x']\n14\n"

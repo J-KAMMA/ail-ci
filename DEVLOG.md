@@ -1,3 +1,24 @@
+## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
+
+Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a
+method -- emitted C that does not compile on the default build (`gcc: expected ')' before ';'`).
+Both `_is_heapq_select` branches in `_call_user_func` pushed the select's raw `ctx.pre`
+statements (`_t1 = 2; if (...); ...`) into `staged`, which `_call_user_func` emits inside a
+comma expression, so the first `;` ended it. Both now wrap the moved statements in the
+`({ ... (void)0; })` statement expression the listcomp branch there already uses -- a list temp
+and an `ail_slist` temp are declared at function scope by `ctx.temp`, so the wrapper changes
+nothing about their lifetime.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, both builds, all CPython-identical): select as a
+`list[int]` argument, a `list[str]` argument, a method argument, two selects in one call, `k`
+= 0 / negative / past the end, a callee that appends to its parameter (the select is a copy,
+the source list is untouched), and a select through `sum`/`len`/`min`/`sorted`/`[...]`. A
+regression case (`test_nsmallest_passed_directly_as_a_call_argument`) was added to
+`test_ail_pyreach_shapes`. Tests on the final commit: `test_ail_pyreach_shapes` 18 OK,
+`test_ail_python_syntax` 10 OK, `test_ail_safetynet` 5 OK, `test_ail_files` 18 OK (1 skipped),
+`test_ail_corpus_findings3` 2 OK, `test_ail_bytearray_loops` 1 OK, `test_ail_bytearray_refs`
+3 OK.
+
 ## 2026-11-06 -- rbpyreachs2_rr1: review fixes for the re-applied pyreachs2_rr1 change (job-rbpyreachs2_rr1)
 
 The reviewer's two defects were reproduced first with probes, then fixed:
