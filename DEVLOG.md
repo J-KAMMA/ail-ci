@@ -138,6 +138,151 @@ keeps (including the newer CR/LF-stripping fix), so that file is unchanged and b
 fixes stay. `tools/diff_ids.py` is absent on this tree (and in the fetched job), so only
 `tools/update_manifest.py` ran; `manifest.d/` was regenerated, not hand-edited. No compiler or
 runtime file changed, so no DIFFERENCES row is needed.
+## 2026-11-06 -- ffbig0: explicit BigInt type design note and executable model (job-rbffbig0-11061655)
+
+Re-applied the accepted `ffbig0` change (`e4acfc4d05e8`..`4582f2f9`) on today's tree. The
+workflow hunk was already present, so the patch applied with that file excluded; the change adds
+`docs/design/BIGINT_TYPE.md` and the twelve `lab/bigtype/` programs plus `check_model.py`. No
+compiler behaviour changed: the note specifies an explicit `BigInt` annotation (`from ail.types
+import BigInt`, `BigInt = int` at run time) for locals, parameters, returns, fields and
+`list[BigInt]`, reusing the exact-int runtime, and leaves `--exact-int` unchanged.
+
+`check_model.py` runs every program twice (plain CPython output against `expected/`, and the
+instrumented flow model) and reports 12/12 output and flow matches; `08_bigint_to_int_param.py`
+is the single loud `OverflowError` boundary and `09_literal_and_demotion.py` the one demotion.
+`tools/diff_ids.py` is not present on this tree; `python3 tools/update_manifest.py` ran (the new
+paths are outside `AIL_CURRENT`, so no pin changed) and `--check` passes. Required tests on the
+final commit: `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+## 2026-11-06 -- rbffdocs1: re-apply the docs link checker and static-site generator (job-rbffdocs1-11061703)
+
+Re-applied the accepted `ffdocs1` change (`cda7f346`..`job-ffdocs1-11061509`) on this tree.
+The source files applied unchanged from the accepted branch: the new `tools/docs_links.py` and
+`tools/docs_site.py`, `AIL_CURRENT/test_ail_docs_site.py`, its `tests.d` registration, the
+`docs/spec/DIFFERENCES.md` companion link to `AIL_REFERENCE.md`, and the `site/` line in
+`.gitignore`. The `agent-worker.yml` hunk was already present on this tree. The `manifest.d`
+hunks were not applied by hand; `tools/update_manifest.py` regenerated the pins for the two new
+test files. `tools/diff_ids.py` does not exist on this tree, so it was not run.
+
+The docs-site test module passes against the current `docs/` tree (the generator renders every
+Markdown file, reports the fenced-block count, builds `search-index.json`, and the built site passes
+the same link checker). Probes in `/tmp/probes` exercised empty trees, missing files and anchors,
+duplicate heading ids, query/fragment links, angle-bracket destinations, fenced/inline/comment
+links, tables with escaped pipes, setext headings, reference-style links, raw HTML (refused in
+docs, allowed in published outside files), `_repo/` publishing of Markdown, assets and
+directories, output-directory cleanup, and links that leave the site root or the repository; all
+matched the expected behaviour. `cmp.sh` runs both probes under CPython and both AIL builds refuse
+them by name (imports/tuples outside the subset), as expected for these Python tools. Required
+tests on the final commit (`par_check -j 2`): `test_ail_docs_site`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass; `tools/update_manifest.py --check` is
+clean.
+## 2026-11-06 -- rbffice1: re-apply the icefuzz compiler fuzzer (job-rbffice1-11061925)
+
+Re-applied the accepted `ffice1` change (`3d6cded0`..`job-ffice1-11061532`) on this tree. The
+`.github/workflows/agent-worker.yml` part was already identical here (the `agent`/`L`/Claude Code
+token inputs are gone), so only the new `lab/icefuzz` tool was missing and was taken from the
+accepted branch unchanged:
+
+- `lab/icefuzz/mutate.py`: seeded AST mutator over the fast stdlib/compare/limits corpus; a
+  candidate that does not parse and exit 0 in CPython within 5 s is discarded.
+- `lab/icefuzz/run.py`: builds each mutant with the default AIL build under a 1.5 GB address-space
+  and 60 s limit, classifies matches/differences/refusals/internal errors, stops at the first
+  silent difference, and minimises one reproducer per group.
+- `lab/icefuzz/RESULTS.md`, `lab/icefuzz/crashes/`: the 1745-mutant run, the seed-1744
+  `NotImplemented` silent difference, and the `name_ref` internal-error reproducer.
+
+No compiler or runtime file changed. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` leaves the pins unchanged because only files outside `AIL_CURRENT`
+were added.
+## 2026-11-05 -- recstop1: keep non-recursive programs' C unchanged
+
+The full suite found that the guard's runtime edit changed every program's DIE block, not only
+the recursive ones: the `ail_exc_kind_of`/`ail_exc_pyname` recursion mapping and the uncaught
+RecursionError naming were unconditional, so the pinned full-C tests (the numeric-binding and
+record-initializer modules) saw different C for programs with no `try` and no recursion. Those
+splices now live in `exctext.recursion_die`, applied to a DIE block only when the program carries
+`RECDEPTH` (it can reach the trap); every other program's DIE text is byte-identical to the base,
+and the pinned hashes match again. Two follow-on breaks are fixed with it: the `pthread` wording
+in the always-emitted `AIL_STACK_LOW` comment tripped the threads module's no-thread-runtime
+scan, and pyboxed2's mixed-clone drain splice did not know the uncaught function's new first
+line, so every typed clone was dropped (bugs7, cc_jobs, flush_exit, mixed_bounds). The class
+table for a program that can observe RecursionError's class now applies inside the DIE block
+itself instead of an invalid `EXCCLASSES` runtime-part name (exception aggregate objects).
+
+## 2026-11-05 -- recstop1 review fixes: caught class, generator depth, unlimited stack
+
+The review of the stack-check change found three regressions, all fixed here.
+
+1. A caught recursion stop on the typed path was the RuntimeError class: the trap is carried
+   as code 7 and `EXC_NAMES['RecursionError']` aliased to 7, so `type(e).__name__` said
+   `RuntimeError` and `except RecursionError` took every RuntimeError. When a program can
+   observe the class (it names `RecursionError` or binds `as e`), `pyfunc` now assigns
+   RecursionError its own code after every user class, `classes_table` names it, the DIE
+   block gains `AIL_EXC_RECURSION` and `ail_exc_kind_of` returns it for the recursion message,
+   and a RuntimeError handler includes that code (the subclass relation is one-way). Probes
+   p23/p12 now print `RecursionError`/`True`; over-catch, `type(e) is`, `isinstance`, `repr`,
+   `raise RecursionError`, a user exception class, and an exception read through a dict value,
+   an attribute or a callee all match CPython.
+2. `AIL_MAX_GENERATOR_DEPTH` (10000) changed how deep a `yield from` chain may run: a 12000
+   chain completed on the base and stopped on HEAD. The cap and `cx->gen_depth` are gone; each
+   generator keeps its own mapped stack, and when that mapping fails the resume raises the
+   same named `RecursionError` before switching. The 12000 chain completes again; an infinite
+   chain still stops by name (at the real address-space limit).
+3. With `RLIMIT_STACK` unlimited, `ail_stack_limit_from` fell back to 8 MiB, so depth 300000
+   (about 20 MiB of frames) raised instead of completing. The unlimited case now uses a
+   conservative 1 GiB bound (256 MiB on 32-bit), far below the first other mapping: 300000
+   completes, and a runaway still stops by name.
+
+`test_ail_recursion_stop.py` grew to 13 tests (class identity, one-way handler, generator
+chain, unlimited stack). `DIFFERENCES.md` rows 1-2 and `docs/LIMITATIONS.md` were corrected.
+
+## 2026-11-05 -- recstop1 review fix: a real stack check replaces the frame cap
+
+The review of the first cut found that `AIL_MAX_GENERAL_CALL_DEPTH` = 10000 *lowered* the maximum
+working depth on the general path: `def rec(n): return 0 if n == 0 else 1 + rec(n-1);
+print(rec(12000))` completed on the base commit and raised `RecursionError` (empty stdout) on
+HEAD. It also confirmed the pre-existing half of the same root cause: a fixed frame count cannot
+bound the real stack, so a recursive function with 60 locals still died with SIGSEGV (exit 139)
+on HEAD and base, because its ~1 KiB frames overflow long before any reasonable count.
+
+`cx->call_depth` is gone. Every OS stack now records `cx->stack_limit`, the lowest address it may
+touch, with a 64 KiB reserve for the raise path: `RLIMIT_STACK` in `ail_ctx_init` for the main
+thread, `pthread_getattr_np` in `threadrt.py` for a thread, and the generator's own mmap'd buffer
+in `safetyrt.py`. A generated function entry (top-level function/method, nested def, boxclosure)
+checks `AIL_STACK_LOW(cx, f)` and raises `RecursionError("maximum recursion depth exceeded")`
+through the ordinary exception path. Because each generator has its own stack, `yield from`
+nesting keeps a separate counter (`cx->gen_depth`, `AIL_MAX_GENERATOR_DEPTH` = 10000), saved and
+restored across generator switches and thread hand-offs. Probes on both builds: direct, mutual,
+method and nested-def recursion stop by name; depth 5000 and 12000 complete (documented
+difference); 60-locals recursion now stops by name where it used to segfault; `*args`, `**kw`
+definition, closures, aliases, static/class methods, list/dict/attribute/argument routes,
+generator `yield from`, `threading.Thread` and the uncaught/`except RuntimeError`/`except
+RecursionError`/`finally` shapes match CPython or stop by name. Depth boundary on an 8 MiB stack:
+base completes 20100 and segfaults at 20200; the new check completes 20000 and stops loudly at
+20100 (about 100 frames / 0.5% lower at the very edge, the cost of the reserve). The runner cannot
+open `perf_event_open` here, so instruction counts are unavailable; the per-call work is now one
+compare and branch (the two counter increments/decrements per frame are gone).
+
+## 2026-11-05 -- recstop1: deep recursion stops loudly on the general path (job-recstop1-11060031)
+
+The safestop1 table (`lab/safety/stops/RESULTS.md`) showed `06_rec_direct.py`, `07_rec_mutual.py` and
+`08_rec_method.py` exiting with signal -11 and empty stderr on the general path. The typed path already
+counted calls (`ail_d`, `AIL_MAX_RECURSION_DEPTH` = 50000); the general frames (`AIL_FRAME_ENTER`/
+`AIL_FRAME_LEAVE` in `cruntime.py`) had no counter. The two frame macros and `AIL_ROOT_N` now maintain
+`cx->call_depth` (root frames use the same leave), and the depth is saved and restored across generator
+stack switches (`ail2g`) and thread hand-offs, so it never leaks or goes negative. A generated function
+entry (top-level function/method, nested def, and boxclosure function) raises
+`RecursionError("maximum recursion depth exceeded")` through the normal exception path at
+`AIL_MAX_GENERAL_CALL_DEPTH` = 10000, before the real C stack is exhausted. `RecursionError` is a real
+builtin class (base RuntimeError) and the typed path's recursion trap is now catchable the same way while
+an uncaught one still prints `RecursionError`. Re-ran the safestop suite: **match 63 -> 66, crash 3 -> 0,
+silent-wrong 3 -> 0** (the three `09_rec_deep5000.py` cells are now "documented difference" per the owner
+decision), stop-differs 10, refused 1, 80 cells. Depth 5000 still completes in both builds
+(`docs/LIMITATIONS.md`). New `test_ail_recursion_stop.py` (6 tests) covers direct/mutual/method/nested/varargs/generator
+shapes, `except RuntimeError`/`except RecursionError`, `finally`, and depth 5000. The runner cannot open a
+hardware instruction counter here (`perf_event_open: Permission denied`, no valgrind), so the cost was
+measured as wall time on three compare-lab programs and on a 5M-call microbenchmark: unchanged within
+noise (0.14-0.15 s either build); the added work is two memory increments/decrements per frame plus one
+compare/branch per generated call.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
