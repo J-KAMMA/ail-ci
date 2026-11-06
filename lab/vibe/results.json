@@ -1,0 +1,712 @@
+{
+ "meta": {
+  "started": "2026-11-06T15:42:40Z",
+  "harness": "lab/vibe/run.py",
+  "model": "deepseek-v4.1-flash",
+  "cli": "cmd",
+  "effort": "low",
+  "rounds": 3,
+  "seeds": [
+   0
+  ],
+  "languages": [
+   "python",
+   "rust",
+   "ail"
+  ],
+  "tasks": [
+   "berth_sim"
+  ],
+  "jobs": 2,
+  "case_timeout": 90,
+  "mode": "python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax python",
+  "seed_note": "seed = independent repeated attempt; the CLI exposes no sampling seed",
+  "updated": "2026-11-06T15:55:59Z",
+  "stopped_early": false
+ },
+ "results": [
+  {
+   "task": "berth_sim",
+   "lang": "ail",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 3,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [
+    {
+     "name": "no_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_ship",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cargo",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "setup_same_operator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "operator_memory_per_berth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "priority_then_arrival_then_id",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "small_berth_chooses_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "berth_number_order_within_class",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_ship_waits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "depart_and_arrive_same_minute",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ceil_division",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unsorted_input",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wait_max_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_berths_few_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_busy",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_calm",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 6.489,
+   "final_run_seconds": 0.002,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5249,
+     "reply_chars": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 300s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 300s"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 5249,
+     "reply_chars": 4889,
+     "build_ok": false,
+     "build_seconds": 2.949,
+     "build_error": "/tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:6:5: not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this program either); general path: the method .readline() (on a instance:_AilStdinBuffer)\nnote: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:79: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:142: cannot tell the typ",
+     "compiler": [
+      [
+       "note",
+       "not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this progra"
+      ],
+      [
+       "note",
+       "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:79: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation"
+      ],
+      [
+       "note",
+       "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:142: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation"
+      ],
+      [
+       "note",
+       "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:157: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation"
+      ],
+      [
+       "note",
+       "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:6: sys.stdin.buffer used as a value is not built: call it as a statement (sys.stdout.write(text) on its own line, sys.stdin.buffer.read())"
+      ]
+     ],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:6:5: not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this program either); general path: the method .readline() (on a instance:_AilStdinBuffer)\nnote: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:79: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:142: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:157: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:6: sys.stdin.buffer used as a value is not built: call it as a statement (sys.stdout.write(text) on its own line, sys.stdin.buffer.read())\n"
+    },
+    {
+     "round": 3,
+     "prompt_chars": 11325,
+     "reply_chars": 5072,
+     "build_ok": true,
+     "build_seconds": 3.538,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:41:5: built on the general path (about 20x slower) because list[list[tuple[int, int, int, int, int, int]]]: a nested list holds rows of int, float, str or a class; keep a "
+      ]
+     ],
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.002
+    }
+   ],
+   "program": "programs/berth_sim/ail-0.py"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "python",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [
+    {
+     "name": "no_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_ship",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cargo",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "setup_same_operator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "operator_memory_per_berth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "priority_then_arrival_then_id",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "small_berth_chooses_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "berth_number_order_within_class",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_ship_waits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "depart_and_arrive_same_minute",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ceil_division",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unsorted_input",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wait_max_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_berths_few_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_busy",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_calm",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 0.04,
+   "final_run_seconds": 0.04,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3711,
+     "reply_chars": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 300s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 300s"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 3711,
+     "reply_chars": 5139,
+     "build_ok": true,
+     "build_seconds": 0.0,
+     "build_error": "",
+     "compiler": [],
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.04
+    }
+   ],
+   "program": "programs/berth_sim/python-0.py"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "rust",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [
+    {
+     "name": "no_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_ship",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cargo",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "setup_same_operator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "operator_memory_per_berth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "priority_then_arrival_then_id",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "small_berth_chooses_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "berth_number_order_within_class",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_ship_waits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "depart_and_arrive_same_minute",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ceil_division",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unsorted_input",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wait_max_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_berths_few_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_busy",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_calm",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 8.339,
+   "final_run_seconds": 0.002,
+   "path": null,
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 3756,
+     "reply_chars": 8924,
+     "build_ok": false,
+     "build_seconds": 4.808,
+     "build_error": "error: `<` is interpreted as a start of generic arguments for `u64`, not a comparison\n   --> /tmp/vibe-berth_sim-rust-0-qzwnfo76/main.rs:296:67\n    |\n296 |                 if w > max_wait || (w == max_wait && sh.id as u64 < max_wait_id) {\n    |                                                                   ^ ------------ interpreted as generic arguments\n    |                                                                   |\n    |                                                                   not interpreted as comparison\n    |\nhelp: try comparing the cast value\n    |\n296 |             ",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\nerror: `<` is interpreted as a start of generic arguments for `u64`, not a comparison\n   --> /tmp/vibe-berth_sim-rust-0-qzwnfo76/main.rs:296:67\n    |\n296 |                 if w > max_wait || (w == max_wait && sh.id as u64 < max_wait_id) {\n    |                                                                   ^ ------------ interpreted as generic arguments\n    |                                                                   |\n    |                                                                   not interpreted as comparison\n    |\nhelp: try comparing the cast value\n    |\n296 |                 if w > max_wait || (w == max_wait && (sh.id as u64) < max_wait_id) {\n    |                                                      +            +\n\nwarning: unused import: `Read`\n --> /tmp/vibe-berth_sim-rust-0-qzwnfo76/main.rs:3:30\n  |\n3 | use std::io::{self, BufRead, Read, Write};\n  |                              ^^^^\n  |\n  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\n\nerror: aborting due to 1 previous error; 1 warning emitted\n\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 13857,
+     "reply_chars": 8920,
+     "build_ok": true,
+     "build_seconds": 3.53,
+     "build_error": "",
+     "compiler": [],
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.002
+    }
+   ],
+   "program": "programs/berth_sim/rust-0.rs"
+  }
+ ],
+ "summary": {
+  "python": {
+   "n": 1,
+   "correct": 1,
+   "public_pass": 1,
+   "gave_up": 0,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "rounds_median": 2,
+   "loop_seconds": 0.04,
+   "final_run_seconds": 0.04,
+   "paths": null
+  },
+  "rust": {
+   "n": 1,
+   "correct": 1,
+   "public_pass": 1,
+   "gave_up": 0,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "rounds_median": 2,
+   "loop_seconds": 8.34,
+   "final_run_seconds": 0.002,
+   "paths": null
+  },
+  "ail": {
+   "n": 1,
+   "correct": 1,
+   "public_pass": 1,
+   "gave_up": 0,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "rounds_median": 3,
+   "loop_seconds": 6.49,
+   "final_run_seconds": 0.002,
+   "paths": {
+    "typed": 0,
+    "general": 1,
+    "refused": 0
+   }
+  }
+ },
+ "ail_errors": [
+  {
+   "kind": "note",
+   "message": "not in the subset: sys.stdin.buffer: only sys.stdin.read(), sys.stdin.readline() and sys.exit(<int>) are supported, and only as calls; sys.stdin.buffer used as a value is not (the general path could not build this progra",
+   "occurrences": 1,
+   "fixed_next": 0,
+   "fixed_rate": 0.0
+  },
+  {
+   "kind": "note",
+   "message": "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:142: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+   "occurrences": 1,
+   "fixed_next": 0,
+   "fixed_rate": 0.0
+  },
+  {
+   "kind": "note",
+   "message": "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:157: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+   "occurrences": 1,
+   "fixed_next": 0,
+   "fixed_rate": 0.0
+  },
+  {
+   "kind": "note",
+   "message": "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:41:5: built on the general path (about 20x slower) because list[list[tuple[int, int, int, int, int, int]]]: a nested list holds rows of int, float, str or a class; keep a ",
+   "occurrences": 1,
+   "fixed_next": 0,
+   "fixed_rate": 0.0
+  },
+  {
+   "kind": "note",
+   "message": "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:6: sys.stdin.buffer used as a value is not built: call it as a statement (sys.stdout.write(text) on its own line, sys.stdin.buffer.read())",
+   "occurrences": 1,
+   "fixed_next": 0,
+   "fixed_rate": 0.0
+  },
+  {
+   "kind": "note",
+   "message": "note: /tmp/vibe-berth_sim-ail-0-1xxcbnuc/main.py:79: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+   "occurrences": 1,
+   "fixed_next": 0,
+   "fixed_rate": 0.0
+  }
+ ]
+}

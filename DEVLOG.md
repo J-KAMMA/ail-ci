@@ -1,3 +1,14 @@
+## 2026-11-06 -- vibe1: the vibe-coding benchmark harness (job-vibe1-11070015)
+
+New `lab/vibe/`: the same AI writes the ten compare-lab tasks and `csv_rollup` in Python, Rust
+and AIL, and the harness records correct programs, fix rounds, silent-wrong and loud-stop counts
+and loop seconds. `run.py` asks a model CLI for one file, runs the task's public cases, sends the
+compiler/runtime error or first diff back for up to five rounds, then runs the hidden cases; every
+round is in `results.json`. `AIL_FOR_AI.md` (30 lines) is the language note for the AIL column,
+`vibe.yml` is a proposed manual workflow (not under `.github/`).
+
+Nothing in the compiler changed, so the only probes are for the claims in `AIL_FOR_AI.md`.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
