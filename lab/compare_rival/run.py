@@ -1,0 +1,560 @@
+#!/usr/bin/env python3
+"""compare-rival: AIL against the Python compilers Nuitka, Cython, mypyc and Codon.
+
+    python3 lab/compare_rival/run.py                       # all ten tasks, every rival -> results.json + RESULTS.md
+    python3 lab/compare_rival/run.py --tasks tree_fold chain_relax
+    python3 lab/compare_rival/run.py --tools nuitka,cython-main
+    python3 lab/compare_rival/run.py --safety              # only the five safety probes
+
+Every rival compiles the same source AIL uses: Nuitka and plain Cython take `src/<task>/main.py`,
+mypyc, Codon and annotated Cython take `src/<task>/typed.py`.  `ail` is the compare-lab AIL column
+(typed.py through AIL), `ail-py` compiles main.py.  A refusal is a result: the first error line is
+kept.  `patches/<tool>/<task>/` may hold a syntax-only patch, and the row is marked "patched".
+
+Measurement reuses lab/compare/run_task.py: the perf input and every public/hidden case come from
+the task's gen.py, the oracle is its reference.py, wall time is the median of 5 runs, instructions
+come from callgrind (or perf_event when the runner exposes it), peak RSS from `/usr/bin/time -v`,
+and the build is one cold build in a fresh directory (compile time, build disk, artifact size).
+The one deliberate difference from compare-lab: rivals get one cold build, not three, because a
+Nuitka onefile build is minutes, not seconds; the README says so.
+
+Safety probes in safety/*.py are built by every tool and run without arguments; their stdout and
+exit status are compared with CPython's.  A compiled program that exits 0 with a different answer
+is "silently wrong", the number that matters most.
+"""
+import argparse, importlib.util, json, os, re, shlex, shutil, statistics, subprocess, sys, tempfile, time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+COMPARE = REPO / 'lab' / 'compare'
+AIL = REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'
+AIL_DIR = REPO / 'AIL_CURRENT'
+VENV = Path(os.environ.get('RIVAL_VENV', '/tmp/rival-venv'))
+CODON_BIN = Path(os.environ.get('CODON_BIN', '/tmp/codon/codon-deploy-linux-x86_64/bin/codon'))
+PY = sys.executable                        # CPython 3.12, the interpreter every rival is built for
+CYTHON = VENV / 'bin' / 'cython'
+VENVPY = VENV / 'bin' / 'python'
+
+TASKS = sorted(p.name for p in (COMPARE / 'src').iterdir() if p.is_dir())
+ALL_TOOLS = ['ail', 'cython-main', 'cython-typed', 'nuitka', 'mypyc', 'codon', 'codon-main']
+SOURCE = {'ail': 'typed.py', 'ail-py': 'main.py', 'cython-main': 'main.py', 'cython-typed': 'typed.py',
+          'nuitka': 'main.py', 'mypyc': 'typed.py', 'codon': 'typed.py', 'codon-main': 'main.py'}
+STANDALONE = {'ail': True, 'ail-py': True, 'cython-main': True, 'cython-typed': True, 'nuitka': True,
+              'mypyc': False, 'codon': True, 'codon-main': True}
+# "single executable" for Cython means one file that links libpython3.12 at run time; mypyc leaves a
+# Python extension module that needs the interpreter plus the `ail` runtime module.
+ANSI = re.compile(r'\x1b\[[0-9;]*m')
+
+AIL_STUB = '''from typing import Any
+def read_stdin_bytes(size: int) -> bytes: ...
+def write_stdout_bytes(data: bytes) -> None: ...
+def read_bytes(path: str) -> bytes: ...
+def heappush(heap: list[Any], item: Any, key: Any = ...) -> None: ...
+def heappop(heap: list[Any], key: Any = ...) -> Any: ...
+def wrapping_add(a: int, b: int) -> int: ...
+def wrapping_sub(a: int, b: int) -> int: ...
+def wrapping_mul(a: int, b: int) -> int: ...
+'''
+
+
+def load_rt():
+    spec = importlib.util.spec_from_file_location('compare_run_task', COMPARE / 'run_task.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.TASK_BASE = COMPARE
+    module.BUILD_RUNS = 1          # one cold build for every tool here; see the module docstring
+    return module
+
+
+RT = load_rt()
+
+
+def tail(data, n=800):
+    return data.decode('utf8', 'replace')[-n:] if isinstance(data, bytes) else str(data)[-n:]
+
+
+def first_error(data):
+    text = ANSI.sub('', data.decode('utf8', 'replace') if isinstance(data, bytes) else str(data))
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for line in lines:
+        if re.search(r'\berror\b', line, re.I):
+            return line[:300]
+    return lines[0][:300] if lines else ''
+
+
+def run(cmd, cwd, env, timeout=2400):
+    return subprocess.run([str(c) for c in cmd], cwd=str(cwd), env=env, capture_output=True, timeout=timeout)
+
+
+def embed_flags():
+    out = subprocess.run(['python3-config', '--embed', '--cflags'], capture_output=True, text=True).stdout
+    ld = subprocess.run(['python3-config', '--embed', '--ldflags'], capture_output=True, text=True).stdout
+    return shlex.split(out), shlex.split(ld)
+
+
+CFLAGS, LDFLAGS = embed_flags()
+
+
+def versions():
+    def first(cmd):
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            return ((p.stdout or p.stderr).strip().splitlines() or [''])[0]
+        except Exception as e:
+            return 'missing (%s)' % type(e).__name__
+    return dict(ail=first([PY, str(AIL), '--version']), python=sys.version.split()[0],
+                gcc=first(['gcc', '--version']), cython=first([str(CYTHON), '--version']),
+                mypy=first([str(VENVPY), '-m', 'mypy', '--version']),
+                nuitka=first([str(VENVPY), '-m', 'nuitka', '--version']),
+                codon=first([str(CODON_BIN), '--version']),
+                valgrind=first(['valgrind', '--version']))
+
+
+def read_pins():
+    pins = {}
+    try:
+        for line in (HERE / 'toolchains.env').read_text().splitlines():
+            if '=' in line and not line.startswith('#'):
+                k, v = line.split('=', 1)
+                pins[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return pins
+
+
+def _artifact(d, tool, stem):
+    if tool == 'nuitka':
+        return d / 'out' / 'prog'
+    if tool in ('cython-main', 'cython-typed', 'codon', 'codon-main'):
+        return d / 'prog'
+    if tool == 'mypyc':
+        found = sorted(d.glob(stem + '*.so'))
+        return found[0] if found else None
+    return None
+
+
+def build_tool(tool, label, src, root, probe=False):
+    """One cold build of `src` with `tool`.  Returns a record with the command that runs it."""
+    fresh, env = RT.fresh_dir(root, '%s-%s' % (tool, label))
+    empty = RT.du_kib(fresh)
+    d = fresh / 'src'
+    d.mkdir()
+    source = d / src.name
+    shutil.copy(src, source)
+    stem = source.stem
+    rec = dict(tool=tool, source=src.name, standalone=STANDALONE[tool], dir=str(d))
+    if tool == 'mypyc':
+        (d / 'ail.pyi').write_text(AIL_STUB)
+        env['MYPYPATH'] = str(d)
+        env['PYTHONPATH'] = str(d) + ':' + str(AIL_DIR)
+    steps = []
+    if tool == 'nuitka':
+        steps = [[str(VENVPY), '-m', 'nuitka', '--onefile', '--assume-yes-for-downloads',
+                  '--output-dir=out', '--output-filename=prog', source.name]]
+    elif tool in ('cython-main', 'cython-typed'):
+        steps = [[str(CYTHON), '--embed', '-3', '-o', 'prog.c', source.name],
+                 ['gcc', '-O2', '-o', 'prog', 'prog.c', *CFLAGS, *LDFLAGS, '-lm']]
+    elif tool == 'mypyc':
+        steps = [[str(VENVPY), '-m', 'mypyc', source.name]]
+    elif tool in ('codon', 'codon-main'):
+        env['CODON_PATH'] = str(AIL_DIR)
+        steps = [[str(CODON_BIN), 'build', '-release', '-o', 'prog', source.name]]
+    else:
+        raise ValueError(tool)
+    start = time.perf_counter()
+    ok = True
+    err = b''
+    for cmd in steps:
+        try:
+            p = run(cmd, d, env)
+        except subprocess.TimeoutExpired:
+            ok, err = False, b'build timeout'
+            break
+        if p.returncode != 0:
+            ok, err = False, (p.stderr or p.stdout)
+            break
+    elapsed = time.perf_counter() - start
+    artifact = _artifact(d, tool, stem)
+    ok = ok and artifact is not None and artifact.is_file()
+    rec.update(build_ok=ok, compile_s=round(elapsed, 3), build_disk_kib=max(RT.du_kib(fresh) - empty, 0),
+               binary_bytes=artifact.stat().st_size if ok else None,
+               build_error=first_error(err) if not ok else '')
+    if tool == 'mypyc' and ok:
+        # a compiled extension module still needs the interpreter; a 3-line launcher is the mypyc way
+        launch = d / 'launcher.py'
+        if probe:
+            launch.write_text('import %s\n' % stem)
+        else:
+            launch.write_text('import sys\nimport %s\nsys.exit(%s.main())\n' % (stem, stem))
+        rec['launcher'] = str(launch)
+        rec['standalone'] = False
+    if not ok:
+        rec['run_cmd'] = None
+        return rec
+    if tool == 'nuitka':
+        rec['run_cmd'] = [str(artifact)]
+    elif tool == 'cython-main':
+        rec['run_cmd'] = [str(artifact)]
+    elif tool == 'cython-typed':
+        rec['run_cmd'] = ['/usr/bin/env', 'PYTHONPATH=' + str(AIL_DIR), str(artifact)]
+    elif tool == 'mypyc':
+        rec['run_cmd'] = ['/usr/bin/env', 'PYTHONPATH=%s:%s' % (d, AIL_DIR), PY, '-B', str(d / 'launcher.py')]
+    elif tool in ('codon', 'codon-main'):
+        rec['run_cmd'] = [str(artifact)]
+    return rec
+
+
+def build_ail(lang, task, root):
+    task_src = COMPARE / 'src' / task
+    rec, cmd = RT.build_language(lang, task_src, root)
+    rec.update(tool=lang, source=SOURCE[lang], standalone=True)
+    if cmd:
+        rec['run_cmd'] = cmd
+    return rec
+
+
+def reference_for(task, case, work):
+    out = work / 'expected.out'
+    stdin = open(case['path'], 'rb') if case['stdin'] else subprocess.DEVNULL
+    try:
+        with open(out, 'wb') as f:
+            p = subprocess.run([PY, str(COMPARE / 'tasks' / task / 'reference.py'), *case['args']],
+                               stdin=stdin, stdout=f, stderr=subprocess.PIPE, timeout=6 * RT.RUN_TIMEOUT)
+    finally:
+        if case['stdin']:
+            stdin.close()
+    return dict(returncode=p.returncode, stdout=out)
+
+
+def measure(rec, task, case, expected, check, expected_cases, work, icount, mode):
+    cmd = rec.get('run_cmd')
+    if not cmd:
+        return rec
+    rec.update(RT.run_pass(rec['tool'], cmd, case, expected, work, smoke=False))
+    if check:
+        rec.update(RT.check_cases(rec['tool'], cmd, check, expected_cases, work))
+    if mode != 'none' and rec.get('status') in ('ok', 'MISMATCH'):
+        try:
+            rec['instructions'] = RT.count_instructions(rec['tool'], cmd, case, work, icount, mode)
+        except Exception as e:
+            rec['instructions'] = None
+            rec['icount_error'] = type(e).__name__
+    return rec
+
+
+def task_work(task, tools, args, root, icount, mode):
+    RT.CURRENT_TASK = task
+    work = Path(tempfile.mkdtemp(prefix='rival-' + task + '-', dir=str(root)))
+    case = RT.make_case(task, False, work)
+    expected = reference_for(task, case, work)
+    check = RT.make_check_cases(task, work)
+    expected_cases = RT.reference_outputs(task, check, work)
+    results = {}
+    for tool in tools:
+        print('%s: build %s' % (task, tool), file=sys.stderr, flush=True)
+        try:
+            if tool in ('ail', 'ail-py'):
+                rec = build_ail(tool, task, work)
+            else:
+                rec = build_tool(tool, task, COMPARE / 'src' / task / SOURCE[tool], work)
+        except Exception as e:
+            rec = dict(tool=tool, build_ok=False, build_error='%s: %s' % (type(e).__name__, e), run_cmd=None)
+        if rec.get('build_ok'):
+            print('%s: run %s' % (task, tool), file=sys.stderr, flush=True)
+            try:
+                measure(rec, task, case, expected, check, expected_cases, work, icount, mode)
+            except Exception as e:
+                rec.update(status='error', correct=False, error='%s: %s' % (type(e).__name__, e))
+        results[tool] = rec
+        print('%-13s %-8s %s' % (tool, rec.get('status', 'build failed'),
+              {k: rec.get(k) for k in ('compile_s', 'build_disk_kib', 'binary_bytes', 'wall_ms', 'rss_kib',
+                                       'instructions', 'cases_public', 'cases_hidden', 'build_error')}),
+              file=sys.stderr, flush=True)
+    return task, dict(case=case['name'], input_bytes=case['input_bytes'], expected_exit=expected['returncode'],
+                      results=results)
+
+
+# ---------------------------------------------------------------- safety probes
+
+def safety_probe(tool, probe, root):
+    if tool == 'ail':
+        fresh, env = RT.fresh_dir(root, 'ail-safety-%s' % probe.stem)
+        out = fresh / 'prog'
+        p = run([PY, '-B', str(AIL), 'compile', str(probe), '-o', str(out), '--syntax', 'python'], fresh, env)
+        if p.returncode != 0 or not out.is_file():
+            return dict(build_ok=False, build_error=first_error(p.stderr or p.stdout))
+        return dict(build_ok=True, run_cmd=[str(out)], standalone=True)
+    else:
+        rec = build_tool(tool, 'safety-' + probe.stem, probe, root, probe=True)
+        return rec
+
+
+def classify(rc, out, ref_rc, ref_out):
+    if rc < 0:
+        return 'crash (signal %d)' % (-rc)
+    if rc == ref_rc and out == ref_out:
+        return 'same as CPython'
+    if rc == 0:
+        return 'silently wrong output'
+    return 'stops loudly'
+
+
+def run_safety(tools, root, jobs):
+    probes = sorted((HERE / 'safety').glob('*.py'))
+    refs = {}
+    for probe in probes:
+        p = subprocess.run([PY, '-B', str(probe)], stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+        refs[probe.stem] = (p.returncode, p.stdout)
+    out = {}
+    for tool in tools:
+        out[tool] = {}
+        for probe in probes:
+            rec = safety_probe(tool, probe, root)
+            if not rec.get('build_ok'):
+                out[tool][probe.stem] = dict(build_ok=False, result='build refused', error=rec.get('build_error'))
+                continue
+            try:
+                p = subprocess.run(rec['run_cmd'], stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                out[tool][probe.stem] = dict(build_ok=True, result='timeout')
+                continue
+            ref_rc, ref_out = refs[probe.stem]
+            out[tool][probe.stem] = dict(build_ok=True, result=classify(p.returncode, p.stdout, ref_rc, ref_out),
+                                         exit=p.returncode, bytes_out=len(p.stdout), ref_exit=ref_rc)
+        print('safety %s done' % tool, file=sys.stderr, flush=True)
+    return out
+
+
+# ---------------------------------------------------------------- report
+
+METRICS = [('wall_ms', 'wall ms'), ('instructions', 'instructions'), ('rss_kib', 'peak RSS KiB'),
+           ('binary_bytes', 'artifact bytes'), ('compile_s', 'compile s'), ('build_disk_kib', 'build disk KiB')]
+RIVALS = ['cython-main', 'cython-typed', 'nuitka', 'mypyc', 'codon', 'codon-main']
+
+
+def usable(rec, key):
+    if not rec or not rec.get('build_ok') or rec.get('correct') is not True:
+        return None
+    v = rec.get(key)
+    return v if isinstance(v, (int, float)) and v > 0 else None
+
+
+def correct_label(rec):
+    if not rec or not rec.get('build_ok'):
+        return 'build failed'
+    pub, hid = rec.get('cases_public'), rec.get('cases_hidden')
+    if pub is None:
+        return 'not checked'
+    wrong = (pub[1] - pub[0]) + (hid[1] - hid[0])
+    if rec.get('correct') is False:
+        wrong += 1
+    total = pub[1] + hid[1] + 1
+    return 'yes' if wrong == 0 else 'no (%d/%d wrong)' % (wrong, total)
+
+
+def f_int(v):
+    if v is None:
+        return '-'
+    for div, suf in ((1e9, 'G'), (1e6, 'M'), (1e3, 'k')):
+        if v >= div:
+            return '%.2f%s' % (v / div, suf)
+    return '%d' % v
+
+
+def geomean(xs):
+    import math
+    return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else None
+
+
+def summary(tasks, data):
+    lines = []
+    wins = {}
+    rows = []
+    for key, name in METRICS:
+        ratios, nwin, n = [], 0, 0
+        for task in tasks:
+            res = data['tasks'][task]['results']
+            a = usable(res.get('ail'), key)
+            best = min((usable(res.get(r), key) for r in RIVALS if usable(res.get(r), key)), default=None)
+            if a is None or best is None:
+                continue
+            ratios.append(a / best)
+            n += 1
+            if a <= best:
+                nwin += 1
+        g = geomean(ratios)
+        wins[key] = (g, nwin, n)
+        rows.append('| %s | %s | %d/%d | %s |' % (name, '%.2fx' % g if g else '-', nwin, n,
+                                                   'AIL better' if g and g < 1 else 'AIL worse'))
+    lines += ['| metric | AIL / best rival (geomean) | tasks AIL wins | verdict |', '|---|---|---|---|'] + rows
+    return lines, wins
+
+
+def render(result):
+    data = result
+    tasks = list(data['tasks'])
+    L = []
+    L.append('# AIL against the Python compilers (Nuitka, Cython, mypyc, Codon)')
+    L.append('')
+    L.append('Generated by `lab/compare_rival/run.py` on %s, commit `%s`.' % (data['date'], data['head']))
+    L.append('')
+    L.append('Every row compiles the same source AIL uses (`src/<task>/main.py` or `typed.py`); the CPython '
+             "reference is the task's `reference.py`. `correct` means every public and hidden case plus the perf "
+             'input matched. Wall time is the median of 5 runs of the perf input, peak RSS from `/usr/bin/time -v`, '
+             'instructions from %s. Compile time and build disk are one cold build in a fresh directory. '
+             '"single exe" is yes when the artifact is one file that runs without the source tree; mypyc needs the '
+             'CPython interpreter and the `ail` module at run time.' % data['icount_method'])
+    L.append('')
+    L.append('| tool | version |')
+    L.append('|---|---|')
+    for k, v in data['tools'].items():
+        L.append('| %s | %s |' % (k, v))
+    L.append('')
+    L.append('## Per task')
+    L.append('')
+    L.append('| task | tool | correct | wall ms | instructions | peak RSS MiB | artifact KiB | compile s | build disk MiB | single exe |')
+    L.append('|---|---|---|---|---|---|---|---|---|---|')
+    for task in tasks:
+        res = data['tasks'][task]['results']
+        for tool in ALL_TOOLS:
+            r = res.get(tool)
+            if r is None:
+                continue
+            name = tool + (' (patched)' if r.get('patched') else '')
+            if not r.get('build_ok'):
+                L.append('| %s | %s | build refused | - | - | - | - | - | - | - |' % (task, name))
+                continue
+            rss = '%.1f' % (r['rss_kib'] / 1024) if r.get('rss_kib') else '-'
+            art = '%.0f' % (r['binary_bytes'] / 1024) if r.get('binary_bytes') else '-'
+            disk = '%.1f' % (r['build_disk_kib'] / 1024) if r.get('build_disk_kib') is not None else '-'
+            L.append('| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |' % (
+                task, name, correct_label(r),
+                '%.0f' % r['wall_ms'] if r.get('wall_ms') is not None else '-',
+                f_int(r.get('instructions')), rss, art,
+                '%.2f' % r['compile_s'] if r.get('compile_s') is not None else '-', disk,
+                'yes' if r.get('standalone') else 'no'))
+    L.append('')
+    L.append('## Summary: AIL against the best rival')
+    L.append('')
+    sl, wins = summary(tasks, data)
+    L.extend(sl)
+    L.append('')
+    L.append('A ratio below 1.00 means AIL is better (every metric is lower-is-better).')
+    L.append('')
+    # five-line verdict
+    LABEL = {'wall_ms': 'wall time', 'instructions': 'instructions', 'rss_kib': 'peak RSS',
+             'binary_bytes': 'artifact size', 'compile_s': 'compile time', 'build_disk_kib': 'build disk'}
+
+    def verdict(key):
+        g, nwin, n = wins[key]
+        if g is None:
+            return '- %s: not measured.' % LABEL[key]
+        if g < 1:
+            return '- %s: AIL is %.2fx better than the best rival (%d/%d tasks).' % (LABEL[key], 1 / g, nwin, n)
+        return '- %s: AIL is %.2fx worse than the best rival (%d/%d tasks).' % (LABEL[key], g, nwin, n)
+
+    L.append('**Five-line verdict**')
+    L.append('')
+    L.append('- ' + verdict('wall_ms'))
+    L.append('- ' + verdict('instructions'))
+    L.append('- ' + verdict('rss_kib'))
+    L.append('- ' + verdict('binary_bytes'))
+    L.append('- ' + verdict('compile_s'))
+    L.append('')
+    L.append('## Refusals and patches')
+    L.append('')
+    L.append('| tool | task | result | first error line |')
+    L.append('|---|---|---|---|')
+    any_ref = False
+    for task in tasks:
+        for tool in ALL_TOOLS:
+            r = data['tasks'][task]['results'].get(tool) or {}
+            if r.get('build_ok'):
+                continue
+            any_ref = True
+            L.append('| %s | %s | %s | `%s` |' % (tool, task, 'patched' if r.get('patched') else 'refused',
+                                                   (r.get('build_error') or '').replace('|', '/')[:220]))
+    if not any_ref:
+        L.append('| - | - | none | - |')
+    L.append('')
+    L.append('## Safety: what each tool does when the program is wrong')
+    L.append('')
+    L.append('| tool | ' + ' | '.join(data['safety_probes']) + ' | silently wrong |')
+    L.append('|---|' + '---|' * len(data['safety_probes']) + '---|')
+    for tool in data['safety']:
+        cells = []
+        silent = 0
+        for probe in data['safety_probes']:
+            r = data['safety'][tool].get(probe, {})
+            res = r.get('result', 'not run')
+            cells.append(res)
+            if res == 'silently wrong output':
+                silent += 1
+        L.append('| %s | %s | %d/%d |' % (tool, ' | '.join(cells), silent, len(data['safety_probes'])))
+    L.append('')
+    L.append('Probes: `safety/overflow.py` (int64 wrap), `safety/index.py` (index out of range), '
+             '`safety/negindex.py` (negative index past the start), `safety/divzero.py` (division by zero), '
+             '`safety/recursion.py` (100000 levels). "stops loudly" means a non-zero exit with the same stdout '
+             'prefix as CPython; "silently wrong" is a zero exit with a different answer.')
+    L.append('')
+    return '\n'.join(L) + '\n'
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--tasks', default=' '.join(TASKS))
+    ap.add_argument('--tools', default=','.join(ALL_TOOLS))
+    ap.add_argument('--out', default=str(HERE / 'results.json'))
+    ap.add_argument('--safety', action='store_true', help='only run the safety probes')
+    ap.add_argument('--no-safety', action='store_true')
+    ap.add_argument('--icount', choices=['auto', 'perf', 'callgrind', 'none'], default='auto')
+    ap.add_argument('--jobs', type=int, default=1)
+    args = ap.parse_args()
+    tasks = [t for t in args.tasks.split() if t]
+    tools = [t for t in args.tools.split(',') if t]
+    for t in tasks:
+        if t not in TASKS:
+            ap.error('unknown task: %s' % t)
+    for t in tools:
+        if t not in ALL_TOOLS:
+            ap.error('unknown tool: %s' % t)
+
+    root = Path(tempfile.mkdtemp(prefix='compare-rival-'))
+    icount = RT.icount_tool(root) if args.icount in ('auto', 'perf') else None
+    if args.icount == 'auto':
+        mode = 'perf' if icount else ('callgrind' if shutil.which('valgrind') else 'none')
+    elif args.icount == 'perf' and not icount:
+        mode = 'none'
+    else:
+        mode = args.icount
+    print('instruction counter: %s' % mode, file=sys.stderr, flush=True)
+    head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=str(REPO), capture_output=True, text=True).stdout.strip()
+    result = dict(date=time.strftime('%Y-%m-%d', time.gmtime()), head=head, icount_method=mode,
+                  runner=dict(os=os.uname().release, cpus=os.cpu_count(), image=os.environ.get('ImageVersion', '')),
+                  tools=versions(), pins=read_pins(), tasks={},
+                  safety_probes=[p.stem for p in sorted((HERE / 'safety').glob('*.py'))], safety={})
+    result['tools']['ail'] = 'checkout ' + head
+
+    if not args.safety:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            futures = [pool.submit(task_work, t, tools, args, root, icount, mode) for t in tasks]
+            for fut in futures:
+                task, rec = fut.result()
+                result['tasks'][task] = rec
+                Path(args.out).write_text(json.dumps(result, indent=1) + '\n', encoding='utf8')   # partial survives a timeout
+        result['tasks'] = {t: result['tasks'][t] for t in tasks if t in result['tasks']}
+
+    if not args.no_safety:
+        print('safety probes', file=sys.stderr, flush=True)
+        result['safety'] = run_safety(tools if not args.safety else tools, root, args.jobs)
+
+    Path(args.out).write_text(json.dumps(result, indent=1) + '\n', encoding='utf8')
+    if result['tasks']:
+        (HERE / 'RESULTS.md').write_text(render(result), encoding='utf8')
+    print('wrote %s' % args.out, file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()
