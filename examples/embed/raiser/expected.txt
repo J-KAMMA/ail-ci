@@ -1,0 +1,4 @@
+checked_div(7, 2) = 3
+error: ValueError: division by zero
+error: ValueError: value must be positive
+require_positive(5) = 5

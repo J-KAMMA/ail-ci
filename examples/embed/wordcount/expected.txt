@@ -1,0 +1,4 @@
+word_count("") = 0
+word_count("one") = 1
+word_count("  one two\tthree\nfour  ") = 4
+word_count("a,b c-d") = 2

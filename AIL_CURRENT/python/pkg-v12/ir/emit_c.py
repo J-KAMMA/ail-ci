@@ -12,8 +12,10 @@ initialised to 0, as the legacy path declares its locals; constants are printed 
 The emitter reports the runtime pieces it used (`parts`, `need`, `floor`) so the driver can
 merge them into the program's runtime selection.
 """
+import ast
 import math
 import os
+import re
 
 from . import ir as I
 from . import effects as E
@@ -169,7 +171,219 @@ def _c_literal(text):
     return body, len(data), int(data.isascii())
 
 
+DEBUG_LOCAL = '/* --debug: the Python local */'   # ends every C line a --debug local mirror adds
 AIL_IR_EXC, AIL_IR_RET = 1, 2         # statuses of an outlined try body (cruntime.IREXC)
+
+
+_PARSED = {}
+_NO_CODE = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Pass, ast.Global,
+            ast.Nonlocal, ast.Try)
+
+
+def _parsed(path):
+    if path not in _PARSED:
+        try:
+            with open(path, encoding='utf-8') as f:
+                _PARSED[path] = ast.parse(f.read())
+        except (OSError, SyntaxError, ValueError):
+            _PARSED[path] = None
+    return _PARSED[path]
+
+
+def _instrs(region):
+    for ins in region.instrs:
+        yield ins
+        for inner in ins.regions:
+            for nested in _instrs(inner):
+                yield nested
+
+
+def _orphan_lines(path, body):
+    """--debug: the lines of the executable statements (not def/class/import/pass/global/try headers or a
+    docstring) of the function BODY, that no instruction left in it that writes C (not a `const`, which is
+    folded into its uses) came from. (I.SRC also holds the loads and stores the passes removed.)"""
+    have = set()
+    for ins in _instrs(body):
+        entry = I.SRC.get(id(ins))
+        if entry is not None and entry[0] is ins and entry[1][0] == path and ins.op not in ('local.alloc', 'const'):
+            have.add(entry[1][1])
+    if not have:
+        return set()
+    tree = _parsed(path)
+    if tree is None:
+        return set()
+    first, last = min(have), max(have)
+    scope = tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno <= first <= node.end_lineno \
+                and (scope is tree or node.lineno > scope.lineno):
+            scope = node
+    if scope is not tree and last > scope.end_lineno:
+        return set()                       # not one function's instructions: add nothing
+    lines, todo = set(), list(scope.body)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.ExceptHandler):
+            todo.extend(node.body)
+            continue
+        doc = isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+        if not isinstance(node, _NO_CODE) and not doc:
+            lines.add(node.lineno)
+        for field in ('body', 'orelse', 'finalbody', 'handlers'):
+            todo.extend(getattr(node, field, None) or ())
+        for case in getattr(node, 'cases', None) or ():
+            todo.extend(case.body)
+    if scope is tree:
+        lines = {n for n in lines if first <= n <= last}   # the module's statements around its instructions
+    return lines - have
+
+
+_C_RESERVED = []
+_C_WORDS = set("""auto break case char const continue default do double else enum extern float for goto if inline int
+long register restrict return short signed sizeof static struct switch typedef union unsigned void volatile while
+bool true false NULL EOF FILE stdin stdout stderr errno assert offsetof setjmp longjmp jmp_buf va_list va_start va_end
+va_arg isinf isnan isfinite signbit INFINITY NAN HUGE_VAL main abs labs exit abort free malloc calloc realloc memcpy
+memset memmove memcmp strlen strcmp printf fprintf snprintf puts fputs putchar fwrite fflush""".split())
+
+
+def _c_reserved():
+    """Names a --debug shadow local may not take: C's words, and every macro name and free identifier of a
+    macro body in the compiler's sources (the runtime's macros expand inside the user's functions)."""
+    if not _C_RESERVED:
+        import glob
+        words = set(_C_WORDS)
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for path in glob.glob(os.path.join(here, '*.py')) + glob.glob(os.path.join(here, 'ir', '*.py')):
+            try:
+                with open(path, encoding='utf-8') as f:
+                    text = f.read().replace('\\\n', ' ')
+            except (OSError, UnicodeDecodeError):
+                return None
+            text = text.replace('\\n', '\n')        # a define inside a Python string literal ends at its `\n`
+            for m in re.finditer(r'#\s*define\s+(\w+)(\(([^)]*)\))?(.*)', text):
+                params = set(re.findall(r'\w+', m.group(3) or ''))
+                words.add(m.group(1))
+                if re.match(r'\s*static\b', m.group(4)):
+                    continue                          # defines functions: expands at file scope
+                # free identifiers of the body: not a parameter, a field (`.i`, `->n`), a comment or a `%s`
+                body = re.sub(r'/\*.*?\*/|%(\(\w+\))?[-\w]', ' ', m.group(4))
+                words.update(set(re.findall(r'(?<![.>\w])[A-Za-z_]\w*', body)) - params)
+        _C_RESERVED.append(words)
+    return _C_RESERVED[0]
+
+
+def _assigned_name(where):
+    """The Name target of the one simple statement (`k = ...`, `k += ...`, `k: int = ...`) at WHERE, or None."""
+    tree = _parsed(where[0])
+    if tree is None:
+        return None
+    found = [n for n in ast.walk(tree) if isinstance(n, ast.stmt) and n.lineno == where[1]]
+    if len(found) != 1:
+        return None
+    node = found[0]
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(
+        node, (ast.AugAssign, ast.AnnAssign)) else []
+    if len(targets) == 1 and isinstance(targets[0], ast.Name) and getattr(node, 'value', None) is not None:
+        return targets[0].id
+    return None
+
+
+def _bound_names(where):
+    """Every name a statement at WHERE binds (any Name in a store context in it), or None without the source."""
+    tree = _parsed(where[0])
+    if tree is None:
+        return None
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.stmt) and node.lineno <= where[1] <= (node.end_lineno or node.lineno):
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+                    out.add(sub.id)
+                elif isinstance(sub, ast.arg):
+                    out.add(sub.arg)
+    return out
+
+
+def _shadow_plan(fn, framed):
+    """--debug: ({value: [python names]}, {(file, line): [(name, C constant)]}, [(param, name)]) for the locals
+    gdb should show by their Python name: a name of type int or float every store of which (the stores the
+    passes removed are still in I.SRC) has a value an instruction on the store's own line defines, or a constant;
+    the parameters among them, and the names never stored, start as the parameter. None in a function with a
+    `try` (its bodies are outlined into other C functions) or when a name could go stale (a loop index)."""
+    if framed or _c_reserved() is None:
+        return None, None, None, None
+    live, hints, line_of = set(), set(), {}
+    for ins in _instrs(fn.body):
+        entry = I.SRC.get(id(ins))
+        for v in ins.results:
+            live.add(v)
+            if entry is not None and entry[0] is ins:
+                line_of[v] = entry[1]
+        for r in ins.regions:
+            for a in r.args:
+                hints.add(a.hint)
+        for v in list(ins.results) + list(ins.operands):
+            if v.hint:
+                hints.add(v.hint)
+    made, by_place, per_line = {}, {}, {}
+    for ins, where in I.SRC.values():
+        if ins.results and ins.op == 'const':
+            made[ins.results[0]] = ins
+        elif ins.op == 'store' and len(ins.operands) == 2:
+            by_place.setdefault(ins.operands[0], []).append((ins, where))
+            per_line[where] = per_line.get(where, 0) + 1
+    shadows, consts, types, bad = {}, {}, {}, set()
+    for place, stores in by_place.items():
+        names = {_assigned_name(where) if per_line[where] == 1 else None for _, where in stores}
+        name = names.pop() if len(names) == 1 else None
+        if name is None or not name.isidentifier() or name.startswith('_'):
+            # a store with no simple `name = ...` (`a, b = b, a`, a `for` target): every name those statements
+            # bind may go stale, so none of them gets a shadow
+            for _, where in stores:
+                bound = _bound_names(where)
+                if bound is None:
+                    return None, None, None, None
+                bad.update(bound)
+            bad.update(n for n in names if n)
+            continue
+        if name in types and types[name] is not place:
+            bad.add(name)                         # two places of one name
+        types[name] = place
+        for ins, where in stores:
+            v = ins.operands[1]
+            if v.type not in (I.I64, I.F64) or v.type != stores[0][0].operands[1].type:
+                bad.add(name)
+                break
+            const = made.get(v)
+            if const is not None and const.attrs.get('value') is not None:
+                # (a constant is written into its uses, not by its instruction: the shadow is set where the
+                # statement that stores it begins)
+                value = const.attrs['value']
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or \
+                        (isinstance(value, float) and not math.isfinite(value)):
+                    bad.add(name)
+                    break
+                consts.setdefault(where, []).append((name, c_float(value) if v.type == I.F64 else c_int(value)))
+            elif v in live and line_of.get(v) == where:
+                shadows.setdefault(v, []).append(name)
+            else:
+                bad.add(name)
+                break
+    types = {n: by_place[place][0][0].operands[1].type for n, place in types.items()}
+    params = []
+    for p, n in zip(fn.params, fn.param_names):
+        if p.type in (I.I64, I.F64) and n.isidentifier() and not n.startswith('_') and \
+                types.setdefault(n, p.type) == p.type:
+            params.append((p, n))
+        elif n in types:
+            bad.add(n)
+    bad |= hints - {n for _, n in params}
+    shadows = {v: [n for n in ns if n not in bad] for v, ns in shadows.items()}
+    consts = {w: [(n, c) for n, c in cs if n not in bad] for w, cs in consts.items()}
+    params = [(p, n) for p, n in params if n not in bad]
+    return shadows, consts, params, {n: ctype(t) for n, t in types.items() if n not in bad}
 
 
 class _Cx(object):
@@ -215,6 +429,8 @@ class Emitter(TextEmitter):
         self.names = {}
         self.defs = E.defs_of(fn)
         self.count = 0
+        self.orphans = None                # --debug: statement lines no instruction came from (_orphan_lines)
+        self.shadows = None                # --debug: value -> Python names it was stored to (_shadow_plan)
         self.bce_site = 0
         self.parts = set()
         self.need = set()
@@ -352,11 +568,80 @@ class Emitter(TextEmitter):
         entry = I.SRC.get(id(ins))
         if entry is None or entry[1] == self.cx.where:
             return
+        if ins.op == 'yield' and self.cx.where is not None:
+            # a region's closing yield (the copies of a branch's results, its `}`) stays on the line that ran
+            # last: tagged with the `if`'s line, gdb's `next` went back to the `if` after each branch
+            return
+        if self.shadows is not None and self.cx.kind == 'top' and self.cx.where is None and self.shadow_params:
+            # the parameters' shadows, at the function's first statement (a first statement inside a block
+            # would leave them unset on the other paths: then none)
+            if depth == 1:
+                self.shadow_assign(depth, [(n, p) for p, n in self.shadow_params], entry[1])
+            else:
+                self.shadow_drop.update(n for _, n in self.shadow_params)
+        if self.cx.debug_lines:
+            self.orphan_sites(depth, self.cx.where, entry[1])
         self.cx.where = entry[1]
+        if self.shadows is not None and self.cx.kind == 'top':
+            self.shadow_assign(depth, [(n, c) for n, c in self.shadow_consts.get(entry[1], ())])
         if ins.op not in ('reraise', 'yield'):
             # (a region's closing yield and a bare re-raise are not statements that begin to run: the site
             # stays that of the last statement that did, e.g. the raise a `finally` lets through)
             self.line(depth, 'AIL_DBG_SITE("%s:%d");' % entry[1])
+
+    def orphan_sites(self, depth, before, after):
+        """--debug: a statement lowered to no instruction (`acc = 0` folded into a loop's carried value, `n = 42`
+        propagated into a call) has no C line, so no entry in the DWARF line table: gdb could not break on it and
+        `next` skipped it. Before the first instruction of AFTER, a site store for each such line of this
+        function between BEFORE and AFTER (or before AFTER at the function's start), in source order."""
+        if self.orphans is None:
+            self.orphans = _orphan_lines(after[0], self.fn.body)
+        if not self.orphans:
+            return
+        low = before[1] if before is not None and before[0] == after[0] else 0
+        for line in [n for n in sorted(self.orphans) if low < n < after[1]]:
+            self.orphans.discard(line)
+            self.cx.lines.append('#line %d "%s"' % (line, after[0]))
+            self.cx.lines.append('    ' * depth + 'AIL_DBG_SITE("%s:%d");' % (after[0], line))
+            if self.shadows is not None and self.cx.kind == 'top':
+                self.cx.where = (after[0], line)
+                self.shadow_assign(depth, [(n, c) for n, c in self.shadow_consts.get((after[0], line), ())])
+
+    def shadow_assign(self, depth, pairs, where=None):
+        """--debug: `k = ir3;` after the instruction whose value the statement `k = ...` stored (the passes
+        replaced the local by SSA values, so gdb's `print k` found no `k`). Each line is kept in a marker
+        entry until shadow_finish knows whether the name is safe to declare."""
+        where = where or self.cx.where
+        if self.cx.kind != 'top' or where is None:
+            return
+        for name, v in pairs:
+            if isinstance(v, str):
+                value = v
+            elif v in self.names and self.owner.get(v, self.cx) is self.cx:
+                value = self.names[v]
+            else:
+                self.shadow_drop.add(name)
+                continue
+            self.cx.lines.append(('shadow', name, '#line %d "%s"\n%s%s = %s; %s'
+                                  % (where[1], where[0], '    ' * depth, name, value, DEBUG_LOCAL)))
+
+    def shadow_finish(self):
+        """--debug: declare the shadow locals at the top of the C function, or drop every line of a name that
+        could clash with C (a keyword, a runtime or libc name, any identifier this function's C uses)."""
+        body = '\n'.join(x for x in self.cx.lines if isinstance(x, str))
+        used = set(re.findall(r'[A-Za-z_]\w*', body)) | set(re.findall(r'[A-Za-z_]\w*', ''.join(self.aux)))
+        keep = {}
+        for name, ct in self.shadow_types.items():
+            if name not in self.shadow_drop and name not in used and name not in _c_reserved() \
+                    and not name.lower().startswith('ail_'):
+                keep[name] = ct
+        lines = ['    %s; %s' % (_decl(ct, n), DEBUG_LOCAL) for n, ct in sorted(keep.items())]
+        for x in self.cx.lines:
+            if isinstance(x, str):
+                lines.append(x)
+            elif x[1] in keep:
+                lines.extend(x[2].split('\n'))
+        self.cx.lines = lines
 
     def use(self, *helpers):
         self.need.update(helpers)
@@ -476,10 +761,21 @@ class Emitter(TextEmitter):
         if self.depth:
             self.parts.add('RECDEPTH')
             self.line(1, 'if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");')
+        if self.cx.debug_lines and I.SRC:
+            self.shadows, self.shadow_consts, self.shadow_params, self.shadow_types = \
+                _shadow_plan(fn, self.frame or self.pre)
+            self.shadow_drop = set()
         self.region(fn.body, 1, None)
+        if self.shadows is not None:
+            self.shadow_finish()
         close = '' if self.cx.where is None or not self.cx.debug_lines else '#line %d "%s"\n' % (self.cx.where[1], self.cx.where[0])
         text = '%s {\n%s\n%s}\n' % (ir_sig, '\n'.join(self.cx.lines), close)
         out = ''.join(self.aux) + text
+        wrapped = self.byval or self.is_pending or self.depth
+        if wrapped and self.cx.where is not None and self.cx.debug_lines:
+            # --debug: the wrappers below are not on the user's lines (they went on counting from the last
+            # `#line`: gdb put a breakpoint on a user line inside a list-returning function's wrapper)
+            out += '#line 1 "<ail-generated>"\n'
         if self.byval:
             kind = 'flist' if fn.attrs['ret_list'] == 'flist' else 'list'
             self.parts.update(('FLIST', 'FLISTRET') if kind == 'flist' else ('LIST', 'LISTRET'))
@@ -502,7 +798,7 @@ class Emitter(TextEmitter):
             else:
                 body = '    %s;\n    return;\n' % call
             out += '%s {\n%s}\n' % (sig, body)
-        if self.cx.where is not None and self.cx.debug_lines:
+        if self.cx.where is not None and self.cx.debug_lines and not wrapped:
             # --debug: what follows (runtime helpers, the next function) is not on the user's last line
             out += '#line 1 "<ail-generated>"\n'
         return sig, out
@@ -602,6 +898,8 @@ class Emitter(TextEmitter):
         """`owner` is the instruction whose region this is (None for the function body)."""
         for ins in region.instrs:
             self.instr(ins, depth, owner)
+            if self.shadows and ins.results:
+                self.shadow_assign(depth, [(n, v) for v in ins.results for n in self.shadows.get(v, ())])
 
     def assign_new(self, depth, v, expr):
         self.line(depth, '%s = %s;' % (_decl(ctype(v.type), self.fresh(v)), expr))
