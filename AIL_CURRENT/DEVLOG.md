@@ -1,3 +1,20 @@
+## 2026-11-06 -- fbnarrow1: int-list census and int32 scratch patch re-applied (job-rbfbnarrow1_rr1-11061236)
+
+Re-applied the accepted `fbnarrow1_rr1` change (`4b0b7123`..`job-fbnarrow1_rr1-11060751`). It adds
+`lab/mem/NARROW.md`, `lab/mem/NARROW.json`, `lab/mem/narrow_census.py` and
+`lab/mem/treefold_i32.patch`, the measurement of tree_fold's int-list peak (292.67 MiB) and the
+hand-edited int32 scratch build; no compiler, runtime or C-compiler file changes. The current
+`lab/mem/GENLIST.*` files are a different measurement and are kept, so both sides' artifacts remain.
+
+The accepted export's `.github/workflows/agent-worker.yml` hunk deleted the `agent`/opus input and
+the subscription-token handling; this tree has those plus a later CR/LF-strip fix, so that hunk was
+not applied (both sides' fixes kept). `tools/diff_ids.py` is not present on this tree, so only
+`tools/update_manifest.py` ran. Probes (`/tmp/probes`, both builds via `cmp.sh`): list append/index/
+negative/slice/sort-key, list[int] fields with append and in-place updates, folded weights above
+int32, and par/fold/cumulative-sum keys all match CPython. Running the added census tool with
+`--census --only ticket_audit` reproduces its committed `3.41 MiB` row; the committed `NARROW.json`
+still carries the `emulate` block (median RSS 415,468 -> 379,132 KiB, cases and perf output identical).
+
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
 str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
