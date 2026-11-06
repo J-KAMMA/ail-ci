@@ -358,7 +358,7 @@ def _split_diff(argv):
     if "--diff" not in argv[:options_end]:
         return None, argv
     before_source = argv[:options_end]
-    settings = {"python": sys.executable, "timeout": 60.0, "json": False}
+    settings = {"python": sys.executable or "python3", "timeout": 60.0, "json": False}
     kept, index = [], 0
     while index < len(before_source):
         word = before_source[index]
@@ -545,10 +545,17 @@ def _cmd_run_diff(argv, settings):
         if found is None:
             return _no_project("run")
         options, source = found.build_options() + options, str(found.entry)
-    python = shutil.which(settings["python"]) or (settings["python"] if Path(settings["python"]).is_file() else None)
-    if python is None:
-        print("ail: --python %s: not found" % settings["python"], file=sys.stderr)
-        return 2
+    python = settings["python"]
+    if os.sep in python or (os.altsep and os.altsep in python):
+        if not (Path(python).is_file() and os.access(python, os.X_OK)):
+            print("ail: --python %s: not an executable file" % python, file=sys.stderr)
+            return 2
+    else:
+        found_python = shutil.which(python)
+        if found_python is None:
+            print("ail: --python %s: not found on PATH" % python, file=sys.stderr)
+            return 2
+        python = found_python
     if not require_compiler(env):
         return 2
     prepare_cache(env)
