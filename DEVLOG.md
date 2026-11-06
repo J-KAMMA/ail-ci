@@ -1,3 +1,22 @@
+## 2026-11-06 -- rbnturl2path1 suite fix: the five named modules pass on today's integ (job-rbnturl2path1-11061752)
+
+The task named `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_std_nturl2path`,
+`test_ail_unified` and `test_ail_virtual_dispatch` as failing with this change applied on the
+integration branch. I could not reproduce any of them. The change is additions only: the 14 files
+(`AIL_CURRENT/stdlib/nturl2path.py`, its test, its `tests.d` registration, the ten
+`lab/stdlib/nturl2path` programs and `RESULTS.md`) copied onto today's `origin/integ` (`1e0e06d`,
+2026-11-06 18:28 +0900) with the pins regenerated (`update_manifest.py --check` exit 0) give
+`tools/par_check.py -j 2` over the five: `safetynet` 154.5s, `std_nturl2path` 93.1s, `unified`
+269.1s, `obj_refs` 8.8s, `virtual_dispatch` 44.0s -- 5/5 pass. The four non-nturl2path modules are
+byte-identical between this branch and `origin/integ` (`git diff` empty), so an additions-only change
+cannot alter their behaviour; no source edit was needed.
+
+Probes `/tmp/probes/p1`-`p4` (value through an argument, a list item, an attribute and a dict value;
+empty/`/`/`//`/`///`/`////`, `C|`, `C:`, `::`, UNC and `\\?\` path edges; `%20`/`%C3%A9`/`%2F`/`%2b`
+escapes, bad `%zz`/`%`/`%2`; `Bad URL:`/`Bad path:` errors and an eight-path round trip) match
+CPython 3.12 stdout and exit status in the default and `AIL_UNIFIED_FORCE=1` builds. No source file
+was changed, so the DIFFERENCES row `C?-job-rbnturl2path1-11061518-1` still describes the module.
+
 ## 2026-11-06 -- rbnturl2path1: re-apply nturl2path1 on the current tree (job-rbnturl2path1-11061518)
 
 Re-applied the accepted `nturl2path1` change (`193e75b0`..`job-nturl2path1-11060839`) on top of
