@@ -17,7 +17,12 @@ interpreter over the structured regions:
   in int64 the checked op becomes `nsw` (the emitter prints the plain C operator); after a checked
   op the result is clipped to int64 (otherwise it raised);
 * `//` and `%` by a positive constant of a non-negative value get mode `nonneg` (plain C / and %,
-  which equal Python's floor division there).
+  which equal Python's floor division there);
+* bce s6: a `field.get` is numbered to an earlier one with the same object SSA value and field name
+  when no instruction between them may write that field (a `field.set` of the name on any object of
+  the struct, a call whose summary may write it or is unknown, an outlined try body); the earlier
+  load's facts then apply. A field the whole-program field facts (s4) list as non-negative starts
+  at `lo = 0`, and two numbered loads of an immutable `bytes` field name one length.
 
 Only the final (stable) visit of each instruction decides its mode, so every decision holds for
 every execution that reaches it.
@@ -25,11 +30,144 @@ every execution that reaches it.
 import json
 import os
 
+from .. import effects as E
 from .. import ir as I
 
 MIN, MAX = -(1 << 63), (1 << 63) - 1
 LEN_MAX = 1 << 48
 WIDEN_AFTER = 3
+
+# bce s6: the instructions that may write a struct field without naming it themselves.  A `call`
+# (and the container-adopting call forms) writes whatever its effect summary says; an unknown
+# summary and an outlined `try` body may write anything.
+_CALL_OPS = ('call', 'rt', 'list.call', 'ba.call', 'obj.call', 'list.rt')
+
+
+def _struct_of(v):
+    if v is not None and v.type.head == 'obj' and v.type.args and v.type.args[0].head == 'class':
+        return v.type.args[0].name
+    return None
+
+
+def _field_key(ins):
+    obj = ins.operands[0]
+    name = ins.attrs.get('name')
+    cls = ins.attrs.get('cls') or _struct_of(obj)
+    return (obj, name, cls)
+
+
+def _field_kill(ins, fn, defs, summaries):
+    """('all', ()) when `ins` may write any struct field, else ((), {(cls, name)})."""
+    op = ins.op
+    if op == 'try':
+        return 'all', ()
+    if op == 'field.set':
+        obj = ins.operands[0]
+        cls = ins.attrs.get('cls') or _struct_of(obj)
+        return (), {(cls, ins.attrs.get('name'))}
+    if op not in _CALL_OPS:
+        return (), ()
+    eff = E.instr_effects(ins, fn, None, None, defs, summaries)
+    if eff.unknown:
+        return 'all', ()
+    out = set()
+    for loc in eff.writes:
+        if loc.startswith('Field(') and loc.endswith(')'):
+            cls, _, name = loc[6:-1].partition(',')
+            out.add((cls, name))
+    return (), out
+
+
+def number_fields(fn, summaries=None):
+    """bce s6: {load: earlier load} for `field.get`s of the same object SSA value and field name
+    with no instruction that may write that field on any path between them.
+
+    A `field.set` of the field name on any object of the same struct type is a write (objects may
+    alias), and so is a call whose effect summary may write that struct's fields, an unknown call
+    and an outlined `try` body.  A loop is iterated to a fixed point: a field entry survives at the
+    loop head only if the initial state and every back edge agree on it, so a store anywhere in
+    the loop kills it on the back edge.  Nothing survives a loop after it (a `break` path may have
+    written), which is conservative and keeps the result independent of the range facts.
+    """
+    defs = {r: ins for ins in I.walk(fn.body) for r in ins.results}
+    canon = {}
+
+    def apply(ins, state):
+        op = ins.op
+        if op == 'field.get':
+            obj, name, _ = _field_key(ins)
+            key = (obj, name)
+            r = ins.results[0]
+            if key in state:
+                canon[r] = state[key]
+            else:
+                canon.pop(r, None)
+                state[key] = r
+            return
+        all_kill, killed = _field_kill(ins, fn, defs, summaries)
+        if all_kill:
+            state.clear()
+            return
+        if not killed:
+            return
+        for key in list(state):
+            obj, name = key
+            if (_struct_of(obj), name) in killed:
+                del state[key]
+
+    def visit(region, state, loops):
+        for ins in region.instrs:
+            op = ins.op
+            if op == 'if':
+                arms = []
+                for arm in ins.regions:
+                    sub = dict(state)
+                    out = visit(arm, sub, loops)
+                    if out is not None:
+                        arms.append(out)
+                state.clear()
+                if len(arms) == 1:
+                    state.update(arms[0])
+                elif len(arms) == 2:
+                    a, b = arms
+                    state.update({k: v for k, v in a.items() if k in b and b[k] is v})
+                continue
+            if op in I.LOOP_OPS:
+                loop(ins, state, loops)
+                continue
+            if op == 'yield':
+                return state
+            if op == 'continue':
+                if loops:
+                    loops[-1].append(dict(state))
+                return None
+            if op == 'break' or op in ('return', 'unreachable', 'raise', 'reraise'):
+                return None
+            if op == 'try':
+                state.clear()
+                for body in ins.regions:          # numbered only among themselves
+                    visit(body, {}, loops)
+                state.clear()
+                continue
+            apply(ins, state)
+        return None
+
+    def loop(ins, state, loops):
+        entry = dict(state)
+        for _ in range(50):
+            back = []
+            out = visit(ins.regions[0], dict(entry), loops + [back])
+            if out is not None:
+                back.append(out)
+            new = {k: v for k, v in entry.items()
+                   if back and all(k in b and b[k] is v for b in back)}
+            if new == entry:
+                break
+            entry = new
+        state.clear()
+
+    visit(fn.body, {}, [])
+    return canon
 
 
 class Fact(object):
@@ -107,6 +245,10 @@ class Analysis(object):
         self.explain = {}           # access instr -> dict for AIL_BCE_EXPLAIN
         self._list_safe = None
         self._names = {}
+        # bce s6: field load numbering and the whole-program non-negative fields (s4)
+        self.canon = number_fields(fn, self.facts.get('summaries')) if bce else {}
+        fields = (self.facts.get('fields') or {}).get('nonneg') or ()
+        self.nonneg = frozenset((str(f[0]), str(f[1])) for f in fields if len(f) == 2) if bce else frozenset()
 
     def vname(self, v):
         n = self._names.get(v)
@@ -399,6 +541,17 @@ class Analysis(object):
         if out is None:
             out = [r for r, d in self.defs.items()
                    if d.op in ('bytes.len', 'span.len') and d.operands[0] is base]
+            if self.bce and base.type == I.BYTES:
+                # bce s6: a bytes field is immutable, so numbered loads of it name one length
+                rep = self.canon.get(base, base)
+                members = {base, rep}
+                for d in self.defs.values():
+                    if d.op == 'field.get' and d.results and d.result.type == I.BYTES \
+                            and self.canon.get(d.result) is rep:
+                        members.add(d.result)
+                if len(members) > 1:
+                    out += [r for r, d in self.defs.items()
+                            if d.op == 'bytes.len' and d.operands[0] in members]
             if self.bce and base.type.head == 'obj' and base.type.args[0].head == 'list' \
                     and self.list_lengths_safe():
                 out += [r for r, d in self.defs.items()
@@ -512,6 +665,20 @@ class Analysis(object):
         if not ins.results or ins.regions:
             return
         r = ins.results[0]
+        if op == 'field.get':
+            if r.type == I.I1:
+                env[r] = Fact(0, 1)
+                return
+            if r.type != I.I64:
+                return
+            same = self.canon.get(r)
+            f = self.get(env, same) if same is not None else TOP
+            lo, hi, ub, lb = f.lo, f.hi, dict(f.ub), dict(f.lb)
+            _, name, cls = _field_key(ins)
+            if self.bce and (cls, name) in self.nonneg:
+                lo = max(lo, 0)                     # bce s6: a whole-program non-negative field
+            env[r] = Fact(lo, hi, ub, lb)
+            return
         if r.type == I.I1:
             env[r] = Fact(0, 1)
             return

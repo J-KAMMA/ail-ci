@@ -1,3 +1,54 @@
+## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
+
+All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for
+ledger_bin):
+
+- (a) `ir/passes/ranges.py` `number_fields()`: each `field.get` is numbered to the earliest earlier
+  `field.get` of the same object SSA value and field name when, on every path between them, no
+  instruction may write that field -- a `field.set` of the name on **any** object of that struct
+  (objects may alias; the struct is the object's static `obj<class>` type), a call whose effect
+  summary may write the struct's fields or is unknown (`E.instr_effects` over `call`, `rt`,
+  `list.call`, `ba.call`, `obj.call`, `list.rt`), or a `try` (its outlined body). `if` arms merge
+  only entries both arms keep; loops iterate to a fixed point whose entry state keeps a field only
+  when the initial state and every back edge agree, so a store anywhere in the loop kills it on the
+  back edge, and nothing survives a loop afterwards. The earlier load's facts, including its guard's
+  refinement, then apply to the later one.
+- (b) every `field.get` of a field listed in `facts['fields']['nonneg']` (bce s4) starts at `lo = 0`.
+- (c) `lengths_of` also returns the `bytes.len` of every load in the same numbered class, so a
+  `bytes` field's length is one value across two numbered loads (`for i in range(len(r.data))`
+  with `r.data[i]` is proven).
+- (d) probes in `AIL_CURRENT/test_ail_bce.py`: `field_cursor_ge` (lengths 0, 1, exactly at the end,
+  one short), `field_cursor_gt` (a `>` guard, not proven: `pos == len` raises as in CPython),
+  `field_cursor_bump` (a call that moves `pos` between guard and read, not proven),
+  `field_cursor_alias` (`r2.pos = 99` through a second parameter naming the same object, not
+  proven), `field_cursor_negative` (`Rd.pos` set to -1 elsewhere retires the s4 fact; `r.data[-1]`
+  reads the last byte as CPython does), `field_bytes_len` (the immutable-length rule),
+  `field_cursor_bigtext` (`int(text)` beyond int64 stops where it does today). The proven ones are
+  pinned through `AIL_IR_STATS` `idx_ssa_proven` (`pair` 2, `scan` 1), the neighbours must stay 0.
+
+Number: ledger_bin/ail 5,394,586,605 -> 5,233,458,638 instructions (ratio 0.97013, **-2.99%**);
+stripped binary 55,512 -> 55,512 bytes; same stdout and exit. That is below the lane's 6% target
+and below its 4% stop line, so per the stop rule the work stopped there instead of changing how
+`try` functions are handled: the remaining hand-edited checks (about 5.1%) are in `main` (lines
+49-51 and 103-108), and `main` is not optimised at all -- its `try` makes `passes.optimize`
+return `{"skipped": "try"}` (`AIL_IR_STATS`: `{"fn": "main", "sym": "py_main", ... "passes":
+{"skipped": "try"}}`), so no range pass ever sees line 105. `AIL_BCE_EXPLAIN` on ledger_bin is
+empty: line 9's `r.data[r.pos]` is proven, and line 105 is in the skipped function (no entry).
+
+One other task's generated C changed: tally_lang/ail loses one `ail_list_span_get` check and three
+`ck_add` overflows (`index + 1` under a proven bound); stripped binary 71,896 -> 67,800 bytes,
+same stdout (sha256 equal) and exit on the perf input, so it cannot get worse. Every other compare
+task's C is byte-identical in both syntaxes (tally_lang/python and tree_fold/python are the same
+pre-existing build refusals in both trees).
+
+Checks: `test_ail_bce` (10/10), `test_ail_range_checks`, `test_ail_ir_s1`, `test_ail_ir_s3`,
+`test_ail_ir_s3b`, `test_ail_borrowed_owner`, `test_ail_boolfield`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` all pass. Probes (``/tmp/probes``, via
+``~/tools/cmp.sh``): `p1_cursor_ge`, `p2_cursor_gt`, `p3_cursor_bump`, `p4_cursor_alias`,
+`p5_cursor_negative` match CPython on both builds; `p6_cursor_bigtext` stops at `int()` on both
+builds as today. Not run, for the record: the callgrind census over all ten tasks (only ledger_bin
+was measured; tally_lang's change is removals only), the 300-seed difffuzz, and compile timing.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an

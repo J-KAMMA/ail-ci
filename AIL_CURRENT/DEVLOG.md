@@ -1,3 +1,36 @@
+## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
+
+All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for
+ledger_bin):
+
+- (a) `ir/passes/ranges.py` `number_fields()`: each `field.get` is numbered to the earliest earlier
+  `field.get` of the same object SSA value and field name when, on every path between them, no
+  instruction may write that field -- a `field.set` of the name on **any** object of that struct
+  (objects may alias), a call whose effect summary may write the struct's fields or is unknown, or
+  a `try` (its outlined body). `if` arms merge only entries both arms keep; loops iterate to a
+  fixed point whose entry state keeps a field only when the initial state and every back edge
+  agree, so a store anywhere in the loop kills it on the back edge, and nothing survives a loop
+  afterwards. The earlier load's facts, including its guard's refinement, then apply to the later
+  one.
+- (b) every `field.get` of a field listed in `facts['fields']['nonneg']` (bce s4) starts at `lo = 0`.
+- (c) `lengths_of` also returns the `bytes.len` of every load in the same numbered class, so a
+  `bytes` field's length is one value across two numbered loads.
+- (d) probes in `test_ail_bce.py`: `field_cursor_ge` (lengths 0, 1, exactly at the end, one short),
+  `field_cursor_gt` (a `>` guard, not proven), `field_cursor_bump` (a call moving `pos`, not
+  proven), `field_cursor_alias` (`r2.pos = 99` through an alias, not proven), `field_cursor_negative`
+  (the s4 fact retired by a negative store; `r.data[-1]` reads the last byte as CPython does),
+  `field_bytes_len`, `field_cursor_bigtext`.
+
+Number: ledger_bin/ail 5,394,586,605 -> 5,233,458,638 instructions (ratio 0.97013, -2.99%);
+stripped binary 55,512 -> 55,512 bytes; same stdout and exit. Below the lane's 6% target and its 4%
+stop line, so per the stop rule the work stopped instead of changing how `try` functions are
+handled: the remaining hand-edited checks are in `main`, which `passes.optimize` skips
+(`{"skipped": "try"}`), so no range pass sees line 105; `AIL_BCE_EXPLAIN` on ledger_bin is empty.
+tally_lang/ail also changed: one `ail_list_span_get` check and three `ck_add` elided, stripped
+71,896 -> 67,800 bytes, same stdout (sha256) and exit. The other compare tasks' C is identical.
+Tests: test_ail_bce 10/10, range_checks, ir_s1, ir_s3, ir_s3b, borrowed_owner, boolfield,
+safetynet, files, corpus_findings3.
+
 ## 2026-11-05 -- rbbces4: two field-fact soundness holes closed, re-applied (job-rbbces4-11052320)
 
 Re-applied the accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`). `fieldfacts.py`
