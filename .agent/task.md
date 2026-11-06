@@ -1,3 +1,55 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode/deepseek-v4.1-flash-free]
+## Review: ff-icefuzz change (`work..4054bb3`)
+
+**What the diff really does:** It redefines a silent difference as *AIL exits 0 and stdout differs, regardless of CPython's exit status*, writes a reproducer for silent findings, runs minimisation even after a silent stop, and regenerates `RESULTS.md` from a run that stops at seed 699. Only `lab/icefuzz/*` is touched; no compiler/runtime change.
+
+**Probes run (all under /tmp/rprobes or /tmp):**
+- `crashes/crash-01-traceback-name_ref.py`: HEAD compile exits 1, `KeyError: 'ops'`; base identical. CPython exits 1 with `NameError`.
+- `crashes/silent-01-seed699.py` (`stdin=/dev/null`): CPython rc 1, empty stdout; AIL rc 0, prints `bytes 0` + sha. Identical on base.
+- Deleted reproducer content (`global name; NotImplemented='local'; print(NotImplemented)`): CPython rc 0 `local`; AIL rc 0 `NotImplemented`; identical on HEAD and base.
+- `_run_cpython('1/0')` and `_run_cpython('raise SystemExit(1)')` both return `True` (should be discarded).
+- Full documented command rerun: 703 classified (374 matching, 31 different, 273 refused, 25 internal), stopped at seed 699, elapsed 509 s; regenerated crash files byte-identical to HEAD.
+- Seeds 699/385/0/1744 generate identically twice (mutator determinism holds).
+- `tools/update_manifest.py --check` rc 0. `test_ail_safetynet`: 1 module, 0 failed.
+
+**Report claims:** silent definition, silent-reproducer writing, minimisation-after-stop, crash-01 KeyError, manifest, safetynet and "not pushed" are verified. The 701 vs 372/31/273/25 counts are only approximately reproducible (rerun 703/374 due to the stop racing in-flight seeds). "seed 385 recorded as a real exit-status difference" is mechanically true but CPython fails with `NameError`, so it is not a valid oracle comparison. "plain/a unchanged" is unverified (no such probes exist).
+
+**Pre-existing (same on `/tmp/base`, not caused by this change):** AIL's acceptance of `read('65536')`, the `NotImplemented`-global silent difference, and the `name_ref` compiler traceback.
+
+### Defects
+
+1. **The mutator accepts CPython-failing mutants, contrary to "run in CPython … else discard".**
+   Probe: `python3 -c "import sys;sys.path.insert(0,'lab/icefuzz');import mutate;print(mutate._run_cpython('1/0'))"`
+   Expected: `False` (discard); actual: `True`. Consequence: the filed crash reproducer and seed 699 both exit 1 in CPython, so the lab's findings are on programs CPython rejects, not "odd but valid" programs.
+
+2. **The new silent rule stops the run on a CPython error.** `silent = (not loud and ail[1] != cpy[1])` dropped the old `cpy[0] == 0` condition. Probe: `silent-01-seed699.py` → expected not a silent wrong-output comparison (CPython rc 1, TypeError); actual `silent:true`, run stops at seed 699 after only 701 (rerun 703) mutants. The done-check "2000 mutants classified" is not met, and the change itself caused this (old code required CPython rc 0).
+
+3. **The genuine silent difference found earlier was deleted.** Seed 1744 (both rc 0; CPython `keyword if True`, AIL `missing NotImplemented`) had `crashes/silent-01-notimplemented-global.py`, which 4054bb3 removes; the final `RESULTS.md`/`crashes/` no longer file it. Probe: the deleted 5‑line program above; expected it remains filed as the first silent difference; actual: file absent, only the CPython-error case is filed.
+
+**Unverified:** exact elapsed/counts of the worker's run (environment-dependent), and `test_ail_files`/`test_ail_corpus_findings3` (outside this review's required set).
+
+VERDICT: FIX
+[cost $0.0000, opencode tokens {"total": 1025203, "input": 77739, "output": 5044, "reasoning": 30164, "cache.write": 0, "cache.read": 912256}]
+    tool time: bash 11.8 min, read 0.0 min
+        510s bash   cd /home/runner/work/ail-ci/ail-ci date rm -rf /tmp/rfull /tmp/rcfull timeout 900 python3 lab/icefuzz/run.py -
+        164s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 500 python3 ../tools/par_check.py -j 2 test_ail_safe
+          9s bash   cd /home/runner/work/ail-ci/ail-ci rm -rf /tmp/r16 /tmp/rc16 timeout 400 python3 lab/icefuzz/run.py --seed 14 
+          8s bash   cd /tmp/rprobes # Probe B: silent reproducer for wt in /home/runner/work/ail-ci/ail-ci /tmp/base; do   d=$(mkt
+          4s bash   cd /home/runner/work/ail-ci/ail-ci rm -rf /tmp/r699 /tmp/rc699 timeout 300 python3 lab/icefuzz/run.py --seed 6
+          3s bash   cd /home/runner/work/ail-ci/ail-ci for s in 30 63 65 89 112; do   rm -rf /tmp/rr$s /tmp/rrc$s   timeout 120 py
+          3s bash   cd /home/runner/work/ail-ci/ail-ci for s in 385 1744; do   echo "=== seed $s ==="   python3 lab/icefuzz/mutate
+          1s bash   cd /home/runner/work/ail-ci/ail-ci for s in 699 385 0 1744; do   a=$(python3 lab/icefuzz/mutate.py --seed $s 2
+
+
+--- ORIGINAL TASK ---
 Lane: ff-icefuzz
 
 # ffice1: compiler crash fuzzing: mutated Python programs must build or be refused by name, never a traceback
@@ -82,7 +134,7 @@ Stop the run and report at once if a mutant gives silent wrong output. Stop when
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
-- **Commits:** commit with explicit `git add` on your branch. Messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- **Commits:** commit with explicit `git add` on your branch. Messages end with a `Co-Authored-By:` line naming the model you actually are (Claude: `Claude Opus 5.5 <noreply@anthropic.com>` or `Claude Sonnet 5.5 <noreply@anthropic.com>`; other models: omit the line).
 - **Forbidden:** push, stash, rebase, reset, and deletion outside /tmp.
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
