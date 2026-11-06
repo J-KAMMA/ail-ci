@@ -1,4 +1,35 @@
+## 2026-11-06 -- rails2 (rerun): the per-line stdin loop `input().split()` + `int(f[k])` (job-rails2_rr1-11062252)
+
+Finishes the run that was cut off with no review. The runtime fast paths from that branch are
+applied unchanged, then verified and extended; the gate module is new.
+
+- `python/pkg-v12/cruntime.py`: `ail_utf8_decode` copies and classifies a line in one word pass
+  (the old order walked every line twice, `ail__utf8_validate` then `memcpy`) and copies the last
+  <8 bytes as one overlapping word instead of a byte loop. `ail_sarena_keep_roots` releases the
+  one block this iteration's line added when no root points into it, instead of the general
+  extent/root/append walk. The ASCII branch of `ail__str_split_ws_scan` uses the class table
+  alone (no `ail__ws_width` decode), takes the rebinding destination's spine (`reuse`), and
+  writes each piece straight into the vector -- the 32-entry offset list and the second pass that
+  rebuilt every piece from it are gone. `ail_str_to_int` parses an optional sign and 1..18 ASCII
+  digits inline (at most 10^18-1, so the negation cannot overflow).
+- `python/pkg-v12/ir/emit_c.py`: a `str_split_ws` rebind emits `ail_str_split_ws_into(dest, src)`,
+  handing the destination to the split instead of free-then-allocate per line.
+- `test_ail_stdin_split_fast.py` (registered in `tests.d/`): compares stdout and exit status with
+  CPython 3.12 in the default and `AIL_UNIFIED_FORCE=1` builds for tabs, `\r\n`, leading/trailing
+  blanks, empty lines, a line without a final newline, 40 fields, U+3000 (splits) and U+00A0 (does
+  not); `int()` of `-0`, `+5`, `007`, 18/19/20 digits, both int64 ends and 2**70 (the loud stop,
+  and the exact value under `--exact-int`); EOF inside the loop (`EOFError`) and invalid UTF-8
+  (`UnicodeDecodeError`, the documented stop of C?-diffs3-3).
+
+Measured with callgrind Ir (perf_event is not available on this runner: paranoid=4 and no PMU;
+the same method reproduces the design's 210 M / 350-per-line split and 345-per-line `int()`):
+p0 2.26 M, p1 84.5 M, p2 147.6 M, p3 210.1 M -> **149.7 M** (1,164 -> 830 instructions per line,
+-28.8%). Remaining per line, by function: the four `int()` parses plus the loop and the
+`keep_roots` check 336, the split scan 256, the line copy 80, `input()` and its memchr 71, the
+arena take/push 59.
+
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
+
 
 str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
 `Tokenizer` (and the AST ports after it) to the general path was `self.toks = [Tok(...)]` -- a list literal
