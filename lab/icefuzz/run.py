@@ -172,8 +172,7 @@ class Runner:
             else:
                 last = (text(ail[2]).strip().splitlines() or [''])[-1]
                 loud = ail[0] != 0
-                silent = (not loud and cpy[0] == 0 and ail[0] == 0
-                          and ail[1] != cpy[1])
+                silent = (not loud and ail[1] != cpy[1])
                 rec.update(cls='different', ail_rc=ail[0],
                            stdout_diff=ail[1] != cpy[1], loud=loud, silent=silent,
                            reason=('loud runtime stop: ' + last[:180]) if loud
@@ -279,8 +278,9 @@ def write_results(records, args, minimised, elapsed):
     for r in internal:
         groups.setdefault(r.get('group') or 'unknown', []).append(r)
     lines = ['# icefuzz: compiler crash fuzzing', '',
-             'Command: `python3 lab/icefuzz/run.py --seed %d --count %d --jobs %d`'
-             % (args.seed, args.count, args.jobs), '',
+             'Command: `python3 lab/icefuzz/run.py --seed %d --count %d --jobs %d '
+             '--out %s --budget %g`'
+             % (args.seed, args.count, args.jobs, args.out, args.budget), '',
              'Corpus: a fast subset of `lab/stdlib/*/*.py` (<=%d lines, files importing `re`/`decimal`/`datetime`/`tomllib` omitted; '
              'regex/decimal/datetime and other high-lowering modules omitted so each mutant fits the 60 s budget), '
              '`lab/compare/src/*/main.py` (<=%d lines), `lab/limits/*.py` (<=%d lines). '
@@ -297,26 +297,48 @@ def write_results(records, args, minimised, elapsed):
               'Internal errors per 2000 mutants: **%.1f** (observed %d in %d). '
               'Elapsed %.0f s.' % (2000.0 * len(internal) / len(records) if records else 0,
                                    len(internal), len(records), elapsed), '']
+    if silent:
+        lines += ['**The run stopped at the first silent difference (seed %d)**, after '
+                  '%d mutants. The remaining seeds were not run.'
+                  % (min(r['seed'] for r in silent), len(records)), '']
 
     lines += ['## Silent differences (built, stdout differs)', '']
     if silent:
-        lines += ['These stop the run; they are listed before crashes as the job requires.', '',
-                  '| seed | corpus mutation | first difference |', '|---|---|---|']
+        lines += ['These stop the run; they are listed before crashes as the job requires. '
+                  'A silent difference is a build that prints output CPython does not, '
+                  'whatever CPython itself exits with.', '',
+                  '| seed | corpus mutation | first difference | reproducer |', '|---|---|---|---|']
         for r in sorted(silent, key=lambda r: r['seed']):
-            lines.append('| %d | %s | %s |' % (r['seed'], ', '.join(r.get('mutations', [])),
-                                               r.get('reason', '').replace('|', '\\|')[:300]))
+            rep = '`crashes/%s`' % r['reproducer'] if r.get('reproducer') else ''
+            lines.append('| %d | %s | %s | %s |'
+                         % (r['seed'], ', '.join(r.get('mutations', [])),
+                            r.get('reason', '').replace('|', '\\|')[:300], rep))
+        first = sorted(silent, key=lambda r: r['seed'])[0]
+        if first.get('reproducer'):
+            fname = first['reproducer']
+            lines += ['', 'Reproducer (`lab/icefuzz/crashes/%s`, seed %d):'
+                      % (fname, first['seed']), '', '```python',
+                      first.get('silent_source', '').rstrip(), '```', '', '```sh',
+                      'ulimit -v 1500000',
+                      'python3 -B AIL_CURRENT/ail_chatgpt.py compile '
+                      'lab/icefuzz/crashes/%s --syntax python -o /tmp/%s.bin'
+                      % (fname, Path(fname).stem), '```', '']
     else:
         lines.append('None.')
     lines.append('')
 
     other = [r for r in different if r not in silent]
     if other:
-        lines += ['## Built and different (not silent: loud int64 stop or exit status only)', '',
+        lines += ['## Built and different (loud stop or exit status)', '',
                   '| seed | mutations | reason |', '|---|---|---|']
         for r in sorted(other, key=lambda r: r['seed']):
             lines.append('| %d | %s | %s |' % (r['seed'], ', '.join(r.get('mutations', [])),
                                                r.get('reason', '').replace('|', '\\|')[:300]))
         lines.append('')
+        if any(not r.get('stdout_diff') for r in other):
+            lines += ['Rows whose stdout matches CPython but whose exit status differs are '
+                      'real oracle differences (CPython 3.12 compares stdout and exit status); '
+                      'they are not invalid comparisons.', '']
 
     lines += ['## Internal errors grouped by the last traceback frame', '']
     if groups:
@@ -423,7 +445,7 @@ def main():
             submit()
 
     minimised = {}
-    if not args.no_minimise and not runner.stop.is_set():
+    if not args.no_minimise:
         groups = {}
         for r in records:
             if r.get('cls') == 'internal' and r.get('dir'):
@@ -442,6 +464,15 @@ def main():
                                'attempts': attempts, 'seed': rep['seed']}
             print('minimised %s -> %s (%d lines)' % (group, fname, len(src.splitlines())),
                   flush=True)
+
+    for n, r in enumerate(sorted((r for r in records
+                                  if r.get('cls') == 'different' and r.get('silent')),
+                                 key=lambda r: r['seed']), 1):
+        source = (Path(r['dir']) / 'prog.py').read_text(encoding='utf-8')
+        fname = 'silent-%02d-seed%d.py' % (n, r['seed'])
+        (crashes / fname).write_text(source, encoding='utf-8')
+        r['reproducer'] = fname
+        r['silent_source'] = source
 
     elapsed = time.time() - t0
     md = write_results(records, args, minimised, elapsed)

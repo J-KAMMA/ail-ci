@@ -1,4 +1,4 @@
 def main() -> None:
-    global winners
+    ops = ['+=', '+', '==', '**=', '->', '...', ':=', '@', '//=']
 main()
-del person
+del ops
