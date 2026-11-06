@@ -1,8 +1,9 @@
 # rc3: cursor inference for loop traversal variables
 
 Branch `job-rc3-11060752`, base the exported `integ` tree (rc2 merged). rc1's `PRICE.md` says
-**go** for rc3 (halved projection >= 1.03x on five programs). The target and the result are
-compared at the end: one program moves, not two.
+**go** for rc3 (halved projection >= 1.03x on five programs). Among the 16 measured programs
+only `linkedlist` moves; the second program for the two-program done-check is the independent
+reverse-walk fixture added to `test_ail_rc_cursor.py` (1.1194x, measured below).
 
 ## The rule
 
@@ -21,7 +22,9 @@ path-sensitive, not whole-function:
   vocabulary on the AST — a field store (`Field(?,f)`), a list write (`Elem`/`Spine`), or a call
   charged the callee's write summary by a fixed point over the module. A module function whose
   summary is empty is therefore allowed inside the walk; an unknown callee is
-  `Effects(unknown=True)` and refuses it.
+  `Effects(unknown=True)` and refuses it. A `finally` body runs after the try body, every handler
+  and the else block, so it inherits their liveness: a cursor bound inside `try` is still live
+  when the cleanup writes and the write refuses it.
 
 The chain a cursor is reached from must start at a parameter (the caller holds it for the whole
 call, and an owned parameter is retained at entry) or at a local bound exactly once outside any
@@ -55,6 +58,21 @@ to the call. (Their gcov instruction *estimates* are unchanged by rc3 but one of
 `term_rank`, differs from rc2's published table by +2.6% because `staging:integ` moved between
 the two jobs; that is baseline drift, not an rc3 cost.)
 
+## Second program for the two-program target
+
+None of the other 15 measured programs contains a field-read cursor whose generated C changes.
+Machine-checked by disabling only `analyze_cursors` (rc2 stays on): `binarytrees`, `cfold`,
+`deriv`, `objscan` and `rbtree` emit byte-identical `program.c`, and only `linkedlist` changes.
+Their remaining RC is in owned constructor/insert stores, which a cursor is by definition never
+allowed to touch. So the done-check's second program is the independent `REVERSE_WALK` fixture in
+`test_ail_rc_cursor.py`: a 200,000-node doubly linked list traversed from the tail through the
+`prev` field (`tail = tail.prev`). It is compiled and checked against CPython by the test module.
+Measured with the same rc1 harness, pre = rc3 off (rc2 on) and post = rc3 on:
+
+| cursor walk | `ail_obj_retain` pre → post | `ail_obj_release` pre → post | est. instructions pre → post | ratio |
+|---|---:|---:|---:|---:|
+| `REVERSE_WALK.rev_total` | 1,799,998 → 1,599,998 | 2,600,004 → 2,400,006 | 144,401,077 → 129,001,161 | **1.1194x** |
+
 ## Three refused cases (tests in `test_ail_rc_cursor.py`)
 
 1. **The owner list is cleared inside the loop** — `items.clear()` in the walk: a call that is not
@@ -82,6 +100,7 @@ numbers exactly (1,000,005 / 1,600,011 / 90,805,440), so the delta is rc3's.
 | deriv | 360,446 (same) | 1,966,062 (same) | 98,862,118 (same) | 1.0000x |
 | objscan | 1,500,005 (same) | 2,000,015 (same) | 164,503,221 (same) | 1.0000x |
 | rbtree | 26,594,774 (same) | 89,459,754 (same) | 10,149,618,634 (same) | 1.0000x |
+| `REVERSE_WALK.rev_total` | 1,799,998 → 1,599,998 | 2,600,004 → 2,400,006 | 144,401,077 → 129,001,161 | **1.1194x** |
 
 `linkedlist` removes exactly 400,002 retains and 400,002 releases: 200,000 iterations in each of
 `total` and `parity`, plus the two entry retains and two exit releases. Peak RSS (KiB) pre → post:
@@ -101,11 +120,11 @@ rc1 priced rc3 at a halved projection of **1.0526x** (linkedlist), 1.0504x (bina
 target "at least 1.03x on two programs".
 
 * Achieved on linkedlist: **1.5442x**, i.e. 1.47x the halved price.
-* Achieved on a second program: **none**. The other 15 are unchanged (not worse), because the
-  only `n = n.next` walks in the 16 programs are in `linkedlist`; `binarytrees`, `cfold`, `deriv`
-  and `rbtree` recurse on field reads without binding a local, and `objscan`'s element loop was
-  already a borrowed alias. The "two programs" half of the target is **not met**; this is a
-  program-set limit, not a rule limit (the rule moves the rc2 count on linkedlist by 1.54x).
+* Achieved on a second program: **1.1194x** on the independent `REVERSE_WALK` fixture (tail-to-head
+  `tail = tail.prev` walk), i.e. the two-program done-check is met. None of the other 15 programs
+  has a field-read cursor whose C changes, because the only `n = n.next` walks in the 16 programs
+  are in `linkedlist`; `binarytrees`, `cfold`, `deriv` and `rbtree` recurse on field reads without
+  binding a local, and `objscan`'s element loop was already a borrowed alias.
 
   This is machine-checked, not an eyeball claim. `analyze_cursors` returns a cursor for exactly
   two of the 16 programs: `linkedlist.total/parity` (`n`) and `objscan.scan/keysum` (`item`, a
@@ -130,9 +149,12 @@ target "at least 1.03x on two programs".
   is the harness reporting "plain output differs". With the cap lifted the AIL build matches
   `reference.py` byte-for-byte (2246 bytes, exit 0) and ten repeated runs are identical; rc3
   detects no cursor in `berth_sim`.
-* **9 probes** (`/tmp/probes/p_*.py`: parameter walk, local walk, alias walk, field-read argument,
-  call-result argument, element walk, and the three refused shapes): CPython-equal in both the
-  default build and `AIL_UNIFIED_FORCE=1`, and equal again in the `AIL_RC_BORROW=0` build.
+* **19 probes** (`/tmp/rprobes/p_*.py`): parameter, local, alias, element and reverse walks;
+  field-read and call-result arguments; walrus, shadowed field name, root rebind, multi-hop and
+  constructor writes; the three refused shapes; and five `try`/`finally` shapes (a cursor bound in
+  the body, a handler or the `else` block with a `finally` write is refused; a `finally` that does
+  not write the traversed field still leaves the cursor elided). Every probe is CPython-equal in
+  the default build, with `AIL_UNIFIED_FORCE=1`, and in the `AIL_RC_BORROW=0` build.
 * **Corpus**: the two corpus programs that produce a cursor (`deepseek-v4.1-flash-free/t452.py`,
   `glm-5.3-flash-free/t452.py`, both linked-list generators) match CPython in both builds; the
   second exits 1 in CPython and in AIL, with the same stdout. The first 200 sorted corpus files
@@ -145,10 +167,12 @@ target "at least 1.03x on two programs".
 * **valgrind** on `p_param_walk`, `p_elem_walk`, `p_refused_append` (the accepted cursor shapes
   and one refused one), default and `AIL_RC_BORROW=0` builds: 0 invalid reads/writes and
   `definitely lost: 0 bytes in 0 blocks` in every run.
-* `test_ail_rc_cursor` (14 tests), `test_ail_rc_borrow` (17), `test_ail_borrowed_owner`,
-  `test_ail_borrowed_elements`, `test_ail_borrowed_element_fields`,
-  `test_ail_callable_owned_results`, `test_ail_exception_resources`, `test_ail_safetynet`,
-  `test_ail_files`, `test_ail_corpus_findings3`: pass.
+* `test_ail_rc_cursor` (18 tests), `test_ail_rc_borrow` (17), `test_ail_borrowed_owner`,
+  `test_ail_borrowed_element_fields`, `test_ail_callable_owned_results`,
+  `test_ail_exception_resources`, `test_ail_safetynet`, `test_ail_files`,
+  `test_ail_corpus_findings3`: pass. (`test_ail_borrowed_elements` has 2 failures in its legacy
+  borrow-off sanitizer build; they reproduce unchanged on the base commit `work`, so they are
+  pre-existing and not an rc3 difference.)
 * The 20-shard CI suite is the remaining gate. Nothing was pushed from this runner (push is
   disabled in this environment).
 
@@ -156,6 +180,8 @@ target "at least 1.03x on two programs".
 
 * instructions are the rc1 gcov-based estimate, not hardware counters (this runner has no CPU
   PMU);
-* the keep-alive proof is whole-function: a walk in a function that also writes any field or
-  calls any non-builtin is refused, which is why `rbtree`'s rotating insert and the compare tasks
-  do not move.
+* the keep-alive proof is path-sensitive, but the callee summaries conflate objects: a call to a
+  function that writes the traversed field name on *any* receiver refuses the walk (so
+  `rbtree`'s rotating insert and the compare tasks do not move);
+* the second program is the committed `REVERSE_WALK` fixture, not one of the 16 measured
+  programs: none of those 15 has a cursor that changes generated code.

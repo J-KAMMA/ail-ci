@@ -4,12 +4,13 @@ A local whose every binding is a read out of another object (a field read `n = n
 element read, or a parameter) and which is never stored, returned or captured is a *cursor*:
 the owner it was read from keeps the object alive, so it takes no retain and no release.
 
-Two accepted walks (a parameter cursor and a local cursor started from a borrowed parameter),
-a walk that calls a pure reader (the callee's `ir/effects.py` summary has no write), and three
-refused ones (the owner list is cleared, the field is reassigned, the cursor is appended to a
-list) pin the rule down.  Each accepted program is run against CPython; each checks the
-generated C for the absent store helper.  A call that writes the traversed field refuses the
-cursor (`WRITER_CALL`).
+Accepted walks (a parameter cursor, a local cursor started from a borrowed parameter, a walk
+that calls a pure reader whose `ir/effects.py` summary has no write, and a tail-to-head
+`tail = tail.prev` walk) and refused ones (the owner list is cleared, the field is reassigned,
+the cursor is appended to a list, and a cursor bound inside `try` is still live when `finally`
+writes the field it was read from) pin the rule down.  Each accepted program is run against
+CPython; each checks the generated C for the absent store helper.  A call that writes the
+traversed field refuses the cursor (`WRITER_CALL`).
 """
 import ast
 import os
@@ -181,6 +182,28 @@ def main() -> int:
 main()
 """
 
+# 6. the cursor is bound inside `try` and the `finally` cleanup writes the field it was read
+#    from: the binding is still live when the cleanup runs, so the cursor must stay owning.
+FINALLY_REUSE = NODE + """
+def total(head: Node) -> int:
+    acc = 0
+    try:
+        n = head.next
+    finally:
+        head.next = None
+        fresh = Node(99, None)
+        acc += n.value + fresh.value
+    return acc
+
+
+def main() -> int:
+    print(total(Node(1, Node(2, None))))
+    return 0
+
+
+main()
+"""
+
 # 3. the cursor is appended to a list: the list keeps its own reference, which the cursor does
 #    not own.
 APPENDED = NODE + """
@@ -204,6 +227,48 @@ def main() -> int:
 main()
 """
 
+# A second, independent cursor walk: the `prev` field of a doubly linked list, traversed from the
+# tail.  The rc1 instruction estimate on this program is recorded in `lab/rc/RESULTS_CURSOR.md`; it
+# is the second program for the two-program instruction target.
+REVERSE_WALK = """
+from __future__ import annotations
+
+COUNT = 200000
+
+
+class Node:
+    def __init__(self, value: int, next: Node | None, prev: Node | None) -> None:
+        self.value: int = value
+        self.next: Node | None = next
+        self.prev: Node | None = prev
+
+
+def build(n: int) -> Node:
+    head = Node(0, None, None)
+    tail = head
+    for i in range(1, n):
+        node = Node(i % 101, None, tail)
+        tail.next = node
+        tail = node
+    return tail
+
+
+def rev_total(tail: Node | None) -> int:
+    acc = 0
+    while tail is not None:
+        acc += tail.value
+        tail = tail.prev
+    return acc
+
+
+def main() -> int:
+    print(rev_total(build(COUNT)))
+    return 0
+
+
+main()
+"""
+
 
 class CursorTests(unittest.TestCase):
     @classmethod
@@ -213,7 +278,8 @@ class CursorTests(unittest.TestCase):
         for name, text in (("param_cursor", PARAM_CURSOR), ("local_cursor", LOCAL_CURSOR),
                            ("reader_call", READER_CALL), ("writer_call", WRITER_CALL),
                            ("cleared", CLEARED), ("field_written", FIELD_WRITTEN),
-                           ("appended", APPENDED)):
+                           ("appended", APPENDED), ("finally_reuse", FINALLY_REUSE),
+                           ("reverse_walk", REVERSE_WALK)):
             cls.cases[name] = build(cls.directory.name, text, name)
 
     @classmethod
@@ -268,6 +334,18 @@ class CursorTests(unittest.TestCase):
         program = self.check("appended")
         self.assertIn("ail_obj_store_Node(&v_n", body_of(program, "collect"))
 
+    def test_a_cursor_live_across_finally_refuses(self):
+        program = self.check("finally_reuse")
+        self.assertIn("ail_obj_store_Node(&v_n", body_of(program, "total"))
+
+    def test_reverse_walk_cursor_takes_no_reference(self):
+        program = self.check("reverse_walk")
+        body = body_of(program, "rev_total")
+        self.assertNotIn("ail_obj_retain(v_tail)", body)
+        self.assertNotIn("ail_obj_release(v_tail)", body)
+        self.assertNotIn("ail_obj_store_Node(&v_tail", body)
+        self.assertIn("v_tail = (ail_nn_Node(v_tail))->f_prev;", body)
+
     def test_switch_is_the_escape_hatch(self):
         text = Path(self.directory.name, "param_cursor.py").read_text(encoding="utf-8")
         env = dict(os.environ, AIL_RC_BORROW="0")
@@ -300,6 +378,12 @@ class AnalysisTests(unittest.TestCase):
 
     def test_a_pure_reader_call_is_a_cursor(self):
         self.assertIn("n", self.cursors(READER_CALL).get("total", ()))
+
+    def test_a_cursor_bound_in_try_is_live_in_finally(self):
+        self.assertNotIn("n", self.cursors(FINALLY_REUSE).get("total", ()))
+
+    def test_reverse_walk_is_a_cursor(self):
+        self.assertEqual(sorted(self.cursors(REVERSE_WALK).get("rev_total", ())), ["tail"])
 
     def test_a_store_before_the_binding_does_not_refuse(self):
         text = NODE + """

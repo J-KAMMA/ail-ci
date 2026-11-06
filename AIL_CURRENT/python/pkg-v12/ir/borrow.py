@@ -663,17 +663,22 @@ def _live_refuses(fn, name, fields, elem, summaries, classes):
             r, l = seq(st.body, live)
             if r:
                 return True, live
+            after = live or l
             for h in st.handlers:
-                r, _ = seq(h.body, live or l)
+                r, lh = seq(h.body, after)
                 if r:
                     return True, live
-            r, l2 = seq(st.orelse, live or l)
+                after = after or lh
+            r, l2 = seq(st.orelse, after)
             if r:
                 return True, live
-            r, l3 = seq(st.finalbody, live)
+            after = after or l2
+            # `finally` runs after the body, every handler and `else`, so it inherits their
+            # liveness: a cursor bound in the body is still live when the cleanup writes.
+            r, l3 = seq(st.finalbody, after)
             if r:
                 return True, live
-            return False, live or l or l2 or l3
+            return False, after or l3
         if isinstance(st, (ast.With, ast.AsyncWith)):
             return True, live                     # `_structure_ok` already refuses it
         if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
