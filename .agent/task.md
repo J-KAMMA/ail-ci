@@ -1,3 +1,38 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: ffbig0 (docs + lab probes only)
+
+**What the change really does:** adds `docs/design/BIGINT_TYPE.md`, 12 CPython-runnable `lab/bigtype/*.py` programs with `expected/`, and `lab/bigtype/check_model.py` (an AST-instrumented CPython flow model). No compiler or runtime file is touched (`git diff --name-only work..HEAD` = `docs/`, `lab/`).
+
+**Verified**
+- All 12 programs run on CPython 3.12 with a real `ail.types.BigInt = int` stub and match `expected/` byte-for-byte.
+- `check_model.py`: 12/12 `OK`; no model run raises unexpectedly; flow counts equal the note's table.
+- Prior review defect 2 is fixed: probes `xs[0] = big` (list[int]) records `overflow`, as do an unannotated parameter, an annotated `-> int` return with a BigInt value, and nested/starred unpack targets.
+- No-feature program `/tmp/rprobes/plain.py`: `--debug-dir program.c` is byte-identical HEAD vs `/tmp/base` (work).
+- Cited `pyfunc.py` lines 38742, 38806, 38834–38838, 38989, 39019 all exist as described.
+- `tools/update_manifest.py --check` exit 0; `icount` really is unavailable (`perf_event_paranoid=4`); CPU cost numbers roughly reproduce.
+- `test_ail_safetynet` passes on HEAD without the memory cap (255 s). Under `ulimit -v 1500000` `S4_generators_gc` truncates, but identically on base → pre-existing.
+
+**Defects**
+1. **Wrong file in the implementation map.** §5 names `AIL_CURRENT/python/pkg-v12/ail_modules.py`; that path does not exist — the resolver is `AIL_CURRENT/ail_modules.py` (`BUNDLED_DIR` at line 85). Expected: ffbig1 edits the real resolver; actual: following the note creates/edits a non-existent path.
+2. **The proposed `pyfunc.py` hook crashes for ordinary units.** The note binds `_bigunit = intmode.exact_scope(_f.name)` = `None` for an ordinary unit, then uses `_bigunit.param(n)` / `_bigunit.ret` unguarded in the `_params`/`_ret` expressions. Probe (`/tmp/rprobes/p_hook_none.py`, the note's expression with `_bigunit=None`, `_all_tint=False`): expected `False` (the unit stays int64); actual `AttributeError: 'NoneType' object has no attribute 'param'`. Once the loop gate is widened, every unmarked function in a BigInt program hits this. Needs `_bigunit is not None and …` or a null-object marks return.
+
+**Unverified:** `test_ail_files` / `test_ail_corpus_findings3` (not re-run per instructions); "not pushed" (n/a on this runner).
+
+VERDICT: FIX
+1. `AIL_CURRENT/python/pkg-v12/ail_modules.py` does not exist; the note must name `AIL_CURRENT/ail_modules.py`.
+2. The note's one `pyfunc.py` hook dereferences `_bigunit` (documented as `None` for an ordinary unit) unguarded; probe `p_hook_none.py` gives `AttributeError` where the ordinary unit should take the int64 path.
+[commandcode stop=end_turn turns=30 out_tokens=50268]
+
+
+--- ORIGINAL TASK ---
 Lane: ff-bigint
 
 # ffbig0: design an explicit big-integer type for Python syntax (design note and probes only)
@@ -82,9 +117,13 @@ Push first.
 - CPython 3.12 is the oracle: compare stdout and the exit status, and stderr where a task says so.
 - Speed claims: instruction counts with `tools/icount.c`, output unchanged.
 
+## Owner decision (2026-11-06)
+
+- BigInt spelling: `from ail.types import BigInt`; under CPython, `BigInt = int`. One minimal pyfunc.py hook is allowed, but only when no other running job edits that file.
+
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
-- **Commits:** commit with explicit `git add` on your branch. Messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- **Commits:** commit with explicit `git add` on your branch. Messages end with a `Co-Authored-By:` line naming the model you actually are (Claude: `Claude Opus 5.5 <noreply@anthropic.com>` or `Claude Sonnet 5.5 <noreply@anthropic.com>`; other models: omit the line).
 - **Forbidden:** push, stash, rebase, reset, and deletion outside /tmp.
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
