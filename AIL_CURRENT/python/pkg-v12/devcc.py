@@ -9,9 +9,13 @@ before any C is compiled; there is no partial build and no silent difference.
 
 The finding this follows (``lab/tccdev``, 2026-11-01) is that tcc 0.9.28
 accepts AIL's generated C once the three checked-overflow builtins are given a
-portable definition.  ``__int128`` is the construct tcc cannot compile, so a
-program that reaches it (a range slice, ``list(range(...))``, 3-argument
-``pow``) is refused rather than mis-compiled.
+portable definition.  tcc 0.9.27 has no ``_Thread_local`` and no size inference
+for unsized aggregate literals/declarations, which nearly every generated C
+uses, so that whole version is refused by its ``tcc -v``.  On 0.9.28 the corpus
+gate (``lab/devcc/gate.py``) found three constructs to refuse by name: 128-bit
+integers (``__int128``, ``__int128_t``, ``__uint128_t``), ``__builtin_fabs``
+and ``__builtin_isinf``.  A program that reaches one is refused rather than
+mis-compiled.
 
 MIR is reached as an external ``c2m`` command only (`$AIL_MIR_C2M`, else
 ``c2m`` on PATH).  c2m cannot write an executable, so ``--cc=mir`` is accepted
@@ -21,6 +25,7 @@ message.
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -40,10 +45,22 @@ MODE_ENV = 'AIL_DEVCC'
 MIR_ENV = 'AIL_MIR_C2M'
 MODES = ('tcc', 'mir')
 
+# tcc 0.9.27 predates the parser fixes this generated C needs: it fails on
+# _Thread_local, unsized aggregate literals/declarations and __builtin_unreachable.
+# tccprobe1 measured 0 of 50 programs building with it, so the whole version is
+# refused instead of enumerating constructs that would refuse almost everything.
+_TCC_MIN_VERSION = (0, 9, 28)
+_TCC_VERSION = re.compile(r'\btcc version\s+(\d+)\.(\d+)\.(\d+)')
+
 # Constructs reached by the generated C that the tool does not implement.
 # Keep the names exactly as they appear in the C: the message quotes them.
 _TCC_CONSTRUCTS = (
-    ('__int128', re.compile(r'\b(?:unsigned\s+)?__int128\b')),
+    # tcc has no 128-bit integer: `unsigned __int128` and the gcc typedefs
+    # `__int128_t` / `__uint128_t` all fail (devcc3 gate measured `__uint128_t`).
+    ('__int128', re.compile(r'\b(?:unsigned\s+)?__int128\b|\b__u?int128_t\b')),
+    # tcc neither defines these builtins nor links them from libm (devcc3 gate).
+    ('__builtin_fabs', re.compile(r'\b__builtin_fabs\b')),
+    ('__builtin_isinf', re.compile(r'\b__builtin_isinf\b')),
     ('__builtin_choose_expr', re.compile(r'\b__builtin_choose_expr\b')),
     ('__builtin_types_compatible_p', re.compile(r'\b__builtin_types_compatible_p\b')),
     ('__builtin_shuffle', re.compile(r'\b__builtin_shuffle\b')),
@@ -138,6 +155,27 @@ def executable(name):
     return found
 
 
+def tcc_version(tool):
+    """The ``x.y.z`` tuple from ``tcc -v``, or None when it cannot be read."""
+    try:
+        done = subprocess.run([os.fspath(tool), '-v'], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = _TCC_VERSION.search((done.stdout or '') + (done.stderr or ''))
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _check_tcc_version(tool):
+    version = tcc_version(tool)
+    if version is not None and version < _TCC_MIN_VERSION:
+        text = '%d.%d.%d' % version
+        raise DevCCRefusal(
+            '--cc=tcc: tcc %s cannot build this generated C; use tcc 0.9.28 or later, '
+            'or build without --cc' % text)
+
+
 def _refuse(name, construct, line):
     raise DevCCRefusal(
         '--cc=%s: this program uses %s (line %d of the generated C), which %s '
@@ -214,6 +252,9 @@ def rewrite(command, phase='compile_link'):
         raise DevCCRefusal(
             '--cc=mir: c2m cannot write an executable, so --cc=mir is available only '
             'for a run-style command; build without --cc')
+    tool = executable(name)
+    if name == 'tcc':
+        _check_tcc_version(tool)
     source_paths = _sources(command)
     for source in source_paths:
         try:
@@ -221,7 +262,6 @@ def rewrite(command, phase='compile_link'):
         except OSError:
             continue
         scan(name, text)
-    tool = executable(name)
     directories = []
     if name == 'tcc' and source_paths:
         replaced, directory = _with_prelude(source_paths)
