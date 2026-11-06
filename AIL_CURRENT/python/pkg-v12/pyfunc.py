@@ -2102,6 +2102,8 @@ _BORROWED_PARAMS = {}
 # rc2 (ir/borrow.py): True while the read-only-parameter rule is on. It then decides the elision
 # for every managed reference kind, not only the class instances the legacy scan covered.
 _BORROW_WIDE = False
+# rc3 (ir/borrow.py): {function: cursor locals}, set by the same hook as _BORROWED_PARAMS.
+_CURSORS = {}
 
 
 def _scan_borrowed_params(tree, library, entries=()):
@@ -21648,7 +21650,8 @@ def _loop_local_releases(statement, ctx, ind):
     for name, escaped in getattr(ctx, 'loop_local_points', {}).get(id(statement), ()):
         kind = ctx.types.get(name)
         if not (name in ctx.locals and name not in ctx.kind and kind is not None
-                and name not in ctx.borrowed_aliases):
+                and name not in ctx.borrowed_aliases
+                and name not in getattr(ctx, 'cursor_locals', ())):
             continue
         # A list buffer moved into another container (or left by a jump) must stay alive; a
         # struct reference is retained by those operations, so its established release stays.
@@ -23791,7 +23794,7 @@ def _stmt_inner(node, ctx, ind):
                 and _is_olist_kind(_etype(node.value.value, ctx))):
             # `let p = xs[i]`: take the retained element straight into `p`; the generic path
             # would park it in a temp and then retain it again for `p`.
-            borrow = t.id in ctx.borrowed_aliases
+            borrow = t.id in ctx.borrowed_aliases or t.id in getattr(ctx, 'cursor_locals', ())
             v = _olist_get_value(node.value, ctx, owned=True, borrow=borrow)
             adopt = True
             if borrow:
@@ -23808,6 +23811,10 @@ def _stmt_inner(node, ctx, ind):
         if ctx.type_of(t.id) == NSUM and vt == FLT:
             ctx.parts.add('FSUM')
             v = 'ail_nsum_from_float((double)(%s))' % v
+        if _is_obj_kind(vt) and t.id in getattr(ctx, 'cursor_locals', ()):
+            # rc3: a cursor is a plain pointer copy. The object it points into is kept alive by
+            # the owner the chain started from (proved in ir/borrow.py), so no retain/release.
+            return pre + '%s%s = %s;\n' % (pad, c, v)
         return pre + '%s%s;\n' % (pad, _obj_store(c, v, vt, ctx, adopt=adopt)
                                   if _managed_obj(vt, ctx) else '%s = %s' % (c, v))
 
@@ -28458,7 +28465,8 @@ def _for_inner_impl(node, ctx, ind):
             bind = ''.join('%s    %s = (%s)->f_%s;\n' % (
                 pad, ctx.declare(name.id, info.field_types[field]), element_c, field)
                 for name, field in zip(nested, info.field_order))
-        elif element.id in ctx.borrowed_aliases and wrapper is None:
+        elif (element.id in ctx.borrowed_aliases
+              or element.id in getattr(ctx, 'cursor_locals', ())) and wrapper is None:
             bind = '%s    %s = %s;\n' % (pad, target, element_c)      # the list outlives the loop (_mark_borrowed_aliases)
         else:
             bind = '%s    %s;\n' % (pad, _obj_store(target, element_c, element_kind, ctx))
@@ -38361,10 +38369,14 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         raise Unsupported('%s: a module variable rebound with `global` is built only into a whole '
                           'program, not a library or a separately compiled module'
                           % ', '.join(sorted(_MODCONSTS.vars)))
-    global _BORROWED_PARAMS, _BORROW_WIDE
+    global _BORROWED_PARAMS, _BORROW_WIDE, _CURSORS
     from ir import borrow as _borrow          # rc2: the read-only-parameter rule (ir/borrow.py)
     _BORROW_WIDE = _borrow.enabled()
     _BORROWED_PARAMS = _borrow.analyze(tree, library, {name, entry}) if _BORROW_WIDE else {}
+    # rc3: cursor locals. A cursor parameter is borrowed too (no entry retain, no exit release).
+    _CURSORS = _borrow.analyze_cursors(tree, _BORROWED_PARAMS, library) if _BORROW_WIDE else {}
+    for _fname, _cnames in _CURSORS.items():
+        _BORROWED_PARAMS[_fname] = _BORROWED_PARAMS.get(_fname, frozenset()) | _cnames
     # Nested functions (pkg-closure): lifted to ordinary top-level siblings, spliced into
     # `tree.body` immediately before the function that used to contain them, BEFORE anything below
     # inspects `tree.body` -- see the module note above `_lift_nested_functions`. A program with no
@@ -40767,6 +40779,10 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     _bind_object_types(fn, ctx)
     ctx.freeable_objs = _mark_freeable_objects(fn, ctx) if ctx.classes else set()
     ctx.borrowed_aliases = _mark_borrowed_aliases(fn, ctx) if ctx.classes else set()
+    # rc3: a cursor owns nothing at all -- no entry retain, no exit release, no loop-point
+    # release, no cleanup-frame entry.  It is kept apart from `borrowed_aliases`: the IR path
+    # refuses a list whose local is a legacy borrowed alias, and a cursor list is not one.
+    ctx.cursor_locals = set(_CURSORS.get(fn.name, ()))
     # The compile-time key range for a set, and therefore its representation -- decided here,
     # before a line of the body is compiled, for the same reason every other container decision in
     # this function is: `seen = set()` has to emit the right structure the first time it is seen.
@@ -40885,7 +40901,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
             # Raising helpers transfer control to the caller; successful paths leave it intact.
             ctx.has_try = False
     object_refs = object_params + [v for v in ctx.locals
-                                   if _managed_obj(ctx.types[v], ctx) and v not in ctx.borrowed_aliases]
+                                   if _managed_obj(ctx.types[v], ctx) and v not in ctx.borrowed_aliases
+                                   and v not in getattr(ctx, 'cursor_locals', ())]
 
     def _free_fn(v):
         if v in getattr(ctx, 'builders', ()):

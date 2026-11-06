@@ -121,6 +121,7 @@ class _Checker(object):
         borrowed-value rule)."""
         names = self.fn.attrs.get('borrow')
         explicit = names is not None
+        cursor_names = set()
         if not explicit:
             # rc2: `ir/borrow.py` decides the set on the AST and the legacy emitter records it on
             # `pyfunc._BORROWED_PARAMS` before any function is lowered, so the IR check sees the
@@ -132,15 +133,21 @@ class _Checker(object):
             if not isinstance(table, dict) or not getattr(pyfunc, '_BORROW_WIDE', False):
                 return
             names = table.get(self.fn.name)
-        if not names:
+            # rc3: cursor locals are borrowed values too (a plain pointer copy, no reference).
+            cursor_names = set((getattr(pyfunc, '_CURSORS', None) or {}).get(self.fn.name, ()))
+        if not names and not cursor_names:
             return
         by_name = dict(zip(self.fn.param_names, self.fn.params))
-        for n in names:
+        for n in names or ():
             if n not in by_name and explicit:
                 self.err('borrow', 'borrowed parameter %r is not a parameter' % (n,))
             elif n not in by_name:
                 continue
-        borrowed = {by_name[n] for n in names if n in by_name}
+        borrowed = {by_name[n] for n in (names or ()) if n in by_name}
+        for ins in I.walk(self.fn.body):
+            if ins.op == 'local.alloc' and ins.result is not None \
+                    and ins.attrs.get('name') in cursor_names:
+                borrowed.add(ins.result)
         # `store` copies a value into a local slot (`local.alloc`), which does not outlive the
         # call; the stores that do hand a reference on are the field/list/dict/global ones.
         # Only the VALUE operands hand a reference on. The first operand of these stores is the
