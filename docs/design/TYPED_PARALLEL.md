@@ -64,6 +64,32 @@ the typed path (`AIL_CURRENT/python/pkg-v12/pyc.py:675`). The runtime is one int
 CPython's GIL behaviour (`AIL_CURRENT/python/pkg-v12/thread_prelude.py:6-7`,
 `AIL_CURRENT/python/pkg-v12/threadrt.py:1-2`); it is memory-safe and not parallel.
 
+## Reductions: `acc += e` in a parallel body (fbred3)
+
+The exact shared-int reduction of `docs/design/PAR_REDUCE.md` is lowered by `parallel.py` and
+`pyfunc._par_for`/`_par_outline` onto `cruntime.PARRED`'s `ail_par_reduce_run`. The accepted shape
+is `acc += e` or `acc -= e` on an int local of the enclosing function that the body touches nowhere
+else (no other store, no read); several accumulators are allowed. `parallel._Body` records the
+accumulators and their sign in the loop's `.par` facts (`reductions`), and `_par_for` asks for the
+`PARRED` part. `_par_outline` lifts the body twice instead of once: a chunk function that keeps,
+per accumulator, the chunk partial sum and its largest/smallest prefix in `__int128` (so a
+chunk-local overflow is not a trap, and the global total may still fit), and a re-run function that
+is the same loop with the ordinary checked add, writing `acc[]` after every update so a caught stop
+leaves the last prefix that fitted. The call site keeps the accumulator values in `_arK[]`, calls
+`ail_par_reduce_run`, and writes them back to the enclosing locals, so a read after the loop sees
+the sequential value. Only the chunk where the sequential loop stops (the first failed chunk, or
+the first whose `B + mx`/`B + mn` leaves int64) is re-run alone; every other chunk adds its partial
+sums. The proof is `PAR_REDUCE.md`'s; the runtime's differential test is `test_ail_par_reduce_rt`.
+
+Scope in v1: only the Python surface (`AIL_SURFACE=python`) is lowered, so the AIL surface keeps
+the old refusal. Refused by name, with a `write instead:` line: a float accumulator, the
+accumulator read in the body, a mixed `+=`/`-=` on one name, and a `parallel for` inside `try`.
+The `sum(ex.map(f, xs))` / `sum(pool.map(f, xs))` shapes already lower through `typedpar`'s
+`_ail_pmap` and are already exact (the map finishes, in order, before the left-to-right sum; so a
+map exception after the overflow index wins, as in the sequential map); fbred3 changes nothing
+there. `sum(parallel_map)` inside a parallel body stays refused by the container-returning-call
+rule. See `lab/race/reduce/RESULTS.md`.
+
 ## Which path a program gets
 
 1. If the program uses `threading`/`queue`/`concurrent.futures`, `threadlib.refuse_typed` stops the
