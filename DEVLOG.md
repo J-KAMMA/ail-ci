@@ -283,6 +283,207 @@ hardware instruction counter here (`perf_event_open: Permission denied`, no valg
 measured as wall time on three compare-lab programs and on a 5M-call microbenchmark: unchanged within
 noise (0.14-0.15 s either build); the added work is two memory increments/decrements per frame plus one
 compare/branch per generated call.
+## 2026-11-06 -- cmprival1: AIL against the Python compilers Nuitka, Cython, mypyc and Codon
+
+New measurement lab, `lab/compare_rival/`, answering the owner's 2026-11-06 question: does AIL still win any
+column against tools that compile the same Python sources? No compiler or runtime file changed. Each of the ten
+`lab/compare/src/<task>` programs is built by `ail` (from `typed.py`), `ail-py` (`main.py`), plain and annotated
+Cython, Nuitka, mypyc and Codon (both sources), then every public and hidden case is checked against the task's
+`reference.py`. Versions are pinned in `toolchains.env` (Cython 3.3.1, mypy 2.4.1, Nuitka 4.3.4, Codon 0.20.6,
+Apache-2.0). Mojo is "not measured: needs an account". The tables are in `RESULTS.md` / `results.json`; the
+manual workflow proposal is `compare-rival.yml` (outside `.github/`).
+
+Headline, stated as plainly as the losses: AIL wins wall time (5.06x geomean against the best rival, 9/10 tasks),
+peak RSS (3.06x, 9/10), artifact size (8.09x, 10/10), build disk (6.96x, 10/10) and build time (1.09x better,
+6/10); it loses instructions (1.87x worse, n=1 because callgrind is capped). Codon compiles neither `typed.py`
+(the `ail` runtime is unimportable) nor most `main.py` files; it is the only tool silently wrong on both probes
+it reaches (overflow and deep recursion, 2/5), and mypyc is silently wrong on deep recursion too.
+
+Review fix (cmprival1-fix1):
+- `run.py --merge` used `glob('*.json')`, but `actions/download-artifact` writes `results/<artifact>/*.json`;
+  it is now `rglob` and an empty merge exits 2 with a message instead of `render(None)` crashing.
+- The five-line verdict printed `- - ` because `verdict()` already returned a leading `- `; the prefix now lives
+  only in `render()`.
+- `classify()` now implements the documented test: a non-zero exit is `stops loudly` only when it reproduces a
+  non-empty CPython stdout prefix; otherwise it is `stops loudly (stdout differs)`. The safety table was re-run
+  under the new rule.
+- `README.md` and the `run.py` docstring now spell out every reduction from `lab/compare/run_task.py`
+  (one cold build, RUN_TIMEOUT 180 s, CASE_TIMEOUT 30 s, CALLGRIND_TIMEOUT 120 s, the 4 s callgrind skip and the
+  240 s case budget) and the consequence: 59 of 70 rows have `-` for instructions and the instruction verdict is
+  n=1 (the two `timeout` rows are `cython-typed` on `scar_life` and `tree_fold`).
+  Restoring the reference timeouts means re-measuring, so the text was corrected instead.
+
+Review fix (cmprival1-fix2):
+- The reductions are now actually stored: `results.json` has a `settings` object (`build_runs`, `run_timeout_s`,
+  `case_timeout_s`, `callgrind_timeout_s`, `callgrind_max_wall_ms`, `case_budget_s`), written by `run.py` and
+  preserved by `--merge`; `RESULTS.md` renders that object. This makes the README/docstring claim true.
+- `classify()` now applies the wording exactly: only a non-empty CPython stdout prefix counts as `stops loudly`.
+  `nuitka recursion` (exit 139, both stdouts empty) is therefore `stops loudly (stdout differs)`, not `stops loudly`.
+- The headline above had build time in the loss list; it is a win (1.09x, 6/10) and is now listed there. Codon is
+  "the only tool silently wrong on both probes", not "the only tool with silent wrong answers" (mypyc is wrong on
+  deep recursion too).
+
+## 2026-11-06 -- proof1: race census finds `threading.Thread(target=...)` (review fix, job-proof1-11070205)
+
+A review of the census found that the race count missed every `threading.Thread(...)` target, and
+that two documents still quoted stale numbers; no compiler source is touched.
+
+- `lab/proof/census.py` `_region_targets`: accept `threading.Thread(...)` (and `t.Thread(...)`) as
+  well as the bare `Thread` name; 11 worker functions of 10 refused-shape programs were invisible.
+- Race counts corrected and `census.json` regenerated with `python3 lab/proof/census.py --jobs 2`:
+  79 safe + 79 refused = 158 distinct accesses (was 104); refused by rule D1 11 (was 2), D3 2
+  (was 0), D4 6 (was 4), 60 unknown (was 19); 16 worker functions of the 14 D5-refused shapes
+  (was 5).  The non-race summary, blocker table and boxed-reason table are byte-identical.
+- `lab/proof/RESULTS.md` (headline 3, race table, bounds-reason note) and
+  `docs/design/SAFETY_PROOF.md` (P7, P8, section 8) use the corrected numbers.  The bounds note no
+  longer claims per-build duplicates: 792 of the 1875 `AIL_BCE_EXPLAIN` records belong to
+  functions with no IR record.
+- The original proof1 entry below now quotes the corrected totals (3255 function records, 907 typed
+  = 27.9%, 645 in refused programs, 219-line design); it previously repeated the rejected 4958 /
+  1552 / 1703 / 123-access figures.
+
+## 2026-11-06 -- proof1: census + design for "Rust's safety without writing lifetimes" (job-proof1-11070008)
+
+Measurement and design only; **no compiler behaviour changes** (no file under `AIL_CURRENT/` was
+edited).  The question: how much of real Python does today's analysis already prove memory-safe,
+in-bounds and race-free?
+
+- `lab/proof/census.py`: imports the compiler's own analyses and reports, per typed function of
+  three corpora, what they prove.  Ownership from `ir/borrow.analyze` (rc2); bounds from the
+  `AIL_IR_STATS` pass statistics of `ir/passes/ranges.py` plus the `AIL_BCE_EXPLAIN` per-site
+  reason; races from `typedpar.rewrite_text` and `parallel._Body`/`check_callee`.  Builds use the
+  real Python surface (`ail_chatgpt._load_sources`) with `PIPE_CC=/bin/true` and
+  `AIL_FE_JOBS=1`, so it is compile-only and reproducible.  Where an analysis has no API to ask,
+  the census records a blocker (`NO_API`) instead of patching it.
+- Corpora: 20 `lab/compare/src` programs, the 55 `lab/pyproof` programs, the first 200
+  `corpus/gdev` programs (275 program records, 3255 function records; 265 distinct non-race
+  files), plus the 31 `lab/race` probes.
+- Result: 80.9% of reference-parameter RC pairs (1658/2050) are already elided; 13.6% of the index
+  sites in IR-lowered functions (166/1221) have their check removed and 4744 more sites are in
+  functions the IR never lowers; 79 of 158 shared accesses in parallel regions are classified safe,
+  79 refused (19 by a named rule, 60 unknown).  Of 3255 function records, 907 (27.9%) are on the
+  typed path, 1703 (52.3%) are boxed and 645 (19.8%) are in programs both paths refuse; 1552 are
+  not boxed, but 645 of those never compiled.  The top 14 blockers are ranked in
+  `lab/proof/RESULTS.md`.
+- `docs/design/SAFETY_PROOF.md` (219 lines): the claim, the precise rule for each of the three
+  properties grounded in the module that implements it, the degrade-to-runtime-check policy, the
+  `file:line: could not prove <property>: <reason>; runtime check kept` diagnostic and its three
+  delivery modes, the module map, a nine-job plan ordered by blockers removed, and what Rust still
+  proves that this cannot.
+- Probes (`/tmp/probes`, `cmp.sh`, both builds): `own1.py` (class instance through an argument, a
+  global and an attribute), `bnd1.py` (in-range and boundary index reads), `race1.py` (executor
+  map), `race2.py` (`global` increment under threads) — all match CPython on the general and the
+  default build.  `AIL_BCE_AUDIT=1` on a loop over a proved-in-range list emits one
+  `ail_bce_audit_fail("py_main", 0)` site, which is the existing "runtime check kept" for a
+  removed bound check.
+## 2026-11-06 -- robo1 review fix: par_range blocker and jitter tail (job-robo1-11070123)
+
+Review fix, docs only; no compiler or runtime change. `RESULTS.md` §2 still carried the stale
+`pthread_mutex_t` first error. Reproduced the bare-metal build: the measured first error (and
+`results.json`) is `program.c:516:38: 'CLOCK_MONOTONIC' undeclared`. newlib does declare the pthread
+types (line 473 compiles), but `_POSIX_THREADS` is off, so `PTHREAD_MUTEX_INITIALIZER` /
+`PTHREAD_COND_INITIALIZER` (lines 568/571) are undefined too. Same correction in the
+`census_par.py` docstring. `RESULTS.md` §3 now reports the true per-run worst miss, C 198-312 us
+and AIL 203-636 us (the 636 us is one alloc run), instead of 271-406 us.
+
+## 2026-11-06 -- robo1: AIL on ARM/Cortex-M3 and 1 kHz control-loop jitter (job-robo1-11062354)
+
+Measurement probe for the owner's "could AIL be a robot language" question. No compiler or runtime
+file changed; the change is new `lab/robo/` only (README, RESULTS, run.py, progs, harness, results.json).
+
+- Cross builds: `pid.py`, `ringbuf.py`, `kin2.py` emit C that cross-compiles unchanged at `-O2` to
+  `aarch64-linux-gnu`, `arm-linux-gnueabihf` and `arm-none-eabi` Cortex-M3 (newlib-nano + rdimon,
+  QEMU `mps2-an385`), and stdout matches CPython 3.12 byte for byte in all 12 cells. Bare metal needs
+  `-u _printf_float`; without it every float silently prints `0.0`. Sizes 44-49 KB text, 11 KB bss.
+- Blocker census, first error per subsystem: `threading` forces the boxed path and stops at
+  `__int128`; `par_range` at `CLOCK_MONOTONIC` (the pthread types exist; the initializer macros
+  and `clock_gettime` do not); `tcp_listen` at `sys/socket.h`; a >1 MiB
+  `read_bytes` at `sys/mman.h`; `time.perf_counter`/`sleep` at `CLOCK_MONOTONIC` (newlib-nano has
+  no `clock_gettime` or `nanosleep`). `read_bytes`/`write_bytes` and `get_env` build and run;
+  bare metal `getenv` returns NULL, so `get_env("PATH","missing")` prints `PATH = missing`.
+- 1 kHz, 20 000 iterations, median of 3: p50 59/60/61 us, p99 66/68/71, p99.9 98/108/114, max
+  271/247/5596 us, overruns 0/0/5 (C / AIL / MicroPython 1.22.1). The C row is the noise floor of a
+  shared runner.
+- RAM: native peak RSS 1.6-2.2 MB; bare-metal heap high-water 20-224 B.
+
+Probes: `bash ~/tools/cmp.sh` on all three programs: the general path and the default build both
+report "same stdout" (3/3 programs x 2 builds). No compiler behaviour changed, so no new
+DIFFERENCES row.
+## 2026-11-06 -- vibe1 review 3 fix: brief now matches the with/yield, dict-view and class-decorator facts (job-vibe1-11070409)
+
+Review-3 fix; no compiler change.
+
+- `AIL_FOR_AI.md` said "a `with` block around a `yield` inside a generator is refused".
+  Probe `withyield_builtin.py` (`with open(...): ... yield`) builds on both g and d, exit 0,
+  same stdout as CPython; only a user context manager is refused (`withyield_user.py`). The
+  brief and refusal list now say "user context manager" and note that builtin `open` works.
+- The brief said `x = d.items()` is fine and omitted the dict-view refusal. Probes:
+  `items_nomut.py` builds, but `items_aftermut.py` / `keys_aftermut.py` / `values_only.py`
+  are refused by name ("a dict view kept in a name ... it is a snapshot") on both builds.
+  The brief now gives the mutation boundary and the rewrite (`list(d.items())`).
+- The brief said a decorator on a class "falls back to the general path" with "the same
+  output". Probe `class_deco.py` builds but runs with exit 1 and `AttributeError: type
+  object 'C' has no attribute 'tag'`: the decorator is dropped. The brief now states that
+  a class decorator is silently dropped and warns against using one. (Pre-existing compiler
+  behaviour; no compiler change in this job.)
+- Probes re-run: `withyield_builtin` g/d same stdout; `withyield_user`, `items_aftermut`,
+  `keys_aftermut`, `values_only` refused by name; `items_nomut` same stdout;
+  `class_deco` known dropped-decorator `AttributeError`.
+- `python3 tools/par_check.py -j 2 test_ail_safetynet test_ail_files
+  test_ail_corpus_findings3`: 3 modules, 0 failed. `tools/update_manifest.py --check`: rc 0.
+
+## 2026-11-06 -- vibe1 review 2 fix: exact refusals in the brief, honest budget flag (job-vibe1-11070147)
+
+Review-2 fix; no compiler change.
+
+- `AIL_FOR_AI.md` claimed generators/`with` all work and that every decorator outside
+  @staticmethod/@property/@lru_cache/@cache is refused. Probes show a `with` (user context
+  manager) around a `yield` is refused by name (`not in the subset: \`with\` around a \`yield\``),
+  while `@classmethod` builds and prints the same as CPython. The brief now names the with/yield
+  refusal and scopes the decorator rule to a `def` (staticmethod/classmethod/property on a method,
+  lru_cache/cache on a top-level function; a class decorator falls back to the general path).
+- `run.py` `pump()` checked the deadline before the combo queue, so a run that finished every
+  combo with `--minutes` set still printed `[budget] stop scheduling` and stored
+  `stopped_early: true`. It now pulls from the queue first and stops only when work remains.
+- Probes re-run (`withyield` user-CM refused; `classmethod_dec`/`property_dec` build and match;
+  `deco.py`/`bigint.py` refused by name). A stubbed pump probe completed its only combo after the
+  deadline and recorded `stopped_early: false`.
+
+## 2026-11-06 -- vibe1 review fix: correct brief, real budget, first run (job-vibe1-11070147)
+
+Review fix for vibe1; no compiler change.
+
+- `AIL_FOR_AI.md` claimed `x = d.items()` and `@property` refuse at compile time. Probes
+  (`dictview.py`, `property_dec.py`, `.agent/cmp.sh`) show both build and match CPython; only
+  `--strict` refuses the dict view. The brief now names the real refusals (an int64
+  constant, a decorator on a def other than @staticmethod/@classmethod/@property on a method
+  or @lru_cache/@cache on a top-level function, multiple inheritance, `with` around a `yield`;
+  see the review-2 entry above) and says the default build falls back to the general path
+  for everything else.
+- `run.py` submitted every combo to the pool up front, so `--minutes` stopped nothing. It now
+  keeps only `--jobs` attempts in flight, stops scheduling at the deadline, and runs seed-outer
+  so a cut run still has complete columns. `results.json` meta is derived from the rows present
+  after a resumed run. A call over `--call-timeout` ends that attempt (gave up), not the run.
+- `run.py` now unlinks the output before an AIL build: `compile -o` refuses to overwrite an
+  existing binary, which made every fix round fail with `error: output already exists`
+  (`echo_pack` was recorded as refused after 5 such rounds; it now builds first try).
+- First real run (`deepseek-v4.1-flash` via `cmd --effort low`, 5 rounds, 300 s/call): seed 0 is
+  complete (11 tasks x 3 languages); seed 1 is partial (python 8/11, rust 1/11, ail 0/11) because
+  the wall-clock budget stopped scheduling. Seed-0 correct: python 9/11, rust 11/11, ail 7/11.
+  Silent-wrong 0 in every column; one loud stop (AIL, `tally_lang`). Every built AIL program took
+  the general path (0 typed, 8 general, 0 refused). `lab/vibe/RESULTS.md` has the tables and the
+  five-line verdict.
+
+## 2026-11-06 -- vibe1: the vibe-coding benchmark harness (job-vibe1-11070015)
+
+New `lab/vibe/`: the same AI writes the ten compare-lab tasks and `csv_rollup` in Python, Rust
+and AIL, and the harness records correct programs, fix rounds, silent-wrong and loud-stop counts
+and loop seconds. `run.py` asks a model CLI for one file, runs the task's public cases, sends the
+compiler/runtime error or first diff back for up to five rounds, then runs the hidden cases; every
+round is in `results.json`. `AIL_FOR_AI.md` (30 lines) is the language note for the AIL column,
+`vibe.yml` is a proposed manual workflow (not under `.github/`).
+
+Nothing in the compiler changed, so the only probes are for the claims in `AIL_FOR_AI.md`.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 

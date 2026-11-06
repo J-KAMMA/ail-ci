@@ -46,3 +46,45 @@ Instruction counts: unavailable: perf_event_open denied: perf_event_open: Permis
 python3 lab/regex/gen_text.py --out /tmp/ffre1-data
 python3 lab/regex/run.py --data /tmp/ffre1-data
 ```
+
+## ffre2: literal / first-byte prefilter -- measured, not landed
+
+The candidate change computed two things at build time and fed them to the generated engine: a
+**required literal** (a string every match contains, e.g. `] ERROR ` in `\[(\d+)\] ERROR (.*)`) used only
+as an absence filter, and the set of **ASCII bytes a match can start with**, searched with one
+`str.find` per byte (memchr) to move the start position.  Both were measured against the workloads the
+task names; neither moves them, so per the task's stop rule the change is **not landed** and `relib.py`
+is left as it was after ffre1 (literal-prefix prefilter only).
+
+### Why the prefilter cannot move these workloads
+
+The three named workloads spend their time on per-match work and on the DFA walk, not on the scan a
+prefilter can skip.  Measured on `/tmp/ffre1-data` (wall clock, median of 3, same machine):
+
+| workload | time | what the time is |
+|---|---|---|
+| `w1_literal`, ASCII half | 0.040 s | read 0.020 + memmem 0.010 + 21 554 matches 0.010 |
+| `w1_literal`, mixed half | 0.040-0.050 s | read 0.010 + `cps` build 0.008 + 48 483 matches ~0.020 + Pike scan ~0.005 |
+| `w2_alt` | 0.090 s | read 0.020 + DFA scan ~0.010 + 106 954 matches ~0.060 |
+| `w5_logline` | 1.220 s | read+split 0.020 + DFA span 0.070 + **group recovery 1.130** |
+
+* `w2_alt`: 106 954 matches; the same pattern with no matches (`zzzz`) over the same 21 MB takes 0.030 s
+  including the 0.020 s read.  A first-byte set of six bytes (`e E w W f F`, `re.I`) needs one `find` per
+  byte per match: raising the cap and searching them made it **0.110 s** -- slower.  `min` over the three
+  branch literals (`error`, `warn`, `fatal`) with one memmem each (0.10-0.11 s) is also no better.
+  The DFA's own two-character `quick` skip is already what the prefilter would do, only without the
+  per-call `find` overhead.
+* `w5_logline` is anchored (`LINE.match`, mode 0): there is no start to skip.  Its cost is the Pike VM
+  that recovers the five named groups -- the same pattern with the groups removed runs in **0.090 s**,
+  i.e. 1.13 s of the 1.22 s is group recovery, which no start-skip can touch.  Its required literal
+  (`: level=`) is present in every line, so the absence filter never fires.
+* `w1_literal`'s ASCII half already had the ffre1 literal-prefix search; 0.010 s of its 0.040 s is the
+  21 554 match objects.  Its mixed half is non-ASCII, where `str.find` maps a character offset to a byte
+  offset by walking from 0, so calling it per match makes the half **slower** (0.072 s), and its scan is
+  only ~0.005 s of the 0.040 s anyway.
+
+### Verdict
+
+0 of 3 workloads reach 1.2x; the task's rule for that case is "stop and report; do not land".  The
+`relib.py` changes, the `test_ail_re_prefilter` module and its `tests.d` entry were removed; the 8
+workload digests and the `re` engine are unchanged from ffre1.

@@ -1,0 +1,2638 @@
+{
+ "date": "2026-11-06",
+ "head": "e9cb684",
+ "icount_method": "callgrind",
+ "runner": {
+  "os": "7.0.0-1017-azure",
+  "cpus": 4,
+  "image": "20261101.360.1"
+ },
+ "tools": {
+  "ail": "checkout e9cb684",
+  "python": "3.12.3",
+  "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "cython": "Cython version 3.3.1",
+  "mypy": "mypy 2.4.1 (compiled: yes)",
+  "nuitka": "4.3.4",
+  "codon": "0.20.6",
+  "valgrind": "valgrind-3.22.0"
+ },
+ "pins": {
+  "PYTHON": "3.12",
+  "GCC": "13.3.0",
+  "CYTHON": "3.3.1",
+  "MYPY": "2.4.1",
+  "NUITKA": "4.3.4",
+  "SETUPTOOLS": "75.8.0",
+  "CODON": "0.20.6"
+ },
+ "safety_probes": [
+  "divzero",
+  "index",
+  "negindex",
+  "overflow",
+  "recursion"
+ ],
+ "tasks": {
+  "berth_sim": {
+   "case": "perf",
+   "input_bytes": 80937673,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 4423,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      8.491
+     ],
+     "compile_s": 8.491,
+     "build_disk_kib": 240,
+     "binary_bytes": 69192,
+     "stripped_bytes": 63704,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 2125.8,
+     "wall_min_ms": 2121.3,
+     "wall_runs_ms": [
+      2143.1,
+      2133.4,
+      2125.8,
+      2121.3,
+      2125.1
+     ],
+     "rss_kib": 245108,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      23,
+      23
+     ],
+     "cases_failed": [],
+     "instructions": 8383606649
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/cython-main-berth_sim/src",
+     "build_ok": true,
+     "compile_s": 3.449,
+     "build_disk_kib": 1288,
+     "binary_bytes": 707392,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/cython-main-berth_sim/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 14927.3,
+     "wall_min_ms": 14866.0,
+     "wall_runs_ms": [
+      14866.0,
+      14922.7,
+      14940.0,
+      14934.6,
+      14927.3
+     ],
+     "rss_kib": 1122000,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      23,
+      23
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/cython-typed-berth_sim/src",
+     "build_ok": true,
+     "compile_s": 3.526,
+     "build_disk_kib": 1360,
+     "binary_bytes": 709408,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/cython-typed-berth_sim/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 15874.9,
+     "wall_min_ms": 15808.6,
+     "wall_runs_ms": [
+      15808.6,
+      15890.7,
+      15874.9
+     ],
+     "rss_kib": 924776,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      23,
+      23
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/nuitka-berth_sim/src",
+     "build_ok": true,
+     "compile_s": 37.876,
+     "build_disk_kib": 41868,
+     "binary_bytes": 4196568,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/nuitka-berth_sim/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 15250.6,
+     "wall_min_ms": 15229.7,
+     "wall_runs_ms": [
+      15250.6,
+      15229.7,
+      15408.5
+     ],
+     "rss_kib": 1128804,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      23,
+      23
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/mypyc-berth_sim/src",
+     "build_ok": true,
+     "compile_s": 3.773,
+     "build_disk_kib": 3852,
+     "binary_bytes": 394960,
+     "build_error": "",
+     "launcher": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/mypyc-berth_sim/src/launcher.py",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/mypyc-berth_sim/src:/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/usr/bin/python3",
+      "-B",
+      "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/mypyc-berth_sim/src/launcher.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 11222.1,
+     "wall_min_ms": 11193.1,
+     "wall_runs_ms": [
+      11384.9,
+      11276.4,
+      11193.1,
+      11196.1,
+      11222.1
+     ],
+     "rss_kib": 810756,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      23,
+      23
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/codon-berth_sim/src",
+     "build_ok": false,
+     "compile_s": 1.832,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/codon-berth_sim/src/typed.py:1 (1-34): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/codon-main-berth_sim/src",
+     "build_ok": false,
+     "compile_s": 1.833,
+     "build_disk_kib": 8,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/codon-main-berth_sim/src/main.py:97 (60-65): error: local variable 'maxid' referenced before assignment at main.py:99:25",
+     "run_cmd": null
+    }
+   }
+  },
+  "chain_relax": {
+   "case": "perf",
+   "input_bytes": 0,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 2885,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      1.86
+     ],
+     "compile_s": 1.86,
+     "build_disk_kib": 144,
+     "binary_bytes": 35088,
+     "stripped_bytes": 30936,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 1118.8,
+     "wall_min_ms": 1111.4,
+     "wall_runs_ms": [
+      1118.8,
+      1111.4,
+      1120.8,
+      1111.7,
+      1191.3
+     ],
+     "rss_kib": 4024,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      29,
+      29
+     ],
+     "cases_failed": [],
+     "instructions": 1692839353
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/cython-main-chain_relax/src",
+     "build_ok": true,
+     "compile_s": 2.998,
+     "build_disk_kib": 1344,
+     "binary_bytes": 697568,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/cython-main-chain_relax/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 15941.5,
+     "wall_min_ms": 14617.9,
+     "wall_runs_ms": [
+      14617.9,
+      17878.5,
+      16117.2,
+      15941.5,
+      15609.7
+     ],
+     "rss_kib": 23556,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      29,
+      29
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/cython-typed-chain_relax/src",
+     "build_ok": true,
+     "compile_s": 3.054,
+     "build_disk_kib": 1224,
+     "binary_bytes": 636320,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/cython-typed-chain_relax/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 16184.3,
+     "wall_min_ms": 15341.7,
+     "wall_runs_ms": [
+      15341.7,
+      16184.3,
+      16254.3
+     ],
+     "rss_kib": 24576,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      29,
+      29
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/nuitka-chain_relax/src",
+     "build_ok": true,
+     "compile_s": 37.957,
+     "build_disk_kib": 41712,
+     "binary_bytes": 4188376,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/nuitka-chain_relax/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 10755.0,
+     "wall_min_ms": 10716.3,
+     "wall_runs_ms": [
+      11134.2,
+      10716.3,
+      10719.8,
+      11494.9,
+      10755.0
+     ],
+     "rss_kib": 30384,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      29,
+      29
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/mypyc-chain_relax/src",
+     "build_ok": true,
+     "compile_s": 3.124,
+     "build_disk_kib": 3368,
+     "binary_bytes": 314600,
+     "build_error": "",
+     "launcher": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/mypyc-chain_relax/src/launcher.py",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/mypyc-chain_relax/src:/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/usr/bin/python3",
+      "-B",
+      "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/mypyc-chain_relax/src/launcher.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 7842.4,
+     "wall_min_ms": 7648.4,
+     "wall_runs_ms": [
+      7835.7,
+      7842.4,
+      7648.4,
+      7984.4,
+      7899.8
+     ],
+     "rss_kib": 23420,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      29,
+      29
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/codon-chain_relax/src",
+     "build_ok": false,
+     "compile_s": 1.834,
+     "build_disk_kib": 8,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/codon-chain_relax/src/typed.py:1 (1-43): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/codon-main-chain_relax/src",
+     "build_ok": true,
+     "compile_s": 6.792,
+     "build_disk_kib": 1052,
+     "binary_bytes": 1068168,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/codon-main-chain_relax/src/prog"
+     ],
+     "status": "MISMATCH",
+     "correct": false,
+     "exit_codes": [
+      1
+     ],
+     "wall_ms": 5.7,
+     "wall_min_ms": 5.6,
+     "wall_runs_ms": [
+      7.0,
+      5.6,
+      5.6,
+      5.7,
+      5.8
+     ],
+     "rss_kib": 9876,
+     "expected_exit": 0,
+     "cases_public": [
+      1,
+      3
+     ],
+     "cases_hidden": [
+      9,
+      29
+     ],
+     "cases_failed": [
+      "public/small",
+      "public/one_element",
+      "hidden/two_elements",
+      "hidden/three_elements",
+      "hidden/no_sweeps",
+      "hidden/one_sweep",
+      "hidden/two_sweeps",
+      "hidden/seed_zero",
+      "hidden/seed_max",
+      "hidden/leading_zeros",
+      "hidden/medium",
+      "hidden/many_sweeps_small",
+      "hidden/odd_length",
+      "hidden/even_length",
+      "hidden/n_max_no_sweeps",
+      "hidden/t_max_tiny",
+      "hidden/seed_too_big",
+      "hidden/random0",
+      "hidden/random1",
+      "hidden/random2"
+     ],
+     "instructions": 86563546
+    }
+   }
+  },
+  "echo_pack": {
+   "case": "perf",
+   "input_bytes": 32000000,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 3995,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      3.211
+     ],
+     "compile_s": 3.211,
+     "build_disk_kib": 144,
+     "binary_bytes": 36096,
+     "stripped_bytes": 30936,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 848.6,
+     "wall_min_ms": 801.2,
+     "wall_runs_ms": [
+      801.2,
+      848.6,
+      890.3,
+      872.8,
+      829.5
+     ],
+     "rss_kib": 354400,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      54,
+      54
+     ],
+     "cases_failed": [],
+     "instructions": 5447659698
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/cython-main-echo_pack/src",
+     "build_ok": true,
+     "compile_s": 3.178,
+     "build_disk_kib": 1284,
+     "binary_bytes": 680504,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/cython-main-echo_pack/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 25948.6,
+     "wall_min_ms": 25461.4,
+     "wall_runs_ms": [
+      25948.6,
+      25461.4,
+      26055.8
+     ],
+     "rss_kib": 1594948,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      54,
+      54
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/cython-typed-echo_pack/src",
+     "build_ok": true,
+     "compile_s": 3.508,
+     "build_disk_kib": 1452,
+     "binary_bytes": 806312,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/cython-typed-echo_pack/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 30604.7,
+     "wall_min_ms": 30294.1,
+     "wall_runs_ms": [
+      31363.3,
+      30604.7,
+      30294.1
+     ],
+     "rss_kib": 1399140,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      54,
+      54
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/nuitka-echo_pack/src",
+     "build_ok": true,
+     "compile_s": 38.188,
+     "build_disk_kib": 41712,
+     "binary_bytes": 4192472,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/nuitka-echo_pack/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 31219.2,
+     "wall_min_ms": 31015.5,
+     "wall_runs_ms": [
+      31015.5,
+      31904.7,
+      31219.2
+     ],
+     "rss_kib": 1601912,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      54,
+      54
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/mypyc-echo_pack/src",
+     "build_ok": false,
+     "compile_s": 1.01,
+     "build_disk_kib": 2156,
+     "binary_bytes": null,
+     "build_error": "typed.py:89: error: Argument 1 to \"write_stdout_bytes\" has incompatible type \"bytearray\"; expected \"bytes\"  [arg-type]",
+     "run_cmd": null
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/codon-echo_pack/src",
+     "build_ok": false,
+     "compile_s": 1.812,
+     "build_disk_kib": 8,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/codon-echo_pack/src/typed.py:1 (1-53): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/codon-main-echo_pack/src",
+     "build_ok": false,
+     "compile_s": 1.859,
+     "build_disk_kib": 8,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/codon-main-echo_pack/src/main.py:105 (12-35): error: 'File[str]' object has no attribute 'buffer'",
+     "run_cmd": null
+    }
+   }
+  },
+  "ledger_bin": {
+   "case": "perf",
+   "input_bytes": 59098102,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 6211,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      3.408
+     ],
+     "compile_s": 3.408,
+     "build_disk_kib": 216,
+     "binary_bytes": 61208,
+     "stripped_bytes": 55512,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 695.3,
+     "wall_min_ms": 691.7,
+     "wall_runs_ms": [
+      695.3,
+      691.7,
+      691.7,
+      696.6,
+      732.4
+     ],
+     "rss_kib": 340604,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "instructions": 5394585226
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/cython-main-ledger_bin/src",
+     "build_ok": true,
+     "compile_s": 4.5,
+     "build_disk_kib": 1920,
+     "binary_bytes": 1053888,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/cython-main-ledger_bin/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 13796.9,
+     "wall_min_ms": 13409.8,
+     "wall_runs_ms": [
+      13409.8,
+      13796.9,
+      13803.9,
+      13707.1,
+      13810.9
+     ],
+     "rss_kib": 1269720,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/cython-typed-ledger_bin/src",
+     "build_ok": true,
+     "compile_s": 4.133,
+     "build_disk_kib": 1596,
+     "binary_bytes": 841760,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/cython-typed-ledger_bin/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 22819.1,
+     "wall_min_ms": 22051.2,
+     "wall_runs_ms": [
+      23072.5,
+      22051.2,
+      22819.1
+     ],
+     "rss_kib": 936696,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/nuitka-ledger_bin/src",
+     "build_ok": true,
+     "compile_s": 37.978,
+     "build_disk_kib": 42148,
+     "binary_bytes": 4208856,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/nuitka-ledger_bin/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 15388.8,
+     "wall_min_ms": 15272.2,
+     "wall_runs_ms": [
+      15622.4,
+      15272.2,
+      15388.8
+     ],
+     "rss_kib": 1282180,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/mypyc-ledger_bin/src",
+     "build_ok": true,
+     "compile_s": 3.824,
+     "build_disk_kib": 3864,
+     "binary_bytes": 399416,
+     "build_error": "",
+     "launcher": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/mypyc-ledger_bin/src/launcher.py",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/mypyc-ledger_bin/src:/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/usr/bin/python3",
+      "-B",
+      "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/mypyc-ledger_bin/src/launcher.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 6355.8,
+     "wall_min_ms": 6294.9,
+     "wall_runs_ms": [
+      6332.1,
+      6507.0,
+      6395.5,
+      6294.9,
+      6355.8
+     ],
+     "rss_kib": 760540,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/codon-ledger_bin/src",
+     "build_ok": false,
+     "compile_s": 1.833,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/codon-ledger_bin/src/typed.py:1 (1-27): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/codon-main-ledger_bin/src",
+     "build_ok": false,
+     "compile_s": 2.31,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/codon-main-ledger_bin/src/main.py:67 (17-35): error: 'Tuple[int,int,int,int]' does not match expected type 'Tuple[int,int,str,int]'",
+     "run_cmd": null
+    }
+   }
+  },
+  "rail_transfer": {
+   "case": "perf",
+   "input_bytes": 4066652,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 6266,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      2.715
+     ],
+     "compile_s": 2.715,
+     "build_disk_kib": 228,
+     "binary_bytes": 65136,
+     "stripped_bytes": 59608,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 53.9,
+     "wall_min_ms": 53.3,
+     "wall_runs_ms": [
+      53.9,
+      53.3,
+      53.9,
+      54.8,
+      53.8
+     ],
+     "rss_kib": 28952,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      21,
+      21
+     ],
+     "cases_failed": [],
+     "instructions": 387941054
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/cython-main-rail_transfer/src",
+     "build_ok": true,
+     "compile_s": 4.219,
+     "build_disk_kib": 1452,
+     "binary_bytes": 804720,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/cython-main-rail_transfer/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 538.0,
+     "wall_min_ms": 536.4,
+     "wall_runs_ms": [
+      536.4,
+      541.4,
+      538.0,
+      547.8,
+      537.9
+     ],
+     "rss_kib": 115392,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      21,
+      21
+     ],
+     "cases_failed": [],
+     "instructions": 3536941109
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/cython-typed-rail_transfer/src",
+     "build_ok": true,
+     "compile_s": 4.724,
+     "build_disk_kib": 1888,
+     "binary_bytes": 1063792,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/cython-typed-rail_transfer/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 1157.5,
+     "wall_min_ms": 1151.9,
+     "wall_runs_ms": [
+      1172.2,
+      1173.0,
+      1152.5,
+      1151.9,
+      1157.5
+     ],
+     "rss_kib": 121176,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      21,
+      21
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "callgrind timeout (120 s)"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/nuitka-rail_transfer/src",
+     "build_ok": true,
+     "compile_s": 37.666,
+     "build_disk_kib": 42028,
+     "binary_bytes": 4208856,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/nuitka-rail_transfer/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 613.5,
+     "wall_min_ms": 610.0,
+     "wall_runs_ms": [
+      610.9,
+      610.0,
+      613.5,
+      651.8,
+      620.8
+     ],
+     "rss_kib": 124208,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      21,
+      21
+     ],
+     "cases_failed": [],
+     "instructions": 206944710
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/mypyc-rail_transfer/src",
+     "build_ok": true,
+     "compile_s": 4.304,
+     "build_disk_kib": 4296,
+     "binary_bytes": 481704,
+     "build_error": "",
+     "launcher": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/mypyc-rail_transfer/src/launcher.py",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/mypyc-rail_transfer/src:/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/usr/bin/python3",
+      "-B",
+      "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/mypyc-rail_transfer/src/launcher.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 840.5,
+     "wall_min_ms": 835.5,
+     "wall_runs_ms": [
+      835.5,
+      840.5,
+      845.2,
+      871.4,
+      835.8
+     ],
+     "rss_kib": 90260,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      21,
+      21
+     ],
+     "cases_failed": [],
+     "instructions": null,
+     "instructions_note": "callgrind timeout (120 s)"
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/codon-rail_transfer/src",
+     "build_ok": false,
+     "compile_s": 1.825,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/codon-rail_transfer/src/typed.py:1 (1-34): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/codon-main-rail_transfer/src",
+     "build_ok": false,
+     "compile_s": 1.831,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/codon-main-rail_transfer/src/main.py:6 (26-57): error: 'File[str]' object has no attribute 'buffer'",
+     "run_cmd": null
+    }
+   }
+  },
+  "scar_life": {
+   "case": "perf",
+   "input_bytes": 4196362,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 4430,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      2.188
+     ],
+     "compile_s": 2.188,
+     "build_disk_kib": 168,
+     "binary_bytes": 44728,
+     "stripped_bytes": 39128,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 24673.0,
+     "wall_min_ms": 24654.6,
+     "wall_runs_ms": [
+      24654.6,
+      24673.0,
+      24759.3
+     ],
+     "rss_kib": 17672,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      50,
+      50
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/cython-main-scar_life/src",
+     "build_ok": true,
+     "compile_s": 4.12,
+     "build_disk_kib": 1704,
+     "binary_bytes": 967688,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/cython-main-scar_life/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 4117.2,
+     "wall_min_ms": 4045.1,
+     "wall_runs_ms": [
+      4045.1,
+      4089.2,
+      4117.2,
+      4204.5,
+      4439.9
+     ],
+     "rss_kib": 101328,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      50,
+      50
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/cython-typed-scar_life/src",
+     "build_ok": true,
+     "compile_s": 3.26,
+     "build_disk_kib": 1352,
+     "binary_bytes": 709856,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/cython-typed-scar_life/src/prog"
+     ],
+     "status": "timeout",
+     "correct": false,
+     "cases_note": "perf run timed out; cases not run"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/nuitka-scar_life/src",
+     "build_ok": true,
+     "compile_s": 41.174,
+     "build_disk_kib": 44196,
+     "binary_bytes": 4442328,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/nuitka-scar_life/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 4495.6,
+     "wall_min_ms": 4329.9,
+     "wall_runs_ms": [
+      4329.9,
+      4495.6,
+      4439.2,
+      4567.2,
+      4567.1
+     ],
+     "rss_kib": 110120,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      50,
+      50
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/mypyc-scar_life/src",
+     "build_ok": false,
+     "compile_s": 1.001,
+     "build_disk_kib": 2160,
+     "binary_bytes": null,
+     "build_error": "typed.py:168: error: Argument 1 to \"write_stdout_bytes\" has incompatible type \"bytearray\"; expected \"bytes\"  [arg-type]",
+     "run_cmd": null
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/codon-scar_life/src",
+     "build_ok": false,
+     "compile_s": 1.872,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/codon-scar_life/src/typed.py:1 (1-53): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/codon-main-scar_life/src",
+     "build_ok": false,
+     "compile_s": 2.36,
+     "build_disk_kib": 8,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/codon-main-scar_life/src/main.py:37 (12-35): error: 'File[str]' object has no attribute 'buffer'",
+     "run_cmd": null
+    }
+   }
+  },
+  "tally_lang": {
+   "case": "perf",
+   "input_bytes": 421,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 12439,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      3.26
+     ],
+     "compile_s": 3.26,
+     "build_disk_kib": 272,
+     "binary_bytes": 78696,
+     "stripped_bytes": 71896,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 1119.1,
+     "wall_min_ms": 1101.8,
+     "wall_runs_ms": [
+      1101.8,
+      1103.8,
+      1147.3,
+      1119.1,
+      1370.2
+     ],
+     "rss_kib": 1628,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      72,
+      72
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": 19585727561
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/cython-main-tally_lang/src",
+     "build_ok": true,
+     "compile_s": 6.166,
+     "build_disk_kib": 2504,
+     "binary_bytes": 1487904,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/cython-main-tally_lang/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 10162.2,
+     "wall_min_ms": 9851.9,
+     "wall_runs_ms": [
+      9851.9,
+      10172.0,
+      10194.4,
+      10162.2,
+      9985.2
+     ],
+     "rss_kib": 12968,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      72,
+      72
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/cython-typed-tally_lang/src",
+     "build_ok": true,
+     "compile_s": 6.381,
+     "build_disk_kib": 2660,
+     "binary_bytes": 1544424,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/cython-typed-tally_lang/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 59789.2,
+     "wall_min_ms": 58789.8,
+     "wall_runs_ms": [
+      58789.8,
+      62987.5,
+      59789.2
+     ],
+     "rss_kib": 12888,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      72,
+      72
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/nuitka-tally_lang/src",
+     "build_ok": true,
+     "compile_s": 41.4,
+     "build_disk_kib": 44900,
+     "binary_bytes": 4466904,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/nuitka-tally_lang/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 9558.2,
+     "wall_min_ms": 9503.8,
+     "wall_runs_ms": [
+      9720.4,
+      9556.4,
+      9503.8,
+      9558.2,
+      9645.0
+     ],
+     "rss_kib": 21700,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      72,
+      72
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/mypyc-tally_lang/src",
+     "build_ok": true,
+     "compile_s": 4.186,
+     "build_disk_kib": 4236,
+     "binary_bytes": 468560,
+     "build_error": "",
+     "launcher": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/mypyc-tally_lang/src/launcher.py",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/mypyc-tally_lang/src:/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/usr/bin/python3",
+      "-B",
+      "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/mypyc-tally_lang/src/launcher.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 8634.4,
+     "wall_min_ms": 8360.8,
+     "wall_runs_ms": [
+      8634.4,
+      8641.4,
+      8360.8,
+      8419.8,
+      8712.8
+     ],
+     "rss_kib": 11732,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      72,
+      72
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/codon-tally_lang/src",
+     "build_ok": false,
+     "compile_s": 1.856,
+     "build_disk_kib": 20,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/codon-tally_lang/src/typed.py:1 (1-41): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/codon-main-tally_lang/src",
+     "build_ok": false,
+     "compile_s": 1.912,
+     "build_disk_kib": 16,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/codon-main-tally_lang/src/main.py:3 (1-29): error: cannot import name 'setrecursionlimit' from 'sys'",
+     "run_cmd": null
+    }
+   }
+  },
+  "term_rank": {
+   "case": "perf",
+   "input_bytes": 64627664,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 4843,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      2.954
+     ],
+     "compile_s": 2.954,
+     "build_disk_kib": 272,
+     "binary_bytes": 78816,
+     "stripped_bytes": 71896,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 1838.5,
+     "wall_min_ms": 1777.9,
+     "wall_runs_ms": [
+      1777.9,
+      1789.0,
+      1896.4,
+      1926.9,
+      1838.5
+     ],
+     "rss_kib": 161080,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      40,
+      40
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": 15480678531
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/cython-main-term_rank/src",
+     "build_ok": true,
+     "compile_s": 2.927,
+     "build_disk_kib": 1300,
+     "binary_bytes": 690184,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/cython-main-term_rank/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 7502.1,
+     "wall_min_ms": 7419.9,
+     "wall_runs_ms": [
+      7502.1,
+      7419.9,
+      7675.0,
+      7667.0,
+      7438.8
+     ],
+     "rss_kib": 418248,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      40,
+      40
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/cython-typed-term_rank/src",
+     "build_ok": true,
+     "compile_s": 3.683,
+     "build_disk_kib": 1552,
+     "binary_bytes": 866520,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/cython-typed-term_rank/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 14936.9,
+     "wall_min_ms": 14837.7,
+     "wall_runs_ms": [
+      14837.7,
+      14968.4,
+      14869.0,
+      15579.1,
+      14936.9
+     ],
+     "rss_kib": 154112,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      40,
+      40
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/nuitka-term_rank/src",
+     "build_ok": true,
+     "compile_s": 41.03,
+     "build_disk_kib": 43932,
+     "binary_bytes": 4421848,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/nuitka-term_rank/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 7713.5,
+     "wall_min_ms": 7302.1,
+     "wall_runs_ms": [
+      7302.1,
+      7713.5,
+      11887.8,
+      7637.3,
+      12085.1
+     ],
+     "rss_kib": 424696,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      40,
+      40
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/mypyc-term_rank/src",
+     "build_ok": false,
+     "compile_s": 1.603,
+     "build_disk_kib": 2164,
+     "binary_bytes": null,
+     "build_error": "typed.py:161: error: Argument 1 to \"write_stdout_bytes\" has incompatible type \"bytearray\"; expected \"bytes\"  [arg-type]",
+     "run_cmd": null
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/codon-term_rank/src",
+     "build_ok": false,
+     "compile_s": 2.701,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/codon-term_rank/src/typed.py:1 (1-53): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/codon-main-term_rank/src",
+     "build_ok": false,
+     "compile_s": 3.66,
+     "build_disk_kib": 8,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/codon-main-term_rank/src/main.py:34 (12-35): error: 'File[str]' object has no attribute 'buffer'",
+     "run_cmd": null
+    }
+   }
+  },
+  "ticket_audit": {
+   "case": "perf",
+   "input_bytes": 62003760,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 9173,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      8.156
+     ],
+     "compile_s": 8.156,
+     "build_disk_kib": 372,
+     "binary_bytes": 112584,
+     "stripped_bytes": 104664,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 2737.6,
+     "wall_min_ms": 2607.9,
+     "wall_runs_ms": [
+      2607.9,
+      2716.8,
+      2762.8,
+      2803.5,
+      2737.6
+     ],
+     "rss_kib": 254732,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      88,
+      88
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "callgrind timeout (120 s)"
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/cython-main-ticket_audit/src",
+     "build_ok": true,
+     "compile_s": 6.294,
+     "build_disk_kib": 1836,
+     "binary_bytes": 1051064,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/cython-main-ticket_audit/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 7635.6,
+     "wall_min_ms": 7504.5,
+     "wall_runs_ms": [
+      7654.2,
+      7504.5,
+      7635.6,
+      7506.8,
+      7726.5
+     ],
+     "rss_kib": 548340,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      88,
+      88
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/cython-typed-ticket_audit/src",
+     "build_ok": true,
+     "compile_s": 5.95,
+     "build_disk_kib": 2492,
+     "binary_bytes": 1469848,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/cython-typed-ticket_audit/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 13817.9,
+     "wall_min_ms": 13320.8,
+     "wall_runs_ms": [
+      14165.7,
+      13817.9,
+      13530.5,
+      14138.6,
+      13320.8
+     ],
+     "rss_kib": 309868,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      88,
+      88
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/nuitka-ticket_audit/src",
+     "build_ok": true,
+     "compile_s": 50.779,
+     "build_disk_kib": 44508,
+     "binary_bytes": 4450520,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/nuitka-ticket_audit/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 11427.3,
+     "wall_min_ms": 11235.6,
+     "wall_runs_ms": [
+      11587.2,
+      11235.6,
+      11521.4,
+      11387.4,
+      11427.3
+     ],
+     "rss_kib": 554980,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      88,
+      88
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/mypyc-ticket_audit/src",
+     "build_ok": true,
+     "compile_s": 5.899,
+     "build_disk_kib": 4324,
+     "binary_bytes": 476824,
+     "build_error": "",
+     "launcher": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/mypyc-ticket_audit/src/launcher.py",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/mypyc-ticket_audit/src:/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/usr/bin/python3",
+      "-B",
+      "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/mypyc-ticket_audit/src/launcher.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 5202.1,
+     "wall_min_ms": 4827.8,
+     "wall_runs_ms": [
+      5222.2,
+      5179.7,
+      5322.4,
+      5202.1,
+      4827.8
+     ],
+     "rss_kib": 304064,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      88,
+      88
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/codon-ticket_audit/src",
+     "build_ok": false,
+     "compile_s": 2.684,
+     "build_disk_kib": 16,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/codon-ticket_audit/src/typed.py:1 (1-27): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/codon-main-ticket_audit/src",
+     "build_ok": false,
+     "compile_s": 3.596,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/codon/codon-deploy-linux-x86_64/lib/codon/stdlib/internal/types/int.codon:72 (27-41): error: 'bytes' object has no attribute '__int__'",
+     "run_cmd": null
+    }
+   }
+  },
+  "tree_fold": {
+   "case": "perf",
+   "input_bytes": 27877476,
+   "expected_exit": 0,
+   "results": {
+    "ail": {
+     "lang": "ail",
+     "source_bytes": 10391,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      5.555
+     ],
+     "compile_s": 5.555,
+     "build_disk_kib": 296,
+     "binary_bytes": 86664,
+     "stripped_bytes": 80088,
+     "tool": "ail",
+     "source": "typed.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/ail-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 1388.3,
+     "wall_min_ms": 1311.5,
+     "wall_runs_ms": [
+      1319.0,
+      1492.4,
+      1443.0,
+      1311.5,
+      1388.3
+     ],
+     "rss_kib": 414996,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": 8935993113
+    },
+    "cython-main": {
+     "tool": "cython-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/cython-main-tree_fold/src",
+     "build_ok": true,
+     "compile_s": 6.559,
+     "build_disk_kib": 1864,
+     "binary_bytes": 1021416,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/cython-main-tree_fold/src/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 14947.9,
+     "wall_min_ms": 14863.2,
+     "wall_runs_ms": [
+      14863.2,
+      14947.9,
+      14946.3,
+      15470.5,
+      14994.7
+     ],
+     "rss_kib": 1178528,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "cython-typed": {
+     "tool": "cython-typed",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/cython-typed-tree_fold/src",
+     "build_ok": true,
+     "compile_s": 6.982,
+     "build_disk_kib": 2248,
+     "binary_bytes": 1292768,
+     "build_error": "",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/cython-typed-tree_fold/src/prog"
+     ],
+     "status": "timeout",
+     "correct": false,
+     "cases_note": "perf run timed out; cases not run"
+    },
+    "nuitka": {
+     "tool": "nuitka",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/nuitka-tree_fold/src",
+     "build_ok": true,
+     "compile_s": 63.896,
+     "build_disk_kib": 44280,
+     "binary_bytes": 4434136,
+     "build_error": "",
+     "run_cmd": [
+      "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/nuitka-tree_fold/src/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 17953.8,
+     "wall_min_ms": 17643.4,
+     "wall_runs_ms": [
+      17643.4,
+      17953.8,
+      36349.1
+     ],
+     "rss_kib": 1190212,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "mypyc": {
+     "tool": "mypyc",
+     "source": "typed.py",
+     "standalone": false,
+     "dir": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/mypyc-tree_fold/src",
+     "build_ok": true,
+     "compile_s": 10.618,
+     "build_disk_kib": 4236,
+     "binary_bytes": 465496,
+     "build_error": "",
+     "launcher": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/mypyc-tree_fold/src/launcher.py",
+     "run_cmd": [
+      "/usr/bin/env",
+      "PYTHONPATH=/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/mypyc-tree_fold/src:/home/runner/work/ail-ci/ail-ci/AIL_CURRENT",
+      "/usr/bin/python3",
+      "-B",
+      "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/mypyc-tree_fold/src/launcher.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 18577.6,
+     "wall_min_ms": 17829.6,
+     "wall_runs_ms": [
+      17829.6,
+      18577.6,
+      20391.4
+     ],
+     "rss_kib": 1231124,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "instructions": null,
+     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+    },
+    "codon": {
+     "tool": "codon",
+     "source": "typed.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/codon-tree_fold/src",
+     "build_ok": false,
+     "compile_s": 4.181,
+     "build_disk_kib": 16,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/codon-tree_fold/src/typed.py:1 (1-33): error: no module named 'ail'",
+     "run_cmd": null
+    },
+    "codon-main": {
+     "tool": "codon-main",
+     "source": "main.py",
+     "standalone": true,
+     "dir": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/codon-main-tree_fold/src",
+     "build_ok": false,
+     "compile_s": 5.329,
+     "build_disk_kib": 12,
+     "binary_bytes": null,
+     "build_error": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/codon-main-tree_fold/src/main.py:61 (12-53): error: 'File[str]' object has no attribute 'buffer'",
+     "run_cmd": null
+    }
+   }
+  }
+ },
+ "safety": {
+  "ail": {
+   "divzero": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "index": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 6,
+    "ref_exit": 1
+   },
+   "negindex": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "overflow": {
+    "build_ok": true,
+    "result": "stops loudly (stdout differs)",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 0
+   },
+   "recursion": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   }
+  },
+  "cython-main": {
+   "divzero": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "index": {
+    "build_ok": true,
+    "result": "stops loudly (stdout differs)",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "negindex": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "overflow": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 0,
+    "bytes_out": 25,
+    "ref_exit": 0
+   },
+   "recursion": {
+    "build_ok": true,
+    "result": "crash (signal 11)",
+    "exit": -11,
+    "bytes_out": 0,
+    "ref_exit": 1
+   }
+  },
+  "cython-typed": {
+   "divzero": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "index": {
+    "build_ok": true,
+    "result": "stops loudly (stdout differs)",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "negindex": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "overflow": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 0,
+    "bytes_out": 25,
+    "ref_exit": 0
+   },
+   "recursion": {
+    "build_ok": true,
+    "result": "crash (signal 11)",
+    "exit": -11,
+    "bytes_out": 0,
+    "ref_exit": 1
+   }
+  },
+  "nuitka": {
+   "divzero": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "index": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 6,
+    "ref_exit": 1
+   },
+   "negindex": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "overflow": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 0,
+    "bytes_out": 25,
+    "ref_exit": 0
+   },
+   "recursion": {
+    "build_ok": true,
+    "result": "stops loudly (stdout differs)",
+    "exit": 139,
+    "bytes_out": 0,
+    "ref_exit": 1
+   }
+  },
+  "mypyc": {
+   "divzero": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "index": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 6,
+    "ref_exit": 1
+   },
+   "negindex": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 1,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "overflow": {
+    "build_ok": true,
+    "result": "same as CPython",
+    "exit": 0,
+    "bytes_out": 25,
+    "ref_exit": 0
+   },
+   "recursion": {
+    "build_ok": true,
+    "result": "silently wrong output",
+    "exit": 0,
+    "bytes_out": 7,
+    "ref_exit": 1
+   }
+  },
+  "codon": {
+   "divzero": {
+    "build_ok": true,
+    "result": "crash (signal 6)",
+    "exit": -6,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "index": {
+    "build_ok": true,
+    "result": "crash (signal 6)",
+    "exit": -6,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "negindex": {
+    "build_ok": true,
+    "result": "crash (signal 6)",
+    "exit": -6,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "overflow": {
+    "build_ok": true,
+    "result": "silently wrong output",
+    "exit": 0,
+    "bytes_out": 20,
+    "ref_exit": 0
+   },
+   "recursion": {
+    "build_ok": true,
+    "result": "silently wrong output",
+    "exit": 0,
+    "bytes_out": 7,
+    "ref_exit": 1
+   }
+  },
+  "codon-main": {
+   "divzero": {
+    "build_ok": true,
+    "result": "crash (signal 6)",
+    "exit": -6,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "index": {
+    "build_ok": true,
+    "result": "crash (signal 6)",
+    "exit": -6,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "negindex": {
+    "build_ok": true,
+    "result": "crash (signal 6)",
+    "exit": -6,
+    "bytes_out": 0,
+    "ref_exit": 1
+   },
+   "overflow": {
+    "build_ok": true,
+    "result": "silently wrong output",
+    "exit": 0,
+    "bytes_out": 20,
+    "ref_exit": 0
+   },
+   "recursion": {
+    "build_ok": true,
+    "result": "silently wrong output",
+    "exit": 0,
+    "bytes_out": 7,
+    "ref_exit": 1
+   }
+  }
+ },
+ "settings": {
+  "build_runs": 1,
+  "run_timeout_s": 180,
+  "case_timeout_s": 30,
+  "callgrind_timeout_s": 120,
+  "callgrind_max_wall_ms": 4000,
+  "case_budget_s": 240
+ }
+}

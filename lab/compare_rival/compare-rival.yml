@@ -1,0 +1,150 @@
+name: compare-rival
+
+# AIL against the Python compilers: Nuitka, Cython (plain and annotated), mypyc and Codon. One job per task;
+# every job builds and measures the same ten programs of lab/compare/src/ and checks every public and hidden
+# case against the task's CPython reference. The safety job runs the five probe programs in
+# lab/compare_rival/safety/ through every tool. Versions are pinned in lab/compare_rival/toolchains.env
+# (Codon is the official v0.20.6 tarball, Apache-2.0). Mojo is not installed: it needs an account.
+# Manual only; at most 4 task jobs at once. This file is proposed and lives outside .github/ on purpose.
+#
+#   gh workflow run compare-rival -R J-KAMMA/ail-ci --ref integ
+#   gh workflow run compare-rival -R J-KAMMA/ail-ci --ref integ -f tasks='tree_fold tally_lang'
+on:
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: 'Space separated task names (default: all ten)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compare-rival-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: m
+        env:
+          WANT: ${{ inputs.tasks }}
+        run: |
+          all=$(ls lab/compare/src)
+          want=${WANT:-$all}
+          for t in $want; do test -d "lab/compare/src/$t" || { echo "unknown task: $t"; exit 1; }; done
+          echo "matrix=$(printf '%s\n' $want | jq -R . | jq -sc '{task: .}')" >> "$GITHUB_OUTPUT"
+
+  measure:
+    name: ${{ matrix.task }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install rivals
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq valgrind time
+          . lab/compare_rival/toolchains.env
+          python3 -m venv /tmp/rival-venv
+          /tmp/rival-venv/bin/pip install --disable-pip-version-check \
+            "cython==$CYTHON" "mypy==$MYPY" "nuitka==$NUITKA" "setuptools==$SETUPTOOLS"
+          curl -fsSL -o codon.tar.gz "https://github.com/exaloop/codon/releases/download/v$CODON/codon-linux-x86_64.tar.gz"
+          mkdir -p /tmp/codon && tar xf codon.tar.gz -C /tmp/codon
+          /tmp/codon/codon-deploy-linux-x86_64/bin/codon --version
+          sudo sysctl -w kernel.perf_event_paranoid=-1 || true
+      - name: Versions
+        run: |
+          . lab/compare_rival/toolchains.env
+          test "$(/tmp/rival-venv/bin/cython --version 2>&1 | awk '{print $3}')" = "$CYTHON"
+          test "$(/tmp/rival-venv/bin/mypy --version | awk '{print $2}')" = "$MYPY"
+          test "$(/tmp/rival-venv/bin/python -m nuitka --version | head -1)" = "$NUITKA"
+          test "$(/tmp/codon/codon-deploy-linux-x86_64/bin/codon --version)" = "$CODON"
+          gcc --version | head -1; python3 --version; valgrind --version; nproc; free -g | head -2
+      - name: Measure ${{ matrix.task }}
+        run: |
+          python3 lab/compare_rival/run.py --tasks "${{ matrix.task }}" --no-safety \
+            --out "result-${{ matrix.task }}.json"
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: result-${{ matrix.task }}
+          path: result-${{ matrix.task }}.json
+          if-no-files-found: ignore
+
+  safety:
+    name: safety
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install rivals
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq valgrind time
+          . lab/compare_rival/toolchains.env
+          python3 -m venv /tmp/rival-venv
+          /tmp/rival-venv/bin/pip install --disable-pip-version-check \
+            "cython==$CYTHON" "mypy==$MYPY" "nuitka==$NUITKA" "setuptools==$SETUPTOOLS"
+          curl -fsSL -o codon.tar.gz "https://github.com/exaloop/codon/releases/download/v$CODON/codon-linux-x86_64.tar.gz"
+          mkdir -p /tmp/codon && tar xf codon.tar.gz -C /tmp/codon
+      - name: Safety probes
+        run: python3 lab/compare_rival/run.py --safety --out result-safety.json
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: result-safety
+          path: result-safety.json
+          if-no-files-found: ignore
+
+  report:
+    name: report
+    needs: [plan, measure, safety]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: result-*
+          path: results
+      - name: Merge
+        run: |
+          python3 lab/compare_rival/run.py --merge results --out compare-rival.json
+          cat lab/compare_rival/RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: compare-rival-report
+          path: |
+            compare-rival.json
+            lab/compare_rival/RESULTS.md

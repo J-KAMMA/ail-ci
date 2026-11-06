@@ -1,0 +1,77 @@
+# Proposed repeatable workflow for the vibe-coding benchmark.
+# Kept at lab/vibe/vibe.yml rather than under .github/ until the owner approves it.
+# Manual trigger only: it costs model calls and runs eleven tasks in three languages.
+name: vibe-bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      langs:
+        description: comma-separated languages
+        default: python,rust,ail
+      seeds:
+        description: number of independent attempts (seed count) or a list
+        default: '3'
+      rounds:
+        description: max model attempts per (task, language, seed)
+        default: '5'
+      model:
+        description: model id for the CLI
+        default: deepseek-v4.1-flash
+      effort:
+        description: cmd reasoning effort (low/medium/high, empty for the model default)
+        default: low
+      minutes:
+        description: stop starting new attempts after this many minutes
+        default: '150'
+
+permissions:
+  contents: read
+
+jobs:
+  vibe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integ
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Toolchains (rustc for the rust column, gcc for AIL)
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          gcc --version
+          rustc --version
+          python3 --version
+
+      - name: Model CLI
+        run: npm install -g command-code@1.88.2
+
+      - name: Run the benchmark
+        env:
+          COMMAND_CODE_API_KEY: ${{ secrets.COMMAND_CODE_API_KEY }}
+        run: |
+          python3 lab/vibe/run.py \
+            --cli cmd \
+            --model '${{ inputs.model }}' \
+            --effort '${{ inputs.effort }}' \
+            --langs '${{ inputs.langs }}' \
+            --seeds '${{ inputs.seeds }}' \
+            --rounds '${{ inputs.rounds }}' \
+            --jobs 2 \
+            --minutes '${{ inputs.minutes }}'
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-results
+          path: |
+            lab/vibe/results.json
+            lab/vibe/programs/
+          if-no-files-found: warn
