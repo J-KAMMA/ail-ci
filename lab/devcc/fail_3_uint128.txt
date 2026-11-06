@@ -1,0 +1,10 @@
+program: corpus/gdev/g03_018.py (corpus)
+bucket: unsupported builtin or intrinsic
+construct: __uint128_t
+c2m stderr:
+  /tmp/devcc-slirwl46/gen-g03_018-6be94157/dbg/program.c:67:17: syntax error on identifier (expected ';'):
+  /tmp/devcc-slirwl46/gen-g03_018-6be94157/dbg/program.c:67:17: syntax error on identifier (expected '<statement>'):
+  /tmp/devcc-slirwl46/gen-g03_018-6be94157/dbg/program.c:107:1: syntax error on static (expected '<statement>'):
+  /tmp/devcc-slirwl46/gen-g03_018-6be94157/dbg/program.c:61:60: unfinished compound statement
+generated C line 67: __uint128_t num, den;
+emitted by: AIL_CURRENT/python/pkg-v12/cruntime.py:3841-3844 (128-bit shift helper)
