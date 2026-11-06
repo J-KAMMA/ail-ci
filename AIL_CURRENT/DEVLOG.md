@@ -1,3 +1,21 @@
+## 2026-11-06 -- proof1: race census finds `threading.Thread(target=...)` (review fix, job-proof1-11070205)
+
+A second review of the proof1 census found the race measurement blind to `threading.Thread(...)`
+and two documents quoting stale numbers; no compiler source is touched.
+
+- `lab/proof/census.py` `_region_targets` matched `Thread` only as a bare name, so 10 of the 14
+  refused-shape programs (`threading.Thread(target=work)`) contributed no worker function.  It now
+  matches the attribute form too.
+- `census.json` regenerated with `python3 lab/proof/census.py --jobs 2`: 79 safe + 79 refused =
+  158 distinct shared accesses (was 104); refused named by rule D1 11 / D3 2 / D4 6 (was 2 / 0 /
+  4), 60 unknown (was 19); 16 worker functions of the 14 D5-refused shapes (was 5).  The
+  ownership/bounds numbers, blocker table and boxed-reason table are unchanged.
+- `lab/proof/RESULTS.md` and `docs/design/SAFETY_PROOF.md` (P7/P8, section 8) carry the corrected
+  race numbers; the bounds-reason note now says that 792 of the 1875 `AIL_BCE_EXPLAIN` records
+  belong to functions with no IR record (not to per-build duplicate reporting).
+- The root `DEVLOG.md` entry is corrected (3255 function records, 907 typed, 645 refused programs,
+  219-line design).
+
 ## 2026-11-06 -- proof1: correct census arithmetic and labels (review fix, job-proof1-11070008)
 
 A review of the census found arithmetic and labelling defects; no compiler source is touched.  All

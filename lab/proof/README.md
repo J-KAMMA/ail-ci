@@ -68,3 +68,6 @@ census records `NO_API` (see the module docstring) instead of patching it.
   by the reason the typed path gave.
 * The identity of the `ail_obj_store`/`_release` sites the emitter actually writes is not exposed
   per function (blocker `no-rc-api`), which is why ownership is counted per parameter reference.
+* A regeneration can change the SSA value ids inside a recorded `ir_reason`
+  (`... operand <%bbe0: i64> ...`); those ids are compiler-internal and no count depends on them.
+  Every summary, blocker and boxed-reason number is stable across runs.

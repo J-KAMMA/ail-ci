@@ -10,9 +10,9 @@ non-race files.  Full records: `census.json`.  Design: `docs/design/SAFETY_PROOF
 2. **Bounds: 13.6% of the index sites in IR-lowered functions already have their check removed** —
    166 of 1221.  A further **4744 index sites sit in functions the IR never lowers** at all, so
    only 20.5% of syntactic index sites are even inside the proof.
-3. **Races: 79 of the 104 distinct shared-state accesses in parallel regions are classified safe;
-   of the 25 refused, 6 are named by a rule (D4 4, D1 2, D3 0) and 19 are unknown.**  14 fork-join
-   shapes are refused by D5, covering 5 worker functions; 17 shapes are lowered lock-free.
+3. **Races: 79 of the 158 distinct shared-state accesses in parallel regions are classified safe;
+   of the 79 refused, 19 are named by a rule (D4 6, D1 11, D3 2) and 60 are unknown.**  14 fork-join
+   shapes are refused by D5, covering 16 worker functions; 17 shapes are lowered lock-free.
 4. **Reach: of 3255 function records, 907 (27.9%) are on the typed path, 1703 (52.3%) are boxed and
    645 (19.8%) belong to programs both paths refuse.**  1552 records are not boxed (47.7%), but 645
    of those are in programs that never compiled: 907 is the real typed-path reach.
@@ -52,8 +52,11 @@ Why a kept bound check stayed, by the `AIL_BCE_EXPLAIN` reason (records, then th
 distribution): `index may be negative` 1072 (85 / 1 / 986), `no length value of this container`
 282 (76 / 0 / 206), `no upper bound against a length` 276 (26 / 0 / 250), `list length may change
 (length-changing op or unknown call)` 245 (19 / 0 / 226).  A record is one (deduplicated) site the
-range pass left checked; the records outnumber the 1055 kept IR sites because a site can be
-reported once per build attempt, so use the reason *mix*, not its total.
+range pass left checked.  The 1875 records are not the 1055 kept IR sites: **792 of them belong to
+functions with no IR record** (legacy-emitted or no-index), so those reasons come from failed IR
+attempts of functions the IR never lowered; the other 1083 are attributed to function names that do
+have an IR record, but `AIL_BCE_EXPLAIN` is keyed by function name and accumulates retries, so they
+neither sum to nor subdivide the 1055 kept sites.  Use the reason *mix* only.
 
 ## Ranked blockers (functions affected, not instances)
 
@@ -110,15 +113,15 @@ per function), first matching group wins.  `other` is the remainder, and the exa
 
 31 programs (`lab/race/safe`, `lab/race/racy`) name a threading module.  17 fork-join shapes are
 lowered to `_ail_par_range` (lock-free).  14 shapes are refused by D5 and run under the general
-path's lock; 5 worker functions of those refused shapes were found, and only there can accesses be
+path's lock; 16 worker functions of those refused shapes were found, and only there can accesses be
 classified.  D5 is a count of *shapes*, never of accesses.
 
 | classification | accesses |
 |---|---:|
 | safe (reads, distinct-shape element writes) | 79 |
-| refused — D4 (str/bytes/object or attribute) | 4 |
-| refused — D1 (shared scalar write) | 2 |
-| refused — D3 (append/resize) | 0 |
-| refused — no rule names it (`unknown`) | 19 |
-| **refused total** | **25** |
-| **distinct accesses (safe + refused)** | **104** |
+| refused — D4 (str/bytes/object or attribute) | 6 |
+| refused — D1 (shared scalar write) | 11 |
+| refused — D3 (append/resize) | 2 |
+| refused — no rule names it (`unknown`) | 60 |
+| **refused total** | **79** |
+| **distinct accesses (safe + refused)** | **158** |

@@ -164,8 +164,8 @@ is a projection, it says so.
 | P4 | **return-transfer borrow** | "parameter returned (or yielded)" 145 + "aliased into a second local" 20 | 165 parameter pairs | up to +330 RC ops elided (16% of the 2050 measured pairs) |
 | P5 | **bounds in the compare corpus** | index kept: "no length value" / "list length may change" | 188 of 308 IR sites kept | up to 188 sites; each is one removed check |
 | P6 | **source positions on accesses** | none: makes P2/P5 diagnosable per line | 1221 IR sites | the 1221 sites P2 cannot yet locate |
-| P7 | **race D3: per-chunk append buffers** | refused regions, rule D3 | 0 accesses, 0 regions | nothing today: D3 never fires in the race corpus (shared `append` is refused by D5 or D1 instead), so this job cannot be ranked from the census |
-| P8 | **race D1: exact shared-int reduction** | rule D1 | 2 accesses in 2 programs | 0 regions on its own: both programs are refused by D5 (shape), so fixing D1 alone lowers nothing |
+| P7 | **race D3: per-chunk append buffers** | refused regions, rule D3 | 2 accesses in 2 programs | 0 regions on its own: both programs are refused by D5 (shape), so fixing D3 alone lowers nothing |
+| P8 | **race D1: exact shared-int reduction** | rule D1 | 11 accesses in 10 programs | 0 regions on its own: every program is refused by D5 (shape), so fixing D1 alone lowers nothing |
 | P9 | **ownership verifier** | none: soundness | 0 | turns "safe by construction" into a checked proof; must come before anyone relies on the word "proved" |
 
 Nine jobs, 18 hours.  P1 is first only because it moves the most; P2 is the one to ship first if
@@ -213,7 +213,7 @@ ranks highest; P9 has no number attached and is the soundness precondition for t
 
 Read as one sentence: the ownership rule is already doing most of its work (81% of the RC pairs a
 call would need are gone), the bounds proof is not (14% of index sites in the functions it reaches,
-and four fifths of all index sites are outside its reach), and the race rules accept 79 of 104
+and four fifths of all index sites are outside its reach), and the race rules accept 79 of 158
 shared accesses.  The single largest number is not a proof gap at all: 72.1% of real functions
 never reach the typed path, so the honest ceiling of "how much of real Python can this prove" is
 27.9% today, not 81%.

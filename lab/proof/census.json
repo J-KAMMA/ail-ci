@@ -528,17 +528,18 @@
   "programs_with_a_parallel_construct": 31,
   "race_probe_programs": 31,
   "safe": 79,
-  "refused": 25,
-  "unknown": 19,
-  "distinct_accesses": 104,
-  "named_rule_refused": 6,
+  "refused": 79,
+  "unknown": 60,
+  "distinct_accesses": 158,
+  "named_rule_refused": 19,
   "constructs_lowered": 17,
   "lowered_regions": 17,
-  "refused_regions": 5,
+  "refused_regions": 16,
   "refused_shapes": 14,
   "by_rule": {
-   "D4": 4,
-   "D1": 2
+   "D4": 6,
+   "D1": 11,
+   "D3": 2
   },
   "programs": [
    {
@@ -985,15 +986,28 @@
        "note": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'acc' is written in the body, but not only at indexes that differ between iterations. Use acc[i], or acc[i * K + j] with j from an inner `for j in range(0, K)`, and touch acc nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'acc' is written in the body, but not only at indexes that differ between iterations. Use acc[i], or acc[i * K + j] with j from an inner `for j in range(0, K)`, and touch acc nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index",
+       "accesses": 6,
+       "rules": {
+        "D1": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 6,
+     "unknown": 5,
+     "by_rule": {
+      "D1": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 6
     }
    },
    {
@@ -1006,15 +1020,24 @@
        "note": "not run in parallel (it runs under the general path's lock): work() writes a module global; threads without the lock may not\n  write instead: pass a list and write out[k], or return values through executor.map"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 8,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): work() writes a module global; threads without the lock may not\n  write instead: pass a list and write out[k], or return values through executor.map",
+       "accesses": 1,
+       "rules": {}
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
+     "refused": 1,
+     "unknown": 1,
      "by_rule": {},
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 1
     }
    },
    {
@@ -1057,15 +1080,28 @@
        "note": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'best' is written in the body, but not only at indexes that differ between iterations. Use best[i], or best[i * K + j] with j from an inner `for j in range(0, K)`, and touch best nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'best' is written in the body, but not only at indexes that differ between iterations. Use best[i], or best[i * K + j] with j from an inner `for j in range(0, K)`, and touch best nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index",
+       "accesses": 5,
+       "rules": {
+        "D1": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 5,
+     "unknown": 4,
+     "by_rule": {
+      "D1": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 5
     }
    },
    {
@@ -1078,15 +1114,28 @@
        "note": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index",
+       "accesses": 4,
+       "rules": {
+        "D1": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 4,
+     "unknown": 3,
+     "by_rule": {
+      "D1": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 4
     }
    },
    {
@@ -1099,15 +1148,28 @@
        "note": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index",
+       "accesses": 4,
+       "rules": {
+        "D1": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 4,
+     "unknown": 3,
+     "by_rule": {
+      "D1": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 4
     }
    },
    {
@@ -1165,15 +1227,41 @@
        "note": "not run in parallel (it runs under the general path's lock): threading is used in a way the typed path does not run without the lock (only Thread started and joined in one block, ThreadPoolExecutor.map and Pool.map are)\n  write instead: return results through executor.map, or give each thread its own out[k] instead of a lock or a queue"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): threading is used in a way the typed path does not run without the lock (only Thread started and joined in one block, ThreadPoolExecutor.map and Pool.map are)\n  write instead: return results through executor.map, or give each thread its own out[k] instead of a lock or a queue",
+       "accesses": 4,
+       "rules": {
+        "D3": 1,
+        "D4": 1
+       }
+      },
+      {
+       "kind": "refused_region",
+       "line": 11,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): threading is used in a way the typed path does not run without the lock (only Thread started and joined in one block, ThreadPoolExecutor.map and Pool.map are)\n  write instead: return results through executor.map, or give each thread its own out[k] instead of a lock or a queue",
+       "accesses": 4,
+       "rules": {
+        "D1": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 8,
+     "unknown": 5,
+     "by_rule": {
+      "D3": 1,
+      "D4": 1,
+      "D1": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 2,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 8
     }
    },
    {
@@ -1186,15 +1274,28 @@
        "note": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index",
+       "accesses": 13,
+       "rules": {
+        "D1": 2
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 13,
+     "unknown": 11,
+     "by_rule": {
+      "D1": 2
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 13
     }
    },
    {
@@ -1207,15 +1308,30 @@
        "note": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: a call or expression statement (print, append, a helper) is not allowed; the body may only compute values; write results into a list or bytearray element indexed by the thread index (out[k], k the thread index) and combine them after the loop\n  write instead: compute into locals and write out[k] once, k the thread index"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: a call or expression statement (print, append, a helper) is not allowed; the body may only compute values; write results into a list or bytearray element indexed by the thread index (out[k], k the thread index) and combine them after the loop\n  write instead: compute into locals and write out[k] once, k the thread index",
+       "accesses": 5,
+       "rules": {
+        "D3": 1,
+        "D4": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 5,
+     "unknown": 3,
+     "by_rule": {
+      "D3": 1,
+      "D4": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 5
     }
    },
    {
@@ -1228,15 +1344,28 @@
        "note": "not run in parallel (it runs under the general path's lock): work(): parameter 'd' needs an annotation (int, float, list[int], list[float] or bytearray)"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): work(): parameter 'd' needs an annotation (int, float, list[int], list[float] or bytearray)",
+       "accesses": 5,
+       "rules": {
+        "D1": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 5,
+     "unknown": 4,
+     "by_rule": {
+      "D1": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 5
     }
    },
    {
@@ -1308,15 +1437,28 @@
        "note": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index"
       }
      ],
-     "regions": [],
+     "regions": [
+      {
+       "kind": "refused_region",
+       "line": 6,
+       "verdict": "refused",
+       "reason": "not run in parallel (it runs under the general path's lock): the thread function work() cannot run without the lock: 'out' is written in the body, but not only at indexes that differ between iterations. Use out[i], or out[i * K + j] with j from an inner `for j in range(0, K)`, and touch out nowhere else in the body\n  write instead: compute into locals and write out[k] once, k the thread index",
+       "accesses": 3,
+       "rules": {
+        "D1": 1
+       }
+      }
+     ],
      "safe": 0,
-     "refused": 0,
-     "unknown": 0,
-     "by_rule": {},
+     "refused": 3,
+     "unknown": 2,
+     "by_rule": {
+      "D1": 1
+     },
      "lowered_regions": 0,
-     "refused_regions": 0,
+     "refused_regions": 1,
      "refused_shapes": 1,
-     "distinct_accesses": 0
+     "distinct_accesses": 3
     }
    }
   ]
@@ -47775,7 +47917,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%bbe0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%8430: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -47798,7 +47940,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%bbe0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%8430: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -48138,7 +48280,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c5e0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%cb80: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -48161,7 +48303,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c5e0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%cb80: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -48401,7 +48543,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%d210: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%0100: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -48424,7 +48566,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%d210: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%0100: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -51773,7 +51915,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%e320: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%5e40: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -51796,7 +51938,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%e320: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%5e40: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -52136,7 +52278,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%df90: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%6320: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -52159,7 +52301,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%df90: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%6320: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -52399,7 +52541,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%acb0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%5bd0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -52422,7 +52564,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%acb0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%5bd0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -53726,7 +53868,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%af20: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%5300: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -53749,7 +53891,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%af20: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%5300: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -54089,7 +54231,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%f010: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%9900: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -54112,7 +54254,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%f010: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%9900: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -54352,7 +54494,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%3130: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%6980: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -54375,7 +54517,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%3130: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%6980: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -82202,7 +82344,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%3fd0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%63e0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -82225,7 +82367,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%3fd0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%63e0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -82565,7 +82707,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%7760: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%4730: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -82588,7 +82730,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%7760: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%4730: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -82828,7 +82970,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%4370: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%6fe0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -82851,7 +82993,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%4370: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%6fe0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -105645,7 +105787,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%56f0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%da50: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -105668,7 +105810,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%56f0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%da50: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -106008,7 +106150,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d300: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%eaa0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -106031,7 +106173,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d300: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%eaa0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -106271,7 +106413,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%6050: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%52a0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -106294,7 +106436,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%6050: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%52a0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -110984,7 +111126,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%0be0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%2590: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -111007,7 +111149,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%0be0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%2590: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -111347,7 +111489,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c6d0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%9390: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -111370,7 +111512,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c6d0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%9390: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -111610,7 +111752,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%6dd0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%a110: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -111633,7 +111775,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%6dd0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%a110: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,

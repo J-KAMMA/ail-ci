@@ -551,7 +551,10 @@ def _region_targets(tree):
         if isinstance(f, ast.Attribute) and f.attr in ('map', 'submit') and node.args \
                 and isinstance(node.args[0], ast.Name):
             names.add(node.args[0].id)
-        elif isinstance(f, ast.Name) and f.id == 'Thread':
+        elif (isinstance(f, ast.Name) and f.id == 'Thread') or \
+                (isinstance(f, ast.Attribute) and f.attr == 'Thread'):
+            # `from threading import Thread` is a bare name; `threading.Thread(...)` and
+            # `t.Thread(...)` are attributes -- both are the same constructor
             for kw in node.keywords:
                 if kw.arg == 'target' and isinstance(kw.value, ast.Name):
                     names.add(kw.value.id)
