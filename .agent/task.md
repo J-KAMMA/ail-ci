@@ -1,3 +1,48 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: cmprival1
+
+**What the change really does:** adds a measurement lab, `lab/compare_rival/run.py`, which builds `lab/compare/src/<task>/{main,typed}.py` with Nuitka, Cython (plain and annotated), mypyc and Codon, checks every public/hidden case against each task's `reference.py`, adds five safety probes, pins versions, and ships `results.json`, `RESULTS.md` and a proposed workflow. No compiler or runtime file is touched (`git diff work..HEAD -- . ':!lab/compare_rival'` is empty). The worker report is empty, so there are no report claims to verify; I checked the artifacts themselves.
+
+**Verified**
+- `RESULTS.md` is exactly `render(results.json)` (byte-identical) and contains all 10 tasks.
+- Data is real: a fresh `--safety` rerun reproduced all 35 table cells bit-identically; a fresh `rail_transfer` run reproduced identical `binary_bytes`/`build_disk_kib` and 3/3 + 21/21 cases (wall was inflated ~4x by my concurrent builds, ratios unchanged); a manual Cython-typed `scar_life` build really does run past 180 s, so that "timeout" is genuine.
+- Installed rivals match `toolchains.env` exactly (Cython 3.3.1, mypy 2.4.1, Nuitka 4.3.4, Codon 0.20.6); Codon licence/absence of Mojo explained.
+- `test_ail_safetynet`: pass (1/1, 350 s). No test modules added/edited.
+- Workflow: `workflow_dispatch` only, pinned SHAs identical to `compare-lab.yml`, `persist-credentials: false`, `max-parallel: 4`, outside `.github/`.
+
+**Defects**
+
+1. **The proposed workflow's report job cannot merge anything.** `run.py:566` globs `Path(args.merge).glob('*.json')`, but `actions/download-artifact` with `pattern:` writes each artifact into `results/<artifact>/…` (this repo's own `census-lab.yml` needs `merge-multiple: true` for a flat layout). Reproduced on the exact layout: `python3 run.py --merge results --out x.json` writes `{}` and dies with `TypeError: 'NoneType' object is not subscriptable` at `run.py:580` (`render(None)`). Expected: "merged 10 tasks"; actual: rc=1, empty report.
+2. **The five-line summary is malformed**: every bullet reads `- - wall time: …` because `verdict()` returns `- …` and `render()` prepends `- ` (`run.py:508-512`, `RESULTS.md:108-112`).
+3. **README understates the methodology change.** `README.md:32` says "the one difference from compare-lab is one cold build"; `run.py:73-76` also cuts `RUN_TIMEOUT` 1500→180, `CASE_TIMEOUT` 120→30, `CALLGRIND_TIMEOUT` 7000→120, skips callgrind above 4 s wall and adds a 240 s case budget. Consequence: 74 of 80 instruction cells are `-`, the instruction verdict rests on n=1, and two rival rows are "timeout" that `run_task.py`'s 1500 s would have measured. The brief asked for measurement exactly as `run_task.py` does.
+4. **Safety classification does not implement its stated rule.** `classify()` (`run.py:338-345`) calls any non-zero exit "stops loudly"; README:153 and the docstring say "non-zero exit **with the same stdout prefix**". Observed: `cython-main index` printed 0 bytes vs CPython's `1\n2\n3\n`, `ail overflow` 0 of 25 bytes, both labelled "stops loudly". A tool that prints wrong data then exits would be reported as safe.
+5. **No DEVLOG entry** for 2026-11-06 (the brief requires one at the top; `DEVLOG.md` still starts at fnvfix1/2026-11-05).
+6. **Empty worker report** — no probes, no numbers, so the mandatory self-check list is absent.
+
+**Pre-existing:** none (no compiler/runtime behaviour changed; nothing to compare against `/tmp/base`).
+
+**Unverified:** the full 10-task re-measurement and most instruction counts were not re-run (budget); action SHAs were not resolved against GitHub. I accidentally let a `--tasks rail_transfer` rerun rewrite `lab/compare_rival/RESULTS.md` (run.py always regenerates it); I restored it with `git checkout` — tree is clean again apart from the untracked `.agent/pipeline.md`.
+
+VERDICT: FIX
+
+1. `--merge` glob is not recursive: `run.py:566` + workflow report job. Probe: nested `results/<artifact>/*.json` (what `actions/download-artifact` produces); expected `merged 10 tasks`, actual `{}` and `TypeError: 'NoneType' object is not subscriptable` (run.py:580).
+2. Five-line summary prints `- - ` on every line (`run.py:508-512`, `RESULTS.md:108-112`); expected `- wall time: …`.
+3. `README.md:32` claims the only difference from compare-lab is one cold build; the code also changes three timeouts, skips callgrind above 4 s and caps cases at 240 s — fix the statement or restore the reference timeouts.
+4. `classify()` (`run.py:338-345`) does not apply the documented same-stdout-prefix test; "stops loudly" cells (`cython-main index`, `ail overflow`) contradict README:153.
+5. Missing DEVLOG entry dated 2026-11-06, required by the brief.
+6. Worker report is empty; re-submit with the probes and numbers the brief requires.
+[commandcode stop=end_turn turns=45 out_tokens=37399]
+
+
+--- ORIGINAL TASK ---
 Lane: cmprival
 
 # cmprival1: compare AIL with its real rivals, the Python compilers Codon, Nuitka, mypyc and Cython (and Mojo if it installs without an account)
