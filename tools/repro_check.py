@@ -342,6 +342,9 @@ def main():
             verdict = {"identical": "identical", "diff": "DIFF", "refused": "not built",
                        "error": "ERROR"}[record["status"]]
             print("%-60s %s" % (name, verdict), flush=True)
+            if args.json:  # incremental: a run stopped by the clock still leaves its rows
+                Path(args.json).write_text(
+                    json.dumps(sorted(results, key=lambda r: r["program"]), indent=1) + "\n")
 
     results.sort(key=lambda r: r["program"])
     if args.json:
