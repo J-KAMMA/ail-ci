@@ -163,7 +163,7 @@ REFUSED = [
     ("bitand", "import ail_array as ta\na = ta.zeros(3, ta.int32)\nb = a & a\n", "write instead"),
     ("shift", "import ail_array as ta\na = ta.zeros(3, ta.int32)\nb = a << 1\n", "write instead"),
     ("matmul", "import ail_array as ta\na = ta.zeros(3, ta.f64)\nb = a @ a\n", "ta.matmul"),
-    ("2-D int32", "import ail_array as ta\na = ta.zeros((2, 3), ta.int32)\n", "write instead"),
+    ("2-D f16", "import ail_array as ta\na = ta.zeros((2, 3), ta.f16)\n", "write instead"),    # 2-D int32: fdarr2
     ("3-D", "import ail_array as ta\na = ta.zeros((2, 3, 4), ta.f64)\n", "write instead"),
     ("2-D index", "import ail_array as ta\na = ta.zeros(3, ta.f64)\nb = a[1, 2]\n", "write instead"),
     ("shape", "import ail_array as ta\na = ta.zeros(3, ta.f64)\nb = a.shape\n", "len(a)"),

@@ -226,10 +226,10 @@ and not numpy's pairwise sum; users who want Python's result call the builtin `s
 | inputs | result | definition |
 | --- | --- | --- |
 | f64 x f64 | f64 | **built (T6, 2026-10-30).** `C[i, j] = ta.dot(A[i], B[:, j])` bit for bit: the products `r(A[i,k] * B[k,j])` are added along `k` in the **one fixed order** below. K = 0 gives `+0.0` |
-| f32 x f32 | f32 | the same order with `r = r_f32` (not built yet) |
+| f32 x f32 | f32 | the same order with `r = r_f32`: each product `r_f32(a * b)`, `r_f32` after every add, the block tree with `r_f32`. **Built (fdarr2, 2026-11-06)**; the reference computed this only from that job on (it refused f32 before) |
 | f16 x f16 | f32 (default `acc`) | the exact sum of the exact products, rounded once to f32 (GPU.md 8.7). f16 products are exact in f32, and every product is an integer multiple of `2^-48`, so the reference adds Python ints and rounds once with integer code (section 4.2). Not built yet |
 | int8 x int8 | int32 | exact integer sum; `OverflowError` if a result leaves int32; order-free (so GPU cooperative matrix may be used under GPU.md 8.7's precondition). Not built yet |
-| int32 x int32 | int32 | exact, checked, order-free. Not built yet |
+| int32 x int32 | int32 | exact, checked, order-free: `OverflowError: int32 matmul overflow at index 7` at the first output element (row-major index `i * n + j`) whose exact sum leaves int32, whatever the partial sums did. **Built (fdarr2)**: the int64 accumulator moves whole multiples of `2**62` into a counter, so partial sums beyond int64 neither wrap nor stop |
 
 **The exact order of one output element (f64).** For `K` products `p_k = r(A[i,k] * B[k,j])` (each rounded to binary64; `k = 0..K-1`):
 
@@ -253,7 +253,7 @@ This replaces the first draft of this table (sequential `k` from 0 with one accu
 - **`.shape`, `len`, `.T`**: `M.shape == (rows, cols)`, `len(M) == rows`, `M.T` is a new transposed array (a 1-D array has no `.T`: `ValueError: ail_array: .T needs a 2-D array, not a 1-D one`). `.copy()`, `.tolist()` (list of rows), `.tobytes()` (row-major), `==` (same dtype, same shape, same values), iteration (yields rows) and `repr` (`array([[1.0, 2.0], [3.0, 4.0]], f64)`) follow.
 - **Element-wise operations** use the 1-D rules on the flat data: the same rounding, NaN, IEEE division and in-place semantics. The two operands of an array-array operation must have the **same shape**; `(2, 3) + (3,)` is `ValueError: ail_array: shapes differ: (2, 3) and (3,)` (the row broadcast of 2.3 is not built; write the loop over rows). This covers `+ - * /` (and `// %` on int arrays), unary `-`, `abs`, `sqrt exp log tanh`, `minimum maximum clip`, `astype` and the in-place forms.
 - **Reductions** (`sum dot min max argmin argmax`) take 1-D arrays; a 2-D argument is `ValueError: ail_array.sum(): 2-D arrays are not built here; reduce one row: ta.sum(M[i])`. `ta.matmul` is the 2-D product.
-- **`ta.matmul(A, B)`**, both 2-D f64: `A` is `(m, k)`, `B` is `(k, n)`, the result is `(m, n)` with the order of 3.7. Errors, in this order: not two arrays: `TypeError: ail_array.matmul() needs two ail_array.Array values`; either not 2-D: `ValueError: ail_array.matmul(): needs two 2-D arrays, not shapes (3,) and (2, 3)`; dtypes differ: the standard `TypeError: ail_array: f64 matmul f32: dtypes differ; write a.astype(ta.f32) or b.astype(ta.f64)`; not f64: `TypeError: ail_array.matmul(): only f64 arrays are built in this version, not f32`; inner sizes differ: `ValueError: ail_array: matmul: shapes (2, 3) and (4, 5) do not match: 3 != 4`. The `@` operator is not defined on arrays (decision TA4: `dot` and `matmul` are separate functions).
+- **`ta.matmul(A, B)`**, both 2-D f64: `A` is `(m, k)`, `B` is `(k, n)`, the result is `(m, n)` with the order of 3.7. Errors, in this order: not two arrays: `TypeError: ail_array.matmul() needs two ail_array.Array values`; either not 2-D: `ValueError: ail_array.matmul(): needs two 2-D arrays, not shapes (3,) and (2, 3)`; dtypes differ: the standard `TypeError: ail_array: f64 matmul f32: dtypes differ; write a.astype(ta.f32) or b.astype(ta.f64)`; not f64, f32 or int32: `TypeError: ail_array.matmul(): only f64, f32 and int32 arrays are built in this version, not f16` (fdarr2; before it the text named f64 only); inner sizes differ: `ValueError: ail_array: matmul: shapes (2, 3) and (4, 5) do not match: 3 != 4`. The `@` operator is not defined on arrays (decision TA4: `dot` and `matmul` are separate functions).
 
 ## 4. The reference implementation
 
@@ -495,6 +495,47 @@ The device side has to produce the bits of 3.7, so what it may and may not do is
   self-test is never used. Constants come from measurements on the laptop iGPU, lavapipe and Colab (G7), not from this note.
 - **Fallback**: no loader, no device, `AIL_GPU=0`, a failed self-test or a failed launch all run the CPU kernel; the result is the
   same bits by construction.
+
+### 5.8 Core subset: conformance table (job fdarr2, 2026-11-06)
+
+`test_ail_array_core.py` builds `array_core_cases/` (one file per dtype and op family) in the default build and with
+`AIL_UNIFIED_FORCE=1`; every output line names its cell, and a cell matches when its lines equal CPython + reference. Edge
+sets: int32 `INT32_MAX + 1`, `INT32_MIN // -1`, `-INT32_MIN`, `abs(INT32_MIN)` (`OverflowError`, reference text), `// 0`,
+`% 0`, in-place prefix state, a scalar out of int32; floats `1/0`, `0/0`, `+-0.0` divisors, `-0.0` and NaN at every position
+for min/max/argmin/argmax, subnormals, overflow, `inf - inf`; reductions at n = 0, 1, 15, 16, 17, 1023, 1024, 1025, 2049, 5000
+with NaN/inf planted at lane and block boundaries; matmul at K = 0, 1, 2, 15, 16, 17, 1023, 1024, 1025, 2049 (int32 to 1025),
+square, tall, wide, empty, a shape mismatch (`ValueError` text), and for int32 results that overflow int32 and partial sums
+that leave int64 and come back. 51 cells: **46 match in both builds, 5 refused by name, 0 wrong** (before the job: f32 and
+int32 `matmul` were refused, 44 match).
+
+| op | f64 | f32 | int32 |
+| --- | --- | --- | --- |
+| `+ - *` | match | match | match |
+| `/` | match | match | refused (`/ on int32 arrays`; write `astype(ta.f64)`) |
+| `//` `%` | refused (`// on f64 arrays`) | refused | match |
+| unary `-`, `abs` | match | match | match |
+| `minimum` `maximum` | match | match | match |
+| `sum` `dot` | match | match | match (a `dot` whose exact value exceeds int64 stops loudly with the int64 `OverflowError`; the reference returns the big int: the int64 rule, not a wrong value) |
+| `min` `max` `argmin` `argmax` | match | match | match |
+| `matmul` | match | match (built here) | match (built here) |
+
+2-D f32 and int32 arrays have construction, `M[i, j]`, rows, row slices, `.T`, `.shape`, `len`, `==`, `copy`, `tobytes`,
+printing and `ta.matmul`; element-wise operations and reductions on them are refused by name (2-D f64 has them, T6).
+
+**Cost** (`tools/icount.c`, user-space instructions per repetition, the R = 0 build subtracted; peak RSS of the whole
+program; default build, WSL; no speed claim is made):
+
+| op | f64 | f32 | int32 | numpy 2.5 f32 (information only: other order, FMA, SIMD BLAS, one thread) |
+| --- | --- | --- | --- | --- |
+| `a * b + a`, n = 1M | 11.6M (fused, 5.2a) | 92.2M (not fused) | - | - |
+| `ta.sum`, n = 1M | 1.41M | 38.1M | - | - |
+| `ta.dot`, n = 1M | 2.48M | 60.1M | - | - |
+| `ta.matmul` 128 x 128 x 128 | 32.7M (15.6 per multiply-add) | 164M (78) | 55.2M (26) | 0.36M (0.17), 0.041 ms wall |
+| peak RSS, two 1M arrays + result | 40.6 MB | 40.7 MB (8 bytes per f32 element) | - | - |
+
+f32 costs 7x to 27x the f64 instructions: every operation calls `_ail_ta_r32` (a function call, a compare chain and the
+Veltkamp split) and the reductions use a generic 16-lane group loop. Inlining `r32`, fusing f32 chains and an unrolled f32
+lane loop are the next steps; each needs `speed-claims` / `optimization-adoption` before it is called faster.
 
 ## 6. Aliasing, layout and the FFI boundary
 
