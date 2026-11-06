@@ -290,7 +290,15 @@ def _new_scope_info():
     return {"annotations": {}, "literals": {}, "uncertain": set(), "functions": {},
             "globals": set(), "nonlocals": set(),
             "global_literals": {}, "global_uncertain": set(),
-            "nonlocal_literals": {}, "nonlocal_uncertain": set()}
+            "nonlocal_literals": {}, "nonlocal_uncertain": set(),
+            "sites": {}}
+
+
+def _add_site(info, name, node, kind, **extra):
+    """Record one place that binds `name` in this scope, for go-to-definition."""
+    entry = {"node": node, "kind": kind}
+    entry.update(extra)
+    info["sites"].setdefault(name, []).append(entry)
 
 
 def _mark_uncertain(name, info):
@@ -317,6 +325,7 @@ def _bind_target(target, info):
     """Record a binding that is not a literal assignment as uncertain."""
     if isinstance(target, ast.Name):
         _mark_uncertain(target.id, info)
+        _add_site(info, target.id, target, "assign")
     elif isinstance(target, (ast.Tuple, ast.List)):
         for item in target.elts:
             _bind_target(item, info)
@@ -325,13 +334,14 @@ def _bind_target(target, info):
 
 
 def _pattern_bindings(pattern):
-    names = []
+    """The (node, name) pairs a match pattern binds."""
+    bindings = []
     for node in ast.walk(pattern):
         if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
-            names.append(node.name)
+            bindings.append((node, node.name))
         elif isinstance(node, ast.MatchMapping) and node.rest:
-            names.append(node.rest)
-    return names
+            bindings.append((node, node.rest))
+    return bindings
 
 
 def _scope_info(scope):
@@ -364,6 +374,7 @@ def _scope_info(scope):
                 _mark_uncertain(target.id, info)
             else:
                 _mark_literal(target.id, kind, info)
+            _add_site(info, target.id, target, "assign", value=value)
         else:
             _bind_target(target, info)
 
@@ -382,6 +393,7 @@ def _scope_info(scope):
                 annotate(argument.arg, text)
             else:
                 uncertain.add(argument.arg)
+            _add_site(info, argument.arg, argument, "param")
         for argument in (args.vararg, args.kwarg):
             if argument is not None:
                 text = _annotation(argument.annotation)
@@ -389,6 +401,7 @@ def _scope_info(scope):
                     annotate(argument.arg, text)
                 else:
                     uncertain.add(argument.arg)
+                _add_site(info, argument.arg, argument, "param")
     if isinstance(scope, _COMPREHENSIONS):
         for generator in scope.generators:
             _bind_target(generator.target, info)
@@ -397,6 +410,8 @@ def _scope_info(scope):
             annotate(node.target.id, _annotation(node.annotation))
             if node.value is not None:
                 assign(node.target, node.value)
+            else:
+                _add_site(info, node.target.id, node.target, "assign", value=None)
         elif isinstance(node, ast.Assign):
             for target in node.targets:
                 assign(target, node.value)
@@ -412,21 +427,29 @@ def _scope_info(scope):
                     _bind_target(item.optional_vars, info)
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                _mark_uncertain((alias.asname or alias.name).split(".")[0], info)
+                bound = (alias.asname or alias.name).split(".")[0]
+                _mark_uncertain(bound, info)
+                _add_site(info, bound, node, "import", alias=alias)
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                _mark_uncertain(alias.asname or alias.name, info)
+                bound = alias.asname or alias.name
+                _mark_uncertain(bound, info)
+                _add_site(info, bound, node, "from-import", alias=alias)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             functions[node.name] = node
+            _add_site(info, node.name, node, "function")
         elif isinstance(node, ast.ClassDef):
             _mark_uncertain(node.name, info)
+            _add_site(info, node.name, node, "class")
         elif isinstance(node, ast.ExceptHandler):
             if node.name:
                 _mark_uncertain(node.name, info)
+                _add_site(info, node.name, node, "except", binding=node.name)
         elif isinstance(node, ast.Match):
             for case in node.cases:
-                for name in _pattern_bindings(case.pattern):
+                for binding, name in _pattern_bindings(case.pattern):
                     _mark_uncertain(name, info)
+                    _add_site(info, name, binding, "pattern", binding=name)
     return info
 
 
@@ -533,9 +556,25 @@ def _plain_name_token(text, tree, token):
                 return True
             if _char_index(text, node.end_lineno, node.end_col_offset) == end:
                 return True
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            if token.start[0] == node.lineno and token.string in node.names:
+                return True
+        elif isinstance(node, ast.ExceptHandler) and node.name == token.string:
+            found = _except_name_span(text, node, node.name)
+            if found is not None and found[0] == start:
+                return True
+        elif isinstance(node, ast.Match):
+            for case in node.cases:
+                for binding, name in _pattern_bindings(case.pattern):
+                    if name != token.string:
+                        continue
+                    found = _name_token_span(text, binding, name)
+                    if found is not None and found[0] == start:
+                        return True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             line = lines[node.lineno - 1] if 0 < node.lineno <= len(lines) else ""
-            match = re.search(r"\bdef\s+" + re.escape(node.name) + r"\b", line)
+            keyword = "class" if isinstance(node, ast.ClassDef) else "def"
+            match = re.search(r"\b" + keyword + r"\s+" + re.escape(node.name) + r"\b", line)
             if match and token.start == (node.lineno, match.end() - len(node.name)) \
                     and token.string == node.name:
                 return True
@@ -593,6 +632,14 @@ def _scope_chain(text, tree, offset):
             start, end = span
             if not (start <= offset <= end):
                 continue
+            if isinstance(child, _COMPREHENSIONS):
+                generators = child.generators
+                first = generators[0].iter if generators else None
+                first_span = _span(text, first) if first is not None else None
+                if first_span is not None and first_span[0] <= offset <= first_span[1]:
+                    # The first iterable of a comprehension runs in the enclosing scope.
+                    visit(child)
+                    return
             if isinstance(child, _SCOPE_TYPES):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
                     body = _body_start(text, child)
@@ -678,6 +725,433 @@ def _hover_in_chain(tree, chain, name):
     return None
 
 
+# ---------------------------------------------------------------- go-to-definition
+
+def _disk_text(path):
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+_MODULES = None
+
+
+def _modules():
+    """The compiler's module loader, for its search order (entry directory, AIL_PATH, bundled stdlib)."""
+    global _MODULES
+    if _MODULES is None:
+        sdk = str(cli.SDK)
+        if sdk not in sys.path:
+            sys.path.insert(0, sdk)
+        import ail_modules
+        _MODULES = ail_modules
+    return _MODULES
+
+
+def _token_span(text, token):
+    lines = text.splitlines(keepends=True)
+    row = token.start[0] - 1
+    if row < 0 or row >= len(lines):
+        return None
+    start = sum(len(item) for item in lines[:row]) + token.start[1]
+    return start, start + len(token.string)
+
+
+def _offset_position(text, offset):
+    """LSP position of a character offset; `character` counts UTF-16 code units."""
+    lines = text.splitlines(keepends=True)
+    total = 0
+    for index, line in enumerate(lines):
+        if total + len(line) > offset:
+            prefix = line[:offset - total]
+            character = sum(2 if ord(char) > 0xFFFF else 1 for char in prefix)
+            return {"line": index, "character": character}
+        total += len(line)
+    return {"line": max(len(lines) - 1, 0), "character": 0}
+
+
+def _range_of_span(text, start, end):
+    return {"start": _offset_position(text, start), "end": _offset_position(text, end)}
+
+
+def _node_range(text, node):
+    span = _span(text, node)
+    if span is None:
+        return None
+    return _range_of_span(text, *span)
+
+
+def _definition_span(text, node):
+    """The span of a bound name: a def/class name or a parameter rather than the whole statement."""
+    if isinstance(node, ast.arg):
+        start = _char_index(text, node.lineno, node.col_offset)
+        return None if start is None else (start, start + len(node.arg))
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        start = _char_index(text, node.lineno, node.col_offset)
+        if start is None:
+            return None
+        prefix = 6 if isinstance(node, ast.ClassDef) else (10 if isinstance(node, ast.AsyncFunctionDef) else 4)
+        return start + prefix, start + prefix + len(node.name)
+    return _span(text, node)
+
+
+def _tokens(text):
+    try:
+        return list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError):
+        return []
+
+
+def _name_token_span(text, node, name):
+    """The span of the name token `name` inside `node`, so a capture is not the whole pattern."""
+    span = _span(text, node)
+    if span is None or not name:
+        return None
+    for token in _tokens(text):
+        if token.type != tokenize.NAME or token.string != name:
+            continue
+        found = _token_span(text, token)
+        if found is not None and span[0] <= found[0] and found[1] <= span[1]:
+            return found
+    return None
+
+
+def _except_name_span(text, node, name):
+    """The span of the `as <name>` binding of an except handler (its header, not its body)."""
+    span = _span(text, node)
+    if span is None or not name:
+        return None
+    end = span[1]
+    if node.body:
+        body_span = _span(text, node.body[0])
+        if body_span is not None:
+            end = body_span[0]
+    previous = None
+    for token in _tokens(text):
+        found = _token_span(text, token)
+        if found is None or found[0] < span[0] or found[1] > end:
+            continue
+        if token.type == tokenize.NAME:
+            if previous == "as" and token.string == name:
+                return found
+            previous = token.string
+    return None
+
+
+def _location(path, text, node, span=None):
+    rng = _range_of_span(text, *span) if span is not None else _node_range(text, node)
+    if rng is None:
+        return None
+    return {"uri": path_to_uri(path), "range": rng}
+
+
+def _module_location(path):
+    zero = {"line": 0, "character": 0}
+    return {"uri": path_to_uri(path), "range": {"start": dict(zero), "end": dict(zero)}}
+
+
+def _dedup(locations):
+    seen, result = set(), []
+    for item in locations:
+        if item is None:
+            continue
+        start, end = item["range"]["start"], item["range"]["end"]
+        key = (item["uri"], start["line"], start["character"], end["line"], end["character"])
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
+
+def _find_scope_results(chain, name):
+    """The (scope, info) pairs that bind `name`, innermost first, following global/nonlocal declarations."""
+    infos = {}
+
+    def info_for(scope):
+        key = id(scope)
+        if key not in infos:
+            infos[key] = _scope_info(scope)
+        return infos[key]
+
+    mode = None
+    for index in range(len(chain) - 1, -1, -1):
+        scope = chain[index]
+        info = info_for(scope)
+        kind = _scope_kind(scope)
+        if kind == "module":
+            if mode == "nonlocal":
+                return []
+            return [(scope, info)]
+        if kind == "class" and index != len(chain) - 1:
+            continue
+        if mode == "global":
+            continue
+        if mode == "nonlocal":
+            if kind == "class":
+                continue
+            if name in info["nonlocals"]:
+                continue
+            if _bound(info, name):
+                return [(scope, info)]
+            continue
+        if kind in ("function", "comprehension", "class"):
+            if name in info["globals"]:
+                mode = "global"
+                continue
+            if name in info["nonlocals"]:
+                mode = "nonlocal"
+                continue
+        if _bound(info, name):
+            return [(scope, info)]
+    return []
+
+
+def _text_of(path, read_text):
+    text = read_text(path) if read_text else None
+    if text is None:
+        text = _disk_text(path)
+    return text
+
+
+def _module_path(name, entry_path, read_text):
+    """The file of dotted module `name`, searched as the compiler does (entry dir, AIL_PATH, bundled)."""
+    if not name:
+        return None
+    try:
+        program = _modules().Program(Path(entry_path).resolve(),
+                                     lambda path: _text_of(Path(path), read_text) or "")
+    except Exception:
+        return None
+    parts = name.split(".")
+    dirs = list(program.roots)
+    found = None
+    for index in range(len(parts)):
+        try:
+            found = program.spec(".".join(parts[:index + 1]), dirs, None, None)
+        except Exception:
+            return None
+        if found is None:
+            return None
+        kind, path, mdirs = found
+        if kind in ("package", "namespace"):
+            dirs = mdirs
+        else:
+            dirs = []
+        if index < len(parts) - 1 and kind == "module":
+            return None
+    path = found[1] if found else None
+    return path if path is not None and Path(path).is_file() else None
+
+
+def _from_module_path(node, current_path, read_text):
+    name = node.module or ""
+    level = node.level or 0
+    base = current_path.parent
+    if level:
+        for _ in range(max(level - 1, 0)):
+            base = base.parent
+        if not name:
+            return None
+        return _module_path(name, base / "__init__.py", read_text)
+    return _module_path(name, current_path, read_text)
+
+
+def _import_module_path(site, current_path, read_text):
+    node, alias = site["node"], site["alias"]
+    if isinstance(node, ast.Import):
+        return _module_path(_imported_module_name(alias), current_path, read_text)
+    if isinstance(node, ast.ImportFrom):
+        return _from_module_path(node, current_path, read_text)
+    return None
+
+
+def _module_member_locations(module_path, name, read_text, depth=0):
+    if depth > 6 or name == "*":
+        return []
+    text = _text_of(module_path, read_text)
+    if text is None:
+        return []
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []
+    info = _scope_info(tree)
+    return _sites_locations(info["sites"].get(name, []), tree, text, module_path, [tree], read_text, depth + 1)
+
+
+def _sites_locations(sites, container, text, path, chain, read_text, depth=0):
+    locations = []
+    for site in sites:
+        kind = site["kind"]
+        node = site["node"]
+        if kind in ("function", "class"):
+            locations.append(_location(path, text, node, _definition_span(text, node)))
+        elif kind == "param":
+            locations.append(_location(path, text, node, _definition_span(text, node)))
+        elif kind == "except":
+            locations.append(_location(path, text, node, _except_name_span(text, node, site.get("binding"))))
+        elif kind == "pattern":
+            locations.append(_location(path, text, node, _name_token_span(text, node, site.get("binding"))))
+        elif kind in ("import", "from-import"):
+            locations += _import_site_locations(site, path, read_text, depth)
+        else:
+            locations.append(_location(path, text, node))
+    return _dedup(locations)
+
+
+def _imported_module_name(alias):
+    """The module a plain `import` binds: `import a.b` binds `a`, but `import a.b as c` binds the module `a.b`."""
+    return alias.name if alias.asname else alias.name.split(".")[0]
+
+
+def _import_site_locations(site, current_path, read_text, depth=0):
+    node, alias = site["node"], site["alias"]
+    if isinstance(node, ast.Import):
+        module_path = _module_path(_imported_module_name(alias), current_path, read_text)
+        return [_module_location(module_path)] if module_path else []
+    if isinstance(node, ast.ImportFrom):
+        module_path = _from_module_path(node, current_path, read_text)
+        if module_path is None and node.level and not node.module:
+            base = current_path.parent
+            for _ in range(max((node.level or 1) - 1, 0)):
+                base = base.parent
+            module_path = _module_path(alias.name, base / "__init__.py", read_text)
+        if module_path is None or alias.name == "*":
+            return []
+        return _module_member_locations(module_path, alias.name, read_text, depth + 1)
+    return []
+
+
+def _import_hit(text, tree, token):
+    """The import statement and alias under the cursor, or the imported module name."""
+    span = _token_span(text, token)
+    if span is None:
+        return None
+    start = span[0]
+    lines = text.splitlines(keepends=True)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                row = node.lineno - 1
+                if 0 <= row < len(lines):
+                    found = lines[row].find(node.module, node.col_offset)
+                    if found >= 0:
+                        module_start = sum(len(item) for item in lines[:row]) + found
+                        if module_start <= start < module_start + len(node.module):
+                            return ("module", node)
+            for alias in node.names:
+                if getattr(alias, "lineno", None) is None:
+                    continue
+                alias_start = _char_index(text, alias.lineno, alias.col_offset)
+                alias_end = _char_index(text, alias.end_lineno, alias.end_col_offset)
+                if alias_start is None or alias_end is None:
+                    continue
+                if alias_start <= start < alias_end:
+                    return ("alias", node, alias)
+    return None
+
+
+def _module_hit_locations(hit, current_path, read_text):
+    if hit[0] == "module":
+        module_path = _from_module_path(hit[1], current_path, read_text)
+        return [_module_location(module_path)] if module_path else []
+    _, node, alias = hit
+    return _import_site_locations({"node": node, "alias": alias,
+                                   "kind": "import" if isinstance(node, ast.Import) else "from-import"},
+                                  current_path, read_text)
+
+
+def _attribute_at(text, tree, token):
+    span = _token_span(text, token)
+    if span is None:
+        return None
+    start = span[0]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == token.string:
+            end = _char_index(text, node.end_lineno, node.end_col_offset)
+            if end is not None and end - len(node.attr) == start:
+                return node
+    return None
+
+
+def _nearest_class(chain):
+    for scope in reversed(chain):
+        if isinstance(scope, ast.ClassDef):
+            return scope
+    return None
+
+
+def _class_refs_of_value(value, chain, text, path, read_text, depth):
+    refs = []
+    if isinstance(value, ast.Call):
+        value = value.func
+    if isinstance(value, ast.Name):
+        for scope, info in _find_scope_results(chain, value.id):
+            for site in info["sites"].get(value.id, []):
+                if site["kind"] == "class":
+                    refs.append((site["node"], text, path))
+    return refs
+
+
+def _class_member_locations(cls, text, path, attr, read_text, depth):
+    info = _scope_info(cls)
+    return _sites_locations(info["sites"].get(attr, []), cls, text, path, [cls], read_text, depth + 1)
+
+
+def _attribute_definition(node, chain, text, path, read_text, depth):
+    base, attr = node.value, node.attr
+    if not isinstance(base, ast.Name):
+        return []
+    if base.id == "self":
+        cls = _nearest_class(chain)
+        return _class_member_locations(cls, text, path, attr, read_text, depth) if cls else []
+    locations = []
+    for scope, info in _find_scope_results(chain, base.id):
+        for site in info["sites"].get(base.id, []):
+            kind = site["kind"]
+            if kind in ("import", "from-import"):
+                module_path = _import_module_path(site, path, read_text)
+                if module_path:
+                    locations += _module_member_locations(module_path, attr, read_text, depth + 1)
+            elif kind == "class":
+                locations += _class_member_locations(site["node"], text, path, attr, read_text, depth)
+            elif kind == "assign":
+                for cls, cls_text, cls_path in _class_refs_of_value(site.get("value"), chain, text, path,
+                                                                    read_text, depth):
+                    locations += _class_member_locations(cls, cls_text, cls_path, attr, read_text, depth)
+    return _dedup(locations)
+
+
+def definition(text, path, position, read_text=None):
+    """Go-to-definition locations for the name at the cursor; empty when it cannot be certain."""
+    read_text = read_text or _disk_text
+    path = Path(path) if path is not None else None
+    token = _token_at(text, position)
+    if token is None or path is None:
+        return []
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []
+    attribute = _attribute_at(text, tree, token)
+    if attribute is not None:
+        offset = _position_offset(text, position)
+        return _attribute_definition(attribute, _scope_chain(text, tree, offset), text, path, read_text, 0)
+    hit = _import_hit(text, tree, token)
+    if hit is not None:
+        return _dedup(_module_hit_locations(hit, path, read_text))
+    if not _plain_name_token(text, tree, token):
+        return []
+    offset = _position_offset(text, position)
+    chain = _scope_chain(text, tree, offset)
+    locations = []
+    for scope, info in _find_scope_results(chain, token.string):
+        locations += _sites_locations(info["sites"].get(token.string, []), scope, text, path, chain,
+                                      read_text, 0)
+    return _dedup(locations)
+
+
 def type_hover(text, position):
     """Markdown for a certain type or a function signature at the cursor; None when it is not certain."""
     token = _token_at(text, position)
@@ -715,6 +1189,18 @@ class Server:
         self.published = {}                # uri -> diagnostics last published
         self.shown = {}                    # opened uri -> every uri it published to
         self.documents = {}                # uri -> current buffer text
+
+    def _open_text(self, path):
+        """The buffer text of an open document, so definitions use unsaved edits; None when not open."""
+        text = self.documents.get(path_to_uri(path))
+        if text is not None:
+            return text
+        wanted = Path(path).resolve()
+        for uri, value in self.documents.items():
+            other = uri_to_path(uri)
+            if other is not None and Path(other).resolve() == wanted:
+                return value
+        return None
 
     # -- framing
     def read(self):
@@ -802,7 +1288,7 @@ class Server:
         if method == "initialize":
             self.reply(message, {"capabilities": {
                 "textDocumentSync": {"openClose": True, "change": 1, "save": {"includeText": False}},
-                "hoverProvider": True},
+                "hoverProvider": True, "definitionProvider": True},
                 "serverInfo": {"name": "ail-lsp", "version": cli.__version__}})
         elif method == "shutdown":
             self.shutdown = True
@@ -835,6 +1321,20 @@ class Server:
             self.documents.pop(uri, None)
             for target in self.shown.pop(uri, {uri}):
                 self.publish(target, [])
+        elif method == "textDocument/definition":
+            document = params.get("textDocument") or {}
+            uri = document.get("uri")
+            if not uri:
+                # A malformed request has no document to look in; keep the old "method not found" reply.
+                self.reply(message, error={"code": -32601, "message": "method not found: %s" % method})
+            else:
+                path = uri_to_path(uri)
+                text = self.documents.get(uri)
+                if text is None and path is not None and path.is_file():
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                position = params.get("position") or {"line": 0, "character": 0}
+                found = definition(text, path, position, self._open_text) if text is not None else []
+                self.reply(message, found or None)
         elif method == "textDocument/hover":
             uri = (params.get("textDocument") or {}).get("uri", "")
             position = params.get("position") or {"line": 0, "character": 0}
