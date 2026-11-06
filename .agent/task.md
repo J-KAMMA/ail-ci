@@ -1,3 +1,53 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: bce s5 — one index check per parallel-list group, plus the negative-index fix
+
+**What the change really does:** adds `idx.norm` + `ail_idx_norm_{read,store}` and a `groupcse` pass that rewrites the first group access `X[i]` to `j = idx.norm(i, len X)` + unchecked `X[j]` and later parallel accesses `Y[i]` to unchecked `Y[j]`; the fix commit makes crossing a length change require a provably non-negative index (`grow_only(gid) and known_nonneg`).
+
+### Defect 1 (blocking): the fix takes tally_lang below the task's required drop
+
+`lab/beatc/bce_census.py check --base /tmp/base --icount callgrind --tasks tally_lang`:
+
+| tree | icount | ratio |
+|---|---|---|
+| base (/tmp/base) | 19,585,728,740 | — |
+| pre-fix 7612779 | 17,526,409,048 | **0.89486** |
+| HEAD 9e8faaf | 18,567,717,170 | **0.94802** |
+
+The task requires tally_lang to drop by **at least 7%** (Done check: `ratio ≤ 0.93`); HEAD drops **5.2%**. Cause: `_cross_ok` now refuses crossings the pre-fix pass made; `parse_line`'s group (`p.s_a`/`p.s_e`/… stored at the statement counter, not proven `≥0`) has a `pe1(...)` call between the accesses that may grow the group, so `groupcse` rewrites drop **5 → 3** there (`ev` stays 2). The generated C loses two `ail_idx_norm_store` + unchecked stores. The report's *"Perf unchanged … the measured callgrind ratio 0.8949 / −10.5% stands"* is **false**. Fix direction: prove the index non-negative from the s4 `nonneg` facts (or ranges' SSA bounds) instead of only constants, so the parse_line elisions come back without reopening the defect.
+
+### Correctness probes (all match CPython in default and `AIL_UNIFIED_FORCE=1`; `AIL_BCE=0`/audit checked where noted)
+- `run.py` on the worker's p1/p2/p6/p7: `167` on default/force/bce0/audit — the negative-growth defect is fixed.
+- `/tmp/rprobes/r1_neg_growth.py` (growth in `if`, straight-line, via call; `i=-1,-2,0`): match; `AIL_BCE=0` C byte-identical to base; audit no exit 86.
+- `r16_empty`, `r17_dict_attr` (index from dict value, attribute, list item), `r18_has_val` (both orders), `r20_two_obj` (no cross-object unify), `r21_const_cross` (constant index across growth), `r22_read_store_neg`, `r23_store_oob2`, `r24_loop_neg` (mutation in a loop; `-1` stays checked, `0` elided): match.
+- `r5b_huge`/`r5c_min` (INT64_MAX / INT64_MIN index): exit 1, `IndexError: list index out of range`, same as base.
+- `r8_no_feature`: default `program.c` identical to base.
+- `r25_augassign` (`s.a[-1] += 5` in a group): HEAD matches CPython; **base** aborts (`munmap_chunk(): invalid pointer`) — pre-existing base bug, fixed incidentally by materialising the get/set pair.
+
+### Claims checked
+- Negative-index-across-growth defect fixed: **verified**.
+- `AIL_BCE=0` C identical to base: **verified** (r1).
+- Audit emitted, no exit 86: **verified** on my probes.
+- `groupcse: 2` in tally `ev` on both commits: **verified**, but total rewrites fell (`parse_line` 5→3); "perf stands" **false** (defect 1).
+- p3/p4/p5/p8 all match: **unverified** (not rerun).
+- Tests: `test_ail_bce`, `test_ail_safetynet` pass (`par_check -j 2`, 0 failed); the other modules listed were not rerun by me.
+
+**Pre-existing:** base crash on `AugAssign` of a negative subscript (r25) — not caused by this change.
+**Unverified:** other nine tasks' ratios/outputs, difffuzz/audit over the ten tasks, compile time, `codegen_diff --pins`, local-list groups (never rewrite: the owner key is each member's `local.alloc`, so a local group never unifies — harmless, but the "same local group" part of the spec is dead code).
+
+VERDICT: FIX
+1. tally_lang icount ratio is 0.94802 (18,567,717,170 vs base 19,585,728,750), not ≤0.93; it was 0.89486 on 7612779. Probe: `python3 lab/beatc/bce_census.py check --base /tmp/base --icount callgrind --tasks tally_lang`; expected ratio ≤0.93, actual 0.94802 (the `parse_line` group loses 2 of its 5 rewrites).
+[commandcode stop=end_turn turns=83 out_tokens=73873]
+
+
+--- ORIGINAL TASK ---
 Lane: codegen
 
 **Owner decisions (2026-11-03):** stripped binary growth up to +1% is allowed only on a task whose instructions drop by at least 1%; on every other task the binary must not grow. The recursion-depth limit keeps its current counting (limit 50,000) and the same firing point; do not change how depth is counted.
