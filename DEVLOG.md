@@ -1,3 +1,32 @@
+## 2026-11-06 -- rundiff1: `ail run --diff`, run natively and under CPython and stop on any difference
+
+New command mode, `ail run --diff [--python PATH] [--timeout SEC] [--json] prog.py [args...]`
+(`packaging/ail_lang/cli.py`, documented in the new `docs/CLI.md`). It builds as `ail run` does, runs
+the native program (stdout/stderr live, as `ail run` shows them), then the same source under CPython
+(default `sys.executable`, same cwd, arguments, environment and timeout), and reports one
+`ail diff:` line on stderr:
+
+- `agree`, exiting with the program's own code;
+- `DIFFER: stdout line N ...` / `DIFFER: exit code A vs B` / `DIFFER: exception X vs Y`, exit 3
+  (reserved for a difference);
+- `loud stop by design: <reason>` for AIL's documented loud errors where CPython continued, exit 4.
+  The recognised messages are one table (`LOUD_STOPS`) in `cli.py` and the same table in
+  `docs/CLI.md`; build-time refusals count too;
+- `timeout: native` / `timeout: cpython`, exit 124.
+
+stdin is read once (when it is not a TTY) into a temp file and the same bytes feed both runs; an
+interactive stdin is inherited untouched. `--json` prints one object on stdout at the end
+(`outcome`, `line`, `native`, `cpython`, `exit`, `seconds`) instead of the stderr line. Exception
+comparison is by type name from the last stderr line only, never the traceback text.
+
+`ail run` without `--diff` keeps its argument parsing and behaviour: `_split_source` is byte-for-byte
+the same scan (the `-o`/`-I`/... value options are now one module constant it reads), and
+`_split_diff` only looks at the words before the source, so `ail run prog.py --diff` still passes
+`--diff` to the program.
+
+The census over `lab/compare/src/*/main.py` and the corpus is in `lab/rundiff/RESULTS.md`; the
+"differ" list there is a compiler bug list, not fixed by this job.
+
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for

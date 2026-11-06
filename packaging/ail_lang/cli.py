@@ -1,6 +1,9 @@
 """The `ail` command: run, build and check AIL programs with the SDK bundled in this wheel.
 
     ail run prog.py [args...]      compile to a temporary executable and run it
+    ail run --diff [--python PATH] [--timeout SEC] [--json] prog.py [args...]
+                                   run it natively and under CPython with the same input, and report any
+                                   difference (docs/CLI.md)
     ail build prog.py -o prog      compile to an executable (ail_chatgpt.py compile)
     ail build --lib name prog.py [-o dir]
                                    build the @export functions as a C library: dir/libname.so, libname.a, name.h
@@ -17,12 +20,16 @@ context, edit, doctor, integrity, cache, export-sdk) is passed to ail_chatgpt.py
 compiler sources live in the `sdk` directory beside this file; they are exactly the files the SDK
 export (ail_sdk.export_sdk) selects, so `ail integrity` verifies them against MANIFEST.json.
 """
+import json
 import os
+import re
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 from . import __version__, project
@@ -48,6 +55,8 @@ USAGE = """usage: ail <command> ...
                                 build the @export functions as a C library (libNAME.so, libNAME.a, NAME.h)
   ail build --strict prog.py    build on the typed path or refuse, listing every blocker and a rewrite
                                 (also `ail run --strict`, AIL_STRICT=1; add --json for a machine-readable list)
+  ail run --diff prog.py        run natively and under CPython on the same input; `ail diff: agree`, or
+                                DIFFER / loud stop by design / timeout (exit 3, 4, 124; docs/CLI.md)
   ail doctor [--check]          report the Python, the C compiler and the SDK root
   ail cache stats|path|clear    the per-user build cache
   ail --version
@@ -174,11 +183,33 @@ def _sdk_command(*args):
     return [sys.executable, "-X", "utf8", "-B", str(SDK / "ail_chatgpt.py"), *map(str, args)]
 
 
+# Compiler options that take a value, so the following word is not the source file.
+_VALUE_OPTIONS = {"-o", "--output", "-I", "--module-path", "--module", "--object", "--syntax", "--target",
+                  "--debug-dir", "--link", "--lib"}
+
+
+def _source_index(argv, value_options):
+    """The index of the first word that is not an option or an option value (len(argv) when there is
+    none); a `--` ends the options, so the word after it is the source."""
+    index = 0
+    while index < len(argv):
+        word = argv[index]
+        if word == "--":
+            return index + 1
+        if word in value_options:
+            index += 2
+            continue
+        if word.startswith("-") and word != "-":
+            index += 1
+            continue
+        return index
+    return len(argv)
+
+
 def _split_source(argv):
     """(compiler options, source, program arguments). The first word that is not an option or an
     option value is the source file."""
-    value_options = {"-o", "--output", "-I", "--module-path", "--module", "--object", "--syntax", "--target",
-                     "--debug-dir", "--link", "--lib"}
+    value_options = _VALUE_OPTIONS
     index = 0
     while index < len(argv):
         word = argv[index]
@@ -281,7 +312,321 @@ def cmd_build(argv):
     return _run_compiler(options, source, rest, env, debug)
 
 
+# ---------------------------------------------------------------- ail run --diff
+
+# AIL's documented loud stops: a fixed-width or otherwise not-reproducible answer ends the program with
+# a named error where CPython keeps going. `ail run --diff` reports these as "loud stop by design"
+# instead of a difference. `stage` says where the message is read from: the native program's own stderr
+# ("run") or the compiler's stderr when it refused the program ("build"). Sources:
+# docs/LIMITATIONS.md sections 1 and 2, docs/MIGRATING.md sections 13 and 14, the "wording the
+# general-path runtime prints for a limit, and the uncatchable runtime error.
+LOUD_STOPS = (
+    ("OverflowError: integer overflow in", "run", "int64 overflow: ints are 64-bit; --exact-int gives exact ints"),
+    ("negative exponent on an integer", "run", "a negative exponent on an integer (CPython gives a float)"),
+    ("re: the group did not take part in the match", "run",
+     "a regex group that did not take part in the match"),
+    ("a negative number raised to a fractional power", "run",
+     "a negative number raised to a fractional power (complex)"),
+    ("NaN used as a dict/set key", "run", "a NaN used as a dict or set key"),
+    ("NaN used with 'in'", "run", "a NaN searched with `in`"),
+    ("NaN used with list.count", "run", "a NaN searched in a list"),
+    ("NaN searched with", "run", "a NaN searched (CPython only matches the same object)"),
+    ("AIL internal error: ", "run", "an uncatchable AIL runtime error"),
+    ("AIL limit: ", "run", "an AIL runtime limit (the CPython answer cannot be reproduced)"),
+    ("ASCII-only in this runtime", "run", "a non-ASCII code point in an ASCII-only text method"),
+    ("not in the subset", "build", "a construct AIL does not build (docs/LIMITATIONS.md)"),
+    ("constant expression out of range", "build",
+     "an int64 constant out of range (docs/LIMITATIONS.md section 1)"),
+)
+
+DIFF_EXIT_DIFFER = 3
+DIFF_EXIT_LOUD = 4
+DIFF_EXIT_TIMEOUT = 124
+
+DIFF_VALUE_OPTIONS = ("--python", "--timeout")
+# An uncaught exception on the last stderr line: "ValueError: ..." or "json.JSONDecodeError: ...".
+# Only a Python exception class is accepted, so a compiler diagnostic such as "prog.py:1:1: ..." is not.
+_EXCEPTION_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*"
+                             r"(?:Error|Exception|Exit|Interrupt|Warning|Iteration))\s*:")
+
+
+def _split_diff(argv):
+    """(settings, argv) for `ail run --diff`; (None, argv) when --diff is not before the source file.
+    Only the options before the source are examined, so `ail run prog.py --diff` still hands --diff to
+    the program, and `ail run` without --diff is left byte-for-byte alone."""
+    options_end = _source_index(argv, _VALUE_OPTIONS | set(DIFF_VALUE_OPTIONS))
+    if "--diff" not in argv[:options_end]:
+        return None, argv
+    before_source = argv[:options_end]
+    settings = {"python": sys.executable, "timeout": 60.0, "json": False}
+    kept, index = [], 0
+    while index < len(before_source):
+        word = before_source[index]
+        name, equal, inline = word.partition("=")
+        if word == "--diff":
+            index += 1
+        elif word == "--json":
+            settings["json"] = True
+            index += 1
+        elif name in DIFF_VALUE_OPTIONS:
+            if equal:
+                value, step = inline, 1
+            elif index + 1 < len(before_source):
+                value, step = before_source[index + 1], 2
+            else:
+                raise ValueError("%s needs a value" % name)
+            if name == "--python":
+                settings["python"] = value
+            else:
+                try:
+                    settings["timeout"] = float(value)
+                except ValueError:
+                    raise ValueError("--timeout needs a number of seconds, not %r" % value)
+                if not settings["timeout"] > 0:
+                    raise ValueError("--timeout needs a positive number of seconds")
+            index += step
+        else:
+            kept.append(word)
+            index += 2 if word in _VALUE_OPTIONS else 1
+    return settings, kept + argv[options_end:]
+
+
+def _diff_text(value):
+    """A value for the report: UTF-8 with escapes, at most 200 characters, no raw CR or newline."""
+    shown = value.decode("utf-8", "backslashreplace") if isinstance(value, bytes) else str(value)
+    shown = shown.replace("\r", "\\r")
+    return shown if len(shown) <= 200 else shown[:200] + "..."
+
+
+def _diff_stdout_line(left, right):
+    """(1-based line number, native line, cpython line) of the first differing stdout line, else None."""
+    absent = object()
+    native_lines, cpython_lines = left.split(b"\n"), right.split(b"\n")
+    for number in range(max(len(native_lines), len(cpython_lines))):
+        a = native_lines[number] if number < len(native_lines) else absent
+        b = cpython_lines[number] if number < len(cpython_lines) else absent
+        if a != b:
+            return number + 1, b"" if a is absent else a, b"" if b is absent else b
+    return None
+
+
+def _exception_name(stderr, code):
+    """The uncaught exception's type name from the last non-empty stderr line, or None. Only a failed
+    run has one, so a warning on a successful run is never mistaken for an exception."""
+    if not code:
+        return None
+    for line in reversed(stderr.decode("utf-8", "replace").splitlines()):
+        line = line.strip()
+        if line:
+            match = _EXCEPTION_LINE.match(line)
+            return match.group(1) if match else None
+    return None
+
+
+def _loud_stop(stderr, stage):
+    """The recognised loud-stop line in this stderr (of this stage), or None."""
+    for line in stderr.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if line and any(marker in line for marker, where, _label in LOUD_STOPS if where == stage):
+            return _diff_text(line)
+    return None
+
+
+def _diff_run(command, cwd, env, stdin_path, timeout, live):
+    """Run `command`; (exit code, stdout, stderr, timed_out, seconds). `live` streams the child's
+    stdout and stderr to ours as they arrive (as `ail run` shows them); otherwise they are captured.
+    stdin_path None means the child inherits our stdin. A child killed by a signal reports
+    128 + the signal, as `ail run` does."""
+    started = time.monotonic()
+    feed = open(stdin_path, "rb") if stdin_path else None
+    try:
+        if not live:
+            try:
+                done = subprocess.run(command, cwd=cwd, env=env, stdin=feed, capture_output=True, timeout=timeout)
+                code = done.returncode
+                return (code if code >= 0 else 128 - code, done.stdout, done.stderr, False,
+                        time.monotonic() - started)
+            except subprocess.TimeoutExpired as expired:
+                return (DIFF_EXIT_TIMEOUT, expired.stdout or b"", expired.stderr or b"", True,
+                        time.monotonic() - started)
+        proc = subprocess.Popen(command, cwd=cwd, env=env, stdin=feed,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        collected = {proc.stdout: [], proc.stderr: []}
+
+        def pump(stream, sink, store):
+            binary = getattr(sink, "buffer", None)
+            while True:
+                chunk = stream.read(65536)
+                if not chunk:
+                    break
+                store.append(chunk)
+                try:
+                    if binary is not None:
+                        binary.write(chunk)
+                        binary.flush()
+                    else:
+                        sink.write(chunk.decode("utf-8", "replace"))
+                        sink.flush()
+                except (BrokenPipeError, ValueError):
+                    pass
+
+        threads = [threading.Thread(target=pump, args=(stream, sink, collected[stream]), daemon=True)
+                   for stream, sink in ((proc.stdout, sys.stdout), (proc.stderr, sys.stderr))]
+        for thread in threads:
+            thread.start()
+        timed_out = False
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            proc.wait()
+        for thread in threads:
+            thread.join(timeout=10)
+        code = proc.returncode
+        return (DIFF_EXIT_TIMEOUT if timed_out else (code if code >= 0 else 128 - code),
+                b"".join(collected[proc.stdout]), b"".join(collected[proc.stderr]), timed_out,
+                time.monotonic() - started)
+    finally:
+        if feed is not None:
+            feed.close()
+
+
+def _diff_verdict(native_code, native_out, native_err, cpython_code, cpython_out, cpython_err):
+    """(kind, outcome text, line, native value, cpython value) for one pair of runs. The order
+    matters: a native loud stop truncates stdout, so it is recognised before a stdout difference."""
+    if native_code and cpython_code == 0:
+        reason = _loud_stop(native_err, "run")
+        if reason:
+            return "loud stop by design", "loud stop by design: %s" % reason, None, reason, None
+    differing = _diff_stdout_line(native_out, cpython_out)
+    if differing:
+        number, left, right = differing
+        return ("differ", "DIFFER: stdout line %d: native %r, cpython %r"
+                % (number, _diff_text(left), _diff_text(right)), number, _diff_text(left), _diff_text(right))
+    native_exc = _exception_name(native_err, native_code)
+    cpython_exc = _exception_name(cpython_err, cpython_code)
+    if native_exc != cpython_exc:
+        return ("differ", "DIFFER: exception %s vs %s" % (native_exc or "none", cpython_exc or "none"), None,
+                native_exc, cpython_exc)
+    if native_code != cpython_code:
+        return ("differ", "DIFFER: exit code %d vs %d" % (native_code, cpython_code), None,
+                native_code, cpython_code)
+    return "agree", "agree", None, None, None
+
+
+def _diff_report(settings, kind, outcome, line, native_value, cpython_value, exit_codes, seconds):
+    """Print the one report line (`ail diff:` on stderr, or one JSON object on stdout under --json)
+    and give the exit code: the program's own on agreement, else 3, 4 or 124. `kind` is the JSON
+    outcome ("agree", "differ", "loud stop by design", "timeout: native" / "timeout: cpython")."""
+    if settings["json"]:
+        sys.stdout.flush()
+        print(json.dumps({"outcome": kind, "line": line, "native": native_value,
+                          "cpython": cpython_value, "exit": list(exit_codes),
+                          "seconds": [round(one, 3) for one in seconds]}, ensure_ascii=False))
+    else:
+        print("ail diff: %s" % outcome, file=sys.stderr)
+    if kind == "agree":
+        return exit_codes[0]
+    if kind == "differ":
+        return DIFF_EXIT_DIFFER
+    if kind == "loud stop by design":
+        return DIFF_EXIT_LOUD
+    return DIFF_EXIT_TIMEOUT
+
+
+def _cmd_run_diff(argv, settings):
+    """`ail run --diff`: build as `ail run` does, then run the program natively and under CPython with
+    the same stdin, cwd, arguments, environment and timeout, and report any difference (docs/CLI.md)."""
+    options, source, program_args = _split_source(argv)
+    env = _env()
+    if source is None:
+        found = _project()
+        if found is None:
+            return _no_project("run")
+        options, source = found.build_options() + options, str(found.entry)
+    python = shutil.which(settings["python"]) or (settings["python"] if Path(settings["python"]).is_file() else None)
+    if python is None:
+        print("ail: --python %s: not found" % settings["python"], file=sys.stderr)
+        return 2
+    if not require_compiler(env):
+        return 2
+    prepare_cache(env)
+    timeout = settings["timeout"]
+    cwd = os.getcwd()
+    # Read stdin once and hand the very same bytes to both runs. An interactive stdin is left alone,
+    # so a program that prompts is not robbed of its terminal.
+    stdin_path, stdin_temp = None, None
+    if not sys.stdin.isatty():
+        stdin_temp = tempfile.NamedTemporaryFile(prefix="ail-diff-stdin-", delete=False)
+        try:
+            try:
+                stdin_temp.write(sys.stdin.buffer.read())
+            except (AttributeError, OSError):
+                pass
+        finally:
+            stdin_temp.close()
+        stdin_path = stdin_temp.name
+    cpython_command = [python, source, *program_args]
+    try:
+        with tempfile.TemporaryDirectory(prefix="ail-run-") as directory:
+            target = Path(directory) / "prog"
+            built = subprocess.run(_sdk_command("compile", *options, source, "-o", target),
+                                   env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            sys.stderr.write(built.stderr)
+            executable = target if target.is_file() else Path(str(target) + EXE)
+            if built.returncode:
+                return _diff_build_failed(settings, built, cpython_command, cwd, stdin_path, timeout)
+            if not executable.is_file():
+                print("ail: the compiler reported success but produced no executable", file=sys.stderr)
+                return 2
+            native_code, native_out, native_err, native_timeout, native_seconds = _diff_run(
+                [str(executable), *program_args], cwd, _env(), stdin_path, timeout, live=True)
+            if native_timeout:
+                return _diff_report(settings, "timeout: native", "timeout: native", None, "timeout", None,
+                                    (DIFF_EXIT_TIMEOUT, None), (native_seconds, 0.0))
+            cpython_code, cpython_out, cpython_err, cpython_timeout, cpython_seconds = _diff_run(
+                cpython_command, cwd, _env(), stdin_path, timeout, live=False)
+            if cpython_timeout:
+                return _diff_report(settings, "timeout: cpython", "timeout: cpython", None, None, "timeout",
+                                    (native_code, DIFF_EXIT_TIMEOUT), (native_seconds, cpython_seconds))
+            verdict = _diff_verdict(native_code, native_out, native_err,
+                                    cpython_code, cpython_out, cpython_err)
+            return _diff_report(settings, *verdict, exit_codes=(native_code, cpython_code),
+                                seconds=(native_seconds, cpython_seconds))
+    finally:
+        if stdin_temp is not None:
+            try:
+                os.unlink(stdin_temp.name)
+            except OSError:
+                pass
+
+
+def _diff_build_failed(settings, built, cpython_command, cwd, stdin_path, timeout):
+    """No native program exists because the build stopped. When CPython still runs the program, that
+    is AIL's own loud stop by design (a refusal or a compile-time int64 refusal); when CPython fails
+    too, the two exit codes are shown."""
+    code, out, err, timed_out, seconds = _diff_run(cpython_command, cwd, _env(), stdin_path, timeout, live=False)
+    if timed_out:
+        return _diff_report(settings, "timeout: cpython", "timeout: cpython", None, None, "timeout",
+                            (built.returncode, DIFF_EXIT_TIMEOUT), (0.0, seconds))
+    if code == 0:
+        reason = _loud_stop(built.stderr.encode("utf-8", "replace"), "build") or _diff_text(
+            (built.stderr.strip().splitlines() or ["the build refused the program"])[0].strip())
+        return _diff_report(settings, "loud stop by design", "loud stop by design: %s" % reason, None,
+                            reason, None, (built.returncode, code), (0.0, seconds))
+    return _diff_report(settings, "differ", "DIFFER: exit code %d vs %d" % (built.returncode, code), None,
+                        built.returncode, code, (built.returncode, code), (0.0, seconds))
+
+
 def cmd_run(argv):
+    try:
+        settings, argv = _split_diff(argv)
+    except ValueError as error:
+        print("ail: %s" % error, file=sys.stderr)
+        return 2
+    if settings is not None:
+        return _cmd_run_diff(argv, settings)
     options, source, program_args = _split_source(argv)
     env = _env()
     if source is None:
