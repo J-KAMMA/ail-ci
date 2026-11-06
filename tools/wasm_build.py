@@ -25,7 +25,8 @@ SHIM = Path(__file__).resolve().parent / 'wasm_shim.h'
 ZIG_FLAGS = ['-target', 'wasm32-wasi', '-O2', '-fno-tree-slp-vectorize', '-ffp-contract=off',
              '-Werror=implicit-function-declaration', '-Werror=implicit-int', '-Werror=incompatible-pointer-types',
              '-mexception-handling', '-mllvm', '-wasm-enable-sjlj', '-mllvm', '-wasm-use-legacy-eh=false',
-             '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-Wl,-z,stack-size=8388608', '-s']
+             '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-D_WASI_EMULATED_MMAN', '-lwasi-emulated-mman',
+             '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '-s']
 WASMTIME_FLAGS = ['-W', 'exceptions=y']     # try/except runs on the exception-handling proposal
 
 
