@@ -1,0 +1,10 @@
+program: corpus/gdev/g01_010.py (corpus)
+bucket: unsupported builtin or intrinsic
+construct: __int128
+c2m stderr:
+  /tmp/devcc-slirwl46/gen-g01_010-6e270bba/dbg/program.c:5685:18: syntax error on identifier (expected ';'):
+  /tmp/devcc-slirwl46/gen-g01_010-6e270bba/dbg/program.c:5685:18: syntax error on identifier (expected '<statement>'):
+  /tmp/devcc-slirwl46/gen-g01_010-6e270bba/dbg/program.c:5714:1: syntax error on static (expected '<statement>'):
+  /tmp/devcc-slirwl46/gen-g01_010-6e270bba/dbg/program.c:5669:152: unfinished compound statement
+generated C line 5685: __int128 nn = (__int128)n;
+emitted by: AIL_CURRENT/python/pkg-v12/cruntime.py:16893 (__int128 nn = (__int128)n; range slice)
