@@ -11305,6 +11305,20 @@ typedef struct ail_frame {
     struct ail_frame *prev;
 } ail_frame;
 
+/* The general path's recursion stop is a REAL STACK CHECK, not a frame count. A generated
+   function entry compares the lowest address of its own frame with `cx->stack_limit`, the
+   lowest address this thread may still touch, and raises RecursionError while there is still
+   room to run the exception path. A count cannot do this job: activations differ in size by
+   two orders of magnitude (60 locals versus one), so any fixed cap is either below a depth
+   that used to work or above the depth a large-frame function can reach -- and a depth that
+   fits the real stack must keep working (owner decision 2026-11-05). `stack_limit` is set per
+   OS stack in ail_ctx_init (ail_stack_limit_from), threadrt.py (a thread's own mapped bounds)
+   and safetyrt.py (a generator's own mmap'd stack); AIL_FRAME_ENTER/LEAVE only maintain the GC
+   frame chain. AIL_STACK_MARGIN is the room left below the limit for the raise path itself
+   (building and printing the exception needs a few KiB, not the ~400 bytes a frame uses). */
+#define AIL_STACK_MARGIN ((size_t)64 << 10)
+#define AIL_STACK_LOW(cx, fvar) ((char *)(fvar).slots < (cx)->stack_limit)
+
 #define AIL_FRAME_ENTER(cx, fvar, N) \
     ail_obj ail__slots_##fvar[(N)]; \
     memset(ail__slots_##fvar, 0, sizeof ail__slots_##fvar); \
@@ -11340,6 +11354,7 @@ enum {
     AIL_B_RUNTIMEERROR, AIL_B_ASSERTIONERROR, AIL_B_NOTIMPLEMENTEDERROR, AIL_B_EOFERROR, AIL_B_OSERROR,
     AIL_B_CONNECTIONERROR, AIL_B_BLOCKINGIOERROR, AIL_B_CHILDPROCESSERROR, AIL_B_BROKENPIPEERROR, AIL_B_CONNECTIONABORTEDERROR, AIL_B_CONNECTIONREFUSEDERROR, AIL_B_CONNECTIONRESETERROR, AIL_B_FILEEXISTSERROR, AIL_B_FILENOTFOUNDERROR, AIL_B_INTERRUPTEDERROR, AIL_B_ISADIRECTORYERROR, AIL_B_NOTADIRECTORYERROR, AIL_B_PERMISSIONERROR, AIL_B_PROCESSLOOKUPERROR, AIL_B_TIMEOUTERROR,
     AIL_B_GENERATOREXIT,
+    AIL_B_RECURSIONERROR,
     AIL_B_COUNT
 };
 
@@ -11354,6 +11369,7 @@ typedef struct ail_ctx {
     size_t gc_bytes;
     size_t gc_threshold;
     ail_frame *frames;
+    char *stack_limit;      /* lowest stack address this thread may touch: the general path's recursion stop */
     /* exception / limit */
     ail_excslot exc;
     int exc_pending;
@@ -14828,6 +14844,7 @@ static inline const char *ail_builtin_name(int id) {
         case AIL_B_PROCESSLOOKUPERROR: return "ProcessLookupError";
         case AIL_B_TIMEOUTERROR: return "TimeoutError";
         case AIL_B_GENERATOREXIT: return "GeneratorExit";
+        case AIL_B_RECURSIONERROR: return "RecursionError";
         default: return "Exception";
     }
 }
@@ -18076,13 +18093,46 @@ static inline int64_t ail_intern(ail_ctx *cx, const char *name) {
 }
 
 /* ===================================================================================
+   The lowest stack address a thread may still touch, derived from where its stack
+   starts. RLIMIT_STACK is the exact bound for the main thread on Linux and macOS (the
+   stack grows on demand up to it); a thread computes its own mapped bounds instead
+   (threadrt.py), and a generator its own buffer (safetyrt.py). AIL_STACK_MARGIN below
+   the derived limit is headroom for the raise path, so a check that fires still has
+   room to build and print the exception.
+   =================================================================================== */
+/* When RLIMIT_STACK is unlimited the main stack may grow until it meets another mapping,
+   so no 8 MiB default may be assumed: the base commit completed a 300000-deep recursion
+   that way. A 1 GiB reserve (256 MiB on a 32-bit address space) is far above any depth
+   that used to work and far below the first mapping, so a runaway recursion still stops
+   by name instead of faulting on an unrelated page. */
+#if SIZE_MAX > 0xffffffffu
+#define AIL_STACK_UNLIMITED ((size_t)1 << 30)
+#else
+#define AIL_STACK_UNLIMITED ((size_t)256 << 20)
+#endif
+static inline char *ail_stack_limit_from(char *sp) {
+    size_t budget = AIL_STACK_UNLIMITED;
+#if defined(AIL_HAVE_GETRUSAGE) && !defined(_WIN32)
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur > 0)
+        budget = (size_t)rl.rlim_cur;
+#endif
+    if (budget > AIL_STACK_MARGIN * 2) budget -= AIL_STACK_MARGIN;
+    else budget /= 2;
+    if ((size_t)sp <= budget) return sp - (size_t)sp / 2;   /* never point below address 0 */
+    return sp - budget;
+}
+
+/* ===================================================================================
    ail_ctx_init / ail_ctx_destroy -- one ail_ctx per program, per the brief. Builtin
    exception classes are allocated once here (Exception first, so every other builtin's
    `base` can point at it); none of this can raise a Python exception, only ail_die on
    allocation failure, consistent with the rest of this file's OOM policy.
    =================================================================================== */
 static inline void ail_ctx_init(ail_ctx *cx) {
+    char stack_probe;
     memset(cx, 0, sizeof *cx);
+    cx->stack_limit = ail_stack_limit_from(&stack_probe);
     cx->gc_threshold = AIL_GC_INITIAL_THRESHOLD;
     for (int i = 0; i < AIL_B_COUNT; i++) {
         ail_classobj *c = (ail_classobj *)ail_gc_alloc(cx, AIL_K_CLASS, sizeof(ail_classobj));
@@ -18092,6 +18142,8 @@ static inline void ail_ctx_init(ail_ctx *cx) {
            Existing non-OS builtin relationships are unchanged in this patch. */
         int parent = AIL_B_EXCEPTION;
         if (i >= AIL_B_CONNECTIONERROR && i <= AIL_B_TIMEOUTERROR) parent = AIL_B_OSERROR;
+        /* CPython: RecursionError derives from RuntimeError, so `except RuntimeError` catches it. */
+        if (i == AIL_B_RECURSIONERROR) parent = AIL_B_RUNTIMEERROR;
         if (i == AIL_B_BROKENPIPEERROR || i == AIL_B_CONNECTIONABORTEDERROR ||
             i == AIL_B_CONNECTIONREFUSEDERROR || i == AIL_B_CONNECTIONRESETERROR)
             parent = AIL_B_CONNECTIONERROR;
@@ -30309,6 +30361,8 @@ def _piece(p, want):
 def _piece_text(p, want):
     text = (_overflow_exception(_assert_exception(SOURCE[p])) if p == 'DIE' and 'OVERFLOWEXC' in want
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
+    if p == 'DIE' and 'RECDEPTH' in want:
+        text = _exctext.recursion_die(text)          # a program that can recurse: catchable, reported by its own name
     if p == 'DIE' and 'OSEXC' in want:
         text = _os_exception(text)
         if 'EXCSTR' in want:
@@ -30331,8 +30385,10 @@ def _piece_text(p, want):
         old = '    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")\n'
         if old in text:
             text = text.replace(old, '    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")\n        || !strcmp(w, "pop index out of range")\n')
-    if p == 'DIE' and 'EXCCLASSES' in want:
+    if p == 'DIE' and ('EXCCLASSES' in want or _exctext.RECURSION_CODE):
         text = _exctext.classes_table(text)          # S4e: Exception (28) and the user exception classes (29..)
+    if p == 'DIE':
+        text = _exctext.recursion_code(text)         # RecursionError's own code, when the program can see its class
     if 'EXCSTR' in want and p != 'DIE':
         text = _exctext.part_edit(p, text)
     if p == 'IREXC':

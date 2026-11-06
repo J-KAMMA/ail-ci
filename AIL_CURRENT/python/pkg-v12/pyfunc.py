@@ -199,8 +199,13 @@ EXC_NAMES = {'ValueError': 1, 'ZeroDivisionError': 2, 'IndexError': 3, 'KeyError
              'sqlite3_IntegrityError': 22, 'sqlite3_ProgrammingError': 23, 'sqlite3_InterfaceError': 24,
              'sqlite3_DataError': 25, 'sqlite3_InternalError': 26, 'sqlite3_NotSupportedError': 27,
              'Exception': 28,
+             'RecursionError': 7,   # catches the recursion trap; CPython: RecursionError is a RuntimeError
              'URLError': 30, 'HTTPError': 31}      # 30, 31: G12 urllib (HTTPError is a URLError is an OSError)              # 28: the root class (S4e); user exception classes (userexc.py) follow from 29
 _BUILTIN_EXC_NAMES = dict(EXC_NAMES)
+# RecursionError's own code on the typed path, when a program can observe its class (pyfunc
+# assigns it after collect(): every user class, so it never collides). 0 means the legacy
+# alias to RuntimeError. See _needs_recursion_class below.
+_RECURSION_CODE = 0
 
 
 def _exc_codes_of(name, exact=False):
@@ -215,7 +220,8 @@ def _exc_codes_of(name, exact=False):
 def _handler_codes(code):
     """Every exception code a handler for `code` catches, user classes derived from it included."""
     if code == EXC_NAMES['Exception']:
-        return tuple(range(1, userexc.last_code() + 1))
+        last = max(userexc.last_code(), _RECURSION_CODE)
+        return tuple(range(1, last + 1))
     base = _builtin_handler_codes(code)
     if userexc.USER:
         extra = set()
@@ -228,6 +234,8 @@ def _handler_codes(code):
 def _builtin_handler_codes(code):
     if code == EXC_NAMES['ValueError']:
         return (code, EXC_NAMES['UnicodeDecodeError']) + ((16,) if filelib.ACTIVE else ())
+    if code == EXC_NAMES['RuntimeError'] and _RECURSION_CODE:
+        return (code, _RECURSION_CODE)          # RecursionError derives from RuntimeError
     if code == EXC_NAMES['OSError']:
         # C23: `except OSError` takes every subclass; a subclass handler takes only its own code (the
         # whole-file builtins raise the class of their errno once the OS-family codes exist).
@@ -243,6 +251,21 @@ def _builtin_handler_codes(code):
 # OverflowError (10) joined 2026-10-12: int64 arithmetic that leaves the range ("integer overflow")
 # is catchable once a program names OverflowError. Like AssertionError, the DIE block only grows
 # the extra code when the name is used, so every other program's C is unchanged.
+
+
+def _needs_recursion_class(tree):
+    """True when a caught recursion stop's CLASS is observable on the typed path.
+
+    The trap used to be carried as plain RuntimeError (code 7) and `except RecursionError`
+    aliased to it, so `type(e).__name__` said RuntimeError and `except RecursionError` took
+    every RuntimeError. When the program names RecursionError, or binds a caught exception
+    with `as e` (an alias that a callee, a container or a `type(e)` read can inspect), the
+    trap gets a code of its own (assigned after every user class) and RuntimeError's handler
+    codes include it.
+    """
+    if any(isinstance(n, ast.ExceptHandler) and n.name for n in ast.walk(tree)):
+        return True
+    return any(isinstance(n, ast.Name) and n.id == 'RecursionError' for n in ast.walk(tree))
 
 
 def _exc_parts(ctx, code):
@@ -38294,6 +38317,17 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     if userexc.collect(tree, {k: v for k, v in _BUILTIN_EXC_NAMES.items() if urllower.ACTIVE or k not in ('URLError', 'HTTPError')}):          # S4e: user exception classes become codes and constructor functions
         for _name, _cls in userexc.USER.items():
             EXC_NAMES[_name] = _cls.code
+    # The recursion trap is carried as RuntimeError (code 7) unless the program can observe its
+    # class; then it gets its own code after every user class, so type(e).__name__, repr(e),
+    # isinstance/type tests and `except RecursionError` are CPython's (RuntimeError handlers take
+    # it through the subclass relation, see _handler_codes).
+    global _RECURSION_CODE
+    _RECURSION_CODE = 0
+    exctext.RECURSION_CODE = 0
+    if _needs_recursion_class(tree):
+        _RECURSION_CODE = userexc.last_code() + 1
+        EXC_NAMES['RecursionError'] = _RECURSION_CODE
+        exctext.RECURSION_CODE = _RECURSION_CODE
     exctext.refuse_args_item_store(tree, Unsupported)
     exctext.rewrite(tree, _exc_codes_of)
     if userexc.USER:
