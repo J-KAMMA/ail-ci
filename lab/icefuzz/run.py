@@ -170,16 +170,17 @@ class Runner:
             elif ail[1] == cpy[1] and ail[0] == cpy[0]:
                 rec['cls'] = 'matching'
             else:
-                low = text(ail[2]).lower()
-                loud = (ail[0] != 0 and cpy[1].startswith(ail[1])
-                        and ('overflow' in low or 'int64' in low or 'limit:' in low))
+                last = (text(ail[2]).strip().splitlines() or [''])[-1]
+                loud = ail[0] != 0
+                silent = (not loud and cpy[0] == 0 and ail[0] == 0
+                          and ail[1] != cpy[1])
                 rec.update(cls='different', ail_rc=ail[0],
-                           stdout_diff=ail[1] != cpy[1], loud=loud,
-                           reason=('declared loud int64 stop: ' + text(ail[2]).strip().splitlines()[-1][:180])
-                           if loud else first_diff(text(cpy[1]), text(ail[1]))
+                           stdout_diff=ail[1] != cpy[1], loud=loud, silent=silent,
+                           reason=('loud runtime stop: ' + last[:180]) if loud
+                           else first_diff(text(cpy[1]), text(ail[1]))
                            if ail[1] != cpy[1]
                            else 'exit cpython=%s ail=%s' % (cpy[0], ail[0]))
-                if ail[1] != cpy[1] and not loud:
+                if silent:
                     self.stop.set()
         elif kind == 'refused':
             rec.update(cls='refused', reason=head)
@@ -273,7 +274,7 @@ def slug(s):
 def write_results(records, args, minimised, elapsed):
     internal = [r for r in records if r.get('cls') == 'internal']
     different = [r for r in records if r.get('cls') == 'different']
-    silent = [r for r in different if r.get('stdout_diff') and not r.get('loud')]
+    silent = [r for r in different if r.get('silent')]
     groups = {}
     for r in internal:
         groups.setdefault(r.get('group') or 'unknown', []).append(r)
