@@ -23,7 +23,9 @@ def main():
     show("maximum", ta.maximum(a, b))
     show("minimum_r", ta.minimum(b, a))
     show("maximum_r", ta.maximum(b, a))
-    for s in [0.0, -0.0, 0.1, 1e39, math.nan, -1.0, 3]:
+    show("mins int", ta.minimum(a, 3))
+    show("maxs int", ta.maximum(a, -2))
+    for s in [0.0, -0.0, 0.1, 1e39, math.nan, -1.0, 3.0]:
         show("mins " + repr(s), ta.minimum(a, s))
         show("maxs " + repr(s), ta.maximum(a, s))
     show("clip", ta.clip(a, -1.0, 2.0))

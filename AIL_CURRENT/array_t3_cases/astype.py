@@ -2,6 +2,15 @@ import math
 import ail_array as ta
 
 
+def cast(bad: ta.Array[ta.f32]):
+    try:
+        print(bad.astype(ta.int32))
+    except ValueError as e:
+        print("ValueError", e)
+    except OverflowError as e:
+        print("OverflowError", e)
+
+
 def main():
     xs = [0.0, -0.0, 5e-324, 1e-46, 7.006492321624085e-46, 7.1e-46, 1.401298464324817e-45, 1.1754942106924411e-38,
           1.1754943508222875e-38, 0.1, 1.0 / 3.0, 16777217.0, 16777219.0, 1.0000000596046448, 1.0000001788139343,
@@ -25,13 +34,10 @@ def main():
     print(f.astype(ta.int32, overflow='saturate'))
     for k in range(len(s)):
         print(k, s[k], back[k], math.copysign(1.0, s[k]))
-    for bad in [ta.array([math.nan], ta.f32), ta.array([math.inf], ta.f32), ta.array([1.0, 3e9], ta.f32)]:
-        try:
-            print(bad.astype(ta.int32))
-        except ValueError as e:
-            print("ValueError", e)
-        except OverflowError as e:
-            print("OverflowError", e)
+    cast(ta.array([math.nan], ta.f32))
+    cast(ta.array([math.inf], ta.f32))
+    cast(ta.array([1.0, 3e9], ta.f32))
+    cast(ta.array([1.0, -3e9], ta.f32))
     try:
         print(s.astype(ta.int32, overflow='wrap'))
     except ValueError as e:
