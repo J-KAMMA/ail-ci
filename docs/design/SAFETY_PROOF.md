@@ -114,11 +114,11 @@ Emitters keep the format literal; `<property>` is `ownership`, `bounds` or `race
 
 ```
 lab/compare/src/rail_transfer/typed.py:13: could not prove ownership: parameter 'h0' is stored
-  into field 'G.h0'; retain/release kept
-lab/compare/src/tally_lang/typed.py:120: could not prove bounds: list length may change
-  (length-changing op or unknown call); runtime check kept
-lab/race/racy/global_add.py:8: could not prove race-freedom: the body writes the shared name
-  'total' (rule D1); lock kept
+  into field 'self.h0'; retain/release kept
+lab/compare/src/tally_lang/typed.py:37: could not prove bounds: index may be negative;
+  runtime check kept
+lab/race/racy/nested_writes_outer.py:9: could not prove race-freedom: the body writes the
+  shared list 'shared' (rule D1); lock kept
 ```
 
 Three delivery modes, on the switch `AIL_PROOF`:
@@ -151,20 +151,21 @@ diagnostic can name the function but not the line.
 
 ## 6. Staged plan (each job ≤ 2 h), ordered by census blockers removed
 
-Counts are from `lab/proof/census.json` (306 programs, 4958 functions, 1552 on the typed path,
-2875 blocker instances).  "Moves" is what the job converts from checked to proved, or from
-unmeasured to measured; where it is a projection, it says so.
+Counts are from `lab/proof/census.json` (275 program records / 3255 function records; 907 on the
+typed path, 1703 boxed, 645 in programs both paths refuse; 2875 functions not fully proved).
+"Moves" is what the job converts from checked to proved, or from unmeasured to measured; where it
+is a projection, it says so.
 
 | # | job | blocker it removes | count today | moves |
-|---|---|---|---:|---|
-| P1 | **typed reach, top reason first** | "function on the general (boxed) path: no proof applies" | 1703 functions (34%) | up to 1703 functions into the proof's domain; rank by `pyc.last_fallback_reason` (186 functions: a `Decimal` format spec; 164: a dunder other than `__init__`; 156: a `bool` parameter given a non-bool; 120: a `list[str]` given a non-str; 108: a generator expression saved; 108: `d.get(k)` needing `Optional`; 76: a `str` parameter a caller also passes an int to; 67: `Counter`/`defaultdict`; 58: `threading` — table in RESULTS) |
-| P2 | **the report itself** | none: visibility | 2875 | names all 2875 with property+reason; the one user-facing deliverable that needs no new analysis |
-| P3 | **index sites outside the IR** | `no-index-api` + every legacy-emitter function | 4744 sites / 31 functions | makes 4744 sites measurable; no proof yet (`rangecheck.py` must report its own per-site provenance) |
+|---|---|---|---|---|
+| P1 | **typed reach, top reason first** | "function on the general (boxed) path: no proof applies" | 1703 functions (52.3%) | up to 1703 functions into the proof's domain; rank by `pyc.last_fallback_reason` (198: a `Decimal` format spec; 214: a dunder other than `__init__`; 188: a `bool` parameter given a non-bool; 126: a `list[str]` given a non-str; 113: a generator expression saved; 109: `d.get(k)` needing `Optional`; 69: a `str` parameter a caller also passes an int to; 54: `collections`; 273 in `other` — table in RESULTS) |
+| P2 | **the report itself** | none: visibility | 2875 functions | names all 2875 with property+reason; the one user-facing deliverable that needs no new analysis |
+| P3 | **index sites outside the IR** | `no-index-api` 47 functions + every legacy-emitter function 252 | 4744 sites | makes 4744 sites measurable; no proof yet (`rangecheck.py` must report its own per-site provenance) |
 | P4 | **return-transfer borrow** | "parameter returned (or yielded)" 145 + "aliased into a second local" 20 | 165 parameter pairs | up to +330 RC ops elided (16% of the 2050 measured pairs) |
 | P5 | **bounds in the compare corpus** | index kept: "no length value" / "list length may change" | 188 of 308 IR sites kept | up to 188 sites; each is one removed check |
 | P6 | **source positions on accesses** | none: makes P2/P5 diagnosable per line | 1221 IR sites | the 1221 sites P2 cannot yet locate |
-| P7 | **race D3: per-chunk append buffers** | refused regions, rule D3 | 25 accesses in 2 regions | 2 regions move from refused to safe |
-| P8 | **race D1: exact shared-int reduction** | refused regions, rule D1 (owner decision D1(c)) | 2 accesses | 2 regions, and `racy/global_add.py` matches CPython without the lock |
+| P7 | **race D3: per-chunk append buffers** | refused regions, rule D3 | 0 accesses, 0 regions | nothing today: D3 never fires in the race corpus (shared `append` is refused by D5 or D1 instead), so this job cannot be ranked from the census |
+| P8 | **race D1: exact shared-int reduction** | rule D1 | 2 accesses in 2 programs | 0 regions on its own: both programs are refused by D5 (shape), so fixing D1 alone lowers nothing |
 | P9 | **ownership verifier** | none: soundness | 0 | turns "safe by construction" into a checked proof; must come before anyone relies on the word "proved" |
 
 Nine jobs, 18 hours.  P1 is first only because it moves the most; P2 is the one to ship first if
@@ -174,7 +175,8 @@ ranks highest; P9 has no number attached and is the soundness precondition for t
 ## 7. What Rust still proves that this cannot
 
 1. **Universally, not per function.** A Rust crate is safe for every input and every build; here a
-   function is proved only if it is on the typed path, and 34% of real functions are not (census).
+   function is proved only if it is on the typed path, and only 907 of 3255 function records (27.9%)
+   are: 1703 are boxed and 645 belong to programs both paths refuse (census).
    A proof that disappears under an unrelated construct in the same program is not a guarantee.
 2. **No aliasing, so no `&mut` exclusivity.** Python has one object with many names; this system
    proves the *absence of a premature free*, not that a writer is alone. `xs.append(x)` while
@@ -196,22 +198,22 @@ ranks highest; P9 has no number attached and is the soundness precondition for t
    proof loses precision exactly where Python is dynamic.  Rust's trait resolution is total.
 7. **Leak freedom.** Arenas, pools and the region allocator are freed once per program scope, not
    per value; nobody proves that a cycle in a class graph is unreachable.
-8. **The general path proves nothing.** 1703 of 4958 functions run on the boxed path, where values
-   are boxed, reference-counted or GC-managed at run time.  That code is safe, but by construction
-   of the runtime, not by proof.
+8. **The general path proves nothing.** 1703 of 3255 function records (52.3%) run on the boxed
+   path, where values are boxed, reference-counted or GC-managed at run time.  That code is safe,
+   but by construction of the runtime, not by proof.
 
 ## 8. Where we stand today (measured, `lab/proof/RESULTS.md`)
 
-| corpus | functions | typed path | boxed | RC pairs elided | IR index sites | checks removed | sites outside the IR |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| compare (20 programs) | 363 | 220 | 143 | 82.1% | 308 | 39.0% | 1353 |
-| pyproof (55) | 769 | 538 | 231 | 91.1% | 3 | 66.7% | 1585 |
-| gdev (200) | 2123 | 794 | 1329 | 70.1% | 910 | 4.8% | 1806 |
-| **all** | **3255** | **1552** | **1703** | **80.9%** | **1221** | **13.6%** | **4744** |
+| corpus | functions | typed path | boxed | refused programs | RC pairs elided | IR index sites | checks removed | sites outside the IR |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| compare (20 programs) | 363 | 118 | 143 | 102 | 82.1% | 308 | 39.0% | 1353 |
+| pyproof (55) | 769 | 64 | 231 | 474 | 91.1% | 3 | 66.7% | 1585 |
+| gdev (200) | 2123 | 725 | 1329 | 69 | 70.1% | 910 | 4.8% | 1806 |
+| **all** | **3255** | **907** | **1703** | **645** | **80.9%** | **1221** | **13.6%** | **4744** |
 
 Read as one sentence: the ownership rule is already doing most of its work (81% of the RC pairs a
 call would need are gone), the bounds proof is not (14% of index sites in the functions it reaches,
-and four fifths of all index sites are outside its reach), and the race rules accept 79 of 123
-shared accesses.  The single largest number is not a proof gap at all: one third of real functions
+and four fifths of all index sites are outside its reach), and the race rules accept 79 of 104
+shared accesses.  The single largest number is not a proof gap at all: 72.1% of real functions
 never reach the typed path, so the honest ceiling of "how much of real Python can this prove" is
-31% today, not 81%.
+27.9% today, not 81%.

@@ -301,8 +301,10 @@
    "programs_built": 16,
    "programs_refused": 4,
    "functions": 363,
-   "typed_functions": 220,
+   "typed_path_functions": 118,
    "boxed_functions": 143,
+   "refused_program_functions": 102,
+   "not_boxed_functions": 220,
    "functions_with_ref_params": 120,
    "rc_ops_elided": 230,
    "rc_ops_needed": 50,
@@ -327,8 +329,10 @@
    "programs_built": 35,
    "programs_refused": 20,
    "functions": 769,
-   "typed_functions": 538,
+   "typed_path_functions": 64,
    "boxed_functions": 231,
+   "refused_program_functions": 474,
+   "not_boxed_functions": 538,
    "functions_with_ref_params": 334,
    "rc_ops_elided": 814,
    "rc_ops_needed": 80,
@@ -350,8 +354,10 @@
    "programs_built": 195,
    "programs_refused": 5,
    "functions": 2123,
-   "typed_functions": 794,
+   "typed_path_functions": 725,
    "boxed_functions": 1329,
+   "refused_program_functions": 69,
+   "not_boxed_functions": 794,
    "functions_with_ref_params": 423,
    "rc_ops_elided": 614,
    "rc_ops_needed": 262,
@@ -380,12 +386,12 @@
   },
   {
    "reason": "program refused by both paths",
-   "count": 580,
+   "count": 645,
    "example": "lab/compare/src/chain_relax/main.py:5 parse -- Unsupported: the integer literal 18446744073709551615 does not fit in a 64-bit signed integer, and AIL ints are 64-bit by default (the program needs a big int here)."
   },
   {
    "reason": "function stays on the legacy emitter",
-   "count": 233,
+   "count": 252,
    "example": "lab/compare/src/rail_transfer/typed.py:43 relax -- field G.h0 of kind ('olist', 'Item') as a container"
   },
   {
@@ -394,29 +400,29 @@
    "example": "lab/compare/src/tally_lang/main.py:96 unary -- unary: self"
   },
   {
+   "reason": "index bound not proved: index may be negative",
+   "count": 106,
+   "example": "lab/compare/src/berth_sim/typed.py:11 fpush -- fpush: 3 site(s)"
+  },
+  {
    "reason": "index bound not proved: no length value of this container",
-   "count": 54,
+   "count": 77,
    "example": "lab/compare/src/berth_sim/typed.py:11 fpush -- fpush: 6 site(s)"
   },
   {
-   "reason": "index bound not proved: index may be negative",
-   "count": 36,
-   "example": "lab/compare/src/ledger_bin/typed.py:11 readvar -- readvar: 1 site(s)"
-  },
-  {
-   "reason": "no-index-api",
-   "count": 31,
-   "example": "lab/compare/src/ledger_bin/typed.py:48 main -- main: 81 index site(s)"
-  },
-  {
    "reason": "index bound not proved: no upper bound against a length",
-   "count": 26,
+   "count": 59,
    "example": "lab/compare/src/berth_sim/typed.py:33 main -- main: 9 site(s)"
   },
   {
    "reason": "index bound not proved: list length may change (length-changing op or unknown call)",
-   "count": 24,
+   "count": 49,
    "example": "lab/compare/src/berth_sim/typed.py:26 fpop -- fpop: 5 site(s)"
+  },
+  {
+   "reason": "no-index-api",
+   "count": 47,
+   "example": "lab/compare/src/ledger_bin/typed.py:48 main -- main: 81 index site(s)"
   },
   {
    "reason": "parameter aliased into a second local name",
@@ -444,15 +450,93 @@
    "example": "examples/ffi/bindgen/zlib_gen.py:141 zlib_gen_ffi__gzread -- zlib_gen_ffi__gzread: buf"
   }
  ],
+ "boxed_reasons": [
+  {
+   "reason": "other (a reason not in the named groups)",
+   "count": 273
+  },
+  {
+   "reason": "a dunder other than `__init__`",
+   "count": 214
+  },
+  {
+   "reason": "a `Decimal` format spec in an f-string",
+   "count": 198
+  },
+  {
+   "reason": "a `bool` parameter given a non-bool",
+   "count": 188
+  },
+  {
+   "reason": "a list of `str` given a non-str value",
+   "count": 126
+  },
+  {
+   "reason": "a generator expression saved as a value",
+   "count": 113
+  },
+  {
+   "reason": "`d.get(k)` with one argument where an Optional is needed",
+   "count": 109
+  },
+  {
+   "reason": "a `str` parameter a caller also supplies an int to",
+   "count": 69
+  },
+  {
+   "reason": "a scalar `None`/Optional value",
+   "count": 62
+  },
+  {
+   "reason": "a `statistics` function not built",
+   "count": 58
+  },
+  {
+   "reason": "`collections` use not built",
+   "count": 54
+  },
+  {
+   "reason": "a set/dict element needing `__eq__`/`__hash__`",
+   "count": 45
+  },
+  {
+   "reason": "an annotation this compiler has no rule for",
+   "count": 43
+  },
+  {
+   "reason": "a struct-list comprehension not built",
+   "count": 42
+  },
+  {
+   "reason": "a module-level constant that is not numeric",
+   "count": 35
+  },
+  {
+   "reason": "the iterator protocol not built",
+   "count": 34
+  },
+  {
+   "reason": "a list parameter that is read-only",
+   "count": 27
+  },
+  {
+   "reason": "`yield`/generators not built",
+   "count": 13
+  }
+ ],
  "races": {
   "programs_with_a_parallel_construct": 31,
   "race_probe_programs": 31,
   "safe": 79,
   "refused": 25,
   "unknown": 19,
+  "distinct_accesses": 104,
+  "named_rule_refused": 6,
   "constructs_lowered": 17,
+  "lowered_regions": 17,
+  "refused_regions": 5,
+  "refused_shapes": 14,
   "by_rule": {
-   "D5": 14,
    "D4": 4,
    "D1": 2
   },
@@ -483,9 +567,12 @@
      "refused": 7,
      "unknown": 5,
      "by_rule": {
-      "D5": 1,
       "D4": 2
-     }
+     },
+     "lowered_regions": 0,
+     "refused_regions": 1,
+     "refused_shapes": 1,
+     "distinct_accesses": 7
     }
    },
    {
@@ -506,7 +593,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -527,7 +618,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -548,7 +643,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -569,7 +668,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -590,7 +693,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -611,7 +718,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -632,7 +743,11 @@
      "safe": 4,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 4
     }
    },
    {
@@ -653,7 +768,11 @@
      "safe": 4,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 4
     }
    },
    {
@@ -674,7 +793,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -695,7 +818,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -716,7 +843,11 @@
      "safe": 3,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 3
     }
    },
    {
@@ -737,7 +868,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -758,7 +893,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -779,7 +918,11 @@
      "safe": 5,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 5
     }
    },
    {
@@ -800,7 +943,11 @@
      "safe": 3,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 3
     }
    },
    {
@@ -821,7 +968,11 @@
      "safe": 2,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 2
     }
    },
    {
@@ -838,9 +989,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -857,9 +1010,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -885,9 +1040,11 @@
      "safe": 0,
      "refused": 2,
      "unknown": 2,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 1,
+     "refused_shapes": 1,
+     "distinct_accesses": 2
     }
    },
    {
@@ -904,9 +1061,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -923,9 +1082,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -942,9 +1103,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -983,10 +1146,13 @@
      "refused": 12,
      "unknown": 9,
      "by_rule": {
-      "D5": 1,
       "D1": 1,
       "D4": 2
-     }
+     },
+     "lowered_regions": 0,
+     "refused_regions": 2,
+     "refused_shapes": 1,
+     "distinct_accesses": 12
     }
    },
    {
@@ -1003,9 +1169,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -1022,9 +1190,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -1041,9 +1211,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -1060,9 +1232,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    },
    {
@@ -1091,9 +1265,12 @@
      "refused": 4,
      "unknown": 3,
      "by_rule": {
-      "D5": 1,
       "D1": 1
-     }
+     },
+     "lowered_regions": 0,
+     "refused_regions": 1,
+     "refused_shapes": 1,
+     "distinct_accesses": 4
     }
    },
    {
@@ -1114,7 +1291,11 @@
      "safe": 8,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {}
+     "by_rule": {},
+     "lowered_regions": 1,
+     "refused_regions": 0,
+     "refused_shapes": 0,
+     "distinct_accesses": 8
     }
    },
    {
@@ -1131,9 +1312,11 @@
      "safe": 0,
      "refused": 0,
      "unknown": 0,
-     "by_rule": {
-      "D5": 1
-     }
+     "by_rule": {},
+     "lowered_regions": 0,
+     "refused_regions": 0,
+     "refused_shapes": 1,
+     "distinct_accesses": 0
     }
    }
   ]
@@ -47592,7 +47775,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%0e50: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%bbe0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -47615,7 +47798,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%0e50: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%bbe0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -47955,7 +48138,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%4c70: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c5e0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -47978,7 +48161,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%4c70: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c5e0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -48218,7 +48401,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%3790: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%d210: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -48241,7 +48424,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%3790: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%d210: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -51590,7 +51773,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%39d0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%e320: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -51613,7 +51796,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%39d0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%e320: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -51953,7 +52136,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d0c0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%df90: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -51976,7 +52159,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d0c0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%df90: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -52216,7 +52399,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%2020: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%acb0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -52239,7 +52422,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%2020: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%acb0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -53543,7 +53726,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%aad0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%af20: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -53566,7 +53749,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%aad0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%af20: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -53906,7 +54089,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%88e0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%f010: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -53929,7 +54112,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%88e0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%f010: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -54169,7 +54352,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%e0b0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%3130: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -54192,7 +54375,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%e0b0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%3130: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -82019,7 +82202,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%3100: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%3fd0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -82042,7 +82225,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%3100: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%3fd0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -82382,7 +82565,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%2b00: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%7760: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -82405,7 +82588,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%2b00: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%7760: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -82645,7 +82828,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%8c40: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%4370: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -82668,7 +82851,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%8c40: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%4370: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -105462,7 +105645,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%4d30: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%56f0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -105485,7 +105668,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%4d30: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%56f0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -105825,7 +106008,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%21d0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d300: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -105848,7 +106031,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%21d0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d300: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -106088,7 +106271,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%b730: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%6050: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -106111,7 +106294,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%b730: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%6050: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -110801,7 +110984,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%f310: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_ds: yield #3: operand <%0be0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 24,
@@ -110824,7 +111007,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%f310: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_ds: yield #3: operand <%0be0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 24,
@@ -111164,7 +111347,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d060: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c6d0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -111187,7 +111370,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%d060: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_runY: yield #8: operand <%c6d0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,
@@ -111427,7 +111610,7 @@
    "rc_needed": 0,
    "ownership": "full",
    "ir_path": "legacy",
-   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%b8e0: i64> is not defined in scope",
+   "ir_reason": "IR failure: IRError: _ail_re_run: yield #8: operand <%6dd0: i64> is not defined in scope",
    "idx_total": null,
    "idx_removed": null,
    "index_sites": 39,
@@ -111450,7 +111633,7 @@
     {
      "kind": "lowering",
      "reason": "function stays on the legacy emitter",
-     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%b8e0: i64> is not defined in scope"
+     "detail": "IR failure: IRError: _ail_re_run: yield #8: operand <%6dd0: i64> is not defined in scope"
     }
    ],
    "idx_kept": 39,

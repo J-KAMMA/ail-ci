@@ -51,8 +51,19 @@ census records `NO_API` (see the module docstring) instead of patching it.
 
 ## Notes on the numbers
 
+* `functions` counts function records: 275 program records, 3255 functions.  Ten `main.py` are
+  listed by both the compare and the pyproof corpus, so the 275 records cover 265 distinct
+  non-race files.
+* The three reach shares partition the records: `typed_path_functions` (not boxed in a program
+  that built), `boxed_functions` (the typed path refused, the general path built), and
+  `refused_program_functions` (both paths refused; these records are `boxed: false` because
+  nothing was built, which is why the not-boxed count alone overstates the typed reach).
 * A program the typed path refuses is built by the general path and its functions are reported
-  `boxed`; if both paths refuse, its functions are counted with the blocker `program refused`.
+  `boxed`; if both paths refuse, its functions carry the blocker `program refused`.
+* `blockers` counts one entry per function per distinct reason, so its counts overlap; the boxed
+  row is added separately and its functions' other blockers are not part of that ranking.
+* `boxed_reasons` groups boxed functions by the one `pyc.last_fallback_reason` their program
+  recorded; the compiler records one reason per program, not per function.
 * `pyc.last_fallback_reason` is captured per program, so the general-path blockers can be ranked
   by the reason the typed path gave.
 * The identity of the `ail_obj_store`/`_release` sites the emitter actually writes is not exposed

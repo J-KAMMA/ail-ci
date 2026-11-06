@@ -1,25 +1,51 @@
+## 2026-11-06 -- proof1: correct census arithmetic and labels (review fix, job-proof1-11070008)
+
+A review of the census found arithmetic and labelling defects; no compiler source is touched.  All
+fixes are in `lab/proof/census.py` and its documents, and `census.json` was regenerated with
+`python3 lab/proof/census.py --jobs 2`:
+
+- **Total functions.**  The print added `boxed` to `len(functions)`; the census has **3255**
+  function records, not 4958.  They partition into 907 on the typed path (27.9%), 1703 boxed
+  (52.3%) and 645 in programs both paths refuse (19.8%).  1552 are not boxed, but 645 of those
+  never compiled, so 907 is the real typed reach.
+- **Blocker table.**  `rank()` now counts every distinct reason a non-boxed function carries
+  (previously only the first) and reports boxed as its own row.  Corrected counts: program refused
+  645, legacy emitter 252, parameter returned 145, index-negative 106, no-length 77, no-upper 59,
+  length-change 49, no-index-api 47, aliased 20, stored-into-field 14.
+- **Races.**  D5 is a refused *shape*, not an access.  Distinct accesses are 104 = 79 safe + 25
+  refused; 6 are named by a rule (D4 4, D1 2, D3 0) and 19 are unknown.  14 shapes are refused by
+  D5 and 5 worker functions were found; 17 shapes are lowered.
+- **Why boxed.**  The table is now produced by `census.boxed_reasons()` from each program's
+  recorded `pyc.last_fallback_reason`, under named groups plus an explicit `other`.
+- **Citations.**  `self.h0` (not `G.h0`); the bounds example is `tally_lang/typed.py:37` (`peekop`),
+  a real blocker, not line 120.
+
+`RESULTS.md`, `SAFETY_PROOF.md` (219 lines) and `README.md` re-derive every quoted number from
+`census.json`.
+
 ## 2026-11-06 -- proof1: census + design for "Rust's safety without writing lifetimes" (job-proof1-11070008)
 
-Measurement and design only; **no compiler behaviour changes** (no file under `AIL_CURRENT/` was
-edited).  The question: how much of real Python does today's analysis already prove memory-safe,
+Measurement and design only; **no compiler source under `AIL_CURRENT/` was edited** (this DEVLOG
+aside).  The question: how much of real Python does today's analysis already prove memory-safe,
 in-bounds and race-free?
 
 - `lab/proof/census.py`: imports the compiler's own analyses and reports, per typed function of
-  three corpora, what they prove.  Ownership from `ir/borrow.analyze` (rc2); bounds from the
+  three corpora, what they prove.  Ownership from `ir.borrow.analyze` (rc2); bounds from the
   `AIL_IR_STATS` pass statistics of `ir/passes/ranges.py` plus the `AIL_BCE_EXPLAIN` per-site
   reason; races from `typedpar.rewrite_text` and `parallel._Body`/`check_callee`.  Builds use the
   real Python surface (`ail_chatgpt._load_sources`) with `PIPE_CC=/bin/true` and
   `AIL_FE_JOBS=1`, so it is compile-only and reproducible.  Where an analysis has no API to ask,
   the census records a blocker (`NO_API`) instead of patching it.
 - Corpora: 20 `lab/compare/src` programs, the 55 `lab/pyproof` programs, the first 200
-  `corpus/gdev` programs (306 programs, 4958 functions), plus the 31 `lab/race` probes.
+  `corpus/gdev` programs (275 program records, 3255 function records), plus the 31 `lab/race`
+  probes.
 - Result: 80.9% of reference-parameter RC pairs (1658/2050) are already elided; 13.6% of the index
   sites in IR-lowered functions (166/1221) have their check removed and 4744 more sites are in
-  functions the IR never lowers; 79 of 123 shared accesses in parallel regions are classified safe,
-  25 refused by a named rule, 19 unknown.  Only 1552 of 4958 functions (31.3%) are on the typed
-  path; 1703 are boxed and 1703 are in refused programs.  The top 14 blockers are ranked in
-  `lab/proof/RESULTS.md`.
-- `docs/design/SAFETY_PROOF.md` (216 lines): the claim, the precise rule for each of the three
+  functions the IR never lowers; 79 of 104 distinct shared accesses in parallel regions are
+  classified safe, 6 refused by a named rule, 19 unknown and 14 shapes refused by D5.  907 of 3255
+  function records (27.9%) are on the typed path; 1703 are boxed and 645 are in refused programs.
+  The top blockers are ranked in `lab/proof/RESULTS.md`.
+- `docs/design/SAFETY_PROOF.md` (219 lines): the claim, the precise rule for each of the three
   properties grounded in the module that implements it, the degrade-to-runtime-check policy, the
   `file:line: could not prove <property>: <reason>; runtime check kept` diagnostic and its three
   delivery modes, the module map, a nine-job plan ordered by blockers removed, and what Rust still

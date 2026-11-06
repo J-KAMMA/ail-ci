@@ -573,10 +573,12 @@ def race_info(text, tree):
     except Exception as error:
         return {'error': '%s: %s' % (type(error).__name__, error)}
     info = {'constructs': len(done), 'refused_constructs': [], 'regions': [],
-            'safe': 0, 'refused': 0, 'unknown': 0, 'by_rule': collections.Counter()}
+            'safe': 0, 'refused': 0, 'unknown': 0, 'by_rule': collections.Counter(),
+            'lowered_regions': 0, 'refused_regions': 0, 'refused_shapes': len(notes)}
     for line, why in notes:
+        # D5 is a refused *shape*, not an access: it is counted in `refused_shapes`, never added
+        # to `by_rule`, which counts accesses.
         info['refused_constructs'].append({'line': line, 'note': why})
-        info['by_rule']['D5'] += 1
     if notes:
         # the shape was not lowered, so the region runs under the general path's lock: every access
         # in it is refused *by the proof*, even though the program stays safe under the lock
@@ -584,6 +586,7 @@ def race_info(text, tree):
             assigned = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)
                         and isinstance(n.ctx, ast.Store)}
             accesses = _shared_accesses(fn.body, '', assigned)
+            info['refused_regions'] += 1
             info['refused'] += len(accesses)
             info['regions'].append({'kind': 'refused_region', 'line': fn.lineno,
                                     'verdict': 'refused', 'reason': notes[0][1],
@@ -620,25 +623,35 @@ def race_info(text, tree):
                   'rules': dict(collections.Counter(r for _, r, _ in accesses if r))}
         info['regions'].append(region)
         if verdict == 'safe':
+            info['lowered_regions'] += 1
             info['safe'] += len(accesses)
         else:
+            info['refused_regions'] += 1
             info['refused'] += len(accesses)
             for _, rule, sub in accesses:
                 if rule is None:
                     info['unknown'] += 1
                 else:
                     info['by_rule'][rule] += 1
+    info['distinct_accesses'] = info['safe'] + info['refused']
     info['by_rule'] = dict(info['by_rule'])
     return info
 
 
 # ---------------------------------------------------------------- ranking
 
-def rank(functions, key='ownership'):
-    """Top reasons a function is not fully proved, counted over functions with a minimal example."""
+def rank(functions):
+    """Top reasons a function is not fully proved, one count per function per distinct reason.
+
+    A function can carry several blockers, so these counts overlap and their sum exceeds the number
+    of functions with a blocker.  Boxed functions are counted as one row of their own (the general
+    path gives no proof at all); their other blockers are not part of the typed-path ranking.
+    `example` is the first function, in census order, that carries the reason."""
     counts = collections.Counter()
     examples = {}
     order = []
+    boxed = 0
+    boxed_example = None
 
     def note(label, example):
         counts[label] += 1
@@ -648,19 +661,78 @@ def rank(functions, key='ownership'):
             order.append(label)
 
     for fn in functions:
+        where = '%s:%d %s' % (fn['program'], fn['line'], fn['name'])
         if fn['boxed']:
-            note('function compiled on the general (boxed) path: no proof applies',
-                 '%s:%d %s' % (fn['program'], fn['line'], fn['name']))
+            boxed += 1
+            if boxed_example is None:
+                boxed_example = where
             continue
-        if not fn['blockers'] and fn['ownership'] in ('full', 'n/a'):
-            continue
-        if fn['blockers']:
-            first = fn['blockers'][0]
-            label = first['reason']
-            note(label, '%s:%d %s -- %s' % (fn['program'], fn['line'], fn['name'], first['detail']))
+        seen = set()
+        for blocker in fn['blockers']:
+            label = blocker['reason']
+            if label in seen:
+                continue
+            seen.add(label)
+            note(label, '%s -- %s' % (where, blocker['detail']))
     ranked = sorted(order, key=lambda label: -counts[label])
-    return [{'reason': label, 'count': counts[label], 'example': examples[label]}
+    rows = [{'reason': label, 'count': counts[label], 'example': examples[label]}
             for label in ranked]
+    if boxed:
+        rows.insert(0, {'reason': 'function compiled on the general (boxed) path: no proof applies',
+                        'count': boxed, 'example': boxed_example})
+    return rows
+
+
+#: How a program's recorded typed-path refusal is named in RESULTS' "why boxed" table.  One
+#: category per function, first match wins; a function whose program matches none is `other`.
+BOXED_GROUPS = collections.OrderedDict([
+    ('a `Decimal` format spec in an f-string', lambda s: 'Decimal' in s and 'format spec' in s),
+    ('a `bool` parameter given a non-bool', lambda s: 'declared bool' in s),
+    ('a dunder other than `__init__`', lambda s: 'dunder method' in s),
+    ('a list of `str` given a non-str value', lambda s: 'a list of str' in s),
+    ('a generator expression saved as a value', lambda s: 'generator expression' in s),
+    ('`d.get(k)` with one argument where an Optional is needed',
+     lambda s: 'with one argument' in s and 'get(' in s),
+    ('a `str` parameter a caller also supplies an int to',
+     lambda s: 'annotated str in the source' in s),
+    ('a scalar `None`/Optional value', lambda s: 'only a struct type can be None' in s),
+    ('a `statistics` function not built', lambda s: 'statistics.' in s),
+    ('`collections` use not built', lambda s: "import of 'collections'" in s),
+    ('a set/dict element needing `__eq__`/`__hash__`',
+     lambda s: 'as the argument of .add()' in s),
+    ('an annotation this compiler has no rule for',
+     lambda s: 'which this compiler has no rule for' in s),
+    ('a struct-list comprehension not built', lambda s: 'struct-list comprehension' in s),
+    ('a module-level constant that is not numeric', lambda s: 'module-level' in s),
+    ('the iterator protocol not built', lambda s: 'iterator protocol' in s),
+    ('a list parameter that is read-only', lambda s: 'is a list parameter, which is read-only' in s),
+    ('`yield`/generators not built', lambda s: 'has no generators' in s),
+    ('`threading`/`queue`/`concurrent.futures` (general path by design)',
+     lambda s: any(word in s for word in ('threading', 'concurrent.futures', 'queue'))),
+])
+
+
+def boxed_reasons(records):
+    """Boxed functions grouped by the typed-path refusal their program recorded.
+
+    The compiler records one `last_fallback_reason` per program (`pyc`), not per function, so every
+    boxed function of a program carries that program's reason.  `other` keeps the remainder
+    visible; it is not silently dropped."""
+    counts = collections.Counter()
+    for rec in records:
+        if rec['corpus'] == 'race':
+            continue
+        boxed = [f for f in rec['functions'] if f['boxed']]
+        if not boxed:
+            continue
+        reason = rec.get('fallback') or ''
+        label = 'other (a reason not in the named groups)'
+        for name, match in BOXED_GROUPS.items():
+            if match(reason):
+                label = name
+                break
+        counts[label] += len(boxed)
+    return [{'reason': label, 'count': n} for label, n in counts.most_common()]
 
 
 def _worker(job):
@@ -684,6 +756,9 @@ def summarize(records):
     for corpus, recs in by_corpus.items():
         typed_fns = [f for rec in recs for f in rec['functions'] if not f['boxed']]
         boxed = [f for rec in recs for f in rec['functions'] if f['boxed']]
+        on_typed_path = [f for rec in recs if rec['built']
+                         for f in rec['functions'] if not f['boxed']]
+        in_refused = [f for rec in recs if not rec['built'] for f in rec['functions']]
         with_refs = [f for f in typed_fns if f['ref_params']]
         elided = sum(f['rc_elided'] for f in with_refs)
         needed = sum(f['rc_needed'] for f in with_refs)
@@ -695,8 +770,13 @@ def summarize(records):
         facts[corpus] = {
             'programs': len(recs), 'programs_built': sum(1 for r in recs if r['built']),
             'programs_refused': sum(1 for r in recs if not r['built']),
-            'functions': len(typed_fns) + len(boxed), 'typed_functions': len(typed_fns),
+            # `functions` is every function record; the three shares below partition it:
+            #   typed_path + boxed + refused_program == functions
+            'functions': len(typed_fns) + len(boxed),
+            'typed_path_functions': len(on_typed_path),
             'boxed_functions': len(boxed),
+            'refused_program_functions': len(in_refused),
+            'not_boxed_functions': len(typed_fns),
             'functions_with_ref_params': len(with_refs),
             'rc_ops_elided': elided, 'rc_ops_needed': needed,
             'rc_share_elided': round(elided / (elided + needed), 4) if elided + needed else None,
@@ -741,10 +821,9 @@ def main(argv=None):
         if not info or info.get('error'):
             continue
         n_race_programs += 1
-        race_totals['safe'] += info['safe']
-        race_totals['refused'] += info['refused']
-        race_totals['unknown'] += info['unknown']
-        race_totals['constructs'] += info['constructs']
+        for key in ('safe', 'refused', 'unknown', 'constructs', 'refused_shapes',
+                    'lowered_regions', 'refused_regions', 'distinct_accesses'):
+            race_totals[key] += info.get(key, 0)
         for rule, n in (info.get('by_rule') or {}).items():
             race_rules[rule] += n
     functions = [f for rec in records if rec['corpus'] != 'race' for f in rec['functions']]
@@ -755,11 +834,17 @@ def main(argv=None):
         'corpora': corpus_map,
         'summary': facts,
         'blockers': rank(functions)[:15],
+        'boxed_reasons': boxed_reasons(records),
         'races': {'programs_with_a_parallel_construct': n_race_programs,
                   'race_probe_programs': len(race_records),
                   'safe': race_totals['safe'], 'refused': race_totals['refused'],
                   'unknown': race_totals['unknown'],
+                  'distinct_accesses': race_totals['distinct_accesses'],
+                  'named_rule_refused': race_totals['refused'] - race_totals['unknown'],
                   'constructs_lowered': race_totals['constructs'],
+                  'lowered_regions': race_totals['lowered_regions'],
+                  'refused_regions': race_totals['refused_regions'],
+                  'refused_shapes': race_totals['refused_shapes'],
                   'by_rule': dict(race_rules),
                   'programs': [{'path': r['path'], 'race': r.get('race')} for r in records
                                if r.get('race')]},
@@ -772,22 +857,28 @@ def main(argv=None):
     Path(args.out).write_text(json.dumps(data, indent=1) + '\n')
     if args.quiet:
         return 0
-    print('%d programs, %d functions (%d typed, %d boxed)'
-          % (len(records), len(functions) + sum(1 for f in functions if f['boxed']),
-             len([f for f in functions if not f['boxed']]),
-             len([f for f in functions if f['boxed']])))
+    n_typed_path = sum(row['typed_path_functions'] for row in facts.values())
+    print('%d programs, %d functions (%d on the typed path, %d boxed)'
+          % (len(records), len(functions), n_typed_path,
+             sum(1 for f in functions if f['boxed'])))
     for corpus, row in facts.items():
         print('\n[%s]' % corpus)
         for key, value in row.items():
             print('  %-32s %s' % (key, value))
     print('\n[races]')
     print('  programs with a parallel construct   %d' % n_race_programs)
-    for key in ('safe', 'refused', 'unknown', 'constructs'):
+    for key in ('safe', 'refused', 'unknown', 'distinct_accesses',
+                'constructs', 'lowered_regions', 'refused_regions', 'refused_shapes'):
         print('  %-32s %d' % (key, race_totals[key]))
+    print('  %-32s %d' % ('named_rule_refused',
+                          race_totals['refused'] - race_totals['unknown']))
     print('  by rule                              %s' % dict(race_rules))
     print('\n[top blockers]')
     for row in data['blockers']:
         print('  %4d  %s\n        e.g. %s' % (row['count'], row['reason'], row['example']))
+    print('\n[boxed reasons]')
+    for row in data['boxed_reasons']:
+        print('  %4d  %s' % (row['count'], row['reason']))
     print('\nwrote %s' % args.out)
     return 0
 
