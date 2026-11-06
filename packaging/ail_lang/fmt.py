@@ -65,7 +65,8 @@ def _line_length_from(text):
 
 def line_length(path):
     """The `[fmt] line-length` of the nearest `ail.toml` above `path`, or None."""
-    start = path if path.is_dir() else path.parent
+    resolved = Path(path).resolve()
+    start = resolved if resolved.is_dir() else resolved.parent
     for directory in (start, *start.parents):
         config = directory / "ail.toml"
         if config.is_file():

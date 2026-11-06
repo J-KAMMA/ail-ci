@@ -171,6 +171,24 @@ class CheckMode(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn("value = sum(", done.stdout)
 
+    def test_line_length_from_ail_toml_above_a_relative_argument(self):
+        sub = self.dir / "sub" / "deep"
+        sub.mkdir(parents=True)
+        source = sub / "prog.py"
+        source.write_text("def main() -> int:\n"
+                          "    value = sum([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])\n"
+                          "    print(value)\n"
+                          "    return 0\n"
+                          "\n"
+                          "\n"
+                          "main()\n", encoding="utf-8")
+        (self.dir / "ail.toml").write_text('[fmt]\nline-length = 40\n', encoding="utf-8")
+        done = check(["prog.py"], cwd=sub)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("value = sum(", done.stdout)
+        done = check(["deep/prog.py"], cwd=self.dir / "sub")
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+
     def test_check_answers_match_the_formatter(self):
         good = self.dir / "good.py"
         bad = self.dir / "bad.py"
