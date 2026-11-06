@@ -38,6 +38,7 @@ LIST_RE = re.compile(r"^ {0,3}(?:[-+*]|\d+[.)])[ \t]+")
 BLOCKQUOTE_RE = re.compile(r"^ {0,3}>")
 HR_RE = re.compile(r"^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$")
 LINK_START_RE = re.compile(r"!?\[([^\]]*)\]\(")
+REF_DEF_RE = re.compile(r"^ {0,3}\[[^\]]+\]:[ \t]*(?:<(?P<angle>[^>]*)>|(?P<plain>[^\s]+))")
 ESCAPE_RE = re.compile(r"\\([\\`*{}\[\]()#+\-.!_>~|])")
 CODE_RE = re.compile(r"(`+)(.+?)\1")
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
@@ -50,10 +51,21 @@ HREF_RE = re.compile(r"<(?P<tag>a|img)\b[^>]*?\b(?P<attr>href|src)\s*=\s*"
 def _plain_inline(text):
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = CODE_RE.sub(r"\2", text)
+    spans = []
+
+    def protect(match):
+        spans.append(match.group(2))
+        return "\x00%d\x00" % (len(spans) - 1)
+
+    text = CODE_RE.sub(protect, text)
     text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"[*_~]", "", text)
-    return ESCAPE_RE.sub(r"\1", text)
+    text = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"\1", text, flags=re.S)
+    text = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"\1", text, flags=re.S)
+    text = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"\1", text, flags=re.S)
+    text = re.sub(r"(?<![*\w])\*(?=\S)(.+?)(?<=\S)\*(?![*\w])", r"\1", text, flags=re.S)
+    text = re.sub(r"(?<![_\w])_(?=\S)(.+?)(?<=\S)_(?![_\w])", r"\1", text, flags=re.S)
+    text = ESCAPE_RE.sub(r"\1", text)
+    return re.sub(r"\x00(\d+)\x00", lambda match: spans[int(match.group(1))], text)
 
 
 def slugify(text):
@@ -132,21 +144,18 @@ def heading_texts(path):
 
 
 def anchors_for(path):
-    seen = set()
-    counts = {}
+    occurrences = {}
     result = set()
     for text in heading_texts(path):
         base = slugify(text)
         if not base:
             continue
         slug = base
-        if slug in seen:
-            number = counts.get(base, 1)
-            while slug in seen:
-                number += 1
-                slug = "%s-%d" % (base, number)
-            counts[base] = number
-        seen.add(slug)
+        original = base
+        while slug in occurrences:
+            occurrences[original] += 1
+            slug = "%s-%d" % (original, occurrences[original])
+        occurrences[slug] = 0
         result.add(slug)
     return result
 
@@ -210,6 +219,16 @@ def iter_links(path):
             if target is not None:
                 yield number, target
             position = max(end + 1, match.end())
+        found = REF_DEF_RE.match(line)
+        if found:
+            target = found.group("angle")
+            if target is None:
+                target = found.group("plain")
+            yield number, target
+        for match in HREF_RE.finditer(line):
+            target = match.group("double") or match.group("single") or match.group("bare")
+            if target:
+                yield number, html.unescape(target)
 
 
 def _split_target(target):

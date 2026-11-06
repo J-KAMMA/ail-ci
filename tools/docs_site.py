@@ -65,10 +65,21 @@ def escape(text, quote=False):
 def plain_inline(text):
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = CODE_RE.sub(r"\2", text)
+    spans = []
+
+    def protect(match):
+        spans.append(match.group(2))
+        return "\x00%d\x00" % (len(spans) - 1)
+
+    text = CODE_RE.sub(protect, text)
     text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"[*_~]", "", text)
-    return ESCAPE_RE.sub(r"\1", text)
+    text = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"\1", text, flags=re.S)
+    text = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"\1", text, flags=re.S)
+    text = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"\1", text, flags=re.S)
+    text = re.sub(r"(?<![*\w])\*(?=\S)(.+?)(?<=\S)\*(?![*\w])", r"\1", text, flags=re.S)
+    text = re.sub(r"(?<![_\w])_(?=\S)(.+?)(?<=\S)_(?![_\w])", r"\1", text, flags=re.S)
+    text = ESCAPE_RE.sub(r"\1", text)
+    return re.sub(r"\x00(\d+)\x00", lambda match: spans[int(match.group(1))], text)
 
 
 def slugify(text):
@@ -80,20 +91,16 @@ def slugify(text):
 
 class Slugger:
     def __init__(self):
-        self.seen = set()
-        self.counts = {}
+        self.occurrences = {}
 
     def slug(self, text):
-        base = slugify(text)
-        slug = base
-        if slug in self.seen:
-            number = self.counts.get(base, 1)
-            while slug in self.seen:
-                number += 1
-                slug = "%s-%d" % (base, number)
-            self.counts[base] = number
-        self.seen.add(slug)
-        return slug
+        result = slugify(text)
+        original = result
+        while result in self.occurrences:
+            self.occurrences[original] += 1
+            result = "%s-%d" % (original, self.occurrences[original])
+        self.occurrences[result] = 0
+        return result
 
 
 def split_table_row(line):
@@ -624,8 +631,9 @@ class PageRenderer:
             if (index + 1 < len(lines) and "|" in lines[index][1]
                     and is_table_delimiter(lines[index + 1][1])):
                 break
-            number_for_row = lines[index][0]
             row_text = lines[index][1]
+            if "|" not in row_text:
+                break
             index += 1
             while not row_text.rstrip().endswith("|") and index < len(lines):
                 continuation = lines[index][1]
