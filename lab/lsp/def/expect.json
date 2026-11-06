@@ -1,0 +1,555 @@
+{
+ "files": [
+  "main.py",
+  "helper.py",
+  "lib/libmod.py",
+  "edge.py",
+  "use_pkg.py"
+ ],
+ "cases": [
+  {
+   "file": "main.py",
+   "line": 10,
+   "character": 11,
+   "target": {
+    "file": "main.py",
+    "line": 5,
+    "character": 0,
+    "end_character": 5
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 11,
+   "character": 4,
+   "target": {
+    "file": "main.py",
+    "line": 5,
+    "character": 0,
+    "end_character": 5
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 12,
+   "character": 11,
+   "target": {
+    "file": "main.py",
+    "line": 5,
+    "character": 0,
+    "end_character": 5
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 9,
+   "character": 11,
+   "target": {
+    "file": "main.py",
+    "line": 9,
+    "character": 11,
+    "end_character": 16
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 9,
+   "character": 4,
+   "target": {
+    "file": "main.py",
+    "line": 9,
+    "character": 4,
+    "end_character": 10
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 45,
+   "character": 12,
+   "target": {
+    "file": "main.py",
+    "line": 9,
+    "character": 4,
+    "end_character": 10
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 18,
+   "character": 8,
+   "target": {
+    "file": "main.py",
+    "line": 18,
+    "character": 8,
+    "end_character": 12
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 23,
+   "character": 11,
+   "target": {
+    "file": "main.py",
+    "line": 18,
+    "character": 8,
+    "end_character": 12
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 16,
+   "character": 4,
+   "target": {
+    "file": "main.py",
+    "line": 16,
+    "character": 4,
+    "end_character": 11
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 19,
+   "character": 17,
+   "target": {
+    "file": "main.py",
+    "line": 16,
+    "character": 4,
+    "end_character": 11
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 21,
+   "character": 15,
+   "target": {
+    "file": "main.py",
+    "line": 16,
+    "character": 4,
+    "end_character": 11
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 20,
+   "character": 8,
+   "target": {
+    "file": "main.py",
+    "line": 16,
+    "character": 4,
+    "end_character": 11
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 38,
+   "character": 4,
+   "target": [
+    {
+     "file": "main.py",
+     "line": 38,
+     "character": 4,
+     "end_character": 9
+    },
+    {
+     "file": "main.py",
+     "line": 39,
+     "character": 4,
+     "end_character": 9
+    }
+   ]
+  },
+  {
+   "file": "main.py",
+   "line": 39,
+   "character": 4,
+   "target": [
+    {
+     "file": "main.py",
+     "line": 38,
+     "character": 4,
+     "end_character": 9
+    },
+    {
+     "file": "main.py",
+     "line": 39,
+     "character": 4,
+     "end_character": 9
+    }
+   ]
+  },
+  {
+   "file": "main.py",
+   "line": 45,
+   "character": 19,
+   "target": [
+    {
+     "file": "main.py",
+     "line": 38,
+     "character": 4,
+     "end_character": 9
+    },
+    {
+     "file": "main.py",
+     "line": 39,
+     "character": 4,
+     "end_character": 9
+    }
+   ]
+  },
+  {
+   "file": "main.py",
+   "line": 40,
+   "character": 16,
+   "target": [
+    {
+     "file": "main.py",
+     "line": 38,
+     "character": 4,
+     "end_character": 9
+    },
+    {
+     "file": "main.py",
+     "line": 39,
+     "character": 4,
+     "end_character": 9
+    }
+   ]
+  },
+  {
+   "file": "main.py",
+   "line": 40,
+   "character": 23,
+   "target": [
+    {
+     "file": "main.py",
+     "line": 38,
+     "character": 4,
+     "end_character": 9
+    },
+    {
+     "file": "main.py",
+     "line": 39,
+     "character": 4,
+     "end_character": 9
+    }
+   ]
+  },
+  {
+   "file": "main.py",
+   "line": 40,
+   "character": 4,
+   "target": {
+    "file": "main.py",
+    "line": 40,
+    "character": 4,
+    "end_character": 8
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 40,
+   "character": 11,
+   "target": {
+    "file": "helper.py",
+    "line": 5,
+    "character": 4,
+    "end_character": 8
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 2,
+   "character": 19,
+   "target": {
+    "file": "helper.py",
+    "line": 5,
+    "character": 4,
+    "end_character": 8
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 0,
+   "character": 7,
+   "target": {
+    "module": "helper.py"
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 31,
+   "character": 15,
+   "target": {
+    "module": "helper.py"
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 31,
+   "character": 22,
+   "target": {
+    "file": "helper.py",
+    "line": 5,
+    "character": 4,
+    "end_character": 8
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 1,
+   "character": 7,
+   "target": {
+    "bundled": "struct.py"
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 47,
+   "character": 69,
+   "target": {
+    "bundled": "struct.py"
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 3,
+   "character": 23,
+   "target": {
+    "file": "lib/libmod.py",
+    "line": 5,
+    "character": 4,
+    "end_character": 10
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 3,
+   "character": 31,
+   "target": {
+    "file": "lib/libmod.py",
+    "line": 2,
+    "character": 0,
+    "end_character": 9
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 47,
+   "character": 50,
+   "target": {
+    "file": "lib/libmod.py",
+    "line": 5,
+    "character": 4,
+    "end_character": 10
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 47,
+   "character": 57,
+   "target": {
+    "file": "lib/libmod.py",
+    "line": 2,
+    "character": 0,
+    "end_character": 9
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 3,
+   "character": 9,
+   "target": {
+    "module": "lib/libmod.py"
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 41,
+   "character": 13,
+   "target": {
+    "file": "main.py",
+    "line": 26,
+    "character": 6,
+    "end_character": 12
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 26,
+   "character": 6,
+   "target": {
+    "file": "main.py",
+    "line": 26,
+    "character": 6,
+    "end_character": 12
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 42,
+   "character": 27,
+   "target": {
+    "file": "main.py",
+    "line": 33,
+    "character": 8,
+    "end_character": 13
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 34,
+   "character": 20,
+   "target": {
+    "file": "main.py",
+    "line": 30,
+    "character": 8,
+    "end_character": 14
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 43,
+   "character": 12,
+   "target": {
+    "file": "main.py",
+    "line": 43,
+    "character": 25,
+    "end_character": 29
+   }
+  },
+  {
+   "file": "main.py",
+   "line": 43,
+   "character": 33,
+   "target": null
+  },
+  {
+   "file": "main.py",
+   "line": 44,
+   "character": 14,
+   "target": null
+  },
+  {
+   "file": "main.py",
+   "line": 44,
+   "character": 29,
+   "target": null
+  },
+  {
+   "file": "main.py",
+   "line": 46,
+   "character": 27,
+   "target": null
+  },
+  {
+   "file": "main.py",
+   "line": 47,
+   "character": 4,
+   "target": null
+  },
+  {
+   "file": "edge.py",
+   "line": 1,
+   "character": 25,
+   "target": {
+    "file": "edge.py",
+    "line": 0,
+    "character": 0,
+    "end_character": 4
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 1,
+   "character": 17,
+   "target": {
+    "file": "edge.py",
+    "line": 1,
+    "character": 17,
+    "end_character": 21
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 6,
+   "character": 11,
+   "target": {
+    "file": "edge.py",
+    "line": 2,
+    "character": 14,
+    "end_character": 20
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 2,
+   "character": 14,
+   "target": {
+    "file": "edge.py",
+    "line": 2,
+    "character": 14,
+    "end_character": 20
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 13,
+   "character": 15,
+   "target": {
+    "file": "edge.py",
+    "line": 12,
+    "character": 25,
+    "end_character": 28
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 12,
+   "character": 25,
+   "target": {
+    "file": "edge.py",
+    "line": 12,
+    "character": 25,
+    "end_character": 28
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 19,
+   "character": 19,
+   "target": {
+    "file": "edge.py",
+    "line": 18,
+    "character": 21,
+    "end_character": 24
+   }
+  },
+  {
+   "file": "edge.py",
+   "line": 18,
+   "character": 21,
+   "target": {
+    "file": "edge.py",
+    "line": 18,
+    "character": 21,
+    "end_character": 24
+   }
+  },
+  {
+   "file": "use_pkg.py",
+   "line": 0,
+   "character": 7,
+   "target": {
+    "module": "pkg/__init__.py"
+   }
+  },
+  {
+   "file": "use_pkg.py",
+   "line": 2,
+   "character": 0,
+   "target": {
+    "module": "pkg/__init__.py"
+   }
+  }
+ ]
+}
