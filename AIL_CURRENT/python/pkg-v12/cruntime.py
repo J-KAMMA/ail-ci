@@ -30989,16 +30989,27 @@ PAR = r"""
 typedef void (*ail_par_fn)(void **, int64_t, int64_t);
 typedef struct {
     ail_par_fn fn; void **args; int64_t lo, hi, block, nblocks, next, fail_block, abort;
+    int64_t n, threads, min_block;   /* guided: iterations left, the divisor, and the least block */
     int fail_code; char fail_msg[192];
     pthread_mutex_t mu;
 } ail_par_job;
 typedef struct { jmp_buf jb; char msg[192]; int code; } ail_par_ctx;
-typedef struct { int64_t light_n, heavy_n; } ail_par_site;   /* zeroed: nothing known yet */
+typedef struct { int64_t light_n, heavy_n; double ns_per_iter; } ail_par_site;   /* zeroed: nothing known yet */
 /* Time spent on the calling thread before a long loop is sized up, and the least remaining work
    (at the rate seen so far) for which waking the pool is worth it. */
 #define AIL_PAR_PROBE_NS 40000
 #define AIL_PAR_MIN_NS 1000000
 #define AIL_PAR_SPIN_NS 60000
+/* AIL_PAR_SCHED=guided: at least this much work (at the rate the probe prefix measured) per block. */
+#define AIL_PAR_GUIDED_NS 20000
+static int ail_par_guided(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *e = getenv("AIL_PAR_SCHED");
+        cached = e && strcmp(e, "guided") == 0;
+    }
+    return cached;
+}
 #if defined(__x86_64__) || defined(__i386__)
 #define AIL_PAR_RELAX() __builtin_ia32_pause()
 #elif defined(__aarch64__)
@@ -31060,7 +31071,40 @@ static __attribute__((noinline)) int ail_par_block(ail_par_ctx *c, ail_par_job *
     J->fn(J->args, lo, hi);
     return 0;
 }
+/* Guided (AIL_PAR_SCHED=guided): a worker takes max(min_block, remaining / (2 * threads)) iterations
+   from the next free index, spending one compare-and-swap on that start index. Blocks stay contiguous
+   and in index order, so they partition the range as before; a failure is remembered by the block's
+   start offset, which orders it like the sequential loop (the lowest failing block holds the first
+   failing iteration). The caller picks min_block from the rate the probe prefix measured. */
+static int64_t ail_par_sched_min_block = 0;   /* set by ail_par_run, consumed by ail_par_go_wide */
+static void ail_par_work_guided(ail_par_job *J) {
+    ail_par_ctx c;
+    ail_par_cur = &c;
+    for (;;) {
+        if (__atomic_load_n(&J->abort, __ATOMIC_RELAXED)) break;
+        int64_t at = -1, sz = 0;
+        for (;;) {
+            int64_t off = __atomic_load_n(&J->next, __ATOMIC_RELAXED);
+            if (off >= J->n) break;
+            int64_t rem = J->n - off;
+            sz = rem / (2 * J->threads);
+            if (sz < J->min_block) sz = J->min_block;
+            if (sz > rem) sz = rem;
+            if (__atomic_compare_exchange_n(&J->next, &off, off + sz, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) { at = off; break; }
+        }
+        if (at < 0) break;
+        int64_t lo = J->lo + at, hi = lo + sz;
+        if (ail_par_block(&c, J, lo, hi)) {
+            pthread_mutex_lock(&J->mu);
+            if (at < J->fail_block) { J->fail_block = at; J->fail_code = c.code; memcpy(J->fail_msg, c.msg, sizeof c.msg); }
+            pthread_mutex_unlock(&J->mu);
+            __atomic_store_n(&J->abort, 1, __ATOMIC_RELAXED);
+        }
+    }
+    ail_par_cur = NULL;
+}
 static void ail_par_work(ail_par_job *J) {
+    if (J->min_block > 0) { ail_par_work_guided(J); return; }
     ail_par_ctx c;
     ail_par_cur = &c;
     for (;;) {
@@ -31138,6 +31182,10 @@ static void ail_par_go_wide(ail_par_fn fn, void **args, int64_t lo, int64_t hi) 
     J->block = n / ((int64_t)(ail_par_pool < nt - 1 ? ail_par_pool + 1 : nt) * 8);
     if (J->block < 1) J->block = 1;
     J->nblocks = (n + J->block - 1) / J->block;
+    J->n = n;
+    J->threads = ail_par_pool < nt - 1 ? ail_par_pool + 1 : nt;
+    J->min_block = ail_par_sched_min_block;   /* > 0: guided; 0: the fixed blocks above */
+    ail_par_sched_min_block = 0;
     J->next = 0; J->fail_block = INT64_MAX; J->abort = 0; J->fail_code = 0; J->fail_msg[0] = 0;
     if (ail_par_pool == 0) { ail_par_work(J); }
     else {
@@ -31190,13 +31238,22 @@ static void ail_par_run(ail_par_fn fn, void **args, int64_t lo, int64_t hi, ail_
                 i = e;
                 if (i >= hi) { S->light_n = n; return; }
                 int64_t spent = ail_par_now() - t0;
-                if (spent >= AIL_PAR_PROBE_NS && (double)spent / (double)(i - lo) * (double)(hi - i) >= (double)AIL_PAR_MIN_NS) break;
+                if (spent >= AIL_PAR_PROBE_NS) {
+                    S->ns_per_iter = (double)spent / (double)(i - lo);
+                    if (S->ns_per_iter * (double)(hi - i) >= (double)AIL_PAR_MIN_NS) break;
+                }
                 step *= 2;
             }
             S->heavy_n = n;
         }
     }
     if (hi - i < 2) { fn(args, i, hi); return; }
+    int64_t mb = 0;
+    if (ail_par_guided()) {
+        mb = S->ns_per_iter > 0.0 ? (int64_t)((double)AIL_PAR_GUIDED_NS / S->ns_per_iter) : 1;
+        if (mb < 1) mb = 1;
+    }
+    ail_par_sched_min_block = mb;
     ail_par_go_wide(fn, args, i, hi);
 }
 """
@@ -31365,6 +31422,7 @@ static void ail_par_reduce_run(ail_red_fn fn, void **args, int64_t lo, int64_t h
     int keep = ail_par_cap;
     ail_par_cap = cap <= 0 ? 0 : cap > 256 ? 256 : (int)cap;
     __atomic_store_n(&ail_par_cap_inside, (int64_t)ail_par_threads_capped() - 1, __ATOMIC_RELAXED);
+    ail_par_sched_min_block = 0;   /* the reduction keeps its own chunk layout under either schedule */
     ail_par_go_wide(ail_red_chunks, (void **)(void *)&R, 0, nchunks);
     ail_par_cap = keep;
     __atomic_store_n(&ail_par_cap_inside, 255, __ATOMIC_RELAXED);
