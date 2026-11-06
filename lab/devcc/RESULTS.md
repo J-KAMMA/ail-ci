@@ -70,3 +70,16 @@ the whole cold build falls 24.48 s -> 19.56 s over the ten medians (2.03 s -> 1.
 prelude injection, `__int128` refusal wording, and the default gcc `-O2` command line;
 build tests for five programs against gcc, one named refusal, and default gcc `-O2` skip when `tcc` is
 not installed.  Registered as `AIL_CURRENT/tests.d/test_ail_devcc.txt`.
+
+## devcc3 price, written before any edit
+
+The speed-claims rule needs the phase share, the Amdahl bound and a projection before the work starts.
+
+* Share: gcc code generation plus link is 26.0% of pooled cold wall in `lab/profile/CTIME_2026-11.md`
+  (the gcc codegen column; gcc read and link are separate).  The bound is `1 / (1 - 0.260) = 1.35x`.
+* Projection from the devcc1 measurement (`docs/design/TCC_DEV.md`, tcc mob `e23dabe`): the sum of the
+  ten task medians falls from 24.48 s to 19.56 s, 1.25x, while the front end is untouched.
+* Halved, because this repo's compile-time estimates have overshot 2-3x: **1.12x** on development
+  builds.  Release and default builds are unchanged; tcc run time is 1.7-8.2x slower, acceptable only
+  for an edit loop.
+* The gate below measures the 1.25x again with `--cc=tcc`; the halved 1.12x is the number to hold.
