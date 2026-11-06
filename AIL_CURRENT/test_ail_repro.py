@@ -3,8 +3,8 @@
 `lab/repro/RESULTS.md` records the whole-corpus measurement.  This test is the ratchet for it:
 five small programs are built twice, once in a short path and once in a longer one, with a
 different TMPDIR, HOME and SOURCE_DATE_EPOCH, and the sha256 of the executable and of the
-generated `program.c` must agree.  The programmes are the ones the document lists as identical
-in both setups; when a difference is fixed, add its row there and to PROGRAMS here.
+generated C must agree.  The five come from the complete-corpus run recorded in that document;
+when a difference is fixed, add its row there and to PROGRAMS here.
 
 Skips without a C compiler (the compiler links `program.c` with it).
 """
@@ -133,6 +133,24 @@ class CheckerTests(unittest.TestCase):
         self.assertEqual(
             checker.classify_c(left, right, left.decode().strip(), right.decode().strip()),
             "absolute path")
+
+    def test_ffi_path_hash_in_a_symbol_is_named(self):
+        checker = load_checker()
+        left = b"int64_t ffi_put_7a7acd(ail_bytearray *v_dst);\n"
+        right = b"int64_t ffi_put_093756(ail_bytearray *v_dst);\n"
+        self.assertEqual(
+            checker.classify_c(left, right, left.decode().strip(), right.decode().strip()),
+            "absolute path hash")
+
+    def test_ffi_entry_c_is_compared_instead_of_missing_program_c(self):
+        checker = load_checker()
+        with tempfile.TemporaryDirectory() as name:
+            debug = Path(name)
+            (debug / "entry.c").write_bytes(b"int main(void) { return 0; }\n")
+            self.assertEqual(checker.generated_c(debug),
+                             ("entry.c", b"int main(void) { return 0; }\n"))
+            (debug / "entry.c").unlink()
+            self.assertEqual(checker.generated_c(debug), (None, None))
 
     def test_one_sided_build_failure_is_a_difference(self):
         checker = load_checker()

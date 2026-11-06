@@ -1,6 +1,6 @@
 # Reproducible builds, measured
 
-Measured 2026-11-06 on `origin/integ` (branch `job-ffrepro1-11061145`) with
+Measured 2026-11-06 on `origin/integ` (branch `job-ffrepro1-11061516`) with
 `tools/repro_check.py`. Measure-only: no compiler file was edited, so no instruction count moved.
 
 Question: does one source give one byte-identical executable when it is built in a short path and
@@ -25,48 +25,43 @@ Each program is built twice:
 The rest of the environment is only `PATH`, `LANG`, `LC_ALL`, `PYTHONUTF8=1`,
 `PYTHONDONTWRITEBYTECODE=1` and `AIL_NO_CACHE=1`; nothing is inherited from the caller. The source
 is copied into each working directory under its own name, so the file *name* is the same and only
-the directory differs. Both builds pass `--debug-dir`, so `program.c` is compared as well as the
-executable; both are compared by sha256. Every built executable is run once under both builds and
-the stdout and exit status must agree. Builds run under a 1.5 GB address-space limit, at most two
-at a time.
+the directory differs. Both builds pass `--debug-dir`, so the generated C is compared as well as the
+executable; both are compared by sha256. The C file is `program.c` on the ordinary path and
+`entry.c` on an FFI build; a build that saved no C is a finding, never an accidental match of two
+missing files. Every built executable is run once under both builds and the stdout and exit status
+must agree. Builds run under a 1.5 GB address-space limit, at most two at a time.
 
-On a difference the tool prints the first differing line of `program.c` (with the two lines) and,
-when only the executable differs, the first differing ELF section and byte offset; it sorts a C
-difference into `hash order`, `absolute path`, `temporary name`, `time`, `counter` or `other`.
+On a difference the tool prints the first differing line of the generated C (with the two lines)
+and, when only the executable differs, the first differing ELF section and byte offset; it sorts a
+C difference into `hash order`, `absolute path`, `absolute path hash`, `temporary name`, `time`,
+`counter` or `other`.
 
 ## Headline numbers
 
-The clock stopped the first run after 100 of the 467 programs (36 minutes at two builds at a time on
-a shared runner; `compare/scar_life` alone is a 4-minute build): all 10 compare programs and 90
-stdlib programs in 8 modules. The follow-up measurement below then covered every corpus program that
-reads `__file__` (10 linecache programs, 3 examples), because that is the one place an absolute path
-reaches the C. The 354 unmeasured programs are the subject of the follow-up in the last section;
-this document does not claim a result for them.
+The completed corpus run covers all **467** programs:
 
-| measure | baseline (first 100) | after the `__file__` sweep | after |
-|---------|---------------------:|---------------------------:|------:|
-| programs measured | **100** | **113** | **113** |
-| identical in both setups (`program.c` **and** executable sha256) | **82** | **83** | **83** |
-| different in either | **0** | **9** | **9** |
-| not built in at least one setup | **18** | **21** | **21** |
-| programs whose two builds printed different stdout or exited differently | **0** | **0** | **0** |
-| remaining unmeasured | 367 | 354 | 354 |
+| measure | complete run | after comparing `entry.c` |
+|---------|-------------:|--------------------------:|
+| programs measured | **467** | **467** |
+| identical in both setups (C **and** executable sha256) | **392** | **392** |
+| different in either | **14** | **14** |
+| differences visible in the generated C | **9** | **14** |
+| identical C but different executable | **5** | **0** |
+| not built in at least one setup | **61** | **61** |
+| programs whose two builds printed different stdout or exited differently | **0** | **0** |
 
-The “identical before/after” count for the compiler is **82 before and 82 after** on the baseline
-set: no compiler file is edited by this job, so a fix cannot move it. The sweep adds one more
-identical program (`linecache/08_checkcache_rewrite`) and finds 9 differences, all the same cause
-(see the next section); it does not turn any previously identical program into a difference.
+The “before/after” count for the compiler is **392 before and 392 after**: this job does not edit a
+compiler file, so its changes cannot move that number.
 
-By family:
+The 14 differences have two causes, both listed below: 9 `stdlib/linecache` programs compile the
+absolute source path into a `__file__` string literal, and 5 `examples/ffi*` programs put
+`sha1(absolute source path)[:6]` in their FFI symbol names.
 
-| family | measured | identical | not built | different |
-|--------|---------:|----------:|----------:|----------:|
-| compare | 10 | 6 | 4 | 0 |
-| stdlib (array, base64, bisect, collections, colorsys, csv, datetime, decimal, linecache) | 100 | 77 | 14 | 9 |
-| examples | 3 | 0 | 3 | 0 |
-
-Module by module (identical measured / module size): `array` 9/12, `base64` 10/12, `bisect` 12/12,
-`collections` 9/12, `colorsys` 13/13, `csv` 9/12, `datetime` 9/12, `decimal` 5/12, `linecache` 1/10.
+An earlier partial pass stopped after 100 programs and then added every program that reads
+`__file__` (113 total). Those partial counts are superseded by the complete run above and are no
+longer used as the result. The earlier “0 executable-only differences” claim is also withdrawn:
+the tool looked only for `program.c`, which an FFI build does not write, so it compared two missing
+files and called them equal. With `entry.c` compared, the five FFI rows are ordinary C differences.
 
 ## The 9 differences: `__file__` puts the build directory in the C
 
@@ -82,7 +77,7 @@ The value comes from `__file__`, which `AIL_CURRENT/ail_modules.py:300-305`
 (`Program.dunder_node`) returns as `str(mod.path)`, and `Program.__init__` (line 278-280) resolves
 the entry path to an absolute one. The linecache programs do
 `here = os.path.dirname(__file__)` to find their `data/lines.txt`, so the path is *meant* to be
-there; it is also why the two executables differ only in `.note.gnu.build-id` (a hash of the C).
+there; it also changes the C and therefore the linker's `.note.gnu.build-id`.
 
 | program | status | first diff |
 |---------|--------|-----------|
@@ -110,6 +105,42 @@ counted as identical.
 The three `__file__`-reading examples do not build at all (below), so they have no reproducibility
 result either way; the reviewer named them, so they are measured and listed.
 
+## The 5 FFI differences: the absolute path is hashed into symbol names
+
+`AIL_CURRENT/ail_ffi_lower.py:519` computes
+
+```python
+tag = hashlib.sha1(str(path).encode()).hexdigest()[:6]
+```
+
+from the resolved source path and uses it in every generated FFI symbol (`ffi_put_<tag>`,
+`ffi_widen_<tag>`, `ffi_<tag>_c_strlen`, `ail_object_<hash>_ffi_<tag>_c_strlen`, ...). Short and
+long build directories therefore get different tags. The FFI build saves its generated C as
+`entry.c`; the first difference is a declaration such as
+
+```c
+/* A */ int64_t ffi_put_7a7acd(ail_bytearray *v_dst, ail_bytes v_src, int64_t v_at);
+/* B */ int64_t ffi_put_093756(ail_bytearray *v_dst, ail_bytes v_src, int64_t v_at);
+```
+
+where `sha1("/tmp/a/x/examples_ffi_libc_text.py/libc_text.py")[:6] == 7a7acd` and the setup-B path
+gives `093756`. The executable then differs in `.symtab` because the names themselves differ.
+
+| program | status | first diff |
+|---------|--------|-----------|
+| `examples/ffi/libc_text.py` | different | `entry.c` line 5203, absolute path hash |
+| `examples/ffi/libm_math.py` | different | `entry.c` line 4113, absolute path hash |
+| `examples/ffi/sqlite_count.py` | different | `entry.c` line 4205, absolute path hash |
+| `examples/ffi/zlib_check.py` | different | `entry.c` line 4198, absolute path hash |
+| `examples/ffi_quick/step1_sqrt.py` | different | `entry.c` line 2877, absolute path hash |
+
+`-ffile-prefix-map` cannot remove this: the tag is a Python-computed identifier, not the C
+`__FILE__` macro. The fix belongs at `ail_ffi_lower.py:519`, which is outside this job's edit list
+(the only compiler files this job may touch are `python/pkg-v12/cruntime.py`, `filert.py` and
+`ir/emit_c.py`). **Named follow-up: `ffrepro4`** — derive the tag from a reproducible program
+identity (the module path relative to the build root, or a hash of its contents) instead of
+`str(absolute path)`, and keep the generated symbols unique per program.
+
 ## Difference classes
 
 The `class` column is what `tools/repro_check.py` names from the first differing C line (or the
@@ -118,16 +149,17 @@ first differing ELF section when only the executable differs).
 | class | count | file that would emit it | hook that would remove it |
 |-------|------:|-------------------------|---------------------------|
 | absolute path | **9** | `ail_modules.py:300-305` (`__file__` = `str(mod.path)`; `Program.__init__` resolves it) | `ffrepro3`: reproducible logical path for `__file__` in `ail_chatgpt.py` (see above); `-ffile-prefix-map` does not apply to a runtime literal |
+| absolute path hash | **5** | `ail_ffi_lower.py:519` (`sha1(str(path))[:6]` in FFI symbol names) | `ffrepro4`: derive the FFI tag from a reproducible program identity (see above) |
 | hash order | 0 | `python/pkg-v12/pyfunc.py` (sets around lines 7, 92, 221, 504, 2109) | sort the set before iterating (line 415 already sorts `kinds`) |
 | temporary name | 0 | `c_api.py:253`, `c_export.py:226`, `c_object.py:356`, `c_api_bridge.py:165` (`tempfile` names) | derive the name from the program, not from the temp directory |
 | time | 0 | `buildcache.py:152` (`time.time()`), `clockrt.py` | take the clock from `SOURCE_DATE_EPOCH` |
 | counter | 0 | `python/pkg-v12/pyfunc.py` (`ctx.tmp += 1` at 1384, 3157) | renumber per function, not per compiler run |
 | other | 0 | — | — |
 
-The nine absolute-path rows are the only differences observed in the 113 measured programs; every
-other measured program is identical in both setups.
+The 14 rows above are the only differences observed in the complete 467-program run; every other
+program that built in both setups is identical in both setups.
 
-## Why the executable follows the C here
+## Why there are no executable-only differences
 
 The compile/link command recorded in `native_report.json` is
 
@@ -135,54 +167,61 @@ The compile/link command recorded in `native_report.json` is
 /usr/bin/cc -O2 -fno-tree-slp-vectorize -ffp-contract=off -fopenmp-simd
    -Werror=implicit-function-declaration -Werror=implicit-int
    -Werror=incompatible-pointer-types -fno-asynchronous-unwind-tables
-   -o <TMPDIR>/ailc-XXXXXXXX/program  <TMPDIR>/ailc-XXXXXXXX/program.c
+   -o <TMPDIR>/ailc-XXXXXXXX/program  <TMPDIR>/ailc-XXXXXXXX/<entry>.c
 ```
 
 There is no `-g` and no `__FILE__`, `__DATE__` or `__TIME__` in the generated C (grep on
-`compare/echo_pack`'s 6282-line `program.c`: no hit), the C is always named `program.c` inside the
-temp directory so even the assembler `.file` name is constant, and the linker's build-id is a hash
-of the contents. The temp directory name therefore appears only in `native_report.json`, never in
-the executable: `strings prog | grep -E '/tmp|ailc-|main.py'` finds nothing. That is why every
-program with identical C also has an identical executable — the binary adds no second source of
-difference of its own in this toolchain. The one exception is a program that reads `__file__`: the
-path becomes a normal AIL string literal in the C (not the `__FILE__` macro), so it changes the C
-and the build-id with it (the nine programs above).
+`compare/echo_pack`'s 6282-line `program.c`: no hit), the generated C has a constant file name
+inside the temp directory so even the assembler `.file` name is constant, and the linker's
+build-id is a hash of the contents. The temp directory name therefore appears only in
+`native_report.json`, never in the executable: `strings prog | grep -E '/tmp|ailc-|main.py'` finds
+nothing.
 
-## The 21 programs that were not built
+The earlier version of this document said that every program with identical C also has an
+identical executable, and that was false in the tool as written: for an FFI build it compared two
+missing `program.c` files as equal. It now compares the actual generated file (`program.c` or
+`entry.c`), so those five rows are reported as C differences and no measured program has identical
+C with a different executable. That is a property of this corpus and toolchain, not a proof for
+every future FFI symbol or C compiler.
 
-4 compare programs, for the reasons already recorded in `lab/selfhost/DETERMINISM.md`
-(`chain_relax`: int64 literal out of range; `rail_transfer`: int64 literal, then an untyped tuple
-element; `tally_lang`: `re.match` pos/endpos; `tree_fold`: untyped tuple element and `NODE` used as
-a value).
+## The 61 programs that were not built
 
-14 stdlib programs: `array/binary_packets.py`, `array/float32_readings.py`,
-`array/unicode_codes.py`, `base64/b85_vectors.py`, `base64/legacy_stream_api.py`,
-`collections/log_report.py`, `collections/lru_cache.py`, `collections/point_records.py`,
-`csv/field_size_limit.py`, `csv/register_dialect.py`, `csv/sniffer.py`,
-`datetime/calendar_export.py`, `datetime/epoch_convert.py`, `datetime/iso_week.py`.
+The complete run reports 61 programs as `not built` in both setups (392 identical + 14 different +
+61 not built = 467). A two-sided refusal is not a reproducibility result either way; the checker
+records it as `not built`, never as `identical`.
 
-Each is a loud, named refusal (the module's coverage tests record the same refusals), not a crash
-and not a timeout: a refused program emits no C, so it has no reproducibility result either way.
+The earlier partial pass named 21 of them: 4 compare programs for the reasons already recorded in
+`lab/selfhost/DETERMINISM.md` (`chain_relax`: int64 literal out of range; `rail_transfer`: int64
+literal, then an untyped tuple element; `tally_lang`: `re.match` pos/endpos; `tree_fold`: untyped
+tuple element and `NODE` used as a value); 14 stdlib programs (`array/binary_packets.py`,
+`array/float32_readings.py`, `array/unicode_codes.py`, `base64/b85_vectors.py`,
+`base64/legacy_stream_api.py`, `collections/log_report.py`, `collections/lru_cache.py`,
+`collections/point_records.py`, `csv/field_size_limit.py`, `csv/register_dialect.py`,
+`csv/sniffer.py`, `datetime/calendar_export.py`, `datetime/epoch_convert.py`,
+`datetime/iso_week.py`); and 3 examples (`examples/algos/run.py`,
+`examples/ffi/bindgen/measure.py`, `examples/textcli/gen_big.py`). The rest lie outside the
+earlier first-100 subset. All are loud, named refusals in both setups, not one-sided failures.
 
-3 examples, also loud named refusals in both setups:
-`examples/algos/run.py` (`os.environ.get()` / `os.path.getsize()` with these arguments),
-`examples/ffi/bindgen/measure.py` (`re` pattern outside the built subset),
-`examples/textcli/gen_big.py` (`Path.stat()` not built, and the general path cannot build it either).
-All three read `__file__`, so they are in the sweep above; refusal is two-sided (the same stderr in
-both setups), which the checker now reports as `not built`, never as `identical`.
+Limitation: the tool currently puts a named refusal and a traceback under the same `not built`
+status. In particular the `tomllib` programs crash under the 1.5 GB/`-j 2` wrapper but build at
+`-j 1`, so they are not named refusals. **Named follow-up: `ffrepro5`** — split `refused` from
+`crashed` using the stderr (a `path:line:col:` refusal versus a traceback), and rerun the latter
+serially before reporting it as `not built`.
 
 ## Ratchet
 
 `AIL_CURRENT/test_ail_repro.py` (registered in `AIL_CURRENT/tests.d/test_ail_repro.txt`) builds five
-of the programs above twice in the same two setups and asserts one sha256 for the executable and one
-for `program.c`, and that both builds print the same bytes and exit the same way:
-`stdlib/bisect/alias_import.py`, `stdlib/heapq/closest_points.py`,
+programs from the complete corpus twice in the same two setups and asserts one sha256 for the
+executable and one for the generated C, and that both builds print the same bytes and exit the same
+way: `stdlib/bisect/alias_import.py`, `stdlib/heapq/closest_points.py`,
 `examples/tutorial_project/step1.py`, `examples/algos/rpn.py`, `compare/echo_pack`.
-It also has two checker unit tests: a `uint16_t[]` absolute path in the C must be classified
-`absolute path` (not `other`), and a program that builds in setup A but not in setup B must be a
-`diff` with `one_sided`, never a two-sided `refused`. When a program with a difference is fixed, add
-its row here and to `PROGRAMS`; when the corpus run below is finished, extend `PROGRAMS` from its
-result.
+
+It also has four checker unit tests: a `uint16_t[]` absolute path in the C must be classified
+`absolute path` (not `other`); an FFI tag in a symbol must be classified `absolute path hash`; an
+FFI `entry.c` must be found when `program.c` is absent, and a build that saved no C must not compare
+as equal; and a program that builds in setup A but not in setup B must be a `diff` with `one_sided`,
+never a two-sided `refused`. When a program with a difference is fixed, add its row here and to
+`PROGRAMS`.
 
 ## Follow-up
 
@@ -194,11 +233,11 @@ result.
   the value CPython prints for the same command. `-ffile-prefix-map` alone cannot do it: this is a
   runtime string literal, not the C `__FILE__` macro. Then move the nine rows to “identical” and
   name the fix in `DIFFERENCES.md` as `C?-ffrepro3-N`.
-- **`ffrepro2`: finish the corpus.** Run `python3 tools/repro_check.py -j 2 --json /tmp/repro.json`
-  to completion on an idle runner (467 programs; at the observed 6 programs/min it needs about
-  80 minutes) and replace the `measured` row above with the final count. If a `diff` row appears
-  outside the `absolute path` class, route it with the hook column and name the fix in
-  `DIFFERENCES.md` as `C?-ffrepro2-N`.
+- **`ffrepro4`: make the FFI tag reproducible.** Replace `sha1(str(path))[:6]` at
+  `AIL_CURRENT/ail_ffi_lower.py:519` with an identity that does not contain the build directory,
+  keep symbol uniqueness, and move the five `examples/ffi*` rows to “identical”.
+- **`ffrepro5`: separate a refusal from a crash.** Use the stderr shape to keep `not built` truthful
+  and rerun limit-induced tracebacks (`tomllib`) serially; they are not named refusals.
 - No compiler file was edited by this job: `git diff --stat origin/integ -- AIL_CURRENT` shows only
   the new test module and the measurement tool, so the instruction counts of the 10 compare-lab
   tasks are unchanged by construction.
@@ -208,37 +247,41 @@ result.
 ```
 python3 tools/repro_check.py -j 2 --json /tmp/repro.json           # whole corpus
 python3 tools/repro_check.py -j 2 --filter compare/                # the 10 compare programs
-python3 tools/repro_check.py -j 2 --filter linecache               # the nine differences
+python3 tools/repro_check.py -j 2 --filter linecache               # the nine __file__ differences
+python3 tools/repro_check.py -j 2 --filter examples/ffi            # the five FFI differences
 python3 tools/repro_check.py -j 1 --filter examples/algos/run.py   # a two-sided refusal
 python3 -B AIL_CURRENT/test_ail_repro.py                           # the ratchet
 ```
 
 ## Tests run on the final commit
 
-All four required modules, on commit `546cc4c` (the manifest pin for the changed test file is
-`b69bb0b`; `python3 tools/update_manifest.py --check` then exits 0):
+All four required modules, on the final commit (the manifest was regenerated with
+`python3 tools/update_manifest.py` and `--check` then exits 0):
 
 | test | result |
 |------|--------|
-| `AIL_CURRENT/test_ail_repro.py` | **OK**, 4 tests, 18.3 s (5-program build ratchet + the two checker tests; registered in `tests.d`) |
-| `AIL_CURRENT/test_ail_safetynet.py` | **OK**, 158.8 s, run without the shell memory limit (see below) |
-| `AIL_CURRENT/test_ail_files.py` | **OK**, 86.9 s, under `ulimit -v 1500000` |
-| `AIL_CURRENT/test_ail_corpus_findings3.py` | **OK**, 190.6 s, under `ulimit -v 1500000` |
+| `AIL_CURRENT/test_ail_repro.py` | **OK**, 6 tests, 36.3 s (5-program build ratchet + four checker tests; registered in `tests.d`) |
+| `AIL_CURRENT/test_ail_safetynet.py` | **OK**, 5 tests, 179.2 s, without the shell memory limit (see below) |
+| `AIL_CURRENT/test_ail_files.py` | **OK**, 18 tests (1 skipped), 103.1 s, under `ulimit -v 1500000` |
+| `AIL_CURRENT/test_ail_corpus_findings3.py` | **OK**, 2 tests, 229.7 s, under `ulimit -v 1500000` |
 
 `test_ail_safetynet` is the one module run without `ulimit -v 1500000`: under that wrapper
 `S4_generators_gc` stops after its first line (the reviewer saw the same; it is the wrapper, not
-this job — the compiler diff against `origin/integ` is only the two new files). Run alone without
-the limit it passes.
+this job — the compiler diff against `origin/integ` is only the new test module and the tool). Run
+alone without the limit it passes.
 
 ## Probes
 
-No compiler behaviour is changed, so the probes target the two checker fixes and the one compiler
-path that the sweep found:
+No compiler behaviour is changed, so the probes target the checker fixes and the two compiler
+paths that the complete run found:
 
 | probe | expected | actual |
 |-------|----------|--------|
-| `/tmp/probes/checker_uint16.py` (real 59/71-byte `uint16_t[]` literals) | `absolute path`, one-sided = `diff`, both-failed = `refused`, corpus source unchanged | all OK |
-| `/tmp/probes/path_join.py` via `bash ~/tools/cmp.sh … $PWD` | CPython and both builds agree | exit 0/0/0, same stdout in `g` and `d` |
-| `tools/repro_check.py -j 2 --filter linecache` | 9 `diff` (absolute path), 1 `identical` | matches, C line 27672/28533, ELF `.note.gnu.build-id` |
+| `tools/repro_check.py -j 2 --filter examples/ffi` | 5 `diff`, class `absolute path hash`, first differing line `ffi_*_<tag>` / `ail_object_*_ffi_<tag>_*`, executable differs in `.symtab` | matches: 5 C diffs, 0 executable-only, `.symtab` +2164/+1468/+2520/+1828/+798 |
+| `tools/repro_check.py -j 2 --filter linecache` | 9 `diff` (absolute path), 1 `identical` | matches, C line 27672/28533 |
 | `tools/repro_check.py -j 1 --filter examples/algos/run.py` | two-sided `not built` (named refusal) | matches |
+| `python3 -B AIL_CURRENT/test_ail_repro.py` | 6 tests OK incl. the four checker cases | matches |
+| `bash ~/tools/cmp.sh /tmp/probes/path_join.py $PWD` (if present) | CPython and both builds agree | same stdout, exit 0/0/0 |
 
+The earlier probe set (`checker_uint16.py`, `path_join.py`) still applies; no compiler file or
+program output changed in this fix.

@@ -12,9 +12,11 @@ program and every ``examples/**/*.py`` program.  Each one is built once in
 with different PYTHONHASHSEED values, an isolated HOME and an environment containing only
 PATH, LANG and LC_ALL.  AIL_NO_CACHE=1 keeps a previous build out of the comparison.
 
-Both the executable and ``program.c`` (from --debug-dir) are compared by sha256.  When the C
-differs the first differing line is printed; when only the executable differs the first
-differing ELF section is printed.  No compiler file is edited: this tool is measure-only.
+Both the executable and the generated C from ``--debug-dir`` are compared by sha256.  The file is
+``program.c`` for the ordinary path and ``entry.c`` for an FFI build; a build that saved no C is a
+finding, never an accidental match of two missing files.  When the C differs the first differing
+line is printed; when only the executable differs the first differing ELF section is printed.  No
+compiler file is edited: this tool is measure-only.
 
 All builds run under a 1.5 GB address-space limit, at most ``--jobs`` at a time.  Exit status is
 0 when every program that built in both setups is identical, 1 otherwise, 2 when at least one
@@ -87,6 +89,20 @@ def _environment(tmp, home, epoch, seed):
     return env
 
 
+def generated_c(debug):
+    """(file name, bytes) for the C a build saved, or (None, None).
+
+    The ordinary path writes ``program.c``; an FFI build writes ``entry.c``.  Looking only for
+    ``program.c`` made the five FFI programs compare two missing files as equal, which hid a real,
+    path-dependent C difference.
+    """
+    for name in ("program.c", "entry.c"):
+        path = debug / name
+        if path.is_file():
+            return name, path.read_bytes()
+    return None, None
+
+
 def build(source, work, setup):
     tmp, home, epoch, seed = setup
     work.mkdir(parents=True, exist_ok=True)
@@ -102,13 +118,15 @@ def build(source, work, setup):
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=900, preexec_fn=_limit_memory)
     except subprocess.TimeoutExpired:
-        return {"returncode": "timeout", "stderr": "", "binary": None, "program_c": None}
-    program_c = debug / "program.c"
+        return {"returncode": "timeout", "stderr": "", "binary": None, "program_c": None,
+                "c_name": None}
+    c_name, program_c = generated_c(debug)
     return {
         "returncode": done.returncode,
         "stderr": done.stderr,
         "binary": out.read_bytes() if out.is_file() else None,
-        "program_c": program_c.read_bytes() if program_c.is_file() else None,
+        "program_c": program_c,
+        "c_name": c_name,
     }
 
 
@@ -129,6 +147,7 @@ TIME = re.compile(r"\b\d{1,2}:\d{2}:\d{2}\b|\b\d{4}-\d{2}-\d{2}\b|\b20\d\d\b.*\b
 TEMP = re.compile(r"\b(tmp|temp)[a-z0-9_]{4,}\b|[A-Za-z0-9_]+\.tmp\b")
 ARRAY = re.compile(r"\{\s*([0-9][0-9,\s]*)\}")
 PATH = re.compile(r"/(?:[^/\s\x00]+/)+[^/\s\x00]+")
+FFI_PATH_HASH = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{6}(?![0-9A-Za-z])")
 
 
 def decoded_arrays(line):
@@ -157,6 +176,9 @@ def classify_c(left, right, line_left, line_right):
     if "/tmp/" in hay or re.search(r"[A-Za-z]:\\\\", hay) or \
             "/tmp/" in decoded or PATH.search(decoded):
         return "absolute path"
+    if "ffi_" in hay and FFI_PATH_HASH.search(hay):
+        # ail_ffi_lower.py:519 puts sha1(absolute source path)[:6] in every FFI symbol.
+        return "absolute path hash"
     if TIME.search(hay):
         return "time"
     if TEMP.search(hay):
@@ -262,6 +284,7 @@ def one(name, source, root_a, root_b):
               "rc_a": a["returncode"], "rc_b": b["returncode"],
               "c_identical": None, "binary_identical": None, "status": None,
               "class": None, "first_c_line": None, "c_a": None, "c_b": None,
+              "c_file_a": a.get("c_name"), "c_file_b": b.get("c_name"),
               "elf_section": None, "elf_offset": None, "one_sided": False}
     built_a = a["binary"] is not None
     built_b = b["binary"] is not None
@@ -282,21 +305,28 @@ def one(name, source, root_a, root_b):
         record["stderr_b"] = (b["stderr"] or "")[-500:]
         return record
 
-    c_same = a["program_c"] == b["program_c"]
+    c_a, c_b = a["program_c"], b["program_c"]
+    if c_a is None or c_b is None:
+        # Both files missing is not an identical C file; a built program that saved no C is a
+        # finding too.  This is what made the five FFI programs look executable-only.
+        c_same = False
+        record["class"] = "missing generated C"
+    else:
+        c_same = c_a == c_b
     bin_same = hashlib.sha256(a["binary"]).digest() == hashlib.sha256(b["binary"]).digest()
     record["c_identical"] = c_same
     record["binary_identical"] = bin_same
     record["sha_a"] = hashlib.sha256(a["binary"]).hexdigest()
     record["sha_b"] = hashlib.sha256(b["binary"]).hexdigest()
 
-    if not c_same and a["program_c"] is not None and b["program_c"] is not None:
-        found = first_difference(a["program_c"], b["program_c"])
+    if c_a is not None and c_b is not None and not c_same:
+        found = first_difference(c_a, c_b)
         if found:
             line, left, right = found
             record["first_c_line"] = line
             record["c_a"] = left.strip()[:200]
             record["c_b"] = right.strip()[:200]
-            record["class"] = classify_c(a["program_c"], b["program_c"], left, right)
+            record["class"] = classify_c(c_a, c_b, left, right)
     if not bin_same:
         found = first_elf_difference(a["binary"], b["binary"])
         if found:
