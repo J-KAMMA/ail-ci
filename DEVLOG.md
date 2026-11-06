@@ -48,6 +48,96 @@ Checks: `test_ail_bce` (10/10), `test_ail_range_checks`, `test_ail_ir_s1`, `test
 `p5_cursor_negative` match CPython on both builds; `p6_cursor_bigtext` stops at `int()` on both
 builds as today. Not run, for the record: the callgrind census over all ten tasks (only ledger_bin
 was measured; tally_lang's change is removals only), the 300-seed difffuzz, and compile timing.
+## 2026-11-06 -- fz235: the try/else exception leak does not reproduce; no code changed (job-fz235-11062253)
+
+The daily fuzzer (seed `2076311105`, CPython 3.12, default+ir) reported
+`DIFF|exit code cpython=1 ail=0; cpython='242' ail='4 4 0'`.  The extra line is an
+`IndexError: string index out of range` raised by `'q q'[3]` in the `else` clause of a
+`try` (inside the `while` in that `else`): the try's own `except IndexError` ran and
+printed `4 4 0`, where CPython lets the exception propagate through `finally` and exits 1.
+That is the fz1 defect already fixed on 2026-10-28 (seed `2075200054`), and
+`test_ail_fz1.py` already pins it.  Nothing was changed.
+
+On this tree the program is refused by name before that path can run: the dead
+`except ValueError:` branch holds two out-of-int64 constant expressions
+(`v12[-8 * 4611686018427387904]` and `-9223372036854775807 - 82`), so both builds stop with
+`int64 index out of range` / `constant integer expression overflows int64`.  With those
+two dead constants in range (they are in never-executed handlers), the whole program
+matches CPython on both builds, and building the unmodified text with `AIL_EXACT_INT=1`
+also matches: 16 stdout lines, exit 1 on both builders.  Probes in `/tmp/probes` on both
+builds via `cmp.sh`: `fz235c` (full program, dead constants in range) matches; `q1`-`q4`
+(`raise` in `else`, matching/non-matching type, call, `'abc'[7]` in `else`) match; `r1`-`r5`
+(runtime `IndexError`/`KeyError`/`ZeroDivisionError` in `else`, sourced from an argument, a
+list item, an attribute and a dict value, plus one inside a `while`) match.  No other
+differences were seen in this reproducer.
+## 2026-11-06 -- fz236: the reported seed already matches on this tree (job-fz236-11062253)
+
+The daily fuzzer (seed `2076311363`, CPython 3.12, modes default+ir) recorded
+`exit code cpython=1 ail=3; line 15: cpython='235' ail='100.7525 False'` with AIL stderr
+`AIL limit: int_overflow`. The program ends in `try/except IndexError/else/finally`; its
+`else` body raises IndexError at `elif round(v1 * v1) > al8[3]`. The reported build caught that
+IndexError in the statement's own `except`, printed `100.7525 False`, ran the rest of `main`
+and stopped at the int64 `sum(v6)` (exit 3). CPython lets the exception escape the `else`, so
+`finally` prints `235` and the process exits 1.
+
+On this tree the seed does not reproduce: `lab/fuzz/run.py --start 2076311363 --count 1` gives
+`default: 1 same`, `ir: 1 same` (no DIFF). The two causes the old output needed are both
+absent. The `al8 = v7` alias is refused by name ("makes a second name for the same container"),
+so the default build compiles on the general path, and the general path's `else` is compiled
+against the enclosing handlers (the fz1 fix), not the statement's own. The typed path handles
+the same structure when the aliases are spelled `.copy()` (matches CPython), and 40 runs of the
+default binary are identical. No compiler source changed.
+
+Added `AIL_CURRENT/test_ail_fz236.py` (registered in `tests.d`): the seed verbatim, a raise in
+`else` inside a try with `finally` (IndexError and KeyError), a nested `else` whose `elif`
+raises, and the alias routes, compared with CPython on the g / ir1 / ir0 builds.
+Probes in `/tmp/probes` (`cmp.sh` and a default/IR/typed-only loop): `fz236`, `fz236_copy`,
+`alias_min`, `alias_arg`, `alias_item`, `alias_attr`, `alias_dict`, `alias_ret`, `alias_aug`,
+`alias_types`, `else_idx`, `else_raise`, `else_ctrl`, `else_other`, `else_nest`, `else_nest2`,
+`else_dict`, `else_param`, `else_zero` all match CPython on the default and IR builds; the
+forced typed-only build refuses each alias route by name. Only other difference seen: with the
+alias refusal switched off (`AIL_ALIAS_REFUSE=0`) and the general path off, the typed build
+copies the container and prints `1 2 -3` where CPython prints `2 2 0` -- an internal-switch
+case, not reachable in a normal build.
+
+Final-state tests (`par_check -j 2`): test_ail_fz236, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass; `tools/update_manifest.py --check` is clean.
+## 2026-11-06 -- fdgpu1 suite: the smoke test no longer fails when spirv-val is absent on a non-GPU runner (job-fdgpu1-11061059)
+
+`test_ail_gpu_smoke.test_06_spirv_valid` treated any `CI=true` environment as the GPU job and failed
+when `spirv-val` was not installed. The smoke module is run by the task/CI harness on ordinary
+runners too, which set `CI=true` but install neither lavapipe nor spirv-tools, so both
+`test_ail_gpu_smoke` and `test_ail_gpu_g2` (which imports `GPUSmoke`) went red before any check ran.
+The missing-validator branch now fails only when `AIL_GPU_REQUIRE_DEVICE=1`, the marker the real
+`gpu (lavapipe)` job sets after installing spirv-tools, and skips otherwise, matching
+`test_ail_gpu_g2.Spirv.test_every_kernel_validates`. No compiler or runtime code changed.
+
+`test_ail_gpu_smoke` (6 tests, 2 skipped), `test_ail_gpu_g2` (31 tests, 11 skipped),
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass. With
+`SPIRV_VAL=/bin/true` the validator path still collects and checks every emitted module
+(`smoke: spirv-val ok`), so the skip only covers a genuinely missing tool.
+## 2026-11-06 -- rbfdinf1: re-apply the inference bench and profile scripts (job-rbfdinf1-11061515)
+
+Re-applied the accepted `fdinf1` change on the current tree. `lab/infer/bench.sh` and
+`lab/infer/profile.sh` are new, with the matching "Bench and profile" README section and RESULTS
+tables. fdinf1's workflow hunk was an out-of-scope revert, so
+`.github/workflows/agent-worker.yml` keeps the current tree's newer `agent=opus` support (the
+`agent` input, `claude.key` creation with the CR/LF strip, its scan and cleanup, and the
+`AIL_WORKER` export); only the `lab/infer/*` part of fdinf1 is applied there.
+
+No compiler file or test module changed, so no language probe applies. `tools/diff_ids.py` is not
+present on this tree. `python3 tools/update_manifest.py --check` passes.
+## 2026-11-06 -- rbfdlsp1: re-apply LSP go-to-definition on the current tree (job-rbfdlsp1-11061255)
+
+Re-applied the accepted `fdlsp1` change (`3d147525`..`job-fdlsp1-11060905`) on top of this
+export. The `packaging/ail_lang/lsp.py` definition provider, `docs/LSP.md`, the new
+`lab/lsp/def/` probe files with `lab/lsp/RESULTS.md`, and
+`AIL_CURRENT/test_ail_lsp_def.py` with its `tests.d` registration applied cleanly. The fetched
+`.github/workflows/agent-worker.yml` hunk would delete the Opus/Claude-token wiring this tree
+keeps (including the newer CR/LF-stripping fix), so that file is unchanged and both sides'
+fixes stay. `tools/diff_ids.py` is absent on this tree (and in the fetched job), so only
+`tools/update_manifest.py` ran; `manifest.d/` was regenerated, not hand-edited. No compiler or
+runtime file changed, so no DIFFERENCES row is needed.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 

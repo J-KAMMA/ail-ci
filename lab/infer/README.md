@@ -61,6 +61,39 @@ ulimit -v 3000000
     -n 16 -t 1 --temp 0 --top-k 1 -c 1024 -no-cnv --no-display-prompt
 ```
 
+## Bench and profile
+
+Two scripts do the whole measurement in one run each.
+
+```bash
+bash lab/infer/bench.sh                 # fetch, build, 5 runs each, print the table
+bash lab/infer/bench.sh /tmp/ail-infer 3   # same, 3 runs, custom work dir
+
+bash lab/infer/profile.sh               # fetch, build, callgrind/perf, top 10 functions
+```
+
+`bench.sh` fetches the weights and llama.cpp with `fetch.sh` (which also runs
+`export_f32.py`), builds `gpt2.py` with the default compile command and
+`llama-cli` at the pinned tag, then runs AIL and `llama-cli -t 1` five times
+each (`-t 4` as a labelled context row) over `tokens.txt` and 16 greedy
+tokens.  It prints median prefill tok/s, decode tok/s, peak RSS from
+`/usr/bin/time -v` and binary size; llama.cpp's decode row divides by its own
+`eval time ... / N runs` because the first generated token comes out of its
+prefill.  After every run the 16 greedy ids of AIL and llama.cpp are compared
+with each other and with `ref.py`; a mismatch prints both lists and exits 3.
+Before the timed runs it checks that `prompt.txt` tokenizes to exactly
+`tokens.txt`.  Peak RSS is about 1 GiB, so run it on a machine that has it.
+
+`profile.sh` profiles a one-token prompt plus four decode forwards (the same
+one-token forward loop that prefill and decode both use) with `perf record -g`,
+falling back to `valgrind --tool=callgrind` when the kernel refuses perf
+(`perf_event_paranoid`) - which is the case on the GitHub runner.  It profiles
+the run twice, empty prompt and then the four forwards, and subtracts the
+load-only counts, so the printed top 10 C functions and their shares are the
+decode alone, each with the `gpt2.py` def line it came from (from the
+`--debug` build).  `RESULTS.md` has both tables and the notes on what each hot
+function is.
+
 `tokens.txt` is the first 64 token ids of `prompt.txt` (the model's tokenizer,
 via `llama-tokenize`). It is committed so the three programs see exactly the
 same ids. `tokens1024.txt` is `tokens.txt` repeated 16 times, the 1024-token
