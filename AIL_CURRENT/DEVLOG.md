@@ -1,3 +1,33 @@
+## 2026-11-06 -- s4gc1 re-applied: generator stack budget, GC marks and free-slot scan (job-rbs4gc1-11070736)
+
+Re-applied the accepted `s4gc1` change (`1e0e06de9c44`..`job-s4gc1-op1106`, three commits) on top of
+this tree. `python/pkg-v12/safetyrt.py` now budgets generator stacks against a quarter of the
+`RLIMIT_AS`/`RLIMIT_DATA` cap (`ail2g_budget_of`, `ail2g_map_stack`, `ail2g_new_stack`): 8 MiB while
+there is room, halving to `AIL2G_STACK_MIN` (256 KiB), then one collector pass and a pooled stack, and
+otherwise the resume stops by name before the switch. Only full-size stacks are pooled, `ail2g_mapped`
+accounts for every mapping, the GC hook marks the current generator itself (object, args, value, sent)
+and tests bit 0 of `mark` so the gcpool class byte no longer pins a dead generator, and `ail2g_make`
+resumes its free-slot scan from `ail2g_scan`. The conflict was in `ail2g_resume`: this tree allocates
+the stack before recording the wait and returns `RecursionError` when the OS cannot provide one, so
+both are kept -- `ail2g_new_stack`'s 0 now takes that same return instead of `ail_die`, the
+`stack_limit` assignment stays after the allocation, and the every-256-stacks collection keeps this
+tree's position (after `g->sent`, g current and the wait registered) while skipping itself on POSIX
+when a pooled stack is available. `tools/diff_ids.py` is not present on this tree; only
+`python3 tools/update_manifest.py` ran.
+
+Probes in `/tmp/probes` (both builds via `cmp.sh` unless noted): `p1_gen_basics` (yield/send/return,
+StopIteration value, empty and generator-expression, close/finally, raising body), `p2_gen_args_roots`
+(args from a list item, an attribute, a dict value and a function argument; 200 live generators),
+`p3_gen_chain` (`yield from` chain of 200), `p4_gen_suspended_gc` (400 suspended generators holding
+lists, allocation pressure, then every one resumed), `p5_gen_new_gc` (1200 short-lived generators and a
+generator resuming generators, so the current-generator root is exercised) and `p6_gen_many_live`
+(300 live plus 500 discarded) all match CPython stdout and exit. Under `ulimit -v 400000`,
+`p7_gen_budget` (300 live generators, 2.4 GB of full stacks) and `p9_gen_reclaim` (400 dropped then
+400 live) print CPython's bytes on both builds, which the unbudgeted 8 MiB stacks could not;
+`p8_gen_cap_stop` under `ulimit -v 200000` stops with `RecursionError: maximum recursion depth
+exceeded`, catchable and by name, where CPython maps 20000 generators. Tests: `test_ail_recursion_stop`
+13/13, `test_ail_gcstress` 8/8, `test_ail_gcroots` 6/6, `test_ail_safety_stops` 1/1,
+`test_ail_safetynet` 5/5, `test_ail_files` 18 (1 skipped), `test_ail_corpus_findings3` 2/2.
 ## 2026-11-06 -- fbnarrow1: int-list census and int32 scratch patch re-applied (job-rbfbnarrow1_rr1-11061236)
 
 Re-applied the accepted `fbnarrow1_rr1` change (`4b0b7123`..`job-fbnarrow1_rr1-11060751`). It adds

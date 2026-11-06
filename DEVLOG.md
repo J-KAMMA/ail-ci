@@ -1,3 +1,24 @@
+## 2026-11-06 -- s4gc1 re-applied: generator stack budget, GC marks and free-slot scan (job-rbs4gc1-11070736)
+
+Re-applied the accepted `s4gc1` change (`1e0e06de9c44`..`job-s4gc1-op1106`) on this tree.
+`python/pkg-v12/safetyrt.py` budgets generator stacks against a quarter of the `RLIMIT_AS`/
+`RLIMIT_DATA` cap (`ail2g_budget_of`, `ail2g_map_stack`, `ail2g_new_stack`): 8 MiB with room,
+halving to 256 KiB, then one collector pass and a pooled stack, else a named `RecursionError`
+before the switch; only full-size stacks are pooled and `ail2g_mapped` accounts for them. The GC
+hook marks the current generator itself (object, args, value, sent) and tests bit 0 of `mark`, and
+`ail2g_make` resumes its free-slot scan from `ail2g_scan`. Conflict: this tree allocates the stack
+before recording the wait and returns `RecursionError` on failure, so `ail2g_new_stack`'s 0 takes
+that same return instead of `ail_die`, and the `stack_limit` assignment and the every-256-stacks
+collection (after `g->sent`, skipping itself on POSIX while a pooled stack exists) are kept.
+`tools/diff_ids.py` is absent on this tree; `tools/update_manifest.py` regenerated the pins.
+
+Probes (`/tmp/probes`, both builds via `cmp.sh`): `p1_gen_basics`, `p2_gen_args_roots` (list item,
+attribute, dict value and argument), `p3_gen_chain` (200), `p4_gen_suspended_gc` (400 suspended),
+`p5_gen_new_gc` (1200 short-lived, nested), `p6_gen_many_live` (300 live + 500 dropped) match
+CPython; under `ulimit -v 400000`, `p7_gen_budget` (300 live) and `p9_gen_reclaim` (400 dropped +
+400 live) match too, and `p8_gen_cap_stop` under `ulimit -v 200000` stops by name, catchable.
+`test_ail_recursion_stop` 13, `test_ail_gcstress` 8, `test_ail_gcroots` 6, `test_ail_safety_stops`
+1, `test_ail_safetynet` 5, `test_ail_files` 18 (1 skipped), `test_ail_corpus_findings3` 2: all pass.
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for
