@@ -1,3 +1,22 @@
+## 2026-11-06 -- tcc1 review fixes: blocker source pointers and refusal reasons
+
+`lab/tcc/` + this file only; no measured number changed.
+
+- `run.py` `CONSTRUCT_EMITTER` (and the derived `fail_*.txt` / `RESULTS.md` table) pointed at the
+  wrong lines: `_Thread_local` is `cruntime.py:17347-17348` (not 17245), the `ail_stdout_parts`
+  call site `pyfunc.py:24977` (not 24481), and `__int128` is the range slice at `cruntime.py:16995`
+  plus `ail_rand_floordiv` at 29811 (not 29709, a comment). Fixed in all three places.
+- `RESULTS.md`'s refusal reasons were wrong: `tally_lang` stops on the field `v` type error (a list
+  or dict that gets bools and numbers), with tuple-shape / `re` notes; `tree_fold` stops on
+  `import of 're' with a use that is not built`, with `cannot tell the type of element 0 of this
+  tuple` notes at lines 44/72/85/89. Stated as the actual fatal first error, not swapped.
+- Also corrected the "front end is 60-85%" claim to the measured tcc/gcc cold ratio range
+  (41-91%, median 59%).
+- Probes: `/tmp/probes/emitter_pointers.py` (15 pointers + 3 stale-pointer checks: PASS) and
+  `/tmp/probes/refusal_reasons.py` (both fatal messages match AIL and the report: PASS); cmp.sh on
+  `g18_008`/`g04_006` still matches CPython in both builds; `test_ail_safetynet`,
+  `test_ail_files`, `test_ail_corpus_findings3` pass; manifest `--check` clean.
+
 ## 2026-11-06 -- tcc1 quick-run probe: TinyCC vs gcc -O2 (job-tcc1-11070326)
 
 `lab/tcc/` only; no compiler or default change. Full report in `lab/tcc/RESULTS.md`.

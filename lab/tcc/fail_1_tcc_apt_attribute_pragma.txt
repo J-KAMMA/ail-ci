@@ -5,4 +5,4 @@ construct: C11 _Thread_local storage class
 first error:
   /tmp/tccquick-4vyx5p_3/gen-chain_relax-cceb078a/dbg/program.c:7729: error: ';' expected (got "void")
 generated C line 7729: static _Thread_local void *ail__rep_stk[512];
-emitted by: cruntime.py:17245-17246 (ail__rep_stk / ail__rep_n), jsonrt.py:858
+emitted by: cruntime.py:17347-17348 (ail__rep_stk / ail__rep_n), jsonrt.py:858

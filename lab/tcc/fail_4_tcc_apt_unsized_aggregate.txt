@@ -5,4 +5,4 @@ construct: unsized struct-array compound literal from runtime values
 first error:
   /tmp/tccquick-4vyx5p_3/gen-g18_008-5b44cd1b/dbg/program.c:4705: error: index too large
 generated C line 4705: ail_stdout_parts((ail_str[]){ir4, ir5}, 2);
-emitted by: pyfunc.py:24481 (ail_stdout_parts)
+emitted by: pyfunc.py:24977 (ail_stdout_parts call site; emitter cruntime.py:1542)

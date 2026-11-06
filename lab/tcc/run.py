@@ -469,10 +469,10 @@ def case_for(name, kind, work):
 
 
 CONSTRUCT_EMITTER = {
-    'C11 _Thread_local storage class': 'cruntime.py:17245-17246 (ail__rep_stk / ail__rep_n), jsonrt.py:858',
-    'unsized struct-array compound literal from runtime values': 'pyfunc.py:24481 (ail_stdout_parts)',
+    'C11 _Thread_local storage class': 'cruntime.py:17347-17348 (ail__rep_stk / ail__rep_n), jsonrt.py:858',
+    'unsized struct-array compound literal from runtime values': 'pyfunc.py:24977 (ail_stdout_parts call site; emitter cruntime.py:1542)',
     'unsized struct-array variable declaration from runtime values': 'cruntime.py:6450,6508,6538 (bytes replace/translate)',
-    '__int128 (no 128-bit integer type in tcc)': 'cruntime.py:29709 (ail_rand_floordiv), general slice and pow paths',
+    '__int128 (no 128-bit integer type in tcc)': 'cruntime.py:16995 (range slice `__int128 nn = (__int128)n`), 29811 (ail_rand_floordiv); general slice and pow paths',
     'unsupported __builtin_*': 'cruntime.py:433,4044,4065 (__builtin_unreachable); bigint_obj.py:403-411 (__builtin_*_overflow)',
 }
 

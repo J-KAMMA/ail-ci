@@ -14,8 +14,10 @@ invoked by `lab/tcc/run.py`, directly on the saved C or through `PIPE_CC`. Relea
 - gcc `13.3.0`, python `3.12.3`. 3 cold builds and 3 runs per program, median.
 - Sample: the ten `lab/compare/src/<task>/main.py` sources and 50 `corpus/gdev` programs
   (seed 20261106, shuffled; 54 candidates tried until 50 built with `gcc -O2`). Two compare sources
-  are refused by AIL itself (`tally_lang`: tuple-element type unknown; `tree_fold`: `re` used outside
-  what is built), so 8 compare programs enter the census. Four corpus candidates were also refused
+  are refused by AIL itself (`tally_lang`: `field 'v' is a list or dict that gets bools and numbers`,
+  plus tuple-shape-comparison and `re` notes; `tree_fold`: `import of 're' with a use that is not
+  built`, plus `cannot tell the type of element 0 of this tuple` notes at lines 44/72/85/89), so 8 compare programs enter the
+  census. Four corpus candidates were also refused
   and replaced. Total: **58 programs**.
 
 `run.py` generates each program's C once through `ail_chatgpt.py compile --debug-dir` (which writes
@@ -54,8 +56,8 @@ these are lower bounds on the incompatible constructs per file.
 
 | construct | count | generated C / emitted by |
 |---|---:|---|
-| C11 `_Thread_local` storage class | 41 | `static _Thread_local void *ail__rep_stk[512];` — `cruntime.py:17245` (repr stack), `jsonrt.py:858`. 0.9.27 has no TLS (`__thread` fails too); fixed in 0.9.28rc. |
-| unsized struct-array compound literal from runtime values | 6 | `ail_stdout_parts((ail_str[]){a, b}, 2);` — `pyfunc.py:24481` (f-string print). tcc: `index too large`. |
+| C11 `_Thread_local` storage class | 41 | `static _Thread_local void *ail__rep_stk[512];` — `cruntime.py:17347-17348` (repr stack), `jsonrt.py:858`. 0.9.27 has no TLS (`__thread` fails too); fixed in 0.9.28rc. |
+| unsized struct-array compound literal from runtime values | 6 | `ail_stdout_parts((ail_str[]){a, b}, 2);` — `pyfunc.py:24977` (f-string print call site). tcc: `index too large`. |
 | unsized struct-array declaration from runtime values | 5 | `ail_bytes spans[] = {h, old, repl};` — `cruntime.py:6450,6508,6538` (bytes replace/translate). tcc: `index too large`. |
 | unsupported `__builtin_*` | 4 | `__builtin_unreachable` / `__builtin_*_overflow`. |
 | `__int128` | 2 | general runtime. |
@@ -68,8 +70,8 @@ these are lower bounds on the incompatible constructs per file.
 | `__int128` | 23 | see below. |
 
 **upstream 0.9.28rc + prelude — 35/58.** The only remaining blocker is **`__int128` (23 programs:
-6/8 compare, 17/50 corpus)**, e.g. `__int128 nn = (__int128)n;` at `cruntime.py`'s range-slice
-path, and `ail_rand_floordiv`/the int-only `pow` modular exponentiation. tcc has no 128-bit integer
+6/8 compare, 17/50 corpus)**, e.g. `__int128 nn = (__int128)n;` at `cruntime.py:16995` (range-slice
+path), and `ail_rand_floordiv` at `cruntime.py:29811` (int-only `pow` modular exponentiation). tcc has no 128-bit integer
 type and no `__int128` mode. 0.9.28rc already parses `_Thread_local`, the `__attribute__`s,
 statement expressions, `__typeof__`, `__builtin_expect/unreachable/constant_p/memcpy/clz`, and the
 sized aggregate forms; the `vector_size`/`avx2` paths are already `#if defined(__GNUC__)`-guarded,
@@ -149,9 +151,11 @@ but not timed.
 
 Medians: gcc cold **4.620 s**, tcc cold **2.923 s**; edit+run **4.621 s → 2.926 s**, a **1.58x**
 ratio of medians (median per-program speedup **1.70x**, range 0.63-2.45x). Two program outputs are
-the same in both builds. The gains are uneven because the Python front end is 60-85% of the cold
-build; where the emitted C is large (`g17_004`, `g04_006`, `g10_010`) tcc halves the build, and
-where the program is small and the front end dominates (`g00_036`) it is a wash or slower.
+the same in both builds. The gains are uneven because the Python front end is 41-91% of the cold
+build (median 59%, the tcc/gcc cold ratio in the table); where the C stage dominates (`g17_004`,
+`g04_006`, `g10_010`, 41-47%) tcc roughly halves the build, and where the front end dominates
+(`berth_sim`, `g19_028`, 85-91%) or the program is small (`g00_036`, where tcc is slower) it is a
+wash or worse.
 
 **Cached re-run:** with the build cache warm, gcc is 0.397 s and tcc 0.504 s (medians). The cache
 stores the finished front end + executable, so the C compiler is not run at all; tcc has nothing to
@@ -165,7 +169,7 @@ is limited. Swapping the C compiler removes essentially all of the C stage (3.12
 and makes the **cold** edit-run **1.6-1.7x** faster (4.62 s → 2.93 s median); it does not change the
 warm/cached build (both ~0.4-0.5 s) and it makes the program **1.7x slower** at run time, so it is
 only defensible for the loop, never the final build. It is not the 4-10x the owner wants, because
-the Python front end is the other two thirds to five sixths of the build.
+the Python front end is 41-91% (median 59%) of the cold build.
 
 The blockers divide into cheap and expensive:
 
