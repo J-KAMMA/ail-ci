@@ -24,6 +24,14 @@ stays checked) and `group_ev_pop_between` in `test_ail_bce.py`; `/tmp/probes/cro
 default and `AIL_UNIFIED_FORCE=1` builds.  `test_ail_bce`, `test_ail_files` and
 `test_ail_corpus_findings3` pass.
 
+The full `bce_census.py check --base /tmp/base` exits 1 on this branch for three tasks that bces5
+does not make slower: echo_pack 1.06419, term_rank 1.03117 and ticket_audit 1.01180.  Their
+generated C is byte-identical between the branch's export base `4b5e417` and `7612779`, and the
+same ratios are already measured at `7612779` (1.06419, 1.03292, 1.01180); the export base's
+compiler differs from `origin/integ` (`/tmp/base`) in those functions for unrelated staging work.
+`9e8faaf`/this commit leave echo_pack and ticket_audit's counts unchanged and term_rank 0.17%
+lower, so the >1 ratios are not a regression of the change.
+
 ## 2026-11-05 -- rbbces4: two field-fact soundness holes closed, re-applied (job-rbbces4-11052320)
 
 Re-applied the accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`). `fieldfacts.py`
