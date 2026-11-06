@@ -1,3 +1,67 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I've completed the review. Here is what I found.
+
+## What the change really does
+
+It adds `textDocument/definition` to the language server (`definitionProvider` + a resolver built on the existing `_scope_chain`/`_scope_info`, plus module lookup through `ail_modules.Program`), fixes comprehension first-iterable scope, UTF-16 output ranges, `except`/`match` name spans, and `import a.b` binding. No compiler/runtime file is touched, so generated C cannot change (verified: diff has no `AIL_CURRENT/ail_*`, no runtime, no `tools/`).
+
+## Probes (all in-process `lsp.definition` queries; positions located by whole-word search)
+
+| probe | case | expected | got |
+|---|---|---|---|
+| u1 | `a = A(); a.m()` / `b = A; b.m()` | `class A` method `m` | correct `A.m` |
+| u1 | `_class_refs_of_value` through a local | `A` | correct |
+| u2 | `f"{name}"`, `{{name}}`, `name!r` | def / null / def | correct |
+| u2/u3 | f-string capture, decorator, base class `class B(A)` | def / null | correct |
+| u3 | `@deco def sweet` | `deco` def, `sweet` def | correct |
+| u4 | `except* … as err`, `case Point(x=px)` | `err`/`px` binding, unknown `Point` null | correct |
+| u5 | CRLF file | def | correct |
+| u6 | non-ASCII identifier `héllo` | def | correct |
+| u7 | `import pkg.sub` vs `import pkg.sub as alt` | pkg `__init__` / `sub.py` | correct |
+| u8 | keyword label `f(a=1)` | null | null |
+| u9 | `global x` read/write/declaration | module `x` | correct |
+| m1 | nested comprehension `[[x for x in xs] for xs in xs]` | inner iter → outer target, outer iter → module | correct |
+| m2 | `case {Color.RED: v, **RED}` | `**RED` binding | **null** (missing, not wrong; duplicate-name heuristic) |
+| harness2/3 | main/edge/use_pkg 40+20 positions | per `expect.json` | all match |
+
+Base (`/tmp/base`) has no definition provider at all, so there are no pre-existing behaviour differences to compare; no probe produced a wrong location, a crash, or a wrong exit status.
+
+Tests on HEAD: `test_ail_lsp_def` ok, `test_ail_lsp` ok, `test_ail_safetynet` ok (3 modules, 0 failed). `tools/update_manifest.py --check` → 0.
+
+## Claim check
+
+- comprehension iterable, `import a.b`→package, UTF-16 ranges, `except`/`match` spans — **verified**.
+- 50/50, 0 wrong — **verified**; I also re-derived all 40 original expectations against the sources and they are semantically right.
+- "Diff touches only lsp.py, lab probes/expect/RESULTS, the test, and manifest.d/e7.txt" — **false**: `docs/LSP.md` and `manifest.d/83.txt` also change (allowed), and four `lab/lsp/def/.ail-lsp-*.py` files are added.
+- "committed as 924171e" — **false**: HEAD is `a4ed8ab "fix: uncommitted edits"`, which adds only the four temp-file copies.
+- safetynet S4 failure under `ulimit` — **unverified** (it passes without the limit here; the change touches no runtime code).
+- test_ail_files / test_ail_corpus_findings3 — **unverified** (not required for this change).
+
+## Defects
+
+1. The new test is not hermetic and commits its litter. `python3 AIL_CURRENT/test_ail_lsp_def.py` leaves generated `.ail-lsp-*.py` files in `lab/lsp/def/` (I produced two new untracked ones just running it; `Client.close` kills the server while `Server.analyse` still has an `mkstemp` sibling open). Four byte-identical copies of `main.py` were then committed in `a4ed8ab`. Expected: `git status` clean after the test and no extra files in the commit; actual: `?? lab/lsp/def/.ail-lsp-_lfvt1sc.py`, `?? lab/lsp/def/.ail-lsp-wlvb5sgt.py` after a run, and `.ail-lsp-h4irn4or/sk2g18gl/u25zw6cr/w7lhu_jw.py` committed. Fix: wait for the server to exit (or drain requests) before killing it, and delete the four committed files.
+
+Minor notes: `_module_member_location` is dead code; the `docs/LSP.md` phrase "or an instance" overclaims (`a = helper.Picker(); a.m()` returns null — safe, but the doc says otherwise).
+
+## Pre-existing
+
+None observed.
+
+VERDICT: FIX
+
+1. `test_ail_lsp_def.py` leaves `.ail-lsp-*.py` temp files in `lab/lsp/def/` on every run, and four such copies were committed in `a4ed8ab` (a commit the report does not mention). Expected: a clean working tree after the test and only the listed files in the diff; actual: two untracked `.ail-lsp-*.py` files after a run plus the four committed copies `.ail-lsp-h4irn4or.py`, `.ail-lsp-sk2g18gl.py`, `.ail-lsp-u25zw6cr.py`, `.ail-lsp-w7lhu_jw.py`.
+[commandcode stop=end_turn turns=36 out_tokens=45251]
+
+
+--- ORIGINAL TASK ---
 Lane: fd-lsp
 
 # fdlsp1: LSP go-to-definition (`textDocument/definition`) for .py files
