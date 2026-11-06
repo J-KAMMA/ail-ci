@@ -1878,8 +1878,30 @@ def _etype(node, ctx):
         if (f in ('nsmallest', 'nlargest') and f not in ctx.funcs and f not in ctx.classes
                 and f not in ctx.kind and f not in ctx.types and len(a) == 2
                 and isinstance(a[1], ast.Name)):
-            # `heapq.nsmallest(k, xs)` answers a list of the same element kind `xs` has
-            return _etype(a[1], ctx)
+            # `heapq.nsmallest(k, xs)` builds a FRESH CONTAINER, so its kind is the container kind
+            # `_heapq_select` actually builds, never the element kind `_etype(xs)` would answer:
+            # an int-list local or an int-array parameter becomes a LIST (the lowering boxes the
+            # elements into an `ail_list`), a list of str becomes an SLIST. Returning 'array' here
+            # used to declare the destination as an array parameter (`v_top`/`v_top_len`) and
+            # emit C that does not compile. `type_of` may not know the source yet in a pre-pass
+            # (`words` is settled later), so an unknown source defaults to LIST instead of
+            # aborting the pass with "read before it is assigned".
+            try:
+                source_kind = ctx.type_of(a[1].id)
+            except Unsupported:
+                source_kind = None
+            if source_kind == SLIST:
+                return SLIST
+            if source_kind in (LIST, 'array'):
+                return LIST
+            # Any other container kind (a list of tuple instances, a float list, ...) keeps the
+            # source's own answer, exactly as this branch did before: the select is refused by
+            # name in `_heapq_select`, and the surrounding olist/repr machinery must still see
+            # the kind it expects rather than a plain LIST.
+            try:
+                return _etype(a[1], ctx)
+            except Unsupported:
+                return LIST
         if f == 'jscharat':
             return STR
         if _is_int_hex_call(node, ctx):
@@ -5985,6 +6007,13 @@ def _seq(node, ctx):
             ctx.pre.append('(void)%s;' % value)
             return '%s.p' % temporary, '%s.n' % temporary
     if _is_heapq_select(node, ctx):
+        if _etype(node, ctx) == SLIST:
+            # Its elements are `ail_str` structs, not numbers: every caller of `_seq` folds or
+            # walks a flat int64 run. The plain `for` over one is handled in `_for_inner_impl`
+            # before it reaches here; any other use is refused by name rather than misread.
+            raise Unsupported('heapq.%s() of a list of str is used here where a flat sequence of '
+                              'numbers is required; bind it to a list of str and loop over that'
+                              % node.func.id)
         temporary, _ = _heapq_select(node, ctx)
         return '%s.p' % temporary, '%s.n' % temporary
     raise Unsupported(_bind_first(node))
@@ -19651,10 +19680,15 @@ def _method(node, ctx, *, as_stmt=False):
             return ('({ ail_bytes _src = %s; for (int64_t _i = _src.n - 1; _i >= 0; _i--) '
                     'ail_list_push(&%s, (int64_t)_src.p[_i]); })' % (value, dst))
         if declared == SLIST and kind == SLIST:
-            p, n = _seq(source, ctx)
+            # `_seq` has no rule for an `ail_slist` -- its elements are `ail_str` structs, never a
+            # flat int64 sequence -- so this reads the spine directly, the same `%s.n`/`%s.p[@]`
+            # shape `_for_inner_impl`'s own list-of-str branch uses. `src` is re-read every step
+            # (rather than captured in a struct copy) so `words.extend(reversed(words))` sees the
+            # spine after a `push` reallocates it.
+            src = _slist_arg_c(source, ctx)
             ctx.parts.add('SLIST')
-            return ('({ int64_t _n = %s; for (int64_t _i = _n - 1; _i >= 0; _i--) '
-                    'ail_slist_push(&%s, %s[_i]); })' % (n, dst, p))
+            return ('({ int64_t _n = %s.n; for (int64_t _i = _n - 1; _i >= 0; _i--) '
+                    'ail_slist_push(&%s, %s.p[_i]); })' % (src, dst, src))
         if declared == SLIST and kind == STR:
             # `out.extend(reversed(s))` -- one code point per step, exactly the backwards str walk
             # `_for_inner_impl` builds for `for c in reversed(s):`, so a multi-byte code point is
@@ -21030,6 +21064,13 @@ def _return_list(value, ctx, pad):
     copy has already happened -- so the container is freed at every return, exactly as every other
     container here is, and nothing that escapes the function is ever freed out from under it.
     """
+    if _is_heapq_select(value, ctx):
+        # `return heapq.nsmallest(k, xs)` -- `_heapq_select` builds the same fresh `ail_list` a
+        # `sorted(xs)[:k]` assignment would, and the ordinary list-return ABI copies it out.
+        c, _ = _heapq_select(value, ctx)
+        ctx.parts.update(('LIST', 'LISTRET'))
+        pre = _flush(ctx, pad)
+        return pre + '%sreturn ail_list_return(&%s, _out, _cap);\n' % (pad, c)
     if _numeric_field_kind(value, ctx) == LIST:
         temporary, expression = _numeric_field_value(value, LIST, ctx)
         ctx.parts.update(('LIST', 'LISTRET'))
@@ -21146,6 +21187,13 @@ def _return_flist(value, ctx, pad):
 
 def _return_slist(value, ctx, pad):
     """Return a packed owned copy before callee cleanup; callers adopt it into their arena."""
+    if _is_heapq_select(value, ctx):
+        # `return heapq.nsmallest(k, words)` -- the select builds a fresh `ail_slist`; the
+        # same owned-copy return every list-of-str return uses packs it before cleanup.
+        c, _ = _heapq_select(value, ctx)
+        ctx.parts.add('SLIST')
+        pre = _flush(ctx, pad)
+        return pre + '%sreturn ail_slist_return_owned(%s);\n' % (pad, c)
     if not isinstance(value, ast.List) and not _is_slist_expr(value, ctx):
         raise Unsupported('returning %s as a list of str; return a name built up with .append() '
                           'in a loop' % type(value).__name__)
@@ -29515,6 +29563,19 @@ def _for_inner_impl(node, ctx, ind):
         head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
             pad, idx, idx, c, idx, pad, v, c, idx)
         return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+    if _is_heapq_select(it, ctx) and _etype(it, ctx) == SLIST:
+        # `for w in heapq.nsmallest(k, words)` -- the select builds a fresh `ail_slist`
+        # (`_heapq_select` -> `_sorted_into_temp`'s own list-of-str branch), so the target is a
+        # str and the walk reads that temp's spine, exactly the shape the `sorted(words)` branch
+        # just above uses for the same element kind. Without this the generic `_seq` fallback
+        # below declared `w` the default int and the `ail_str` slots were misread as numbers.
+        c, _ = _heapq_select(it, ctx)
+        ctx.parts.add('SLIST')
+        v = ctx.declare(node.target.id, STR)
+        pre = _flush(ctx, pad)
+        head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
+            pad, idx, idx, c, idx, pad, v, c, idx)
+        return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
     if _is_list_call(it, ctx) or _is_flist_call(it, ctx):
         value, local = _list_call_value(it, ctx)
         ctx.pre.append('(void)%s;' % value)
@@ -29932,6 +29993,19 @@ def _promote_floats(fn, ctx):
     # loop (`for n in nums:`) needs `nums` in `slist_names` before ITS OWN target can be marked
     # STR -- an unbounded chain, exactly the reason `obj_names` below needs its own `while _grown`.
     slist_names = set()
+
+    def _select_source_is_slist(node):
+        """`heapq.nsmallest(k, xs)` where `xs` is statically a list of str -- True when the
+        select's result is the fresh list of str `_heapq_select` builds. Reads `slist_names`
+        (grown below) as well as the settled kinds, so the pre-binding of a `for` target before
+        emission sees the same answer `_for`'s own STR branch will."""
+        if not _is_heapq_select(node, ctx):
+            return False
+        src = node.args[1]
+        return (isinstance(src, ast.Name)
+                and (src.id in slist_names or ctx.kind.get(src.id) == SLIST
+                     or ctx.types.get(src.id) == SLIST))
+
     for _ in range(8):
         changed = False
         # AIL_TASK_strcontainers_20260916.md mechanisms 4/5: a best-effort, this-iteration-only
@@ -30037,7 +30111,8 @@ def _promote_floats(fn, ctx):
                 changed = True
             elif (isinstance(n, ast.For) and isinstance(n.target, ast.Name)
                   and isinstance(n.iter, ast.Name)
-                  and (n.iter.id in slist_names or ctx.kind.get(n.iter.id) == SLIST)
+                  and (n.iter.id in slist_names or ctx.kind.get(n.iter.id) == SLIST
+                       or ctx.types.get(n.iter.id) == SLIST)
                   and n.target.id not in ctx.kind and ctx.types.get(n.target.id) is None):
                 # `for line in lines:` over a KNOWN slist-producing name, OR (AIL_TASK_strparam_
                 # 20260916.md) an SLIST-kind PARAMETER, which `slist_names` itself never covers
@@ -30045,6 +30120,13 @@ def _promote_floats(fn, ctx):
                 # loop target here too, in the SAME fixed point, so a split() call on `line`
                 # inside this loop's own body (reached later in this very pass, or in a later
                 # pass if it comes textually earlier in `ast.walk`'s order) is recognised.
+                ctx.types[n.target.id] = STR
+                changed = True
+            elif (isinstance(n, ast.For) and isinstance(n.target, ast.Name)
+                  and _select_source_is_slist(n.iter)
+                  and n.target.id not in ctx.kind and ctx.types.get(n.target.id) is None):
+                # `for w in heapq.nsmallest(k, words):` -- the select is a fresh list of str, so
+                # a chained `.split()` on `w` in the body needs STR here as well.
                 ctx.types[n.target.id] = STR
                 changed = True
             elif (isinstance(n, ast.For) and isinstance(n.target, ast.Name)
@@ -30421,6 +30503,13 @@ def _promote_floats(fn, ctx):
                                      # `container_names`'s own comment above already describes for
                                      # LIST/SET/DICT -- caught by `count_on_stripped_and_split_
                                      # element`/every other split()-assigning case in test_strops.py
+            if _is_heapq_select(n.value, ctx):
+                # `xs = heapq.nsmallest(k, words)` -- a fresh list, settled in `_stmt`'s own
+                # select branch, not here. A list-of-str result joins `slist_names` too, so a
+                # later `for w in xs:` binds `w` STR instead of this pass's INT default.
+                if _select_source_is_slist(n.value):
+                    slist_names.add(name)
+                continue
             if _is_handle_producing(n.value, ctx):
                 continue            # `h = g[0]`, `h = d[k]` -- a handle, settled in `_stmt`, not
                                     # here; pre-binding `h` to INT would only fight that later
@@ -30500,8 +30589,15 @@ def _promote_floats(fn, ctx):
                 # must not fight a stale INT default.
                 ctx.bind(n.target.id, STR)
                 continue
+            if _select_source_is_slist(n.iter):
+                # `for w in heapq.nsmallest(k, words)` -- the select builds a fresh list of str
+                # (`_heapq_select` -> `_sorted_into_temp`'s own branch), and `_for` declares the
+                # target STR; this pass's INT default would fight that later, correct declare.
+                ctx.bind(n.target.id, STR)
+                continue
             if isinstance(n.iter, ast.Name) and (n.iter.id in slist_names
-                                                 or ctx.kind.get(n.iter.id) == SLIST):
+                                                 or ctx.kind.get(n.iter.id) == SLIST
+                                                 or ctx.types.get(n.iter.id) == SLIST):
                 # `for w in words:` over a list of str (AIL_TASK_strops_20260915.md Part B) --
                 # `ctx.kind.get(...) == SLIST` (AIL_TASK_strparam_20260916.md) is the SAME
                 # condition for an SLIST-kind PARAMETER `slist_names` was never going to have --

@@ -1,3 +1,28 @@
+## 2026-11-06 -- pyreachs2 review fix (job-pyreachs2_rr1-11062251)
+
+Three defects in the s2 shapes above were found by review and are fixed:
+
+- **`heapq.nsmallest(k, xs)` on a function parameter emitted invalid C.** `_etype` answered the
+  *element* kind of the source (`'array'` for an int-list parameter), so `top = heapq.nsmallest(...)`
+  declared `top` an array parameter (`v_top`/`v_top_len`) while `_heapq_select` built an `ail_list`,
+  and a direct `return heapq.nsmallest(...)` returned a list through an `int64_t` return. `_etype`
+  now answers the container kind the lowering builds (LIST for an int list or an array parameter,
+  SLIST for a list of str, otherwise the source's own kind, so the olist tuple refusal still fires).
+  `_return_list` / `_return_slist` build the select into that return ABI, so the parameter shapes
+  compile. `_promote_floats` pre-binds a select's `for` target STR for a list-of-str source.
+- **`xs.extend(reversed(src))` with a list-of-str source was dead code.** Its branch called `_seq` on
+  an `ail_slist`, which `_seq` never walks. It now reads the spine directly (`src.n` / `src.p[i]`),
+  re-reading it each step so a self-extend that reallocates is safe.
+- **`for w in heapq.nsmallest(k, words)` on a list of str refused with the wrong reason.** The
+  generic `_seq` fallback declared `w` an int. `_for_inner_impl` now walks the select's own slist
+  temp and binds `w` STR; `_seq` refuses a str select elsewhere by name rather than misreading the
+  `ail_str` slots as numbers.
+
+Probes (both builds, CPython-identical): `nsmallest`/`nlargest` on int and `list[str]` parameters
+(direct return, `top[0]`, `sum`, `for`), `k <= 0` / `k > len` / ties; `extend(reversed(...))` over
+`list[str]` receivers (annotation, parameter source, self-extend with reallocation); the subscript
+and `key=` refusals. Two regression cases were added to `test_ail_pyreach_shapes.py`.
+
 ## 2026-11-06 -- pyreachs2 (re-run, job-pyreachs2_rr1-11062251)
 
 s2 (F5a) shapes.  This tree already carried s1-s8, so the stepped-slice, `del` and heap-subscript

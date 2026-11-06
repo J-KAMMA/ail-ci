@@ -243,6 +243,49 @@ def main():
 main()
 '''
 
+NSMALLEST_PARAM = '''import heapq
+
+def smallest(k, xs):
+    return heapq.nsmallest(k, xs)
+
+def local_top(k, xs):
+    top = heapq.nlargest(k, xs)
+    return top[0]
+
+def words_first(k, words: list[str]):
+    for w in heapq.nsmallest(k, words):
+        print(w)
+
+def words_all(k, words: list[str]):
+    return heapq.nlargest(k, words)
+
+def main():
+    print(smallest(2, [3, 1, 2]))
+    print(local_top(2, [3, 1, 2]))
+    words_first(2, ['b', 'a', 'c'])
+    print(words_all(2, ['b', 'a', 'c']))
+
+
+main()
+'''
+
+EXTEND_REVERSED_STR = '''def main():
+    words: list[str] = ['a', 'b']
+    words.extend(reversed(words))
+    print(words)
+    src: list[str] = ['x', 'y']
+    more: list[str] = []
+    more.extend(reversed(src))
+    print(more)
+    for i in range(3):
+        words.append("z%d" % i)
+    words.extend(reversed(words))
+    print(len(words))
+
+
+main()
+'''
+
 
 def build_source(tmp, name, source):
     exe = Path(tmp) / name
@@ -401,6 +444,16 @@ class PyreachShapes(unittest.TestCase):
                     '[1, 1, 2, 3]\n')
         self._typed('nsmallest_shapes', NSMALLEST, expected)
         self._both('nsmallest_shapes', NSMALLEST, expected)
+
+    def test_nsmallest_on_a_list_parameter(self):
+        expected = '[1, 2]\n3\na\nb\n[\'c\', \'b\']\n'
+        self._typed('nsmallest_param', NSMALLEST_PARAM, expected)
+        self._both('nsmallest_param', NSMALLEST_PARAM, expected)
+
+    def test_extend_reversed_list_of_str(self):
+        expected = "['a', 'b', 'b', 'a']\n['y', 'x']\n14\n"
+        self._typed('extend_reversed_str', EXTEND_REVERSED_STR, expected)
+        self._both('extend_reversed_str', EXTEND_REVERSED_STR, expected)
 
     def test_nsmallest_of_tuples_is_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-s2-') as tmp:
