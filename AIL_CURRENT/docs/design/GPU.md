@@ -466,7 +466,11 @@ gone: a marked loop with `/` or `math.sqrt` is now a kernel.
 - **The algorithm, in both twins.** Division is `q0 = a * r` with `r` an approximation of `1/b` (an unsigned-int64 seed
   `2**62 / mantissa` and three Newton steps, all plain `NoContraction` `FMul`/`FSub`), then the exact residual
   `E = a - q0*b` as a double-double (Veltkamp split + Dekker TwoProduct + branchless TwoSum) and `q = fl(q0 + E*r)`.
-  `E/b` is about `2**-105` of the result, so the rounding of the sum is the CPU's. Square root is the same with
+  `E/b` is about `2**-105` of the result, so the rounding of the sum is the CPU's. That sum can still land exactly on a
+  midpoint (a/b just above 1 rounds to even and loses the remainder), so a last step takes the exact residual around the
+  candidate `q`: R = a - q*b, V - q = R/b, and V is past the midpoint iff 2|R| > |b|*u (u the gap at q); the comparison
+  is exact (u is a power of two), with an even-significand rule for a tie. This was found on lavapipe: 328 pairs near
+  1.0 (and their negative mirrors) were one ulp low before it. Square root is the same with
   `s0 = GLSL Sqrt(x)`, `E = x - s0*s0` and a correction by `E/(2*s0)`; the prototype stayed bit-exact over 150k values
   even with `s0` moved one or two ulp. No `OpFDiv` (136), no `Fma`, no fast-math decoration; every `FAdd/FSub/FMul`
   carries `NoContraction`. Thirty-odd float ops per division, a few more for sqrt.
@@ -486,7 +490,7 @@ gone: a marked loop with `/` or `math.sqrt` is now a kernel.
   The unused `_ail_math_sqrt` helper the surface adds is dropped, or the program would stay on the general path.
   `x ** 0.5` written directly is the same sqrt in the kernel; every other `**` is still refused.
 - **Tests.** `test_ail_gpu_g5.py` (`SpirvG5`, `BitTests`, `Programs`), registered in `tests.d` and in `GPU_JOB`, and
-  imported by `test_ail_gpu_g2.py` so the existing `gpu (lavapipe)` job runs it. `BitTests` compares 131,072 operand
+  imported by `test_ail_gpu_g2.py` so the existing `gpu (lavapipe)` job runs it. `BitTests` compares 524,288 operand
   pairs per op (random bit patterns, `+-0`, subnormals, the smallest and largest normals, `1 +- ulp`, powers of two,
   halfway constructions, NaN, inf) bit for bit between the device and the CPU, and requires every element the CPU flags
   to flag on the device. `Programs` builds four marked programs (`/` on floats, int and mixed `/`, `math.sqrt` of a

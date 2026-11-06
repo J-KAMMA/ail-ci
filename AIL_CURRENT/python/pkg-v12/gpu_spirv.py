@@ -535,7 +535,47 @@ class Gen:
         c = self.contraction(self.op('FAdd', self.F,
                                      self.contraction(self.op('FMul', self.F, eh, r)),
                                      self.contraction(self.op('FMul', self.F, el, r))))
-        return self.chk(self.contraction(self.op('FAdd', self.F, q0, c)))
+        q = self.contraction(self.op('FAdd', self.F, q0, c))
+        return self.chk(self.final_div_round(a, b, q))
+
+    def final_div_round(self, a, b, q):
+        """The correction `q0 + E*r` can land exactly on the midpoint between two floats (a/b just above 1, say),
+        where the double sum rounds to even and loses the tiny remainder.  Decide the last step with the exact
+        residual around `q`: R = a - q*b; V - q = R/b, so V is beyond the midpoint iff 2|R| > |b|*u, where u is the
+        gap from q in the direction of V.  Both sides are exact (u is a power of two, |b|*u is `ulp(a)`-sized), and the
+        comparison is done in double-double.  An exact tie (D == 0) rounds to the even significand."""
+        F, I, U64, B = self.F, self.I, self.U64, self.B
+        rh, rl = self.residual(a, q, b)
+        zero = self.cf(0.0)
+        exact = self.op('LogicalAnd', B, self.op('FOrdEqual', B, rh, zero), self.op('FOrdEqual', B, rl, zero))
+        rneg = self.op('LogicalOr', B, self.op('FOrdLessThan', B, rh, zero),
+                       self.op('LogicalAnd', B, self.op('FOrdEqual', B, rh, zero), self.op('FOrdLessThan', B, rl, zero)))
+        bneg = self.op('FOrdLessThan', B, b, zero)
+        up = self.op('LogicalNot', B, self.op('LogicalNotEqual', B, rneg, bneg))     # V > q
+        qneg = self.op('FOrdLessThan', B, q, zero)
+        plus = self.op('LogicalNotEqual', B, up, qneg)          # nextafter(q, up) is bits + 1
+        qbits = self.bits(q)
+        nb = self.op('IAdd', U64, qbits, self.op('Select', U64, plus, self.m.c_u64(1), self.m.c_u64((1 << 64) - 1)))
+        nxt = self.from_bits(nb)
+        diff = self.contraction(self.op('FSub', F, nxt, q))
+        u = self.from_bits(self.op('BitwiseAnd', U64, self.bits(diff), self.m.c_u64(self.SIGN - 1)))   # |gap|
+        absb = self.from_bits(self.op('BitwiseAnd', U64, self.bits(b), self.m.c_u64(self.SIGN - 1)))
+        thr = self.contraction(self.op('FMul', F, absb, u))      # |b| * u, exact
+        srh = self.contraction(self.op('FAdd', F, rh, rh))       # 2|R| as (srh, srl)
+        srl = self.contraction(self.op('FAdd', F, rl, rl))
+        sm = self.op('Select', U64, rneg, self.m.c_u64(self.SIGN), self.m.c_u64(0))
+        srh = self.from_bits(self.op('BitwiseXor', U64, self.bits(srh), sm))
+        srl = self.from_bits(self.op('BitwiseXor', U64, self.bits(srl), sm))
+        d1, d2 = self.two_sum(srh, self.negf(thr))
+        rest = self.contraction(self.op('FAdd', F, d2, srl))
+        d1z = self.op('FOrdEqual', B, d1, zero)
+        gt = self.op('Select', B, d1z, self.op('FOrdGreaterThan', B, rest, zero), self.op('FOrdGreaterThan', B, d1, zero))
+        lt = self.op('Select', B, d1z, self.op('FOrdLessThan', B, rest, zero), self.op('FOrdLessThan', B, d1, zero))
+        tie = self.op('LogicalNot', B, self.op('LogicalOr', B, gt, lt))
+        even = self.op('IEqual', B, self.op('BitwiseAnd', U64, nb, self.m.c_u64(1)), self.m.c_u64(0))
+        move = self.op('LogicalAnd', B, self.op('LogicalNot', B, exact),
+                       self.op('LogicalOr', B, gt, self.op('LogicalAnd', B, tie, even)))
+        return self.op('Select', F, move, nxt, q)
 
     def x_sqrt(self, e):
         x = self.to_f(self.ex(e[2]))

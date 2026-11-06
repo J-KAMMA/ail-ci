@@ -4,7 +4,7 @@ Two layers:
 
 * `SpirvG5`   -- the emitter alone: no OpFDiv (136) and no Fma, every FAdd/FSub/FMul carries NoContraction, no
                  fast-math decoration, and the module is SPIR-V 1.4 with the binary64 capabilities.  Runs in any shard.
-* `BitTests`  -- GPU.md 5.1: one kernel applies `/` (and one `sqrt`) to 131,072 operand pairs (random bit patterns,
+* `BitTests`  -- GPU.md 5.1: one kernel applies `/` (and one `sqrt`) to 524,288 operand pairs (random bit patterns,
                  +-0, subnormals, the smallest and largest normals, 1 +- ulp, powers of two, halfway constructions,
                  NaN and inf) and the C side compares every result bit with the CPU's own `double` op.  Needs a
                  Vulkan device (lavapipe in the `gpu` job; skipped in the shards).
@@ -263,7 +263,7 @@ def device_env():
 class BitTests(unittest.TestCase):
     """GPU.md 5.1: the device against the CPU's own `/` and sqrt, bit for bit."""
 
-    N = 131072
+    N = 524288
 
     @classmethod
     def setUpClass(cls):
@@ -295,7 +295,7 @@ class BitTests(unittest.TestCase):
             self.assertIn(name, lines, r.stdout)
             _, clean, flagged, checked, bad, spurious, missed = lines[name].groups()
             self.assertEqual((int(bad), int(spurious), int(missed)), (0, 0, 0), r.stdout)
-            self.assertGreater(int(clean), 100000 // 2, '%s: too few clean elements\n%s' % (name, r.stdout))
+            self.assertGreater(int(clean), 100000, '%s: fewer than 100,000 clean pairs compared\n%s' % (name, r.stdout))
         self.assertIn('DONE mismatches=0', r.stdout)
 
 
@@ -323,7 +323,7 @@ n = 8192
 a = [0.0] * n
 b = [0.0] * n
 for i in range(n):
-    a[i] = float(i) * 0.5 - 1000.0
+    a[i] = float(i) * 0.5 - 1000.25
     b[i] = float(i % 37) / 8.0 + 0.25
 out = [0.0] * n
 # ail: gpu
