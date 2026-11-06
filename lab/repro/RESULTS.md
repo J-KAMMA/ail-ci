@@ -140,3 +140,16 @@ python3 tools/repro_check.py -j 2 --json /tmp/repro.json           # whole corpu
 python3 tools/repro_check.py -j 2 --filter compare/                # the 10 compare programs
 python3 -B AIL_CURRENT/test_ail_repro.py                           # the ratchet
 ```
+
+## Tests run on the final commit
+
+| test | result |
+|------|--------|
+| `AIL_CURRENT/test_ail_repro.py` | OK, 2 tests, 52 s (registered in `tests.d`, seen in `ail_check.MODULES`) |
+| `AIL_CURRENT/test_ail_files.py` | OK, 18 tests, 1 skipped, 825 s |
+| `AIL_CURRENT/test_ail_corpus_findings3.py` | OK, 2 tests, 664 s |
+| `AIL_CURRENT/test_ail_safetynet.py` | 4 of 5 OK; `S4_generators_gc` printed only its first line **when the whole test ran under `ulimit -v 1500000`**; re-run alone without that limit it passes in 137 s. The limit is this job's own shell wrapper, not a code change: the only compiler-side difference from `origin/integ` is two new files |
+
+No probe of my own was needed beyond these: the only behaviour this job adds is measurement, and the
+measurement is exactly the 82 identical pairs plus the 5-program ratchet above.
+
