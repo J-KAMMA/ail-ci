@@ -9,6 +9,10 @@ file records what moved and the measurements behind the done-check.
 * `parallel.py` (`_Body`) accepts `acc += e` / `acc -= e` on an int local of the enclosing
   function when the body touches `acc` nowhere else (no other store, no read), records
   `code -> '+' | '-'` in the loop's `.par` facts, and leaves every other refusal as it was.
+  A body that also writes a list/bytearray element (`ys[i] = …`, `ys[i] += …`, an inner-loop
+  `ys[i*K + j] = …`, conditional or aliased) stays refused in v1, as `PAR_REDUCE.md` requires:
+  the re-run would repeat those writes, so the shape is approximated rather than exact.  The
+  refusal names both and carries a `write instead:` line.
 * `pyfunc._par_for` asks cruntime for the `PARRED` part; `pyfunc._par_outline` emits three things
   instead of one worker: the chunk function (`ail_red_fn`, per accumulator a `__int128` partial sum
   and its largest/smallest prefix, so a chunk-local overflow is not a trap), the re-run function
@@ -69,6 +73,15 @@ local) and is refused by name with a `write instead:` line.
 | `p_float` | float accumulator | refused: "must be an int local ... write instead:" | - |
 | `p_read` | `out[i] = acc` in the body | refused: "read before the body assigns it" | - |
 | `p_mixed` | `acc += i` and `acc -= 1` | refused: "read before the body assigns it" | - |
+| `p_lwrite` | `acc += i` and `ys[i] = i` (the v1 boundary) | refused: "'acc' is a reduction ... also writes 'ys' ... write instead:" | - |
+| `p_lwrite_aug` | `acc += i` and `ys[i] += 1` | refused the same way | - |
+| `p_lwrite_inner` | `acc += i` and `ys[i*10 + j] = i + j` | refused the same way | - |
+| `p_lwrite_byte` | `acc += i` and `bs[i] = 7` on a bytearray | refused the same way | - |
+| `p_lwrite_cond` | `if i < 5: ys[i] = i` and `acc += i` | refused the same way | - |
+| `p_lwrite_alias` | `ys = xs`, `acc += xs[i]` and `ys[i] = i` | refused the same way | - |
+| `p_only_write` | `ys[i] = i * 2`, no reduction | builds, matches | `198` |
+| `p_readonly` | `acc += xs[i]`, no write | builds, matches | `200` |
+| `p_callee_aug` | a called fn does `x += j` on its parameter | builds, matches | `90` |
 
 `AIL_UNIFIED_FORCE=1` (the general path) refuses every `par_range` program, before and after this
 job: the general path has no `par_range`. That is unchanged and is not a regression.
@@ -87,7 +100,7 @@ reached by no racy or safe probe (they are AIL syntax or use `threading` globals
 
 ## Tests
 
-`python3 AIL_CURRENT/test_ail_par_reduce.py` (3 tests, includes 144 matching runs and the four
+`python3 AIL_CURRENT/test_ail_par_reduce.py` (3 tests, includes 144 matching runs and the five
 refusals), `test_ail_parallel_for` (6), `test_ail_typed_parallel` (16, TSan and ASan/UBSan
 included), `test_ail_race_probes` (31, one expected failure) all pass. `test_ail_files` (18, one
 skipped) and `test_ail_corpus_findings3` (2) pass. `test_ail_safetynet` fails `S4_generators_gc`

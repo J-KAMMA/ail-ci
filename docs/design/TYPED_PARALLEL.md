@@ -83,7 +83,9 @@ sums. The proof is `PAR_REDUCE.md`'s; the runtime's differential test is `test_a
 
 Scope in v1: only the Python surface (`AIL_SURFACE=python`) is lowered, so the AIL surface keeps
 the old refusal. Refused by name, with a `write instead:` line: a float accumulator, the
-accumulator read in the body, a mixed `+=`/`-=` on one name, and a `parallel for` inside `try`.
+accumulator read in the body, a mixed `+=`/`-=` on one name, a body that also writes a
+list/bytearray element (`PAR_REDUCE.md`) -- the re-run would repeat those writes, so the shape is
+out of scope rather than approximated -- and a `parallel for` inside `try`.
 The `sum(ex.map(f, xs))` / `sum(pool.map(f, xs))` shapes already lower through `typedpar`'s
 `_ail_pmap` and are already exact (the map finishes, in order, before the left-to-right sum; so a
 map exception after the overflow index wins, as in the sequential map); fbred3 changes nothing

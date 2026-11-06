@@ -337,6 +337,7 @@ class _Callee(_Body):
         loop = ast.For(target=ast.Name(id='\0', ctx=ast.Store()), iter=ast.Constant(value=0), body=fn.body,
                        orelse=[])
         super().__init__(loop, funcs, Unsupported)
+        self.reductions = {}       # a callee's `x += e` is ordinary local arithmetic, not a reduction
         self.fn, self.stack = fn, stack
         self.stored = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
         self.stored -= {a.arg for a in fn.args.args}
@@ -440,6 +441,13 @@ def _make(node, funcs, counter, U):
         raise _refuse(U, node, 'the loop needs a single loop variable and no else branch')
     body = _Body(node, funcs, U)
     body.block(node.body, {body.var})
+    if body.reductions and body.writes:
+        acc, base = sorted(body.reductions)[0], sorted(body.writes)[0]
+        raise _refuse(U, node, '%r is a reduction (`%s += e`), and the body also writes '
+                               '%r; a write made after an overflow would stay visible, so v1 keeps this '
+                               'refused; write instead: keep the reduction in a loop that writes only its '
+                               'own locals, and do the %s[i] writes in a separate loop'
+                      % (acc, acc, base, base))
     body.check_owned()
     counter[0] += 1
     k = counter[0]

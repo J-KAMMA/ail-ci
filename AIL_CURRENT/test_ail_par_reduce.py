@@ -73,6 +73,9 @@ REFUSED = {
                                          "read before the body assigns it"),
     "mixed += and -=": ("def main():\n    acc = 0\n    for i in par_range(0, 10):\n        acc += i\n"
                         "        acc -= 1\n    print(acc)\nmain()\n", "read before the body assigns it"),
+    "a list element written in the same body": (
+        "def main():\n    ys = [0] * 100\n    acc = 0\n    for i in par_range(0, 100):\n"
+        "        acc += i\n        ys[i] = i\n    print(acc, ys[99])\nmain()\n", "write instead:"),
 }
 
 
