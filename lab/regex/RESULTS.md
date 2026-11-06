@@ -47,68 +47,44 @@ python3 lab/regex/gen_text.py --out /tmp/ffre1-data
 python3 lab/regex/run.py --data /tmp/ffre1-data
 ```
 
-## ffre2: a literal / first-byte prefilter
+## ffre2: literal / first-byte prefilter -- measured, not landed
 
-What `relib.py` computes at build time, per pattern (see `Program.prefilter`, `Program.first_byte_set`
-and `Program.required_literal`, each with its proof comment):
+The candidate change computed two things at build time and fed them to the generated engine: a
+**required literal** (a string every match contains, e.g. `] ERROR ` in `\[(\d+)\] ERROR (.*)`) used only
+as an absence filter, and the set of **ASCII bytes a match can start with**, searched with one
+`str.find` per byte (memchr) to move the start position.  Both were measured against the workloads the
+task names; neither moves them, so per the task's stop rule the change is **not landed** and `relib.py`
+is left as it was after ffre1 (literal-prefix prefilter only).
 
-* **literal prefix** (`literal_prefix`): the run of case-sensitive `CHAR` instructions no `SPLIT` can
-  bypass, so every match starts with it.  `_ail_re_pre` returns `t.find(prefix, s)` -- one memmem search
-  lands on the only position a match can begin at.
-* **first-byte set** (`first_byte_set`): the ASCII bytes `first_set()` says a match can start with, read
-  with every assertion true (a superset, so skipping to a byte outside it is safe).  At build time one
-  `find` per byte is emitted and the smallest hit wins, which is the first position a match can start
-  at.  Capped at `_PREFILTER_MAX = 2` bytes: see the measurement below.
-* **required literal** (`required_literal`): a string every match *contains* (`] ERROR ` in
-  `\[(\d+)\] ERROR (.*)`, from a run of adjacent fixed parts of a sequence; an alternative forces one only
-  when every branch forces the same one; `*`/`?`/`{0,n}` force nothing; under `re.I` a candidate with an
-  ASCII letter is dropped).  It is used only as a **filter**, never as a start position: a match may begin
-  before its required literal, so only its absence in the subject proves that there is no match.  So
-  `search`, `findall`, `finditer`, `sub` and `split` test it once per call with one memmem and return "no
-  match" without running the DFA at all.  A match's start can never be skipped: the literal is inside
-  `[start, end)`, and the check only ever rejects.
+### Why the prefilter cannot move these workloads
 
-Leftmost-first is untouched: the prefilter moves `pos` to the first byte a match can start with, and the
-required-literal filter only ever answers "there is no match at or after `pos`".
+The three named workloads spend their time on per-match work and on the DFA walk, not on the scan a
+prefilter can skip.  Measured on `/tmp/ffre1-data` (wall clock, median of 3, same machine):
 
-### Measurement
+| workload | time | what the time is |
+|---|---|---|
+| `w1_literal`, ASCII half | 0.040 s | read 0.020 + memmem 0.010 + 21 554 matches 0.010 |
+| `w1_literal`, mixed half | 0.040-0.050 s | read 0.010 + `cps` build 0.008 + 48 483 matches ~0.020 + Pike scan ~0.005 |
+| `w2_alt` | 0.090 s | read 0.020 + DFA scan ~0.010 + 106 954 matches ~0.060 |
+| `w5_logline` | 1.220 s | read+split 0.020 + DFA span 0.070 + **group recovery 1.130** |
 
-Instruction counts are **unavailable** on this runner (`perf_event_open` is denied,
-`/proc/sys/kernel/perf_event_paranoid` = 4 and the job runs unprivileged), so the 1.2x instruction target
-could not be verified; the table below is wall-clock (median of 3, same machine, same data).  The machine
-was loaded by other jobs while the second run happened, so the before column was taken on a quiet
-machine and the after column on a busy one; w6 (untouched by this change: no required literal, no
-prefilter) moves 0.602 s -> 0.809 s, which is the scale of that load.
+* `w2_alt`: 106 954 matches; the same pattern with no matches (`zzzz`) over the same 21 MB takes 0.030 s
+  including the 0.020 s read.  A first-byte set of six bytes (`e E w W f F`, `re.I`) needs one `find` per
+  byte per match: raising the cap and searching them made it **0.110 s** -- slower.  `min` over the three
+  branch literals (`error`, `warn`, `fatal`) with one memmem each (0.10-0.11 s) is also no better.
+  The DFA's own two-character `quick` skip is already what the prefilter would do, only without the
+  per-call `find` overhead.
+* `w5_logline` is anchored (`LINE.match`, mode 0): there is no start to skip.  Its cost is the Pike VM
+  that recovers the five named groups -- the same pattern with the groups removed runs in **0.090 s**,
+  i.e. 1.13 s of the 1.22 s is group recovery, which no start-skip can touch.  Its required literal
+  (`: level=`) is present in every line, so the absence filter never fires.
+* `w1_literal`'s ASCII half already had the ffre1 literal-prefix search; 0.010 s of its 0.040 s is the
+  21 554 match objects.  Its mixed half is non-ASCII, where `str.find` maps a character offset to a byte
+  offset by walking from 0, so calling it per match makes the half **slower** (0.072 s), and its scan is
+  only ~0.005 s of the 0.040 s anyway.
 
-| workload | before (s) | after (s) | digest |
-|---|---|---|---|
-| `w1_literal` | 0.100 | 0.099 | unchanged |
-| `w2_alt` | 0.091 | 0.108 | unchanged |
-| `w5_logline` | 1.220 | 1.252 | unchanged |
+### Verdict
 
-**Result: the target was not met, so this is not landed as a speedup.**  What the numbers say:
-
-* `w1_literal`: the literal-prefix search was already there (ffre1); the remaining cost is `t.find` over
-  20 MB of `error` (already memmem) plus the Pike VM for the non-ASCII `café` half.  No gain.
-* `w2_alt` (`error|warn|fatal` with `re.I`): the first-byte set is 6 bytes (e/E/w/W/f/F).  Searching it
-  with one `find` per byte was measured **slower** (0.091 s -> 0.110 s) than the DFA's byte-class walk,
-  because 6 memmem calls over each ~187-byte gap cost more than walking the same gap once, so the set
-  path is capped at 2 bytes and this pattern keeps the class walk.
-* `w5_logline`: `LINE.match(line)` is mode 0 (anchored at 0), so there is no start to skip and no
-  prefilter applies.  Its cost is the anchored Pike VM that recovers the five groups, not scanning.
-
-A required-literal prefilter cannot be used to skip *starts* for a literal that is not at the start of
-the match -- a match starting before the literal's first occurrence is still the leftmost one -- so the
-only safe uses are the prefix search (already present) and the absence filter (added here, exercised by
-`AIL_CURRENT/test_ail_re_prefilter.py`).
-
-### Tests
-
-`AIL_CURRENT/test_ail_re_prefilter.py` (registered as `tests.d/test_ail_re_prefilter.txt`):
-
-* 40 hand-written patterns x 40 subjects: every CPython match contains the required literal, starts
-  with the literal prefix and starts on a byte of the first-byte set; the `re.I` (ASCII), optional-part,
-  `^`/`\b`/`$`, lookaround and empty-match cases are in the table.
-* 2000 seeded random patterns from the supported grammar x 20 subjects: the same property (it is what
-  makes skipping safe), plus 60-pattern generated programs compared byte-for-byte with CPython 3.12 on
-  `search` / `findall` / `split` / `sub`.
+0 of 3 workloads reach 1.2x; the task's rule for that case is "stop and report; do not land".  The
+`relib.py` changes, the `test_ail_re_prefilter` module and its `tests.d` entry were removed; the 8
+workload digests and the `re` engine are unchanged from ffre1.

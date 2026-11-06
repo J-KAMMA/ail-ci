@@ -34,7 +34,6 @@ _PROG_LIMIT = 30000
 _DFA_MAX_STATES = 256
 _DFA_MAX_CELLS = 4096
 _DFA_MAX_QUICK = 1600
-_PREFILTER_MAX = 2
 _MAXGROUPS = 99
 _ASCII_LETTERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
@@ -415,90 +414,6 @@ def _nullable(node):
     raise AssertionError(kind)
 
 
-def _fixed_text(node):
-    """The exact text this node matches, when it matches exactly one string of literal ASCII characters;
-    otherwise None.  Used to find a run of adjacent fixed characters inside a sequence."""
-    kind = node[0]
-    if kind == 'char':
-        return chr(node[1]) if node[1] < 128 else None
-    if kind == 'seq':
-        parts = [_fixed_text(part) for part in node[1]]
-        return None if any(p is None for p in parts) else ''.join(parts)
-    if kind == 'group':
-        return _fixed_text(node[2])
-    if kind == 'ncgroup':
-        return _fixed_text(node[1])
-    if kind == 'rep' and node[3] == node[2] and node[2] >= 1:
-        text = _fixed_text(node[1])
-        return None if text is None else text * node[2]
-    return None
-
-
-def _required_one(node, flags):
-    """A string that every match of this node contains, or None.
-
-    Rules, each with its proof:
-    * `char c` / a run of them: the match consumes exactly those characters (ASCII only: a non-ASCII
-      character is left out because the packed table and `find` index them the same way either way, but a
-      single code point is too weak to pay for a search).  Under IGNORECASE a letter may appear in any
-      case, so a candidate that contains an ASCII letter is dropped.
-    * `seq`: the match consumes every part, so what any one part requires is required by the whole; the
-      longest such candidate wins.  Adjacent fixed parts also form one longer candidate.
-    * `alt`: no single string is forced by the branches in general, so None (see _required_any).
-    * `rep` with lo >= 1: the body is consumed at least once, so the body's requirement holds.
-    * `group` / `ncgroup`: the body runs.
-    * `assert` / `look` / `any` / `set`: nothing.
-    """
-    kind = node[0]
-    if kind in ('group',):
-        return _required_one(node[2], flags)
-    if kind == 'ncgroup':
-        return _required_one(node[1], flags)
-    if kind == 'rep':
-        return _required_one(node[1], flags) if node[2] >= 1 else None
-    if kind == 'seq':
-        best = ''
-        run = []
-        parts = node[1]
-        for n, part in enumerate(parts):
-            text = _fixed_text(part)
-            if text is None:
-                if run:
-                    best = _longer(best, ''.join(run), flags)
-                    run = []
-                best = _longer(best, _required_one(part, flags), flags)
-            else:
-                run.append(text)
-        if run:
-            best = _longer(best, ''.join(run), flags)
-        return best or None
-    return None
-
-
-def _longer(best, text, flags):
-    """The longer of two candidates, after the IGNORECASE / length rule; '' when `text` is not usable."""
-    if not text or len(text) < 2 or (flags & I and any(ch in _ASCII_LETTERS for ch in text)):
-        return best
-    return text if len(text) > len(best) else best
-
-
-def _required_any(node, flags):
-    """Strings such that every match of this node contains at least one of them: for an alternative the
-    union over its branches (a match is in one branch, and that branch forces one of its own), and
-    everywhere else the single candidate _required_one finds."""
-    one = _required_one(node, flags)
-    if one is not None:
-        return [one]
-    if node[0] == 'alt':
-        out = []
-        for branch in node[1]:
-            for text in _required_any(branch, flags):
-                if text not in out:
-                    out.append(text)
-        return out
-    return []
-
-
 def _mandatory_groups(node):
     """The capturing groups that take part in EVERY successful match of this pattern.
 
@@ -583,7 +498,6 @@ class Program:
             flags |= A              # a bytes pattern is ASCII-only: \w \d \s and case folding
         parser = _Parser(pattern, flags, is_bytes)
         tree = parser.parse()
-        self.tree = tree
         self.is_bytes = is_bytes
         self.flags = parser.flags
         self.pattern = pattern
@@ -959,12 +873,7 @@ class Program:
 
     def literal_prefix(self):
         """The ASCII characters every match starts with (consecutive CHAR instructions at the start of the
-        program, groups opened on the way allowed); '' when there is none or the pattern is a bytes one.
-
-        Proof: a match is a walk of the program from pc 0; the first instructions are the SAVE of group 0
-        and then CHAR ops that no SPLIT can bypass before them, so every match consumes exactly these
-        characters first, in this order.  (An IGNORECASE letter is emitted as a CLASS, not a CHAR, so the
-        prefix is case-sensitive and `find` is the right search for it.)"""
+        program, groups opened on the way allowed); '' when there is none or the pattern is a bytes one."""
         if self.is_bytes:
             return ''
         pc = 0
@@ -975,44 +884,6 @@ class Program:
             chars.append(chr(self.xs[pc]))
             pc += 1
         return ''.join(chars)
-
-    def first_byte_set(self):
-        """The ASCII byte values a match can start with, or None when skipping with them is not possible
-        or not worth it: a match that can start with a non-ASCII character, a pattern that can match the
-        empty string (an empty match starts at every position, so no start can be skipped), or more than
-        _PREFILTER_MAX distinct starters.  The measured cost of one `find` per starter (see
-        lab/regex/RESULTS.md) is why the limit is small: at three or more starters the byte-class walk of
-        the DFA is cheaper than one memchr per starter over the same gap.
-
-        Proof: first_set() reads every assertion as true, so it is a superset of the bytes a match really
-        starts with; skipping to a byte outside the superset can therefore never skip a match start."""
-        empty, nonascii, table = self.first_set()
-        if self.is_bytes or empty or nonascii:
-            return None
-        bs = [c for c in range(128) if table[c]]
-        if not bs or len(bs) > _PREFILTER_MAX:
-            return None
-        return bs
-
-    def prefilter(self):
-        """('lit', text) or ('set', bytes) for the generated _ail_re_pre, or None: the cheapest safe way to
-        skip starts that cannot match.  A literal prefix is preferred: one memmem search lands on the only
-        position a match can begin at.  Otherwise a small first-byte set is searched with one memchr per
-        byte and the smallest hit wins, which is the first position a match can start at."""
-        if self.is_bytes:
-            return None
-        text = self.literal_prefix()
-        if text:
-            return ('lit', text)
-        bs = self.first_byte_set()
-        if bs is not None:
-            return ('set', bs)
-        return None
-
-    def required_literal(self):
-        """A string that every match contains, or None.  Used as a filter, never as a start position: a
-        match may begin before its required literal, so only its ABSENCE proves that there is no match."""
-        return _required_one(self.tree, self.flags)
 
     # -- packing ------------------------------------------------------------------------------
     def pack(self, pid):
@@ -1042,7 +913,7 @@ class Program:
         for _neg, table, _flat in self.classes:
             out += list(table)
         out += starts + items
-        out[16] = 1 if self.prefilter() else 0
+        out[16] = 1 if self.literal_prefix() else 0
         out[13] = len(out)
         out += first
         dfa = self.build_dfa()
@@ -1605,8 +1476,6 @@ def _ail_re_find(vm: _ail_re_Vm, p: list[int], sb: bytes, cps: list[int], asc: i
 
 def _ail_re_do(p: list[int], s: str, mode: int) -> _ail_re_Match | None:
     @PREP@
-    if mode == 2 and not _ail_re_need(p[2], s):  #R
-        return None  #R
     if mode == 2 and p[16] != 0:  #P
         if _ail_re_pre(p[2], s, 0) < 0:  #P
             return None  #P
@@ -1640,8 +1509,6 @@ def _ail_re_do(p: list[int], s: str, mode: int) -> _ail_re_Match | None:
 
 def _ail_re_test(p: list[int], s: str, mode: int) -> bool:
     @PREP@
-    if mode == 2 and not _ail_re_need(p[2], s):  #R
-        return False  #R
     if mode == 2 and p[16] != 0:  #P
         if _ail_re_pre(p[2], s, 0) < 0:  #P
             return False  #P
@@ -1669,8 +1536,6 @@ def _ail_re_findall(p: list[int], s: str) -> list[str]:
     out: list[str] = []
     pos = 0
     mustadv = 0
-    if not _ail_re_need(p[2], t):  #R
-        return out  #R
     while pos <= n:
         if p[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
@@ -1707,8 +1572,6 @@ def _ail_re_finditer(p: list[int], s: str) -> list[_ail_re_Match]:
     out: list[_ail_re_Match] = []
     pos = 0
     mustadv = 0
-    if not _ail_re_need(p[2], t):  #R
-        return out  #R
     while pos <= n:
         if p[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
@@ -1746,8 +1609,6 @@ def _ail_re_split(p: list[int], s: str, maxsplit: int) -> list[str]:
     last = 0
     mustadv = 0
     cnt = 0
-    if not _ail_re_need(p[2], t):  #R
-        pos = n + 1  #R
     while pos <= n:
         if maxsplit != 0 and cnt >= maxsplit:
             break
@@ -1790,8 +1651,6 @@ def _ail_re_sublit(p: list[int], s: str, repl: str, count: int) -> str:
     last = 0
     mustadv = 0
     cnt = 0
-    if not _ail_re_need(p[2], t):  #R
-        pos = n + 1  #R
     while pos <= n:
         if count != 0 and cnt >= count:
             break
@@ -1863,8 +1722,6 @@ def _ail_re_sub%(k)d(s: str, count: int) -> str:
     last = 0
     mustadv = 0
     cnt = 0
-    if not _ail_re_need(%(pid)d, t):  #R
-        pos = n + 1  #R
     while pos <= n:
         if count != 0 and cnt >= count:
             break
@@ -1961,7 +1818,7 @@ def _bytes_api(api):
                    if not b.startswith('def _ail_re_escape') and not b.startswith('def _ail_re_cps'))
     api = (api.replace('    @PREP@\n', _PREP_BYTES).replace('    @TEXT@\n', _TEXT_BYTES)
            .replace('    @WK@\n', _WK.replace('@P@', 'p')))
-    api = _drop_marked(_drop_marked(_drop_marked(_drop_l(api, False), '  #P', False), '  #R', False), '  #S', False)
+    api = _drop_marked(_drop_marked(_drop_l(api, False), '  #P', False), '  #S', False)
     api = regex.sub(r'\b(_ail_re_(?:Match|do|test|findall|finditer|split|plain|sublit))\b', r'\1B', api)
     api = api.replace('s: str', 's: bytes').replace('repl: str', 'repl: bytes').replace('list[str]', 'list[bytes]')
     api = api.replace('def groupn(self, name: str) -> str', 'def groupn(self, name: str) -> bytes')
@@ -2027,9 +1884,8 @@ class Library:
             text = _SUB_TEMPLATE % {'k': k, 'table': table, 'pid': index, 'parts': '\n'.join(lines) or '        pass',
                                     'prep': prep, 'wk': _WK.replace('@P@', table), 'needg': needg,
                                     'text': _TEXT_BYTES if program.is_bytes else _TEXT_STR.replace('@P@', table)}
-            text = _drop_marked(_drop_marked(_drop_marked(text, '  #P', program.prefilter() is not None),
-                                             '  #R', not program.is_bytes and program.required_literal() is not None),
-                                '  #S', not program.is_bytes)
+            text = _drop_marked(_drop_marked(text, '  #P', bool(program.literal_prefix())), '  #S',
+                                not program.is_bytes)
             if not program.is_bytes:
                 text = _dual_cut(text)
             if program.is_bytes:
@@ -2187,41 +2043,18 @@ def %(name)s(s: %(kind)s, repl, count: int) -> %(kind)s:
         shared, flavor, api = _blocks()
         api = api.replace('@NAMED@', '\n'.join(named))
         have_l = self.uses_escape or any(not p.is_bytes for p in self.programs)
-        pre = [(index, program.prefilter()) for index, program in enumerate(self.programs)
-               if not program.is_bytes and program.prefilter() is not None]
-        needs = [(index, program.required_literal()) for index, program in enumerate(self.programs)
-                 if not program.is_bytes and program.required_literal() is not None]
+        prefixes = [(index, program.literal_prefix()) for index, program in enumerate(self.programs)
+                    if program.literal_prefix()]
         parts = [_drop_l(shared, have_l), _y_flavor(flavor)]
         if have_l:
-            if pre:
+            if prefixes:
                 lines = ['def _ail_re_pre(pid: int, t: str, s: int) -> int:']
-                for index, (kind, value) in pre:
-                    lines.append('    if pid == %d:' % index)
-                    if kind == 'lit':
-                        lines.append('        return t.find(%r, s)' % value)
-                        continue
-                    # one memchr (str.find of a one-character string) per possible first byte, the
-                    # smallest hit wins: that is the first position a match can start at
-                    later = False
-                    for c in value:
-                        name = 'b' if later else 'a'
-                        lines.append('        %s = t.find(%r, s)' % (name, chr(c)))
-                        if later:
-                            lines.append('        if %s >= 0 and (a < 0 or %s < a):' % (name, name))
-                            lines.append('            a = %s' % name)
-                        later = True
-                    lines.append('        return a')
+                for index, prefix in prefixes:
+                    lines += ['    if pid == %d:' % index, '        return t.find(%r, s)' % prefix]
                 lines.append('    return s')
                 parts.append('\n'.join(lines))
-            if needs:
-                lines = ['def _ail_re_need(pid: int, t: str) -> bool:']
-                for index, literal in needs:
-                    lines += ['    if pid == %d:' % index, '        return t.find(%r) >= 0' % literal]
-                lines.append('    return True')
-                parts.append('\n'.join(lines))
             parts.append(flavor)
-            parts.append(_dual_cut(_drop_marked(_drop_marked(_drop_marked(_drop_l(_str_api(api), True),
-                                                                        '  #P', bool(pre)), '  #R', bool(needs)),
+            parts.append(_dual_cut(_drop_marked(_drop_marked(_drop_l(_str_api(api), True), '  #P', bool(prefixes)),
                                                 '  #S', True)))
         if any(p.is_bytes for p in self.programs):
             parts.append(_bytes_api(api))
