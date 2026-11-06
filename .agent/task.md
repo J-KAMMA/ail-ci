@@ -1,3 +1,58 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+**What the change really does:** it adds a census script (`lab/proof/census.py`), its JSON/results and `docs/design/SAFETY_PROOF.md`; it imports the existing analyses and measures them. No compiler source is touched (verified: the diff is only the two DEVLOGs, the design doc, `lab/proof/*`). The measured ownership/bounds/reach numbers re-derive from `census.json`; the race section does not.
+
+**Claims checked**
+
+| claim | verdict |
+|---|---|
+| no compiler source touched; C unchanged | verified (`git diff --name-only work..HEAD`; no compiler file) |
+| 3255 records; reach 907/1703/645 partitions exactly | verified (recomputed from `census.json`; per-corpus sums 363/769/2123) |
+| blocker counts 645/252/145/106/77/59/49/47/20/14 | verified (recomputed with the script's `rank` rules; matches `census.json`) |
+| why-boxed table (Decimal 198, bool 188, dunder 214, other 273) | verified (recomputed `boxed_reasons()`; equals JSON; sums 1703) |
+| `self.h0`; `tally_lang/typed.py:37` bounds blocker | verified (line 13 `G.__init__` has `self.h0 = h0`; line 37 `peekop`, 2 index-negative sites) |
+| `--limit 3` prints 40 programs, 31 functions (29/2) | verified (re-run produced 40/31/29/2) |
+| probes own1/bnd1/race1/race2/bce1 pass both builds | verified (reran all five: CPython/g/d identical, exit 0) |
+| "races: 104 = 79 safe + 25 refused, 6 named, 5 worker functions, D3 0" | **false as a corpus fact** — script output only; see defect 1 |
+| "DEVLOG corrected … 219-line design" | **false** for the root `DEVLOG.md` — see defect 2 |
+| test_ail_safetynet | verified (1 module, 0 failed, 164 s) |
+
+**Defects**
+
+1. **The race census misses every `threading.Thread` target, so the refused-access numbers and the P7/P8 plan are wrong.** `_region_targets` (`census.py:544-559`) matches `Thread` only as a bare `Name`; 10 of the 14 refused-shape programs write `threading.Thread(target=...)`. Reproducer:
+   ```
+   python3 - <<'EOF'
+   import ast,sys; sys.path[:0]=['lab/proof','AIL_CURRENT/python/pkg-v12','AIL_CURRENT']
+   import census; census._setup()
+   src=open('lab/race/racy/shared_append.py').read()
+   print([f.name for f in census._region_targets(ast.parse(src))])
+   r=census.race_info(src, ast.parse(src)); print(r['refused'], r['refused_regions'])
+   EOF
+   ```
+   Expected: `['work']`, then a nonzero refused count (the `xs.append` is D3). Actual: `[]`, `0 0`.
+   Aggregate (same `_shared_accesses` applied to the 11 missed worker functions in `shared_append, global_add, float_cell, max_cell, mod_two, neighbour, same_list_twice, shared_dict, write_slot0, resize_while_index`): refused **79** not 25, distinct **158** not 104, D1 **11** not 2, D3 **2** not 0, D4 **6** not 4. So RESULTS' "5 worker functions … only there can accesses be classified" describes a script gap, and `SAFETY_PROOF.md` P7 ("D3 never fires: 0 accesses, 0 regions") and P8 ("D1: 2 accesses in 2 programs") are false.
+
+2. **The root `DEVLOG.md` at HEAD still publishes the numbers the previous review rejected.** Actual: "306 programs, 4958 functions", "1552 of 4958 (31.3%)", "1703 boxed and 1703 are in refused programs", "79 of 123 shared accesses … 25 refused by a named rule", "(216 lines)". Expected (HEAD `census.json`, `AIL_CURRENT/DEVLOG.md`): 3255 functions, 907 typed (27.9%), 645 refused, 104 accesses, 6 named, 219 lines. The report's "DEVLOG corrected" is true only of the `AIL_CURRENT` file.
+
+3. Minor: RESULTS' bounds note says the 1875 reason records exceed the 1059 kept IR sites because "a site can be reported once per build attempt". Actually 792 of the 1875 records are attached to functions with no IR record (legacy/no-index) and only 1083 are in IR functions; the reason totals (1072/282/276/245) therefore mix sites from failed IR attempts of legacy functions. The function-level blocker counts are unaffected.
+
+Pre-existing: none (no compiler change). Unverified: full `census.py --jobs 2` regeneration (I recomputed from the committed JSON and ran `--limit 3`); `test_ail_bce/rc_borrow/files/corpus_findings3` (not edited, and not required); correctness of the recorded `pyc.last_fallback_reason` strings. Speed: N/A, no compiler/hot-code change.
+
+VERDICT: FIX
+1. `census.py:_region_targets` ignores `threading.Thread(...)`; recompute with the attribute form: refused accesses 79 (D1 11, D3 2, D4 6, unknown 60), distinct 158 — correct RESULTS, README and `SAFETY_PROOF.md` P7/P8.
+2. Correct or remove the stale top-level `DEVLOG.md` entry (4958/1552/1703/123/25 named/216).
+3. Correct RESULTS' bounds-reason note: 792/1875 records belong to functions with no IR record, not to per-build duplicate reporting.
+[commandcode stop=end_turn turns=38 out_tokens=42835]
+
+
+--- ORIGINAL TASK ---
 Lane: proof
 
 # proof1: design + census for "Rust's safety without writing lifetimes": how much of real Python code can AIL prove memory-safe and race-free at compile time
