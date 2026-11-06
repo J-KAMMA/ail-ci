@@ -14,6 +14,32 @@ negative/slice/sort-key, list[int] fields with append and in-place updates, fold
 int32, and par/fold/cumulative-sum keys all match CPython. Running the added census tool with
 `--census --only ticket_audit` reproduces its committed `3.41 MiB` row; the committed `NARROW.json`
 still carries the `emulate` block (median RSS 415,468 -> 379,132 KiB, cases and perf output identical).
+## 2026-11-06 -- rbffrepro1: the accepted reproducible-build measurement, re-applied (job-rbffrepro1-11061746)
+
+Re-applied the accepted `ffrepro1` change (`1f24e143b1`..`job-ffrepro1-11061516`). Its four files are
+new on this tree and applied with no content conflict: `tools/repro_check.py` (measure-only tool: each
+corpus program built in `/tmp/a/x/...` with `TMPDIR=/tmp/a/tmp`, `SOURCE_DATE_EPOCH=1000000000` and in
+`/tmp/b/longer/path/x/...` with the other TMPDIR/epoch, C and executable compared by sha256, FFI
+`entry.c` compared too), `AIL_CURRENT/test_ail_repro.py` with its `tests.d/test_ail_repro.txt`
+registration (five-program two-setup ratchet plus four checker unit tests), and `lab/repro/RESULTS.md`
+(the whole-corpus measurement). The branch's `.github/workflows/agent-worker.yml` hunk deleted the
+`agent` input of the worker; that is infrastructure outside this change and this tree's newer workflow
+is kept as is, so both sides' fixes stand (here: neither side had a repro fix). No compiler file is
+touched: the 392-identical headline cannot move.
+
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran; it
+pins `test_ail_repro.py` and `tests.d/test_ail_repro.txt` and `--check` exits 0. The corpus here is
+**477** programs, not the document's 467, because 10 `lab/stdlib/chunk` programs arrived after that
+measurement; the recorded numbers stay the integ baseline and were not re-measured.
+
+Tests on the final commit: `test_ail_repro` 6/6 (22.4 s), `test_ail_safetynet` 5/5 (173.4 s),
+`test_ail_files` 18 (1 skip, 45.0 s, `ulimit -v 1500000`), `test_ail_corpus_findings3` 2/2 (139.5 s,
+same limit). Tool probes on this tree reproduce the document: `--filter linecache` 10 programs, 1
+identical / 9 different, all class `absolute path` at C line 27672; `--filter examples/ffi` 5
+different, class `absolute path hash`, 13 not built, executable differences only in `.symtab`.
+Program probes p1-p3 (`__file__` basename/slices/`os.path` through an argument, a list item, an
+attribute and a dict value; long path literals; the empty string boundary) match CPython on both
+builds.
 
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
