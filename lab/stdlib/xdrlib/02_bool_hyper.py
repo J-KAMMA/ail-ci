@@ -1,0 +1,21 @@
+import xdrlib
+
+p = xdrlib.Packer()
+p.pack_bool(True)
+p.pack_bool(False)
+p.pack_bool(7)
+p.pack_hyper(1)
+p.pack_hyper(-2)
+p.pack_uhyper(4294967296)
+p.pack_hyper(-9223372036854775808)
+print(p.get_buffer().hex())
+
+u = xdrlib.Unpacker(p.get_buffer())
+print(u.unpack_bool())
+print(u.unpack_bool())
+print(u.unpack_bool())
+print(u.unpack_hyper())
+print(u.unpack_hyper())
+print(u.unpack_uhyper())
+print(u.unpack_hyper())
+u.done()
