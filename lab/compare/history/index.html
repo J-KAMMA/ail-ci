@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>compare-lab history</title>
+<style>
+body{font:14px/1.45 system-ui,sans-serif;margin:24px;color:#1f2328;background:#fff}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 8px}
+p{margin:6px 0}.muted{color:#57606a}.legend span{margin-right:18px}
+.swatch{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px}
+svg{max-width:100%;height:auto;margin:8px 0;border:1px solid #d0d7de;border-radius:6px}
+.grid{stroke:#eaeef2;stroke-width:1}.baseline{stroke:#8c959f;stroke-width:1;stroke-dasharray:4 3}
+.axis-line{stroke:#8c959f;stroke-width:1}.axis{font-size:11px;fill:#57606a}
+.tick{font-size:11px;fill:#57606a}.chart-title{font-size:13px;font-weight:600;fill:#1f2328}
+.empty{font-size:13px;fill:#57606a;text-anchor:middle}
+table{border-collapse:collapse;margin:8px 0 20px;font-size:12px}
+th,td{border:1px solid #d0d7de;padding:3px 6px;text-align:right}
+th{background:#f6f8fa}td:first-child,th:first-child,td:nth-child(2),th:nth-child(2){text-align:left}
+</style>
+</head>
+<body>
+<h1>compare-lab history</h1>
+<p class="muted">1 run(s), 2026-11-02 (4f1245b) to 2026-11-02 (4f1245b). Each point is the geomean over the tasks present in that run; a change of the task list breaks the line.</p>
+<p class="legend"><span><i class="swatch" style="background:#1f6feb"></i>AIL</span><span><i class="swatch" style="background:#d1242f"></i>AIL (py src)</span></p>
+<h2>Wall time (ms)</h2>
+<svg viewBox="0 0 880 250" role="img" aria-label="Wall time vs Rust over time">
+<text x="78" y="20" class="chart-title">Wall time / Rust (geomean per run, lower is better)</text>
+<line x1="78" y1="192.0" x2="856" y2="192.0" class="grid"/>
+<text x="70" y="196.0" class="axis" text-anchor="end">1.00</text>
+<line x1="78" y1="152.5" x2="856" y2="152.5" class="grid"/>
+<text x="70" y="156.5" class="axis" text-anchor="end">1.00</text>
+<line x1="78" y1="113.0" x2="856" y2="113.0" class="grid"/>
+<text x="70" y="117.0" class="axis" text-anchor="end">1.00</text>
+<line x1="78" y1="73.5" x2="856" y2="73.5" class="grid"/>
+<text x="70" y="77.5" class="axis" text-anchor="end">1.00</text>
+<line x1="78" y1="34.0" x2="856" y2="34.0" class="grid"/>
+<text x="70" y="38.0" class="axis" text-anchor="end">1.00</text>
+<line x1="78" y1="181.1" x2="856" y2="181.1" class="baseline"/>
+<text x="860" y="185.1" class="axis" text-anchor="start">1.00</text>
+<line x1="78" y1="34" x2="78" y2="192" class="axis-line"/>
+<line x1="78" y1="192" x2="856" y2="192" class="axis-line"/>
+<polyline points="467.0,44.9" fill="none" stroke="#1f6feb" stroke-width="2"/>
+<circle cx="467.0" cy="44.9" r="3.2" fill="#1f6feb"><title>AIL: 1.002x, run 41393616319, 4f1245b, 2026-11-02</title></circle>
+<text x="467.0" y="210" class="tick" text-anchor="end" transform="rotate(-30 467.0 210)">4f1245b</text>
+</svg>
+<p class="muted">AIL geomean 1.00x over 1 run(s)</p>
+<h2>Peak RSS (KiB)</h2>
+<svg viewBox="0 0 880 250" role="img" aria-label="Peak RSS vs Rust over time">
+<text x="78" y="20" class="chart-title">Peak RSS / Rust (geomean per run, lower is better)</text>
+<line x1="78" y1="192.0" x2="856" y2="192.0" class="grid"/>
+<text x="70" y="196.0" class="axis" text-anchor="end">0.98</text>
+<line x1="78" y1="152.5" x2="856" y2="152.5" class="grid"/>
+<text x="70" y="156.5" class="axis" text-anchor="end">1.05</text>
+<line x1="78" y1="113.0" x2="856" y2="113.0" class="grid"/>
+<text x="70" y="117.0" class="axis" text-anchor="end">1.12</text>
+<line x1="78" y1="73.5" x2="856" y2="73.5" class="grid"/>
+<text x="70" y="77.5" class="axis" text-anchor="end">1.19</text>
+<line x1="78" y1="34.0" x2="856" y2="34.0" class="grid"/>
+<text x="70" y="38.0" class="axis" text-anchor="end">1.25</text>
+<line x1="78" y1="181.1" x2="856" y2="181.1" class="baseline"/>
+<text x="860" y="185.1" class="axis" text-anchor="start">1.00</text>
+<line x1="78" y1="34" x2="78" y2="192" class="axis-line"/>
+<line x1="78" y1="192" x2="856" y2="192" class="axis-line"/>
+<polyline points="467.0,44.9" fill="none" stroke="#1f6feb" stroke-width="2"/>
+<circle cx="467.0" cy="44.9" r="3.2" fill="#1f6feb"><title>AIL: 1.235x, run 41393616319, 4f1245b, 2026-11-02</title></circle>
+<text x="467.0" y="210" class="tick" text-anchor="end" transform="rotate(-30 467.0 210)">4f1245b</text>
+</svg>
+<p class="muted">AIL geomean 1.23x over 1 run(s)</p>
+<h2>Binary size (bytes)</h2>
+<svg viewBox="0 0 880 250" role="img" aria-label="Binary size vs Rust over time">
+<text x="78" y="20" class="chart-title">Binary size / Rust (geomean per run, lower is better)</text>
+<text x="467" y="113" class="empty">no values to plot</text>
+</svg>
+<p class="muted">no geomean available</p>
+<h2>Compile time (s)</h2>
+<svg viewBox="0 0 880 250" role="img" aria-label="Compile time vs Rust over time">
+<text x="78" y="20" class="chart-title">Compile time / Rust (geomean per run, lower is better)</text>
+<text x="467" y="113" class="empty">no values to plot</text>
+</svg>
+<p class="muted">no geomean available</p>
+<h2>Build disk (KiB)</h2>
+<svg viewBox="0 0 880 250" role="img" aria-label="Build disk vs Rust over time">
+<text x="78" y="20" class="chart-title">Build disk / Rust (geomean per run, lower is better)</text>
+<text x="467" y="113" class="empty">no values to plot</text>
+</svg>
+<p class="muted">no geomean available</p>
+<h2>Instructions (count)</h2>
+<svg viewBox="0 0 880 250" role="img" aria-label="Instructions vs Rust over time">
+<text x="78" y="20" class="chart-title">Instructions / Rust (geomean per run, lower is better)</text>
+<text x="467" y="113" class="empty">no values to plot</text>
+</svg>
+<p class="muted">no geomean available</p>
+<h2>Latest run: 4f1245b, 2026-11-02 (41393616319)</h2>
+<h3>AIL vs Rust</h3>
+<table>
+<thead><tr><th>task</th><th>commit</th><th>Wall time (ms)</th><th>Peak RSS (KiB)</th><th>Binary size (bytes)</th><th>Compile time (s)</th><th>Build disk (KiB)</th><th>Instructions (count)</th></tr></thead>
+<tbody>
+<tr><td>berth_sim</td><td>4f1245b</td><td>2472 / 1470 (1.68x)</td><td>239.2 MiB / 187.7 MiB (1.27x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>chain_relax</td><td>4f1245b</td><td>1256 / 1037 (1.21x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>echo_pack</td><td>4f1245b</td><td>934 / 1895 (0.49x)</td><td>346.1 MiB / 344.6 MiB (1.00x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>ledger_bin</td><td>4f1245b</td><td>840 / 2833 (0.30x)</td><td>337.0 MiB / 273.8 MiB (1.23x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>rail_transfer</td><td>4f1245b</td><td>862 / 48 (17.96x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>scar_life</td><td>4f1245b</td><td>16696 / 29534 (0.57x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>tally_lang</td><td>4f1245b</td><td>1548 / 1640 (0.94x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>term_rank</td><td>4f1245b</td><td>2260 / 2925 (0.77x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>ticket_audit</td><td>4f1245b</td><td>1887 / 4248 (0.44x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>tree_fold</td><td>4f1245b</td><td>1866 / 1783 (1.05x)</td><td>464.6 MiB / 314.9 MiB (1.48x)</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+</tbody>
+</table>
+<h3>AIL (py src) vs Rust</h3>
+<table>
+<thead><tr><th>task</th><th>commit</th><th>Wall time (ms)</th><th>Peak RSS (KiB)</th><th>Binary size (bytes)</th><th>Compile time (s)</th><th>Build disk (KiB)</th><th>Instructions (count)</th></tr></thead>
+<tbody>
+<tr><td>berth_sim</td><td>4f1245b</td><td>- / 1470</td><td>- / 187.7 MiB</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>chain_relax</td><td>4f1245b</td><td>- / 1037</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>echo_pack</td><td>4f1245b</td><td>- / 1895</td><td>- / 344.6 MiB</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>ledger_bin</td><td>4f1245b</td><td>- / 2833</td><td>- / 273.8 MiB</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>rail_transfer</td><td>4f1245b</td><td>- / 48</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>scar_life</td><td>4f1245b</td><td>- / 29534</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>tally_lang</td><td>4f1245b</td><td>- / 1640</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>term_rank</td><td>4f1245b</td><td>- / 2925</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>ticket_audit</td><td>4f1245b</td><td>- / 4248</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+<tr><td>tree_fold</td><td>4f1245b</td><td>- / 1783</td><td>- / 314.9 MiB</td><td>- / -</td><td>- / -</td><td>- / -</td><td>- / -</td></tr>
+</tbody>
+</table>
+<h2>Runs</h2>
+<table><thead><tr><th>run</th><th>date</th><th>commit</th><th>tasks</th></tr></thead><tbody>
+<tr><td>41393616319</td><td>2026-11-02</td><td>4f1245b</td><td>10</td></tr>
+</tbody>
+</table>
+</body>
+</html>
