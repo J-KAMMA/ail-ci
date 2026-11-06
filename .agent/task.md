@@ -1,3 +1,42 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I've reproduced the cross-builds, the census, the tests and the tables. Here's what I found.
+
+**What the change really does:** adds only `lab/robo/` (a measurement lab: 3 programs, a Cortex-M harness, `run.py`, `results.json`, `README`/`RESULTS`, 7 census programs) plus a DEVLOG entry. No compiler, runtime, workflow or test file is touched.
+
+**Probes** (`bash ~/tools/cmp.sh … $PWD`, both builds, all "same stdout"):
+`/tmp/rprobes/empty_alias.py` (empty list mean, negative values, dict value, list alias mutated, append during iteration); `/tmp/rprobes/widths.py` (float via argument/list item/attribute/dict value, `-0.0`, negative floor/true division, round ties); `/tmp/rprobes/plain.py` (no feature: generated C byte-identical between `/tmp/base` and HEAD).
+
+**Independent reproduction:** built `pid/ringbuf/kin2` with AIL and gcc at the README's flags:
+- all 12 cells (native, aarch64+qemu, armhf+qemu, Cortex-M3+qemu) reproduce the table's text/data/bss **exactly** and match CPython;
+- without `-u _printf_float` kin2 prints `0.0` (the documented silent-float failure);
+- `pid/program.c` = 3232 lines, 0 refs to pthread/mmap/socket/clock_gettime/nanosleep;
+- `pid` via `compile -o exe` is also text 12846; `STRICT_DECL_FLAGS` is exactly the three `-Werror=` flags claimed.
+
+**Claims:** 1 mostly verified (0 mismatches for cross/RAM/jitter) but "regenerated every table" is **false** (census row, below); 2 verified; 3 verified; 4 verified; 5 verified; 12/12 verified; tests `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` → 3 modules, 0 failed; manifest `--check` rc 0; diff scope verified. Jitter numbers not re-run (JSON↔table↔prose cross-checked only).
+
+**Defects**
+1. `RESULTS.md` §2 parallel-loop row is stale and wrong. Reproduce: `AIL … compile lab/robo/progs/census/census_par.py --debug-dir`, then the `run.py` `bm_build` command. Expected (actual build **and** `results.json`): `program.c:516:38: error: 'CLOCK_MONOTONIC' undeclared (first use in this function)`. Table says: `program.c:473:5: error: unknown type name 'pthread_mutex_t'`. The diagnosis is wrong too: newlib's `pthread.h` does declare `pthread_mutex_t` (473 compiles); what is missing is `PTHREAD_MUTEX_INITIALIZER` (568) plus the clock helper — i.e. the pool's clock, not the type. This row did not change when `results.json` was regenerated (`git show 3308c12:lab/robo/results.json` census.par still has the old 473 error).
+2. `RESULTS.md` §3 prose: "C and AIL … worst miss 271-406 us" contradicts the data. `results.json` run maxima: C 198–312 µs, AIL 208–**635.8** µs (alloc run). Even the table's median-of-maxima column spans 247–405. The 635.8 µs AIL outlier is understated.
+
+**Pre-existing:** none — no compiler/runtime code changed; base and HEAD emit identical C.
+
+**Speed:** not applicable (no hot path changed).
+
+VERDICT: FIX
+1. Regenerate/fix the `RESULTS.md` §2 `ail.par_range` row to the measured first error (`program.c:516:38: 'CLOCK_MONOTONIC' undeclared`) and correct "what is missing" (initializers/clock, not `pthread_mutex_t`).
+2. Correct the §3 "worst miss 271-406 us" sentence to the true observed maxima (C ≤312 µs, AIL ≤636 µs).
+[commandcode stop=end_turn turns=28 out_tokens=23241]
+
+
+--- ORIGINAL TASK ---
 Lane: robo
 
 # robo1: robotics/embedded probe: can AIL's generated C run on ARM and on a microcontroller, and how steady is a 1 kHz control loop
