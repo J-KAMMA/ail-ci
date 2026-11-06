@@ -12,6 +12,7 @@ initialised to 0, as the legacy path declares its locals; constants are printed 
 The emitter reports the runtime pieces it used (`parts`, `need`, `floor`) so the driver can
 merge them into the program's runtime selection.
 """
+import ast
 import math
 import os
 
@@ -172,6 +173,71 @@ def _c_literal(text):
 AIL_IR_EXC, AIL_IR_RET = 1, 2         # statuses of an outlined try body (cruntime.IREXC)
 
 
+_PARSED = {}
+_NO_CODE = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Pass, ast.Global,
+            ast.Nonlocal, ast.Try)
+
+
+def _parsed(path):
+    if path not in _PARSED:
+        try:
+            with open(path, encoding='utf-8') as f:
+                _PARSED[path] = ast.parse(f.read())
+        except (OSError, SyntaxError, ValueError):
+            _PARSED[path] = None
+    return _PARSED[path]
+
+
+def _instrs(region):
+    for ins in region.instrs:
+        yield ins
+        for inner in ins.regions:
+            for nested in _instrs(inner):
+                yield nested
+
+
+def _orphan_lines(path, body):
+    """--debug: the lines of the executable statements (not def/class/import/pass/global/try headers or a
+    docstring) of the function BODY, that no instruction left in it that writes C (not a `const`, which is
+    folded into its uses) came from. (I.SRC also holds the loads and stores the passes removed.)"""
+    have = set()
+    for ins in _instrs(body):
+        entry = I.SRC.get(id(ins))
+        if entry is not None and entry[0] is ins and entry[1][0] == path and ins.op not in ('local.alloc', 'const'):
+            have.add(entry[1][1])
+    if not have:
+        return set()
+    tree = _parsed(path)
+    if tree is None:
+        return set()
+    first, last = min(have), max(have)
+    scope = tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno <= first <= node.end_lineno \
+                and (scope is tree or node.lineno > scope.lineno):
+            scope = node
+    if scope is not tree and last > scope.end_lineno:
+        return set()                       # not one function's instructions: add nothing
+    lines, todo = set(), list(scope.body)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.ExceptHandler):
+            todo.extend(node.body)
+            continue
+        doc = isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+        if not isinstance(node, _NO_CODE) and not doc:
+            lines.add(node.lineno)
+        for field in ('body', 'orelse', 'finalbody', 'handlers'):
+            todo.extend(getattr(node, field, None) or ())
+        for case in getattr(node, 'cases', None) or ():
+            todo.extend(case.body)
+    if scope is tree:
+        lines = {n for n in lines if first <= n <= last}   # the module's statements around its instructions
+    return lines - have
+
+
 class _Cx(object):
     """One C function being written: the IR function itself ('top'), or the body of a `try`
     ('body'), which is outlined (design section 11: the setjmp that catches a longjmp from a
@@ -215,6 +281,7 @@ class Emitter(TextEmitter):
         self.names = {}
         self.defs = E.defs_of(fn)
         self.count = 0
+        self.orphans = None                # --debug: statement lines no instruction came from (_orphan_lines)
         self.bce_site = 0
         self.parts = set()
         self.need = set()
@@ -352,11 +419,32 @@ class Emitter(TextEmitter):
         entry = I.SRC.get(id(ins))
         if entry is None or entry[1] == self.cx.where:
             return
+        if ins.op == 'yield' and self.cx.where is not None:
+            # a region's closing yield (the copies of a branch's results, its `}`) stays on the line that ran
+            # last: tagged with the `if`'s line, gdb's `next` went back to the `if` after each branch
+            return
+        if self.cx.debug_lines:
+            self.orphan_sites(depth, self.cx.where, entry[1])
         self.cx.where = entry[1]
         if ins.op not in ('reraise', 'yield'):
             # (a region's closing yield and a bare re-raise are not statements that begin to run: the site
             # stays that of the last statement that did, e.g. the raise a `finally` lets through)
             self.line(depth, 'AIL_DBG_SITE("%s:%d");' % entry[1])
+
+    def orphan_sites(self, depth, before, after):
+        """--debug: a statement lowered to no instruction (`acc = 0` folded into a loop's carried value, `n = 42`
+        propagated into a call) has no C line, so no entry in the DWARF line table: gdb could not break on it and
+        `next` skipped it. Before the first instruction of AFTER, a site store for each such line of this
+        function between BEFORE and AFTER (or before AFTER at the function's start), in source order."""
+        if self.orphans is None:
+            self.orphans = _orphan_lines(after[0], self.fn.body)
+        if not self.orphans:
+            return
+        low = before[1] if before is not None and before[0] == after[0] else 0
+        for line in [n for n in sorted(self.orphans) if low < n < after[1]]:
+            self.orphans.discard(line)
+            self.cx.lines.append('#line %d "%s"' % (line, after[0]))
+            self.cx.lines.append('    ' * depth + 'AIL_DBG_SITE("%s:%d");' % (after[0], line))
 
     def use(self, *helpers):
         self.need.update(helpers)
@@ -480,6 +568,11 @@ class Emitter(TextEmitter):
         close = '' if self.cx.where is None or not self.cx.debug_lines else '#line %d "%s"\n' % (self.cx.where[1], self.cx.where[0])
         text = '%s {\n%s\n%s}\n' % (ir_sig, '\n'.join(self.cx.lines), close)
         out = ''.join(self.aux) + text
+        wrapped = self.byval or self.is_pending or self.depth
+        if wrapped and self.cx.where is not None and self.cx.debug_lines:
+            # --debug: the wrappers below are not on the user's lines (they went on counting from the last
+            # `#line`: gdb put a breakpoint on a user line inside a list-returning function's wrapper)
+            out += '#line 1 "<ail-generated>"\n'
         if self.byval:
             kind = 'flist' if fn.attrs['ret_list'] == 'flist' else 'list'
             self.parts.update(('FLIST', 'FLISTRET') if kind == 'flist' else ('LIST', 'LISTRET'))
@@ -502,7 +595,7 @@ class Emitter(TextEmitter):
             else:
                 body = '    %s;\n    return;\n' % call
             out += '%s {\n%s}\n' % (sig, body)
-        if self.cx.where is not None and self.cx.debug_lines:
+        if self.cx.where is not None and self.cx.debug_lines and not wrapped:
             # --debug: what follows (runtime helpers, the next function) is not on the user's last line
             out += '#line 1 "<ail-generated>"\n'
         return sig, out
