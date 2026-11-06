@@ -78,6 +78,22 @@ class DocsSiteTests(unittest.TestCase):
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
             self.assertIn("0 broken links", checked.stdout)
 
+    def test_links_outside_docs_are_published(self):
+        with tempfile.TemporaryDirectory(prefix="ail-docs-outside-") as tmp:
+            docs = Path(tmp) / "docs"
+            docs.mkdir()
+            (docs / "a.md").write_text("[outside](../outside.md)\n", encoding="utf-8")
+            (Path(tmp) / "outside.md").write_text("# Outside\n", encoding="utf-8")
+            out = Path(tmp) / "site"
+            done = run(SITE, docs, "-o", out)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertNotIn("unconverted", done.stderr.lower())
+            html = (out / "a.html").read_text(encoding="utf-8")
+            self.assertNotIn('href="../outside.md"', html)
+            checked = run(LINKS, out)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            self.assertIn("0 broken links", checked.stdout)
+
     def test_broken_link_is_named(self):
         with tempfile.TemporaryDirectory(prefix="ail-docs-broken-") as tmp:
             docs = Path(tmp) / "docs"

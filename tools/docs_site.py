@@ -18,6 +18,11 @@ suffix), a generated ``index.html`` when ``docs/index.md`` does not exist, a sid
 built from the file tree, ``search-index.json``, and an inline search/theme script plus
 inline CSS with light and dark palettes.  No font or script is loaded from another host.
 
+A relative link that points outside ``docs/`` but inside the repository is published
+under ``_repo/`` with the same relative path (Markdown as HTML, other files verbatim) and
+rewritten to that copy, so the built site never links outside its own root.  A link that
+leaves the repository is reported as an unconverted construct and exits 1.
+
 Publishing with GitHub Pages (owner approval and a workflow edit are required, so this
 tool does not do it): commit the generated ``site/`` directory on a ``gh-pages`` branch
 (or an ``/docs`` directory chosen in the repository settings), then in the repository
@@ -195,7 +200,7 @@ def first_heading(path):
 
 class InlineRenderer:
     def __init__(self, rewrite_href=None, warn=None):
-        self.rewrite_href = rewrite_href or (lambda value: value)
+        self.rewrite_href = rewrite_href or (lambda value, line=None: value)
         self.warn = warn or (lambda message: None)
 
     def _destination(self, line, start):
@@ -225,7 +230,7 @@ class InlineRenderer:
             index += 1
         return line[begin:index], index
 
-    def _replace_links(self, text, token, resolve, render_label):
+    def _replace_links(self, text, token, resolve, render_label, line=None):
         pieces = []
         position = 0
         while True:
@@ -258,7 +263,8 @@ class InlineRenderer:
                 position = match.end()
                 continue
             label = match.group(1)
-            href = self.rewrite_href(target)
+            href = self.rewrite_href(
+                target, (line + text.count("\n", 0, match.start())) if line else None)
             if image:
                 value = '<img src="%s" alt="%s" loading="lazy">' % (
                     escape(href, True), escape(plain_inline(resolve(label)), True))
@@ -304,7 +310,7 @@ class InlineRenderer:
                       r"<em>\1</em>", text, flags=re.S)
         return text
 
-    def render(self, text):
+    def render(self, text, line=None):
         tokens = []
 
         def token(value):
@@ -326,11 +332,11 @@ class InlineRenderer:
         def render_label(value):
             protected = re.sub(r"\x00(\d+)\x00",
                                lambda m: "\x01%s\x01" % m.group(1), value)
-            rendered = self.render(protected)
+            rendered = self.render(protected, line)
             return re.sub(r"\x01(\d+)\x01",
                           lambda m: tokens[int(m.group(1))], rendered)
 
-        text = self._replace_links(text, token, resolve_tokens, render_label)
+        text = self._replace_links(text, token, resolve_tokens, render_label, line)
         text = AUTOLINK_RE.sub(
             lambda m: token('<a href="%s">%s</a>' % (escape(m.group(1), True),
                                                       escape(m.group(1)))), text)
@@ -350,9 +356,13 @@ class InlineRenderer:
 
 
 class PageRenderer:
-    def __init__(self, src, docs_root, html_rel, warnings, code_blocks):
+    def __init__(self, src, docs_root, html_rel, warnings, code_blocks,
+                 repo_root=None, external=None, external_mode=False):
         self.src = src
         self.docs_root = docs_root
+        self.repo_root = repo_root or docs_root.parent
+        self.external = external if external is not None else {}
+        self.external_mode = external_mode
         self.html_rel = html_rel
         self.warnings = warnings
         self.code_blocks = code_blocks
@@ -361,9 +371,13 @@ class PageRenderer:
         self.inline = InlineRenderer(self.rewrite_href)
 
     def warn(self, line, message):
-        self.warnings.append("%s:%d: %s" % (self.src.relative_to(self.docs_root), line, message))
+        try:
+            name = self.src.relative_to(self.docs_root)
+        except ValueError:
+            name = self.src.relative_to(self.repo_root)
+        self.warnings.append("%s:%d: %s" % (name, line, message))
 
-    def rewrite_href(self, destination):
+    def rewrite_href(self, destination, line=None):
         if not destination or destination.startswith(("#", "//")) or SCHEME_RE.match(destination):
             return destination
         path_part = destination
@@ -377,19 +391,44 @@ class PageRenderer:
         if path_part.startswith("/"):
             return destination
         target = Path(os.path.normpath(str(self.src.parent / unquote(path_part))))
+        if not target.exists():
+            self.warn(line or 0, "relative link %r: target %s does not exist"
+                      % (destination, target))
+            return destination
         if target.is_dir():
-            index = target / "index.md"
-            if index.is_file():
-                target = index
-            else:
-                return destination
+            for name in ("index.md", "README.md"):
+                index = target / name
+                if index.is_file():
+                    target = index
+                    break
+        start = posixpath.dirname(self.html_rel.as_posix()) or "."
         try:
             rel = target.relative_to(self.docs_root)
+            external = False
         except ValueError:
+            try:
+                rel = target.relative_to(self.repo_root)
+            except ValueError:
+                self.warn(line or 0,
+                          "relative link %r leaves the repository; not published"
+                          % destination)
+                return destination
+            external = True
+        if external:
+            if target.is_dir():
+                published = Path("_repo") / rel / "index.html"
+                self.external[rel] = "dir"
+            elif target.suffix.lower() in (".md", ".markdown"):
+                published = Path("_repo") / rel.with_suffix(".html")
+                self.external[rel] = "markdown"
+            else:
+                published = Path("_repo") / rel
+                self.external[rel] = "copy"
+            return posixpath.relpath(published.as_posix(), start) + suffix
+        if target.is_dir():
             return destination
         if target.suffix.lower() in (".md", ".markdown"):
             rel = rel.with_suffix(".html")
-        start = posixpath.dirname(self.html_rel.as_posix()) or "."
         return posixpath.relpath(rel.as_posix(), start) + suffix
 
     def _warn_inline(self, text, line):
@@ -398,6 +437,8 @@ class PageRenderer:
             self.warn(line, "reference-style link is not supported")
         elif REF_DEF_RE.match(visible):
             self.warn(line, "reference link definition is not supported")
+        if self.external_mode:
+            return
         for match in RAW_TAG_RE.finditer(visible):
             if not re.match(r"<(?:https?|mailto):", match.group(0), re.I):
                 self.warn(line, "raw HTML %r is not converted" % match.group(0))
@@ -454,7 +495,7 @@ class PageRenderer:
                 self.headings.append((level, plain_inline(text).strip(), slug))
                 self._warn_inline(text, number)
                 out.append('<h%d id="%s">%s</h%d>' % (level, escape(slug, True),
-                                                       self.inline.render(text), level))
+                                                       self.inline.render(text, number), level))
                 index += 1
                 continue
             if (index + 1 < total and line.strip() and not line.startswith("    ")
@@ -465,7 +506,7 @@ class PageRenderer:
                 self.headings.append((level, plain_inline(text).strip(), slug))
                 self._warn_inline(text, number)
                 out.append('<h%d id="%s">%s</h%d>' % (level, escape(slug, True),
-                                                       self.inline.render(text), level))
+                                                       self.inline.render(text, number), level))
                 index += 2
                 continue
             if HR_RE.match(line):
@@ -507,7 +548,7 @@ class PageRenderer:
                     body.pop()
                 out.append("<pre><code>%s</code></pre>" % escape("\n".join(body)))
                 continue
-            if line.lstrip().startswith("<"):
+            if line.lstrip().startswith("<") and not self.external_mode:
                 self.warn(number, "raw HTML block is not converted")
             start = index
             chunk = []
@@ -521,7 +562,7 @@ class PageRenderer:
                 index += 1
             text = "\n".join(chunk).strip()
             self._warn_inline(text, number)
-            out.append("<p>%s</p>" % self.inline.render(text))
+            out.append("<p>%s</p>" % self.inline.render(text, number))
         return "\n".join(out)
 
     def _fence(self, lines, index, found):
@@ -668,7 +709,7 @@ class PageRenderer:
 
         def cell_html(tag, text, align):
             style = ' style="text-align:%s"' % align if align else ""
-            return "<%s%s>%s</%s>" % (tag, style, self.inline.render(text), tag)
+            return "<%s%s>%s</%s>" % (tag, style, self.inline.render(text, number), tag)
 
         head = "<tr>%s</tr>" % "".join(
             cell_html("th", text, aligns[pos] if pos < len(aligns) else "")
@@ -908,7 +949,9 @@ def build(docs_root, out_root):
                                     entry.html_rel.as_posix()))
     warnings = []
     code_blocks = [0]
+    external = {}
     search = []
+    repo_root = docs_root.parent
     if out_root.exists():
         shutil.rmtree(out_root)
     out_root.mkdir(parents=True)
@@ -926,7 +969,7 @@ def build(docs_root, out_root):
             title = entry.title
         else:
             renderer = PageRenderer(entry.src, docs_root, entry.html_rel,
-                                    warnings, code_blocks)
+                                    warnings, code_blocks, repo_root, external)
             body = renderer.render(entry.src.read_text(encoding="utf-8", errors="replace"))
             title = entry.title
         start = posixpath.dirname(entry.html_rel.as_posix()) or "."
@@ -944,6 +987,58 @@ def build(docs_root, out_root):
                          (renderer.headings if entry.src is not None else [])],
             "text": _plain_text(body),
         })
+    external_blocks = [0]
+    published = set()
+    while external:
+        rel = next(iter(external))
+        kind = external.pop(rel)
+        if rel in published:
+            continue
+        published.add(rel)
+        source = repo_root / rel
+        if kind == "copy":
+            target = out_root / "_repo" / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            continue
+        if kind == "dir":
+            html_rel = Path("_repo") / rel / "index.html"
+            target = out_root / html_rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            start = posixpath.dirname(html_rel.as_posix()) or "."
+            items = []
+            for child in sorted(source.iterdir(), key=lambda path: path.name):
+                child_rel = rel / child.name
+                if child.is_dir():
+                    items.append("<li>%s/</li>" % escape(child.name))
+                elif child.suffix.lower() in (".md", ".markdown"):
+                    external[child_rel] = "markdown"
+                    child_pub = Path("_repo") / child_rel.with_suffix(".html")
+                    href = posixpath.relpath(child_pub.as_posix(), start)
+                    items.append('<li><a href="%s">%s</a></li>'
+                                 % (escape(href, True), escape(child.name)))
+                else:
+                    items.append("<li>%s</li>" % escape(child.name))
+            body = ("<h1>Directory: %s</h1>\n<ul>\n%s\n</ul>"
+                    % (escape(rel.as_posix()), "\n".join(items)))
+            title = "Directory: %s" % rel.as_posix()
+        else:
+            html_rel = Path("_repo") / rel.with_suffix(".html")
+            target = out_root / html_rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            renderer = PageRenderer(source, docs_root, html_rel, warnings,
+                                    external_blocks, repo_root, external,
+                                    external_mode=True)
+            body = renderer.render(source.read_text(encoding="utf-8", errors="replace"))
+            title = first_heading(source) or rel.stem.replace("_", " ").title()
+        start = posixpath.dirname(html_rel.as_posix()) or "."
+        root_prefix = posixpath.relpath(".", start)
+        if root_prefix == ".":
+            root_prefix = ""
+        else:
+            root_prefix += "/"
+        sidebar = _sidebar(entries, html_rel)
+        target.write_text(_page_html(title, sidebar, body, root_prefix), encoding="utf-8")
     for src in sorted(path for path in docs_root.rglob("*") if path.is_file()):
         if src.suffix.lower() in (".md", ".markdown"):
             continue

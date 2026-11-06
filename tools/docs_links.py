@@ -14,8 +14,9 @@ protocol-relative URLs, and links that leave the checked tree are not followed; 
 the repository, because it exists on disk.
 
 When the input is a built site (HTML files), the same rules apply to ``href`` and
-``src`` attributes.  Links that leave the site root are ignored: they point at repository
-files that a static server does not publish.
+``src`` attributes.  A relative link that leaves the site root is reported as broken:
+a static server publishes only the site directory, so the target would be a 404.  The
+generator republishes such targets under ``_repo/`` so the published site stays closed.
 
 Exit status is 0 when nothing is broken, 1 when a link or anchor is broken (one
 ``file:line:`` line per break), and 2 for a usage error.
@@ -316,11 +317,13 @@ def check_html(root):
             if path_part.startswith("/"):
                 continue
             target_path = (path.parent / path_part).resolve() if path_part else path
+            line = text.count("\n", 0, match.start()) + 1
             try:
                 target_path.relative_to(root)
             except ValueError:
+                breaks.append("%s:%d: broken link %r: target leaves the site root"
+                              % (_display(path, root), line, target))
                 continue
-            line = text.count("\n", 0, match.start()) + 1
             if not target_path.exists():
                 breaks.append("%s:%d: broken link %r: target does not exist"
                               % (_display(path, root), line, target))
