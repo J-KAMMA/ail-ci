@@ -1,0 +1,6 @@
+[package]
+name = "raiser"
+version = "0.1.0"
+edition = "2021"
+
+# No dependencies: build.rs runs AIL_CURRENT/ail_embed.py and links libraiser.a.
