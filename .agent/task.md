@@ -1,3 +1,52 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: vibe1 benchmark
+
+**What the change really does.** Adds only `lab/vibe/` (harness `run.py`, `AIL_FOR_AI.md`, `README.md`, `results.json`, `vibe.yml`, two captured programs) and a DEVLOG entry. No compiler/runtime change. The harness is a real, working driver; the recorded rows are genuine (I replayed both `berth_sim` Python programs against `gen.py` + `reference.py`: 52/52 case runs match CPython). But step 1 is incomplete and steps 2–3 were not done at all.
+
+**Claims vs observation**
+- DEVLOG/README: harness, brief, proposed workflow — verified (files exist; `task_list()` returns the 11 tasks; `AIL_FOR_AI.md` is 30 lines; `--syntax python`/`--strict` flags valid).
+- README: "`results.json` ... per-language summary" — true but nearly empty; "`RESULTS.md` — the report" — **false**, file absent.
+- DEVLOG: implies the ten tasks + csv_rollup are written in three languages — **false**; only Python, one task.
+- `AIL_FOR_AI.md` refusal claims — partly **false** (defect 3).
+- Worker report: empty ("no final text"); nothing to verify.
+
+**Probes** (`bash ~/tools/cmp.sh`, HEAD; base is identical since no compiler change)
+| probe | result |
+|---|---|
+| `dictview.py` (`x = d.items()`) | default build **compiles, exit 0, same stdout**; only `--strict` refuses |
+| `property_dec.py` (`@property`) | **compiles typed, exit 0, same stdout**; `--strict` builds |
+| `deco.py` (custom decorator) | refused at compile time (as documented) |
+| `stdoutbuf.py` (`sys.stdin/stdout.buffer`) | matches CPython |
+| `overflow_arg.py` | inconclusive: `cmp.sh` passes no argv |
+
+**Tests.** `test_ail_safetynet` on HEAD: `ok [1/1]`, 0 failed. No test modules added/edited. Manifest `--check` passes.
+
+**Defects**
+1. **Benchmark not run.** `results.json` has 2 rows (`berth_sim`/python/seeds 0,1) out of 11 tasks × 3 languages × 3 (or 2) seeds. Expected: Python, Rust and AIL columns, per-task rows, AIL path counts and the error table. Actual: Python only, one task. Consequently the AIL error table (`ail_errors`) is empty and no silent-wrong/loud-stop comparison exists.
+2. **`lab/vibe/RESULTS.md` is missing** although `README.md` lists it and sub-step 3 requires the per-language table, per-task detail and a 5-line verdict. Expected: file with the table; actual: absent (dangling README link).
+3. **`AIL_FOR_AI.md` misstates compile-time refusals** (this brief is fed to the model, so wrong guidance is part of the deliverable). Line "a dict view kept in a name (`x = d.items()`) ... refuses at compile time, exit status 2 or 3": probe `dictview.py` builds and runs, exit 0, same output as CPython (general-path fallback). Line "decorators other than @staticmethod and @lru_cache/@cache": probe `property_dec.py` (`@property`) builds typed and prints `3`, matching CPython. Expected per doc: named refusal, exit 2/3. Actual: successful build.
+4. **Report is empty**, so the mandatory self-check/probes and the "say so if the budget ran short" disclosure are absent, while DEVLOG/README describe a full benchmark.
+
+**Pre-existing:** none (no compiler change; probes that do not use new features are unaffected).
+**Unverified:** AIL/Rust harness paths never exercised (no such rows); overflow via `argv` (cmp.sh has no argv support); `test_ail_files`/`test_ail_corpus_findings3` not run (reviewer scope is added modules + safetynet).
+
+VERDICT: FIX
+1. Full run missing: only `berth_sim`/python/seeds {0,1} in `results.json`; expected 11 tasks × 3 languages (all columns populated) — actual Python only, no AIL/Rust rows, empty `ail_errors`.
+2. `lab/vibe/RESULTS.md` required by sub-step 3 and linked from `README.md`; expected the per-language table + per-task detail + 5-line verdict; actual: file does not exist.
+3. `AIL_FOR_AI.md` "what AIL refuses" is false for `x = d.items()` (probe `dictview.py`: expected named refusal exit 2/3, actual build succeeds exit 0, same stdout) and for `@property` (probe `property_dec.py`: expected refusal, actual typed build, prints `3`).
+4. Worker report has no text; the mandatory probe self-check and any budget/shortfall disclosure are missing.
+[commandcode stop=end_turn turns=33 out_tokens=13236]
+
+
+--- ORIGINAL TASK ---
 Lane: vibe
 
 # vibe1: the vibe-coding benchmark: the same AI writes the same tasks in Python, Rust and AIL; compare correct-program rate, fix rounds and silent-wrong count
