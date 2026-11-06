@@ -1,12 +1,31 @@
+## 2026-11-06 -- vibe1 review 2 fix: exact refusals in the brief, honest budget flag (job-vibe1-11070147)
+
+Review-2 fix; no compiler change.
+
+- `AIL_FOR_AI.md` claimed generators/`with` all work and that every decorator outside
+  @staticmethod/@property/@lru_cache/@cache is refused. Probes show a `with` (user context
+  manager) around a `yield` is refused by name (`not in the subset: \`with\` around a \`yield\``),
+  while `@classmethod` builds and prints the same as CPython. The brief now names the with/yield
+  refusal and scopes the decorator rule to a `def` (staticmethod/classmethod/property on a method,
+  lru_cache/cache on a top-level function; a class decorator falls back to the general path).
+- `run.py` `pump()` checked the deadline before the combo queue, so a run that finished every
+  combo with `--minutes` set still printed `[budget] stop scheduling` and stored
+  `stopped_early: true`. It now pulls from the queue first and stops only when work remains.
+- Probes re-run (`withyield` user-CM refused; `classmethod_dec`/`property_dec` build and match;
+  `deco.py`/`bigint.py` refused by name). A stubbed pump probe completed its only combo after the
+  deadline and recorded `stopped_early: false`.
+
 ## 2026-11-06 -- vibe1 review fix: correct brief, real budget, first run (job-vibe1-11070147)
 
 Review fix for vibe1; no compiler change.
 
 - `AIL_FOR_AI.md` claimed `x = d.items()` and `@property` refuse at compile time. Probes
   (`dictview.py`, `property_dec.py`, `.agent/cmp.sh`) show both build and match CPython; only
-  `--strict` refuses the dict view. The brief now names the three real refusals (an int64
-  constant, a decorator other than @staticmethod/@property/@lru_cache/@cache, multiple
-  inheritance) and says the default build falls back to the general path for everything else.
+  `--strict` refuses the dict view. The brief now names the real refusals (an int64
+  constant, a decorator on a def other than @staticmethod/@classmethod/@property on a method
+  or @lru_cache/@cache on a top-level function, multiple inheritance, `with` around a `yield`;
+  see the review-2 entry above) and says the default build falls back to the general path
+  for everything else.
 - `run.py` submitted every combo to the pool up front, so `--minutes` stopped nothing. It now
   keeps only `--jobs` attempts in flight, stops scheduling at the deadline, and runs seed-outer
   so a cut run still has complete columns. `results.json` meta is derived from the rows present

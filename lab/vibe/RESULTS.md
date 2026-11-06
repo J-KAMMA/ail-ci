@@ -105,10 +105,12 @@ or was refused by name.
 |---|---|---|
 | `dictview.py` `x = d.items()` | default build | builds, same stdout; `--strict` refuses by name |
 | `property_dec.py` `@property` | typed build | builds (also `--strict`), prints `3`, same stdout |
+| `classmethod_dec.py` `@classmethod` | both builds | builds, same stdout (the brief used to call it refused) |
 | `deco.py` custom decorator | both builds | refused by name: "only @staticmethod ... @cache are supported" |
 | `multi.py` multiple inheritance | both builds | refused by name: "multiple inheritance in class C" |
 | `lru.py`, `static.py` | both builds | build, same stdout |
-| `gen.py`, `withyield.py`, `withyield2.py` | default build | build, same stdout; `--strict` refuses generators by name |
+| `gen.py`, `withyield.py`, `withyield2.py` (`with open` + `yield`) | default build | build, same stdout; `--strict` refuses generators by name |
+| user context manager around a `yield` | both builds | refused by name: "`with` around a `yield` ..." (the brief now says so) |
 | `bigint.py` `1 << 200`, `overflow.py` int64 max + 1 | compile | refused by name, exit 2 |
 | `overflow_argv.py` runtime `MAX + 1` | run | `OverflowError`, exit 1 |
 | `sock.py`, `csvt.py` | both builds | build, same stdout (general path) |

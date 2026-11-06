@@ -739,13 +739,13 @@ def main():
         def pump():
             # Only keep `jobs` attempts in flight, so the wall-clock budget really stops new work.
             while not stopped[0] and len(pending) < jobs:
-                if deadline and time.time() > deadline:
-                    print('[budget] stop scheduling after %d attempts' % done, flush=True)
-                    stopped[0] = True
-                    return
                 try:
                     combo = next(queue)
                 except StopIteration:
+                    return
+                if deadline and time.time() > deadline:
+                    print('[budget] stop scheduling after %d attempts' % done, flush=True)
+                    stopped[0] = True
                     return
                 pending[pool.submit(one, combo)] = combo
 

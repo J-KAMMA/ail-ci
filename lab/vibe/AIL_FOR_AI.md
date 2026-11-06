@@ -1,6 +1,7 @@
 AIL reads Python 3 syntax and compiles one .py file to a native binary.
 Write normal Python 3.12: functions, classes, lists, dicts, sets, tuples, strings,
-bytes, loops, comprehensions, exceptions, generators and `with` all work. Type
+bytes, loops, comprehensions, exceptions, generators and `with` all work, with one
+exception: a `with` block around a `yield` inside a generator is refused. Type
 annotations are optional. The binary is run as `prog [args...]`, so read `sys.argv`,
 stdin and write stdout the usual way.
 
@@ -14,8 +15,11 @@ Good to use:
 
 Refused at compile time, with a named message and exit status 2 or 3:
 - an integer literal or constant expression outside int64 (for example 1 << 200)
-- a decorator other than @staticmethod, @property, @lru_cache or @cache
+- a decorator on a def other than @staticmethod, @classmethod or @property (with its
+  matching @NAME.setter) on a method, or @lru_cache / @cache on a top-level function
+  (a decorator on a class falls back to the general path instead)
 - multiple inheritance
+- a `with` block around a `yield` inside a generator
 Most other constructs compile: when the typed path cannot take one, the default build
 falls back to a slower general path with the same output.
 
