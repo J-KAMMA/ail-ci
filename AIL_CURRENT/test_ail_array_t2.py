@@ -144,7 +144,7 @@ class PreludeBits(unittest.TestCase):
 
 
 REFUSED = [
-    ("f32", "import ail_array as ta\na = ta.zeros(3, ta.f32)\n", "stage T3"),
+    ("f16 zeros", "import ail_array as ta\na = ta.zeros(3, ta.f16)\n", "stage T3"),     # f32 is built since T3a
     ("f16", "import ail_array as ta\na = ta.array([1.0], ta.f16)\n", "stage T3"),
     ("int8", "import ail_array as ta\na = ta.zeros(3, ta.int8)\n", "stage T3"),
     ("int64", "import ail_array as ta\na = ta.zeros(3, ta.int64)\n", "has f64, f32, f16, int8, int32"),
@@ -163,7 +163,7 @@ REFUSED = [
     ("bitand", "import ail_array as ta\na = ta.zeros(3, ta.int32)\nb = a & a\n", "write instead"),
     ("shift", "import ail_array as ta\na = ta.zeros(3, ta.int32)\nb = a << 1\n", "write instead"),
     ("matmul", "import ail_array as ta\na = ta.zeros(3, ta.f64)\nb = a @ a\n", "ta.matmul"),
-    ("2-D int32", "import ail_array as ta\na = ta.zeros((2, 3), ta.int32)\n", "write instead"),
+    ("2-D f16", "import ail_array as ta\na = ta.zeros((2, 3), ta.f16)\n", "write instead"),    # 2-D int32: fdarr2
     ("3-D", "import ail_array as ta\na = ta.zeros((2, 3, 4), ta.f64)\n", "write instead"),
     ("2-D index", "import ail_array as ta\na = ta.zeros(3, ta.f64)\nb = a[1, 2]\n", "write instead"),
     ("shape", "import ail_array as ta\na = ta.zeros(3, ta.f64)\nb = a.shape\n", "len(a)"),
@@ -204,7 +204,7 @@ class Refusals(unittest.TestCase):
     @unittest.skipUnless(CC, "installed C compiler required")
     def test_cli_refusal_names_file_line_and_hint(self):
         with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "r.py").write_text("import ail_array as ta\n\ndef main():\n    a = ta.zeros(3, ta.f32)\n    print(a)\n\nmain()\n")
+            Path(tmp, "r.py").write_text("import ail_array as ta\n\ndef main():\n    a = ta.zeros(3, ta.f16)\n    print(a)\n\nmain()\n")
             done = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", "r.py", "-o", "r.out"],
                                   cwd=tmp, capture_output=True, text=True, timeout=300)
         self.assertNotEqual(done.returncode, 0)
