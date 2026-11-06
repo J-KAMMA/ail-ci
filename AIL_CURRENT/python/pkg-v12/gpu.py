@@ -471,13 +471,9 @@ class Builder:
         if isinstance(node, ast.BinOp):
             op = type(node.op)
             if op is ast.Pow and _half_exponent(node.right):
-                if not getattr(node, SQRT_REWRITE, False):
-                    raise self.fail(node, '`** 0.5` has no exact GPU form: CPython makes a negative base a complex '
-                                          'number, which the kernel cannot represent',
-                                    'write math.sqrt(x) when the operand is not negative, or drop the marker')
-                a = self.ex(node.left, frame)
-                self.num(node, a[1], 'the operand')
-                return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
+                raise self.fail(node, '`** 0.5` has no exact GPU form: CPython makes a negative base a complex '
+                                      'number, which the kernel cannot represent',
+                                'write math.sqrt(x) when the operand is not negative, or drop the marker')
             if op in _BAD_BIN:
                 raise self.fail(node, *_BAD_BIN[op])
             if op not in _OPS:
@@ -682,6 +678,12 @@ class Builder:
                 return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
             raise self.fail(node, 'math.%s has no exact GPU form (CPython uses the C library\'s result)' % fn,
                             "drop '# ail: gpu' (the loop runs on the CPU) or move the math.%s call out of the loop" % fn)
+        if n == GPU_SQRT:                             # stage G5: the helper math.sqrt was lowered to
+            if len(node.args) != 1:
+                raise self.fail(node, 'math.sqrt() takes one argument')
+            a = self.ex(node.args[0], frame)
+            self.num(node, a[1], 'the argument')
+            return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
         if n in self.funcs:
             return self.inline(node, frame)
         args = node.args
@@ -813,20 +815,29 @@ def _half_exponent(node):
     return (isinstance(node, ast.Constant) and isinstance(node.value, float) and node.value == 0.5)
 
 
-SQRT_REWRITE = '_ail_sqrt_rewrite'   # marks the `** 0.5` that `math.sqrt` was lowered to (see _SqrtRewrite)
+GPU_SQRT = '_ail_gpu_sqrt'           # the typed helper math.sqrt is lowered to (see _SqrtRewrite)
+GPU_SQRT_SOURCE = '''def _ail_gpu_sqrt(x: float) -> float:
+    if x < 0.0:
+        raise ValueError("math domain error")
+    if x == 0.0:
+        return x
+    return x ** 0.5
+'''
 
 
 class _SqrtRewrite(ast.NodeTransformer):
-    """math.sqrt(x) -> (float(x) if float(x) == 0.0 else (1.0 / 0.0 if float(x) < 0.0 else float(x) ** 0.5)).
+    """math.sqrt(x) -> _ail_gpu_sqrt(float(x)), where `_ail_gpu_sqrt` is the typed helper of GPU_SQRT_SOURCE.
 
-    The typed path has no `math.sqrt` (it writes a square root as `x ** 0.5`, ail_fsqrt), so a marked loop that
-    calls it would fall to the general path, which never offloads (GPU.md 1.1).  This keeps the loop typed and
-    CPython-exact: the zero keeps its sign (-0.0 -> -0.0, as math.sqrt does), a positive value is the same
-    correctly rounded square root, NaN takes the last arm (both comparisons are false) and is the square root of
-    NaN as CPython's math.sqrt(NaN) is NaN, and a negative value is a loud ZeroDivisionError where CPython raises
-    ValueError (a value the program cannot compute either way; never a quiet nan).  The `** 0.5` it builds is
-    tagged so the kernel accepts this one spelling of a square root and still refuses a `** 0.5` written by hand,
-    whose negative case would be a complex number (see SQRT_REWRITE)."""
+    The typed path has no `math.sqrt` (and refuses a call to the surface's `_ail_math_sqrt` helper), so a marked loop
+    that calls it would fall to the general path, which never offloads (GPU.md 1.1).  This keeps the loop typed and
+    CPython-exact: the helper returns the zero unchanged (-0.0 -> -0.0, as math.sqrt does), a positive value is the
+    same correctly rounded square root (`x ** 0.5` is ail_fsqrt on the typed path), NaN is the square root of NaN as
+    CPython's math.sqrt(NaN) is NaN, and a negative value raises CPython's `ValueError("math domain error")`, so a
+    caller's `except ValueError` still catches it.  The kernel builder lowers the same call to its sqrt op, whose flag
+    sends a negative operand to the CPU replay (and every other guarded case with it)."""
+
+    def __init__(self):
+        self.used = False
 
     @staticmethod
     def name_of(call):
@@ -845,14 +856,8 @@ class _SqrtRewrite(ast.NodeTransformer):
         def as_float():
             return ast.Call(func=ast.Name(id='float', ctx=ast.Load()), args=[x], keywords=[])
 
-        zero = ast.Constant(value=0.0)
-        is_zero = ast.Compare(left=as_float(), ops=[ast.Eq()], comparators=[zero])
-        negative = ast.Compare(left=as_float(), ops=[ast.Lt()], comparators=[ast.Constant(value=0.0)])
-        root = ast.BinOp(left=as_float(), op=ast.Pow(), right=ast.Constant(value=0.5))
-        root.__dict__[SQRT_REWRITE] = True
-        loud = ast.BinOp(left=ast.Constant(value=1.0), op=ast.Div(), right=ast.Constant(value=0.0))
-        inner = ast.IfExp(test=negative, body=loud, orelse=root)
-        out = ast.IfExp(test=is_zero, body=as_float(), orelse=inner)
+        out = ast.Call(func=ast.Name(id=GPU_SQRT, ctx=ast.Load()), args=[as_float()], keywords=[])
+        self.used = True
         return ast.copy_location(out, node)
 
 
@@ -1104,10 +1109,21 @@ def prepare(tree, text):
     tagged = [n for n in ast.walk(tree) if isinstance(n, ast.stmt) and getattr(n, '_ail_gpu', False)]
     if not tagged:
         return 0
-    rewriter = _SqrtRewrite()                # math.sqrt has no typed form: lower it to x ** 0.5 before pyfunc sees it
+    rewriter = _SqrtRewrite()                # math.sqrt has no typed form: lower it to a call gpu.py defines
     for s in tagged:
         rewriter.visit(s)
         ast.fix_missing_locations(s)
+    if rewriter.used and not any(isinstance(n, ast.FunctionDef) and n.name == GPU_SQRT
+                                 for n in tree.body):
+        # a plain typed function (the typed path refuses a call to the surface's `_ail_math_*` helpers):
+        # the kernel builder lowers this name to its sqrt op, and the C text raises CPython's ValueError
+        i = 0
+        while i < len(tree.body) and (isinstance(tree.body[i], (ast.Import, ast.ImportFrom))
+                                      or (i == 0 and isinstance(tree.body[i], ast.Expr)
+                                          and isinstance(tree.body[i].value, ast.Constant))):
+            i += 1
+        tree.body.insert(i, ast.parse(GPU_SQRT_SOURCE).body[0])
+        ast.fix_missing_locations(tree)
     # the surface adds a `_ail_math_sqrt` helper for the general path; with every call rewritten it is dead code that
     # would keep the whole program off the typed path (and so off the GPU), so drop it when nothing calls it any more
     if not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == '_ail_math_sqrt'

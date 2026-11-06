@@ -427,8 +427,8 @@ print(out[0] == out[0], out[1], math.copysign(1.0, out[2]), out[3], out[4], out[
 '''
 
     def test_sqrt_of_nan_inf_and_zero_matches_cpython(self):
-        """GPU.md 6.3: NaN and `+inf` take the `** 0.5` arm and replay on the CPU (never a quiet nan or an error); -0
-        keeps its sign; a subnormal argument also replays."""
+        """GPU.md 6.3: NaN and `+inf` take the helper's sqrt op and set the flag, so they replay on the CPU (never a
+        quiet nan or an error); -0 keeps its sign; a subnormal argument also replays."""
         src, exe, _ = self.build('sqrt_edges', self.SQRT_EDGES)
         py = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, text=True)
         self.assertEqual(py.returncode, 0, py.stderr)
@@ -437,9 +437,46 @@ print(out[0] == out[0], out[1], math.copysign(1.0, out[2]), out[3], out[4], out[
             out, rc, err = self.run_prog(exe, AIL_GPU=value)
             self.assertEqual((out, rc), (py.stdout, py.returncode), 'AIL_GPU=' + value + '\n' + err)
 
+    SQRT_NEGATIVE = '''
+import math
+
+
+def g(a: list[float]) -> list[float]:
+    r = [0.0] * len(a)
+    # ail: gpu
+    for i in range(len(a)):
+        r[i] = math.sqrt(a[i])
+    return r
+
+
+def main():
+    a = [0.0]
+    a[0] = -1.0
+    try:
+        r = g(a)
+        print('ok', r[0])
+    except ValueError:
+        print('caught ValueError')
+    except ZeroDivisionError:
+        print('caught ZeroDivisionError')
+
+
+main()
+'''
+
+    def test_sqrt_of_a_negative_raises_cpython_valueerror(self):
+        """A negative argument raises CPython's `ValueError("math domain error")` -- not the ZeroDivisionError a
+        `1.0 / 0.0` arm used to raise -- so a caller's `except ValueError` still catches it, on every path."""
+        src, exe, _ = self.build('sqrt_negative', self.SQRT_NEGATIVE)
+        py = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, text=True)
+        self.assertEqual(py.stdout, 'caught ValueError\n', py.stderr)
+        for value in ('0', 'emu', 'force'):
+            out, rc, err = self.run_prog(exe, AIL_GPU=value)
+            self.assertEqual((out, rc), (py.stdout, py.returncode), 'AIL_GPU=' + value + '\n' + err)
+
     def test_hand_written_pow_half_is_refused_by_name(self):
         """A `** 0.5` the user writes is refused: CPython makes a negative base a complex number, and the CPU replay
-        would print a quiet nan; only the `** 0.5` that `gpu.prepare` builds from `math.sqrt` is accepted."""
+        would print a quiet nan; `math.sqrt` is accepted because `gpu.prepare` lowers it to its own typed helper."""
         text = '''
 n = 4
 a = [0.0] * n
