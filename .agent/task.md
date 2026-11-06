@@ -7,38 +7,80 @@
 --- LAST REVIEW ---
 ## review 1
 [model commandcode/deepseek-v4.1-flash]
-**What the change really does:** adds `os.stat`/`os.lstat` (a new `ailf_stat_record` in `ailfile_core.h`, reached through `_ail_os_scandir` modes 2/3), `os.fspath` (identity for str/bytes), `os.scandir` lowered for `for`/`with`, and `os.path` normcase/expanduser/expandvars/getmtime/getatime/getctime/samefile/samestat. That matches the report, with one misstatement: the "dynamic `os.fspath` gap" is **not** in RESULTS.md (RESULTS only lists bytes paths, `fstat`, `list()`/`next()`).
+I have enough to judge. Time check: 04:21 (started 04:07), so I'll write the report now.
 
-**Probes** (`bash ~/tools/cmp.sh`, both builds unless noted), HEAD 12f6d3b:
-- p1_stat_types, p2_stat_edges — match (fields, mode classes, float times, `_ns`, empty path, ENOENT/ENOTDIR text, broken symlink, stat vs lstat).
-- p3_scandir_edges, p14_withmissing — match (names sorted, `entry.path`, is_dir/file/symlink, `entry.stat`, with-on-missing).
-- p4_fspath — match (literal int → fallback → CPython text; None).
-- p5_expanduser with `HOME=/home/runner`, `HOME=`, `HOME` unset — match except `~root`.
-- p6_expandvars (`$$`, `${}`, `$`, `${HOME`, `$1`, unset) — match.
-- p7_samefile/samestat/getsize/getmtime through a dict/list — match.
-- p8_bytes_paths — identical binary and runtime `TypeError` on base and HEAD (pre-existing).
-- p9_nofeature — C diff is only the inserted header functions (`ailf_put_stat_field`, `ailf_stat_record`, the scandir comment); no existing code changed, same exe size.
-- Census spot-check (fnmatch, filecmp, tempfile): before and after first reasons reproduce RESULTS.md exactly.
+## Review report — job fcos1 finish (HEAD `8dffbb4`, base `work` = `b7938f1`)
+
+**What the change really does:** makes `with os.scandir(p) as it:` close the scanner (new `_AilScandir.close` index reset + a try/finally wrap of the body), keeps the scanner marker alive after the `with`, and adds compile-time refusals for rebinding/consuming the scanner; adds a typed `_ail_fspath_str` identity helper and `expanduser("~user")` via `getpwnam` (`ailf_user_home`, `ailf_scandir` mode 4). This matches the report; the files touched are exactly the allowed compiler/runtime/RESULTS/manifest set, and no benchmark or example was edited.
+
+**Probes** (all in `/tmp/rprobes`, `bash ~/tools/cmp.sh … $PWD`, both builds, base in `/tmp/base`):
+- fspath: `r1–r6`, `r34`, `q4_*` — match (int via arg/list item/dict value/attribute → TypeError exit 1; bytes/str identity; bytes under a `str` annotation matches).
+- expanduser: `r10`, `r18`, `r26` (HOME unset), `q5_*` — match (`~root`→`/root`, `~nosuchuser` unchanged, HOME empty/trailing slash, ~runner). `q5_bytes` differs identically on base.
+- scandir close: `r15`, `q13_closed/partial/exit/nested_after`, `r11` (alias), `r22` (exception), `r23` (multi-item with), `r12` (buffer/list reuse), `r9` (delete during iteration), `r24` (`len` TypeError) — match.
+- no-feature C: `r13_nofeature`, `r27_withopen` — `program.c` **identical** to base.
+- regressions found: `f1–f4` below (all base-matching, HEAD-failing).
 
 **Defects**
-1. `p12_comp.py` — `[e.name for e in os.scandir("/tmp/rpdata/sub2")]`. CPython: `['x.txt']`, exit 0. AIL (d and g): no stdout, `TypeError: 'instance' object is not iterable`, exit 1. Base refused by name at compile time, so the change turned a loud refusal into a runtime crash. `list(os.scandir(...))` is the same path (RESULTS says "not built", but it is not refused).
-2. `p13_afterwith.py` — `for e in it:` after the `with os.scandir(...) as it:` block. CPython: `1` then `0`, exit 0. HEAD: prints `1`, then the same TypeError, exit 1. On 8e646dd the program printed `1`/`0`; the scope fix in 12f6d3b introduced this regression (the name is dropped from `scandir_names`, so the generic loop iterates the `_AilScandir` object).
-3. `p4d_fspath_int_uncaught.py` — `def f(x): return os.fspath(x); print(f(7))`. CPython: TypeError, exit 1. AIL default build (typed, `--strict` accepts, no fallback): `7`, exit 0. Disclosed in the report, but it is a silent wrong value; a refusal would be acceptable.
-4. `p5_expanduser.py` — `~root`. CPython `/root`, AIL `~root` (both builds). Disclosed; `~user` is never expanded.
 
-**Claims:** (1) with-scope fix — the leak is fixed but it caused defect 2; (2) fspath literal — verified, dynamic gap real; (3) expanduser HOME empty/unset/trailing slash — verified; (4) file scope — verified (`filelib_prelude.py` byte-identical to base, only `ailfile_core.h`); (5) 12/12 programs — test passes; 14/14 census — 3 spot-checked only; (6) test_ail_files 18 OK verified, safetynet fails under the 1.5 GB cap identically on base (pre-existing), corpus_findings3 not run; (7) manifest `--check` rc 0.
+1. **Chained assignment loses/keeps the wrong marker** — `f2_chainassign.py`:
+```python
+import os
+d = "/tmp/rpdata6/f2"; os.makedirs(d, exist_ok=True); open(d + "/a.txt", "w").write("A")
+with os.scandir(d) as it:
+    n = 0
+    for e in it: n += 1
+    print(n)
+a = it = [1, 2]
+for e in it: print(e)
+for e in a: print("a", e)
+```
+CPython/base: `1 1 2 a 1 a 2`, exit 0. HEAD (both builds): `p.ail:11:1: not in the subset: the method .advance() (on a list)` — build fails. `rebind_scandir` runs only for `len(node.targets) == 1`, so `a = it = [1,2]` leaves `it` marked as a scanner.
 
-**Tests on HEAD:** `test_ail_os_stat` OK (47 s), `test_ail_files` OK (81 s), `test_ail_safetynet` 4/5 (S4_generators_gc truncated, same on base with the same `ulimit -v 1500000`).
+2. **Nested `def` inside the `with` body now fails** — `f1_definscan.py` (same shape as `q13_nested_inwith`):
+```python
+import os
+d = "/tmp/rpdata6/f1"; os.makedirs(d, exist_ok=True); open(d + "/a.txt", "w").write("A"); os.makedirs(d + "/sub", exist_ok=True)
+with os.scandir(d) as it:
+    def f(): return 3
+    print(f())
+    n = 0
+    for e in it: n += 1
+    print(n)
+```
+CPython/base: `3 2`, exit 0. HEAD (both builds): `not in the subset: the name 'f' is not a known function/class/builtin`. The new try/finally wrap puts the `def` inside a `try`, which AIL cannot compile (probe `r19_defintry` fails on base too); the `with` used to leave the body unwrapped.
 
-**Pre-existing:** S4 memory failure under the cap; bytes-path programs (`os.path.exists(b"..")` etc.) produce the same runtime `TypeError` on base and HEAD.
-**Unverified:** remaining 11 census modules, `test_ail_corpus_findings3`, nt/Windows paths, instruction counts (no hot path changed: new static functions plus one branch in `ailf_scandir`).
+3. **False-positive rebinding refusal from the `if True:` heuristic** — `f3_nestedopen.py`:
+```python
+with os.scandir(d) as it:
+    for e in it:
+        if e.name == "a.txt":
+            with open(e.path) as f: print(f.read())
+    n = 0
+    for e in it: n += 1
+    print("again", n)
+```
+CPython/base: `A / again 0`, exit 0. HEAD (both builds): `iterating it after a `with ... as it` rebound it ...` — but `it` was never rebound. `visit_If` drops **every** scanner name when it sees the surface-rewritten `if True:` around any `open`, not just a rebound target.
+
+4. **`break` inside the `with` body refused on the general path** — `f4_break.py`: CPython/base both builds: `0`, exit 0. HEAD default build: `0`; HEAD `AIL_UNIFIED_FORCE=1`: `not in the subset: break out of a try/finally's protected region`, build fails. This is the new try/finally wrapper interacting with the general path's break modelling.
+
+**Claims**
+- close-on-`with` fix — **verified** (`q13_closed/partial` crash on base, `0` on HEAD; diff shows `self.index = len(self.names)` + `Try`/`finalbody`).
+- with-target rebinding refusal — **verified** (`q13_openrebind` named refusal in both builds).
+- fspath dynamic non-str — **verified** (all probes above); literal refusal intact.
+- expanduser `~user` — **verified** (`q5_user`, `r10`); `ntpath.expanduser('~root')` really does return `~root`, so the nt claim is correct.
+- “Plain Assign/AnnAssign/tuple/del rebindings still drop the marker and match” — **false** for multi-target `Assign` (defect 1); `q13_annrebind`, `q13_tuple`, `q13_aug`, `q13_forreuse`, `q13_del` do match.
+- Tests: `test_ail_os_stat` **ok** (68.5 s, verified); `test_ail_safetynet` 4/5 with `S4_generators_gc` truncated under `ulimit -v 1500000` (**verified**; identical on base per review 1); `test_ail_files` / `test_ail_corpus_findings3` **unverified** (not run — not added/edited by this change); `update_manifest.py --check` **rc 0** (verified).
+
+**Pre-existing** (identical on base): `S4_generators_gc` under the memory cap; `q5_bytes` (`expanduser(b"~root")`) raises on both; `os.path.normcase(3)` prints `3` on both base and HEAD (CPython TypeError); nested `def` inside a plain `try` or `with open` refused on base (`r19`/`r20`).
+
+**Unverified:** `test_ail_files`, `test_ail_corpus_findings3`, the 11 remaining census modules, nt target; instruction counts skipped — the diff changes only compiler-side logic plus a new C static reached from `expanduser`, no hot loop.
 
 VERDICT: FIX
-1. Comprehension/`list()` over `os.scandir` compiles but crashes — `p12_comp.py`: CPython `['x.txt']` exit 0, AIL empty stdout + `TypeError: 'instance' object is not iterable` exit 1 (base: named compile refusal).
-2. Iterating the scandir object after its `with` crashes — `p13_afterwith.py`: CPython `1`/`0` exit 0, HEAD `1` + TypeError exit 1 (8e646dd: `1`/`0`). Regression from the scope fix; keep the marker for the function or refuse by name.
-3. `os.fspath(dynamic non-str)` on the typed path returns the value — `p4d_fspath_int_uncaught.py`: CPython TypeError exit 1, AIL `7` exit 0; refuse it by name.
-4. `expanduser("~root")` — CPython `/root`, AIL `~root` (disclosed; needs the passwd lookup or an explicit limitation gate).
-[commandcode stop=end_turn turns=57 out_tokens=45589]
+1. `f2_chainassign.py` — `a = it = [1, 2]` after `with os.scandir(p) as it:`: CPython/base `1/1/2/a 1/a 2` exit 0; HEAD both builds fail with `the method .advance() (on a list)`. Handle every target of a multi-target `Assign` in `rebind_scandir`.
+2. `f1_definscan.py` — `def` inside the `with os.scandir` body: CPython/base `3/2` exit 0; HEAD both builds fail with `the name 'f' is not a known function/class/builtin` (the new try/finally wrapper; AIL cannot compile a `def` inside `try`).
+3. `f3_nestedopen.py` — a `with open(...)` (surface `if True:`) earlier in the scanner's scope: CPython/base `A/again 0` exit 0; HEAD both builds fail with `iterating it after a with ... as it rebound it ...` even though `it` was not rebound; `visit_If` must drop only the actual rebound target.
+4. `f4_break.py` — `break` inside the `with` body: CPython/base both builds `0` exit 0; HEAD general build (`AIL_UNIFIED_FORCE=1`) refuses `break out of a try/finally's protected region` (default build matches).
+[commandcode stop=end_turn turns=43 out_tokens=48771]
 
 
 --- ORIGINAL TASK ---
@@ -133,7 +175,7 @@ both paths or any file not listed; name it. Stop when 60 minutes pass. Push what
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
-- **Commits:** commit with explicit `git add` on your branch. Messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- **Commits:** commit with explicit `git add` on your branch. Messages end with a `Co-Authored-By:` line naming the model you actually are (Claude: `Claude Opus 5.5 <noreply@anthropic.com>` or `Claude Sonnet 5.5 <noreply@anthropic.com>`; other models: omit the line).
 - **Forbidden:** push, stash, rebase, reset, and deletion outside /tmp.
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
