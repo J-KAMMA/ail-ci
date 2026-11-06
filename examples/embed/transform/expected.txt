@@ -1,0 +1,4 @@
+transform("Hello World 42") = "HELLO_WORLD_42"
+transform("ail embed") = "AIL_EMBED"
+transform("") = ""
+transform("already UPPER") = "ALREADY_UPPER"
