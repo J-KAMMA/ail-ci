@@ -1,0 +1,8 @@
+variant: tcc-apt
+program: lab/compare/src/berth_sim/main.py (compare)
+bucket: unsized aggregate
+construct: unsized struct-array variable declaration from runtime values
+first error:
+  /tmp/tccquick-4vyx5p_3/gen-berth_sim-98217d0b/dbg/program.c:5806: error: index too large
+generated C line 5806: ail_bytes spans[] = {h, old, repl};
+emitted by: cruntime.py:6450,6508,6538 (bytes replace/translate)

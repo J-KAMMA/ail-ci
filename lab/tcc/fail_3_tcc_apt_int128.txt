@@ -1,0 +1,8 @@
+variant: tcc-apt
+program: corpus/gdev/g11_026.py (corpus)
+bucket: int128
+construct: __int128 (no 128-bit integer type in tcc)
+first error:
+  /tmp/tccquick-4vyx5p_3/gen-g11_026-2cb22828/dbg/program.c:3437: error: '__uint128_t' undeclared
+generated C line 3437: int shift = 55 - (abl - bbl);
+emitted by: cruntime.py:29709 (ail_rand_floordiv), general slice and pow paths

@@ -1,0 +1,8 @@
+variant: tcc-apt
+program: corpus/gdev/g00_036.py (corpus)
+bucket: builtin
+construct: unsupported __builtin_*
+first error:
+  tcc: error: undefined symbol '__builtin_unreachable'
+generated C line None: 
+emitted by: cruntime.py:433,4044,4065 (__builtin_unreachable); bigint_obj.py:403-411 (__builtin_*_overflow)

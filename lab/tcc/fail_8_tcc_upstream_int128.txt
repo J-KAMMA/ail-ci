@@ -1,0 +1,8 @@
+variant: tcc-upstream
+program: lab/compare/src/chain_relax/main.py (compare)
+bucket: int128
+construct: __int128 (no 128-bit integer type in tcc)
+first error:
+  /tmp/tccquick-4vyx5p_3/gen-chain_relax-cceb078a/dbg/program.c:7398: error: '__int128' undeclared
+generated C line 7398: __int128 nn = (__int128)n;
+emitted by: cruntime.py:29709 (ail_rand_floordiv), general slice and pow paths

@@ -1,3 +1,22 @@
+## 2026-11-06 -- tcc1 quick-run probe: TinyCC vs gcc -O2 (job-tcc1-11070326)
+
+`lab/tcc/` only; no compiler or default change. Full report in `lab/tcc/RESULTS.md`.
+
+- apt tcc 0.9.27 builds 0/58 generated C (41 first stops at `_Thread_local`, 11 unsized runtime
+  aggregates, 4 builtins, 2 `__int128`). Unusable.
+- upstream tcc 0.9.28rc (`e23dabe`) builds 5/58 raw; with `lab/tcc/tcc_prelude.h` (portable overflow
+  builtins) 35/58 (2/8 compare `main.py`, 33/50 corpus), all byte-identical to gcc -O2.
+- The only remaining blocker is `__int128` (23/58; 6/8 compare): the general runtime's range slice
+  and int `pow`. tcc has no 128-bit type; it needs a two-word int64 fallback in cruntime, not a
+  prelude.
+- C compile median on the 35 that build: 3.12 s (gcc -O2) / 0.83 s (gcc -O0) / 0.026 s (tcc); the
+  runner was loaded (~2.3x inflated). Program run is 1.7x slower.
+- Edit-run (cold AIL compile + run, 14 programs): 4.62 s -> 2.93 s (1.58x ratio of medians, 1.70x
+  median per-program). The warm cache is ~0.4 s for both, so tcc only helps a cold build.
+- Probes: the overflow prelude is 588/588 byte-identical to GCC's builtins; the classifier 13/13;
+  the saved C equals the compiler input and both rebuilds reproduce the AIL binary; cmp.sh on
+  g18_008/g04_006 matches CPython in both modes.
+
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for
