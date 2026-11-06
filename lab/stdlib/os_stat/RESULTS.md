@@ -119,8 +119,10 @@ The other 9 modules of the bucket (`_osx_support`, `cgitb`, `getpass`, `imghdr`,
   `st_rdev`. `st_*time` is `st_*time_ns / 1000000000` (one float division of the ns field).
 * `os.scandir` is built in `for ... in os.scandir(...)` and `with os.scandir(...) as it:`; the
   object stays usable through the function after its `with` (a later `for x in it:` sees the
-  exhausted iterator). A comprehension or generator over it, `list()` / `next()` / another
-  iterable consumer, and binding it with a plain assignment are refused by name in both builds.
+  exhausted iterator). Rebinding the name with `with open(...) as it:` and iterating it is refused
+  by name (the fourth-round section gives the reason). A comprehension or generator over it,
+  `list()` / `next()` / another iterable consumer, and binding it with a plain assignment are
+  refused by name in both builds.
 * `expanduser("~user")` follows the passwd database on POSIX (an unknown user leaves the path
   unchanged); the nt target leaves `~user` unchanged, as `ntpath` does. `~` follows CPython for a
   set, empty and unset `HOME`.
@@ -163,3 +165,20 @@ lowering.
   (`p4d_fspath_int_uncaught.py`, `p4f_fspath_str.py`, `p4g_fspath_bytes.py`, `p4h_fspath_none.py`).
 * `expanduser("~root")` looks the user up in the passwd database and returns `/root`; `~nosuchuser`
   is left unchanged, as CPython does (`p5_expanduser_root.py`, `p5b_expanduser_more.py`).
+
+## Review fixes (fourth round)
+
+* `with os.scandir(p) as it:` now closes the scanner when the body leaves, as the `with` statement
+  does: `_AilScandir.close` sets the index past the end and the lowering wraps the body in
+  try/finally. A later `for e in it:` therefore sees the exhausted iterator (`0`), after a `break`
+  or in a nested function (`q13_closed.py`, `q13_partial.py`, `q13_nested_after.py` match CPython).
+* Rebinding a scanner name with `with open(...) as it:` and then iterating it is refused by name in
+  both builds: `iterating it after a `with ... as it` rebound it from an os.scandir object is not
+  built.` CPython iterates the (closed) file object there and raises `ValueError`; AIL cannot keep
+  that binding, because `ail_syntax.python_surface` lowers `with open(...) as name:` to `if True:`
+  before `filelower` runs (the target name is gone). The same refusal covers the shape the surface
+  leaves alone (`q13_openrebind.py`, `q13_openrebind2.py`); nothing silent is emitted. Plain
+  `Assign` / `AnnAssign` / tuple / `del` rebindings still drop the marker and match CPython
+  (`p13c_rebind.py`, `q13_annrebind.py`, `q13_tuple.py`, `q13_aug.py`, `q13_forreuse.py`,
+  `q13_del.py`).
+

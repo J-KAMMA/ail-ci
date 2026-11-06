@@ -109,6 +109,7 @@ class _AilScandir:
         return _AilDirEntry(_ail_pjoin(self.path, name), name)
 
     def close(self) -> None:
+        self.index = len(self.names)
         return
 
 
@@ -271,6 +272,7 @@ class _Lowerer(ast.NodeTransformer):
         self.file_expr_names = set()
         self.walk_dirs = set()         # names bound as the `dirs` of an os.walk loop
         self.scandir_names = set()     # names bound by `with os.scandir(p) as it:`
+        self.scandir_rebound = set()   # scanner names a later `with ... as` rebound to something else
         self.hoist = []                # assignments to put before the statement being lowered
         self.windows = filelib.target_windows()
 
@@ -598,8 +600,11 @@ class _Lowerer(ast.NodeTransformer):
                 shadow.add(each.id)
         saved = self.scandir_names
         self.scandir_names = saved - shadow
+        saved_rebound = self.scandir_rebound
+        self.scandir_rebound = saved_rebound - shadow
         node.body = self.block(node.body)
         self.scandir_names = saved
+        self.scandir_rebound = saved_rebound
         self.scopes.pop()
         return node
 
@@ -630,8 +635,12 @@ class _Lowerer(ast.NodeTransformer):
             return
         if isinstance(value, ast.Name) and value.id in self.scandir_names:
             self.scandir_names.add(target.id)       # `it2 = it`: the same scanner
+            self.scandir_rebound.discard(target.id)
         elif target.id in self.scandir_names:
             self.scandir_names.discard(target.id)
+            self.scandir_rebound.discard(target.id)
+        else:
+            self.scandir_rebound.discard(target.id)
 
     def visit_Assign(self, node):
         if len(node.targets) == 1:
@@ -744,12 +753,30 @@ class _Lowerer(ast.NodeTransformer):
             return ast.Constant(value=expr.value)
         return ast.FormattedValue(value=expr, conversion=-1, format_spec=None)
 
+    def visit_If(self, node):
+        # ail_syntax lowers `with open(...) as name:` to `if True:` before this pass, so the binding of
+        # `name` is gone. When a scanner name was the target it cannot be tracked here; refuse its later
+        # use as an iterable instead of silently iterating the exhausted scanner.
+        if isinstance(node.test, ast.Constant) and node.test.value is True and self.scandir_names \
+                and any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'open'
+                        for stmt in node.body for n in ast.walk(stmt)):
+            for name in list(self.scandir_names):
+                self.scandir_names.discard(name)
+                self.scandir_rebound.add(name)
+        return self.generic_visit(node)
+
     def visit_With(self, node):
         items = node.items
         for item in items:
-            if isinstance(item.context_expr, ast.Call) and self.qual(item.context_expr.func) == 'os.scandir' \
-                    and isinstance(item.optional_vars, ast.Name):
+            if not isinstance(item.optional_vars, ast.Name):
+                continue
+            if isinstance(item.context_expr, ast.Call) and self.qual(item.context_expr.func) == 'os.scandir':
                 self.scandir_names.add(item.optional_vars.id)
+                self.scandir_rebound.discard(item.optional_vars.id)
+            else:
+                if item.optional_vars.id in self.scandir_names:
+                    self.scandir_rebound.add(item.optional_vars.id)   # rebound to a non-scanner
+                self.scandir_names.discard(item.optional_vars.id)
         body = self.block(node.body)
         # `it` stays bound after the `with` (Python does not drop it), so keep the marker for the
         # rest of the function: a later `for x in it:` is the same scandir object, now exhausted.
@@ -778,8 +805,11 @@ class _Lowerer(ast.NodeTransformer):
                 if context.keywords or len(context.args) > 1:
                     self.refuse(node, 'os.scandir(path) takes the path only')
                 path = self.visit(context.args[0]) if context.args else self.C('.')
-                body = [ast.Assign(targets=[item.optional_vars],
-                                   value=self.call('_ail_scan_open', path))] + body
+                target = item.optional_vars
+                close = ast.Expr(value=self.method(self.N(target.id), 'close'))
+                guarded = ast.Try(body=body, handlers=[], orelse=[], finalbody=[close])
+                body = [ast.Assign(targets=[target],
+                                   value=self.call('_ail_scan_open', path)), guarded]
                 continue
             elif self.general:
                 item.context_expr = self.visit(item.context_expr)
@@ -824,6 +854,10 @@ class _Lowerer(ast.NodeTransformer):
         return True
 
     def visit_For(self, node):
+        if isinstance(node.iter, ast.Name) and node.iter.id in self.scandir_rebound:
+            self.refuse(node, 'iterating %s after a `with ... as %s` rebound it from an os.scandir object is '
+                              'not built.\n  write instead: use another name for the new value'
+                              % (node.iter.id, node.iter.id))
         if isinstance(node.target, ast.Name) and node.target.id in self.scandir_names:
             source = node.iter
             if not (isinstance(source, ast.Call) and self.qual(source.func) == 'os.scandir') \
@@ -932,6 +966,10 @@ class _Lowerer(ast.NodeTransformer):
         return self.located(stmts, node)
 
     def visit_comprehension(self, node):
+        if isinstance(node.iter, ast.Name) and node.iter.id in self.scandir_rebound:
+            self.refuse(node, 'a comprehension or generator over %s after a `with ... as %s` rebound it from '
+                              'an os.scandir object is not built.\n'
+                              '  write instead: use another name for the new value' % (node.iter.id, node.iter.id))
         if (isinstance(node.iter, ast.Call) and self.qual(node.iter.func) == 'os.scandir') \
                 or (isinstance(node.iter, ast.Name) and node.iter.id in self.scandir_names):
             self.refuse(node, 'a comprehension or generator over os.scandir(...) is not built.\n'
@@ -1034,6 +1072,11 @@ class _Lowerer(ast.NodeTransformer):
                 and any(isinstance(a, ast.Name) and a.id in self.scandir_names for a in node.args):
             self.refuse(node, '%s() of an os.scandir object is not built.\n'
                               '  write instead: `for entry in os.scandir(path):` and collect the values' % func)
+        if func in ('list', 'tuple', 'set', 'frozenset', 'sorted', 'sum', 'any', 'all', 'min', 'max',
+                    'enumerate', 'zip', 'dict', 'iter', 'next') \
+                and any(isinstance(a, ast.Name) and a.id in self.scandir_rebound for a in node.args):
+            self.refuse(node, '%s() of a name that a `with ... as` rebound from an os.scandir object is not '
+                              'built.\n  write instead: use another name for the new value' % func)
         if func == 'next' and node.args and self.file_kind(node.args[0]):
             if len(node.args) == 1:
                 return self.method(node.args[0], '_next_value')
