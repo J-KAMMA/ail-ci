@@ -62,3 +62,35 @@ Nested-region programs found: `lab/race/racy/nested_writes_outer.py`
 - `lab/race/pmap/{par_collatz,uniform,ramp,heavy,tiny}.py`: the five loads.
 - `lab/race/pmap/par_collatz.py` is a byte-for-byte copy of `lab/compare_par/src/par_collatz/typed.py`.
 - `lab/race/pmap/run.py`: builds, instruments in /tmp, measures, writes these files.
+
+## After: guided chunk sizes (`AIL_PAR_SCHED=guided`, fbpmap2)
+
+The same five loads, built unchanged from `lab/race/pmap/*.py` with `python3 -B
+AIL_CURRENT/ail_chatgpt.py compile`, on a 4-vCPU GitHub Actions runner (CPython 3.12), under a
+1.5 GB address-space cap. Each number is the median of 9 alternating whole-process wall times at
+`AIL_THREADS=4` (interquartile-ish range in brackets); stdout was compared byte for byte between
+the two schedules and also matched CPython.
+
+| load | fixed blocks ms | guided ms | speedup | target |
+|---|---:|---:|---:|---|
+| uniform | 17.8 [17.5-18.2] | 17.7 [17.5-18.2] | 1.01x | not slower by >2%: met |
+| ramp | 53.7 [52.8-55.2] | 50.9 [50.8-51.2] | **1.05x** | **at least 1.15x: missed** |
+| heavy | 85.4 [84.8-85.6] | 45.2 [45.0-45.5] | **1.89x** | at least 1.15x: met |
+| tiny | 23.7 [23.6-23.9] | 23.7 [23.6-23.9] | 1.00x | not slower by >2%: met |
+| par_collatz | 626.3 [608.3-641.2] | 583.9 [568.0-612.0] | **1.07x** | not slower: met |
+
+`ramp` is the load that missed: at 4 threads its fixed-block schedule is already close to the
+four-fold wall (the 609-iteration tail is a few percent of the region), and guided blocks shrink to
+the 20 us floor (about 115 iterations at the rate the probe prefix measured) but only remove about
+3 ms of the idle tail. An earlier, less loaded run of instrumented scratch builds put the region
+at 38-41 ms fixed and 36-38 ms guided, the same ratio. The `heavy` tail is what guided is for: its
+final 1% (100x work per item) is cut into small blocks and the region drops from 85 ms to 45 ms.
+
+Instruction counts are still unavailable on this runner (`perf_event_open: Permission denied`,
+`perf_event_paranoid=4`; no valgrind), so the "not worse by 0.5% in instructions" target has no
+measurement here; `uniform` and `tiny` are within 1% of fixed in wall time.
+
+Correctness at the time of measurement: all five loads print the same bytes at `AIL_THREADS`
+1, 2, 4 and 16 with `AIL_PAR_SCHED` unset and set to `guided`; `lab/race/run.py --quick` reports
+0 silent races, 16 of 17 safe matched and 16 of 17 GIL-free (the unmatched one is
+`safe/int_beyond_int64.py`, the expected loud stop).
