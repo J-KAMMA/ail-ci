@@ -38,6 +38,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from test_ail_gpu_smoke import *
+
 ROOT = Path(__file__).resolve().parent
 PKG = ROOT / 'python' / 'pkg-v12'
 if str(PKG) not in sys.path:
