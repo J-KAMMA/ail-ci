@@ -2509,7 +2509,7 @@
    },
    "recursion": {
     "build_ok": true,
-    "result": "stops loudly",
+    "result": "stops loudly (stdout differs)",
     "exit": 139,
     "bytes_out": 0,
     "ref_exit": 1
@@ -2626,5 +2626,13 @@
     "ref_exit": 1
    }
   }
+ },
+ "settings": {
+  "build_runs": 1,
+  "run_timeout_s": 180,
+  "case_timeout_s": 30,
+  "callgrind_timeout_s": 120,
+  "callgrind_max_wall_ms": 4000,
+  "case_budget_s": 240
  }
 }

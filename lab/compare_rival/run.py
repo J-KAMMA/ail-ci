@@ -15,7 +15,8 @@ Measurement reuses lab/compare/run_task.py: the perf input and every public/hidd
 the task's gen.py, the oracle is its reference.py, wall time is the median of 5 runs, instructions
 come from callgrind (or perf_event when the runner exposes it), peak RSS from `/usr/bin/time -v`,
 and the build is one cold build in a fresh directory (compile time, build disk, artifact size).
-Deliberate reductions from compare-lab's settings, each recorded in results.json and RESULTS.md:
+Deliberate reductions from compare-lab's settings, each recorded in `settings` in results.json and
+above the tables in RESULTS.md:
 one cold build instead of three (a Nuitka onefile build is minutes); RUN_TIMEOUT 180 s instead of
 1500 s, so a rival slower than 3 min is recorded as "timeout" rather than measured; CASE_TIMEOUT
 30 s instead of 120 s; CALLGRIND_TIMEOUT 120 s instead of 7000 s; callgrind skipped when the wall
@@ -80,6 +81,11 @@ RT = load_rt()
 RT.CALLGRIND_TIMEOUT = 120
 RT.RUN_TIMEOUT = 180          # a rival that needs more than 3 minutes for one run has lost that column
 RT.CASE_TIMEOUT = 30
+CALLGRIND_MAX_WALL_MS = 4000
+CASE_BUDGET_S = 240
+SETTINGS = dict(build_runs=RT.BUILD_RUNS, run_timeout_s=RT.RUN_TIMEOUT, case_timeout_s=RT.CASE_TIMEOUT,
+                callgrind_timeout_s=RT.CALLGRIND_TIMEOUT, callgrind_max_wall_ms=CALLGRIND_MAX_WALL_MS,
+                case_budget_s=CASE_BUDGET_S)
 
 
 def tail(data, n=800):
@@ -239,7 +245,7 @@ def reference_for(task, case, work):
     return dict(returncode=p.returncode, stdout=out)
 
 
-def check_cases_budget(tool, cmd, check, expected, work, budget=240):
+def check_cases_budget(tool, cmd, check, expected, work, budget=CASE_BUDGET_S):
     """RT.check_cases with a per-tool wall budget; cases not reached are counted as not matched."""
     tally = {'public': [0, 0], 'hidden': [0, 0]}
     failed = []
@@ -279,7 +285,7 @@ def measure(rec, task, case, expected, check, expected_cases, work, icount, mode
         rec.update(check_cases_budget(rec['tool'], cmd, check, expected_cases, work))
     if mode != 'none' and rec.get('status') in ('ok', 'MISMATCH'):
         wall = rec.get('wall_ms')
-        if wall is not None and wall > 4000:
+        if wall is not None and wall > CALLGRIND_MAX_WALL_MS:
             # callgrind is ~50-100x slower than native; a 5 s run would take most of a job's budget.
             rec['instructions'] = None
             rec['instructions_note'] = 'skipped: wall > 4 s, callgrind too slow'
@@ -348,10 +354,10 @@ def classify(rc, out, ref_rc, ref_out):
         return 'same as CPython'
     if rc == 0:
         return 'silently wrong output'
-    # "Stops loudly" is the documented rule: a non-zero exit that still reproduces CPython's stdout
-    # up to the error.  A non-empty prefix counts; empty stdout against non-empty CPython output does
-    # not, because that is a different partial answer (usually buffered away) and must stay visible.
-    if out == ref_out or (out and ref_out.startswith(out)):
+    # "Stops loudly" is the documented rule: a non-zero exit that reproduces a non-empty CPython
+    # stdout prefix.  Empty stdout never counts, even when CPython's stdout is empty too: the exit
+    # status differs, so it is a different partial answer and must stay visible.
+    if out and ref_out.startswith(out):
         return 'stops loudly'
     return 'stops loudly (stdout differs)'
 
@@ -466,12 +472,16 @@ def render(result):
              '"single exe" is yes when the artifact is one file that runs without the source tree; mypyc needs the '
              'CPython interpreter and the `ail` module at run time.' % data['icount_method'])
     L.append('')
-    L.append('Measurement reductions from `lab/compare/run_task.py` (see the `run.py` docstring): one cold build '
-             'instead of three; RUN_TIMEOUT 180 s instead of 1500 s (a slower rival is "timeout", not a number); '
-             'CASE_TIMEOUT 30 s instead of 120 s; CALLGRIND_TIMEOUT 120 s instead of 7000 s; instructions skipped '
-             'when wall > 4 s; and a 240 s per-tool case budget.  So most instruction cells are "-" '
-             '(59 of the 70 rows; 37 of the 48 builds that succeeded) and the instruction verdict has n=1.  '
-             'Restoring the reference timeouts requires re-measuring every task.')
+    s = data.get('settings', {})
+    L.append('Measurement reductions from `lab/compare/run_task.py`, recorded in the `settings` object of '
+             '`results.json`: %d cold build%s instead of %d; RUN_TIMEOUT %s s instead of 1500 s (a slower rival '
+             'is "timeout", not a number); CASE_TIMEOUT %s s instead of 120 s; CALLGRIND_TIMEOUT %s s instead '
+             'of 7000 s; instructions skipped when wall > %s s; and a %s s per-tool case budget.  So most '
+             'instruction cells are "-" (59 of the 70 rows; 37 of the 48 builds that succeeded) and the '
+             'instruction verdict has n=1.  Restoring the reference timeouts requires re-measuring every task.'
+             % (s.get('build_runs', 1), '' if s.get('build_runs', 1) == 1 else 's', 3,
+                s.get('run_timeout_s', 180), s.get('case_timeout_s', 30), s.get('callgrind_timeout_s', 120),
+                s.get('callgrind_max_wall_ms', 4000) / 1000, s.get('case_budget_s', 240)))
     L.append('')
     L.append('| tool | version |')
     L.append('|---|---|')
@@ -630,7 +640,7 @@ def main():
     head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=str(REPO), capture_output=True, text=True).stdout.strip()
     result = dict(date=time.strftime('%Y-%m-%d', time.gmtime()), head=head, icount_method=mode,
                   runner=dict(os=os.uname().release, cpus=os.cpu_count(), image=os.environ.get('ImageVersion', '')),
-                  tools=versions(), pins=read_pins(), tasks={},
+                  settings=dict(SETTINGS), tools=versions(), pins=read_pins(), tasks={},
                   safety_probes=[p.stem for p in sorted((HERE / 'safety').glob('*.py'))], safety={})
     result['tools']['ail'] = 'checkout ' + head
 

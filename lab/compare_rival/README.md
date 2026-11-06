@@ -31,8 +31,8 @@ data structure is changed, and AIL's sources are never touched. No patch was nee
 instructions are callgrind Ir (or `perf_event_open` when the runner exposes it), and each tool gets one cold
 build in a fresh directory that also holds its caches (compile time, build disk, artifact size).
 
-It does **not** use compare-lab's settings unchanged. The reductions are deliberate and are repeated in
-`results.json` and above the tables in `RESULTS.md`:
+It does **not** use compare-lab's settings unchanged. The reductions are deliberate and are repeated in the
+`settings` object of `results.json` and above the tables in `RESULTS.md`:
 
 - one cold build instead of `BUILD_RUNS=3` (a Nuitka onefile build takes minutes);
 - `RUN_TIMEOUT` 180 s instead of 1500 s, so a rival slower than 3 minutes is recorded as `timeout`, not a number;

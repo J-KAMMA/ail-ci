@@ -9,10 +9,10 @@ Apache-2.0). Mojo is "not measured: needs an account". The tables are in `RESULT
 manual workflow proposal is `compare-rival.yml` (outside `.github/`).
 
 Headline, stated as plainly as the losses: AIL wins wall time (5.06x geomean against the best rival, 9/10 tasks),
-peak RSS (3.06x, 9/10), artifact size (8.09x, 10/10) and build disk (7.2x, 10/10); it loses instructions
-(1.87x worse, n=1 because callgrind is capped) and build time (1.09x better, 6/10). Codon compiles neither
-`typed.py` (the `ail` runtime is unimportable) nor most `main.py` files and is the only tool with silent wrong
-answers (both overflow and deep recursion, 2/5 probes). mypyc is silently wrong on deep recursion too.
+peak RSS (3.06x, 9/10), artifact size (8.09x, 10/10), build disk (7.2x, 10/10) and build time (1.09x better,
+6/10); it loses instructions (1.87x worse, n=1 because callgrind is capped). Codon compiles neither `typed.py`
+(the `ail` runtime is unimportable) nor most `main.py` files; it is the only tool silently wrong on both probes
+it reaches (overflow and deep recursion, 2/5), and mypyc is silently wrong on deep recursion too.
 
 Review fix (cmprival1-fix1):
 - `run.py --merge` used `glob('*.json')`, but `actions/download-artifact` writes `results/<artifact>/*.json`;
@@ -27,6 +27,16 @@ Review fix (cmprival1-fix1):
   240 s case budget) and the consequence: 59 of 70 rows have `-` for instructions and the instruction verdict is
   n=1 (the two `timeout` rows are `cython-typed` on `scar_life` and `tree_fold`).
   Restoring the reference timeouts means re-measuring, so the text was corrected instead.
+
+Review fix (cmprival1-fix2):
+- The reductions are now actually stored: `results.json` has a `settings` object (`build_runs`, `run_timeout_s`,
+  `case_timeout_s`, `callgrind_timeout_s`, `callgrind_max_wall_ms`, `case_budget_s`), written by `run.py` and
+  preserved by `--merge`; `RESULTS.md` renders that object. This makes the README/docstring claim true.
+- `classify()` now applies the wording exactly: only a non-empty CPython stdout prefix counts as `stops loudly`.
+  `nuitka recursion` (exit 139, both stdouts empty) is therefore `stops loudly (stdout differs)`, not `stops loudly`.
+- The headline above had build time in the loss list; it is a win (1.09x, 6/10) and is now listed there. Codon is
+  "the only tool silently wrong on both probes", not "the only tool with silent wrong answers" (mypyc is wrong on
+  deep recursion too).
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
