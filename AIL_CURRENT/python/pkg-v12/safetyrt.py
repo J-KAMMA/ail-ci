@@ -1556,16 +1556,20 @@ static void ail2g_gc_hook(ail_ctx *cx) {
 #if defined(__GNUC__)
 __attribute__((noinline, cold))
 #endif
-static void ail2g_new_stack(ail_ctx *cx, ail2g *g) {
+static int ail2g_new_stack(ail_ctx *cx, ail2g *g) {
     for (int round = 0; ; round++) {
         size_t budget = ail2g_budget_of(), left = ail2g_mapped < budget ? budget - ail2g_mapped : 0;
         size_t size = AIL2G_STACK;
         while (size > AIL2G_STACK_MIN && size > left) size >>= 1;
-        for (; size >= AIL2G_STACK_MIN; size >>= 1) if (ail2g_map_stack(g, size)) return;
-        if (round) ail_die("generator: no stack");
-        /* g is RUNNING, so the collector keeps it and what it holds (ail2g_gc_hook) */
+        for (; size >= AIL2G_STACK_MIN; size >>= 1) if (ail2g_map_stack(g, size)) return 1;
+        if (round) return 0;
+        /* while it is the current generator the collector keeps g and what it holds (ail2g_gc_hook)
+           whatever its state; the caller's frames are on cx->frames or on ail2g_waiting */
+        ail2g *was = ail2g_current;
+        ail2g_current = g;
         ail2g_fresh = 0; ail_gc_collect(cx);
-        if (ail2g_pooled) { g->stack = ail2g_pool[--ail2g_pooled]; g->stack_size = AIL2G_STACK; return; }
+        ail2g_current = was;
+        if (ail2g_pooled) { g->stack = ail2g_pool[--ail2g_pooled]; g->stack_size = AIL2G_STACK; return 1; }
     }
 }
 #endif
@@ -1656,7 +1660,7 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
 #else
     if (fresh) {
         if (ail2g_pooled) { g->stack = ail2g_pool[--ail2g_pooled]; g->stack_size = AIL2G_STACK; }
-        else ail2g_new_stack(cx, g);
+        else if (!ail2g_new_stack(cx, g)) ail_die("generator: no stack");
 #ifdef AIL2G_ASM
         /* a frame ail2g_switch returns from into ail2g_entry, with the stack aligned as after a call */
         uintptr_t top = ((uintptr_t)g->stack + g->stack_size) & ~(uintptr_t)15;
