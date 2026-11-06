@@ -1,0 +1,7 @@
+main
+callback-1
+callback-2
+after-sleep-0
+callback-3
+after-sleep-0-again
+exit: 0

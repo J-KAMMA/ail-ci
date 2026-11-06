@@ -1,0 +1,6 @@
+worker start
+worker cancelled
+worker finally
+cancelled at main
+done
+exit: 0

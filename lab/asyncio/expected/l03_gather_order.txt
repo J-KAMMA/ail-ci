@@ -1,0 +1,5 @@
+finish b
+finish a
+finish c
+results ['a', 'b', 'c']
+exit: 0

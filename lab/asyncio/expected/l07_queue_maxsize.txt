@@ -1,0 +1,8 @@
+put 0
+got 0
+put 1
+got 1
+put 2
+got 2
+qsize 0
+exit: 0
