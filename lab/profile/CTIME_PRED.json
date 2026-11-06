@@ -1330,742 +1330,742 @@
  "corpus_inputs": 200,
  "date": "2026-11-06",
  "listed": [
-  "_map_kind",
   "_is_owned_bytes_call",
+  "_map_kind",
   "_param_kinds"
  ],
  "lookup_ns": 125.0,
- "lookup_s": 1.25e-07,
+ "lookup_s": 1.2500000000000002e-07,
  "predicate_summary": [
   {
-   "cacheable_s": 1.1588,
-   "calls": 622726,
-   "changed": 96810,
-   "changed_all_inputs": 220974,
-   "changed_corpus": 124164,
-   "corpus_calls": 1288131,
-   "eligible": false,
-   "fe_own_s": 1.812,
-   "fe_probe_ratio": 0.1286,
    "predicate": "_etype",
-   "probe_cacheable_s": 8.993,
-   "probe_own_s": 14.087,
-   "repeat_share": 0.9155,
-   "repeats": 570104
+   "calls": 513296,
+   "repeats": 470714,
+   "repeat_share": 0.917,
+   "changed": 90900,
+   "corpus_calls": 1288131,
+   "changed_corpus": 124164,
+   "changed_all_inputs": 215064,
+   "probe_own_s": 8.427125,
+   "probe_cacheable_s": 5.481502,
+   "fe_own_s": 1.812015,
+   "fe_probe_ratio": 0.215022,
+   "cacheable_s": 1.178642,
+   "eligible": false
   },
   {
-   "cacheable_s": 0.739,
-   "calls": 469022,
-   "changed": 800,
-   "changed_all_inputs": 12135,
-   "changed_corpus": 11335,
-   "corpus_calls": 890961,
-   "eligible": false,
-   "fe_own_s": 0.852,
-   "fe_probe_ratio": 0.1849,
    "predicate": "_is_str_expr",
-   "probe_cacheable_s": 3.937,
-   "probe_own_s": 4.611,
-   "repeat_share": 0.8904,
-   "repeats": 417615
+   "calls": 430695,
+   "repeats": 388999,
+   "repeat_share": 0.9032,
+   "changed": 771,
+   "corpus_calls": 890961,
+   "changed_corpus": 11335,
+   "changed_all_inputs": 12106,
+   "probe_own_s": 3.60707,
+   "probe_cacheable_s": 3.165506,
+   "fe_own_s": 0.852403,
+   "fe_probe_ratio": 0.236315,
+   "cacheable_s": 0.748055,
+   "eligible": false
   },
   {
-   "cacheable_s": 0.2392,
-   "calls": 353534,
-   "changed": 65,
-   "changed_all_inputs": 1207,
-   "changed_corpus": 1142,
-   "corpus_calls": 688194,
-   "eligible": false,
-   "fe_own_s": 0.281,
-   "fe_probe_ratio": 0.1724,
    "predicate": "_is_slist_expr",
-   "probe_cacheable_s": 1.379,
-   "probe_own_s": 1.691,
-   "repeat_share": 0.8599,
-   "repeats": 304000
+   "calls": 325390,
+   "repeats": 285315,
+   "repeat_share": 0.8768,
+   "changed": 65,
+   "corpus_calls": 688194,
+   "changed_corpus": 1142,
+   "changed_all_inputs": 1207,
+   "probe_own_s": 1.155231,
+   "probe_cacheable_s": 0.987534,
+   "fe_own_s": 0.280945,
+   "fe_probe_ratio": 0.243194,
+   "cacheable_s": 0.240162,
+   "eligible": false
   },
   {
-   "cacheable_s": 0.1244,
-   "calls": 530263,
-   "changed": 0,
-   "changed_all_inputs": 0,
-   "changed_corpus": 0,
-   "corpus_calls": 983939,
-   "eligible": true,
-   "fe_own_s": 0.11,
-   "fe_probe_ratio": 0.0865,
    "predicate": "_map_kind",
-   "probe_cacheable_s": 1.447,
-   "probe_own_s": 1.683,
-   "repeat_share": 0.9035,
-   "repeats": 479080
+   "calls": 483928,
+   "repeats": 442559,
+   "repeat_share": 0.9145,
+   "changed": 0,
+   "corpus_calls": 983939,
+   "changed_corpus": 0,
+   "changed_all_inputs": 0,
+   "probe_own_s": 0.970699,
+   "probe_cacheable_s": 0.855328,
+   "fe_own_s": 0.109527,
+   "fe_probe_ratio": 0.112833,
+   "cacheable_s": 0.096509,
+   "eligible": true
   },
   {
-   "cacheable_s": 0.1485,
-   "calls": 116013,
-   "changed": 879,
-   "changed_all_inputs": 1983,
-   "changed_corpus": 1104,
-   "corpus_calls": 194124,
-   "eligible": false,
-   "fe_own_s": 0.15,
-   "fe_probe_ratio": 0.1396,
    "predicate": "_is_bytes_expr",
-   "probe_cacheable_s": 1.077,
-   "probe_own_s": 1.36,
-   "repeat_share": 0.8161,
-   "repeats": 94680
+   "calls": 108028,
+   "repeats": 90062,
+   "repeat_share": 0.8337,
+   "changed": 810,
+   "corpus_calls": 194124,
+   "changed_corpus": 1104,
+   "changed_all_inputs": 1914,
+   "probe_own_s": 0.847885,
+   "probe_cacheable_s": 0.681461,
+   "fe_own_s": 0.149759,
+   "fe_probe_ratio": 0.176627,
+   "cacheable_s": 0.120364,
+   "eligible": false
   },
   {
-   "cacheable_s": 0.1605,
-   "calls": 489358,
-   "changed": 0,
-   "changed_all_inputs": 0,
-   "changed_corpus": 0,
-   "corpus_calls": 847855,
-   "eligible": true,
-   "fe_own_s": 0.141,
-   "fe_probe_ratio": 0.2408,
    "predicate": "_is_owned_bytes_call",
-   "probe_cacheable_s": 0.668,
-   "probe_own_s": 0.766,
-   "repeat_share": 0.8823,
-   "repeats": 431750
-  },
-  {
-   "cacheable_s": 0.0814,
-   "calls": 1122902,
-   "changed": 428396,
-   "changed_all_inputs": 822922,
-   "changed_corpus": 394526,
-   "corpus_calls": 1697062,
-   "eligible": false,
-   "fe_own_s": 0.048,
-   "fe_probe_ratio": 0.1234,
-   "predicate": "type_of",
-   "probe_cacheable_s": 0.655,
-   "probe_own_s": 0.918,
-   "repeat_share": 0.9937,
-   "repeats": 1115802
-  },
-  {
-   "cacheable_s": 0.0,
-   "calls": 546,
+   "calls": 443701,
+   "repeats": 398373,
+   "repeat_share": 0.8978,
    "changed": 0,
-   "changed_all_inputs": 0,
+   "corpus_calls": 847855,
    "changed_corpus": 0,
-   "corpus_calls": 4041,
-   "eligible": true,
-   "fe_own_s": 0.092,
-   "fe_probe_ratio": 0.152,
+   "changed_all_inputs": 0,
+   "probe_own_s": 0.694961,
+   "probe_cacheable_s": 0.618309,
+   "fe_own_s": 0.141497,
+   "fe_probe_ratio": 0.203604,
+   "cacheable_s": 0.12589,
+   "eligible": true
+  },
+  {
+   "predicate": "type_of",
+   "calls": 1044004,
+   "repeats": 1038181,
+   "repeat_share": 0.9944,
+   "changed": 403929,
+   "corpus_calls": 1697062,
+   "changed_corpus": 394526,
+   "changed_all_inputs": 798455,
+   "probe_own_s": 0.874546,
+   "probe_cacheable_s": 0.622618,
+   "fe_own_s": 0.047543,
+   "fe_probe_ratio": 0.054363,
+   "cacheable_s": 0.033847,
+   "eligible": false
+  },
+  {
    "predicate": "_param_kinds",
-   "probe_cacheable_s": 0.0,
-   "probe_own_s": 1.066,
+   "calls": 546,
+   "repeats": 0,
    "repeat_share": 0.0,
-   "repeats": 0
+   "changed": 0,
+   "corpus_calls": 4041,
+   "changed_corpus": 0,
+   "changed_all_inputs": 0,
+   "probe_own_s": 1.14457,
+   "probe_cacheable_s": 0.0,
+   "fe_own_s": 0.09204,
+   "fe_probe_ratio": 0.080414,
+   "cacheable_s": 0.0,
+   "eligible": true
   }
  ],
  "tasks": [
   {
-   "halved_all": 1.0681,
-   "halved_listed": 1.0047,
-   "predicates": {
-    "_etype": {
-     "cacheable": 0.5314140633487768,
-     "calls": 178134,
-     "changed": 36884,
-     "repeats": 165031
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.06865600660172118,
-     "calls": 39943,
-     "changed": 0,
-     "repeats": 33552
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.06839988380375407,
-     "calls": 162622,
-     "changed": 0,
-     "repeats": 147954
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.10701007607935573,
-     "calls": 115295,
-     "changed": 65,
-     "repeats": 102991
-    },
-    "_is_str_expr": {
-     "cacheable": 0.3433208262113151,
-     "calls": 153607,
-     "changed": 217,
-     "repeats": 140711
-    },
-    "_map_kind": {
-     "cacheable": 0.05526133662638446,
-     "calls": 178974,
-     "changed": 0,
-     "repeats": 166258
-    },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 51,
-     "changed": 0,
-     "repeats": 0
-    },
-    "type_of": {
-     "cacheable": 0.020549245905214942,
-     "calls": 384303,
-     "changed": 156579,
-     "repeats": 382188
-    }
-   },
-   "projection_all": 1.1362,
-   "projection_listed": 1.0094,
-   "saving_all": 1.043,
-   "saving_listed": 0.081,
    "task": "berth_sim",
-   "wall": 8.7022
-  },
-  {
-   "halved_all": 1.0561,
-   "halved_listed": 1.0035,
+   "wall": 8.7022,
    "predicates": {
     "_etype": {
-     "cacheable": 0.059054547488735176,
-     "calls": 36129,
-     "changed": 16350,
-     "repeats": 34307
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.012215246463148222,
-     "calls": 10269,
-     "changed": 0,
-     "repeats": 9521
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.011920923533519555,
-     "calls": 43398,
-     "changed": 0,
-     "repeats": 41369
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.021278090384813937,
-     "calls": 32212,
-     "changed": 0,
-     "repeats": 30408
+     "calls": 178134,
+     "repeats": 165031,
+     "changed": 36884,
+     "cacheable": 0.534482
     },
     "_is_str_expr": {
-     "cacheable": 0.06964257922331889,
-     "calls": 41612,
-     "changed": 151,
-     "repeats": 39745
+     "calls": 153607,
+     "repeats": 140711,
+     "changed": 217,
+     "cacheable": 0.343036
+    },
+    "_is_slist_expr": {
+     "calls": 115295,
+     "repeats": 102991,
+     "changed": 65,
+     "cacheable": 0.114578
     },
     "_map_kind": {
-     "cacheable": 0.008419459087224447,
-     "calls": 39142,
+     "calls": 178974,
+     "repeats": 166258,
      "changed": 0,
-     "repeats": 37301
+     "cacheable": 0.056
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 16,
+    "_is_bytes_expr": {
+     "calls": 39943,
+     "repeats": 33552,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.068336
+    },
+    "_is_owned_bytes_call": {
+     "calls": 162622,
+     "repeats": 147954,
+     "changed": 0,
+     "cacheable": 0.068436
     },
     "type_of": {
-     "cacheable": 0.0016045710665124897,
-     "calls": 113507,
-     "changed": 94442,
-     "repeats": 113310
+     "calls": 384303,
+     "repeats": 382188,
+     "changed": 156579,
+     "cacheable": 0.009456
+    },
+    "_param_kinds": {
+     "calls": 51,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.1122,
-   "projection_listed": 1.007,
-   "saving_all": 0.1446,
-   "saving_listed": 0.01,
+   "saving_listed": 0.0817,
+   "projection_listed": 1.0095,
+   "halved_listed": 1.0047,
+   "saving_all": 1.0427,
+   "projection_all": 1.1361,
+   "halved_all": 1.0681
+  },
+  {
    "task": "chain_relax",
-   "wall": 1.4332
-  },
-  {
-   "halved_all": 1.1237,
-   "halved_listed": 1.0052,
+   "wall": 1.4332,
    "predicates": {
     "_etype": {
-     "cacheable": 0.23943700716448096,
-     "calls": 95153,
-     "changed": 16513,
-     "repeats": 92172
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.02991708208749885,
-     "calls": 24082,
-     "changed": 0,
-     "repeats": 22809
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.026112676088775863,
-     "calls": 104152,
-     "changed": 0,
-     "repeats": 100884
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.049455951605258855,
-     "calls": 79764,
-     "changed": 0,
-     "repeats": 76845
+     "calls": 36129,
+     "repeats": 34307,
+     "changed": 16350,
+     "cacheable": 0.058329
     },
     "_is_str_expr": {
-     "cacheable": 0.16153557158505313,
-     "calls": 103696,
+     "calls": 41612,
+     "repeats": 39745,
+     "changed": 151,
+     "cacheable": 0.069707
+    },
+    "_is_slist_expr": {
+     "calls": 32212,
+     "repeats": 30408,
      "changed": 0,
-     "repeats": 100723
+     "cacheable": 0.021198
     },
     "_map_kind": {
-     "cacheable": 0.026390498351997933,
-     "calls": 122210,
+     "calls": 39142,
+     "repeats": 37301,
      "changed": 0,
-     "repeats": 119229
+     "cacheable": 0.008924
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 24,
+    "_is_bytes_expr": {
+     "calls": 10269,
+     "repeats": 9521,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.012184
+    },
+    "_is_owned_bytes_call": {
+     "calls": 43398,
+     "repeats": 41369,
+     "changed": 0,
+     "cacheable": 0.011932
     },
     "type_of": {
-     "cacheable": 0.03448401102819005,
-     "calls": 301359,
-     "changed": 83893,
-     "repeats": 301104
+     "calls": 113507,
+     "repeats": 113310,
+     "changed": 94442,
+     "cacheable": 0.001581
+    },
+    "_param_kinds": {
+     "calls": 16,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.2474,
-   "projection_listed": 1.0105,
-   "saving_all": 0.4635,
-   "saving_listed": 0.0242,
+   "saving_listed": 0.0105,
+   "projection_listed": 1.0074,
+   "halved_listed": 1.0037,
+   "saving_all": 0.1443,
+   "projection_all": 1.112,
+   "halved_all": 1.056
+  },
+  {
    "task": "echo_pack",
-   "wall": 2.337
-  },
-  {
-   "halved_all": 1.0369,
-   "halved_listed": 1.0018,
+   "wall": 2.337,
    "predicates": {
     "_etype": {
-     "cacheable": 0.09813111193918207,
-     "calls": 51740,
-     "changed": 4240,
-     "repeats": 47157
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.009919086462781746,
-     "calls": 9204,
-     "changed": 110,
-     "repeats": 7331
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.010562819361225446,
-     "calls": 40311,
-     "changed": 0,
-     "repeats": 35080
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.01815237722887828,
-     "calls": 29183,
-     "changed": 0,
-     "repeats": 24754
+     "calls": 95153,
+     "repeats": 92172,
+     "changed": 16513,
+     "cacheable": 0.239191
     },
     "_is_str_expr": {
-     "cacheable": 0.05430318037595834,
-     "calls": 38406,
-     "changed": 20,
-     "repeats": 33966
+     "calls": 103696,
+     "repeats": 100723,
+     "changed": 0,
+     "cacheable": 0.161351
+    },
+    "_is_slist_expr": {
+     "calls": 79764,
+     "repeats": 76845,
+     "changed": 0,
+     "cacheable": 0.049323
     },
     "_map_kind": {
-     "cacheable": 0.009111171581941444,
-     "calls": 46017,
+     "calls": 122210,
+     "repeats": 119229,
      "changed": 0,
-     "repeats": 41425
+     "cacheable": 0.026276
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 22,
+    "_is_bytes_expr": {
+     "calls": 24082,
+     "repeats": 22809,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.029729
+    },
+    "_is_owned_bytes_call": {
+     "calls": 104152,
+     "repeats": 100884,
+     "changed": 0,
+     "cacheable": 0.026091
     },
     "type_of": {
-     "cacheable": 0.005618513930578203,
-     "calls": 92531,
-     "changed": 22285,
-     "repeats": 92039
+     "calls": 301359,
+     "repeats": 301104,
+     "changed": 83893,
+     "cacheable": 0.034407
+    },
+    "_param_kinds": {
+     "calls": 24,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.0737,
-   "projection_listed": 1.0037,
-   "saving_all": 0.1674,
-   "saving_listed": 0.0089,
+   "saving_listed": 0.0241,
+   "projection_listed": 1.0104,
+   "halved_listed": 1.0052,
+   "saving_all": 0.4626,
+   "projection_all": 1.2468,
+   "halved_all": 1.1234
+  },
+  {
    "task": "ledger_bin",
-   "wall": 2.4369
-  },
-  {
-   "halved_all": 1.0185,
-   "halved_listed": 1.001,
+   "wall": 2.4369,
    "predicates": {
     "_etype": {
-     "cacheable": 0.04539343532624706,
-     "calls": 38939,
-     "changed": 4144,
-     "repeats": 35308
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.005390435231989147,
-     "calls": 5601,
-     "changed": 0,
-     "repeats": 4127
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.005895556682623884,
-     "calls": 21274,
-     "changed": 0,
-     "repeats": 17354
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.008292468311060354,
-     "calls": 14226,
-     "changed": 0,
-     "repeats": 10905
+     "calls": 51740,
+     "repeats": 47157,
+     "changed": 4240,
+     "cacheable": 0.099751
     },
     "_is_str_expr": {
-     "cacheable": 0.02249499505580045,
-     "calls": 19676,
+     "calls": 38406,
+     "repeats": 33966,
+     "changed": 20,
+     "cacheable": 0.054373
+    },
+    "_is_slist_expr": {
+     "calls": 29183,
+     "repeats": 24754,
      "changed": 0,
-     "repeats": 16174
+     "cacheable": 0.01807
     },
     "_map_kind": {
-     "cacheable": 0.0033433111106021683,
-     "calls": 18237,
+     "calls": 46017,
+     "repeats": 41425,
      "changed": 0,
-     "repeats": 14865
+     "cacheable": 0.009092
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 18,
+    "_is_bytes_expr": {
+     "calls": 9204,
+     "repeats": 7331,
+     "changed": 110,
+     "cacheable": 0.009756
+    },
+    "_is_owned_bytes_call": {
+     "calls": 40311,
+     "repeats": 35080,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.010576
     },
     "type_of": {
-     "cacheable": 0.002270589210228394,
-     "calls": 31063,
-     "changed": 11554,
-     "repeats": 30624
+     "calls": 92531,
+     "repeats": 92039,
+     "changed": 22285,
+     "cacheable": 0.002663
+    },
+    "_param_kinds": {
+     "calls": 22,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.0371,
-   "projection_listed": 1.0021,
-   "saving_all": 0.0745,
-   "saving_listed": 0.0043,
+   "saving_listed": 0.0089,
+   "projection_listed": 1.0037,
+   "halved_listed": 1.0018,
+   "saving_all": 0.1659,
+   "projection_all": 1.073,
+   "halved_all": 1.0365
+  },
+  {
    "task": "rail_transfer",
-   "wall": 2.0838
-  },
-  {
-   "halved_all": 1.013,
-   "halved_listed": 1.0015,
+   "wall": 2.0838,
    "predicates": {
     "_etype": {
-     "cacheable": 0.023399102779840975,
-     "calls": 22478,
-     "changed": 3122,
-     "repeats": 19937
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.0027505678558848684,
-     "calls": 3136,
-     "changed": 0,
-     "repeats": 2022
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.005869978126121894,
-     "calls": 12877,
-     "changed": 0,
-     "repeats": 9985
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.004491355790791051,
-     "calls": 7911,
-     "changed": 0,
-     "repeats": 5449
+     "calls": 38939,
+     "repeats": 35308,
+     "changed": 4144,
+     "cacheable": 0.046392
     },
     "_is_str_expr": {
-     "cacheable": 0.012760004694113909,
-     "calls": 11393,
+     "calls": 19676,
+     "repeats": 16174,
      "changed": 0,
-     "repeats": 8859
-    },
-    "_map_kind": {
-     "cacheable": 0.0018399801807080958,
-     "calls": 10650,
-     "changed": 0,
-     "repeats": 8135
-    },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 17,
-     "changed": 0,
-     "repeats": 0
-    },
-    "type_of": {
-     "cacheable": 0.0012558421157860846,
-     "calls": 18212,
-     "changed": 9177,
-     "repeats": 17931
-    }
-   },
-   "projection_all": 1.026,
-   "projection_listed": 1.0029,
-   "saving_all": 0.0415,
-   "saving_listed": 0.0048,
-   "task": "scar_life",
-   "wall": 1.6408
-  },
-  {
-   "halved_all": 1.0064,
-   "halved_listed": 1.0008,
-   "predicates": {
-    "_etype": {
-     "cacheable": 0.01951928303235515,
-     "calls": 34540,
-     "changed": 1254,
-     "repeats": 29986
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.0026999105178997745,
-     "calls": 3461,
-     "changed": 0,
-     "repeats": 1858
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.005069001289701275,
-     "calls": 16285,
-     "changed": 0,
-     "repeats": 11389
+     "cacheable": 0.023866
     },
     "_is_slist_expr": {
-     "cacheable": 0.00629968217098025,
-     "calls": 10871,
+     "calls": 14226,
+     "repeats": 10905,
      "changed": 0,
-     "repeats": 6650
-    },
-    "_is_str_expr": {
-     "cacheable": 0.007953038935515369,
-     "calls": 14405,
-     "changed": 0,
-     "repeats": 10018
+     "cacheable": 0.008458
     },
     "_map_kind": {
-     "cacheable": 0.002750109527333265,
-     "calls": 15583,
+     "calls": 18237,
+     "repeats": 14865,
      "changed": 0,
-     "repeats": 11204
+     "cacheable": 0.003269
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 66,
+    "_is_bytes_expr": {
+     "calls": 5601,
+     "repeats": 4127,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.00536
+    },
+    "_is_owned_bytes_call": {
+     "calls": 21274,
+     "repeats": 17354,
+     "changed": 0,
+     "cacheable": 0.005904
     },
     "type_of": {
-     "cacheable": 0.002333794868665677,
-     "calls": 26112,
-     "changed": 5636,
-     "repeats": 25536
+     "calls": 31063,
+     "repeats": 30624,
+     "changed": 11554,
+     "cacheable": 0.000978
+    },
+    "_param_kinds": {
+     "calls": 18,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.0128,
-   "projection_listed": 1.0015,
-   "saving_all": 0.0315,
-   "saving_listed": 0.0038,
-   "task": "tally_lang",
-   "wall": 2.4948
-  },
-  {
-   "halved_all": 1.0183,
+   "saving_listed": 0.0042,
+   "projection_listed": 1.002,
    "halved_listed": 1.001,
+   "saving_all": 0.0756,
+   "projection_all": 1.0376,
+   "halved_all": 1.0188
+  },
+  {
+   "task": "scar_life",
+   "wall": 1.6408,
    "predicates": {
     "_etype": {
-     "cacheable": 0.054288054249852453,
-     "calls": 37138,
-     "changed": 3617,
-     "repeats": 33570
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.003056186506538744,
-     "calls": 3735,
-     "changed": 256,
-     "repeats": 2532
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.005460346602225349,
-     "calls": 19935,
-     "changed": 0,
-     "repeats": 16143
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.008619276479711812,
-     "calls": 15664,
-     "changed": 0,
-     "repeats": 12345
+     "calls": 22478,
+     "repeats": 19937,
+     "changed": 3122,
+     "cacheable": 0.024815
     },
     "_is_str_expr": {
-     "cacheable": 0.023281081319021627,
-     "calls": 20567,
-     "changed": 257,
-     "repeats": 17089
+     "calls": 11393,
+     "repeats": 8859,
+     "changed": 0,
+     "cacheable": 0.012752
+    },
+    "_is_slist_expr": {
+     "calls": 7911,
+     "repeats": 5449,
+     "changed": 0,
+     "cacheable": 0.00445
     },
     "_map_kind": {
-     "cacheable": 0.0045038514492896685,
-     "calls": 21151,
+     "calls": 10650,
+     "repeats": 8135,
      "changed": 0,
-     "repeats": 17675
+     "cacheable": 0.001731
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 38,
+    "_is_bytes_expr": {
+     "calls": 3136,
+     "repeats": 2022,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.00232
+    },
+    "_is_owned_bytes_call": {
+     "calls": 12877,
+     "repeats": 9985,
+     "changed": 0,
+     "cacheable": 0.004884
     },
     "type_of": {
-     "cacheable": 0.003583588005421631,
-     "calls": 40657,
-     "changed": 10359,
-     "repeats": 40154
+     "calls": 18212,
+     "repeats": 17931,
+     "changed": 9177,
+     "cacheable": 0.000539
+    },
+    "_param_kinds": {
+     "calls": 17,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.0366,
-   "projection_listed": 1.0021,
-   "saving_all": 0.0829,
-   "saving_listed": 0.0048,
+   "saving_listed": 0.0037,
+   "projection_listed": 1.0022,
+   "halved_listed": 1.0011,
+   "saving_all": 0.0407,
+   "projection_all": 1.0254,
+   "halved_all": 1.0127
+  },
+  {
+   "task": "tally_lang",
+   "wall": 2.4948,
+   "predicates": {
+    "_etype": {
+     "calls": 8369,
+     "repeats": 5991,
+     "changed": 390,
+     "cacheable": 0.019514
+    },
+    "_is_str_expr": {
+     "calls": 6638,
+     "repeats": 4352,
+     "changed": 0,
+     "cacheable": 0.008959
+    },
+    "_is_slist_expr": {
+     "calls": 5280,
+     "repeats": 3052,
+     "changed": 0,
+     "cacheable": 0.003152
+    },
+    "_map_kind": {
+     "calls": 6905,
+     "repeats": 4628,
+     "changed": 0,
+     "cacheable": 0.001132
+    },
+    "_is_bytes_expr": {
+     "calls": 1668,
+     "repeats": 984,
+     "changed": 0,
+     "cacheable": 0.001285
+    },
+    "_is_owned_bytes_call": {
+     "calls": 6611,
+     "repeats": 4382,
+     "changed": 0,
+     "cacheable": 0.001668
+    },
+    "type_of": {
+     "calls": 11568,
+     "repeats": 11255,
+     "changed": 1486,
+     "cacheable": 0.000455
+    },
+    "_param_kinds": {
+     "calls": 66,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
+    }
+   },
+   "saving_listed": 0.0011,
+   "projection_listed": 1.0004,
+   "halved_listed": 1.0002,
+   "saving_all": 0.0303,
+   "projection_all": 1.0123,
+   "halved_all": 1.0061
+  },
+  {
    "task": "term_rank",
-   "wall": 2.3512
-  },
-  {
-   "halved_all": 1.0069,
-   "halved_listed": 1.0008,
+   "wall": 2.3512,
    "predicates": {
     "_etype": {
-     "cacheable": 0.032521748617540855,
-     "calls": 58509,
-     "changed": 1687,
-     "repeats": 51301
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.004331411725568471,
-     "calls": 6001,
-     "changed": 0,
-     "repeats": 3548
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.008015305625173334,
-     "calls": 26127,
-     "changed": 0,
-     "repeats": 18877
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.005785072263148215,
-     "calls": 20684,
-     "changed": 0,
-     "repeats": 13926
+     "calls": 37138,
+     "repeats": 33570,
+     "changed": 3617,
+     "cacheable": 0.055536
     },
     "_is_str_expr": {
-     "cacheable": 0.016347757656063604,
-     "calls": 27310,
+     "calls": 20567,
+     "repeats": 17089,
+     "changed": 257,
+     "cacheable": 0.02357
+    },
+    "_is_slist_expr": {
+     "calls": 15664,
+     "repeats": 12345,
      "changed": 0,
-     "repeats": 20491
+     "cacheable": 0.008645
     },
     "_map_kind": {
-     "cacheable": 0.005154141548883664,
-     "calls": 34238,
+     "calls": 21151,
+     "repeats": 17675,
      "changed": 0,
-     "repeats": 27178
+     "cacheable": 0.004114
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 170,
+    "_is_bytes_expr": {
+     "calls": 3735,
+     "repeats": 2532,
+     "changed": 256,
+     "cacheable": 0.002672
+    },
+    "_is_owned_bytes_call": {
+     "calls": 19935,
+     "repeats": 16143,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.005519
     },
     "type_of": {
-     "cacheable": 0.004192312813535381,
-     "calls": 46013,
-     "changed": 11955,
-     "repeats": 45228
+     "calls": 40657,
+     "repeats": 40154,
+     "changed": 10359,
+     "cacheable": 0.001591
+    },
+    "_param_kinds": {
+     "calls": 38,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.0139,
-   "projection_listed": 1.0016,
-   "saving_all": 0.049,
-   "saving_listed": 0.0056,
+   "saving_listed": 0.0045,
+   "projection_listed": 1.0019,
+   "halved_listed": 1.001,
+   "saving_all": 0.0818,
+   "projection_all": 1.036,
+   "halved_all": 1.018
+  },
+  {
    "task": "ticket_audit",
-   "wall": 3.5844
-  },
-  {
-   "halved_all": 1.0125,
-   "halved_listed": 1.0013,
+   "wall": 3.5844,
    "predicates": {
     "_etype": {
-     "cacheable": 0.05559314255354885,
-     "calls": 69966,
-     "changed": 8999,
-     "repeats": 61335
-    },
-    "_is_bytes_expr": {
-     "cacheable": 0.009570468978010368,
-     "calls": 10581,
-     "changed": 513,
-     "repeats": 7380
-    },
-    "_is_owned_bytes_call": {
-     "cacheable": 0.013164717574136552,
-     "calls": 42377,
-     "changed": 0,
-     "repeats": 32715
-    },
-    "_is_slist_expr": {
-     "cacheable": 0.00985634419368197,
-     "calls": 27724,
-     "changed": 0,
-     "repeats": 19727
+     "calls": 17137,
+     "repeats": 14256,
+     "changed": 782,
+     "cacheable": 0.03662
     },
     "_is_str_expr": {
-     "cacheable": 0.02738032488417728,
-     "calls": 38350,
-     "changed": 155,
-     "repeats": 29839
+     "calls": 12208,
+     "repeats": 9497,
+     "changed": 0,
+     "cacheable": 0.017741
+    },
+    "_is_slist_expr": {
+     "calls": 9191,
+     "repeats": 6548,
+     "changed": 0,
+     "cacheable": 0.006561
     },
     "_map_kind": {
-     "cacheable": 0.007603152401478077,
-     "calls": 44061,
+     "calls": 14991,
+     "repeats": 12214,
      "changed": 0,
-     "repeats": 35810
+     "cacheable": 0.002125
     },
-    "_param_kinds": {
-     "cacheable": 0.0,
-     "calls": 124,
+    "_is_bytes_expr": {
+     "calls": 3132,
+     "repeats": 1978,
      "changed": 0,
-     "repeats": 0
+     "cacheable": 0.002081
+    },
+    "_is_owned_bytes_call": {
+     "calls": 10615,
+     "repeats": 8012,
+     "changed": 0,
+     "cacheable": 0.002766
     },
     "type_of": {
-     "cacheable": 0.005463709446827517,
-     "calls": 69145,
-     "changed": 22516,
-     "repeats": 67688
+     "calls": 16620,
+     "repeats": 16319,
+     "changed": 3178,
+     "cacheable": 0.000702
+    },
+    "_param_kinds": {
+     "calls": 170,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
     }
    },
-   "projection_all": 1.025,
-   "projection_listed": 1.0027,
-   "saving_all": 0.0908,
-   "saving_listed": 0.0099,
+   "saving_listed": 0.0017,
+   "projection_listed": 1.0005,
+   "halved_listed": 1.0002,
+   "saving_all": 0.0581,
+   "projection_all": 1.0165,
+   "halved_all": 1.0082
+  },
+  {
    "task": "tree_fold",
-   "wall": 3.7305
+   "wall": 3.7305,
+   "predicates": {
+    "_etype": {
+     "calls": 28079,
+     "repeats": 22985,
+     "changed": 4858,
+     "cacheable": 0.058447
+    },
+    "_is_str_expr": {
+     "calls": 22892,
+     "repeats": 17883,
+     "changed": 126,
+     "cacheable": 0.029365
+    },
+    "_is_slist_expr": {
+     "calls": 16664,
+     "repeats": 12018,
+     "changed": 0,
+     "cacheable": 0.010384
+    },
+    "_map_kind": {
+     "calls": 25651,
+     "repeats": 20829,
+     "changed": 0,
+     "cacheable": 0.004901
+    },
+    "_is_bytes_expr": {
+     "calls": 7258,
+     "repeats": 5206,
+     "changed": 444,
+     "cacheable": 0.006549
+    },
+    "_is_owned_bytes_call": {
+     "calls": 21906,
+     "repeats": 17210,
+     "changed": 0,
+     "cacheable": 0.006634
+    },
+    "type_of": {
+     "calls": 34184,
+     "repeats": 33257,
+     "changed": 10976,
+     "cacheable": 0.001615
+    },
+    "_param_kinds": {
+     "calls": 124,
+     "repeats": 0,
+     "changed": 0,
+     "cacheable": 0.0
+    }
+   },
+   "saving_listed": 0.0056,
+   "projection_listed": 1.0015,
+   "halved_listed": 1.0007,
+   "saving_all": 0.0983,
+   "projection_all": 1.0271,
+   "halved_all": 1.0135
   }
  ]
 }

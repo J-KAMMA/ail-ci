@@ -15,8 +15,15 @@ For each call the wrapper records a key, the own time, and ``repr(result)``:
   the build and a plain memo would be wrong for it;
 * *cacheable* seconds are the own time of the repeats whose answer did not change.
 
+Own time is the time inside the predicate body only.  The whole interval of a wrapped callee --
+its key construction, its bookkeeping and its own recording included -- is subtracted from the
+caller, and a predicate's own recording is excluded from its own time, so the probe's
+instrumentation is not charged to any predicate.
+
     python3 lab/profile/pred_probe.py --tasks berth_sim chain_relax tally_lang --out-dir /tmp/pred
     python3 lab/profile/pred_probe.py --corpus --out-dir /tmp/pred
+    python3 lab/profile/pred_probe.py --report /tmp/pred --corpus-dir /tmp/predcorpus \\
+        --out-json lab/profile/CTIME_PRED.json
 """
 from __future__ import annotations
 
@@ -72,17 +79,6 @@ def _primitive(value):
     return isinstance(value, (str, bytes, int, float, bool, type(None)))
 
 
-def _token(value, alive):
-    """A hashable key token: the value for a primitive, ``id()`` for anything else.
-
-    Keeping the object in ``alive`` is what stops CPython reusing its id, so two different
-    calls cannot collide by accident."""
-    if _primitive(value):
-        return ('lit', value)
-    alive.append(value)
-    return ('id', id(value))
-
-
 def install(out_path, names, mode):
     """Called from the child's ``sitecustomize`` before ``pyc.py`` imports ``pyfunc``."""
     import pyfunc
@@ -110,6 +106,7 @@ def install(out_path, names, mode):
         entry = state[name]
         entry['calls'] += 1
         entry['own'] += seconds
+        mark = clock()
         key = (tuple(token(a) for a in args),
                tuple(sorted((k, token(v)) for k, v in kwargs.items())))
         keys = entry['keys']
@@ -124,6 +121,10 @@ def install(out_path, names, mode):
                 entry['changed_keys'].add(key)
             else:
                 entry['cacheable'] += seconds
+        if stack:
+            # Charge the whole recording interval to the caller's child time, so the
+            # probe's own bookkeeping is not counted as any predicate's own time.
+            stack[-1][1] += clock() - mark
 
     def finish():
         stop = clock()
@@ -279,15 +280,160 @@ def corpus_inputs(limit=200):
     return sorted(CORPUS.glob('*/*.py'))[:limit]
 
 
+def _read_rows(directory, names):
+    rows = {}
+    for name in names:
+        path = Path(directory) / (name + '.json')
+        if path.is_file():
+            rows[name] = json.loads(path.read_text(encoding='utf8'))
+    return rows
+
+
+def build_report(probe_dir, corpus_dir, out_json, fe_path=None, lookup_ns=125.0):
+    """Turn the per-input probe rows into ``CTIME_PRED.json``.
+
+    The probe's own times are inflated by its wrapping, so the cacheable *fraction*
+    ``probe_cacheable / probe_own`` is applied to the real front-end own time.  For a predicate
+    row that ``CTIME_FE.json`` reports for a task, the scale is that task's
+    ``fe_own / probe_own``; otherwise the pooled ``fe_own / probe_own`` fills the gap.  The
+    fraction is scale-free, so this cannot report more cacheable time than the predicate's own
+    time on a task whose row exists.
+    """
+    import datetime
+    probe_dir = Path(probe_dir)
+    fe_path = Path(fe_path) if fe_path else HERE / 'CTIME_FE.json'
+    tasks = sorted(path.parent.name for path in SRC.glob('*/main.ail'))
+    task_rows = _read_rows(probe_dir, tasks)
+    missing = [task for task in tasks if task not in task_rows]
+    if missing:
+        raise SystemExit('missing probe rows: %s' % ', '.join(missing))
+    corpus_path = Path(corpus_dir) / 'summary.json'
+    if corpus_path.is_file():
+        corpus_rows = json.loads(corpus_path.read_text(encoding='utf8'))
+    else:
+        corpus_rows = [json.loads(path.read_text(encoding='utf8'))
+                       for path in sorted(Path(corpus_dir).glob('corpus-*.json'))
+                       if '.child.' not in path.name]
+    fe = json.loads(fe_path.read_text(encoding='utf8'))
+    fe_own, walls = {}, {}
+    for result in fe['results']:
+        task = result['task']
+        walls[task] = result['plain_summary']['wall']['median']
+        fe_own[task] = {row['function']: row['own_s'] for row in result['profile']['top_own']}
+
+    summary = []
+    for name in PREDICATES:
+        calls = repeats = changed = 0
+        probe_own = probe_cacheable = 0.0
+        fe_total = 0.0
+        for task in tasks:
+            row = task_rows[task]['predicates'].get(name)
+            if row is None:
+                continue
+            calls += row['calls']
+            repeats += row['repeats']
+            changed += row['changed']
+            probe_own += row['own_s']
+            probe_cacheable += row['cacheable_s']
+            fe_total += fe_own[task].get(name, 0.0)
+        corpus_calls = sum(row['predicates'].get(name, {}).get('calls', 0) for row in corpus_rows)
+        corpus_changed = sum(row['predicates'].get(name, {}).get('changed', 0) for row in corpus_rows)
+        ratio = fe_total / probe_own if probe_own else 0.0
+        summary.append({
+            'predicate': name, 'calls': calls, 'repeats': repeats,
+            'repeat_share': round(repeats / calls, 4) if calls else 0.0,
+            'changed': changed, 'corpus_calls': corpus_calls,
+            'changed_corpus': corpus_changed,
+            'changed_all_inputs': changed + corpus_changed,
+            'probe_own_s': round(probe_own, 6),
+            'probe_cacheable_s': round(probe_cacheable, 6),
+            'fe_own_s': round(fe_total, 6),
+            'fe_probe_ratio': round(ratio, 6),
+            'cacheable_s': round(probe_cacheable * ratio, 6),
+            'eligible': changed + corpus_changed == 0,
+        })
+    listed = [row['predicate'] for row in
+              sorted((row for row in summary if row['eligible']),
+                     key=lambda row: row['cacheable_s'], reverse=True)]
+    by_name = {row['predicate']: row for row in summary}
+
+    task_out = []
+    for task in tasks:
+        probe = task_rows[task]['predicates']
+        per = {}
+        for name in PREDICATES:
+            row = probe.get(name)
+            if row is None:
+                continue
+            fe_task = fe_own[task].get(name)
+            if fe_task is not None and row['own_s']:
+                scale = fe_task / row['own_s']
+            else:
+                scale = by_name[name]['fe_probe_ratio']
+            per[name] = {'calls': row['calls'], 'repeats': row['repeats'],
+                         'changed': row['changed'],
+                         'cacheable': round(row['cacheable_s'] * scale, 6)}
+        wall = walls[task]
+
+        def block(names):
+            saving = sum(per[name]['cacheable'] - lookup_ns * 1e-9 * per[name]['calls']
+                         for name in names if name in per)
+            projection = 1.0 / (1.0 - saving / wall) if saving < wall else float('inf')
+            return round(saving, 4), round(projection, 4), round(1 + (projection - 1) / 2, 4)
+
+        saving_listed, projection_listed, halved_listed = block(listed)
+        saving_all, projection_all, halved_all = block(PREDICATES)
+        task_out.append({
+            'task': task, 'wall': wall, 'predicates': per,
+            'saving_listed': saving_listed, 'projection_listed': projection_listed,
+            'halved_listed': halved_listed, 'saving_all': saving_all,
+            'projection_all': projection_all, 'halved_all': halved_all,
+        })
+
+    record = {}
+    out_path = Path(out_json)
+    if out_path.is_file():
+        try:
+            record = json.loads(out_path.read_text(encoding='utf8'))
+        except ValueError:
+            record = {}
+    record.update({
+        'base': 'export of staging:integ (aea334f)',
+        'date': datetime.date.today().isoformat(),
+        'corpus_inputs': len(corpus_rows),
+        'lookup_ns': lookup_ns,
+        'lookup_s': lookup_ns * 1e-9,
+        'predicate_summary': summary,
+        'listed': listed,
+        'tasks': task_out,
+    })
+    out_path.write_text(json.dumps(record, indent=1) + '\n', encoding='utf8')
+    print('wrote %s: %d tasks, %d corpus inputs, listed %s'
+          % (out_path, len(task_out), len(corpus_rows), ', '.join(listed)))
+    return record
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--tasks', nargs='+', help='compare-task names under lab/compare/src')
     parser.add_argument('--corpus', action='store_true', help='first 200 sorted corpus programs')
-    parser.add_argument('--out-dir', required=True)
+    parser.add_argument('--out-dir')
     parser.add_argument('--mode', default='full', choices=('full', 'changed'))
     parser.add_argument('--source', help='one source file (Python syntax) instead of a task')
     parser.add_argument('--debug', action='store_true', help='also record sha256(program.c)')
+    parser.add_argument('--report', metavar='PROBE_DIR',
+                        help='build CTIME_PRED.json from probe rows instead of probing')
+    parser.add_argument('--corpus-dir', help='probe directory of the 200 corpus rows')
+    parser.add_argument('--out-json', default=str(HERE / 'CTIME_PRED.json'))
+    parser.add_argument('--fe', default=str(HERE / 'CTIME_FE.json'))
     args = parser.parse_args(argv)
+    if args.report:
+        if not args.corpus_dir:
+            parser.error('--report needs --corpus-dir')
+        build_report(args.report, args.corpus_dir, args.out_json, args.fe)
+        return 0
+    if not args.out_dir:
+        parser.error('--out-dir is required unless --report is given')
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []

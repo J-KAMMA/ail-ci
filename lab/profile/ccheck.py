@@ -12,8 +12,9 @@ refusal hash.
     python3 lab/profile/ccheck.py --check         # compare against them, exit 1 on a mismatch
 
 Two builds run at a time (the repo's ``-j 2`` cap); every build is wrapped in
-``RLIMIT_AS = 1500000`` KiB.  The path the work directory and the output take in a refusal text
-is replaced with a placeholder, so the hash is a hash of the message, not of the temp name.
+``RLIMIT_AS = 1500000`` KiB.  The work directory, the output and the compiler's own
+``ailc-XXXXXX`` temp directory are replaced with placeholders in a refusal text, so the hash is a
+hash of the message, not of the temp names.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import resource
 import shutil
 import subprocess
@@ -98,6 +100,9 @@ def build_one(name, source):
             text = (done.stdout + done.stderr)
             for prefix in (str(work), str(target), str(source)):
                 text = text.replace(prefix, '<path>')
+            # The compiler writes program.c into a fresh `ailc-XXXXXX` under TMPDIR, so the
+            # gcc message carries a random component that is not part of the refusal.
+            text = re.sub(r'ailc-[A-Za-z0-9_]+', 'ailc-<tmp>', text)
             row['refusal'] = _text_sha(text)
             lines = [line.strip() for line in done.stderr.splitlines() if line.strip()]
             row['reason'] = lines[-1][:300] if lines else ''
