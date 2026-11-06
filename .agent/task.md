@@ -1,3 +1,50 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: fd-fmt (fdfmt1), HEAD = `9086a08`
+
+**What the change really does:** adds `packaging/ail_lang/fmt.py`, a `--check`-only front end that shells out to `ruff format` (or `black`) and forwards its diff; plus `lab/fmt/check_build.py`+`RESULTS.md`, `docs/FORMAT.md`, `AIL_CURRENT/test_ail_fmt.py` and the manifest entries. No compiler/runtime file is touched — `--debug-dir` C for `lab/compare/src/echo_pack` is byte-identical to the base worktree, so the "C unchanged" claim is structural.
+
+**Probes** (`/tmp/rprobes/fd`, ruff 0.14.4 / black 25.11.0 from `/tmp/fmtvenv`):
+
+| probe | result |
+|---|---|
+| no formatter on PATH | exit 2, `ail fmt needs ruff or black on PATH: pip install ruff` |
+| formatted file, ruff / black-only PATH | exit 0, file md5 unchanged |
+| unformatted file, ruff / black-only | exit 1, `---/+++` diff, file md5 unchanged |
+| empty file, comment-only file (no trailing NL) | 0 / 1 (correctly "would change") |
+| unparsable file, missing file | exit 2 + named `ail fmt: ruff failed on …` |
+| multi-file good+bad | exit 1, diff only for `bad.py` |
+| `line-length` = -5 / `abc` in ail.toml | ignored, default length used |
+| `# ail: gpu`, PEP 263 | survive (harness) |
+
+**Claim checks:** fix commit really is `--color=false`→`--no-color` and works (verified both directions: b0fb550 line 86 vs HEAD). Test module: 9 tests OK with ruff+black, with black-only PATH, and 8 skips + OK without a formatter. `test_ail_safetynet`: **OK, 0 failed (293.9 s)** — the report's "1 failure S4_generators_gc" did not reproduce on HEAD. Harness re-run: **0 of 60 C/output/refusal changed, 60 of 60 check answers equal** (reproduced independently; `RESULTS.md` identical apart from the generated-date line). `update_manifest.py --check` rc=0; diff = exactly the 8 allowed files. Not verified: `test_ail_files`, `test_ail_corpus_findings3`, the 20 CI shards (nothing pushed).
+
+**Defect**
+1. `line_length()` (fmt.py:66-76) walks the ancestors of the path *as typed*, never of the resolved path, so `[fmt] line-length` in an `ail.toml` above the cwd is silently ignored for relative arguments — while the same file given absolutely applies it. This is a wrong exit status from the feature the task specified, and the package's own `project.py:find()` resolves first (`start = Path(start).resolve()`).
+   ```python
+   # /tmp/rprobes/fd/cfg2/proj/ail.toml         -> [fmt] line-length = 40
+   # /tmp/rprobes/fd/cfg2/proj/sub/deep/prog.py -> one 60-char line
+   cd .../proj/sub/deep && PYTHONPATH=<repo>/packaging \
+     python3 -m ail_lang.fmt --check prog.py        # expected 1 + diff, actual 0, "1 file already formatted"
+   PYTHONPATH=… python3 -m ail_lang.fmt --check /tmp/rprobes/fd/cfg2/proj/sub/deep/prog.py   # actual 1 + diff
+   ```
+   Same failure from `proj/sub` with `deep/prog.py`. `docs/FORMAT.md` promises "the nearest `ail.toml` above each file"; the test passes only absolute paths, so it misses this. Fix: `start = Path(path).resolve()` (or resolve in `main()`).
+
+**Pre-existing:** none observed (safetynet passed; C identical to base).
+
+VERDICT: FIX
+1. `packaging/ail_lang/fmt.py:line_length` does not resolve the argument; `[fmt] line-length` from a project-root `ail.toml` is ignored when invoked from a subdirectory with a relative path. Probe above: expected exit 1 + diff (line-length 40), actual exit 0.
+[commandcode stop=end_turn turns=33 out_tokens=31032]
+
+
+--- ORIGINAL TASK ---
 Lane: fd-fmt
 
 # fdfmt1: `ail fmt --check` that reuses an existing Python formatter, proven not to change the build
