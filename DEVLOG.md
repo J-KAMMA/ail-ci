@@ -1,3 +1,36 @@
+## 2026-11-06 -- fz236: the reported seed already matches on this tree (job-fz236-11062253)
+
+The daily fuzzer (seed `2076311363`, CPython 3.12, modes default+ir) recorded
+`exit code cpython=1 ail=3; line 15: cpython='235' ail='100.7525 False'` with AIL stderr
+`AIL limit: int_overflow`. The program ends in `try/except IndexError/else/finally`; its
+`else` body raises IndexError at `elif round(v1 * v1) > al8[3]`. The reported build caught that
+IndexError in the statement's own `except`, printed `100.7525 False`, ran the rest of `main`
+and stopped at the int64 `sum(v6)` (exit 3). CPython lets the exception escape the `else`, so
+`finally` prints `235` and the process exits 1.
+
+On this tree the seed does not reproduce: `lab/fuzz/run.py --start 2076311363 --count 1` gives
+`default: 1 same`, `ir: 1 same` (no DIFF). The two causes the old output needed are both
+absent. The `al8 = v7` alias is refused by name ("makes a second name for the same container"),
+so the default build compiles on the general path, and the general path's `else` is compiled
+against the enclosing handlers (the fz1 fix), not the statement's own. The typed path handles
+the same structure when the aliases are spelled `.copy()` (matches CPython), and 40 runs of the
+default binary are identical. No compiler source changed.
+
+Added `AIL_CURRENT/test_ail_fz236.py` (registered in `tests.d`): the seed verbatim, a raise in
+`else` inside a try with `finally` (IndexError and KeyError), a nested `else` whose `elif`
+raises, and the alias routes, compared with CPython on the g / ir1 / ir0 builds.
+Probes in `/tmp/probes` (`cmp.sh` and a default/IR/typed-only loop): `fz236`, `fz236_copy`,
+`alias_min`, `alias_arg`, `alias_item`, `alias_attr`, `alias_dict`, `alias_ret`, `alias_aug`,
+`alias_types`, `else_idx`, `else_raise`, `else_ctrl`, `else_other`, `else_nest`, `else_nest2`,
+`else_dict`, `else_param`, `else_zero` all match CPython on the default and IR builds; the
+forced typed-only build refuses each alias route by name. Only other difference seen: with the
+alias refusal switched off (`AIL_ALIAS_REFUSE=0`) and the general path off, the typed build
+copies the container and prints `1 2 -3` where CPython prints `2 2 0` -- an internal-switch
+case, not reachable in a normal build.
+
+Final-state tests (`par_check -j 2`): test_ail_fz236, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass; `tools/update_manifest.py --check` is clean.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
