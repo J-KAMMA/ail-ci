@@ -1,7 +1,7 @@
 """tools/wasm_build.py builds AIL's C for wasm32-wasi with zig cc; the result runs under wasmtime.
 
 Skipped when zig or wasmtime is missing (zig as test_ail_cross_target.py finds it; wasmtime as AIL_WASMTIME,
-`wasmtime` on PATH or ~/tools/wasmtime). Builds hello and two compare-lab tasks and compares their output with
+`wasmtime` on PATH or ~/tools/wasmtime). Builds hello and three compare-lab tasks and compares their output with
 the tasks' CPython oracle (reference.py) on their public cases; try/except runs on wasm exception handling.
 """
 import importlib.util
@@ -83,6 +83,15 @@ class WasmTests(unittest.TestCase):
 
     def test_task_tally_lang(self):
         self.check_task('tally_lang')
+
+    def test_task_tree_fold(self):
+        # read_stdin_bytes(1 << 40): needs wasm_build.patch_c's saturation for wasm32's 32-bit size_t
+        self.check_task('tree_fold')
+
+    def test_patch_c_refuses_a_changed_reader(self):
+        text = 'static unsigned char *ail_stdin_fill_bytes(unsigned char *buf, size_t *capp) {}\n'
+        self.assertIn('changed shape', wasm_build.patch_c(text)[1])
+        self.assertEqual(wasm_build.patch_c('int main(void) { return 0; }\n'), ('int main(void) { return 0; }\n', ''))
 
 
 if __name__ == '__main__':

@@ -43,6 +43,26 @@ def first_error(text):
     return lines[0].strip() if lines else '(no output)'
 
 
+# The typed runtime's stdin reader casts its int64 request to size_t (`next > (size_t)size`). On wasm32 size_t is
+# 32 bits, so read_stdin_bytes(1 << 40) becomes 0 and the first realloc is realloc(buf, 0): MemoryError. The emitter
+# is not edited in this step; the build saturates the request at SIZE_MAX at the function's entry, in a copy of the C
+# (WORK/c/program.wasm.c). No read on wasm32 can exceed SIZE_MAX bytes, so the result is what Python returns. A
+# runtime whose reader no longer has this shape stops the build loudly instead of building unpatched.
+STDIN_FILL_HEAD = ('static unsigned char *ail_stdin_fill_bytes(unsigned char *buf, size_t *capp, int64_t size, '
+                   'int64_t *gotp) {\n    size_t cap = *capp, n = 0;\n')
+STDIN_FILL_CAST = '            if (next > (size_t)size) next = (size_t)size;\n'
+STDIN_FILL_SAT = '    if ((uint64_t)size > (uint64_t)SIZE_MAX) size = (int64_t)SIZE_MAX; /* wasm_build.py: 32-bit size_t */\n'
+
+
+def patch_c(text):
+    """Returns (text, error): the C with the 32-bit size_t workarounds applied, or an error message."""
+    if 'ail_stdin_fill_bytes(unsigned char *buf' not in text:
+        return text, ''
+    if text.count(STDIN_FILL_HEAD) != 1 or STDIN_FILL_CAST not in text:
+        return text, 'wasm_build.py: ail_stdin_fill_bytes changed shape; update the 32-bit size_t patch'
+    return text.replace(STDIN_FILL_HEAD, STDIN_FILL_HEAD + STDIN_FILL_SAT), ''
+
+
 def c_sources(debug_dir):
     """program.c first, then any other generated .c file the report lists (copied into the debug dir or not)."""
     out = [debug_dir / 'program.c']
@@ -69,7 +89,16 @@ def build(src, out, work, extra=()):
                         '--debug-dir', str(debug_dir), *extra], capture_output=True, text=True)
     if r.returncode != 0 or not (debug_dir / 'program.c').is_file():
         return False, 'host compile: ' + first_error(r.stderr + r.stdout)
-    cmd = [z, 'cc', *ZIG_FLAGS, '-include', str(SHIM), '-o', str(out), *map(str, c_sources(debug_dir)), '-lm']
+    sources = []
+    for p in c_sources(debug_dir):
+        text, err = patch_c(p.read_text(encoding='utf-8', errors='surrogateescape'))
+        if err:
+            return False, err
+        if text != p.read_text(encoding='utf-8', errors='surrogateescape'):
+            p = p.with_name(p.stem + '.wasm.c')
+            p.write_text(text, encoding='utf-8', errors='surrogateescape')
+        sources.append(p)
+    cmd = [z, 'cc', *ZIG_FLAGS, '-include', str(SHIM), '-o', str(out), *map(str, sources), '-lm']
     r = subprocess.run(cmd, capture_output=True, text=True)
     (debug_dir / 'zig.log').write_text(' '.join(cmd) + '\n' + r.stdout + r.stderr)
     if r.returncode != 0:
