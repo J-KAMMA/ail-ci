@@ -1,3 +1,57 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: fdexp1 `ail explain`
+
+**What the change really does:** adds a standalone Python diagnostic (`packaging/ail_lang/explain.py`) that shells out to the compiler in default and `--strict --json` modes over a *temp copy* of the source and maps blockers to functions; plus 30 probe programs, a test module and RESULTS.md. It touches no compiler, runtime or `cli.py`, so generated C is unchanged: `/tmp/rprobes/r1_typed_all.py` builds to byte-identical `program.c` on HEAD and `/tmp/base` (sha `6b64d301…`), and the diff names only allowed files.
+
+### Defects
+
+1. **Strict analysis runs on a temp copy, so any program that imports a sibling module reports every function `unknown`.**
+   `explain.py:292-295` writes the source into a temp directory and runs *round 0* strict there. AIL resolves imports relative to the source file, so the copy fails with `import of 'helper' is not available`; `_strict_payload` is unparseable, no round passes, and every function becomes `unknown` — although the program is typed and `--strict` on the real file passes.
+   Probe `/tmp/rprobes/imp/main.py` (`from helper import twice`; `helper.py` beside it; `strict` on the real file: `status passed`; default build: no note):
+   - expected: `main.py typed`, `run typed`, `main typed`
+   - actual: `main.py typed`, `run unknown`, `main unknown`
+   The task says build the *file* with `--strict --json`; only the hiding rounds may use a copy. AIL programs do use sibling modules (`language_examples/*.py`), so this is a systematic hole.
+
+### Claims checked
+
+- 117/117 probe functions match `# expect:` — **verified** (my run over all 30: 117 functions, 0 mismatched, 0 unknown).
+- 0 false `typed` — **verified** by construction and probes (typed only after a round with `status passed`): r1 all-typed, r8, r12.
+- static/classmethod attribution — **verified**: r2 `Util.make general`, r12 `Box.build general` (compiler names `Box__classmethod__build`).
+- stub decorators keep callers typed — **verified**: r8 `Box.value general`, `show typed`.
+- env tuning removed — **verified**: `AIL_QUIET_FALLBACK=1 g01`→general, `AIL_UNIFIED_FORCE=1 t01`→typed, `AIL_NO_GENERAL=1 g01`→general.
+- test 2 tests OK, manifest `--check` — **verified** (`test_ail_explain` ok, 16.8s; manifest 0).
+- S4 safetynet failure under `ulimit -v` not caused by the diff — **verified**: base passes without the cap, and the diff has no compiler/runtime code.
+- "a class-returning stub as `Cls(0)`" — mechanism present; arity-fragile, would degrade to `unknown` (allowed), not verified.
+
+### Pre-existing (not caused by this change)
+
+- r7 (`def A__b` colliding with mangled `A.b`) — the compiler itself conflates the two names; its blocker points at line 2. Not a tool bug.
+- `language_examples` importing brace-syntax `.ail` siblings: refused by the compiler already.
+- `S4_generators_gc` fails only under `ulimit -v 1500000`; passes on base and HEAD without it.
+
+### Tests run
+
+`par_check.py -j 2 test_ail_explain test_ail_safetynet` on HEAD: `test_ail_explain` ok; `test_ail_safetynet` failed only S4 under the memory cap. `tools/update_manifest.py --check` ok. `cmp.sh` on r1/r2/r8: both builds match CPython.
+
+### Unverified
+
+- Per-row `blocker_count`/names in RESULTS.md beyond g08, g10, m10 (spot-checked, they match).
+- The >10 hiding-round cap; behavior on very large programs.
+
+VERDICT: FIX
+1. Round 0 of the strict analysis is run on a temp copy (`explain.py:292-295`), so a program importing a sibling module is reported all-`unknown`. Probe `/tmp/rprobes/imp/main.py` + `helper.py`: expected `run typed`, `main typed` (strict on the real file passes), actual `run unknown`, `main unknown`.
+[commandcode stop=end_turn turns=30 out_tokens=28156]
+
+
+--- ORIGINAL TASK ---
 Lane: fd-explain
 
 # fdexp1: `ail explain <file>`: per-function typed / general status and the reason
