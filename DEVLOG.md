@@ -1,3 +1,36 @@
+## 2026-11-06 -- rbnturl2path1: re-apply nturl2path1 on the current tree (job-rbnturl2path1-11061518)
+
+Re-applied the accepted `nturl2path1` change (`193e75b0`..`job-nturl2path1-11060839`) on top of
+`39562f3c`. Its source files are additions only: `AIL_CURRENT/stdlib/nturl2path.py`, its test and
+`tests.d` registration, the ten `lab/stdlib/nturl2path` programs and `RESULTS.md`. The workflow
+conflict from the accepted branch is resolved by its removal of the `agent=opus` input, since the
+current tree has no `L` token path left; the current branch's other workflow lines are unchanged.
+The `DEVLOG` and `DIFFERENCES` records from the accepted change are kept below with a branch id
+of this re-apply. Probes `/tmp/probes/p1`-`p11` (argument, list item, attribute, dict value,
+alias and mutation, empty/`/`/UNC/drive edges, escapes, errors, round trip, a non-BMP URL escape
+and a non-BMP literal) match CPython 3.12 stdout and exit status in both builds; the two non-BMP
+probes are refused by name (`AIL limit: chr_non_bmp` at run time, `a non-BMP string literal in
+the 16-bit v2 runtime` at build). Required tests on the final commit (`par_check -j 2`):
+`test_ail_std_nturl2path` 125.7s, `test_ail_safetynet` 186.3s, `test_ail_files` 104.7s,
+`test_ail_corpus_findings3` 249.3s -- 4/4 pass.
+
+## 2026-11-05 -- nturl2path1 suite fix: the named modules pass unchanged (job-nturl2path1-11060839)
+
+The task named `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_std_nturl2path`,
+`test_ail_unified` and `test_ail_virtual_dispatch` as failing with this change applied on the
+integration branch. None of them fails here. `tools/par_check.py -j 4` over the five ran 5/5 ok on
+this tree (`obj_refs` 18s, `virtual_dispatch` 89s, `std_nturl2path` 185s, `safetynet` 235s,
+`unified` 402s), and 5/5 ok again with the change copied onto `origin/integ` at `5c1c321f` (the
+same tree as `cand-1106080829`: 19s, 89s, 183s, 234s, 402s). The change is additions only
+(`stdlib/nturl2path.py`, its test and `tests.d` registration, the ten `lab/stdlib/nturl2path`
+programs, the manifest shards), and the four non-nturl2path modules are byte-identical between this
+branch and `origin/integ`, so it cannot change their behaviour; no source edit was needed.
+Probes `/tmp/probes/p1`-`p9` (argument, list item, attribute, dict value, alias and mutation,
+empty/`/`/UNC/drive edges, escapes, errors, round trip) match CPython 3.12 stdout and exit status
+in the default and `AIL_UNIFIED_FORCE=1` builds, and the non-BMP escapes stop by name as
+`lab/stdlib/nturl2path/RESULTS.md` records. Required tests on the final commit: the five above,
+`test_ail_files` (104s) and `test_ail_corpus_findings3` (232s), all pass.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
