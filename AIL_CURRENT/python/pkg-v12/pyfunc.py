@@ -3068,12 +3068,9 @@ class Ctx:
                               % name)
         old = self.types.get(name)
         if old is None:
-            import sys as _s, traceback as _tb
-            if name in ('top','got'): print('DECLARE-FIRST', name, t, file=_s.stderr); _tb.print_stack(limit=6, file=_s.stderr)
             self.locals.append(name)
             self.types[name] = t
         elif old != t and not _obj_assignable(name, t, old):
-
             # A local that holds an int on one line and a float on another is a float, which is what
             # Python does; `smoothed = xs[0]` then `smoothed = 0.3 * v + 0.7 * smoothed` is the
             # ordinary shape. Mixing a number with a container is still an error.
