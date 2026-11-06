@@ -1,0 +1,5 @@
+holder acquired
+waiter cancelled
+holder releasing
+locked False
+exit: 0

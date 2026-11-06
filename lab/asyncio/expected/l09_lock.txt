@@ -1,0 +1,7 @@
+first acquired
+first released
+second acquired
+second released
+third acquired
+third released
+exit: 0
