@@ -14,8 +14,10 @@ twice:
   and raises ``OverflowError`` outside int64.
 
 The programs are instrumented with an in-memory AST rewrite so that every
-annotated place (variable, parameter, return, field, list[BigInt] item) is a
-recording point.  No program source is modified on disk.
+annotated place (variable, parameter, return, field, list item) is a recording
+point.  A plain int place is a check point too: an unannotated parameter or
+return, a ``list[int]`` item store, and every unpacking target are checked the
+same way as an annotated ``int``.  No program source is modified on disk.
 """
 
 from __future__ import annotations
@@ -238,15 +240,28 @@ def flow_listbig(line, place, value):
     return out
 
 
+def flow_listint(line, place, value):
+    """A list[int] construction: every item enters a plain int place."""
+    if value is None:
+        return []
+    out = []
+    for index, item in enumerate(value):
+        out.append(flow_int(line, "%s[%d]" % (place, index), item))
+    return out
+
+
 HELPERS = {
     "big": flow_big,
     "int": flow_int,
     "listbig": flow_listbig,
+    "listint": flow_listint,
 }
 
 BIG = "big"
 INT = "int"
 LBIG = "list[big]"
+LINT = "list[int]"
+_HELPER = {BIG: "big", INT: "int", LBIG: "listbig", LINT: "listint"}
 
 
 def kind_of(annotation):
@@ -258,8 +273,12 @@ def kind_of(annotation):
         if annotation.id == "int":
             return INT
     if isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name):
-        if annotation.value.id == "list" and kind_of(annotation.slice) == BIG:
-            return LBIG
+        if annotation.value.id == "list":
+            inner = kind_of(annotation.slice)
+            if inner == BIG:
+                return LBIG
+            if inner == INT:
+                return LINT
     return None
 
 
@@ -292,6 +311,7 @@ class Model(ast.NodeTransformer):
         self.scope = Scope()
         self.class_fields = class_fields
         self.class_stack = []
+        self._temp = 0
 
     def _call(self, helper, line, place, expr):
         return ast.Call(
@@ -302,16 +322,23 @@ class Model(ast.NodeTransformer):
     def _wrap(self, expr, kind, line, place):
         if expr is None or kind is None:
             return expr
-        helper = {BIG: "big", INT: "int", LBIG: "listbig"}[kind]
+        helper = _HELPER[kind]
         return ast.copy_location(self._call(helper, line, place, expr), expr)
 
-    def _target_name(self, target):
+    def _new_temp(self):
+        self._temp += 1
+        return "__ail_model_tmp_%d" % self._temp
+
+    def _target_place(self, target):
         if isinstance(target, ast.Name):
             return target.id
         if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                 and target.value.id == "self"):
             return "self." + target.attr
-        return None
+        try:
+            return ast.unparse(target)
+        except Exception:
+            return "<target>"
 
     def _target_kind(self, target):
         if isinstance(target, ast.Name):
@@ -319,13 +346,75 @@ class Model(ast.NodeTransformer):
         if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                 and target.value.id == "self"):
             return self.scope.attr(target.attr)
-        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
-            if self.scope.lookup(target.value.id) == LBIG:
+        if isinstance(target, ast.Subscript):
+            container = None
+            if isinstance(target.value, ast.Name):
+                container = self.scope.lookup(target.value.id)
+            elif (isinstance(target.value, ast.Attribute)
+                  and isinstance(target.value.value, ast.Name)
+                  and target.value.value.id == "self"):
+                container = self.scope.attr(target.value.attr)
+            if container == LBIG:
                 return BIG
+            if container == LINT:
+                return INT
         return None
 
+    def _visit_body(self, body):
+        out = []
+        for stmt in body:
+            result = self.visit(stmt)
+            if isinstance(result, list):
+                out.extend(result)
+            elif result is not None:
+                out.append(result)
+        return out
+
+    def _destructure(self, target, expr, line, out):
+        if isinstance(target, (ast.Tuple, ast.List)):
+            elements = target.elts
+            star = next((i for i, e in enumerate(elements)
+                         if isinstance(e, ast.Starred)), None)
+            if star is None:
+                for index, element in enumerate(elements):
+                    item = ast.Subscript(value=expr,
+                                         slice=ast.Constant(value=index),
+                                         ctx=ast.Load())
+                    self._destructure(element, item, line, out)
+                return
+            for index, element in enumerate(elements[:star]):
+                item = ast.Subscript(value=expr,
+                                     slice=ast.Constant(value=index),
+                                     ctx=ast.Load())
+                self._destructure(element, item, line, out)
+            trailing = len(elements) - star - 1
+            upper = (None if trailing == 0 else
+                     ast.UnaryOp(op=ast.USub(), operand=ast.Constant(value=trailing)))
+            item = ast.Subscript(value=expr,
+                                 slice=ast.Slice(lower=ast.Constant(value=star),
+                                                 upper=upper),
+                                 ctx=ast.Load())
+            self._destructure(elements[star].value, item, line, out)
+            for offset, element in enumerate(elements[star + 1:], start=1):
+                item = ast.Subscript(
+                    value=expr,
+                    slice=ast.UnaryOp(
+                        op=ast.USub(),
+                        operand=ast.Constant(value=trailing - offset + 1)),
+                    ctx=ast.Load())
+                self._destructure(element, item, line, out)
+            return
+        if isinstance(target, ast.Starred):
+            target = target.value
+        kind = self._target_kind(target)
+        if kind is not None:
+            expr = self._wrap(expr, kind, line, self._target_place(target))
+        statement = ast.Assign(targets=[target], value=expr, type_comment=None)
+        ast.copy_location(statement, target)
+        out.append(statement)
+
     def visit_Module(self, node):
-        node.body = [self.visit(stmt) for stmt in node.body]
+        node.body = self._visit_body(node.body)
         return node
 
     def visit_ClassDef(self, node):
@@ -333,7 +422,7 @@ class Model(ast.NodeTransformer):
         self.scope = Scope(previous)
         self.scope.attrs = dict(self.class_fields.get(node.name, {}))
         self.class_stack.append(node.name)
-        node.body = [self.visit(stmt) for stmt in node.body]
+        node.body = self._visit_body(node.body)
         self.class_stack.pop()
         self.scope = previous
         return node
@@ -343,7 +432,9 @@ class Model(ast.NodeTransformer):
         scope = Scope(previous)
         if self.class_stack:
             scope.attrs = dict(self.class_fields.get(self.class_stack[-1], {}))
-        scope.return_kind = kind_of(node.returns)
+        # An unannotated return is a plain int64 place (rule 2.6); an explicit
+        # non-int annotation (str, None, a class) is left alone.
+        scope.return_kind = INT if node.returns is None else kind_of(node.returns)
         self.scope = scope
 
         args = list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs)
@@ -351,16 +442,19 @@ class Model(ast.NodeTransformer):
         for arg in args:
             kind = kind_of(arg.annotation)
             if kind is None:
-                continue
+                if arg.annotation is None:
+                    kind = INT          # unannotated parameter: plain int64 place
+                else:
+                    continue
             scope.ann[arg.arg] = kind
-            helper = {BIG: "big", INT: "int", LBIG: "listbig"}[kind]
+            helper = _HELPER[kind]
             text = "%s = __flow_%s__(%d, %r, %s)" % (
                 arg.arg, helper, node.lineno, arg.arg, arg.arg)
             statement = ast.parse(text).body[0]
             ast.copy_location(statement, node)
             wrappers.append(statement)
 
-        body = [self.visit(stmt) for stmt in node.body]
+        body = self._visit_body(node.body)
         if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
                 and isinstance(body[0].value.value, str):
             node.body = [body[0]] + wrappers + body[1:]
@@ -388,32 +482,54 @@ class Model(ast.NodeTransformer):
 
     def visit_Assign(self, node):
         self.generic_visit(node)
+        if any(isinstance(target, (ast.Tuple, ast.List)) for target in node.targets):
+            temp = self._new_temp()
+            statements = [ast.Assign(
+                targets=[ast.Name(id=temp, ctx=ast.Store())],
+                value=node.value, type_comment=None)]
+            ast.copy_location(statements[0], node)
+            for target in node.targets:
+                self._destructure(target, ast.Name(id=temp, ctx=ast.Load()),
+                                  node.lineno, statements)
+            return statements
         kinds = [self._target_kind(target) for target in node.targets]
         if kinds and kinds[0] is not None and all(kind == kinds[0] for kind in kinds):
-            name = self._target_name(node.targets[0]) or "<target>"
-            node.value = self._wrap(node.value, kinds[0], node.lineno, name)
+            place = self._target_place(node.targets[0])
+            node.value = self._wrap(node.value, kinds[0], node.lineno, place)
+            return node
+        if any(kind is not None for kind in kinds):
+            temp = self._new_temp()
+            statements = [ast.Assign(
+                targets=[ast.Name(id=temp, ctx=ast.Store())],
+                value=node.value, type_comment=None)]
+            ast.copy_location(statements[0], node)
+            for target, kind in zip(node.targets, kinds):
+                value = ast.Name(id=temp, ctx=ast.Load())
+                if kind is not None:
+                    value = self._wrap(value, kind, node.lineno,
+                                       self._target_place(target))
+                statement = ast.Assign(targets=[target], value=value,
+                                       type_comment=None)
+                ast.copy_location(statement, target)
+                statements.append(statement)
+            return statements
         return node
 
     def visit_AugAssign(self, node):
         kind = self._target_kind(node.target)
         if kind in (BIG, INT):
-            name = self._target_name(node.target) or "<target>"
-            value = ast.BinOp(left=ast.copy_location(
-                ast.parse(self._target_source(node.target), mode="eval").body, node.target),
-                op=node.op, right=node.value)
-            wrapped = self._wrap(value, kind, node.lineno, name)
+            place = self._target_place(node.target)
+            try:
+                loaded = ast.parse(ast.unparse(node.target), mode="eval").body
+            except Exception:
+                loaded = ast.Constant(value=0)
+            value = ast.BinOp(left=ast.copy_location(loaded, node.target),
+                              op=node.op, right=node.value)
+            wrapped = self._wrap(value, kind, node.lineno, place)
             assign = ast.Assign(targets=[node.target], value=wrapped, type_comment=None)
             return ast.copy_location(assign, node)
         self.generic_visit(node)
         return node
-
-    @staticmethod
-    def _target_source(target):
-        if isinstance(target, ast.Name):
-            return target.id
-        if isinstance(target, ast.Attribute):
-            return "self." + target.attr
-        return "0"
 
     def visit_Return(self, node):
         self.generic_visit(node)
@@ -426,15 +542,17 @@ class Model(ast.NodeTransformer):
         func = node.func
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
             kind = self.scope.lookup(func.value.id)
-            if kind == LBIG and func.attr in ("append", "extend", "insert"):
+            if kind in (LBIG, LINT) and func.attr in ("append", "extend", "insert"):
+                item_kind = BIG if kind == LBIG else INT
+                list_kind = LBIG if kind == LBIG else LINT
                 if func.attr == "append" and node.args:
-                    node.args[0] = self._wrap(node.args[0], BIG, node.lineno,
+                    node.args[0] = self._wrap(node.args[0], item_kind, node.lineno,
                                               func.value.id + ".append")
                 elif func.attr == "extend" and node.args:
-                    node.args[0] = self._wrap(node.args[0], LBIG, node.lineno,
+                    node.args[0] = self._wrap(node.args[0], list_kind, node.lineno,
                                               func.value.id + ".extend")
                 elif func.attr == "insert" and len(node.args) >= 2:
-                    node.args[1] = self._wrap(node.args[1], BIG, node.lineno,
+                    node.args[1] = self._wrap(node.args[1], item_kind, node.lineno,
                                               func.value.id + ".insert")
         return node
 

@@ -254,22 +254,24 @@ checks. Files:
 | `packaging/ail/types.py` (new) | `BigInt = int`; `packaging/ail/__init__.py` (new, empty). |
 | `packaging/ail_wheel_backend.py` | ship the top-level `ail/` package alongside `ail_lang/`; extend the wheel check/smoke test. |
 | `AIL_CURRENT/python/pkg-v12/ail_modules.py` | resolve `from ail.types import BigInt` as an annotation-only import: do not compile, export or execute the module. |
-| `AIL_CURRENT/python/pkg-v12/intmode.py` | add `exact_scope(unit)` (or an equivalent predicate) for a BigInt-marked unit; `exact()`, `exact_python()` and `int64_python()` keep their meaning. |
+| `AIL_CURRENT/python/pkg-v12/intmode.py` | add `exact_scope(name)` returning the per-unit BigInt marks (parameters, return, locals/fields) and `any_exact_scope()` for the loop gate; `exact()`, `exact_python()` and `int64_python()` keep their meaning. |
 | `AIL_CURRENT/python/pkg-v12/bigcap.py` | a new annotation pass (or a small new `bigint_type.py` imported here): collect BigInt locals, params, returns, fields and `list[BigInt]` items, then add those units to `marked()`; propagate through calls of marked units. This is the same "capable unit" set that drives the exact lowering. |
 | `AIL_CURRENT/python/pkg-v12/pyfront.py` | record the annotation on the syntax tree/scopes; allow a literal beyond int64 in a BigInt place (the existing exact literal path) and keep the plain-place refusal. |
 | `AIL_CURRENT/python/pkg-v12/pyc.py` | route a BigInt-marked unit to the exact attempt: skip the int64 literal/constant refusal for that scope, use the tagged/unified plan, and keep the ordinary int64 route for unmarked units. |
 | `AIL_CURRENT/python/pkg-v12/unified.py` | make `exact_enabled()` / the per-function exact plan include BigInt-marked units; keep those locals boxed/tagged and unmarked units as they are. |
 | `AIL_CURRENT/python/pkg-v12/pyboxed2.py` | include BigInt-marked units in the `biggate` reachability/marking so the general-path piece carries the exact runtime, and only those. |
 | `AIL_CURRENT/python/pkg-v12/biggate.py` | select the `AIL_T_BIG`/tint runtime for a BigInt-marked unit, not for the whole program; a program without BigInt imports must stay byte-identical. |
-| `AIL_CURRENT/python/pkg-v12/pyfunc.py` | **one hook only**: line 38742, `_python_surface = intmode.exact_python()`, becomes `_python_surface = intmode.exact_python() or intmode.exact_scope(fn.name)`. Everything below (`TINT_SIGS`, `TINT_ACTIVE`, the `ail_tint` locals) already keys off `_python_surface`. |
+| `AIL_CURRENT/python/pkg-v12/pyfunc.py` | **one hook only**, inside the existing per-function `_tint_sigs` loop where `_f` is already bound (the `for _i, _f in enumerate(fns if ...)` at line 38806): (a) widen that loop's gate from `_python_surface` to `(_python_surface or intmode.any_exact_scope())`; (b) as its first body statement bind `_bigunit = intmode.exact_scope(_f.name)` (`None` for an ordinary unit); (c) in the `_params`/`_ret` expressions at lines 38834-38838, tint a parameter named in `_bigunit` and a `_bigunit` BigInt return, e.g. `_all_tint or ... or _bigunit.param(n)` and `_all_tint or _needs_tint or _bigunit.ret`. `_python_surface` at 38742 and `GLOBAL_INT_TINT` keep their whole-program meaning: they say whether module-int storage is exact and whether the loop can run, never whether an individual unit is exact. Use a fresh name such as `_bigunit`; `_unit` is already bound for the fast-emit path at 38989 and 39019, so reusing it would be a collision. |
 | `AIL_CURRENT/python/pkg-v12/tint.py`, `tint_typed.py`, `cruntime.py`, `bigint_core.py`, `bigint_obj.py`, `ir/driver.py`, `ir/lower.py` | **unchanged**: the exact representation, the tagged ABI and the IR lowering are reused. |
 | `AIL_CURRENT/test_ail_bigint_type.py` (new) | the positive/negative cases, both builds, and the `--exact-int` precedence; register through `AIL_CURRENT/tests.d/` as the repository rules require. |
 | `docs/PORTING.md`, `docs/LIMITATIONS.md`, `DIFFERENCES.md`, `DEVLOG.md` | the user-facing spelling, the new stop and the interaction text. |
 
-The one `pyfunc.py` hook is intentionally the same line that already decides whether the tagged
-`ail_tint` lowering runs. `pyfront.py` rewrites a BigInt-place literal to the exact parse the
-exact mode already emits, so no second `pyfunc.py` literal hook is needed; that is a
-precondition of this design.
+The one `pyfunc.py` hook sits where `_f` is already bound, so no undefined name is needed and no
+whole-program flag has to change meaning. It feeds the existing per-function signature computation
+(`TINT_SIGS`, `TINT_ACTIVE`, the `ail_tint` locals) instead of replacing it, and it uses a fresh
+local (`_bigunit`) because `_unit` is already bound later in the same function. `pyfront.py` rewrites
+a BigInt-place literal to the exact parse the exact mode already emits, so no second `pyfunc.py`
+literal hook is needed; that is a precondition of this design.
 
 ### 5.1 Boundary check hook
 
@@ -286,7 +288,10 @@ conversion is emitted. No new value representation, root discipline or GC tag.
 1. runs each program with `BigInt = int` and compares stdout with `expected/<program>.txt`;
 2. runs it again with `BigInt` as an `int` subclass that keeps exact arithmetic and instruments
    the annotated places with an in-memory AST rewrite;
-3. prints every promotion, demotion and overflow and compares the counts with the rule table.
+3. treats the plain int check points of rule 2.3 the same way: an unannotated parameter or
+   return, a `list[int]` item store, and every unpacking target (including nested and starred
+   targets) is checked, so a BigInt stored there raises the modelled `OverflowError`;
+4. prints every promotion, demotion and overflow and compares the counts with the rule table.
 
 `--write-expected` regenerates the CPython files; `--show-flows` lists every flow.
 
