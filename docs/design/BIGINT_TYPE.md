@@ -294,13 +294,13 @@ conversion is emitted. No new value representation, root discipline or GC tag.
 | --- | --- | ---: | ---: | ---: | ---: |
 | `01_factorial.py` | annotated accumulator and return: `30!` | 1 | 0 | 0 | 0 |
 | `02_fibonacci.py` | `F(100)` beyond `2**63` | 2 | 0 | 0 | 0 |
-| `03_modpow.py` | `pow` with BigInt base/exponent/modulus | 1 | 1 | 0 | 0 |
+| `03_modpow.py` | `pow` with BigInt base/exponent/modulus | 1 | 2 | 0 | 0 |
 | `04_counter_field.py` | class field `total: BigInt`, 1000 bumps then `2**70` | 2 | 1 | 0 | 0 |
 | `05_list_sums.py` | `list[BigInt]` literal and loop sum | 3 | 2 | 0 | 0 |
 | `06_mix_divmod.py` | `//` and `%` mixing BigInt and plain int, both signs | 0 | 1 | 0 | 0 |
 | `07_str_int_roundtrip.py` | 40-digit `str`/`int` round trip and a parser | 0 | 2 | 0 | 0 |
 | `08_bigint_to_int_param.py` | **negative:** BigInt into `x: int`, must stop | 0 | 1 | 0 | **1** |
-| `09_literal_and_demotion.py` | literal beyond int64 in a BigInt place, then in-range demotion | 0 | 1 | 1 | 0 |
+| `09_literal_and_demotion.py` | literals beyond int64 in BigInt places, then in-range demotion | 0 | 2 | 1 | 0 |
 | `10_bigint_param_return.py` | BigInt parameter and return, plain int promoted at a call | 1 | 1 | 0 | 0 |
 | `11_bitops_compare.py` | `&`, `>>`, comparison, subtraction with BigInt | 0 | 2 | 0 | 0 |
 | `12_list_largest_sum.py` | `list[BigInt]`, `max` loop and `sum` | 1 | 2 | 0 | 0 |

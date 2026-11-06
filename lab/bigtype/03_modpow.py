@@ -7,5 +7,6 @@ def modpow(base: BigInt, exponent: BigInt, modulus: BigInt) -> BigInt:
 
 p: BigInt = 2 ** 89 - 1
 result: BigInt = modpow(3, p - 1, p)
+modulus: BigInt = 10 ** 30 + 7
 print(result)
-print(pow(2, 200, 10 ** 30 + 7))
+print(pow(2, 200, modulus))
