@@ -580,6 +580,25 @@ def _protected(name, candidates):
     return fields, elem
 
 
+def _owners(name, candidates, seen=None):
+    """The list names an element cursor is reached from, through `m = n` bindings.  Handing such
+    a list to a call is refused conservatively: the callee could release an element even on a
+    path the write summary does not name."""
+    seen = set() if seen is None else seen
+    if name in seen:
+        return set()
+    seen.add(name)
+    out = set()
+    for kind, source in candidates.get(name, ()):
+        if kind in ('elem', 'for'):
+            base = _base_of(kind, source)
+            if base is not None:
+                out.add(base)
+        elif kind == 'name':
+            out |= _owners(source, candidates, seen)
+    return out
+
+
 def _writes_hit(writes, unknown, fields, elem):
     if unknown:
         return True
@@ -593,7 +612,7 @@ def _writes_hit(writes, unknown, fields, elem):
     return False
 
 
-def _live_refuses(fn, name, fields, elem, summaries, classes):
+def _live_refuses(fn, name, fields, elem, owners, summaries, classes):
     """Whether a write that may release the chain can run while `name` is live.
 
     A forward walk carries "bound on some path so far".  A loop whose body can bind the name
@@ -606,6 +625,11 @@ def _live_refuses(fn, name, fields, elem, summaries, classes):
                 eff = _call_effects(sub, summaries, classes)
                 if _writes_hit(eff.writes, eff.unknown, fields, elem):
                     return True
+                if owners and not (isinstance(sub.func, ast.Name)
+                                   and sub.func.id in READ_ONLY_CALLS):
+                    args = list(sub.args) + [k.value for k in sub.keywords]
+                    if any(_deepest_name(a) in owners for a in args):
+                        return True
             elif isinstance(sub, ast.Attribute) and isinstance(sub.ctx, ast.Store):
                 if sub.attr in fields:
                     return True
@@ -723,7 +747,8 @@ def _cursors_in(fn, borrowed, summaries, classes, by_name):
             if not ok or not _loads_ok(fn, name, borrowed, by_name, classes):
                 continue
             fields, elem = _protected(name, candidates)
-            if _live_refuses(fn, name, fields, elem, summaries, classes):
+            if _live_refuses(fn, name, fields, elem, _owners(name, candidates),
+                             summaries, classes):
                 continue
             if _roots_ok(name, candidates, cursors, params, stores, loop_bound):
                 cursors.add(name)

@@ -24,7 +24,9 @@ path-sensitive, not whole-function:
   summary is empty is therefore allowed inside the walk; an unknown callee is
   `Effects(unknown=True)` and refuses it. A `finally` body runs after the try body, every handler
   and the else block, so it inherits their liveness: a cursor bound inside `try` is still live
-  when the cleanup writes and the write refuses it.
+  when the cleanup writes and the write refuses it. For an element or loop cursor, handing the
+  owner list itself to a non-read-only call also refuses: the callee could release an element on
+  a path the write summary does not name (a read-only builtin such as `len(items)` is exempt).
 
 The chain a cursor is reached from must start at a parameter (the caller holds it for the whole
 call, and an owned parameter is retained at entry) or at a local bound exactly once outside any
@@ -36,9 +38,10 @@ retain/release at a store — the store becomes a plain pointer copy. A cursor p
 to rc2's borrowed set (so callers stage non-name arguments exactly as for any borrowed position).
 `AIL_RC_BORROW=0` turns cursors off together with rc2.
 
-Implementation: `ir/borrow.py::analyze_cursors`, 14 added lines in `pyfunc.py` (the same emit
-hook rc2 added — `_BORROWED_PARAMS`/`object_params` — plus the generic object-store site), and
-`ir/verify.py::check_borrowed` extended to cursor locals (10 added lines).
+Implementation: `ir/borrow.py::analyze_cursors`; `pyfunc.py` keeps the cursor set separate from
+rc2's `borrowed_aliases` (the IR path refuses a legacy borrowed-alias list) and threads it through
+the same emit hook rc2 added — the element binding, the element read, the loop-point and exit
+releases — and `ir/verify.py::check_borrowed` is extended to cursor locals.
 
 ## Cursors detected, 16 programs
 

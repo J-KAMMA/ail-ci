@@ -405,6 +405,36 @@ main()
 """
         self.assertIn("n", self.cursors(text).get("total", ()))
 
+    def test_handing_the_owner_list_to_a_call_refuses_an_element_cursor(self):
+        text = NODE + """
+def count(items: list[Node]) -> int:
+    return len(items)
+
+
+def scan(items: list[Node]) -> int:
+    total = 0
+    for item in items:
+        total += count(items) + item.value
+    return total
+
+
+def scan_read(items: list[Node]) -> int:
+    total = 0
+    for item in items:
+        total += len(items) + item.value
+    return total
+
+
+def main() -> int:
+    return 0
+
+
+main()
+"""
+        found = self.cursors(text)
+        self.assertNotIn("item", found.get("scan", ()))
+        self.assertIn("item", found.get("scan_read", ()))
+
     def test_stored_into_a_list_literal_is_refused(self):
         text = NODE + """
 def pack(head: Node | None, out: list[Node]) -> int:
