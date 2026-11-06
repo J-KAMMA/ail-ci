@@ -1472,6 +1472,472 @@ def _ail_tai_to_f64(a: _AilTAI) -> _AilTAF:
     return out
 
 
+# ============================== f32 (stage T3a) ======================================================================
+# An f32 array is a _AilTAS holding a list[float] whose every element is a binary64 value that is exactly a binary32 value
+# (or the canonical NaN). Every operation computes in binary64 and rounds once with _ail_ta_r32 (design 3.2: exact for
+# + - * / sqrt because 53 >= 2 * 24 + 2); nothing is computed in C float arithmetic. Reductions use the order of 3.5 with an
+# f32 accumulator (r32 after every add), or the f64 kernels for acc=ta.f64 (the elements widen exactly).
+def _ail_ta_r32(x: float) -> float:
+    """r_f32(x): round to nearest binary32, ties to even, subnormals kept, overflow to +-inf, NaN canonical; the result is
+    a binary64 value.  Normal range: Veltkamp's split with 2**29 + 1 keeps the top 24 bits rounded to nearest-even (checked
+    against struct on 1.8M values incl. every kind of tie, test_ail_array_t3.py).  Below 2**-126 the grid is the fixed
+    2**-149: adding and removing 1.5 * 2**-97 rounds onto it (the sum's last bit is the 2**-149 bit)."""
+    if x != x:
+        return math.nan
+    y = math.fabs(x)
+    if y < 1.1754943508222875e-38:
+        return math.copysign((y + 9.466330862652142e-30) - 9.466330862652142e-30, x)
+    if y >= 3.4028235677973366e+38:
+        return math.copysign(math.inf, x)
+    c = x * 536870913.0
+    return c - (c - x)
+
+
+class _AilTAS:
+    def __init__(self, n: int):
+        self.d = [0.0] * n
+
+
+def _ail_tas_v(a: _AilTAS) -> _AilTAF:
+    # the same list seen as an f64 array: for operations whose result does not depend on the dtype (no rounding)
+    t = _AilTAF(0)
+    t.d = a.d
+    return t
+
+
+def _ail_tas_w(t: _AilTAF) -> _AilTAS:
+    out = _AilTAS(0)
+    out.d = t.d
+    return out
+
+
+def _ail_ta_te_as(msg: str) -> _AilTAS:
+    if len(msg) >= 0:
+        raise TypeError(msg)
+    return _AilTAS(0)
+
+
+def _ail_ta_ve_as(msg: str) -> _AilTAS:
+    if len(msg) >= 0:
+        raise ValueError(msg)
+    return _AilTAS(0)
+
+
+def _ail_ta_ne_fs(a: _AilTAF, b: _AilTAS) -> bool:
+    return False
+
+
+def _ail_ta_ne_sf(a: _AilTAS, b: _AilTAF) -> bool:
+    return False
+
+
+def _ail_ta_ne_is(a: _AilTAI, b: _AilTAS) -> bool:
+    return False
+
+
+def _ail_ta_ne_si(a: _AilTAS, b: _AilTAI) -> bool:
+    return False
+
+
+def _ail_ta_bits32(x: float) -> int:
+    """The binary32 pattern of an f32 value x (a binary64 value that is exactly f32; NaN gives 7fc00000)."""
+    if x != x:
+        return 2143289344
+    sign = 0
+    y = x
+    if math.copysign(1.0, y) < 0.0:
+        sign = 2147483648
+        y = 0.0 - y
+    if y == 0.0:
+        return sign
+    if y == math.inf:
+        return sign + 2139095040
+    if y < 1.1754943508222875e-38:
+        return sign + int(y * 7.1362384635298e+44)
+    b = _ail_ta_bits(y)
+    e = b[0] // 1048576
+    m = (b[0] % 1048576) * 8 + b[1] // 536870912
+    return sign + (e - 896) * 8388608 + m
+
+
+def _ail_ta_unbits32(u: int) -> float:
+    e = (u // 8388608) % 256
+    m = u % 8388608
+    r = 0.0
+    if e == 255:
+        if m != 0:
+            if u == 2143289344:
+                return math.nan
+            raise RuntimeError("ail_array: this f32 NaN carries a sign or payload that the compiled build does not keep "
+                               "(stage T3a); write instead: ta.frombytes of canonical NaNs (7fc00000) only")
+        r = math.inf
+    elif e == 0:
+        r = float(m) * 1.401298464324817e-45
+    else:
+        r = _ail_ta_scale(1.0 + float(m) * 1.1920928955078125e-07, e - 127)
+    if u >= 2147483648:
+        r = -r
+    return r
+
+
+# ---- f32: construction and access ---------------------------------------------------------------------------------------
+def _ail_tas_zeros(n: int) -> _AilTAS:
+    return _AilTAS(_ail_ta_length(n))
+
+
+def _ail_tas_from(xs: list[float]) -> _AilTAS:
+    a = _AilTAS(len(xs))
+    for k in range(len(xs)):
+        a.d[k] = _ail_ta_r32(xs[k])
+    return a
+
+
+def _ail_tas_full(n: int, x: float) -> _AilTAS:
+    m = _ail_ta_length(n)
+    a = _AilTAS(m)
+    v = _ail_ta_r32(x)
+    for k in range(m):
+        a.d[k] = v
+    return a
+
+
+def _ail_tas_copy(a: _AilTAS) -> _AilTAS:
+    n = len(a.d)
+    b = _AilTAS(n)
+    for k in range(n):
+        b.d[k] = a.d[k]
+    return b
+
+
+def _ail_tas_frombytes(data: bytes) -> _AilTAS:
+    if len(data) % 4 != 0:
+        raise ValueError("ail_array: byte length " + str(len(data)) + " is not a multiple of 4 (f32)")
+    n = len(data) // 4
+    a = _AilTAS(n)
+    for k in range(n):
+        j = k * 4
+        a.d[k] = _ail_ta_unbits32(data[j] + data[j + 1] * 256 + data[j + 2] * 65536 + data[j + 3] * 16777216)
+    return a
+
+
+def _ail_tas_tobytes(a: _AilTAS) -> bytes:
+    n = len(a.d)
+    out = bytearray(n * 4)
+    for k in range(n):
+        u = _ail_ta_bits32(a.d[k])
+        j = k * 4
+        out[j] = u % 256
+        out[j + 1] = (u // 256) % 256
+        out[j + 2] = (u // 65536) % 256
+        out[j + 3] = u // 16777216
+    return bytes(out)
+
+
+def _ail_tas_tolist(a: _AilTAS) -> list[float]:
+    return list(a.d)
+
+
+def _ail_tas_repr(a: _AilTAS) -> str:
+    s = "array(["
+    for k in range(len(a.d)):
+        if k > 0:
+            s = s + ", "
+        s = s + repr(a.d[k])
+    return s + "], f32)"
+
+
+def _ail_tas_get(a: _AilTAS, i: int) -> float:
+    return a.d[_ail_ta_oob(len(a.d), i)]
+
+
+def _ail_tas_set(a: _AilTAS, i: int, x: float):
+    k = _ail_ta_oob(len(a.d), i)
+    a.d[k] = _ail_ta_r32(x)
+
+
+def _ail_tas_slice(a: _AilTAS, lo: int, hi: int, st: int, flags: int) -> _AilTAS:
+    return _ail_tas_w(_ail_taf_slice(_ail_tas_v(a), lo, hi, st, flags))
+
+
+def _ail_tas_setslice(a: _AilTAS, lo: int, hi: int, st: int, flags: int, b: _AilTAS):
+    _ail_taf_setslice(_ail_tas_v(a), lo, hi, st, flags, _ail_tas_v(b))
+
+
+def _ail_tas_eq(a: _AilTAS, b: _AilTAS) -> bool:
+    return _ail_taf_eq(_ail_tas_v(a), _ail_tas_v(b))
+
+
+# ---- f32: element-wise arithmetic (binary64 op, one rounding) ---------------------------------------------------------------
+def _ail_tas_aa(dst: _AilTAS, a: _AilTAS, b: _AilTAS, op: int):
+    """dst = a op b (op 0 + 1 - 2 * 3 /); dst may be a or b."""
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if op == 0:
+        for k in range(n):
+            dst.d[k] = _ail_ta_r32(a.d[k] + b.d[k])
+    elif op == 1:
+        for k in range(n):
+            dst.d[k] = _ail_ta_r32(a.d[k] - b.d[k])
+    elif op == 2:
+        for k in range(n):
+            dst.d[k] = _ail_ta_r32(a.d[k] * b.d[k])
+    else:
+        for k in range(n):
+            y = b.d[k]
+            v = 0.0
+            if y == 0.0:
+                v = _ail_ta_fdiv0(a.d[k], y)
+            else:
+                v = a.d[k] / y
+            dst.d[k] = _ail_ta_r32(v)
+
+
+def _ail_tas_as(dst: _AilTAS, a: _AilTAS, x: float, op: int, refl: bool):
+    """dst = a op x, or x op a when refl; x is the scalar already stored to f32."""
+    n = len(a.d)
+    if op == 0:
+        for k in range(n):
+            dst.d[k] = _ail_ta_r32(a.d[k] + x)
+    elif op == 1:
+        if refl:
+            for k in range(n):
+                dst.d[k] = _ail_ta_r32(x - a.d[k])
+        else:
+            for k in range(n):
+                dst.d[k] = _ail_ta_r32(a.d[k] - x)
+    elif op == 2:
+        for k in range(n):
+            dst.d[k] = _ail_ta_r32(a.d[k] * x)
+    else:
+        for k in range(n):
+            p = a.d[k]
+            q = x
+            if refl:
+                p = x
+                q = a.d[k]
+            v = 0.0
+            if q == 0.0:
+                v = _ail_ta_fdiv0(p, q)
+            else:
+                v = p / q
+            dst.d[k] = _ail_ta_r32(v)
+
+
+def _ail_tas_bin(a: _AilTAS, b: _AilTAS, op: int) -> _AilTAS:
+    out = _AilTAS(len(a.d))
+    _ail_tas_aa(out, a, b, op)
+    return out
+
+
+def _ail_tas_bin_s(a: _AilTAS, x: float, op: int, refl: bool) -> _AilTAS:
+    out = _AilTAS(len(a.d))
+    _ail_tas_as(out, a, _ail_ta_r32(x), op, refl)
+    return out
+
+
+def _ail_tas_ibin(a: _AilTAS, b: _AilTAS, op: int) -> _AilTAS:
+    _ail_tas_aa(a, a, b, op)
+    return a
+
+
+def _ail_tas_ibin_s(a: _AilTAS, x: float, op: int) -> _AilTAS:
+    _ail_tas_as(a, a, _ail_ta_r32(x), op, False)
+    return a
+
+
+def _ail_tas_neg(a: _AilTAS) -> _AilTAS:
+    # negation and fabs of an f32 value are f32 values: no rounding (T2's f64 code, NaN canonical)
+    return _ail_tas_w(_ail_taf_neg(_ail_tas_v(a)))
+
+
+def _ail_tas_abs(a: _AilTAS) -> _AilTAS:
+    return _ail_tas_w(_ail_taf_abs(_ail_tas_v(a)))
+
+
+def _ail_tas_fn(a: _AilTAS, which: int) -> _AilTAS:
+    """r_f32(f(x)) with f the f64 sqrt / exp / log / tanh of T2 (design 3.1)."""
+    t = _ail_taf_fn(_ail_tas_v(a), which)
+    for k in range(len(t.d)):
+        t.d[k] = _ail_ta_r32(t.d[k])
+    return _ail_tas_w(t)
+
+
+def _ail_tas_pick_aa(a: _AilTAS, b: _AilTAS, smaller: bool) -> _AilTAS:
+    return _ail_tas_w(_ail_taf_pick_aa(_ail_tas_v(a), _ail_tas_v(b), smaller))
+
+
+def _ail_tas_pick_as(a: _AilTAS, s: float, smaller: bool) -> _AilTAS:
+    return _ail_tas_w(_ail_taf_pick_as(_ail_tas_v(a), _ail_ta_r32(s), smaller))
+
+
+# ---- f32: reductions (the order of 3.5 with an f32 accumulator) -------------------------------------------------------------
+def _ail_tas_tree(blocks: list[float], lo: int, hi: int) -> float:
+    if hi - lo == 1:
+        return blocks[lo]
+    p = 1
+    while p * 2 < hi - lo:
+        p = p * 2
+    return _ail_ta_r32(_ail_tas_tree(blocks, lo, lo + p) + _ail_tas_tree(blocks, lo + p, hi))
+
+
+def _ail_tas_fsum(d: list[float], e: list[float], prod: bool) -> float:
+    # the sum of d (prod False) or of the products r32(d[k] * e[k]) (prod True), r32 after every add
+    n = len(d)
+    if n == 0:
+        return 0.0
+    nb = (n + 1023) // 1024
+    blocks = [0.0] * nb
+    tp = [-0.0] * 16
+    for b in range(nb):
+        s = b * 1024
+        t = s + 1024
+        if t > n:
+            t = n
+        l0 = -0.0
+        l1 = -0.0
+        l2 = -0.0
+        l3 = -0.0
+        l4 = -0.0
+        l5 = -0.0
+        l6 = -0.0
+        l7 = -0.0
+        l8 = -0.0
+        l9 = -0.0
+        l10 = -0.0
+        l11 = -0.0
+        l12 = -0.0
+        l13 = -0.0
+        l14 = -0.0
+        l15 = -0.0
+        k = s
+        while k < t:
+            # one group of up to 16 elements; a missing lane adds -0.0, the identity (the lane is left as it was)
+            for y in range(16):
+                tp[y] = -0.0
+                if k + y < t:
+                    if prod:
+                        tp[y] = _ail_ta_r32(d[k + y] * e[k + y])
+                    else:
+                        tp[y] = d[k + y]
+            l0 = _ail_ta_r32(l0 + tp[0])
+            l1 = _ail_ta_r32(l1 + tp[1])
+            l2 = _ail_ta_r32(l2 + tp[2])
+            l3 = _ail_ta_r32(l3 + tp[3])
+            l4 = _ail_ta_r32(l4 + tp[4])
+            l5 = _ail_ta_r32(l5 + tp[5])
+            l6 = _ail_ta_r32(l6 + tp[6])
+            l7 = _ail_ta_r32(l7 + tp[7])
+            l8 = _ail_ta_r32(l8 + tp[8])
+            l9 = _ail_ta_r32(l9 + tp[9])
+            l10 = _ail_ta_r32(l10 + tp[10])
+            l11 = _ail_ta_r32(l11 + tp[11])
+            l12 = _ail_ta_r32(l12 + tp[12])
+            l13 = _ail_ta_r32(l13 + tp[13])
+            l14 = _ail_ta_r32(l14 + tp[14])
+            l15 = _ail_ta_r32(l15 + tp[15])
+            k = k + 16
+        l0 = _ail_ta_r32(l0 + l8)
+        l1 = _ail_ta_r32(l1 + l9)
+        l2 = _ail_ta_r32(l2 + l10)
+        l3 = _ail_ta_r32(l3 + l11)
+        l4 = _ail_ta_r32(l4 + l12)
+        l5 = _ail_ta_r32(l5 + l13)
+        l6 = _ail_ta_r32(l6 + l14)
+        l7 = _ail_ta_r32(l7 + l15)
+        l0 = _ail_ta_r32(l0 + l4)
+        l1 = _ail_ta_r32(l1 + l5)
+        l2 = _ail_ta_r32(l2 + l6)
+        l3 = _ail_ta_r32(l3 + l7)
+        l0 = _ail_ta_r32(l0 + l2)
+        l1 = _ail_ta_r32(l1 + l3)
+        l0 = _ail_ta_r32(l0 + l1)
+        blocks[b] = l0
+    r = _ail_tas_tree(blocks, 0, nb)
+    if r != r:
+        return math.nan
+    return r
+
+
+def _ail_tas_sum(a: _AilTAS) -> float:
+    return _ail_tas_fsum(a.d, a.d, False)
+
+
+def _ail_tas_dot(a: _AilTAS, b: _AilTAS) -> float:
+    if len(b.d) != len(a.d):
+        _ail_ta_shapes(len(a.d), len(b.d))
+    return _ail_tas_fsum(a.d, b.d, True)
+
+
+def _ail_tas_sum64(a: _AilTAS) -> float:
+    return _ail_taf_fsum_s(a.d)
+
+
+def _ail_tas_dot64(a: _AilTAS, b: _AilTAS) -> float:
+    if len(b.d) != len(a.d):
+        _ail_ta_shapes(len(a.d), len(b.d))
+    return _ail_taf_fsum_d(a.d, b.d)
+
+
+def _ail_taf_dot_ve(a: _AilTAF, b: _AilTAF, msg: str) -> float:
+    if len(b.d) != len(a.d):
+        _ail_ta_shapes(len(a.d), len(b.d))
+    raise ValueError(msg)
+    return 0.0
+
+
+def _ail_tas_dot_ve(a: _AilTAS, b: _AilTAS, msg: str) -> float:
+    if len(b.d) != len(a.d):
+        _ail_ta_shapes(len(a.d), len(b.d))
+    raise ValueError(msg)
+    return 0.0
+
+
+def _ail_tas_min(a: _AilTAS) -> float:
+    return _ail_taf_min(_ail_tas_v(a))
+
+
+def _ail_tas_max(a: _AilTAS) -> float:
+    return _ail_taf_max(_ail_tas_v(a))
+
+
+def _ail_tas_argmin(a: _AilTAS) -> int:
+    return _ail_taf_argmin(_ail_tas_v(a))
+
+
+def _ail_tas_argmax(a: _AilTAS) -> int:
+    return _ail_taf_argmax(_ail_tas_v(a))
+
+
+# ---- f32 casts ----------------------------------------------------------------------------------------------------------------
+def _ail_taf_to_f32(a: _AilTAF) -> _AilTAS:
+    n = len(a.d)
+    out = _AilTAS(n)
+    for k in range(n):
+        out.d[k] = _ail_ta_r32(a.d[k])
+    return out
+
+
+def _ail_tai_to_f32(a: _AilTAI) -> _AilTAS:
+    n = len(a.d)
+    out = _AilTAS(n)
+    for k in range(n):
+        out.d[k] = _ail_ta_r32(float(a.d[k]))
+    return out
+
+
+def _ail_tas_to_f32(a: _AilTAS) -> _AilTAS:
+    return _ail_tas_copy(a)
+
+
+def _ail_tas_to_f64(a: _AilTAS) -> _AilTAF:
+    return _ail_taf_copy(_ail_tas_v(a))
+
+
+def _ail_tas_to_i32(a: _AilTAS, nearest: bool, mode: int) -> _AilTAI:
+    return _ail_taf_to_i32(_ail_tas_v(a), nearest, mode)
+
+
 # ---- 2-D f64 arrays (stage T6) ------------------------------------------------------------------------------------------
 # A 2-D array holds its data as a 1-D f64 array (`.v`), so an element-wise function of a 2-D array is the 1-D function
 # on `.v` (in place too); the shape checks come first, with the reference's text.
@@ -1782,4 +2248,392 @@ def _ail_tam_matmul(a: _AilTAM, b: _AilTAM) -> _AilTAM:
     out.r = a.r
     out.c = b.c
     out.v.d = _ail_tam_mmk(a.v.d, b.v.d, _ail_tam_len(a.r), _ail_tam_len(a.c), _ail_tam_len(b.c))
+    return out
+
+
+# ---- 2-D f32 and int32 arrays (job fdarr2): construction, indexing, rows, .T, ==, tobytes and matmul -----------------------
+class _AilTAMS:
+    # a 2-D f32 array: rows r, columns c, row-major data v (a 1-D f32 array)
+    def __init__(self, r: int, c: int):
+        self.r = r
+        self.c = c
+        self.v = _AilTAS(r * c)
+
+
+class _AilTAMI:
+    # a 2-D int32 array: rows r, columns c, row-major data v (a 1-D int32 array)
+    def __init__(self, r: int, c: int):
+        self.r = r
+        self.c = c
+        self.v = _AilTAI(r * c)
+
+
+def _ail_tam_te(msg: str) -> _AilTAM:
+    if len(msg) >= 0:
+        raise TypeError(msg)
+    return _AilTAM(0, 0)
+
+
+def _ail_tams_te(msg: str) -> _AilTAMS:
+    if len(msg) >= 0:
+        raise TypeError(msg)
+    return _AilTAMS(0, 0)
+
+
+def _ail_tami_te(msg: str) -> _AilTAMI:
+    if len(msg) >= 0:
+        raise TypeError(msg)
+    return _AilTAMI(0, 0)
+
+
+def _ail_tams_m(a: _AilTAMS) -> _AilTAM:
+    # the same data seen as a 2-D f64 array, for the operations that do not round
+    m = _AilTAM(0, 0)
+    m.r = a.r
+    m.c = a.c
+    m.v = _ail_tas_v(a.v)
+    return m
+
+
+def _ail_tams_w(m: _AilTAM) -> _AilTAMS:
+    out = _AilTAMS(0, 0)
+    out.r = m.r
+    out.c = m.c
+    out.v = _ail_tas_w(m.v)
+    return out
+
+
+def _ail_tams_zeros(r: int, c: int) -> _AilTAMS:
+    r2 = _ail_ta_length(r)
+    c2 = _ail_ta_length(c)
+    return _AilTAMS(r2, c2)
+
+
+def _ail_tams_full(r: int, c: int, x: float) -> _AilTAMS:
+    r2 = _ail_ta_length(r)
+    c2 = _ail_ta_length(c)
+    a = _AilTAMS(r2, c2)
+    v = _ail_ta_r32(x)
+    for k in range(r2 * c2):
+        a.v.d[k] = v
+    return a
+
+
+def _ail_tams_from(rows: list[list[float]]) -> _AilTAMS:
+    m = _ail_tam_from(rows)
+    for k in range(len(m.v.d)):
+        m.v.d[k] = _ail_ta_r32(m.v.d[k])
+    return _ail_tams_w(m)
+
+
+def _ail_tams_copy(a: _AilTAMS) -> _AilTAMS:
+    return _ail_tams_w(_ail_tam_copy(_ail_tams_m(a)))
+
+
+def _ail_tams_t(a: _AilTAMS) -> _AilTAMS:
+    return _ail_tams_w(_ail_tam_t(_ail_tams_m(a)))
+
+
+def _ail_tams_tobytes(a: _AilTAMS) -> bytes:
+    return _ail_tas_tobytes(a.v)
+
+
+def _ail_tams_repr(a: _AilTAMS) -> str:
+    s = "array(["
+    for i in range(a.r):
+        if i > 0:
+            s = s + ", "
+        s = s + "["
+        for j in range(a.c):
+            if j > 0:
+                s = s + ", "
+            s = s + repr(a.v.d[i * a.c + j])
+        s = s + "]"
+    return s + "], f32)"
+
+
+def _ail_tams_get(a: _AilTAMS, i: int, j: int) -> float:
+    return _ail_tam_get(_ail_tams_m(a), i, j)
+
+
+def _ail_tams_set(a: _AilTAMS, i: int, j: int, x: float):
+    p = _ail_ta_oob(a.r, i)
+    q = _ail_ta_oob(a.c, j)
+    a.v.d[p * a.c + q] = _ail_ta_r32(x)
+
+
+def _ail_tams_row(a: _AilTAMS, i: int) -> _AilTAS:
+    return _ail_tas_w(_ail_tam_row(_ail_tams_m(a), i))
+
+
+def _ail_tams_setrow(a: _AilTAMS, i: int, row: _AilTAS):
+    _ail_tam_setrow(_ail_tams_m(a), i, _ail_tas_v(row))
+
+
+def _ail_tams_slice(a: _AilTAMS, lo: int, hi: int, st: int, flags: int) -> _AilTAMS:
+    return _ail_tams_w(_ail_tam_slice(_ail_tams_m(a), lo, hi, st, flags))
+
+
+def _ail_tams_eq(a: _AilTAMS, b: _AilTAMS) -> bool:
+    return _ail_tam_eq(_ail_tams_m(a), _ail_tams_m(b))
+
+
+def _ail_tams_mmk(ad: list[float], bd: list[float], lm: list[float], lk: list[float], ln: list[float]) -> list[float]:
+    # _ail_tam_mmk with r_f32 after every product and every add: element (i, j) is the f32 dot of row i and column j in the
+    # order of 3.5 / 3.7 (blocks of 1024, sixteen lanes from -0.0, the 8-4-2-1 tree, the tree over blocks with r_f32).  The
+    # short last group of a block adds -0.0, the identity, to the lanes it does not reach.
+    m = len(lm)
+    k = len(lk)
+    n = len(ln)
+    out = [0.0] * (m * n)
+    if k == 0 or m == 0 or n == 0:
+        return out
+    bt = [0.0] * (k * n)
+    for kk in range(k):
+        for jj in range(n):
+            bt[jj * k + kk] = bd[kk * n + jj]
+    nb = (k + 1023) // 1024
+    blocks = [0.0] * nb
+    tp = [-0.0] * 16
+    for i in range(m):
+        for j in range(n):
+            for x in range(nb):
+                bs = x * 1024
+                te = bs + 1024
+                if te > k:
+                    te = k
+                l0 = -0.0
+                l1 = -0.0
+                l2 = -0.0
+                l3 = -0.0
+                l4 = -0.0
+                l5 = -0.0
+                l6 = -0.0
+                l7 = -0.0
+                l8 = -0.0
+                l9 = -0.0
+                l10 = -0.0
+                l11 = -0.0
+                l12 = -0.0
+                l13 = -0.0
+                l14 = -0.0
+                l15 = -0.0
+                u = bs
+                while u < te:
+                    for y in range(16):
+                        tp[y] = -0.0
+                        if u + y < te:
+                            tp[y] = _ail_ta_r32(ad[i * k + u + y] * bt[j * k + u + y])
+                    l0 = _ail_ta_r32(l0 + tp[0])
+                    l1 = _ail_ta_r32(l1 + tp[1])
+                    l2 = _ail_ta_r32(l2 + tp[2])
+                    l3 = _ail_ta_r32(l3 + tp[3])
+                    l4 = _ail_ta_r32(l4 + tp[4])
+                    l5 = _ail_ta_r32(l5 + tp[5])
+                    l6 = _ail_ta_r32(l6 + tp[6])
+                    l7 = _ail_ta_r32(l7 + tp[7])
+                    l8 = _ail_ta_r32(l8 + tp[8])
+                    l9 = _ail_ta_r32(l9 + tp[9])
+                    l10 = _ail_ta_r32(l10 + tp[10])
+                    l11 = _ail_ta_r32(l11 + tp[11])
+                    l12 = _ail_ta_r32(l12 + tp[12])
+                    l13 = _ail_ta_r32(l13 + tp[13])
+                    l14 = _ail_ta_r32(l14 + tp[14])
+                    l15 = _ail_ta_r32(l15 + tp[15])
+                    u = u + 16
+                l0 = _ail_ta_r32(l0 + l8)
+                l1 = _ail_ta_r32(l1 + l9)
+                l2 = _ail_ta_r32(l2 + l10)
+                l3 = _ail_ta_r32(l3 + l11)
+                l4 = _ail_ta_r32(l4 + l12)
+                l5 = _ail_ta_r32(l5 + l13)
+                l6 = _ail_ta_r32(l6 + l14)
+                l7 = _ail_ta_r32(l7 + l15)
+                l0 = _ail_ta_r32(l0 + l4)
+                l1 = _ail_ta_r32(l1 + l5)
+                l2 = _ail_ta_r32(l2 + l6)
+                l3 = _ail_ta_r32(l3 + l7)
+                l0 = _ail_ta_r32(l0 + l2)
+                l1 = _ail_ta_r32(l1 + l3)
+                l0 = _ail_ta_r32(l0 + l1)
+                blocks[x] = l0
+            res = blocks[0]
+            if nb > 1:
+                res = _ail_tas_tree(blocks, 0, nb)
+            if res != res:
+                res = math.nan
+            out[i * n + j] = res
+    return out
+
+
+def _ail_tams_matmul(a: _AilTAMS, b: _AilTAMS) -> _AilTAMS:
+    if a.c != b.r:
+        raise ValueError("ail_array: matmul: shapes (" + str(a.r) + ", " + str(a.c) + ") and (" + str(b.r) + ", " + str(b.c)
+                         + ") do not match: " + str(a.c) + " != " + str(b.r))
+    out = _AilTAMS(0, 0)
+    out.r = a.r
+    out.c = b.c
+    out.v.d = _ail_tams_mmk(a.v.d, b.v.d, _ail_tam_len(a.r), _ail_tam_len(a.c), _ail_tam_len(b.c))
+    return out
+
+
+# int32 2-D
+def _ail_tami_zeros(r: int, c: int) -> _AilTAMI:
+    r2 = _ail_ta_length(r)
+    c2 = _ail_ta_length(c)
+    return _AilTAMI(r2, c2)
+
+
+def _ail_tami_full(r: int, c: int, x: int) -> _AilTAMI:
+    r2 = _ail_ta_length(r)
+    c2 = _ail_ta_length(c)
+    v = _ail_tai_store(x)
+    a = _AilTAMI(r2, c2)
+    for k in range(r2 * c2):
+        a.v.d[k] = v
+    return a
+
+
+def _ail_tami_from(rows: list[list[int]]) -> _AilTAMI:
+    r = len(rows)
+    c = 0
+    if r > 0:
+        c = len(rows[0])
+    for i in range(r):
+        if len(rows[i]) != c:
+            raise ValueError("ail_array: array(): rows differ in length (" + str(c) + " and " + str(len(rows[i])) + ")")
+    a = _AilTAMI(r, c)
+    for i in range(r):
+        for j in range(c):
+            a.v.d[i * c + j] = _ail_tai_store(rows[i][j])
+    return a
+
+
+def _ail_tami_copy(a: _AilTAMI) -> _AilTAMI:
+    out = _AilTAMI(a.r, a.c)
+    for k in range(len(a.v.d)):
+        out.v.d[k] = a.v.d[k]
+    return out
+
+
+def _ail_tami_t(a: _AilTAMI) -> _AilTAMI:
+    out = _AilTAMI(a.c, a.r)
+    for i in range(a.r):
+        for j in range(a.c):
+            out.v.d[j * a.r + i] = a.v.d[i * a.c + j]
+    return out
+
+
+def _ail_tami_tobytes(a: _AilTAMI) -> bytes:
+    return _ail_tai_tobytes(a.v)
+
+
+def _ail_tami_repr(a: _AilTAMI) -> str:
+    s = "array(["
+    for i in range(a.r):
+        if i > 0:
+            s = s + ", "
+        s = s + "["
+        for j in range(a.c):
+            if j > 0:
+                s = s + ", "
+            s = s + repr(a.v.d[i * a.c + j])
+        s = s + "]"
+    return s + "], int32)"
+
+
+def _ail_tami_get(a: _AilTAMI, i: int, j: int) -> int:
+    p = _ail_ta_oob(a.r, i)
+    q = _ail_ta_oob(a.c, j)
+    return a.v.d[p * a.c + q]
+
+
+def _ail_tami_set(a: _AilTAMI, i: int, j: int, x: int):
+    p = _ail_ta_oob(a.r, i)
+    q = _ail_ta_oob(a.c, j)
+    a.v.d[p * a.c + q] = _ail_tai_store(x)
+
+
+def _ail_tami_row(a: _AilTAMI, i: int) -> _AilTAI:
+    p = _ail_ta_oob(a.r, i)
+    out = _AilTAI(a.c)
+    for j in range(a.c):
+        out.d[j] = a.v.d[p * a.c + j]
+    return out
+
+
+def _ail_tami_setrow(a: _AilTAMI, i: int, row: _AilTAI):
+    p = _ail_ta_oob(a.r, i)
+    if len(row.d) != a.c:
+        raise ValueError("ail_array: row assignment needs a 1-D array of " + str(a.c) + " elements, not shape ("
+                         + str(len(row.d)) + ",)")
+    for j in range(a.c):
+        a.v.d[p * a.c + j] = row.d[j]
+
+
+def _ail_tami_slice(a: _AilTAMI, lo: int, hi: int, st: int, flags: int) -> _AilTAMI:
+    r = _ail_ta_slice(a.r, lo, hi, st, flags)
+    out = _AilTAMI(r[1], a.c)
+    for q in range(r[1]):
+        src = r[0] + q * r[2]
+        for j in range(a.c):
+            out.v.d[q * a.c + j] = a.v.d[src * a.c + j]
+    return out
+
+
+def _ail_tami_eq(a: _AilTAMI, b: _AilTAMI) -> bool:
+    if a.r != b.r or a.c != b.c:
+        return False
+    for k in range(len(a.v.d)):
+        if a.v.d[k] != b.v.d[k]:
+            return False
+    return True
+
+
+def _ail_tami_mmk(ad: list[int], bd: list[int], lm: list[float], lk: list[float], ln: list[float]) -> list[int]:
+    # exact int32 matmul, order-free (design 3.7).  A product is at most 2**62 in size, so the int64 accumulator acc is kept
+    # inside (-2**62, 2**62) by moving whole multiples of 2**62 into hi; the exact sum is hi * 2**62 + acc, checked against
+    # int32 without forming it.  The first result outside int32 in row-major order raises, as in the reference.
+    m = len(lm)
+    k = len(lk)
+    n = len(ln)
+    out = [0] * (m * n)
+    bt = [0] * (k * n)
+    for kk in range(k):
+        for jj in range(n):
+            bt[jj * k + kk] = bd[kk * n + jj]
+    for i in range(m):
+        for j in range(n):
+            acc = 0
+            hi = 0
+            for t in range(k):
+                acc = acc + ad[i * k + t] * bt[j * k + t]
+                if acc >= 4611686018427387904:
+                    acc = acc - 4611686018427387904
+                    hi = hi + 1
+                elif acc <= -4611686018427387904:
+                    acc = acc + 4611686018427387904
+                    hi = hi - 1
+            v = acc
+            ok = True
+            if hi == 1 and acc < 0:
+                v = acc + 4611686018427387904
+            elif hi == -1 and acc > 0:
+                v = acc - 4611686018427387904
+            elif hi != 0:
+                ok = False
+            if not ok or v < -2147483648 or v > 2147483647:
+                raise OverflowError("int32 matmul overflow at index " + str(i * n + j))
+            out[i * n + j] = v
+    return out
+
+
+def _ail_tami_matmul(a: _AilTAMI, b: _AilTAMI) -> _AilTAMI:
+    if a.c != b.r:
+        raise ValueError("ail_array: matmul: shapes (" + str(a.r) + ", " + str(a.c) + ") and (" + str(b.r) + ", " + str(b.c)
+                         + ") do not match: " + str(a.c) + " != " + str(b.r))
+    out = _AilTAMI(0, 0)
+    out.r = a.r
+    out.c = b.c
+    out.v.d = _ail_tami_mmk(a.v.d, b.v.d, _ail_tam_len(a.r), _ail_tam_len(a.c), _ail_tam_len(b.c))
     return out
