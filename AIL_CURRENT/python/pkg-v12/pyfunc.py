@@ -31671,6 +31671,515 @@ def _mark_freeable_objects(fn, ctx):
     return candidates - escaping
 
 
+_ALIAS_MUTATING_METHODS = frozenset((
+    'append', 'pop', 'sort', 'extend', 'insert', 'remove', 'clear', 'reverse', '__setitem__'))
+_ALIAS_SAFE_LIST_METHODS = frozenset(('copy', 'count', 'index'))
+
+
+def _alias_field_element(annotation):
+    if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+            and annotation.value.id in ('list', '__ail_checked_list')
+            and isinstance(annotation.slice, ast.Name)
+            and annotation.slice.id in ('int', 'float', 'str')):
+        return annotation.slice.id
+    return None
+
+
+def _alias_annotation_class(annotation, class_names):
+    if isinstance(annotation, ast.Name) and annotation.id in class_names:
+        return annotation.id
+    return None
+
+
+def _alias_annotation_list_class(annotation, class_names):
+    if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+            and annotation.value.id in ('list', '__ail_checked_list')
+            and isinstance(annotation.slice, ast.Name) and annotation.slice.id in class_names):
+        return annotation.slice.id
+    return None
+
+
+def _alias_class_fields(tree):
+    class_names = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    info = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            info[node.name] = {
+                'list': {}, 'obj': {}, 'objs': {}, 'methods': set(), 'own': set(),
+                'bases': [base.id for base in node.bases if isinstance(base, ast.Name)]}
+
+    def note(table, field, value):
+        if value is None:
+            return
+        if field in table and table[field] != value:
+            table.pop(field, None)
+        else:
+            table[field] = value
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        own = info[node.name]
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef):
+                own['methods'].add(item.name)
+                if item.name == '__init__':
+                    for arg in item.args.args[1:]:
+                        own['own'].add(arg.arg)
+                        note(own['list'], arg.arg, _alias_field_element(arg.annotation))
+                        note(own['obj'], arg.arg, _alias_annotation_class(arg.annotation, class_names))
+                        note(own['objs'], arg.arg, _alias_annotation_list_class(arg.annotation, class_names))
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                own['own'].add(item.target.id)
+                note(own['list'], item.target.id, _alias_field_element(item.annotation))
+                note(own['obj'], item.target.id, _alias_annotation_class(item.annotation, class_names))
+                note(own['objs'], item.target.id, _alias_annotation_list_class(item.annotation, class_names))
+    changed = True
+    while changed:
+        changed = False
+        for info_ in info.values():
+            for base in info_['bases']:
+                parent = info.get(base)
+                if parent is None:
+                    continue
+                for table in ('list', 'obj', 'objs'):
+                    for field, value in parent[table].items():
+                        if field not in info_['own'] and field not in info_[table]:
+                            info_[table][field] = value
+                            changed = True
+    return class_names, info
+
+
+def _alias_own_nodes(fn):
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _alias_blocks(fn):
+    found = []
+    stack = [fn.body]
+    while stack:
+        body = stack.pop()
+        for index, statement in enumerate(body):
+            found.append((body, index, statement))
+            for field in ('body', 'orelse', 'finalbody'):
+                inner = getattr(statement, field, None)
+                if isinstance(inner, list) and inner and isinstance(inner[0], ast.stmt):
+                    stack.append(inner)
+            if isinstance(statement, ast.Try):
+                for handler in statement.handlers:
+                    stack.append(handler.body)
+            if isinstance(statement, ast.Match):
+                for case in statement.cases:
+                    stack.append(case.body)
+    return found
+
+
+def _alias_name_classes(fn, class_names, info):
+    owner, lists = {}, {}
+
+    def note(table, name, value):
+        if value is None:
+            return
+        if name in table:
+            if table[name] != value:
+                table[name] = None
+        else:
+            table[name] = value
+
+    def value_class(node):
+        if isinstance(node, ast.Name):
+            return owner.get(node.id)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in class_names):
+            return node.func.id
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            parent = owner.get(node.value.id)
+            return info.get(parent, {}).get('obj', {}).get(node.attr)
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+            return value_list_class(node.value)
+        return None
+
+    def value_list_class(node):
+        if isinstance(node, ast.Name):
+            return lists.get(node.id)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            parent = owner.get(node.value.id)
+            return info.get(parent, {}).get('objs', {}).get(node.attr)
+        if isinstance(node, ast.Call):
+            if (isinstance(node.func, ast.Name) and node.func.id in ('list', 'sorted')
+                    and node.args):
+                return value_list_class(node.args[0])
+            if (isinstance(node.func, ast.Attribute) and node.func.attr == 'copy'
+                    and not node.args):
+                return value_list_class(node.func.value)
+        return None
+
+    args = [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]
+    for arg in args:
+        if arg.arg not in class_names:
+            note(owner, arg.arg, _alias_annotation_class(arg.annotation, class_names))
+            note(lists, arg.arg, _alias_annotation_list_class(arg.annotation, class_names))
+    changed = True
+    while changed:
+        changed = False
+        for node in _alias_own_nodes(fn):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if len(targets) != 1 or not isinstance(targets[0], ast.Name):
+                    continue
+                name, value = targets[0].id, node.value
+                if value is None:
+                    continue
+                before = (owner.get(name), lists.get(name))
+                if isinstance(node, ast.AnnAssign):
+                    note(owner, name, _alias_annotation_class(node.annotation, class_names))
+                    note(lists, name, _alias_annotation_list_class(node.annotation, class_names))
+                note(owner, name, value_class(value))
+                note(lists, name, value_list_class(value))
+                changed |= before != (owner.get(name), lists.get(name))
+            elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name):
+                before = owner.get(node.target.id)
+                note(owner, node.target.id, value_list_class(node.iter))
+                changed |= before != owner.get(node.target.id)
+    return owner, lists
+
+
+def _alias_refers(node, x, field):
+    if isinstance(node, ast.Name):
+        return node.id == x
+    if isinstance(node, ast.Attribute):
+        return node.attr == field or _alias_refers(node.value, x, field)
+    if isinstance(node, ast.Subscript):
+        return _alias_refers(node.value, x, field)
+    return False
+
+
+def _alias_expr_struct(node, o, owner, info):
+    if isinstance(node, ast.Name):
+        return node.id == o or owner.get(node.id) is not None
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id in info
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        parent = owner.get(node.value.id)
+        return node.attr in info.get(parent, {}).get('obj', {})
+    return False
+
+
+class _AliasScope:
+    def __init__(self, fn, info, funcs):
+        methods = set()
+        for entry in info.values():
+            methods.update(entry['methods'])
+        self.methods = methods
+        local_names = {n.id for n in ast.walk(fn)
+                       if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+        local_names.update(arg.arg for arg in [*fn.args.posonlyargs, *fn.args.args,
+                                               *fn.args.kwonlyargs])
+        self.classes = {name: _AliasClass(entry) for name, entry in info.items()
+                        if name not in local_names}
+        self.locals = local_names
+        self.kind = {}
+        self.types = {}
+        self.local_annotations = {}
+        self.strlist = set()
+        self.flist = set()
+        self.skeys = set()
+        self.bkeys = set()
+        self.nlist = set()
+        self.ndict = set()
+        self.funcs = {name: signature for name, signature in funcs.items()
+                      if name not in local_names}
+
+
+class _AliasClass:
+    def __init__(self, entry):
+        self.methods = entry['methods']
+
+
+def _alias_signature(fn, class_names):
+    classes = class_names
+    params = []
+    for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]:
+        try:
+            params.append((arg.arg, _annotation_kind(arg.annotation, classes)))
+        except Unsupported:
+            params.append((arg.arg, ('unknown', 'annotation')))
+    try:
+        result = _annotation_kind(fn.returns, classes)
+    except Unsupported:
+        result = ('unknown', 'return')
+    return params, result
+
+
+def _alias_assignment_candidate(statement, owner, info):
+    if isinstance(statement, ast.Assign):
+        if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            return None
+        target, value = statement.targets[0], statement.value
+    elif isinstance(statement, ast.AnnAssign):
+        if not isinstance(statement.target, ast.Name) or statement.value is None:
+            return None
+        target, value = statement.target, statement.value
+    else:
+        return None
+    if not (isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name)
+            and isinstance(value.ctx, ast.Load)):
+        return None
+    field = value.attr
+    parent = owner.get(value.value.id)
+    element = info.get(parent, {}).get('list', {}).get(field)
+    if element not in ('int', 'float', 'str'):
+        return None
+    return target.id, value.value.id, field
+
+
+def _alias_target_stores(target, x, o, field):
+    hit = None
+    for node in ast.walk(target):
+        if isinstance(node, ast.Name) and node.id == o:
+            hit = 'o'
+        elif isinstance(node, ast.Attribute) and node.attr == field:
+            hit = 'f'
+        elif isinstance(node, ast.Subscript) and _alias_refers(node.value, x, field):
+            hit = 'x'
+        elif isinstance(node, ast.Attribute) and _alias_refers(node.value, x, field):
+            hit = 'x'
+    return hit
+
+
+def _alias_call_targets(fn):
+    targets = []
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete,
+                             ast.For, ast.AsyncFor, ast.With, ast.comprehension, ast.NamedExpr)):
+            if isinstance(node, ast.Assign):
+                targets.extend(node.targets)
+            elif isinstance(node, (ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+                targets.append(node.target)
+            elif isinstance(node, ast.Delete):
+                targets.extend(node.targets)
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                targets.append(node.target)
+            elif isinstance(node, ast.With):
+                targets.extend(item.optional_vars for item in node.items
+                               if item.optional_vars is not None)
+            elif isinstance(node, ast.comprehension):
+                targets.append(node.target)
+    return targets
+
+
+def _alias_safe_use(node, parents, allowed_names, scope):
+    parent = parents.get(node)
+    if parent is None:
+        return False
+    if isinstance(parent, ast.Subscript) and parent.value is node:
+        return True
+    if isinstance(parent, (ast.For, ast.AsyncFor)) and parent.iter is node:
+        return True
+    if isinstance(parent, ast.comprehension) and parent.iter is node:
+        return True
+    if isinstance(parent, ast.Attribute) and parent.value is node:
+        grand = parents.get(parent)
+        return (parent.attr in _ALIAS_SAFE_LIST_METHODS
+                and isinstance(grand, ast.Call) and grand.func is parent)
+    if isinstance(parent, ast.Call) and parent.func is not node:
+        func = parent.func
+        return (isinstance(func, ast.Name) and func.id in allowed_names
+                and func.id not in scope.funcs and func.id not in scope.classes
+                and func.id not in scope.locals)
+    return False
+
+
+def _alias_call_safe(node, scope):
+    """`_borrow_call_safe` against the light alias scope: any typing context this scope does not
+    carry is treated as unsafe, so a call it cannot classify keeps the copy instead of crashing."""
+    try:
+        return _borrow_call_safe(node, scope, scope.methods)
+    except (AttributeError, KeyError, TypeError, Unsupported):
+        return False
+
+
+def _elide_readonly_field_alias_in_function(fn, class_names, info, funcs):
+    if not class_names or not info:
+        return 0
+    owner, _lists = _alias_name_classes(fn, class_names, info)
+    if not owner:
+        return 0
+    candidates = []
+    blocks = _alias_blocks(fn)
+    for body, index, statement in blocks:
+        found = _alias_assignment_candidate(statement, owner, info)
+        if found is not None:
+            candidates.append((body, index, statement, found))
+    if not candidates:
+        return 0
+    own = list(_alias_own_nodes(fn))
+    params = {arg.arg for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]}
+    stores = {}
+    declared_outer = set()
+    for node in own:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            stores[node.name] = stores.get(node.name, 0) + 1
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            # A `global`/`nonlocal` name is a binding outside this function's locals. Eliding its
+            # only store (`x = o.f`) would leave the outer slot unwritten, so neither an alias
+            # name nor its owner may be declared outer, wherever the declaration sits in the
+            # function. The block-local check below still catches `o`; this catches `x` and any
+            # declaration that precedes the alias's live range.
+            declared_outer.update(node.names)
+    parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    scope = _AliasScope(fn, info, funcs)
+    targets = _alias_call_targets(fn)
+    changed = 0
+    valid = []
+    for body, index, statement, (x, o, field) in candidates:
+        if x in params or x in declared_outer or o in declared_outer or stores.get(x, 0) != 1:
+            continue
+        if o not in params:
+            # A struct local's field alias is a field borrow the IR ownership pass can take
+            # (`list.share` from a field to a local); eliding it here would hide the borrow and
+            # leave the local's field lists without the ownership the IR path expects.
+            continue
+        last = index
+        for later in range(index, len(body)):
+            if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(body[later])):
+                last = later
+        block = body[index:last + 1]
+        allowed = set()
+        for item in block:
+            allowed.update(id(n) for n in ast.walk(item))
+        outside = False
+        for node in own:
+            if isinstance(node, ast.Name) and node.id == x and id(node) not in allowed:
+                outside = True
+                break
+        if outside:
+            continue
+        ok = True
+        for item in block:
+            for node in ast.walk(item):
+                if isinstance(node, ast.Call):
+                    if not _alias_call_safe(node, scope):
+                        ok = False
+                        break
+                    func = node.func
+                    user = ((isinstance(func, ast.Name)
+                             and (func.id in scope.funcs or func.id in scope.classes))
+                            or (isinstance(func, ast.Attribute) and func.attr in scope.methods))
+                    if user:
+                        args = [*node.args, *(kw.value for kw in node.keywords)]
+                        if isinstance(func, ast.Attribute):
+                            args.append(func.value)
+                        if any(_alias_expr_struct(arg, o, owner, info) for arg in args
+                               if not isinstance(arg, ast.Starred)):
+                            ok = False
+                            break
+                elif isinstance(node, ast.Lambda):
+                    bound = {arg.arg for arg in [*node.args.posonlyargs, *node.args.args,
+                                                 *node.args.kwonlyargs]}
+                    if node.args.vararg is not None:
+                        bound.add(node.args.vararg.arg)
+                    if node.args.kwarg is not None:
+                        bound.add(node.args.kwarg.arg)
+                    if o in bound or x in bound:
+                        ok = False
+                        break
+                    if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(node)):
+                        if not _borrow_lambda_ok(node, parents):
+                            ok = False
+                            break
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(node)):
+                        ok = False
+                        break
+                elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                    if o in node.names:
+                        ok = False
+                        break
+                elif isinstance(node, ast.ExceptHandler) and node.name == o:
+                    ok = False
+                    break
+            if not ok:
+                break
+        if not ok:
+            continue
+        if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr in _ALIAS_MUTATING_METHODS
+               and _alias_refers(n.func.value, x, field) for item in block for n in ast.walk(item)):
+            continue
+        target_hit = False
+        for node in targets:
+            in_block = any(any(sub is node for sub in ast.walk(item)) for item in block)
+            if not in_block:
+                continue
+            if node is statement or (isinstance(statement, ast.Assign)
+                                     and any(node is target for target in statement.targets)):
+                continue
+            if _alias_target_stores(node, x, o, field):
+                target_hit = True
+                break
+        if target_hit:
+            continue
+        escapes = False
+        for item in block:
+            for node in ast.walk(item):
+                if not (isinstance(node, ast.Name) and node.id == x
+                        and isinstance(node.ctx, ast.Load)):
+                    continue
+                if not _alias_safe_use(node, parents, _ALIAS_SAFE_CALLS, scope):
+                    escapes = True
+                    break
+            if escapes:
+                break
+        if escapes:
+            continue
+        valid.append((body, statement, x, o, field))
+    for body, statement, x, o, field in valid:
+        index = next(i for i, item in enumerate(body) if item is statement)
+        last = index
+        for later in range(index, len(body)):
+            if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(body[later])):
+                last = later
+        for item in body[index:last + 1]:
+            class Replace(ast.NodeTransformer):
+                def visit_Name(self, node):
+                    if node.id == x and isinstance(node.ctx, ast.Load):
+                        replacement = ast.Attribute(
+                            value=ast.Name(id=o, ctx=ast.Load()), attr=field, ctx=ast.Load())
+                        return ast.copy_location(replacement, node)
+                    return node
+            Replace().visit(item)
+        body.remove(statement)
+        changed += 1
+    if changed:
+        ast.fix_missing_locations(fn)
+    return changed
+
+
+def _elide_readonly_field_aliases(tree):
+    class_names, info = _alias_class_fields(tree)
+    funcs = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name not in funcs:
+            funcs[node.name] = _alias_signature(node, class_names)
+    changed = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            changed += _elide_readonly_field_alias_in_function(node, class_names, info, funcs)
+    return changed
+
+
 _C_TOKENS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/|[A-Za-z_]\w*')
 
 
@@ -33312,6 +33821,14 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     expression and the original source position; raising it here would instead point at
     the callee's declaration, which is less useful for a repair loop. The claim is
     dropped instead, leaving the function's own annotation in place.
+
+    A `str` actual is the one kind deliberately NOT raised here, and it is left for
+    `_call_user_func`'s own argument guards, which name the CALL: the argument-details
+    contract (`test_ail_argument_type_details.py`, `test_ail_source_check.py`) reports
+    `passing str where take() wants int` at the call site rather than a declaration-site
+    `signature_override` one. Raising here would reach the parameter first, since
+    `_signatures` runs before any body compile. Other kinds (a float actual against an
+    `int` annotation) keep the declaration-site refusal.
     """
     for pname, text in override.items():
         given = _sig_override_kind(fn, pname, text)
@@ -33325,7 +33842,7 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
         for a in fn.args.args:
             if a.arg == pname and a.annotation is not None:
                 expected = _annotation_kind(a.annotation, classes or ())
-                if given == STR:
+                if given == STR and expected != STR:
                     continue    # a str claim is reported at its call site as an argument error
                 if given != expected and not (expected == FLT and given == INT):
                     return True
@@ -38391,6 +38908,15 @@ def _refusal_line_from_names(source, message):
     return None
 
 
+def _alias_elision_count(source):
+    """How many read-only field aliases the new pass would elide in `source` (a throwaway parse)."""
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return 0
+    return _elide_readonly_field_aliases(tree)
+
+
 def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None):
     """Compile `source`; see `_to_c_once` for what the arguments mean.
 
@@ -38400,8 +38926,25 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
     A program that compiles without the lowering is compiled exactly as before, and a refusal
     that has nothing to do with a sort is reported as it always was."""
     snapshot = dict(info) if info is not None else None
+    alias_applies = _alias_elision_count(source) > 0
+
+    def attempt(stage):
+        # The alias rewrite only removes copies, but keep the old route on any refusal: compile
+        # again without it when the rewritten function cannot build on the typed path.
+        try:
+            return _to_c_once(source, name, strict, info, entry, sig, library, external,
+                              _sort_stage=stage)
+        except Unsupported:
+            if not alias_applies:
+                raise
+            if info is not None:
+                info.clear()
+                info.update(snapshot)
+            return _to_c_once(source, name, strict, info, entry, sig, library, external,
+                              _sort_stage=stage, _alias_elide=False)
+
     try:
-        return _to_c_once(source, name, strict, info, entry, sig, library, external)
+        return attempt(0)
     except Unsupported as failure:
         first = failure
     if 'sort' not in source:
@@ -38416,6 +38959,7 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
     report, previous = first, 0
     for stage in (1, 2, 3):
         probe = ast.parse(source.strip())
+        _elide_readonly_field_aliases(probe)
         try:
             count = sortkeys.rewrite(probe, stage, _old_sort_key_shape, Unsupported)
         except Unsupported as refusal:
@@ -38427,8 +38971,7 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
             info.clear()
             info.update(snapshot)
         try:
-            return _to_c_once(source, name, strict, info, entry, sig, library, external,
-                              _sort_stage=stage)
+            return attempt(stage)
         except Unsupported as error:
             # Named as coming from the key-column lowering only when it is raised at a sort's
             # own line; a refusal elsewhere in the program is reported exactly as written.
@@ -38476,7 +39019,7 @@ def _script_entry(tree, names):
     return None
 
 
-def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0):
+def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0, _alias_elide=True):
     """C for every `def` in the source, with the last one as the entry point.
 
     Functions may call each other, including themselves, directly or in a cycle. Recursion shares
@@ -38597,6 +39140,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                         if isinstance(_a, ast.Attribute):
                             _written.add(_a.attr)
         _FROZEN_LINKS.update(_ClassFieldNames(tree) - _written)
+    if _alias_elide:
+        _elide_readonly_field_aliases(tree)
     if _sort_stage:
         sortkeys.rewrite(tree, _sort_stage, _old_sort_key_shape, Unsupported)
     if any('file_chunks' in external.get(section, {}) for section in ('exports', 'constants', 'structs')):
@@ -39476,7 +40021,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         retry_info = dict(info) if info is not None else None
         retried = _to_c_once(source, name, strict, retry_info, entry, sig, library, external,
                              _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
-                             _tint_retry=_tint_retry + 1)
+                             _tint_retry=_tint_retry + 1, _alias_elide=_alias_elide)
         if info is not None and 'c_split' in retry_info:
             info['c_split'] = retry_info['c_split']
         return retried
