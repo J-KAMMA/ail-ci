@@ -1466,15 +1466,40 @@ static ail2g *ail2g_current;
 static ail2g_wait *ail2g_waiting;    /* the callers' frames while a generator runs */
 static ail_ctx *ail2g_cx;
 static int64_t ail2g_id_h, ail2g_id_a, ail2g_scan;
-#define AIL2G_STACK ((size_t)256 << 10)
+/* A generator's stack is as deep as a main stack (8 MiB), so recursion inside a generator body reaches
+   the same depth as outside one. It is reserved (MAP_NORESERVE), not committed: only the pages a body
+   touches cost memory. What it does cost is address space, which matters only under an address-space or
+   data cap (ulimit -v / RLIMIT_DATA): 2000 live generators would reserve 16 GB. So under such a cap the
+   generator stacks together keep within a quarter of it; past that a fresh generator gets a smaller
+   stack (halving, down to AIL2G_STACK_MIN), and when even that cannot be mapped the collector runs once
+   to take back the stacks of unreachable generators before the program stops by name. Without a cap
+   every generator keeps the full depth. */
+#define AIL2G_STACK ((size_t)8 << 20)
+#define AIL2G_STACK_MIN ((size_t)256 << 10)
 
 #ifndef _WIN32
-/* stacks given back are kept for the next generator: no mapping and no first-touch faults per generator */
+#include <sys/resource.h>
+/* full-size stacks given back are kept for the next generator: no mapping and no first-touch faults */
 static void *ail2g_pool[256]; static int ail2g_pooled;
-static int ail2g_map_stack(ail2g *g) {
-    g->stack = mmap(NULL, g->stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (g->stack == MAP_FAILED) { g->stack = NULL; return 0; }
-    if (mprotect(g->stack, 4096, PROT_NONE) != 0) { munmap(g->stack, g->stack_size); g->stack = NULL; return 0; }
+static size_t ail2g_mapped;          /* bytes of generator stacks mapped, the kept ones included */
+static size_t ail2g_budget;          /* a quarter of the address-space cap; SIZE_MAX without one; 0 = not read */
+static size_t ail2g_budget_of(void) {
+    if (!ail2g_budget) {
+        size_t b = SIZE_MAX;
+        struct rlimit rl;
+        if (getrlimit(RLIMIT_AS, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && (size_t)(rl.rlim_cur / 4) < b)
+            b = (size_t)(rl.rlim_cur / 4);
+        if (getrlimit(RLIMIT_DATA, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && (size_t)(rl.rlim_cur / 4) < b)
+            b = (size_t)(rl.rlim_cur / 4);
+        ail2g_budget = b ? b : 1;
+    }
+    return ail2g_budget;
+}
+static int ail2g_map_stack(ail2g *g, size_t size) {
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (p == MAP_FAILED) return 0;
+    if (mprotect(p, 4096, PROT_NONE) != 0) { munmap(p, size); return 0; }
+    g->stack = p; g->stack_size = size; ail2g_mapped += size;
     return 1;
 }
 #endif
@@ -1486,8 +1511,9 @@ static void ail2g_free_stack(ail2g *g) {
     if (g->fiber) { DeleteFiber(g->fiber); g->fiber = NULL; }
 #else
     if (g->stack) {
-        if (ail2g_pooled < 256) ail2g_pool[ail2g_pooled++] = g->stack;
-        else munmap(g->stack, g->stack_size);
+        if (g->stack_size == AIL2G_STACK && ail2g_pooled < 256 && ail2g_mapped <= ail2g_budget_of())
+            ail2g_pool[ail2g_pooled++] = g->stack;
+        else { munmap(g->stack, g->stack_size); ail2g_mapped -= g->stack_size; }
         g->stack = NULL;
     }
 #endif
@@ -1525,6 +1551,24 @@ static void ail2g_gc_hook(ail_ctx *cx) {
         }
     }
 }
+#ifndef _WIN32
+/* a fresh generator's stack when none is kept: out of line, so the resume path stays as small as before */
+#if defined(__GNUC__)
+__attribute__((noinline, cold))
+#endif
+static void ail2g_new_stack(ail_ctx *cx, ail2g *g) {
+    for (int round = 0; ; round++) {
+        size_t budget = ail2g_budget_of(), left = ail2g_mapped < budget ? budget - ail2g_mapped : 0;
+        size_t size = AIL2G_STACK;
+        while (size > AIL2G_STACK_MIN && size > left) size >>= 1;
+        for (; size >= AIL2G_STACK_MIN; size >>= 1) if (ail2g_map_stack(g, size)) return;
+        if (round) ail_die("generator: no stack");
+        /* g is RUNNING, so the collector keeps it and what it holds (ail2g_gc_hook) */
+        ail2g_fresh = 0; ail_gc_collect(cx);
+        if (ail2g_pooled) { g->stack = ail2g_pool[--ail2g_pooled]; g->stack_size = AIL2G_STACK; return; }
+    }
+}
+#endif
 #ifdef _WIN32
 static void CALLBACK ail2g_entry(LPVOID p) {
 #else
@@ -1592,7 +1636,12 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     ail2g_current = g;
     g->sent = sendv;
     int fresh = g->state == AIL2G_NEW;
+#ifdef _WIN32
+    if (fresh && ++ail2g_fresh >= 256) { ail2g_fresh = 0; ail_gc_collect(cx); }
+#else
+    /* while kept stacks remain, a fresh generator needs no new mapping, so the collection can wait */
     if (fresh && ++ail2g_fresh >= 256 && !ail2g_pooled) { ail2g_fresh = 0; ail_gc_collect(cx); }
+#endif
     cx->frames = fresh ? NULL : g->top;
     g->state = AIL2G_RUNNING;
 #ifdef _WIN32
@@ -1606,13 +1655,8 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     SwitchToFiber(g->fiber);
 #else
     if (fresh) {
-        g->stack_size = AIL2G_STACK;
-        if (ail2g_pooled) g->stack = ail2g_pool[--ail2g_pooled];
-        else if (!ail2g_map_stack(g)) {
-            if (ail2g_fresh > 0) { ail2g_fresh = 0; ail_gc_collect(cx); }
-            if (ail2g_pooled) g->stack = ail2g_pool[--ail2g_pooled];
-            else if (!ail2g_map_stack(g)) ail_die("generator: no stack");
-        }
+        if (ail2g_pooled) { g->stack = ail2g_pool[--ail2g_pooled]; g->stack_size = AIL2G_STACK; }
+        else ail2g_new_stack(cx, g);
 #ifdef AIL2G_ASM
         /* a frame ail2g_switch returns from into ail2g_entry, with the stack aligned as after a call */
         uintptr_t top = ((uintptr_t)g->stack + g->stack_size) & ~(uintptr_t)15;
