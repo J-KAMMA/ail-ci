@@ -585,8 +585,13 @@ class Store:
     def write(self):
         self.meta['updated'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         rows = sorted(self.rows.values(), key=lambda r: (r['task'], r['lang'], r['seed']))
-        data = dict(meta=self.meta, results=rows)
         every = list(self.rows.values())
+        if every:
+            # Meta must describe the rows actually in the file, also after a resumed partial run.
+            self.meta['seeds'] = sorted({r['seed'] for r in every})
+            self.meta['languages'] = [l for l in LANGS if any(r['lang'] == l for r in every)]
+            self.meta['tasks'] = sorted({r['task'] for r in every})
+        data = dict(meta=self.meta, results=rows)
         data['summary'] = summarize(every)
         data['ail_errors'] = ail_error_table([r for r in every if r['lang'] == 'ail'])
         tmp = self.path.with_suffix('.tmp')
@@ -673,9 +678,10 @@ def main():
                                                     sum(c['kind'] == 'hidden' for c in case_cache[name])), flush=True)
 
     combos = []
-    for name, tdir in tasks:
+    # Seed-outer order: a run cut short still has complete columns for the low seeds.
+    for seed in seeds:
         for lang in langs:
-            for seed in seeds:
+            for name, tdir in tasks:
                 key = '%s:%s:%d' % (name, lang, seed)
                 if args.only and key != args.only:
                     continue
@@ -701,41 +707,68 @@ def main():
         except ModelTimeout as e:
             return None
 
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = {}
-        for combo in combos:
-            if deadline and time.time() > deadline:
-                print('[budget] stop scheduling after %d attempts' % done, flush=True)
-                break
-            futures[pool.submit(one, combo)] = combo
-        from concurrent.futures import as_completed
-        for fut in as_completed(futures):
-            combo = futures[fut]
-            try:
-                rec = fut.result()
-            except Exception as e:     # one bad attempt must not lose the rest
-                print('[error] %s: %s' % (combo[0], e), flush=True)
-                continue
-            if rec is None:
-                if fatal:
-                    print('[fatal] %s' % fatal, flush=True)
-                continue
-            store.put(rec)
-            done += 1
-            print('[%d] %s %s seed %d: %s rounds %d silent %d loud %d%s' % (
-                done, rec['task'], rec['lang'], rec['seed'],
-                'correct' if rec['correct'] else ('gave up' if rec['gave_up'] else 'wrong'),
-                rec['rounds_used'], rec['silent_wrong'], rec['loud_stop'],
-                (' ' + rec['path']) if rec.get('path') else ''), flush=True)
+    from concurrent.futures import wait, FIRST_COMPLETED
+
+    pending = {}
+    queue = iter(combos)
+    stopped = [False]
+
+    def handle(fut, combo):
+        nonlocal done
+        if fut.cancelled():
+            return
+        try:
+            rec = fut.result()
+        except Exception as e:     # one bad attempt must not lose the rest
+            print('[error] %s: %s' % (combo[0], e), flush=True)
+            return
+        if rec is None:
             if fatal:
-                for f in futures:
-                    f.cancel()
-                break
+                print('[fatal] %s' % fatal, flush=True)
+                stopped[0] = True
+            return
+        store.put(rec)
+        done += 1
+        print('[%s %d] %s %s seed %d: %s rounds %d silent %d loud %d%s' % (
+            time.strftime('%H:%M:%S', time.gmtime()), done, rec['task'], rec['lang'], rec['seed'],
+            'correct' if rec['correct'] else ('gave up' if rec['gave_up'] else 'wrong'),
+            rec['rounds_used'], rec['silent_wrong'], rec['loud_stop'],
+            (' ' + rec['path']) if rec.get('path') else ''), flush=True)
+        if fatal:
+            stopped[0] = True
+
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        def pump():
+            # Only keep `jobs` attempts in flight, so the wall-clock budget really stops new work.
+            while not stopped[0] and len(pending) < jobs:
+                if deadline and time.time() > deadline:
+                    print('[budget] stop scheduling after %d attempts' % done, flush=True)
+                    stopped[0] = True
+                    return
+                try:
+                    combo = next(queue)
+                except StopIteration:
+                    return
+                pending[pool.submit(one, combo)] = combo
+
+        pump()
+        while pending:
+            finished, _ = wait(list(pending), return_when=FIRST_COMPLETED)
+            for fut in finished:
+                combo = pending.pop(fut)
+                handle(fut, combo)
+            if stopped[0]:
+                for fut in list(pending):
+                    fut.cancel()
+            else:
+                pump()
 
     shutil.rmtree(refdir, ignore_errors=True)
-    store.meta['stopped_early'] = bool(fatal)
+    store.meta['stopped_early'] = bool(fatal) or stopped[0]
     if fatal:
         store.meta['fatal'] = fatal
+    store.meta['completed_attempts'] = done
+    store.meta['scheduled_attempts'] = len(combos)
     store.write()
     s = summarize(list(store.rows.values()))
     print(json.dumps(s, indent=1))
