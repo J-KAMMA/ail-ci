@@ -1181,6 +1181,34 @@ static inline void ail_sarena_keep_roots(ail_sarena *A, int64_t mark, ail_str **
        allocation -- never release live data. A word accumulator kept in its own block made every
        character of a word-count loop take the slow path (2.7M calls). */
     if (A->kmark == mark && A->kn == A->n) return;
+    /* The stdin-loop shape `f = input().split()` adds exactly one block -- this iteration's line --
+       and no root points into it. The general pass would still walk the extents, the roots and the
+       append slots for that one block. Release it here; any other shape takes the general pass. */
+    if (A->n == mark + 1) {
+        int64_t be = A->bcap ? A->bcap[mark] : 0;
+        if (be > 0) {
+            const uint8_t *bp = A->blk[mark];
+            int keep = 0;
+            for (int64_t r = 0; r < count; r++) {
+                const uint8_t *p = roots[r]->p;
+                if (!p) continue;
+                if (p == bp || ((uintptr_t)p > (uintptr_t)bp
+                        && ((uintptr_t)p - (uintptr_t)bp) / sizeof(uint8_t) < (uintmax_t)be)) {
+                    keep = 1; break;
+                }
+            }
+            if (!keep) {
+                for (int t = 0; t < AIL_SARENA_TOPS; t++)
+                    if (A->top[t] == bp) {
+                        A->top[t] = 0; A->tlen[t] = A->tcap[t] = A->trun[t] = 0;
+                    }
+                ail__blk_release(A->blk[mark], be);
+                A->n = mark;
+                A->kmark = mark; A->kn = A->n;
+                return;
+            }
+        }
+    }
     ail__sarena_keep_roots_slow(A, mark, roots, count);
     A->kmark = mark; A->kn = A->n;
 }
@@ -1627,9 +1655,25 @@ static char *ail__str_ascii(ail_str s, char *stack, int64_t cap, int64_t *len) {
    for the same INT64_MIN reason `ail_str_from_int` reads off a magnitude: negating an int64_t
    overflows for exactly that one value. Values outside int64 stop as integer overflow. */
 static int64_t ail__str_to_int_full(ail_str s);
-/* One digit -- int(s[i]) over a digit string -- inline; anything else takes the full parse. */
+/* The common stdin token -- an optional '-' and 1..18 ASCII digits, nothing else -- is parsed
+   inline. It used to be the first block of `ail__str_to_int_full`, so every `int(f[k])` over a
+   short field paid a call and a prologue even though no whitespace trim or overflow check could
+   apply. Only the shapes that need the full rule (sign only, padding, 19+ digits, non-ASCII)
+   still cross the call boundary. */
 static inline int64_t ail_str_to_int(ail_str s) {
     if (s.n == 1 && (uint32_t)s.p[0] - 48u < 10u) return (int64_t)s.p[0] - 48;
+    {
+        int64_t k = s.n > 0 && s.p[0] == 45, j = k;
+        if (s.n - k >= 1 && s.n - k <= 18) {
+            uint64_t m = 0;
+            for (; j < s.n; j++) {
+                uint32_t d = (uint32_t)s.p[j] - 48u;
+                if (d > 9u) break;
+                m = m * 10u + d;
+            }
+            if (j == s.n) return k ? -(int64_t)m : (int64_t)m;
+        }
+    }
     return ail__str_to_int_full(s);
 }
 static void ail__str_to_int_fail(ail_str s) {
@@ -2214,12 +2258,42 @@ static ail_str ail_utf8_decode_m(ail_sarena *A, const unsigned char *b, int64_t 
 }
 static ail_str ail_utf8_decode(ail_sarena *A, const unsigned char *b, int64_t nb) {
     ail__need_elems(nb, AIL_STR_LIMIT - 1);
-    _Bool ascii;
-    if (!ail__utf8_validate(b, nb, &ascii)) ail_stdin_utf8_fail(b, nb);
     int64_t bcap;
     uint8_t *q = ail__blk_take(nb + 1, &bcap);
-    if (nb) memcpy(q, b, (size_t)nb);
+    /* Copy and classify in the same pass. The common stdin line is ASCII, and the old order
+       walked it twice -- `ail__utf8_validate`'s word loop, then `memcpy` -- so the load and the
+       store now happen once per word. A non-ASCII line falls back to the full validator after
+       the copy; it is rare and the bytes are already where the str will keep them. */
+    _Bool ascii = 1;
+    int64_t i = 0;
+    for (; i + 8 <= nb; i += 8) {
+        uint64_t w;
+        memcpy(&w, b + i, 8);
+        if (w & 0x8080808080808080ull) ascii = 0;
+        memcpy(q + i, &w, 8);
+    }
+    if (i < nb) {
+        /* The last 8 bytes as one overlapping word: a line is not a multiple of 8, and the byte
+           that the word repeats is the byte the loop already stored. Only a line shorter than a
+           word falls back to the per-byte loop. */
+        if (nb >= 8) {
+            uint64_t w;
+            memcpy(&w, b + nb - 8, 8);
+            if (w & 0x8080808080808080ull) ascii = 0;
+            memcpy(q + nb - 8, &w, 8);
+        } else {
+            for (; i < nb; i++) {
+                uint8_t c = b[i];
+                if (c >= 0x80) ascii = 0;
+                q[i] = c;
+            }
+        }
+    }
     q[nb] = 0;
+    if (!ascii) {
+        _Bool again;
+        if (!ail__utf8_validate(b, nb, &again)) ail_stdin_utf8_fail(b, nb);
+    }
     ail_sarena_pushn(A, q, bcap);
     ail_str r; r.bytes = ascii; r.p = q;  r.n = nb; return r;
 }
@@ -3152,45 +3226,83 @@ static inline int64_t ail__ws_width(ail_str s, int64_t i) {
     if (c < 2) return c;
     return ail__is_ws(ail_str_point(s, i)) ? ail_str_next_unit(s, i) - i : 0;
 }
-static ail_slist ail__str_split_ws_raw(ail_str s) {
-    /* One pass noting up to 32 pieces on the stack, then the vector is allocated once at its
+
+static ail_slist ail__str_split_ws_scan(ail_str s, ail_slist *reuse) {
+    /* One pass noting up to 32 pieces on the stack, then the vector is filled once at its
        exact size. (`line.split()` per input line used to grow the vector by realloc and decode
        every byte through ail_str_point -- a quarter of an LLM-written stdin parser's
-       instructions.) More pieces take the two-pass count-then-fill path below. */
-    ail_slist r = {0};
+       instructions.) More pieces take the two-pass count-then-fill path below.
+
+       `reuse` is the destination of a rebind in the same statement (`f = line.split()` inside a
+       loop): its spine is already allocated and about to be replaced, so it is kept instead of
+       being released to the small-vector cache and taken back out for every line. */
+    ail_slist r = reuse ? *reuse : (ail_slist){0};
+    r.n = 0;
     {
         int64_t at[64], k = 0, i = 0;
         const uint8_t *p = s.p;
         const int64_t n = s.n;
-        for (;;) {
-            while (i < n) {
-                uint8_t c = ail__ws_class[p[i]];
-                if (!c) break;
-                if (c == 1) { i++; continue; }
-                int64_t w = ail__ws_width(s, i);
-                if (!w) break;
-                i += w;
+        if (s.bytes) {
+            /* An ASCII str: the class table's 1 means whitespace and 0 means anything else, so
+               the class-2 test and the `ail__ws_width` decode can never fire. Splitting an
+               input line used to take the general per-byte path that checks both on every byte.
+
+               The pieces go straight into the vector: the scan already knows a piece's start and
+               length, so the stack list of 32 offsets and the second pass that rebuilt every
+               piece from it are both gone. The vector grows by doubling, which for a rebinding
+               loop costs nothing after the first line. */
+            for (;;) {
+                while (i < n && ail__ws_class[p[i]] == 1) i++;
+                if (i >= n) break;
+                if (k == 32) { k = -1; break; }
+                int64_t start = i++;
+                while (i < n && ail__ws_class[p[i]] != 1) i++;
+                if (k == r.cap) {
+                    int64_t cap = r.cap, need = r.cap ? 2 * r.cap : 8;
+                    ail_str *np = ail__svec_take(need, &cap);
+                    for (int64_t j = 0; j < k; j++) np[j] = r.p[j];
+                    if (r.p) ail_slist_free(&r);
+                    r.p = np; r.cap = cap;
+                }
+                ail_str piece; piece.p = p + start; piece.n = i - start; piece.bytes = 1;
+                r.p[k++] = piece;
             }
-            if (i >= n) break;
-            if (k == 32) { k = -1; break; }
-            int64_t start = i++;
-            while (i < n) {
-                uint8_t c = ail__ws_class[p[i]];
-                if (!c) { i++; continue; }
-                if (c == 1 || ail__ws_width(s, i)) break;
-                i++;
+            if (k >= 0) { r.n = k; if (reuse) *reuse = r; return r; }
+        } else {
+            for (;;) {
+                while (i < n) {
+                    uint8_t c = ail__ws_class[p[i]];
+                    if (!c) break;
+                    if (c == 1) { i++; continue; }
+                    int64_t w = ail__ws_width(s, i);
+                    if (!w) break;
+                    i += w;
+                }
+                if (i >= n) break;
+                if (k == 32) { k = -1; break; }
+                int64_t start = i++;
+                while (i < n) {
+                    uint8_t c = ail__ws_class[p[i]];
+                    if (!c) { i++; continue; }
+                    if (c == 1 || ail__ws_width(s, i)) break;
+                    i++;
+                }
+                at[2 * k] = start; at[2 * k + 1] = i - start; k++;
             }
-            at[2 * k] = start; at[2 * k + 1] = i - start; k++;
-        }
-        if (k == 0) return r;
-        if (k > 0) {
-            r.p = ail__svec_take(k, &r.cap);
-            r.n = k;
-            for (int64_t j = 0; j < k; j++) {
-                ail_str piece = ail_view(s, at[2 * j]); piece.n = at[2 * j + 1];
-                r.p[j] = piece;
+            if (k == 0) { if (reuse) *reuse = r; return r; }
+            if (k > 0) {
+                if (r.cap < k) {
+                    if (r.p) ail_slist_free(&r);
+                    r.p = ail__svec_take(k, &r.cap);
+                }
+                r.n = k;
+                for (int64_t j = 0; j < k; j++) {
+                    ail_str piece = ail_view(s, at[2 * j]); piece.n = at[2 * j + 1];
+                    r.p[j] = piece;
+                }
+                if (reuse) *reuse = r;
+                return r;
             }
-            return r;
         }
     }
     int64_t pieces = 0;
@@ -3200,11 +3312,14 @@ static ail_slist ail__str_split_ws_raw(ail_str s) {
         pieces++;
         do i++; while (i < s.n && !ail__ws_width(s, i));
     }
-    if (!pieces) return r;
+    if (!pieces) { if (reuse) *reuse = r; return r; }
     ail__need_elems(pieces, AIL_ELEM_LIMIT(ail_str));
-    r.p = (ail_str *)malloc((size_t)pieces * sizeof *r.p);
-    if (!r.p) ail_die("out of memory");
-    r.cap = pieces;
+    if (r.cap < pieces) {
+        if (r.p) ail_slist_free(&r);
+        r.p = (ail_str *)malloc((size_t)pieces * sizeof *r.p);
+        if (!r.p) ail_die("out of memory");
+        r.cap = pieces;
+    }
     for (int64_t i = 0; i < s.n; ) {
         int64_t w = ail__ws_width(s, i);
         if (w) { i += w; continue; }
@@ -3213,7 +3328,11 @@ static ail_slist ail__str_split_ws_raw(ail_str s) {
         ail_str piece = ail_view(s, start); piece.n = i - start;
         r.p[r.n++] = piece;
     }
+    if (reuse) *reuse = r;
     return r;
+}
+static ail_slist ail__str_split_ws_raw(ail_str s) {
+    return ail__str_split_ws_scan(s, NULL);
 }
 /* `s.split(sep)` -- a literal, possibly multi-character separator. Every occurrence is a boundary,
    so (unlike the whitespace form above) consecutive separators and a separator at either end DO
@@ -3353,6 +3472,12 @@ static ail_slist ail_str_split_ws(ail_str s) {
     ail_slist r = ail__str_split_ws_raw(s);
     if (!s.bytes) ail__slist_flag_ascii(&r);
     return r;
+}
+/* The rebinding form `f = line.split()`: the destination's spine is reused when it already has
+   room, instead of being released to the small-vector cache and taken back out on every line. */
+static void ail_str_split_ws_into(ail_slist *L, ail_str s) {
+    ail__str_split_ws_scan(s, L);
+    if (!s.bytes) ail__slist_flag_ascii(L);
 }
 static ail_slist ail_str_split_sep(ail_str s, ail_str sep) {
     ail_slist r = ail__str_split_sep_raw(s, sep);
