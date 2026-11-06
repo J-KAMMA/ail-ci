@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Build a static C library from a typed-path AIL/Python module.
+"""Build a C library from a typed-path AIL/Python module.
 
     python3 AIL_CURRENT/ail_embed.py build examples/embed/fib/mod.py -o build/fib
+    python3 AIL_CURRENT/ail_embed.py build examples/embed/fib/mod.py -o build/fib --shared
 
 The module names its exports in a plain Python list:
 
     __ail_export__ = ["fib", "gcd"]
 
 For each name the tool writes ``lib<name>.a`` and ``<name>.h`` in the output
-directory.  See examples/embed/README.md for the version 1 ABI.
+directory, or ``lib<name>.so`` and ``<name>.h`` with ``--shared``.  Every export
+takes one process-wide lock, so calls from several threads are serialised.  See
+examples/embed/README.md for the version 1 ABI.
 """
 import argparse
 import ast
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -205,6 +209,16 @@ def transform_program(program):
 
 RUNTIME_C = r'''
 #include <stdbool.h>
+#include <pthread.h>
+
+/* The AIL runtime of a typed-path module has no lock of its own: the generated
+ * state is static and the exception stack, the arena and the saved error are
+ * globals.  One process-wide mutex is that lock, so two threads calling an
+ * export at once are serialised instead of racing. */
+static pthread_mutex_t ail_embed_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void ail_embed_lock(void) { pthread_mutex_lock(&ail_embed_mutex); }
+static void ail_embed_unlock(void) { pthread_mutex_unlock(&ail_embed_mutex); }
 
 static int ail_embed_in_call = 0;
 static int ail_embed_slot = -1;
@@ -261,6 +275,7 @@ static void ail_die(const char *w) {
     ail_embed_die_message = NULL; \
     if (ail_exc_top + 1 >= AIL_EXC_MAX_DEPTH) { \
         ail_embed_set_error("RuntimeError", "try nesting too deep", 20, 1); \
+        ail_embed_unlock(); \
         return 1; \
     } \
     ail_embed_saved_top = ail_exc_top; \
@@ -296,6 +311,7 @@ static int ail_embed_failed(void) {
     } else {
         ail_embed_set_error("RuntimeError", "unknown error", 13, 1);
     }
+    ail_embed_unlock();
     return 1;
 }
 
@@ -358,11 +374,12 @@ def wrapper_function(library, name, params, result):
     cname = "%s_%s" % (library, name)
     lines = ["", "int %s(%s) {" % (cname, ", ".join(param_c_declarations(params) +
                                                     result_c_declarations(result)))]
+    lines.append("    ail_embed_lock();")
     if result in ("int", "float", "bool"):
-        lines.append("    if (!out) { ail_embed_set_error(\"TypeError\", \"out is NULL\", 11, 1); return 1; }")
+        lines.append("    if (!out) { ail_embed_set_error(\"TypeError\", \"out is NULL\", 11, 1); ail_embed_unlock(); return 1; }")
     elif result in ("str", "bytes"):
-        lines.append("    if (!len) { ail_embed_set_error(\"TypeError\", \"len is NULL\", 11, 1); return 1; }")
-        lines.append("    if (cap && !out) { ail_embed_set_error(\"TypeError\", \"out is NULL\", 11, 1); return 1; }")
+        lines.append("    if (!len) { ail_embed_set_error(\"TypeError\", \"len is NULL\", 11, 1); ail_embed_unlock(); return 1; }")
+        lines.append("    if (cap && !out) { ail_embed_set_error(\"TypeError\", \"out is NULL\", 11, 1); ail_embed_unlock(); return 1; }")
     lines.append("    AIL_EMBED_BEGIN();")
     lines.extend(local)
     lines.append("    %s e_r;" % {
@@ -377,12 +394,13 @@ def wrapper_function(library, name, params, result):
         lines.append("    {")
         lines.append("        size_t n = (size_t)e_r.n;")
         lines.append("        *len = n;")
-        lines.append("        if (n > cap) { free((void *)e_r.p); return 2; }")
+        lines.append("        if (n > cap) { free((void *)e_r.p); ail_embed_unlock(); return 2; }")
         lines.append("        if (n) memcpy(out, e_r.p, n);")
         lines.append("        free((void *)e_r.p);")
         lines.append("    }")
     else:
         lines.append("    *out = e_r;")
+    lines.append("    ail_embed_unlock();")
     lines.append("    return 0;")
     lines.append("}")
     return "\n".join(lines)
@@ -391,8 +409,10 @@ def wrapper_function(library, name, params, result):
 def wrapper_source(program, library, described):
     body = [transform_program(program), RUNTIME_C]
     body.append("")
-    body.append("int %s_init(void) { ail_embed_clear_error(); ail_exc_top = -1; return 0; }" % library)
-    body.append("void %s_shutdown(void) { ail_embed_clear_error(); }" % library)
+    body.append("int %s_init(void) { ail_embed_lock(); ail_embed_clear_error(); ail_exc_top = -1; "
+                "ail_embed_unlock(); return 0; }" % library)
+    body.append("void %s_shutdown(void) { ail_embed_lock(); ail_embed_clear_error(); ail_embed_unlock(); }"
+                % library)
     body.append("const char *%s_last_error(void) { return ail_embed_error ? ail_embed_error : \"\"; }" % library)
     for name, params, result in described:
         body.append(wrapper_function(library, name, params, result))
@@ -415,7 +435,7 @@ def header_source(library, described):
     return "\n".join(lines)
 
 
-def build(source, out_dir, name=None, cc=None):
+def build(source, out_dir, name=None, cc=None, shared=False):
     source = Path(source).resolve()
     if not source.is_file():
         raise EmbedError("no such source file: %s" % source)
@@ -424,9 +444,9 @@ def build(source, out_dir, name=None, cc=None):
     text = source.read_text(encoding="utf-8")
     exports, declared_name, facts = module_facts(text)
     library = library_name(source, name or declared_name)
-    cc = cc or os.environ.get("CC") or "gcc"
-    if not shutil.which(cc):
-        raise EmbedError("no C compiler found: %s" % cc)
+    cc_cmd = shlex.split(cc or os.environ.get("CC") or "gcc")
+    if not cc_cmd or not shutil.which(cc_cmd[0]):
+        raise EmbedError("no C compiler found: %s" % " ".join(cc_cmd))
     with tempfile.TemporaryDirectory(prefix="ail-embed-") as tmp:
         tmp = Path(tmp)
         exe = tmp / "probe"
@@ -451,19 +471,25 @@ def build(source, out_dir, name=None, cc=None):
         wrapper = tmp / "ail_embed_wrapper.c"
         wrapper.write_text(wrapper_source(program, library, described), encoding="utf-8")
         obj = tmp / "ail_embed_wrapper.o"
-        compile_cmd = [cc, "-O2", "-std=gnu11", "-fPIC", "-c", str(wrapper), "-o", str(obj)]
+        compile_cmd = cc_cmd + ["-O2", "-std=gnu11", "-fPIC", "-c", str(wrapper), "-o", str(obj)]
         compiled = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=900)
         if compiled.returncode != 0:
             raise EmbedError(compiled.stderr.strip() or compiled.stdout.strip())
-        lib = out_dir / ("lib%s.a" % library)
+        lib = out_dir / (("lib%s.so" if shared else "lib%s.a") % library)
         if lib.exists():
             lib.unlink()
-        ar = shutil.which("ar")
-        if not ar:
-            raise EmbedError("no ar found")
-        packed = subprocess.run([ar, "rcs", str(lib), str(obj)], capture_output=True, text=True, timeout=900)
-        if packed.returncode != 0:
-            raise EmbedError(packed.stderr.strip())
+        if shared:
+            linked = subprocess.run(cc_cmd + ["-shared", "-pthread", "-o", str(lib), str(obj), "-lm"],
+                                    capture_output=True, text=True, timeout=900)
+            if linked.returncode != 0:
+                raise EmbedError(linked.stderr.strip())
+        else:
+            ar = shutil.which("ar")
+            if not ar:
+                raise EmbedError("no ar found")
+            packed = subprocess.run([ar, "rcs", str(lib), str(obj)], capture_output=True, text=True, timeout=900)
+            if packed.returncode != 0:
+                raise EmbedError(packed.stderr.strip())
         header = out_dir / ("%s.h" % library)
         header.write_text(header_source(library, described), encoding="utf-8")
     return lib, header
@@ -472,14 +498,16 @@ def build(source, out_dir, name=None, cc=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="build a static C library from an AIL module")
     sub = parser.add_subparsers(dest="command", required=True)
-    build_parser = sub.add_parser("build", help="write lib<name>.a and <name>.h")
+    build_parser = sub.add_parser("build", help="write lib<name>.a (or .so with --shared) and <name>.h")
     build_parser.add_argument("source")
     build_parser.add_argument("-o", "--output", required=True, help="output directory")
     build_parser.add_argument("--name", help="library name (default: __ail_name__ or the file stem)")
-    build_parser.add_argument("--cc", help="C compiler (default: $CC or gcc)")
+    build_parser.add_argument("--cc", help="C compiler command (default: $CC or gcc)")
+    build_parser.add_argument("--shared", action="store_true",
+                              help="write lib<name>.so (compiled with -fPIC) instead of lib<name>.a")
     args = parser.parse_args(argv)
     try:
-        lib, header = build(args.source, args.output, args.name, args.cc)
+        lib, header = build(args.source, args.output, args.name, args.cc, args.shared)
     except EmbedError as error:
         print("error: %s" % error, file=sys.stderr)
         return 1

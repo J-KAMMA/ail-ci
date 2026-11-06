@@ -1,13 +1,22 @@
 # Embedding AIL as a C library
 
 `AIL_CURRENT/ail_embed.py` turns a typed-path Python-syntax module into a static
-library and a header:
+library, a shared library (`--shared`) and a header:
 
 ```sh
 python3 -B AIL_CURRENT/ail_embed.py build examples/embed/fib/mod.py -o build/fib
-cc -O2 -Ibuild/fib examples/embed/fib/test.c build/fib/libfib.a -lm -o build/fib/test
+cc -O2 -pthread -Ibuild/fib examples/embed/fib/test.c build/fib/libfib.a -lm -o build/fib/test
 build/fib/test
+
+python3 -B AIL_CURRENT/ail_embed.py build examples/embed/fib/mod.py -o build/fib --shared
+python3 -B examples/embed/fib/use_ctypes.py --lib build/fib/libfib.so
+
+cd examples/embed/fib/rust && cargo build --release --offline && cargo run --release --offline
 ```
+
+The same module is called by three hosts and each prints what CPython prints:
+the C `test.c`, the Rust binary under `rust/`, and `use_ctypes.py` through
+`lib<name>.so`.
 
 The library name is `__ail_name__` from the module, or the source file stem when
 that assignment is absent.  The module names its exports in a plain Python list:
@@ -65,6 +74,31 @@ An `int64` overflow inside an export is status 1 with an `OverflowError` in
 `last_error`, never a wrapped value.  Only typed-path functions can be exported;
 the general path is refused by name.
 
+## Threads
+
+Every export takes one process-wide lock, so calls from several threads are
+serialised: a second call waits for the first one to return.  This is the same
+rule as the general-path runtime's interpreter lock (`python/pkg-v12/threadrt.py`
+gives one AIL lock with CPython's GIL semantics); a typed-path library has no
+lock of its own, and its exception stack, arena and saved error are globals, so
+the wrapper supplies that lock.  `init` and `shutdown` take it too.
+
+`last_error()` reads that shared error without the lock.  It is valid until the
+next call on any thread, so a caller that needs the text while other threads are
+calling exports must serialise those reads itself.
+
+The test builds `fib` and runs 2 pthreads x 500 iterations (`test.c`-style
+checks inside each thread); 1000/1000 results are correct.  The same program
+under `gcc -fsanitize=thread` (library and test both instrumented through
+`--cc "gcc -fsanitize=thread"`) reports no data race and 1000/1000 correct.  With
+the lock calls removed from the wrapper, ThreadSanitizer reports 8 races on
+`ail_exc_top`, `ail_exc_cleanup`, `ail_embed_in_call`, `ail_embed_saved_*` and
+`ail_embed_error`, which is what the lock prevents.
+
+A ThreadSanitizer binary reserves a huge address space, so the sanitizer run is
+skipped when the process has a virtual-memory cap (`ulimit -v`); the plain
+two-thread run always runs.
+
 ## What the generated C looks like
 
 The probe used by `ail_embed.py` is
@@ -89,6 +123,22 @@ adapted as follows.
   handler around each call, so a Python exception or an int64 trap becomes a
   status and a `last_error` string instead of terminating the host process.
 
+## Callers
+
+Each example directory holds three callers:
+
+| file | how it calls |
+| --- | --- |
+| `test.c` | links `lib<name>.a` with `gcc -O2` |
+| `rust/` | `build.rs` runs `ail_embed.py`, emits `rustc-link-search`/`rustc-link-lib`, and `src/main.rs` declares the exports in `extern "C"` (no crates) |
+| `use_ctypes.py` | `ctypes.CDLL` on `lib<name>.so`; builds it with `--shared` unless `--lib` names one |
+
+`use_ctypes.py` calls the library and, in the same process, imports `mod.py`
+directly, comparing every value with the plain-Python result before printing the
+line.  `rust/build.rs` finds the repository root by walking up from
+`CARGO_MANIFEST_DIR` until it sees `AIL_CURRENT/ail_embed.py`; `AIL_PYTHON`
+overrides the interpreter it runs.
+
 ## Examples
 
 | directory | exports | checks |
@@ -98,6 +148,6 @@ adapted as follows.
 | `wordcount/` | `word_count` | a text buffer with explicit length |
 | `raiser/` | `checked_div`, `require_positive` | status 1 and exact `ValueError` text |
 
-Each `expected.txt` is CPython's stdout for that example's `mod.py`.  `test.c`
-prints the same lines through the ABI; `AIL_CURRENT/test_ail_embed.py` builds,
-links with `gcc -O2`, and compares them.
+Each `expected.txt` is CPython's stdout for that example's `mod.py`.  All three
+callers print the same lines; `AIL_CURRENT/test_ail_embed.py` builds each form,
+runs the three of them plus the two-thread test, and compares the output.
