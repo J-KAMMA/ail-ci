@@ -1,3 +1,49 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review — fdgpu2 (G5: `/` and `sqrt` as SPIR-V kernels)
+
+**What the diff really does:** lifts the two G1 refusals (`/`, `math.sqrt`) and adds a residual-based (Veltkamp/Dekker/TwoSum) correctly-rounded division and sqrt to the SPIR-V generator, an emulation twin in `gpu.RUNTIME` (`GK_FDIV` guard + CPU `/`/`sqrt`), and an AST pre-pass in `prepare()` that lowers `math.sqrt(x)` inside marked statements to `(float(x) if float(x)==0.0 else (1.0/0.0 if float(x)<0.0 else float(x)**0.5))` and drops the now-dead `_ail_math_sqrt` helper. The report only describes the last commit's two bug fixes; the diff is the whole feature (that commit stack is the real change).
+
+**Probes** (`/tmp/rprobes`, `gcmp.sh` = `--gpu` build, CPython vs `AIL_GPU=0/emu/force`; `cmp.sh` = general+default):
+
+| probe | result |
+|---|---|
+| p1/p2 sqrt out-of-range and in-range (`pow≠sqrt` values) | all match CPython |
+| p4 int `/` incl. 2⁵³±1, negatives | flags `range`, matches |
+| p8/p19 `/` by 0.0 | same stdout/exit (1), replay |
+| p13 sqrt in marked comprehension | matches, kernel runs |
+| p14/p21/p22 sqrt of int lists, ints > 2⁵³ | match CPython |
+| p5/p16/p17 user `** 0.5`, `sq = math.sqrt` | refused by name, exit 3 |
+| p12/p7 plain and marked `+` loop | C byte-identical to base (GPU build only gains unused inline helpers) |
+| **p24** | **wrong output** (below) |
+
+**Defect 1 (change-caused, base refuses).** `/tmp/rprobes/p24_catch3.py`: `def g(a: list[float]) -> list[float]` holds a `# ail: gpu` loop `r[i] = math.sqrt(a[i])`, `main()` wraps `g(a)` (one element `-1.0`) in `try/except ValueError / except ZeroDivisionError`. The rewrite's negative arm `1.0/0.0` raises `ZeroDivisionError`.
+- CPython: `caught ValueError` (exit 0)
+- HEAD (`--gpu`, `AIL_GPU=0`, `emu`, `force`): `caught ZeroDivisionError` (exit 0)
+- base (`--gpu`): named refusal, `math.sqrt needs the correctly rounded GPU square root of stage G5`, exit 3
+So the branch taken differs silently — no refusal, no uncaught stop. Narrow (the catch must sit in a caller; a `try` in the loop's own function is refused), but it is observable program output. The uncaught form (p3/p9) only differs in the message with the same exit status.
+
+**Diff-level notes (not defects):** guard predicates and bounds are identical in emulation and device; a loop containing one zero/NaN/out-of-range operand replays entirely on the CPU (documented); a program that also calls `math.sqrt` outside the marked loop keeps `_ail_math_sqrt`, falls to the general path and prints the `ignored` note — correct output, no kernel.
+
+**Report claims:** "sqrt(NaN) died with ZeroDivisionError, fixed" — verified (g5 `SQRT_EDGES`, p1/p2). "hand-written `** 0.5` refused" — verified. "8 OK / 2 skips" — verified. "1 safetynet failure, pre-existing" — verified: base fails the same `S4_generators_gc` with the identical assertion. "manifest `--check` = 0" — verified. "0 mismatches over 100k pairs on lavapipe" — **unverified**: no Vulkan device and no `spirv-val` here, so `BitTests` and `test_every_kernel_validates` skip. My independent Python model of the emitted algorithm is bit-exact over 200k random in-range pairs, 350k near-1.0 divisions and 200k sqrts (also with `s0` perturbed 1–2 ulp), and `test_no_division_instruction_and_no_fma`/NoContraction pass.
+
+**Tests on HEAD** (`par_check.py -j 2`): g5, g1, g2, smoke all ok; `test_ail_safetynet` 1 failure.
+**Pre-existing:** `test_ail_safetynet::test_programs[S4_generators_gc]` — identical on `/tmp/base`.
+**Unverified:** device bits, SPIR-V validity, and speed (no GPU; the non-GPU generated C is unchanged, so no hot path is affected).
+
+VERDICT: FIX
+1. `math.sqrt(x)` with `x < 0` in a marked loop raises `ZeroDivisionError` (the rewrite's `1.0/0.0` arm) where CPython raises `ValueError`, so a caller's `except ValueError` no longer catches it: probe `/tmp/rprobes/p24_catch3.py` prints `caught ValueError` (exit 0) under CPython but `caught ZeroDivisionError` (exit 0) in every `--gpu` run (`AIL_GPU=0`, `emu`, `force`); the base refused the program by name (exit 3). Expected: `caught ValueError`, or a named refusal.
+[commandcode stop=end_turn turns=57 out_tokens=58942]
+
+
+--- ORIGINAL TASK ---
 Lane: fd-gpu
 Needs: fdgpu1
 
