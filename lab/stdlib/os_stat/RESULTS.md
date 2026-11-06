@@ -58,13 +58,15 @@ What is built:
 * `os.scandir(path)` in `for entry in os.scandir(p):` and in `with os.scandir(p) as it:`, with
   `DirEntry.name`, `.path`, `.is_dir()`, `.is_file()`, `.is_symlink()`, `.stat()`, `.lstat()` and
   `.inode()`; entries come in the order the OS returns them.
-* `os.fspath(p)` for str and bytes (identity); any other literal is refused by name on the typed
-  path (`os.fspath(3) raises TypeError: expected str, bytes or os.PathLike object, not int`) and
-  raised as that `TypeError` on the general path. `os.path.normcase` (identity on POSIX, lower case
+* `os.fspath(p)` for str and bytes (identity). A literal other than str/bytes is refused by name
+  on the typed path (`os.fspath(3) raises TypeError: expected str, bytes or os.PathLike object,
+  not int`). A value that reaches the call through a variable is a typed `str` identity; a `bytes`
+  or non-str value falls back to the general path, whose `_ail_fspath` returns the bytes identity
+  or raises the same `TypeError` CPython does. `os.path.normcase` (identity on POSIX, lower case
   and `\` on the nt target), `expanduser` (`~` and `~/...` from `HOME`, even when `HOME` is empty;
-  the passwd entry when `HOME` is unset), `expandvars` (`$NAME`,
-  `${NAME}`, an unset name left as written), `getmtime` / `getatime` / `getctime`, `samefile`,
-  `samestat`.
+  the passwd entry when `HOME` is unset; `~user` from the passwd database on POSIX), `expandvars`
+  (`$NAME`, `${NAME}`, an unset name left as written), `getmtime` / `getatime` / `getctime`,
+  `samefile`, `samestat`.
 
 ## The stdlib census bucket "os.X is not built"
 
@@ -115,17 +117,20 @@ The other 9 modules of the bucket (`_osx_support`, `cgitb`, `getpass`, `imghdr`,
 * **`os.fstat`** needs an OS file descriptor, which the file layer's handles are not; not built.
 * `stat_result` is an attribute object only: no tuple indexing, no `st_blksize` / `st_blocks` /
   `st_rdev`. `st_*time` is `st_*time_ns / 1000000000` (one float division of the ns field).
-* `os.scandir` is built in `for ... in os.scandir(...)` and `with os.scandir(...) as it:`; `list()`,
-  `next()` and passing the iterator around are not built.
-* `expanduser("~user")` is not expanded (only `~` and `~/...`); `~` follows CPython for a set,
-  empty and unset `HOME`.
+* `os.scandir` is built in `for ... in os.scandir(...)` and `with os.scandir(...) as it:`; the
+  object stays usable through the function after its `with` (a later `for x in it:` sees the
+  exhausted iterator). A comprehension or generator over it, `list()` / `next()` / another
+  iterable consumer, and binding it with a plain assignment are refused by name in both builds.
+* `expanduser("~user")` follows the passwd database on POSIX (an unknown user leaves the path
+  unchanged); the nt target leaves `~user` unchanged, as `ntpath` does. `~` follows CPython for a
+  set, empty and unset `HOME`.
 * `os.path.normcase` is the identity on POSIX; the nt target lowers case and turns `/` into `\`.
 
 ## Runtime files touched
 
 Only one runtime source changed: `AIL_CURRENT/python/pkg-v12/ailfile_core.h`, the C file whose
-`ailf_scandir` already answered `os.listdir` / `os.scandir` (it gained `ailf_stat_record`, reached
-through the existing `_ail_os_scandir` primitive in mode 2/3). The prelude AIL helpers
+`ailf_scandir` already answered `os.listdir` / `os.scandir` (it gained `ailf_stat_record` and
+`ailf_user_home`, reached through the existing `_ail_os_scandir` primitive in modes 2/3 and 4). The prelude AIL helpers
 (`_AilStatResult`, the DirEntry/scandir classes, `normcase`, `expanduser`, `expandvars`,
 `samefile`, `samestat`, `_ail_fspath`) are registered from `filelower.py`, which is one of the
 compiler files this task allows; `filelib_prelude.py` is unchanged. `filelower.py` also holds the
@@ -133,11 +138,28 @@ lowering.
 
 ## Review fixes (second round)
 
-* `with os.scandir(p) as it:` now scopes `it` to the `with` body only; a later ordinary
-  `for x in it:` over a list/str is no longer lowered to `it.advance()`, and a nested function
-  whose parameter or local is named `it` shadows the marker.
+* `with os.scandir(p) as it:` no longer treats a later ordinary `for x in it:` over a list/str as
+  `it.advance()`, and a nested function whose parameter or local is named `it` shadows the marker.
+  (The third round below keeps the marker after the `with`, because CPython keeps `it` bound.)
 * `os.fspath(3)`: the typed path refuses by name, the default build falls back to the general path
   and raises `TypeError: expected str, bytes or os.PathLike object, not int` (`q_fspath_int.py`).
 * `expanduser`: `HOME` empty gives `/` for `~` and `/x` for `~/x`; `HOME` unset falls back to the
   passwd entry (both builds, `q_expanduser.py` with `HOME` unset, empty and with trailing slashes).
 * The four `filelib_prelude.py` snippets moved into `filelower.py` (see "Runtime files touched").
+
+## Review fixes (third round)
+
+* A comprehension or generator over `os.scandir(...)` (or over a scanner bound by `with`) is now
+  refused by name in both builds instead of compiling and raising `TypeError: 'instance' object is
+  not iterable` (`p12_comp.py`, `p12b_list.py`). `list(os.scandir(...))`, `list(it)` after the
+  `with`, and a plain `it = os.scandir(...)` are refused by name too (`p12c_list_direct.py`,
+  `p12d_list_afterwith.py`, `p12e_assign.py`).
+* `with os.scandir(p) as it:` keeps the scanner marker for the rest of the function, so
+  `for e in it:` after the `with` iterates the exhausted scanner (`1`/`0`, `p13_afterwith.py`
+  matches CPython). Rebinding the name to something else drops the marker; `it2 = it` keeps it.
+* `os.fspath(x)` through a variable: the typed path uses a `str`-annotated identity helper, so a
+  value the compiler knows to be `str` stays typed; a dynamic `bytes` or `int` falls back to the
+  general path, which returns the bytes identity or raises CPython's `TypeError`
+  (`p4d_fspath_int_uncaught.py`, `p4f_fspath_str.py`, `p4g_fspath_bytes.py`, `p4h_fspath_none.py`).
+* `expanduser("~root")` looks the user up in the passwd database and returns `/root`; `~nosuchuser`
+  is left unchanged, as CPython does (`p5_expanduser_root.py`, `p5b_expanduser_more.py`).

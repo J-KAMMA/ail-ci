@@ -40,6 +40,7 @@
 #else
 #include <unistd.h>
 #include <dirent.h>
+#include <pwd.h>
 extern char **environ;
 #endif
 
@@ -1272,6 +1273,27 @@ static int ailf_put_stat_field(ailf_buf *b, int64_t v) {
     return ailf_buf_putc(b, 0);
 }
 
+/* The home directory of a named user, for os.path.expanduser('~name'): the passwd entry on POSIX.
+   An unknown user (or any name on Windows, where ntpath does not expand ~user) gives an empty
+   buffer, and the caller leaves the path unchanged. */
+static int ailf_user_home(const uint8_t *p, int64_t n, ailf_buf *out) {
+    out->p = NULL; out->n = out->cap = 0;
+#ifdef _WIN32
+    (void)p; (void)n;
+    return 0;
+#else
+    if (n <= 0) return 0;
+    char *name = (char *)malloc((size_t)n + 1);
+    if (!name) return ailf_fail(AILF_E_NOMEM, "out of memory");
+    memcpy(name, p, (size_t)n);
+    name[n] = 0;
+    struct passwd *pw = getpwnam(name);
+    free(name);
+    if (!pw || !pw->pw_dir) return 0;
+    return ailf_buf_put(out, (const uint8_t *)pw->pw_dir, (int64_t)strlen(pw->pw_dir)) ? -1 : 0;
+#endif
+}
+
 /* What os.stat(path) / os.lstat(path) report, as NUL separated decimal fields:
    mode, ino, dev, nlink, uid, gid, size, atime_sec, atime_nsec, mtime_sec, mtime_nsec,
    ctime_sec, ctime_nsec. `follow` 0 looks at a symlink itself (lstat). */
@@ -1320,8 +1342,10 @@ static int ailf_stat_record(const uint8_t *p, int64_t n, ailf_buf *out, int foll
 /* The entries of a directory in the order the OS returns them (what os.listdir / os.scandir give).
    Output: one record per entry, "<type><name>", records separated by NUL; type 'd' for a directory
    (symlinks to directories included, as DirEntry.is_dir() answers), 'f' otherwise.
-   mode 2 (3) instead returns the stat (lstat) record of the path itself, see ailf_stat_record. */
+   mode 2 (3) instead returns the stat (lstat) record of the path itself, see ailf_stat_record;
+   mode 4 returns the home directory of the user named by the string, see ailf_user_home. */
 static int ailf_scandir(const uint8_t *p, int64_t n, ailf_buf *out, int with_type) {
+    if (with_type == 4) return ailf_user_home(p, n, out);
     if (with_type >= 2) return ailf_stat_record(p, n, out, with_type == 2);
     out->p = NULL; out->n = out->cap = 0;
     ailf_pchar *pp = ailf_path(p, n); if (!pp) return -1;

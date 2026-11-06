@@ -132,17 +132,21 @@ def _ail_expanduser(p: str) -> str:
     i = p.find("/", 1)
     if i < 0:
         i = len(p)
-    if i != 1:
-        return p
-    if _ail_os_hasenv("HOME") != 0:
-        home = _ail_os_getenv("HOME")
-        while len(home) > 0 and home[len(home) - 1] == "/":
-            home = home[0:len(home) - 1]
-        out = home + p[i:]
-        if len(out) == 0:
-            return "/"
-        return out
-    return _ail_pp_home() + p[i:]
+    if i == 1:
+        if _ail_os_hasenv("HOME") != 0:
+            home = _ail_os_getenv("HOME")
+        else:
+            home = _ail_pp_home()
+    else:
+        home = _ail_os_scandir(p[1:i], 4)
+        if len(home) == 0:
+            return p
+    while len(home) > 0 and home[len(home) - 1] == "/":
+        home = home[0:len(home) - 1]
+    out = home + p[i:]
+    if len(out) == 0:
+        return "/"
+    return out
 
 
 def _ail_expandvars(p: str) -> str:
@@ -195,6 +199,11 @@ def _ail_fspath(p):
     if n == "str" or n == "bytes":
         return p
     raise TypeError("expected str, bytes or os.PathLike object, not " + n)
+''')
+
+filelib_prelude.snippet('fspath_str', '''
+def _ail_fspath_str(p: str) -> str:
+    return p
 ''')
 
 # annotations that stand for the two file classes
@@ -611,10 +620,22 @@ class _Lowerer(ast.NodeTransformer):
     def visit_AnnAssign(self, node):
         node.annotation = self.annotate(node.annotation)
         if node.value is not None:
+            self.rebind_scandir(node.target, node.value)
             node.value = self.visit(node.value)
         return node
 
+    def rebind_scandir(self, target, value):
+        """A name that held a scandir object and is assigned again is no longer one."""
+        if not isinstance(target, ast.Name):
+            return
+        if isinstance(value, ast.Name) and value.id in self.scandir_names:
+            self.scandir_names.add(target.id)       # `it2 = it`: the same scanner
+        elif target.id in self.scandir_names:
+            self.scandir_names.discard(target.id)
+
     def visit_Assign(self, node):
+        if len(node.targets) == 1:
+            self.rebind_scandir(node.targets[0], node.value)
         # head, tail = os.path.split(p) / root, ext = os.path.splitext(p)
         pn = self.path_name(self.qual(node.value.func)) if isinstance(node.value, ast.Call) else None
         if len(node.targets) == 1 and isinstance(node.targets[0], (ast.Tuple, ast.List)) \
@@ -725,16 +746,13 @@ class _Lowerer(ast.NodeTransformer):
 
     def visit_With(self, node):
         items = node.items
-        added = []
         for item in items:
             if isinstance(item.context_expr, ast.Call) and self.qual(item.context_expr.func) == 'os.scandir' \
-                    and isinstance(item.optional_vars, ast.Name) \
-                    and item.optional_vars.id not in self.scandir_names:
+                    and isinstance(item.optional_vars, ast.Name):
                 self.scandir_names.add(item.optional_vars.id)
-                added.append(item.optional_vars.id)
         body = self.block(node.body)
-        for name in added:
-            self.scandir_names.discard(name)
+        # `it` stays bound after the `with` (Python does not drop it), so keep the marker for the
+        # rest of the function: a later `for x in it:` is the same scandir object, now exhausted.
         # innermost first
         for item in reversed(items):
             context = item.context_expr
@@ -806,6 +824,11 @@ class _Lowerer(ast.NodeTransformer):
         return True
 
     def visit_For(self, node):
+        if isinstance(node.target, ast.Name) and node.target.id in self.scandir_names:
+            source = node.iter
+            if not (isinstance(source, ast.Call) and self.qual(source.func) == 'os.scandir') \
+                    and not (isinstance(source, ast.Name) and source.id in self.scandir_names):
+                self.scandir_names.discard(node.target.id)
         if self.legacy_open(node.iter):
             node.iter.args = [self.visit(a) for a in node.iter.args]       # the typed path reads it line by line itself
             node.body = self.block(node.body)
@@ -841,6 +864,8 @@ class _Lowerer(ast.NodeTransformer):
         loop = ast.While(test=self.method(self.N(it), 'advance'),
                          body=head + self.block(node.body), orelse=self.block(node.orelse))
         stmts.append(loop)
+        if node.target.id == it:
+            self.scandir_names.discard(it)          # the loop rebinds the name to an entry
         return self.located(stmts, node)
 
     def lower_file_loop(self, node, file_node, start, enumerated):
@@ -907,6 +932,10 @@ class _Lowerer(ast.NodeTransformer):
         return self.located(stmts, node)
 
     def visit_comprehension(self, node):
+        if (isinstance(node.iter, ast.Call) and self.qual(node.iter.func) == 'os.scandir') \
+                or (isinstance(node.iter, ast.Name) and node.iter.id in self.scandir_names):
+            self.refuse(node, 'a comprehension or generator over os.scandir(...) is not built.\n'
+                              '  write instead: `for entry in os.scandir(path):` and collect the values')
         node.target = self.visit(node.target)
         if self.file_kind(node.iter):
             node.iter = self.lines_of(node.iter)
@@ -1000,6 +1029,11 @@ class _Lowerer(ast.NodeTransformer):
         func = node.func.id
         if func in self.user_defs:
             return node
+        if func in ('list', 'tuple', 'set', 'frozenset', 'sorted', 'sum', 'any', 'all', 'min', 'max',
+                    'enumerate', 'zip', 'dict', 'iter', 'next') \
+                and any(isinstance(a, ast.Name) and a.id in self.scandir_names for a in node.args):
+            self.refuse(node, '%s() of an os.scandir object is not built.\n'
+                              '  write instead: `for entry in os.scandir(path):` and collect the values' % func)
         if func == 'next' and node.args and self.file_kind(node.args[0]):
             if len(node.args) == 1:
                 return self.method(node.args[0], '_next_value')
@@ -1198,9 +1232,9 @@ class _Lowerer(ast.NodeTransformer):
             (path,) = self.bind(node, ('path',), {}, required=1)
             return self.call('_ail_os_stat' if name == 'os.stat' else '_ail_os_lstat', path)
         if name == 'os.scandir':
-            self.need.add('scandir')
-            (path,) = self.bind(node, ('path',), {'path': '.'}, required=0)
-            return self.call('_ail_scan_open', path)
+            self.refuse(node, 'os.scandir(path) is built in `for entry in os.scandir(path):` and in '
+                              '`with os.scandir(path) as it:` only.\n'
+                              '  write instead: loop over it directly, or bind it with `with`')
         if name == 'os.fspath':
             if len(node.args) != 1 or node.keywords:
                 self.refuse(node, 'os.fspath(path) takes one string or bytes argument')
@@ -1208,10 +1242,13 @@ class _Lowerer(ast.NodeTransformer):
             if self.general:
                 self.need.add('fspath')
                 return self.call('_ail_fspath', self.visit(arg))
-            if isinstance(arg, ast.Constant) and not isinstance(arg.value, (str, bytes)):
-                self.refuse(node, 'os.fspath(%s) raises TypeError: expected str, bytes or os.PathLike object, '
-                                  'not %s' % (ast.unparse(arg), type(arg.value).__name__))
-            return self.visit(arg)
+            if isinstance(arg, ast.Constant):
+                if not isinstance(arg.value, (str, bytes)):
+                    self.refuse(node, 'os.fspath(%s) raises TypeError: expected str, bytes or os.PathLike object, '
+                                      'not %s' % (ast.unparse(arg), type(arg.value).__name__))
+                return self.visit(arg)
+            self.need.add('fspath_str')
+            return self.call('_ail_fspath_str', self.visit(arg))
         if name == 'os.makedirs':
             self.need.update(('makedirs', 'phead', 'ptail', 'pexists'))
             n, mode, exist_ok = self.bind(node, ('name', 'mode', 'exist_ok'), {'mode': 0o777, 'exist_ok': False}, required=1)
