@@ -24,7 +24,11 @@ RESULTS = ROOT / "RESULTS.md"
 MODES = ("typed", "default", "general", "hybrid")
 LIMIT_KB = 1_500_000
 TIMEOUT = 20
-CLASSES = ("match", "stop-differs", "silent-wrong", "crash", "refused", "n/a")
+CLASSES = ("match", "stop-differs", "silent-wrong", "documented difference", "crash", "refused", "n/a")
+# Owner decision 2026-11-05: AIL does not emulate CPython's default recursion limit of 1000.
+# Depth 5000 is within the real stack, so AIL completes where CPython refuses; that is a
+# documented difference (docs/LIMITATIONS.md), not a silent-wrong row.
+DOCUMENTED = {"09_rec_deep5000.py"}
 
 
 def base_commit():
@@ -163,7 +167,10 @@ def main():
                     row["modes"][mode] = {"class": "refused", "build": detail, "run": None}
                     continue
                 run = run_limited([str(executable(out, copy, mode))], work, env)
-                row["modes"][mode] = {"class": classify(cpython, run), "build": detail,
+                klass = classify(cpython, run)
+                if source.name in DOCUMENTED and klass == "silent-wrong":
+                    klass = "documented difference"
+                row["modes"][mode] = {"class": klass, "build": detail,
                                       "run": run}
             results[source.name] = row
 
@@ -228,6 +235,20 @@ def main():
     if not any_followup:
         lines.append("(none)")
     lines.append("")
+    documented = [(name, mode) for name in sorted(DOCUMENTED)
+                  for mode in MODES if results[name]["modes"][mode]["class"] == "documented difference"]
+    if documented:
+        lines.append("## Documented differences")
+        lines.append("")
+        lines.append("AIL runs recursion on the real C stack and does not emulate CPython's default limit of 1000 "
+                     "(owner decision 2026-11-05; `docs/LIMITATIONS.md`). The depth in these cells fits, so AIL "
+                     "prints its result where CPython refuses; only an actual stack exhaustion stops, and then "
+                     "with `RecursionError: maximum recursion depth exceeded`.")
+        lines.append("")
+        for name, mode in documented:
+            lines.append("- `%s` / **%s**: depth within the real stack (documented difference)."
+                         % (name, mode))
+        lines.append("")
     RESULTS.write_text("\n".join(lines), encoding="utf-8")
     print("wrote", RESULTS)
     for name in CLASSES:

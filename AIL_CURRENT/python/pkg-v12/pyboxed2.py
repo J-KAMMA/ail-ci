@@ -129,8 +129,8 @@ _MIX_DRAIN_SITES = (
      '    {\n        const char *name = ail_exc_pyname(w);\n        ail_mix_drain_out(); fflush(stdout);\n'
      '        if (name) { fputs(name, stderr); fputs(": ", stderr); }\n        fputs(w, stderr);\n    }\n'
      '    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
-    ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
-     'static void ail_exception_uncaught(ail_exception *value) {\n    ail_mix_drain_out();\n    fflush(stdout);\n'),
+    ('static void ail_exception_uncaught(ail_exception *value) {\n',
+     'static void ail_exception_uncaught(ail_exception *value) {\n    ail_mix_drain_out();\n'),
 )
 _MIX_DRAIN_DEF = (
     'void ail_mix_drain_out(void) {   /* called by a clone\'s trap path before _Exit */\n'
@@ -280,6 +280,7 @@ EXC_IDS = {
     'PermissionError': 'AIL_B_PERMISSIONERROR',
     'ProcessLookupError': 'AIL_B_PROCESSLOOKUPERROR',
     'TimeoutError': 'AIL_B_TIMEOUTERROR',
+    'RecursionError': 'AIL_B_RECURSIONERROR',
 }
 TYPE_TAG = {
     'int': 'AIL_T_INT', 'float': 'AIL_T_FLOAT', 'str': 'AIL_T_STR', 'bool': 'AIL_T_BOOL',
@@ -4413,6 +4414,13 @@ class Compiler(boxclosure.ClosureMixin):
         body = '\n'.join(preamble_lines) + ('\n' if preamble_lines else '')
         body += ctx.body_text()
         st_decl = '    ail_st st = AIL_OK; (void)st;\n'
+        # A generated entry stops a call that would exhaust the C stack with a named
+        # RecursionError (the typed path's counterpart is ail_d / AIL_MAX_RECURSION_DEPTH).
+        # The check is a real stack check -- the address of this activation's frame against
+        # cx->stack_limit -- not a frame count: a depth that fits the real stack keeps
+        # working, and a function with many locals is still stopped before it overflows.
+        depth_guard = ('    if (AIL_STACK_LOW(cx, f)) { st = ail_raise_c(cx, '
+                       'AIL_B_RECURSIONERROR, "maximum recursion depth exceeded"); goto L_leave; }\n')
         comp_decl = '    ail_completion comp = AIL_COMPLETE_NORMAL; (void)comp;\n'
         # @lru_cache/@cache (S047): the BODY compiles under a private `_impl` name; the plain
         # name (what every caller -- including a recursive call inside this very body -- resolves
@@ -4425,13 +4433,13 @@ class Compiler(boxclosure.ClosureMixin):
             self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out%s);\n' %
                                   (impl_cname, sig))
         full = ('static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n'
-               '    AIL_FRAME_ENTER(cx, f, %d);\n%s%s'
+               '    AIL_FRAME_ENTER(cx, f, %d);\n%s%s%s'
                '    *out = ail_box_none();\n'
                '%s\n'
                '    AIL_FRAME_LEAVE(cx, f);\n    return AIL_OK;\n'
                'L_leave:\n'
                '    AIL_FRAME_LEAVE(cx, f);\n    return st;\n'
-               '}\n\n') % (impl_cname, sig, n_slots, st_decl, comp_decl, body)
+               '}\n\n') % (impl_cname, sig, n_slots, st_decl, depth_guard, comp_decl, body)
         if self.uplan is not None and getattr(ctx, 'u', None) is not None:
             decls = ''.join('    %s\n' % d for d in ctx.u_decls)
             head = 'static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n' % (impl_cname, sig)
@@ -4595,6 +4603,8 @@ class Compiler(boxclosure.ClosureMixin):
         full = ('static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n'
                '    AIL_FRAME_ENTER(cx, f, %d);\n'
                '    ail_st st = AIL_OK; (void)st;\n'
+               '    if (AIL_STACK_LOW(cx, f)) { st = ail_raise_c(cx, '
+               'AIL_B_RECURSIONERROR, "maximum recursion depth exceeded"); goto L_leave; }\n'
                '    ail_completion comp = AIL_COMPLETE_NORMAL; (void)comp;\n%s'
                '    *out = ail_box_none();\n'
                '    AIL_FRAME_LEAVE(cx, f);\n    return AIL_OK;\n'
