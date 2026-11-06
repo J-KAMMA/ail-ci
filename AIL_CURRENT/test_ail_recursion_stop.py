@@ -235,7 +235,52 @@ def _run_cpython(directory, text):
     return got.stdout.decode("utf-8", "replace"), got.returncode
 
 
-def _build_and_run(directory, name, text, env_extra):
+# Every built program runs in a child with its own limits, set inside the child: an address-space
+# cap (so an unbounded chain of generators, each on its own mmap'd stack, stops when the OS can no
+# longer map one instead of growing until the machine runs out of memory) and a wall-clock timeout
+# (a hang is a failure, never a pass).
+CHILD_AS = 1 << 30
+CHILD_TIMEOUT = 60
+GEN_STACK = 8 << 20           # AIL2G_STACK in safetyrt.py: each generator's own mapped stack
+
+
+def _current_as_limit():
+    if resource is None:
+        return None
+    soft = resource.getrlimit(resource.RLIMIT_AS)[0]
+    return None if soft == resource.RLIM_INFINITY else soft
+
+
+def _child_limits(as_bytes):
+    """preexec_fn that caps the child's address space (never above the parent's own cap)."""
+    if resource is None or as_bytes is None or not sys.platform.startswith("linux"):
+        return None
+    parent = _current_as_limit()
+    if parent is not None:
+        as_bytes = min(as_bytes, parent)
+
+    def limit():
+        resource.setrlimit(resource.RLIMIT_AS, (as_bytes, as_bytes))
+    return limit
+
+
+def _run_child(cmd, directory, as_bytes=CHILD_AS, preexec=None):
+    limit = _child_limits(as_bytes)
+
+    def setup():
+        if limit is not None:
+            limit()
+        if preexec is not None:
+            preexec()
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=CHILD_TIMEOUT, cwd=directory,
+                              preexec_fn=setup if (limit or preexec) else None)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError("%s did not stop within %d s (a hang, not a loud stop)"
+                             % (cmd[0], CHILD_TIMEOUT)) from error
+
+
+def _build_and_run(directory, name, text, env_extra, as_bytes=CHILD_AS):
     src = Path(directory) / (name + ".py")
     src.write_text(text, encoding="utf-8")
     exe = Path(directory) / ("exe_" + name)
@@ -248,7 +293,7 @@ def _build_and_run(directory, name, text, env_extra):
                            timeout=900, env=env)
     if built.returncode != 0:
         return None, (built.stdout + built.stderr)[-2000:]
-    got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+    got = _run_child([str(exe)], directory, as_bytes)
     return got, ""
 
 
@@ -261,8 +306,7 @@ def _run_unlimited(exe, directory):
     """Run a built program with RLIMIT_STACK unlimited, as `ulimit -s unlimited` does."""
     def unlimit():
         resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-    return subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory,
-                          preexec_fn=unlimit)
+    return _run_child([str(exe)], directory, CHILD_AS, preexec=unlimit)
 
 
 class RecursionStop(unittest.TestCase):
@@ -352,7 +396,11 @@ class RecursionStop(unittest.TestCase):
                     self.assertIsNotNone(got, err)
                     self.assertEqual(got.stdout.decode("utf-8", "replace"), want_out, "%s/%s" % (slug, mode))
                     self.assertNotEqual(got.returncode, 0, "%s/%s" % (slug, mode))
-                    self.assertTrue(_last_line(got.stderr).startswith("RecursionError:"),
+                    # The unbounded generator chain ends when the child's address-space cap
+                    # refuses the next generator stack: a named stop either way.
+                    names = ("RecursionError:", "MemoryError") if slug == "generator" \
+                        else ("RecursionError:",)
+                    self.assertTrue(_last_line(got.stderr).startswith(names),
                                     "%s/%s: %r" % (slug, mode, got.stderr[-400:]))
 
     def test_caught_stop_is_a_recursionerror_instance(self):
@@ -391,11 +439,21 @@ class RecursionStop(unittest.TestCase):
         # An artificial nesting cap refused this depth; each generator has its own stack and the
         # chain used to complete.  CPython refuses at its default limit 1000 (documented
         # difference), so the oracle here is the base behaviour, not CPython.
+        # Each generator reserves GEN_STACK of address space (MAP_NORESERVE: its RSS is a few
+        # pages), so the depth is derived from the address space this test may use: 12000 (above
+        # the old 10000 cap) when no cap is set, fewer under one such as `ulimit -v 2500000`.
+        # The child always runs with an explicit cap sized for that depth.
+        headroom = 512 << 20
+        parent = _current_as_limit()
+        depth = 12000 if parent is None else max(50, min(12000, (parent - headroom) * 4 // 5 // GEN_STACK))
+        budget = depth * GEN_STACK + headroom
+        text = GENERATOR_CHAIN.replace("g(12000)", "g(%d)" % depth)
         with tempfile.TemporaryDirectory(prefix="ail-recstop-") as directory:
             for mode, env_extra in MODES:
-                got, err = _build_and_run(directory, "gen_chain_" + mode, GENERATOR_CHAIN, env_extra)
+                got, err = _build_and_run(directory, "gen_chain_" + mode, text, env_extra,
+                                          as_bytes=budget)
                 self.assertIsNotNone(got, "%s\n%s" % (mode, err))
-                self.assertEqual(got.returncode, 0, "%s: %r" % (mode, got.stderr[-400:]))
+                self.assertEqual(got.returncode, 0, "%s depth %d: %r" % (mode, depth, got.stderr[-400:]))
                 self.assertEqual(got.stdout.decode("utf-8", "replace"), "1\n", mode)
 
     @unittest.skipUnless(resource is not None and sys.platform.startswith("linux"),
