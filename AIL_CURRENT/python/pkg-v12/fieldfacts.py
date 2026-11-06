@@ -17,6 +17,21 @@ _LIST_FIELD_KINDS = frozenset(('list', 'flist', 'slist', 'blist'))
 _ISTORE_METHODS = frozenset(('append', 'pop', 'clear'))
 _MUTATORS = frozenset(('append', 'pop', 'clear', 'insert', 'extend', 'remove'))
 _READ_BUILTINS = frozenset(('sum', 'min', 'max', 'sorted', 'str'))
+# Calls that cannot change a user struct's list fields.  Every occurrence of a group member is
+# already one of the accepted appends/pops/clears (or a read), so a call to a helper only matters
+# through a mutation in the helper's own body.  Builtins that may call back into user code
+# (`map`, `filter`, `sorted`/`min`/`max`/`sum` with a key, ...) are deliberately absent: an
+# unrecognised call only costs an optimisation.
+_SAFE_CALLS = frozenset((
+    'len', 'ord', 'chr', 'int', 'float', 'bool', 'range', 'abs', 'isinstance', 'round',
+    'divmod', 'pow', 'hash', 'id', 'type', 'list', 'dict', 'set', 'tuple', 'bytes', 'bytearray',
+    'open', 'input', 'wrapping_mul', 'read_bytes'))
+_SAFE_METHODS = frozenset((
+    'append', 'pop', 'clear', 'insert', 'extend', 'remove', 'sort', 'reverse', 'count', 'index',
+    'copy', 'join', 'decode', 'encode', 'split', 'rsplit', 'strip', 'lstrip', 'rstrip',
+    'startswith', 'endswith', 'replace', 'find', 'rfind', 'format', 'upper', 'lower', 'isdigit',
+    'isalpha', 'read', 'write', 'close', 'seek', 'readline', 'readlines', 'keys', 'values',
+    'items', 'get', 'setdefault', 'update'))
 
 
 def _is_list_kind(kind):
@@ -83,6 +98,11 @@ class _Pass:
         self.fns = fns
         self.classes = classes or {}
         self.classdefs = {c.name: c for c in (classdefs or ())}
+        self.user_methods = set()
+        for cdef in (classdefs or ()):
+            for stmt in cdef.body:
+                if isinstance(stmt, ast.FunctionDef):
+                    self.user_methods.add(stmt.name)
         self.structs = {}
         self.field_struct = {}    # unique field name -> struct name
         self.field_kind = {}
@@ -468,6 +488,87 @@ class _Pass:
         out.sort(key=lambda g: (g['struct'] or '', g['fn'] or '', g['members']))
         return out
 
+    # ---------------------------------------------------------------- group writers
+    def mutators(self, groups):
+        """{function name: group ids that a call to it may change the length of}.
+
+        A group's members are only ever touched by the accepted append/pop/clear calls this pass
+        found (every other occurrence invalidates the group), so a function changes a length only
+        if one of those calls is in its own body or in the body of a function it can reach.  A
+        call this pass cannot name -- including a user-defined method (which may do anything) and
+        a struct constructor (whose `__init__` is not in this call graph) -- is treated as able to
+        change every struct group.
+        """
+        field_member = {}
+        field_gids = set()
+        for gid, group in enumerate(groups):
+            if not group.get('struct'):
+                continue
+            field_gids.add(gid)
+            for member in group['members']:
+                field_member[('field', member)] = gid
+        fn_names = {fn.name for fn in self.fns}
+        direct = {name: set() for name in fn_names}
+        for run in self.runs:
+            if not run.ok or run.kind not in _ISTORE_METHODS:
+                continue
+            gids = set()
+            for key, _call in run.members:
+                gid = field_member.get(key)
+                if gid is not None:
+                    gids.add(gid)
+            if gids and run.fn in direct:
+                direct[run.fn] |= gids
+        edges = {name: set() for name in fn_names}
+        unknown = {name: False for name in fn_names}
+
+        def safe_call(node):
+            if isinstance(node, ast.Name):
+                name = node.id
+                if name in fn_names or name in _SAFE_CALLS:
+                    return True
+                if name.endswith(('Error', 'Exception')):
+                    return True
+                # a struct constructor's `__init__` may append to a list it is handed and is
+                # not one of the top-level functions this call graph reaches
+                return False
+            if isinstance(node, ast.Attribute):
+                if node.attr in self.user_methods:
+                    return False
+                return node.attr in _SAFE_METHODS
+            return False
+
+        for fn in self.fns:
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Name):
+                    if node.func.id in fn_names:
+                        edges[fn.name].add(node.func.id)
+                    elif not safe_call(node.func):
+                        unknown[fn.name] = True
+                elif not safe_call(node.func):
+                    unknown[fn.name] = True
+        reach = {}
+        for name in fn_names:
+            seen, todo = set(), [name]
+            while todo:
+                current = todo.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                todo.extend(edges.get(current, ()))
+            reach[name] = seen
+        out = {}
+        for name in fn_names:
+            gids = set()
+            for target in reach[name]:
+                gids |= direct[target]
+                if unknown[target]:
+                    gids |= field_gids
+            out[name] = sorted(gids)
+        return out
+
     # ---------------------------------------------------------------- non-negative ints
     def nonneg(self):
         if not self.int_fields:
@@ -818,7 +919,7 @@ def _field_still_nonneg(pass_, struct, field, fn_locals, result_nonneg, bytes_fi
 def compute(fns, classes, classdefs, *, library=False, external=None, info=None,
             enabled=True, closures=False):
     """The facts for one whole program, or empty facts when they would not be sound."""
-    empty = {'groups': [], 'nonneg': []}
+    empty = {'groups': [], 'nonneg': [], 'mutators': {}}
     if not enabled or not fns:
         return empty
     # A captured list (a lambda or a lifted nested function) can be kept and changed after this
@@ -846,7 +947,9 @@ def compute(fns, classes, classdefs, *, library=False, external=None, info=None,
         return empty
     try:
         pass_ = _Pass(fns, classes, classdefs)
-        return {'groups': pass_.groups(), 'nonneg': pass_.nonneg()}
+        groups = pass_.groups()
+        return {'groups': groups, 'nonneg': pass_.nonneg(),
+                'mutators': pass_.mutators(groups)}
     except Exception:
         # The facts are an optimisation input only; anything unexpected means "no facts".
         return empty

@@ -47,6 +47,7 @@ class GroupCSE(object):
         self.fn = fn
         self.facts = facts or {}
         self.groups = (self.facts.get('fields') or {}).get('groups') or []
+        self.mutators = (self.facts.get('fields') or {}).get('mutators') or {}
         self.summaries = self.facts.get('summaries') or {}
         self.defs = {r: ins for ins in I.walk(fn.body) for r in ins.results}
         self.field_groups = {}
@@ -118,7 +119,13 @@ class GroupCSE(object):
     def changes_length(self, ins, gid):
         """Whether `ins` may change the length of the group `gid`."""
         if ins.op == 'call':
-            eff = self.summaries.get(ins.attrs.get('callee'))
+            callee = ins.attrs.get('callee')
+            mutators = self.mutators.get(callee)
+            if mutators is not None and self.groups[gid].get('struct'):
+                # bce s4 proved every write of a group member is one of a known set of
+                # append/pop/clear calls; a function that cannot reach one cannot change it.
+                return gid in mutators
+            eff = self.summaries.get(callee)
             if eff is None or eff.unknown:
                 return True
             return self._writes_group(eff, gid)

@@ -71,6 +71,30 @@ fn store_first(s: S, t: int, v: int) -> int {
 }
 """
 
+GROUP_CALL = r"""
+struct PC { n_op: list[int]; n_a: list[int]; n_b: list[int]; has: list[int]; val: list[int]; }
+fn add_n(p: PC, op: int, a: int, b: int) {
+    p.n_op.append(op); p.n_a.append(a); p.n_b.append(b);
+}
+fn add_h(p: PC, h: int, v: int) {
+    p.has.append(h); p.val.append(v);
+}
+fn grow(p: PC) { p.n_op.append(0); p.n_a.append(0); p.n_b.append(77); }
+fn grow2(p: PC) { grow(p); }
+fn peek(p: PC) -> int { return len(p.n_op); }
+fn cross_call(p: PC, i: int) -> int {
+    let op = p.n_op[i];
+    let a = p.n_a[i];
+    grow2(p);
+    return op * 10 + p.n_b[i];
+}
+fn cross_peek(p: PC, i: int) -> int {
+    let op = p.n_op[i];
+    let a = p.n_a[i];
+    peek(p);
+    return op * 10 + p.n_b[i];
+}
+"""
 PROBES = [
     ('range_read_store', r"""
 fn main() {
@@ -557,6 +581,17 @@ fn main() {
     print(evn(p, -2, 0));
 }
 """),
+    ('group_call_growth', GROUP_CALL + r"""
+fn main() {
+    let p = PC([], [], [], [], []);
+    add_n(p, 100, 5, 0); add_h(p, 1, 7);
+    add_n(p, 0, 6, 2); add_h(p, 1, 0);
+    add_n(p, 100, 9, 30); add_h(p, 1, 0);
+    print(cross_call(p, -1));
+    print(cross_peek(p, -1));
+    print(cross_peek(p, 0));
+}
+"""),
     ('group_ev_pop_between', GROUP_P + r"""
 fn evp(p: P, i: int, d: int) -> int {
     let op = p.n_op[i];
@@ -717,6 +752,24 @@ def _ir_stats(directory, name, source):
     return [json.loads(line) for line in stats.read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
+def _ir_dump(directory, name, source):
+    src = Path(directory) / (name + '_dump.ail')
+    src.write_text(source, encoding='utf-8')
+    dump = Path(directory) / (name + '_dump.ir')
+    if dump.exists():
+        dump.unlink()
+    exe = Path(directory) / ('exe_' + name + '_dump')
+    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1',
+               AIL_IR_DUMP_FINAL=str(dump))
+    for key in ('AIL_NO_GENERAL', 'AIL_UNIFIED_FORCE', 'AIL_BCE', 'AIL_BCE_AUDIT'):
+        env.pop(key, None)
+    built = subprocess.run([sys.executable, '-B', CHATGPT, 'compile', src.name, '-o', exe.name],
+                           cwd=directory, capture_output=True, text=True, timeout=900, env=env)
+    if built.returncode != 0:
+        raise AssertionError((built.stdout + built.stderr)[-2000:])
+    return dump.read_text(encoding='utf-8')
+
+
 @unittest.skipUnless(HAVE_CC, 'no C compiler')
 class BceProbeTests(unittest.TestCase):
     maxDiff = None
@@ -823,6 +876,27 @@ class GroupCseTests(unittest.TestCase):
             self.assertTrue(found, 'no IR stats for ev')
             self.assertFalse(found[-1].get('passes', {}).get('groupcse'),
                              found[-1].get('passes'))
+
+    def test_call_growth_needs_a_nonnegative_index(self):
+        # a call that can reach an append keeps the later access checked (the negative index
+        # would name a different element after the growth); a call that cannot reach one lets
+        # the later access reuse the normalised index.
+        with tempfile.TemporaryDirectory(prefix='ail-groupcse-') as directory:
+            dump = _ir_dump(directory, 'group_call', GROUP_CALL + r"""
+fn main() {
+    let p = PC([], [], [], [], []);
+    add_n(p, 100, 5, 0); add_h(p, 1, 7);
+    print(cross_call(p, -1));
+    print(cross_peek(p, -1));
+}
+""")
+            for fn, want in (('cross_call', 'ck'), ('cross_peek', 'nck')):
+                start = dump.index('func @%s(' % fn)
+                end = dump.find('\nfunc @', start + 1)
+                body = dump[start:end if end >= 0 else len(dump)]
+                lines = body.splitlines()
+                at = next(i for i, line in enumerate(lines) if 'name = "n_b"' in line)
+                self.assertIn('mode = "%s"' % want, lines[at + 1], (fn, lines[at + 1]))
 
     def test_store_first_keeps_the_store_error(self):
         # a store that is the first access raises the store's own error (the accessor's own call);
