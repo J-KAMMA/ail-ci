@@ -35,9 +35,6 @@ KNOWN = {
     "next x5 p05_try.py:2",                            # the try body is outlined into another C function
     "next x5 p10_strings.py:9",                        # pyfunc.py: one #line for a statement over 3 C lines
     "finish from inner returns to middle:7 with 11",   # pyfunc.py: always_inline in debug builds
-    # the IR path's locals are SSA values (`ir1`) and parameters `v_n`: no C variable has the Python name, and
-    # test_ail_debug_lines pins a debug build's C to the release C plus #line and site lines
-    "info locals names k, g, r", "print n == 42", "print f == 1.5", "print k == 43", "print g == 3",
 }
 
 if GDB:

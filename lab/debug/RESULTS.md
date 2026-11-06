@@ -57,18 +57,15 @@ back to the `if`), next p05:2, next p10:9, finish, info locals, print n, print f
 lowering, which writes no `#line` for the `__init__` body. pyfunc.py is not editable in this lane (follow-up 1).
 **General path: 77/77 (100%)**, unchanged, so pyboxed2 has no gap to record on these 10 programs.
 
-**(b) 22/30. Target ≥26: not met.** The 8 failures:
+**(b) 27/30. Target ≥26: met.** The 3 failures:
 
 | check | gdb / CPython | cause | where to fix |
 |---|---|---|---|
 | next x5 p05_try.py:2 | `[6, 11, 2, 5, 6]` / `[3, 6, 11, 2, 3]` | the `try` body is outlined into another C function (`ail_ir_try` runs it under setjmp), so `next` steps over line 3 | ir/emit_c.py design (outlined bodies); a gdb `step` reaches it |
 | next x5 p10_strings.py:9 | `[10, 11, 10, 11, 12]` / `[10, 11, 12, 11, 12]` | the legacy emitter writes one `#line 9` before a statement it spreads over 3 C lines, so the 2nd and 3rd C lines map to 10 and 11 | pyfunc.py (`_debug_site`) |
 | finish from inner → middle:7 with 11 | back in middle:7, no "Value returned" | `inner` is `__attribute__((always_inline))` in debug builds too (pyfunc's straight-line predicate). ir/driver.py checks that the IR signature equals the legacy one, so emit_c cannot drop it alone. | pyfunc.py (skip the attribute under AIL_DEBUG=1) |
-| info locals names k, g, r | `ir1 ir2 ir3 ir4` | IR locals are SSA values | see "Locals" |
-| print n == 42 | `No symbol "n"` | the C parameter is `v_n` | see "Locals" |
-| print f == 1.5 | `No symbol "f"` | `v_f` | see "Locals" |
-| print k == 43 | `No symbol "k"` | `ir1` | see "Locals" |
-| print g == 3 | `No symbol "g"` | `ir2` | see "Locals" |
+
+`info locals` (names k, g, r) and `print n`/`f`/`k`/`g` pass since change 4 below (Python-named locals).
 
 ### What changed (ir/emit_c.py, debug builds only)
 
@@ -83,40 +80,38 @@ lowering, which writes no `#line` for the `__init__` body. pyfunc.py is not edit
 3. **The wrappers after a function are `<ail-generated>`.** `#line 1 "<ail-generated>"` now comes before the
    list-return / pending / depth wrappers, not after them. They had gone on numbering from the user's last line.
    Fixed p04's stray 4, 5 and the second breakpoint location inside `squares`.
+4. **Locals by their Python name** (rerun after review, 2026-11-06). In an IR function with no `try`, each
+   int/float local is mirrored into a C variable of its Python name: `int64_t k; /* --debug: the Python local */`
+   at the top, and `k = ir1; /* --debug: the Python local */` (under the statement's `#line`) right after the
+   instruction that computes the stored value; a parameter's mirror is set at the first statement. The name comes
+   from the stores mem2reg removed (still in `I.SRC`) and the statement's AST. No mirror for a name that could go
+   stale or clash: a `for` target or a tuple assignment binds it, a store whose value is not computed on that
+   statement's line (a loop-carried value), a name that is a C word, a runtime macro's identifier, starts with
+   `ail_`, or appears anywhere in the function's C. Every added C line ends with that marker comment, and
+   `test_ail_debug_lines` (debug C = release C + `#line` + site lines) now also strips lines ending with it: the
+   one edit outside this task's file list, made because the review asked for it. Fixed info locals, print n, f,
+   k, g.
 
 cruntime.py is unchanged.
 
 ### Locals: the C names
 
-gdb shows the IR path's locals only under their C names. In p08 `calc(n: int, f: float)`, at line 5:
+Without the mirror (release builds, functions with a `try`, loop-carried values such as p01's `acc`) gdb shows the
+IR path's locals only under their C names. In p08 `calc(n: int, f: float)`: `n` is `v_n`, `f` is `v_f`, `k = n + 1`
+is `ir1`, `g = f * 2.0` is `ir2`, `r = g + k` is `ir4` (`ir3` is `(double)k`). The legacy emitter names a local
+`v_<name>`, and compiler temporaries `v__tN`. With the mirror, gdb at p08:5 shows `f g k n r` with CPython's values.
 
-| Python | C | gdb `print` |
-|---|---|---|
-| `n` (param) | `v_n` | `print v_n` → 42 |
-| `f` (param) | `v_f` | `print v_f` → 1.5 |
-| `k = n + 1` | `ir1` | `print ir1` → 43 |
-| `g = f * 2.0` | `ir2` | `print ir2` → 3 |
-| `r = g + k` | `ir4` (`ir3` is `(double)k`) | `print ir4` → 46 |
-| `n = 42`, `f = 1.5` in `main` | none (constants propagated into `calc(42LL, 1.5)`) | – |
-
-The legacy emitter names a local `v_<name>`, and compiler temporaries `v__tN`.
-
-**A debug-only rename was tried and backed out.** It mirrored each int/float local into a C variable of its Python
-name after the instruction that produces the value. The name came from the dead `store`s in `I.SRC` and from the
-statement's AST. It skipped any name a `for` target, a tuple assignment, a `try` or a C/runtime identifier could make
-stale. With it the matrix was **27/30**, and a probe that compared every named local against CPython's `f_locals` at
-the same line found no mismatch. It cannot land: `test_ail_debug_lines.py::
-test_release_has_no_directives_and_debug_differs_by_them_alone` requires a debug build's C to be the release C plus
-`#line` and `AIL_DBG_SITE` lines only, and that test is outside this task's files. Hiding the mirror assignments
-inside site lines would get past the test without meeting its intent, so it was not done. Follow-up 3 needs the
-owner of that invariant to allow debug-only `/* --debug */` local mirrors.
+A probe (`/tmp/probes/shadowcheck.py`) compares every Python-named local gdb shows at 34 breakpoints over 15 programs
+(9 of them typed, with C-word names, `ir1`/`v_n`/`ail_die` names, swaps, reassignments, loops, floats, values from an
+attribute, a list item and a dict value) with CPython's `f_locals` at the same line: 0 mismatches.
 
 ### Release C byte-identical
 
-`--debug-dir` C of a release build (no `--debug`), origin/integ vs this branch, AIL_NO_CACHE=1 AIL_SERVER=0, over 30
-programs: the 20 `lab/compare/src/*/{main,typed}.py` and the 10 `progs/`. **26 have byte-identical `program.c`**. The
-other 4 (`main.py` of chain_relax, rail_transfer, tally_lang and tree_fold) are refused with the same exit status on
-both trees, so they write no C (for example chain_relax: an int64 literal out of range). All the changes are gated on AIL_DEBUG=1
+`--debug-dir` C of a release build (no `--debug`), origin/integ vs this branch, AIL_NO_CACHE=1 AIL_SERVER=0, over 44
+programs: the 20 `lab/compare/src/*/{main,typed}.py`, the 11 `progs/` files and 13 probes (rerun after the locals change).
+**40 have byte-identical `program.c`, 0 differ**. The other 4 (`main.py` of chain_relax, rail_transfer, tally_lang and
+tree_fold) are refused with the same exit status on both trees, so they write no C (for example chain_relax: an int64
+literal out of range). All the changes are gated on AIL_DEBUG=1
 (`debug_lines`) and need `I.SRC`, which is filled only in debug builds.
 
 ## Follow-ups (outside this lane's files)
@@ -125,7 +120,7 @@ both trees, so they write no C (for example chain_relax: an int64 literal out of
 2. pyfunc.py legacy statements: a `#line` before *every* C line of a statement, as ir/emit_c.py does (p10:9 maps its
    2nd/3rd C lines to 10, 11). The same cause gives the stray lines past the end of the file in p03 (14–21), p04
    (10–20) and p10 (14–24): the module code after the last `#line`.
-3. Python-named locals in debug builds (above): relax the invariant of test_ail_debug_lines, then land the mirror.
+3. Python-named locals for loop-carried values (p01's `acc`, `i`) and in functions with a `try`: not mirrored yet.
 4. pyfunc.py: no `always_inline` under AIL_DEBUG=1, so `finish` shows the value returned.
 5. CI: the ubuntu-24.04 image has no gdb. `test_ail_debug_gdb` skips the matrix there (and prints
    `gdb: not installed`), and its readelf part runs. Running the matrix on CI needs `sudo apt-get install gdb` in
