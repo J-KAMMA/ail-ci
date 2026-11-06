@@ -1465,12 +1465,18 @@ static ail2g **ail2g_tab; static int64_t ail2g_n, ail2g_cap;
 static ail2g *ail2g_current;
 static ail2g_wait *ail2g_waiting;    /* the callers' frames while a generator runs */
 static ail_ctx *ail2g_cx;
-static int64_t ail2g_id_h, ail2g_id_a;
-#define AIL2G_STACK ((size_t)8 << 20)
+static int64_t ail2g_id_h, ail2g_id_a, ail2g_scan;
+#define AIL2G_STACK ((size_t)256 << 10)
 
 #ifndef _WIN32
 /* stacks given back are kept for the next generator: no mapping and no first-touch faults per generator */
 static void *ail2g_pool[256]; static int ail2g_pooled;
+static int ail2g_map_stack(ail2g *g) {
+    g->stack = mmap(NULL, g->stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (g->stack == MAP_FAILED) { g->stack = NULL; return 0; }
+    if (mprotect(g->stack, 4096, PROT_NONE) != 0) { munmap(g->stack, g->stack_size); g->stack = NULL; return 0; }
+    return 1;
+}
 #endif
 /* every 256 new stacks the collector runs, so generators left unfinished are found and their stacks
    reused before many pile up */
@@ -1495,13 +1501,17 @@ static void ail2g_gc_hook(ail_ctx *cx) {
     for (int64_t i = 0; i < ail2g_n; i++) if (ail2g_tab[i]) {
         ail2g *g = ail2g_tab[i];
         g->scanned = 0;
-        if (g->state == AIL2G_RUNNING) { g->scanned = 1; ail_gc_mark_value(g->sent); }
+        if (g->state == AIL2G_RUNNING || g == ail2g_current) {
+            g->scanned = 1;
+            if (g->inst) { ail_obj io; io.tag = AIL_T_INST; io.o = g->inst; ail_gc_mark_value(io); }
+            ail_gc_mark_value(g->args); ail_gc_mark_value(g->value); ail_gc_mark_value(g->sent);
+        }
     }
     for (int changed = 1; changed; ) {
         changed = 0;
         for (int64_t i = 0; i < ail2g_n; i++) {
             ail2g *g = ail2g_tab[i];
-            if (!g || g->scanned || !g->inst->mark) continue;
+            if (!g || g->scanned || !(g->inst->mark & 1)) continue;
             g->scanned = 1; changed = 1;
             ail_gc_mark_value(g->args); ail_gc_mark_value(g->value); ail_gc_mark_value(g->sent);
             if (g->state == AIL2G_SUSPENDED) ail2g_mark_chain(g->top);
@@ -1509,7 +1519,10 @@ static void ail2g_gc_hook(ail_ctx *cx) {
     }
     for (int64_t i = 0; i < ail2g_n; i++) {
         ail2g *g = ail2g_tab[i];
-        if (g && !g->scanned && !g->inst->mark) { ail2g_free_stack(g); free(g); ail2g_tab[i] = NULL; }
+        if (g && !g->scanned && !(g->inst->mark & 1)) {
+            ail2g_free_stack(g); free(g); ail2g_tab[i] = NULL;
+            if (i < ail2g_scan) ail2g_scan = i;
+        }
     }
 }
 #ifdef _WIN32
@@ -1546,10 +1559,11 @@ static inline ail_st ail2g_make(ail_ctx *cx, ail_obj *out, ail_obj cls, ail_obj 
     g->state = AIL2G_NEW; g->body = body; g->inst = fr.slots[1].o; g->args = args; g->name = name;
     g->value = g->sent = ail_box_none();
     int64_t h = -1;
-    for (int64_t i = 0; i < ail2g_n; i++) if (!ail2g_tab[i]) { h = i; break; }
+    for (; ail2g_scan < ail2g_n; ail2g_scan++) if (!ail2g_tab[ail2g_scan]) { h = ail2g_scan++; break; }
     if (h < 0) {
         if (ail2g_n == ail2g_cap) { ail2g_cap = ail2g_cap ? ail2g_cap * 2 : 16; ail2g_tab = (ail2g **)realloc(ail2g_tab, (size_t)ail2g_cap * sizeof *ail2g_tab); if (!ail2g_tab) ail_die("out of memory"); }
         h = ail2g_n++;
+        ail2g_scan = ail2g_n;
     }
     ail2g_tab[h] = g;
     ail_inst_setattr(cx, fr.slots[1], ail2g_id_a, args);
@@ -1578,7 +1592,7 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     ail2g_current = g;
     g->sent = sendv;
     int fresh = g->state == AIL2G_NEW;
-    if (fresh && ++ail2g_fresh >= 256) { ail2g_fresh = 0; ail_gc_collect(cx); }
+    if (fresh && ++ail2g_fresh >= 256 && !ail2g_pooled) { ail2g_fresh = 0; ail_gc_collect(cx); }
     cx->frames = fresh ? NULL : g->top;
     g->state = AIL2G_RUNNING;
 #ifdef _WIN32
@@ -1594,10 +1608,10 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     if (fresh) {
         g->stack_size = AIL2G_STACK;
         if (ail2g_pooled) g->stack = ail2g_pool[--ail2g_pooled];
-        else {
-            g->stack = mmap(NULL, g->stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-            if (g->stack == MAP_FAILED) { g->stack = NULL; ail_die("generator: no stack"); }
-            mprotect(g->stack, 4096, PROT_NONE);
+        else if (!ail2g_map_stack(g)) {
+            if (ail2g_fresh > 0) { ail2g_fresh = 0; ail_gc_collect(cx); }
+            if (ail2g_pooled) g->stack = ail2g_pool[--ail2g_pooled];
+            else if (!ail2g_map_stack(g)) ail_die("generator: no stack");
         }
 #ifdef AIL2G_ASM
         /* a frame ail2g_switch returns from into ail2g_entry, with the stack aligned as after a call */
