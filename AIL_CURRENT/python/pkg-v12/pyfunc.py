@@ -12952,6 +12952,16 @@ def _heapq_select(node, ctx):
     if not isinstance(source, ast.Name):
         raise Unsupported('heapq.%s() is built for a list NAME only; bind the sequence to a '
                           'typed local first' % f)
+    if source.id in ctx.blist:
+        # A bytes list keeps its elements as bytes-pool HANDLES in an `ail_list`, but `_etype`
+        # answers the select with the SOURCE's kind (BLIST) -- the destination was declared
+        # `ail_blist *` and the temp's `ail_list` assigned into it, which gcc rejects. The
+        # original task's select covers ints and int/str/bytes TUPLE lists, never a list of
+        # bytes, so refuse this shape by name (the default build then keeps it on the general
+        # path, as before this step) rather than build a mismatched temp.
+        raise Unsupported('heapq.%s() of a list of bytes is not built; a bytes list holds '
+                          'bytes-pool handles, not a comparable flat sequence -- sort it '
+                          'yourself with an index loop, or keep the elements as ints' % f)
     count, _ = ctx.temp(INT)
     ctx.pre.append('%s = %s;' % (count, _map_inline(lambda: _expr(a[0], ctx), ctx)))
     keywords = ([ast.keyword(arg='reverse', value=ast.Constant(value=True))]

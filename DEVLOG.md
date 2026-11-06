@@ -1,3 +1,27 @@
+## 2026-11-06 -- pyreachs2 second review fix (job-pyreachs2_rr1-11070228)
+
+The reviewer's FIX round found three remaining defects; each was reproduced first and fixed:
+
+- **Manifest pin stale.** `test_ail_pyreach_shapes.py` was not in the manifest, so
+  `update_manifest.py --check` reported it stale and `par_check` aborted on a hash mismatch.
+  Regenerated with `python3 tools/update_manifest.py`; `--check` is now clean.
+- **`heapq.nsmallest(k, xs)` of a list of bytes emitted C that does not compile.** `_etype`
+  answers the select with the source's own kind (BLIST), so the destination was declared
+  `ail_blist *` while `_sorted_into_temp`'s bytes branch builds an `ail_list` handle list; gcc
+  rejected `ail_list_free(&v_top); v_top = v__t3;`. The task's select covers int lists and
+  int/str/bytes TUPLE lists, not a list of bytes, so the shape is now refused by name in
+  `_heapq_select` (the default build falls back to the general path and matches CPython; strict
+  names it). Probe: `bs=[b"b",b"a"]; top=heapq.nsmallest(1,bs); print(len(top))` -> `1`.
+- **`reversed()` of bytes/bytearray returned a list, not an iterator.** The prelude's
+  `__reversed__` returned the backing list, so `reversed(b"") == reversed(b"")` was `True`
+  (CPython `False`; `next(reversed(b))` also failed). Both classes now return `iter(out)`.
+  Probes: equality is `False`, `next()`/`list()`/`for` over the result match CPython for bytes
+  and bytearray, empty and non-empty.
+
+Ran: `test_ail_pyreach_shapes` (14 OK), `test_ail_safetynet` (5 OK), `test_ail_files` (18 OK,
+1 skipped), `test_ail_corpus_findings3` (2 OK), `test_ail_fuzz83` (2 OK), `test_ail_strict`
+(13 OK).
+
 ## 2026-11-06 -- pyreachs2 review fix (job-pyreachs2_rr1-11062251)
 
 Three defects in the s2 shapes above were found by review and are fixed:
