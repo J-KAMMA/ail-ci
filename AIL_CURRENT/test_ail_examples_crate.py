@@ -28,6 +28,10 @@ CASES = {
     "fnvhash": {"header": "fnvhash/fnvhash.h", "flags": ["--exact-int"]},
     "textstat": {"header": "textstat/textstat.h", "check": "stats=negative:ValueError"},
     "rle": {"header": "rle/rle.h"},
+    "wordbag": {"header": "wordbag/wordbag.h"},
+    "slugify": {"header": "slugify/slugify.h"},
+    "walk": {"header": "walk/walk.h"},
+    "bits": {"header": "bits/bits.h"},
 }
 
 
@@ -58,9 +62,15 @@ class CrateExampleTests(unittest.TestCase):
 
             for module in sorted(source.glob("*.py")):
                 shutil.copyfile(module, out / module.name)
+            main_source = (out / "main.py").read_text(encoding="utf-8")
+            cpython_main = "main.py"
+            if "./lib%s.a" % name in main_source:
+                cpython_main = "main_cpython.py"
+                (out / cpython_main).write_text(
+                    main_source.replace("./lib%s.a" % name, "./lib%s.so" % name), encoding="utf-8")
             shared = original.replace("./lib%s.a" % name, "./lib%s.so" % name)
             stubs.write_text(shared, encoding="utf-8")
-            expected = run([sys.executable, "-B", "main.py"], out, env=env)
+            expected = run([sys.executable, "-B", cpython_main], out, env=env)
             self.assertEqual(expected.returncode, 0, expected.stderr)
             stubs.write_text(original, encoding="utf-8")
 
@@ -99,6 +109,55 @@ class CrateExampleTests(unittest.TestCase):
             "3 6 True",
             "360 720 True",
             "-1",
+        ])
+
+    def test_wordbag(self):
+        text = self.example("wordbag")
+        self.assertEqual(text.splitlines(), [
+            "0 0",
+            "2 1 0",
+            "1",
+        ])
+
+    def test_slugify(self):
+        text = self.example("slugify")
+        self.assertEqual(text.splitlines(), [
+            "11 hello-world",
+            "3 a-b",
+            "12 already-slug",
+            "0 ",
+            "need 12",
+            "3 caf",
+            "need 6",
+        ])
+
+    def test_walk(self):
+        text = self.example("walk")
+        self.assertEqual(text.splitlines(), [
+            "step 0",
+            "step 1",
+            "step 2",
+            "step 3",
+            "sum 14",
+            "empty 0",
+            "fail 0",
+            "fail 1",
+            "fail 2",
+            "fail 3",
+            "caught: stop at 3",
+            "done",
+        ])
+
+    def test_bits(self):
+        text = self.example("bits")
+        self.assertEqual(text.splitlines(), [
+            "0 0",
+            "1 1",
+            "11 3",
+            "2147483648 1",
+            "9223372036854775807 63",
+            "3 878082066",
+            "2147483648 3735928559",
         ])
 
 
