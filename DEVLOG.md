@@ -323,6 +323,59 @@ Review fix (cmprival1-fix2):
   "the only tool silently wrong on both probes", not "the only tool with silent wrong answers" (mypyc is wrong on
   deep recursion too).
 
+## 2026-11-06 -- proof1: race census finds `threading.Thread(target=...)` (review fix, job-proof1-11070205)
+
+A review of the census found that the race count missed every `threading.Thread(...)` target, and
+that two documents still quoted stale numbers; no compiler source is touched.
+
+- `lab/proof/census.py` `_region_targets`: accept `threading.Thread(...)` (and `t.Thread(...)`) as
+  well as the bare `Thread` name; 11 worker functions of 10 refused-shape programs were invisible.
+- Race counts corrected and `census.json` regenerated with `python3 lab/proof/census.py --jobs 2`:
+  79 safe + 79 refused = 158 distinct accesses (was 104); refused by rule D1 11 (was 2), D3 2
+  (was 0), D4 6 (was 4), 60 unknown (was 19); 16 worker functions of the 14 D5-refused shapes
+  (was 5).  The non-race summary, blocker table and boxed-reason table are byte-identical.
+- `lab/proof/RESULTS.md` (headline 3, race table, bounds-reason note) and
+  `docs/design/SAFETY_PROOF.md` (P7, P8, section 8) use the corrected numbers.  The bounds note no
+  longer claims per-build duplicates: 792 of the 1875 `AIL_BCE_EXPLAIN` records belong to
+  functions with no IR record.
+- The original proof1 entry below now quotes the corrected totals (3255 function records, 907 typed
+  = 27.9%, 645 in refused programs, 219-line design); it previously repeated the rejected 4958 /
+  1552 / 1703 / 123-access figures.
+
+## 2026-11-06 -- proof1: census + design for "Rust's safety without writing lifetimes" (job-proof1-11070008)
+
+Measurement and design only; **no compiler behaviour changes** (no file under `AIL_CURRENT/` was
+edited).  The question: how much of real Python does today's analysis already prove memory-safe,
+in-bounds and race-free?
+
+- `lab/proof/census.py`: imports the compiler's own analyses and reports, per typed function of
+  three corpora, what they prove.  Ownership from `ir/borrow.analyze` (rc2); bounds from the
+  `AIL_IR_STATS` pass statistics of `ir/passes/ranges.py` plus the `AIL_BCE_EXPLAIN` per-site
+  reason; races from `typedpar.rewrite_text` and `parallel._Body`/`check_callee`.  Builds use the
+  real Python surface (`ail_chatgpt._load_sources`) with `PIPE_CC=/bin/true` and
+  `AIL_FE_JOBS=1`, so it is compile-only and reproducible.  Where an analysis has no API to ask,
+  the census records a blocker (`NO_API`) instead of patching it.
+- Corpora: 20 `lab/compare/src` programs, the 55 `lab/pyproof` programs, the first 200
+  `corpus/gdev` programs (275 program records, 3255 function records; 265 distinct non-race
+  files), plus the 31 `lab/race` probes.
+- Result: 80.9% of reference-parameter RC pairs (1658/2050) are already elided; 13.6% of the index
+  sites in IR-lowered functions (166/1221) have their check removed and 4744 more sites are in
+  functions the IR never lowers; 79 of 158 shared accesses in parallel regions are classified safe,
+  79 refused (19 by a named rule, 60 unknown).  Of 3255 function records, 907 (27.9%) are on the
+  typed path, 1703 (52.3%) are boxed and 645 (19.8%) are in programs both paths refuse; 1552 are
+  not boxed, but 645 of those never compiled.  The top 14 blockers are ranked in
+  `lab/proof/RESULTS.md`.
+- `docs/design/SAFETY_PROOF.md` (219 lines): the claim, the precise rule for each of the three
+  properties grounded in the module that implements it, the degrade-to-runtime-check policy, the
+  `file:line: could not prove <property>: <reason>; runtime check kept` diagnostic and its three
+  delivery modes, the module map, a nine-job plan ordered by blockers removed, and what Rust still
+  proves that this cannot.
+- Probes (`/tmp/probes`, `cmp.sh`, both builds): `own1.py` (class instance through an argument, a
+  global and an attribute), `bnd1.py` (in-range and boundary index reads), `race1.py` (executor
+  map), `race2.py` (`global` increment under threads) — all match CPython on the general and the
+  default build.  `AIL_BCE_AUDIT=1` on a loop over a proved-in-range list emits one
+  `ail_bce_audit_fail("py_main", 0)` site, which is the existing "runtime check kept" for a
+  removed bound check.
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
