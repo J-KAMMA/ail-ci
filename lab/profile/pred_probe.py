@@ -231,6 +231,7 @@ def probe(source, out_path, mode='full', syntax=None, debug=False):
         (Path(work) / sub).mkdir(parents=True, exist_ok=True)
     env = child_env(work, child_path, mode)
     target = Path(work) / 'prog'
+    source = Path(source).resolve()
     command = [sys.executable, '-X', 'utf8', '-B', str(AIL), 'compile', str(source),
                '-o', str(target)]
     if syntax:
