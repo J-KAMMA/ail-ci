@@ -67,8 +67,10 @@ AIL numbers do not change.
 One command, one table, medians of 5: `bash lab/infer/bench.sh`. Same runner
 family as above but a later, noticeably slower allocation of it - llama.cpp's
 decode is 30.1 ms/forward here against 12.93 ms in the table above, and AIL's
-is 263.7 ms against 130.6 ms, so read the ratios, not the absolute numbers.
-Both programs see `tokens.txt` (64 ids) and the same F32 weights; AIL is the
+is 263.7 ms against 130.6 ms. The per-program tok/s are the repeatable part;
+the AIL/llama ratio also drifts between allocations because the two programs
+are timed in separate blocks. Both programs see `tokens.txt` (64 ids) and the
+same F32 weights; AIL is the
 default (release) compile, `gpt2.py` needs no `--strict` flag it does not
 already satisfy (the `--strict` and default binaries are byte-identical).
 
@@ -116,10 +118,13 @@ The binary is the `--debug` build (`-g -O0`, `#line` back to `gpt2.py`), which
 is what makes the source-line column possible; the callgrind shares are of
 that `-O0` build, so they show where the work is, not the exact `-O2` split.
 
-The loader is 58% of a short profile of its own (`read_f32__irl` 32%,
-`ail_bytes_get` 19%, memset 7%), so `profile.sh` runs the program twice - empty
-prompt, then one-token prompt + 4 decode forwards - and subtracts the load-only
-counts per function.  The list below is the decode only:
+The loader dominates a short profile of its own (`read_f32__irl` and
+`ail_bytes_get`, with a small memset remainder), so `profile.sh` runs the
+program twice - empty prompt, then one-token prompt + 4 decode forwards - and
+subtracts the load-only counts per function.  The list below is the decode
+only.  The `runtime (libc)` / `runtime (libm)` labels in the source column are
+hand annotations for symbols `profile.sh` cannot tie to a `#line` region; the
+script itself prints just `runtime` for those.
 
 | # | C function | share | AIL source |
 | ---: | --- | ---: | --- |
