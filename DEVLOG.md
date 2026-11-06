@@ -1,3 +1,26 @@
+## 2026-11-06 -- vibe1 review 3 fix: brief now matches the with/yield, dict-view and class-decorator facts (job-vibe1-11070409)
+
+Review-3 fix; no compiler change.
+
+- `AIL_FOR_AI.md` said "a `with` block around a `yield` inside a generator is refused".
+  Probe `withyield_builtin.py` (`with open(...): ... yield`) builds on both g and d, exit 0,
+  same stdout as CPython; only a user context manager is refused (`withyield_user.py`). The
+  brief and refusal list now say "user context manager" and note that builtin `open` works.
+- The brief said `x = d.items()` is fine and omitted the dict-view refusal. Probes:
+  `items_nomut.py` builds, but `items_aftermut.py` / `keys_aftermut.py` / `values_only.py`
+  are refused by name ("a dict view kept in a name ... it is a snapshot") on both builds.
+  The brief now gives the mutation boundary and the rewrite (`list(d.items())`).
+- The brief said a decorator on a class "falls back to the general path" with "the same
+  output". Probe `class_deco.py` builds but runs with exit 1 and `AttributeError: type
+  object 'C' has no attribute 'tag'`: the decorator is dropped. The brief now states that
+  a class decorator is silently dropped and warns against using one. (Pre-existing compiler
+  behaviour; no compiler change in this job.)
+- Probes re-run: `withyield_builtin` g/d same stdout; `withyield_user`, `items_aftermut`,
+  `keys_aftermut`, `values_only` refused by name; `items_nomut` same stdout;
+  `class_deco` known dropped-decorator `AttributeError`.
+- `python3 tools/par_check.py -j 2 test_ail_safetynet test_ail_files
+  test_ail_corpus_findings3`: 3 modules, 0 failed. `tools/update_manifest.py --check`: rc 0.
+
 ## 2026-11-06 -- vibe1 review 2 fix: exact refusals in the brief, honest budget flag (job-vibe1-11070147)
 
 Review-2 fix; no compiler change.
