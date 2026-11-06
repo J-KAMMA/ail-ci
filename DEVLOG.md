@@ -127,6 +127,17 @@ tables. fdinf1's workflow hunk was an out-of-scope revert, so
 
 No compiler file or test module changed, so no language probe applies. `tools/diff_ids.py` is not
 present on this tree. `python3 tools/update_manifest.py --check` passes.
+## 2026-11-06 -- rbfdlsp1: re-apply LSP go-to-definition on the current tree (job-rbfdlsp1-11061255)
+
+Re-applied the accepted `fdlsp1` change (`3d147525`..`job-fdlsp1-11060905`) on top of this
+export. The `packaging/ail_lang/lsp.py` definition provider, `docs/LSP.md`, the new
+`lab/lsp/def/` probe files with `lab/lsp/RESULTS.md`, and
+`AIL_CURRENT/test_ail_lsp_def.py` with its `tests.d` registration applied cleanly. The fetched
+`.github/workflows/agent-worker.yml` hunk would delete the Opus/Claude-token wiring this tree
+keeps (including the newer CR/LF-stripping fix), so that file is unchanged and both sides'
+fixes stay. `tools/diff_ids.py` is absent on this tree (and in the fetched job), so only
+`tools/update_manifest.py` ran; `manifest.d/` was regenerated, not hand-edited. No compiler or
+runtime file changed, so no DIFFERENCES row is needed.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
