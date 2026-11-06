@@ -142,12 +142,14 @@ class GroupCSE(object):
         return False
 
     def _cross_ok(self, cand):
-        """Whether the group may change length between X and Y without changing what Y reads.
-        A grow-only group only appends, so a later access at the normalised index is bounds-safe.
-        (A negative index over a group that grows between the two accesses would name a different
-        element; the spec's grow-only rule admits that, and the caller's own first access keeps
-        its check and its position.)"""
-        return self.grow_only(cand.gid)
+        """Whether the candidate survives a length change of the group between X and Y.
+
+        A grow-only group only appends, but a *negative* index `i` normalises against X's length
+        (`j = len_X + i`); if the lists grew before Y, CPython's `Y[i]` names `len_Y + i`, a
+        different element.  So crossing a length change needs a provably non-negative index (j
+        is then `i` itself).  Where the index may be negative, callers fall back to requiring
+        that nothing between X and Y changes the group's length."""
+        return self.grow_only(cand.gid) and cand.known_nonneg
 
     def _materialize(self, cand):
         """Rewrite `X[i]` into `j = idx.norm(i, len X)` + unchecked `X[j]`."""
@@ -193,6 +195,8 @@ class GroupCSE(object):
                             # proven in [0, len) already: reuse its index as it stands
                             cand.j = index
                             cand.known_nonneg = True
+                        else:
+                            cand.known_nonneg = self._nonneg(index)
                         avail[key] = cand
             if ins.regions:
                 for child in ins.regions:

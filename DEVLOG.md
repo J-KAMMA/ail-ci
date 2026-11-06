@@ -1,3 +1,26 @@
+## 2026-11-05 -- bces5 review fix: negative index across a group growth (job-bces5-11060644)
+
+Review defect: `groupcse._cross_ok` returned `grow_only(gid)` unconditionally, so a *negative*
+index `i` could cross an append between `X[i]` and `Y[i]`.  `j = len_X + i` then names a
+different element than CPython's `Y[i] = len_Y + i`: `p.n_op[i]`/`p.n_a[i]`, then an append, then
+`p.n_b[i]` with `i = -1` read the wrong value.
+
+- `python/pkg-v12/ir/passes/groupcse.py`: `_cross_ok` is now `grow_only(gid) and known_nonneg`
+  (`known_nonneg` seeded from a non-negative constant index, or from an access already unchecked
+  at a normalised index).  Where the index may be negative the candidate is kept only when no
+  instruction between X and Y can change the group's length, so the rewrite is skipped and both
+  accesses stay checked.  Non-negative indices keep the previous elision.
+- `AIL_CURRENT/test_ail_bce.py`: `group_ev_neg_grow_between` covers a negative index with growth
+  in an `if` and straight-line growth (must match CPython; the `n_b[i]` sites are not rewritten)
+  plus a negative index with no growth.
+
+Probes `/tmp/rprobes` (`run.py` over `p1..p8`, CPython oracle): before, `p1/p2/p6/p7` gave `120`
+expected `167`; after, all four match on default, `AIL_UNIFIED_FORCE=1`, `AIL_BCE=0` and
+`AIL_BCE_AUDIT=1`.  `test_ail_bce` still shows `groupcse: 2` in tally_lang's `ev`, identical to
+the pre-fix commit, so the speed measurement is unchanged.  Required modules and
+`test_ail_safetynet`/`test_ail_files`/`test_ail_corpus_findings3` pass (the ASan modules need the
+`ulimit -v` lifted; under it they fail to map shadow memory, unrelated to this change).
+
 ## 2026-11-05 -- bces5: one index check per parallel-list group (job-bces5-11060644)
 
 `facts['fields']['groups']` (bce s4) says which lists always share a length. A checked access
@@ -6,9 +29,12 @@ can reuse the index the first check produced. New IR op `idx.norm(i, len) -> i64
 `read`/`store`) normalises a negative index and raises exactly where the replaced access did; the
 new pass `ir/passes/groupcse.py` runs right after the first `ranges` run and rewrites
 `X[i]` into `j = idx.norm(i, len X)` + unchecked `X[j]`, and every later `Y[i]` into unchecked
-`Y[j]`. The first access keeps its error, message and place; for a grow-only group no length
-change between the two is required (appends only, and the index is normalised at the first
-access). An `X` no `Y` uses is left alone; `AIL_BCE=0` leaves the C identical to the base.
+`Y[j]`. The first access keeps its error, message and place. A length change between the two
+accesses is crossed only when the index is provably non-negative (then `j == i`); for a possibly
+negative index the rewrite requires that nothing between them can change the group's length.
+(A negative `i` normalises against X's length, but CPython's later `Y[i]` normalises against Y's
+length; after a growth those name different elements.) An `X` no `Y` uses is left alone;
+`AIL_BCE=0` leaves the C identical to the base.
 
 - `python/pkg-v12/ir/{ir,verify,effects,emit_c}.py`: the op, its typing rule (i64, i64 -> i64),
   its effect (raises IndexError) and its C (`ail_idx_norm_read`/`ail_idx_norm_store`, in

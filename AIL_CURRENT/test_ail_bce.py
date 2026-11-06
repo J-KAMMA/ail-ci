@@ -530,6 +530,33 @@ fn main() {
     print(len(p.n_op));
 }
 """),
+    ('group_ev_neg_grow_between', GROUP_P + r"""
+fn evn(p: P, i: int, d: int) -> int {
+    let op = p.n_op[i];
+    let a = p.n_a[i];
+    if d > 0 {
+        p.n_op.append(0); p.n_a.append(0); p.n_b.append(77); p.has.append(0); p.val.append(0);
+    }
+    let r = p.n_b[i];
+    return a * 10 + r;
+}
+fn evs(p: P, i: int) -> int {
+    let op = p.n_op[i];
+    let a = p.n_a[i];
+    p.n_op.append(0); p.n_a.append(0); p.n_b.append(77); p.has.append(0); p.val.append(0);
+    let r = p.n_b[i];
+    return a * 10 + r;
+}
+fn main() {
+    let p = P([], [], [], [], []);
+    add(p, 100, 5, 0, 1, 7);
+    add(p, 0, 6, 2, 1, 0);
+    add(p, 100, 9, 30, 1, 0);
+    print(evn(p, -1, 1));
+    print(evs(p, -1));
+    print(evn(p, -2, 0));
+}
+"""),
     ('group_ev_pop_between', GROUP_P + r"""
 fn evp(p: P, i: int, d: int) -> int {
     let op = p.n_op[i];
