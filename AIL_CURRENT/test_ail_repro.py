@@ -9,6 +9,7 @@ in both setups; when a difference is fixed, add its row there and to PROGRAMS he
 Skips without a C compiler (the compiler links `program.c` with it).
 """
 import hashlib
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
@@ -111,6 +113,50 @@ class ReproducibleBuildTests(unittest.TestCase):
             runs = self.builds[name][2]
             with self.subTest(program=name):
                 self.assertEqual(runs[0], runs[1], "the two builds print or exit differently")
+
+
+def load_checker():
+    path = REPO / "tools" / "repro_check.py"
+    spec = importlib.util.spec_from_file_location("ail_repro_check", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class CheckerTests(unittest.TestCase):
+    def test_absolute_path_in_uint16_literal_is_named(self):
+        checker = load_checker()
+        left = (b"static struct { int64_t n; uint16_t d[6]; } _lit1 = { 6, "
+                b"{ 47, 116, 109, 112, 47, 97, 47, 120, 46, 112, 121 } };\n")
+        right = (b"static struct { int64_t n; uint16_t d[18]; } _lit1 = { 18, "
+                 b"{ 47, 116, 109, 112, 47, 98, 47, 108, 111, 110, 103, 101, 114, 47, 120, 46, 112, 121 } };\n")
+        self.assertEqual(
+            checker.classify_c(left, right, left.decode().strip(), right.decode().strip()),
+            "absolute path")
+
+    def test_one_sided_build_failure_is_a_difference(self):
+        checker = load_checker()
+        good = {"returncode": 0, "stderr": "", "binary": b"ELF", "program_c": b"int main(void){}\n"}
+        bad = {"returncode": 1, "stderr": "refused", "binary": None, "program_c": None}
+
+        class Root:
+            def __truediv__(self, other):
+                return self
+
+            def mkdir(self, *args, **kwargs):
+                pass
+
+        def fake_build(source, work, setup):
+            return good if setup[2] == checker.EPOCH_A else bad
+
+        with mock.patch.object(checker, "build", side_effect=fake_build), \
+                mock.patch.object(checker, "run_binary", return_value=None):
+            row = checker.one("probe/one-sided", REPO / "examples" / "algos" / "rpn.py",
+                              Root(), Root())
+        self.assertEqual(row["status"], "diff")
+        self.assertTrue(row["one_sided"])
+        self.assertTrue(row["built_a"])
+        self.assertFalse(row["built_b"])
 
 
 if __name__ == "__main__":

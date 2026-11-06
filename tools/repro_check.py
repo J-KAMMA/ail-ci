@@ -127,14 +127,35 @@ def first_difference(left, right):
 
 TIME = re.compile(r"\b\d{1,2}:\d{2}:\d{2}\b|\b\d{4}-\d{2}-\d{2}\b|\b20\d\d\b.*\b(GMT|UTC)\b")
 TEMP = re.compile(r"\b(tmp|temp)[a-z0-9_]{4,}\b|[A-Za-z0-9_]+\.tmp\b")
+ARRAY = re.compile(r"\{\s*([0-9][0-9,\s]*)\}")
+PATH = re.compile(r"/(?:[^/\s\x00]+/)+[^/\s\x00]+")
+
+
+def decoded_arrays(line):
+    """The text of integer arrays on a C line, e.g. a `uint16_t d[]` string literal.
+
+    The source path is stored as one decimal code unit per character, so the literal
+    `/tmp/a/x` appears as `47, 116, 109, 112, ...` and is invisible to a text search.
+    """
+    parts = []
+    for match in ARRAY.finditer(line):
+        numbers = [int(token) for token in re.findall(r"\d+", match.group(1))]
+        if not numbers or max(numbers) > 0x10FFFF:
+            continue
+        text = "".join(chr(number) for number in numbers if number)
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
 
 
 def classify_c(left, right, line_left, line_right):
     if sorted(left.decode("utf-8", "replace").splitlines()) == \
             sorted(right.decode("utf-8", "replace").splitlines()):
         return "hash order"
+    decoded = decoded_arrays(line_left) + "\n" + decoded_arrays(line_right)
     hay = line_left + "\n" + line_right
-    if "/tmp/" in hay or re.search(r"[A-Za-z]:\\\\", hay):
+    if "/tmp/" in hay or re.search(r"[A-Za-z]:\\\\", hay) or \
+            "/tmp/" in decoded or PATH.search(decoded):
         return "absolute path"
     if TIME.search(hay):
         return "time"
@@ -241,11 +262,22 @@ def one(name, source, root_a, root_b):
               "rc_a": a["returncode"], "rc_b": b["returncode"],
               "c_identical": None, "binary_identical": None, "status": None,
               "class": None, "first_c_line": None, "c_a": None, "c_b": None,
-              "elf_section": None, "elf_offset": None}
+              "elf_section": None, "elf_offset": None, "one_sided": False}
     built_a = a["binary"] is not None
     built_b = b["binary"] is not None
-    if not built_a or not built_b:
+    if not built_a and not built_b:
         record["status"] = "refused"
+        record["stderr_a"] = (a["stderr"] or "")[-500:]
+        record["stderr_b"] = (b["stderr"] or "")[-500:]
+        return record
+    if not built_a or not built_b:
+        # One setup produced an executable and the other did not.  That is exactly the
+        # nondeterministic failure this tool looks for, never a two-sided refusal.
+        record["status"] = "diff"
+        record["one_sided"] = True
+        record["class"] = "one-sided build failure"
+        record["built_a"] = built_a
+        record["built_b"] = built_b
         record["stderr_a"] = (a["stderr"] or "")[-500:]
         record["stderr_b"] = (b["stderr"] or "")[-500:]
         return record
@@ -288,14 +320,16 @@ def summarize(results):
     c_diff = [r for r in diff if r.get("c_identical") is False]
     bin_only = [r for r in diff if r.get("c_identical") is True]
     classes = {}
+    one_sided = [r for r in diff if r.get("one_sided")]
     for row in c_diff:
         key = row.get("class") or "other"
         classes[key] = classes.get(key, 0) + 1
     print()
     print("programs: %d" % total)
     print("identical: %d" % identical)
-    print("different: %d  (C differs: %d, only executable differs: %d)" %
-          (len(diff), len(c_diff), len(bin_only)))
+    print("different: %d  (C differs: %d, only executable differs: %d, "
+          "one-sided build failure: %d)" %
+          (len(diff), len(c_diff), len(bin_only), len(one_sided)))
     print("not built in both setups: %d" % len(refused))
     if errors:
         print("errors: %d" % len(errors))
@@ -306,6 +340,9 @@ def summarize(results):
     for row in bin_only:
         print("  ELF %s section %s at +%s" %
               (row["program"], row.get("elf_section"), row.get("elf_offset")))
+    for row in one_sided:
+        print("  build failed only in setup %s: %s" %
+              ("B" if row.get("built_a") else "A", row["program"]))
     wrong = [r for r in results if r.get("wrong_output")]
     if wrong:
         print("WRONG OUTPUT: " + ", ".join(r["program"] for r in wrong))
@@ -352,6 +389,11 @@ def main():
     status = summarize(results)
     for row in results:
         if row["status"] == "diff":
+            if row.get("one_sided"):
+                print("%s: built only in setup %s\n  A: %s\n  B: %s" %
+                      (row["program"], "A" if row.get("built_a") else "B",
+                       (row.get("stderr_a") or "").strip()[-300:],
+                       (row.get("stderr_b") or "").strip()[-300:]))
             if row.get("c_identical") is False:
                 print("%s: C differs at line %s\n  A: %s\n  B: %s" %
                       (row["program"], row.get("first_c_line"), row.get("c_a"), row.get("c_b")))
