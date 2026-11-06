@@ -5,8 +5,9 @@
 
 Runs `ail_chatgpt.py compile SRC --debug-dir WORK/c` for the host (the host binary is a by-product, kept as
 WORK/native), takes WORK/c/program.c plus every other generated C file WORK/c/native_report.json lists, and builds them
-with `zig cc -target wasm32-wasi -O2`, force-including tools/wasm_shim.h (setjmp/longjmp stand-ins, all behind
-`#ifdef __wasi__`). zig is AIL_ZIG, `zig` on PATH, or ~/tools/zig/zig (as test_ail_cross_target.py finds it).
+with `zig cc -target wasm32-wasi -O2`, force-including tools/wasm_shim.h (the setjmp/longjmp tag, all behind
+`#ifdef __wasi__`). zig is AIL_ZIG, `zig` on PATH, or ~/tools/zig/zig (as test_ail_cross_target.py finds it);
+tested with zig 0.17.1. Run the result with `wasmtime run -W exceptions=y` (wasmtime 50.0.1; see WASMTIME_FLAGS).
 Prints one JSON line: output path, bytes, and the native binary. A failing step exits 1 with the first error line.
 """
 import argparse
@@ -23,9 +24,9 @@ COMPILER = ROOT / 'AIL_CURRENT' / 'ail_chatgpt.py'
 SHIM = Path(__file__).resolve().parent / 'wasm_shim.h'
 ZIG_FLAGS = ['-target', 'wasm32-wasi', '-O2', '-fno-tree-slp-vectorize', '-ffp-contract=off',
              '-Werror=implicit-function-declaration', '-Werror=implicit-int', '-Werror=incompatible-pointer-types',
-             '-D_WASI_EMULATED_SIGNAL', '-D_WASI_EMULATED_PROCESS_CLOCKS', '-D_WASI_EMULATED_MMAN',
-             '-lwasi-emulated-signal', '-lwasi-emulated-process-clocks', '-lwasi-emulated-mman',
-             '-Wl,-z,stack-size=8388608', '-s']
+             '-mexception-handling', '-mllvm', '-wasm-enable-sjlj', '-mllvm', '-wasm-use-legacy-eh=false',
+             '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-Wl,-z,stack-size=8388608', '-s']
+WASMTIME_FLAGS = ['-W', 'exceptions=y']     # try/except runs on the exception-handling proposal
 
 
 def zig():
