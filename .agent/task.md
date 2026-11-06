@@ -1,3 +1,45 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: ffdocs1 (docs site + link checker)
+
+**What the change really does:** adds two stdlib-only Python tools — `tools/docs_links.py` (relative-link and heading-anchor checker for Markdown and built HTML) and `tools/docs_site.py` (Markdown→HTML static site with sidebar, search index, inline theme/search script, light/dark CSS) — plus `test_ail_docs_site.py`, its `tests.d` entry, manifest rows, `site/` in `.gitignore`, and one broken-link fix in `docs/spec/DIFFERENCES.md`. No compiler or runtime file is touched, so no AIL program's C can change and `cmp.sh` probes do not apply.
+
+**Claims checked**
+- Three previous defects fixed: **verified** (table→heading with no blank line; GitHub ids keep inline-code underscores and suffix duplicates from `-1`; reference definitions and raw `href`/`src` are checked).
+- `DIFFERENCES.html` has both `differences-from-cpython` / `-1`: **verified**.
+- Real tree 28 Markdown, 0 broken; site 29 HTML, 0 broken; 177 fenced blocks, 0 unconverted: **verified** with the tools.
+- `test_ail_docs_site` 4/4: **verified**. `update_manifest.py --check`: **verified**.
+- Safetynet `S4_generators_gc` fails under `ulimit -v 1500000`: **verified on HEAD, and identically on base** → pre-existing/environmental, not caused here. I did not re-run it without the cap.
+- docsrun code-block count: **unverified/omitted** — the report never gives the task's "blocks docsrun already checks against the total" (docsrun covers 19 of the 177 docs blocks; README's block is outside `docs/`).
+
+**Defect**
+
+1. The generated site leaves relative links that escape the site root, so the published pages contain dead links, and the HTML checker silently skips exactly those.
+   Probe `/tmp/rprobes/p2` (`a.md` contains `[outside](../outside.md)`; `/tmp/rprobes/outside.md` exists):
+   ```
+   python3 tools/docs_links.py /tmp/rprobes/p2      -> 0 broken, rc 0
+   python3 tools/docs_site.py  /tmp/rprobes/p2 -o S -> rc 0, no warning
+   grep href S/a.html                               -> href="../outside.md"
+   (S/../outside.md does not exist -> 404 when published)
+   python3 tools/docs_links.py --site S             -> 0 broken, rc 0
+   ```
+   Expected: the generator either publishes/rewrites the target or reports it as an unconverted construct (exit 1), since the task requires rendered pages with 0 broken links and nothing "dropped silently". Actual: `rc 0` and a link pointing outside the site. The real tree has **28 such hrefs** (`WHY.html` → `../lab/...`, `MIGRATING.html` → `../lab/...` and `../AIL_CURRENT/...`, `tutorial.html` → `../DIFFERENCES.md`), including `spec/DIFFERENCES.html` → `../../AIL_CURRENT/AIL_REFERENCE.md`, a link this very change introduced.
+
+**Non-blocking observations (not in docs, so not defects today):** `## Head ##` keeps its closing hashes (`id="head-"`, text `Head ##`); `***x***` emits crossed tags `<strong><em>x</strong></em>`.
+
+VERDICT: FIX
+1. Generated-site relative links that leave the site root are emitted verbatim and never checked or warned (28 in `docs/`, one added by this change). Probe `/tmp/rprobes/p2`: expected a warning/exit 1 (or a resolving link); actual `docs_site` rc 0, `docs_links --site` rc 0, `a.html` has `href="../outside.md"` resolving to a nonexistent `/tmp/outside.md`.
+[commandcode stop=end_turn turns=30 out_tokens=42602]
+
+
+--- ORIGINAL TASK ---
 Lane: ff-docs
 
 # ffdocs1: a static docs website generated from `docs/`, with every internal link and code block checked
@@ -73,9 +115,13 @@ first.
 - CPython 3.12 is the oracle: compare stdout and the exit status, and stderr where a task says so.
 - Speed claims: instruction counts with `tools/icount.c`, output unchanged.
 
+## Owner decision (2026-11-06)
+
+- Workflow (.github/workflows) changes: write the exact steps into a doc; the maintainer opens the PR and the owner approves it.
+
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
-- **Commits:** commit with explicit `git add` on your branch. Messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- **Commits:** commit with explicit `git add` on your branch. Messages end with a `Co-Authored-By:` line naming the model you actually are (Claude: `Claude Opus 5.5 <noreply@anthropic.com>` or `Claude Sonnet 5.5 <noreply@anthropic.com>`; other models: omit the line).
 - **Forbidden:** push, stash, rebase, reset, and deletion outside /tmp.
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
