@@ -343,8 +343,8 @@ Task: {task_name}
 Language: {LANG_NAME[lang]}
 
 Write a complete, correct solution in a single file. The hidden tests check the edge cases
-in the specification. Do not use tools, do not edit files and do not run commands: reply
-with the file contents only.
+in the specification. Keep your reasoning short and write the solution directly. Do not use
+tools, do not edit files and do not run commands: reply with the file contents only.
 
 --- SPECIFICATION ---
 {spec}

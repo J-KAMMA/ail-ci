@@ -3,209 +3,249 @@ import heapq
 from array import array
 
 
+def reorder_array(old, order, mask):
+    n = len(order)
+    new = array(old.typecode, [0]) * n
+    for k in range(n):
+        new[k] = old[order[k] & mask]
+    return new
+
+
+def reorder_byte(old, order, mask):
+    n = len(order)
+    new = bytearray(n)
+    for k in range(n):
+        new[k] = old[order[k] & mask]
+    return new
+
+
 def main():
-    read = sys.stdin.buffer.readline
-    first = read().split()
+    inp = sys.stdin.buffer
+    first = inp.readline()
     if not first:
         return
 
-    B = int(first[0])
-    S = int(first[1])
+    B, S = map(int, first.split())
 
-    bcls = [0] * B
-    brate = [0] * B
-    for i in range(B):
-        c, r = map(int, read().split())
-        bcls[i] = c
-        brate[i] = r
+    bclass = bytearray(B)
+    rate = [0] * B
+    free1 = []
+    free2 = []
+    free3 = []
 
-    id_arr = array('I')
-    arr_arr = array('I')
-    size_arr = bytearray()
-    cargo_arr = array('I')
-    prio_arr = bytearray()
-    op_arr = array('I')
-
-    ia = id_arr.append
-    aa = arr_arr.append
-    za = size_arr.append
-    ca = cargo_arr.append
-    pa = prio_arr.append
-    oa = op_arr.append
-
-    for _ in range(S):
-        sid, ar, sz, cg, pr, op = map(int, read().split())
-        ia(sid)
-        aa(ar)
-        za(sz)
-        ca(cg)
-        pa(pr)
-        oa(op)
-
-    start = array('q', [0]) * S
-    berth = array('h', [-1]) * S
-
-    MASK = (1 << 22) - 1
-
-    order = [(arr_arr[i] << 22) | i for i in range(S)]
-    order.sort()
-    order = array('Q', order)
-
-    wait_heaps = [[], [], [], []]
-    free_heaps = [[], [], [], []]
     for b in range(B):
-        free_heaps[bcls[b]].append(b)
+        c, r = map(int, inp.readline().split())
+        bclass[b] = c
+        rate[b] = r
+        if c == 1:
+            free1.append(b)
+        elif c == 2:
+            free2.append(b)
+        else:
+            free3.append(b)
 
-    last_op = [-1] * B
-    busy = [0] * B
-    served = [0] * B
+    if S == 0:
+        out = ["ships 0", "makespan 0", "wait total 0 max 0 ship -1"]
+        for b in range(B):
+            out.append("berth %d ships 0 busy 0" % b)
+        out.append("digest 0")
+        sys.stdout.write("\n".join(out) + "\n")
+        return
+
+    idx_bits = (S - 1).bit_length()
+    if idx_bits == 0:
+        idx_bits = 1
+    mask = (1 << idx_bits) - 1
+
+    ids = array('I', [0]) * S
+    arr = array('Q', [0]) * S
+    sizes = bytearray(S)
+    cargos = array('I', [0]) * S
+    prios = bytearray(S)
+    opers = array('I', [0]) * S
+    order = [0] * S
+
+    for i in range(S):
+        sid, a, z, cargo, p, op = map(int, inp.readline().split())
+        ids[i] = sid
+        arr[i] = a
+        sizes[i] = z
+        cargos[i] = cargo
+        prios[i] = p
+        opers[i] = op
+        order[i] = (sid << idx_bits) | i
+
+    # Reorder ships by ascending ID, so index order is ID order.
+    order.sort()
+    ids = reorder_array(ids, order, mask)
+    arr = reorder_array(arr, order, mask)
+    sizes = reorder_byte(sizes, order, mask)
+    cargos = reorder_array(cargos, order, mask)
+    prios = reorder_byte(prios, order, mask)
+    opers = reorder_array(opers, order, mask)
+
+    # Sort indices by arrival time.
+    for k in range(S):
+        order[k] = (arr[k] << idx_bits) | k
+    order.sort()
+
+    free_heaps = [None, free1, free2, free3]
     dep_heap = []
+    last_op = [-1] * B
+    counts = [0] * B
+    busy = [0] * B
+
+    w1 = []
+    w2 = []
+    w3 = []
 
     heappush = heapq.heappush
     heappop = heapq.heappop
 
-    i_arr = 0
-    waiting_count = 0
-    free_count = B
-    makespan = 0
     total_wait = 0
-    max_wait = 0
-    max_wait_id = -1
+    max_wait = -1
+    max_idx = -1
+    makespan = 0
+    ai = 0
+    INF = 1 << 62
 
-    while i_arr < S or dep_heap:
-        if i_arr < S:
-            na = order[i_arr] >> 22
+    while ai < S or dep_heap:
+        if ai < S:
+            next_a = order[ai] >> idx_bits
         else:
-            na = -1
+            next_a = INF
 
         if dep_heap:
-            nd = dep_heap[0][0]
+            next_d = dep_heap[0][0]
         else:
-            nd = -1
+            next_d = INF
 
-        if na != -1 and (nd == -1 or na <= nd):
-            t = na
-        else:
-            t = nd
+        t = next_a if next_a < next_d else next_d
 
+        # Departures at t.
         while dep_heap and dep_heap[0][0] == t:
             _, b = heappop(dep_heap)
-            heappush(free_heaps[bcls[b]], b)
-            free_count += 1
-            makespan = t
+            c = bclass[b]
+            if c == 1:
+                heappush(free1, b)
+            elif c == 2:
+                heappush(free2, b)
+            else:
+                heappush(free3, b)
 
-        while i_arr < S:
-            ov = order[i_arr]
-            if (ov >> 22) != t:
+        # Arrivals at t.
+        while ai < S:
+            val = order[ai]
+            a = val >> idx_bits
+            if a != t:
                 break
 
-            idx = ov & MASK
-            z = size_arr[idx]
-            ar = arr_arr[idx]
-            key = (((prio_arr[idx] << 30) | ar) << 30 | id_arr[idx]) << 22 | idx
-            heappush(wait_heaps[z], key)
-            waiting_count += 1
-            i_arr += 1
+            idx = val & mask
+            order[ai] = 0
+            ai += 1
 
-        if i_arr == S:
-            order = None
+            z = sizes[idx]
+            key = (((prios[idx] << 30) | a) << idx_bits) | idx
 
-        if waiting_count and free_count:
-            for c in (1, 2, 3):
-                fh = free_heaps[c]
-                if not fh:
-                    continue
+            if z == 1:
+                heappush(w1, key)
+            elif z == 2:
+                heappush(w2, key)
+            else:
+                heappush(w3, key)
 
-                while fh:
-                    best_key = -1
-                    best_z = 0
+        # Assign free berths in class order.
+        for c in (1, 2, 3):
+            fh = free_heaps[c]
 
-                    for z in range(1, c + 1):
-                        h = wait_heaps[z]
-                        if h:
-                            k = h[0]
-                            if best_key == -1 or k < best_key:
-                                best_key = k
-                                best_z = z
+            while fh:
+                if c == 1:
+                    if not w1:
+                        break
+                    key = w1[0]
+                    src = 1
+                elif c == 2:
+                    if w1:
+                        if w2 and w2[0] < w1[0]:
+                            key = w2[0]
+                            src = 2
+                        else:
+                            key = w1[0]
+                            src = 1
+                    else:
+                        if not w2:
+                            break
+                        key = w2[0]
+                        src = 2
+                else:
+                    if w1:
+                        key = w1[0]
+                        src = 1
+                    else:
+                        key = None
 
-                    if best_key == -1:
+                    if w2 and (key is None or w2[0] < key):
+                        key = w2[0]
+                        src = 2
+                    if w3 and (key is None or w3[0] < key):
+                        key = w3[0]
+                        src = 3
+
+                    if key is None:
                         break
 
-                    best_key = heappop(wait_heaps[best_z])
-                    waiting_count -= 1
+                b = heappop(fh)
 
-                    b = heappop(fh)
-                    free_count -= 1
+                if src == 1:
+                    heappop(w1)
+                elif src == 2:
+                    heappop(w2)
+                else:
+                    heappop(w3)
 
-                    idx = best_key & MASK
-                    op = op_arr[idx]
+                idx = key & mask
+                cargo = cargos[idx]
+                op = opers[idx]
+                r = rate[b]
 
-                    if last_op[b] == op:
-                        setup = 1
-                    else:
-                        setup = 4
-                        last_op[b] = op
+                service = (cargo + r - 1) // r
+                if last_op[b] == op:
+                    service += 1
+                else:
+                    service += 4
+                last_op[b] = op
 
-                    cargo = cargo_arr[idx]
-                    rate = brate[b]
-                    service = (cargo + rate - 1) // rate + setup
-                    dep = t + service
-                    heappush(dep_heap, (dep, b))
+                wait = t - arr[idx]
+                total_wait += wait
+                if wait > max_wait or (wait == max_wait and idx < max_idx):
+                    max_wait = wait
+                    max_idx = idx
 
-                    start[idx] = t
-                    berth[idx] = b
-                    busy[b] += service
-                    served[b] += 1
+                arr[idx] = t
+                opers[idx] = b
 
-                    w = t - arr_arr[idx]
-                    total_wait += w
-                    sid = id_arr[idx]
+                counts[b] += 1
+                busy[b] += service
 
-                    if w > max_wait or (
-                        w == max_wait and (max_wait_id == -1 or sid < max_wait_id)
-                    ):
-                        max_wait = w
-                        max_wait_id = sid
-
-                if waiting_count == 0:
-                    break
-
-    del arr_arr, size_arr, cargo_arr, prio_arr, op_arr
-    del wait_heaps, free_heaps, dep_heap, last_op, bcls, brate
-    if order is not None:
-        del order
-
-    id_order = [(id_arr[i] << 22) | i for i in range(S)]
-    id_order.sort()
+                dep = t + service
+                heappush(dep_heap, (dep, b))
+                if dep > makespan:
+                    makespan = dep
 
     g = 0
-    for key in id_order:
-        i = key & MASK
-        g = (g * 1000003 + start[i] * 31 + berth[i]) % 1000000007
+    for i in range(S):
+        g = (g * 1000003 + arr[i] * 31 + opers[i]) % 1000000007
+
+    max_ship = ids[max_idx] if max_idx >= 0 else -1
 
     out = []
-    out.append("ships " + str(S))
-    out.append("makespan " + str(makespan))
-    out.append(
-        "wait total "
-        + str(total_wait)
-        + " max "
-        + str(max_wait)
-        + " ship "
-        + str(max_wait_id)
-    )
-
+    out.append("ships %d" % S)
+    out.append("makespan %d" % makespan)
+    out.append("wait total %d max %d ship %d" % (total_wait, max_wait, max_ship))
     for b in range(B):
-        out.append(
-            "berth "
-            + str(b)
-            + " ships "
-            + str(served[b])
-            + " busy "
-            + str(busy[b])
-        )
+        out.append("berth %d ships %d busy %d" % (b, counts[b], busy[b]))
+    out.append("digest %d" % g)
 
-    out.append("digest " + str(g))
     sys.stdout.write("\n".join(out) + "\n")
 
 
