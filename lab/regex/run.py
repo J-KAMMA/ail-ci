@@ -340,7 +340,8 @@ def main():
     measured = [r for r in rows if isinstance(r["ail_wall"], float)]
     if measured:
         worst = max(measured, key=lambda r: r["ail_wall"])
-        slowest = ("`%s` is the slowest AIL workload: %s s wall, %s instructions%s."
+        slowest = ("`%s` is the slowest AIL workload: %s s wall, %s instructions%s; "
+                   "ffre2 should start here."
                    % (worst["workload"], worst["ail_wall"], worst["icount"],
                       "; Rust is unavailable, so this is the slowest against CPython"
                       if not rust_ok else ""))

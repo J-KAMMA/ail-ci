@@ -38,7 +38,7 @@ Instruction counts: unavailable: perf_event_open denied: perf_event_open: Permis
 
 ## Slowest workload
 
-`w5_logline` is the slowest AIL workload: 0.831 s wall, n/a instructions; Rust is unavailable, so this is the slowest against CPython.
+`w5_logline` is the slowest AIL workload: 0.831 s wall, n/a instructions; Rust is unavailable, so this is the slowest against CPython; ffre2 should start here.
 
 ## Reproduce
 
