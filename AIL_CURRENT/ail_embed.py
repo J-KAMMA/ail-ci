@@ -345,7 +345,7 @@ def wrapper_function(library, name, params, result):
         v = "e_p%d" % i
         if kind == "str":
             local.append("    if (ail_embed_too_long(%s_len)) { ail_embed_length_error(); return ail_embed_failed(); }" % pname)
-            local.append("    ail_str %s = {(const uint8_t *)%s, (int64_t)%s_len, 1};" % (v, pname, pname))
+            local.append("    ail_str %s = {(const uint8_t *)%s, (int64_t)%s_len, 0};" % (v, pname, pname))
         elif kind == "bytes":
             local.append("    if (ail_embed_too_long(%s_len)) { ail_embed_length_error(); return ail_embed_failed(); }" % pname)
             local.append("    ail_bytes %s = {(const unsigned char *)%s, (int64_t)%s_len};" % (v, pname, pname))

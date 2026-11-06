@@ -17,5 +17,5 @@ def transform(text: str) -> str:
 
 
 if __name__ == "__main__":
-    for value in ["Hello World 42", "ail embed", "", "already UPPER"]:
+    for value in ["Hello World 42", "ail embed", "", "already UPPER", "héllo wörld"]:
         print('transform("%s") = "%s"' % (value, transform(value)))

@@ -24,6 +24,7 @@ int main(void) {
     ok &= show("ail embed");
     ok &= show("");
     ok &= show("already UPPER");
+    ok &= show("héllo wörld");
 
     st = transform_transform("Hello World 42", strlen("Hello World 42"), small, sizeof small, &len);
     if (!(st == 2 && len == 14)) {
