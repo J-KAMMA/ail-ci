@@ -25,6 +25,7 @@ state (arenas, reference counts, the cleanup chain, the exception stack).
 """
 import ast
 import copy
+import os
 
 PAR_ITER = 'par_range'
 # typedpar.py's spelling: `_ail_par_range(lo, hi, workers)`, the same loop on at most `workers` threads
@@ -62,6 +63,29 @@ class _Body:
             if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
                 self.stored.add(node.id)
         self.stored.add(self.var)
+        # D1/exact reductions (docs/design/PAR_REDUCE.md): `acc += e` on an int local that only these
+        # statements touch.  v1 lowers them on the Python surface; the AIL surface keeps the refusal.
+        self.reductions = {}
+        if os.environ.get('AIL_SURFACE') == 'python':
+            nodes = list(ast.walk(ast.Module(body=loop.body, type_ignores=[])))
+            aug = {}
+            for node in nodes:
+                if (isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name)
+                        and isinstance(node.op, (ast.Add, ast.Sub))):
+                    aug.setdefault(node.target.id, set()).add(type(node.op))
+            targets = {id(n.target) for n in nodes if isinstance(n, ast.AugAssign)
+                       and isinstance(n.target, ast.Name) and isinstance(n.op, (ast.Add, ast.Sub))}
+            other, loads = set(), set()
+            for node in nodes:
+                if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                    if id(node) not in targets:
+                        other.add(node.id)
+                elif isinstance(node, ast.Name):
+                    loads.add(node.id)
+            self.reductions = {n: '-' if ops == {ast.Sub} else '+' for n, ops in aug.items()
+                               if ops in ({ast.Add}, {ast.Sub}) and n != self.var and n not in other
+                               and n not in loads and n not in self.funcs}
+            self.stored -= set(self.reductions)
         self.inner = {}        # inner loop variable -> [(lo, hi)] of the range() loops it drives
         self.assigned = set()  # names bound by an assignment (inner loop variables are not)
         self.reads, self.writes = {}, {}
@@ -95,6 +119,9 @@ class _Body:
             if not isinstance(s.op, _ARITH):
                 raise self.refuse(s, 'unsupported operator')
             if isinstance(s.target, ast.Name):
+                if s.target.id in self.reductions:     # `acc += e`: the lowering makes it a reduction
+                    self.expr(s.value, defined)
+                    return defined | {s.target.id}
                 self.expr(s.target, defined)           # read-modify-write: must be defined already
             else:
                 self.access(s.target, True, defined)
@@ -310,6 +337,7 @@ class _Callee(_Body):
         loop = ast.For(target=ast.Name(id='\0', ctx=ast.Store()), iter=ast.Constant(value=0), body=fn.body,
                        orelse=[])
         super().__init__(loop, funcs, Unsupported)
+        self.reductions = {}       # a callee's `x += e` is ordinary local arithmetic, not a reduction
         self.fn, self.stack = fn, stack
         self.stored = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
         self.stored -= {a.arg for a in fn.args.args}
@@ -413,6 +441,13 @@ def _make(node, funcs, counter, U):
         raise _refuse(U, node, 'the loop needs a single loop variable and no else branch')
     body = _Body(node, funcs, U)
     body.block(node.body, {body.var})
+    if body.reductions and body.writes:
+        acc, base = sorted(body.reductions)[0], sorted(body.writes)[0]
+        raise _refuse(U, node, '%r is a reduction (`%s += e`), and the body also writes '
+                               '%r; a write made after an overflow would stay visible, so v1 keeps this '
+                               'refused; write instead: keep the reduction in a loop that writes only its '
+                               'own locals, and do the %s[i] writes in a separate loop'
+                      % (acc, acc, base, base))
     body.check_owned()
     counter[0] += 1
     k = counter[0]
@@ -425,7 +460,8 @@ def _make(node, funcs, counter, U):
                          args=[ast.Name(id=lo_name, ctx=ast.Load()), ast.Name(id=hi_name, ctx=ast.Load())],
                          keywords=[])
     node.par = {'k': k, 'private': private, 'lo': lo_name, 'hi': hi_name, 'callees': sorted(body.callees),
-                'writes': sorted(body.writes)}
+                'writes': sorted(body.writes),
+                'reductions': [(n, body.reductions[n]) for n in sorted(body.reductions)]}
     pre = [ast.Assign(targets=[ast.Name(id=lo_name, ctx=ast.Store())], value=lo),
            ast.Assign(targets=[ast.Name(id=hi_name, ctx=ast.Store())], value=hi)]
     if cap is not None:
@@ -444,7 +480,7 @@ def _transform(stmts, funcs, counter, U):
             out.extend(_make(s, funcs, counter, U))
             continue
         if isinstance(s, ast.Try) and any(is_par(n) for n in ast.walk(s)):
-            raise _refuse(U, s, 'parallel for cannot be inside try; put the loop in its own fn')
+            raise _refuse(U, s, 'parallel for cannot be inside try; write instead: put the loop in its own fn')
         for field in ('body', 'orelse', 'finalbody'):
             if isinstance(getattr(s, field, None), list):
                 setattr(s, field, _transform(getattr(s, field), funcs, counter, U))

@@ -27650,11 +27650,13 @@ _PAR_HELPERS = frozenset((
 def _par_for(node, ctx, ind):
     if ctx.exc_frame:
         raise Unsupported('parallel for cannot be used in a function that has try/except; '
-                          'move the loop into its own fn')
+                          'write instead: move the loop into its own fn')
     if ctx.par_depth:
         raise Unsupported('parallel for cannot be nested')
     ctx.parts.add('PAR')
     info = node.par
+    if info.get('reductions'):
+        ctx.parts.add('PARRED')                 # cruntime.py: the exact shared-int reduction
     if info.get('cap'):
         ctx.parts.add('PARN')                   # typedpar.py: at most `workers` threads
     first_local = len(ctx.locals)
@@ -27666,11 +27668,33 @@ def _par_for(node, ctx, ind):
     ctx.par_regions[info['k']] = {'lo': 'v_' + info['lo'], 'hi': 'v_' + info['hi'],
                                   'writes': ['v_' + n for n in info['writes']],
                                   'fresh': ['v_' + n for n in ctx.locals[first_local:]],
+                                  'reductions': info.get('reductions') or [],
                                   'line': getattr(node, 'lineno', None)}
     if info.get('cap'):
         ctx.par_regions[info['k']]['cap'] = 'v_' + info['cap']
     pad = '    ' * ind
     return '%s/*@par:begin:%d*/\n%s%s/*@par:end:%d*/\n' % (pad, info['k'], inner, pad, info['k'])
+
+
+def _red_stmt(text, acc, j, op, chunk):
+    """`acc += e` for the chunk fn (`__int128` prefixes, never traps on overflow) or the re-run fn
+    (the ordinary checked add, `acc[]` left at the last prefix that fitted)."""
+    def one(m):
+        rhs, parts, depth, begin = m[2], [], 0, 0
+        for i, ch in enumerate(rhs):
+            depth += (ch == '(') - (ch == ')')
+            if ch == ',' and not depth:
+                parts.append(rhs[begin:i]); begin = i + 1
+        parts.append(rhs[begin:])
+        i, p = m[1], parts[1]
+        if chunk:
+            return ('%s{ __int128 _t = _s%d %s (__int128)%s; _s%d = _t; if (_t > _mx%d) _mx%d = _t; '
+                    'if (_t < _mn%d) _mn%d = _t; %s = (int64_t)_t; }\n'
+                    % (i, j, '-' if op == '-' else '+', p, j, j, j, j, j, acc))
+        t2 = p.strip().lstrip('(').split(' = ')[0]
+        return ('%s%s = (%s, ck_%s(%s, %s));\n%s_acc[%d] = %s;\n'
+                % (i, acc, p, 'sub' if op == '-' else 'add', acc, t2, i, j, acc))
+    return re.sub(r'(?m)^([ \t]*)' + re.escape(acc) + r' = \((.*)\);\s*$', one, text)
 
 
 def _par_decls(decls, sig):
@@ -27715,9 +27739,11 @@ def _par_outline(generated, sig, decls, ctx, cname):
                               'list/bytearray elements' % (where, ', '.join(bad)))
         names = sorted(set(re.findall(r'\bv_\w*', text)))
         fresh = set(facts['fresh'])
+        reds = facts.get('reductions') or []
+        red_c = {'v_' + n for n, _ in reds}
         captured, private = [], []
         for name in names:
-            if name in (facts['lo'], facts['hi']):
+            if name in (facts['lo'], facts['hi']) or name in red_c:
                 continue
             if name in fresh:
                 if name not in local or local[name][0] not in ('int64_t', 'double'):
@@ -27737,14 +27763,10 @@ def _par_outline(generated, sig, decls, ctx, cname):
                                   'bytearray values can be used' % (where, name[2:], kind))
             captured.append((name, kind))
         worker = '%s__par%d' % (cname, k)
-        lines = ['static void %s(void **_a, int64_t _lo, int64_t _hi) {\n' % worker,
-                 '    int64_t %s = _lo, %s = _hi;\n' % (facts['lo'], facts['hi'])]
-        for i, (name, kind) in enumerate(captured):
-            lines.append('    %s %s = *(%s *)_a[%d];\n' % (kind, name, kind, i))
-        lines.extend('    %s\n' % local[name][1] for name in private)
-        lines.append(text)
-        lines.append('}\n')
-        workers.append(''.join(lines))
+        head = ['    int64_t %s = _lo, %s = _hi;\n' % (facts['lo'], facts['hi'])]
+        head += ['    %s %s = *(%s *)_a[%d];\n' % (kind, name, kind, i)
+                 for i, (name, kind) in enumerate(captured)]
+        priv = ['    %s\n' % local[name][1] for name in private]
         array = ', '.join('&' + name for name, _ in captured) or '0'
         # Bytearrays are references: two names may be one object, and a write through one would race
         # with an access through the other. Lists are values (`let ys = xs` copies), so only these.
@@ -27753,6 +27775,37 @@ def _par_outline(generated, sig, decls, ctx, cname):
             '        if (%s == %s) ail_die("parallel for: two names refer to one bytearray");\n' % (w, other)
             for w in refs if w in facts['writes'] for other in refs
             if other != w and not (other in facts['writes'] and other < w))
+        for n, _ in reds:
+            c = 'v_' + n
+            if (local[c][0] if c in local else params.get(c)) != 'int64_t':
+                raise Unsupported('parallel for%s: %r carries a value between iterations, so it must be an '
+                                  'int local of the enclosing function; write instead: write it into a list '
+                                  'element xs[i] and combine the list after the loop' % (where, n))
+        if reds:
+            body, rerun = text, text
+            for j, (n, op) in enumerate(reds):
+                body = _red_stmt(body, 'v_' + n, j, op, True)
+                rerun = _red_stmt(rerun, 'v_' + n, j, op, False)
+            lines = ['static void %s(void **_a, int64_t _lo, int64_t _hi, ail_red_part *_p) {\n' % worker]
+            lines += head + ['    int64_t v_%s = 0;\n' % n for n, _ in reds]
+            lines += ['    __int128 _s%d = 0, _mx%d = 0, _mn%d = 0;\n' % (j, j, j) for j in range(len(reds))]
+            lines += priv + [body]
+            lines += ['    _p[%d] = (ail_red_part){_s%d, _mx%d, _mn%d};\n' % (j, j, j, j)
+                      for j in range(len(reds))]
+            lines += ['}\n', 'static void %s_rerun(void **_a, int64_t _lo, int64_t _hi, int64_t *_acc) {\n' % worker]
+            lines += head + ['    int64_t v_%s = _acc[%d];\n' % (n, j) for j, (n, _) in enumerate(reds)]
+            lines += priv + [rerun, '}\n']
+            workers.append(''.join(lines))
+            accs = ', '.join('v_' + n for n, _ in reds)
+            back = ' '.join('v_%s = _ar%d[%d];' % (n, k, j) for j, (n, _) in enumerate(reds))
+            return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n'
+                    '        int64_t _ar%d[] = {%s};\n%s'
+                    '        ail_par_reduce_run(%s, _pa%d, %s, %s, &_ps%d, %s, %d, _ar%d, %s_rerun);\n'
+                    '        %s\n    }\n'
+                    % (k, k, array, k, accs, guards, worker, k, facts['lo'], facts['hi'], k,
+                       facts['cap'] if facts.get('cap') else '0', len(reds), k, worker, back))
+        lines = ['static void %s(void **_a, int64_t _lo, int64_t _hi) {\n' % worker] + head + priv + [text, '}\n']
+        workers.append(''.join(lines))
         if facts.get('cap'):
             return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n%s'
                     '        ail_par_run_n(%s, _pa%d, %s, %s, &_ps%d, %s);\n    }\n'
