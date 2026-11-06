@@ -9,7 +9,7 @@ Apache-2.0). Mojo is "not measured: needs an account". The tables are in `RESULT
 manual workflow proposal is `compare-rival.yml` (outside `.github/`).
 
 Headline, stated as plainly as the losses: AIL wins wall time (5.06x geomean against the best rival, 9/10 tasks),
-peak RSS (3.06x, 9/10), artifact size (8.09x, 10/10), build disk (7.2x, 10/10) and build time (1.09x better,
+peak RSS (3.06x, 9/10), artifact size (8.09x, 10/10), build disk (6.96x, 10/10) and build time (1.09x better,
 6/10); it loses instructions (1.87x worse, n=1 because callgrind is capped). Codon compiles neither `typed.py`
 (the `ail` runtime is unimportable) nor most `main.py` files; it is the only tool silently wrong on both probes
 it reaches (overflow and deep recursion, 2/5), and mypyc is silently wrong on deep recursion too.
