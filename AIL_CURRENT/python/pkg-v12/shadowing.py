@@ -22,7 +22,7 @@ import re
 # plus the intrinsics the typed path dispatches by name). test_ail_builtin_shadowing checks that
 # every declared plain builtin is listed here.
 AIL_BUILTINS = frozenset('''
-    heappush heappop heapify heappushpop heapreplace bisect bisect_left bisect_right
+    heappush heappop heapify heappushpop heapreplace nsmallest nlargest bisect bisect_left bisect_right
     insort insort_left insort_right
     read_stdin_bytes read_bytes write_bytes append_bytes write_text write_stdout_bytes flush_stdout
     open_binary get_env current_dir list_dir path_exists is_dir file_size same_file make_dir

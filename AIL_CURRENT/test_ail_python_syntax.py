@@ -312,10 +312,10 @@ REFUSED = [
     ('def main():\n    xs = ["1", "2", "3"]\n    t = 0\n    for x in (int(s) for s in xs):\n        t += x\n'
      '    print(t)\n\n\nmain()\n', '(`for x in part: ...`)', '{'),
     ('import heapq\nimport math\n\n\ndef main():\n    h = [3, 1, 2]\n    heapq.heapify(h)\n'
-     '    print(heapq.nsmallest(2, h)[0], math.gamma(2.0))\n\n\nmain()\n',
+     '    print(len(list(heapq.merge(h))), math.gamma(2.0))\n\n\nmain()\n',
      'prog.ail:1:1: not in the subset: import of \'heapq\' with a function that is not built in', None),
     ('import heapq\nimport math\n\n\ndef main():\n    h = [3, 1, 2]\n    heapq.heapify(h)\n'
-     '    print(heapq.nsmallest(2, h)[0], math.gamma(2.0))\n\n\nmain()\n',
+     '    print(len(list(heapq.merge(h))), math.gamma(2.0))\n\n\nmain()\n',
      'note: prog.ail:8: math.gamma() with these arguments is not built', None),
 ]
 
