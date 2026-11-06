@@ -108,7 +108,7 @@ value CPython prints for the same command. Until then these nine are recorded he
 counted as identical.
 
 The three `__file__`-reading examples do not build at all (below), so they have no reproducibility
-result either way; the reviewers named them, so they are measured and listed.
+result either way; the reviewer named them, so they are measured and listed.
 
 ## Difference classes
 
