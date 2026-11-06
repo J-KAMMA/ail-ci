@@ -501,6 +501,7 @@ class NestedLists:
                         for arg in member.args.args[1:]:
                             arg.annotation = self.convert_ann(arg.annotation)
         self.decide_legacy()
+        self.infer_params()
         for node in self.tree.body:
             if isinstance(node, ast.FunctionDef) and self.signature_legacy(node):
                 params, ret = self.funcs[node.name]
@@ -525,6 +526,97 @@ class NestedLists:
             self.tree.body[0:0] = classes
         ast.fix_missing_locations(self.tree)
         return bool(self.rows)
+
+    def infer_params(self):
+        """fcfloat1: an unannotated parameter of a plain top-level function that every call site
+        hands the same `list[list[T]]` local (`advance(bodies, dt)` with `bodies = [[0.0, ...], ...]`)
+        is that nested list, as if annotated `list[list[T]]`; CPython passes the same list, so
+        the rows it reads and writes are the caller's rows. Only plain positional calls of a
+        function never used as a value count, each argument a bare name of the calling
+        function's own scope (no lambda, comprehension or nested def around the call); the
+        parameter is never rebound in the callee. Any other shape leaves the parameter alone."""
+        if self.library:
+            return
+        fns = {n.name: n for n in self.tree.body if isinstance(n, ast.FunctionDef)}
+        called, calls = set(), {}
+        for n in ast.walk(self.tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                called.add(id(n.func))
+        as_value = {n.id for n in ast.walk(self.tree)
+                    if isinstance(n, ast.Name) and n.id in fns and id(n) not in called}
+        callers = []                                   # (caller fn, owner class or None)
+        for node in self.tree.body:
+            if isinstance(node, ast.FunctionDef):
+                callers.append((node, None))
+            elif isinstance(node, ast.ClassDef):
+                callers.extend((m, node.name) for m in node.body if isinstance(m, ast.FunctionDef))
+        stray = set()                                  # callees called somewhere unreadable
+        barrier = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+                   ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+        def direct_calls(fn):
+            stack = list(ast.iter_child_nodes(fn))
+            while stack:
+                n = stack.pop()
+                if isinstance(n, barrier):
+                    for m in ast.walk(n):
+                        if isinstance(m, ast.Call) and isinstance(m.func, ast.Name):
+                            stray.add(m.func.id)
+                    continue
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in fns:
+                    yield n
+                stack.extend(ast.iter_child_nodes(n))
+        inside = set()
+        for fn, owner in callers:
+            for c in direct_calls(fn):
+                calls.setdefault(c.func.id, []).append((c, fn, owner))
+                inside.add(id(c))
+        for n in ast.walk(self.tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and id(n) not in inside:
+                stray.add(n.func.id)
+        candidates = {}
+        for name, fn in fns.items():
+            a = fn.args
+            if (name == self.entry or name in self.legacy or name in as_value or name in stray
+                    or name not in calls or fn.decorator_list or a.vararg or a.kwarg or a.kwonlyargs
+                    or a.posonlyargs or a.defaults):
+                continue
+            stored = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+            open_params = [k for k, p in enumerate(a.args) if p.annotation is None and p.arg not in stored]
+            if open_params:
+                candidates[name] = open_params
+        for _ in range(4):
+            envs, changed = {}, False
+            for name, open_params in candidates.items():
+                fn = fns[name]
+                for k in list(open_params):
+                    agreed = None
+                    for c, caller, owner in calls[name]:
+                        if c.keywords or len(c.args) != len(fn.args.args) or not isinstance(c.args[k], ast.Name):
+                            agreed = None
+                            break
+                        if id(caller) not in envs:
+                            try:
+                                envs[id(caller)] = self.environment(caller, owner)
+                            except self.Unsupported:
+                                envs[id(caller)] = None
+                        env = envs[id(caller)]
+                        t = env.get(c.args[k].id) if env is not None else None
+                        if not (_nest(t) and t[1] is not None and (agreed is None or agreed == t)):
+                            agreed = None
+                            break
+                        agreed = t
+                    if agreed is None:
+                        continue
+                    open_params.remove(k)
+                    param = fn.args.args[k]
+                    param.annotation = ast.copy_location(ast.parse(
+                        'list[list[%s]]' % _element_text(agreed[1]), mode='eval').body, param)
+                    params, ret = self.funcs[name]
+                    self.funcs[name] = ([(p, agreed if i == k else t) for i, (p, t) in enumerate(params)], ret)
+                    changed = True
+            if not changed:
+                break
 
     def signature_legacy(self, fn):
         """A function whose signature a host sees (library exports, the entry point), or one

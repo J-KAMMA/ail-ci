@@ -1,3 +1,18 @@
+## 2026-11-06 -- fcfloat1: written list[float] parameters, nested-list parameters from call sites (job-fcfloat1-op1106)
+
+Stacked on callinf1 with fclist1's three commits cherry-picked. With both, scimark_fft and
+spectral_norm are typed already: callinf1 gives the parameters list[float], and fclist1's written-list
+proof is kind-agnostic (an `ail_flist` parameter shares the caller's buffer; stores are bounds-checked
+and never resize). nbody was refused with `subscripting a list[float]`: `bi[0]` on a row of an
+unannotated `bodies` parameter that the nested-list lowering never rewrote. `NestedLists.infer_params`
+now treats an unannotated parameter that every plain call hands the same `list[list[T]]` local as
+`list[list[T]]` (entry, library, values, keywords, defaults, module-level calls, rebinding and
+disagreeing sites excluded). Tests: `test_ail_fcfloat1.py`; notes `lab/reach/fcfloat1.md`.
+
+Numbers: pyproof typed 34 -> 35 / 55 on the stacked base (31 -> 35 against callinf1 alone), wrong 0.
+nbody icount 19.09G -> 0.44G, RSS 10.3 -> 1.6 MB vs its general build; 60-130x CPython wall. Generated
+C byte-identical for 33 previously typed programs (FFI examples differ only in package hashes).
+
 ## 2026-11-06 -- callinf1: single-kind call-site inference for unannotated parameters (job-callinf1-op1106)
 
 fcspec0 measured that multi-kind specialisation moves 0 programs and recommended single-kind
