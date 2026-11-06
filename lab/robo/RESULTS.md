@@ -6,25 +6,25 @@ runner, gcc 13.3.0, arm-none-eabi-gcc 13.2.1 + newlib-nano 4.4.0, QEMU 8.2.2, Mi
 
 ## 1. Cross-build table
 
-`-O2 -fno-asynchronous-unwind-tables -ffp-contract=off -fopenmp-simd -std=c11 -lm`, the flags AIL
-uses natively (minus its two `-Werror=` diagnostic flags, which change no code).
+`-O2 -fno-tree-slp-vectorize -ffp-contract=off -fopenmp-simd -fno-asynchronous-unwind-tables -lm`,
+the flags AIL uses natively (minus its three `-Werror=` diagnostic flags, which change no code).
 Sizes are `size` text+data+bss of the linked executable in bytes. "match" compares the full stdout
 with CPython 3.12.3; the exit status was 0 everywhere.
 
 | program | target | builds | first error | text | data | bss | runs | match |
 |---|---|---|---|---|---|---|---|---|
-| pid.py | x86-64 native | yes | - | 12750 | 848 | 4968 | yes | yes |
-| pid.py | aarch64-linux-gnu (qemu-aarch64) | yes | - | 17853 | 944 | 20256 | yes | yes |
+| pid.py | x86-64 native | yes | - | 12846 | 848 | 4968 | yes | yes |
+| pid.py | aarch64-linux-gnu (qemu-aarch64) | yes | - | 17837 | 944 | 20256 | yes | yes |
 | pid.py | arm-linux-gnueabihf (qemu-arm) | yes | - | 9787 | 468 | 25376 | yes | yes |
 | pid.py | arm-none-eabi Cortex-M3 (qemu-system-arm) | yes | - | 44636 | 468 | 11036 | yes | yes |
-| ringbuf.py | x86-64 native | yes | - | 11518 | 848 | 4968 | yes | yes |
-| ringbuf.py | aarch64-linux-gnu | yes | - | 17035 | 944 | 20256 | yes | yes |
+| ringbuf.py | x86-64 native | yes | - | 11550 | 848 | 4968 | yes | yes |
+| ringbuf.py | aarch64-linux-gnu | yes | - | 17003 | 944 | 20256 | yes | yes |
 | ringbuf.py | arm-linux-gnueabihf | yes | - | 10239 | 472 | 25376 | yes | yes |
-| ringbuf.py | arm-none-eabi Cortex-M3 | yes | - | 44636 | 468 | 11036 | yes | yes |
-| kin2.py | x86-64 native | yes | - | 11519 | 984 | 5000 | yes | yes |
-| kin2.py | aarch64-linux-gnu | yes | - | 16443 | 1080 | 20264 | yes | yes |
-| kin2.py | arm-linux-gnueabihf | yes | - | 8437 | 532 | 25376 | yes | yes |
-| kin2.py | arm-none-eabi Cortex-M3 | yes | - | 48820 | 468 | 11036 | yes | yes |
+| ringbuf.py | arm-none-eabi Cortex-M3 | yes | - | 44644 | 468 | 11036 | yes | yes |
+| kin2.py | x86-64 native | yes | - | 11535 | 984 | 5000 | yes | yes |
+| kin2.py | aarch64-linux-gnu | yes | - | 16427 | 1080 | 20264 | yes | yes |
+| kin2.py | arm-linux-gnueabihf | yes | - | 8441 | 532 | 25376 | yes | yes |
+| kin2.py | arm-none-eabi Cortex-M3 | yes | - | 48828 | 468 | 11036 | yes | yes |
 
 Two build facts behind the bare-metal "yes" cells:
 
@@ -32,9 +32,10 @@ Two build facts behind the bare-metal "yes" cells:
   formatter: the same image links, runs, and prints `0.0` for every float (verified with a
   `1.5*2.25+0.5` probe: `3.875 7.5 4.0` became `0.0 0.0 0.0`). Integer output is unaffected, so
   this fails silently for a control program. It is a link flag, not a source change.
-- The runtime is one C file; `gcc -O2` drops the subsystems a program does not reach. That is why
-  a 44 KB Cortex-M3 image with no `mmap`, sockets or pthreads links even though those parts exist
-  in `program.c` (section 2).
+- The runtime is one C file, but AIL emits only the runtime a program reaches: `pid.py`'s
+  `program.c` is 3,232 lines with 0 references to `pthread`, `mmap`, `socket`, `clock_gettime` or
+  `nanosleep`. That is why a 44 KB Cortex-M3 image with none of those subsystems links at all;
+  gcc dead-code elimination is not what makes it small (section 2).
 
 Confirmed with `bash ~/tools/cmp.sh` on all three programs: the general path (`AIL_UNIFIED_FORCE=1`)
 and the default build both print exactly what CPython prints (3/3 programs, 2/2 builds).
@@ -53,7 +54,7 @@ in `AIL_CURRENT/python/pkg-v12/cruntime.py` (the runtime is emitted into `progra
 | large file read (`read_bytes` of 2 MiB, iterated) | `program.c:3448:10: fatal error: sys/mman.h: No such file or directory` | `ail_win_map`, `ail_win_drop` (IR window runtime) | `mmap`, `munmap`, `madvise`, `sysconf(_SC_PAGESIZE)`, `S_ISREG` | the runtime already falls back to `read()` when `mmap` fails; the header and the type names must still exist, or set `AIL_IR_WINDOW_MIN` out of reach |
 | clock / sleeping (`time.perf_counter`, `time.sleep`) | `program.c:479:23: error: 'CLOCK_MONOTONIC' undeclared (first use in this function)` | `ail_perf_counter_ns` and the `time.sleep` helper | newlib-nano defines neither `CLOCK_MONOTONIC` nor `clock_gettime`/`nanosleep` (checked with `nm` on `libc_nano.a`) | define `CLOCK_MONOTONIC` and provide `clock_gettime`/`nanosleep` over SysTick or the vendor HAL |
 | file I/O (`read_bytes`/`write_bytes`) | builds and runs | `ail_*file*` via stdio | nothing: newlib + librdimon semihosting provides `fopen`/`read`/`write` | no stub needed; heap peak 65,576 B (stdio buffer) |
-| environment (`ail.get_env`) | builds and runs | `ail_get_env` | `getenv` exists but returns NULL under semihosting (no environment) | inject a small key/value table |
+| environment (`ail.get_env`) | builds and runs: prints `PATH = missing` bare metal (the fallback; native prints the real `PATH`) | `ail_get_env` | `getenv` exists but returns NULL under semihosting (no environment) | inject a small key/value table |
 | signals | not applicable | - | AIL's documented Python subset has no `signal` module, so the runtime needs no signal symbols | - |
 
 Also confirmed absent from newlib-nano: `mmap`, `munmap`, `nanosleep`, `clock_gettime`,
@@ -61,24 +62,25 @@ Also confirmed absent from newlib-nano: `mmap`, `munmap`, `nanosleep`, `clock_ge
 
 ## 3. Control-loop jitter, 1 kHz, 20 000 iterations
 
-Deadline miss in microseconds; median of 3 runs (each run's histogram gives nearest-rank p50/p99/p99.9,
-`max` is exact). "overruns" = iterations whose wake-up was at least one whole period (1000 us) late.
+Deadline miss in microseconds; median of 3 runs (each run's histogram gives nearest-rank p50/p99/p99.9;
+`max` is the exact maximum, rounded here to the nearest microsecond). "overruns" = iterations whose
+wake-up was at least one whole period (1000 us) late.
 This is a shared GitHub Actions VM: the C row is the noise floor, not a guarantee.
 
 | variant | tool | p50 | p99 | p99.9 | max | overruns |
 |---|---|---|---|---|---|---|
-| noalloc | C (clock_nanosleep, absolute) | 60 | 66 | 106 | 604 | 0 |
-| noalloc | AIL (perf_counter + time.sleep) | 61 | 68 | 96 | 331 | 0 |
-| noalloc | MicroPython (time_ns + sleep_us) | 62 | 72 | 102 | 5332 | 5 |
-| alloc | C (malloc/free per iteration) | 60 | 68 | 95 | 628 | 0 |
-| alloc | AIL (list(state) per iteration) | 60 | 69 | 98 | 307 | 0 |
-| alloc | MicroPython (list(state) per iteration) | 61 | 72 | 122 | 5586 | 5 |
+| noalloc | C (clock_nanosleep, absolute) | 59 | 66 | 98 | 271 | 0 |
+| noalloc | AIL (perf_counter + time.sleep) | 60 | 68 | 108 | 247 | 0 |
+| noalloc | MicroPython (time_ns + sleep_us) | 61 | 71 | 114 | 5596 | 5 |
+| alloc | C (malloc/free per iteration) | 60 | 69 | 99 | 277 | 0 |
+| alloc | AIL (list(state) per iteration) | 60 | 69 | 94 | 405 | 0 |
+| alloc | MicroPython (list(state) per iteration) | 61 | 72 | 110 | 5745 | 5 |
 
 Reading: at 1 kHz the language is invisible in the body of the distribution - all three sit at the
-kernel's ~60 us timer slack (p50 60-62 us, p99 66-72 us). The difference is in the tail: C and AIL
-had no overrun in the median run (one C run of 20 000 was hit by runner noise: 3884 us, 6 overruns;
-one AIL run: 1222 us, 1 overrun), while MicroPython overran 4-9 times in every run and its worst
-miss was 5.3-5.6 ms, about 9x the C worst case. Allocation does not move the C or AIL numbers.
+kernel's ~60 us timer slack (p50 59-61 us, p99 66-72 us). The difference is in the tail: C and AIL
+had no overrun in any run (worst miss 271-406 us), while MicroPython overran 5-7 times in every run
+and its worst miss was 5.4-6.1 ms, about 20x the C worst case. Allocation does not move the C or
+AIL numbers.
 
 ## 4. RAM
 
@@ -89,9 +91,9 @@ an upper bound, not the guest's own footprint. Bare metal: heap high-water from 
 
 | program | native RSS | aarch64 RSS (qemu) | armhf RSS (qemu) | bare-metal heap peak | bare-metal .data+.bss |
 |---|---|---|---|---|---|
-| pid.py | 1,644 KB | 10,348 KB | 9,544 KB | 224 B | 468 + 11,036 B |
-| ringbuf.py | 1,704 KB | 10,456 KB | 9,532 KB | 88 B | 468 + 11,036 B |
-| kin2.py | 2,216 KB | 10,992 KB | 10,732 KB | 20 B | 468 + 11,036 B |
+| pid.py | 1,644 KB | 10,588 KB | 9,440 KB | 224 B | 468 + 11,036 B |
+| ringbuf.py | 1,704 KB | 10,464 KB | 9,400 KB | 88 B | 468 + 11,036 B |
+| kin2.py | 2,152 KB | 10,908 KB | 10,692 KB | 20 B | 468 + 11,036 B |
 
 The 11,036 B of `.bss` on Cortex-M3 is the runtime's static state (arena headers, stdio, exception
 stack), not program data: the three programs allocate 20-224 B of heap for their whole run.
@@ -109,6 +111,6 @@ stack), not program data: the three programs allocate 20-224 B of heap for their
    general path, and `-u _printf_float` (or an internal float formatter) as an automatic link
    flag so float output cannot silently become `0.0`.
 5. It already beats MicroPython where a control loop cares: no GC tail (0 overruns vs 5 per 20,000,
-   worst miss 0.3-0.6 ms vs 5.3 ms) and 20-224 B of heap vs MicroPython's interpreter heap.
+   worst miss 0.2-0.6 ms vs 5.4-6.1 ms) and 20-224 B of heap vs MicroPython's interpreter heap.
 6. Not measured: real hardware, interrupt latency, an RTOS/CMSIS integration, and long-run thermal
    or clock drift; the jitter numbers come from a noisy shared x86 runner.

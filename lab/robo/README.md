@@ -41,15 +41,15 @@ All tools come from Ubuntu apt; nothing is fetched from the network by `run.py`.
 ## Method
 
 **AIL C emission.** `AIL_CURRENT/ail_chatgpt.py compile prog.py --syntax python -o exe
---debug-dir DIR` leaves the generated C in `DIR/program.c`. That single file embeds the runtime the
-program reaches (dead-code elimination removes the rest). `run.py` compiles that C with
+--debug-dir DIR` leaves the generated C in `DIR/program.c`. That single file embeds only the
+runtime the program actually reaches. `run.py` compiles that C with
 
 ```
--O2 -fno-asynchronous-unwind-tables -ffp-contract=off -fopenmp-simd -std=c11   (AIL's own flags)
+-O2 -fno-tree-slp-vectorize -ffp-contract=off -fopenmp-simd -fno-asynchronous-unwind-tables   (AIL's own flags)
 ```
 
-for every target, plus `-lm`. (AIL's two `-Werror=` warning flags are left out; they change no code.)
-The AIL executable itself (`compile -o exe`) is the native row.
+for every target, plus `-lm`. (AIL's three `-Werror=` diagnostic flags are left out; they change no
+code.) The native row is `gcc` on that same `program.c`, not AIL's own `compile -o exe` binary.
 
 **Linux ARM targets.** `aarch64-linux-gnu-gcc` and `arm-linux-gnueabihf-gcc`; run under
 `qemu-aarch64 -L /usr/aarch64-linux-gnu` and `qemu-arm -L /usr/arm-linux-gnueabihf`.
@@ -64,7 +64,8 @@ program is compiled at `-O2` like the Linux targets.
 **Jitter.** 20 000 iterations at a 1 ms period. Each iteration, in every language, runs the same PID
 update (8 doubles: `0.85*err + 0.12*integral + 0.04*deriv`, clamped, `state += (u - 0.3*state)*0.005`),
 then sleeps to the next absolute deadline, then records `now - deadline` in microseconds into a
-1 us histogram. `p50/p99/p99.9` are nearest-rank from that histogram; `max` is exact. "Overruns"
+1 us histogram. `p50/p99/p99.9` are nearest-rank from that histogram; `max` is exact (rounded to the
+nearest microsecond in the table). "Overruns"
 counts periods whose wake-up was at least one full period (1000 us) late. `noalloc` keeps all state
 in preallocated lists; `alloc` additionally copies the 8-element state list every iteration
 (`malloc`/`free` in C, `list(state)` in AIL and MicroPython). C uses

@@ -10,9 +10,10 @@ file changed; the change is new `lab/robo/` only (README, RESULTS, run.py, progs
 - Blocker census, first error per subsystem: `threading` forces the boxed path and stops at
   `__int128`; `par_range` at `pthread_mutex_t`; `tcp_listen` at `sys/socket.h`; a >1 MiB
   `read_bytes` at `sys/mman.h`; `time.perf_counter`/`sleep` at `CLOCK_MONOTONIC` (newlib-nano has
-  no `clock_gettime` or `nanosleep`). `read_bytes`/`write_bytes` and `get_env` build and run.
-- 1 kHz, 20 000 iterations, median of 3: p50 60/61/62 us, p99 66/68/72, p99.9 106/96/102, max
-  604/331/5332 us, overruns 0/0/5 (C / AIL / MicroPython 1.22.1). The C row is the noise floor of a
+  no `clock_gettime` or `nanosleep`). `read_bytes`/`write_bytes` and `get_env` build and run;
+  bare metal `getenv` returns NULL, so `get_env("PATH","missing")` prints `PATH = missing`.
+- 1 kHz, 20 000 iterations, median of 3: p50 59/60/61 us, p99 66/68/71, p99.9 98/108/114, max
+  271/247/5596 us, overruns 0/0/5 (C / AIL / MicroPython 1.22.1). The C row is the noise floor of a
   shared runner.
 - RAM: native peak RSS 1.6-2.2 MB; bare-metal heap high-water 20-224 B.
 

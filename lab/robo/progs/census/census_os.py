@@ -1,12 +1,10 @@
-"""Census probe: environment and CPU count (getenv, sysconf)."""
+"""Census probe: environment (getenv through ail.get_env)."""
 
 from ail import get_env
 
 
 def main() -> None:
-    value = get_env("PATH", "missing")
-    print("env", len(value) >= 0)
-    print("cpus", 1)
+    print("PATH =", get_env("PATH", "missing"))
 
 
 main()

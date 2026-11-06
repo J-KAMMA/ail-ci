@@ -24,9 +24,10 @@ AIL = REPO / "AIL_CURRENT" / "ail_chatgpt.py"
 PROGS = HERE / "progs"
 HARNESS = HERE / "harness"
 
-# The native flags AIL itself uses for its C (from a --debug-dir build log).
-CFLAGS = ["-O2", "-fno-asynchronous-unwind-tables", "-ffp-contract=off",
-          "-fopenmp-simd", "-std=c11"]
+# AIL's own native C flags (pyc.opt_flags + pyc.CFLAGS_TUNE), minus its three
+# -Werror= diagnostic flags, which change no code.
+CFLAGS = ["-O2", "-fno-tree-slp-vectorize", "-ffp-contract=off",
+          "-fopenmp-simd", "-fno-asynchronous-unwind-tables"]
 
 LINUX_TARGETS = {
     "aarch64-linux-gnu": {
