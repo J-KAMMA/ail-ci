@@ -116,6 +116,17 @@ The missing-validator branch now fails only when `AIL_GPU_REQUIRE_DEVICE=1`, the
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass. With
 `SPIRV_VAL=/bin/true` the validator path still collects and checks every emitted module
 (`smoke: spirv-val ok`), so the skip only covers a genuinely missing tool.
+## 2026-11-06 -- rbfdinf1: re-apply the inference bench and profile scripts (job-rbfdinf1-11061515)
+
+Re-applied the accepted `fdinf1` change on the current tree. `lab/infer/bench.sh` and
+`lab/infer/profile.sh` are new, with the matching "Bench and profile" README section and RESULTS
+tables. fdinf1's workflow hunk was an out-of-scope revert, so
+`.github/workflows/agent-worker.yml` keeps the current tree's newer `agent=opus` support (the
+`agent` input, `claude.key` creation with the CR/LF strip, its scan and cleanup, and the
+`AIL_WORKER` export); only the `lab/infer/*` part of fdinf1 is applied there.
+
+No compiler file or test module changed, so no language probe applies. `tools/diff_ids.py` is not
+present on this tree. `python3 tools/update_manifest.py --check` passes.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 

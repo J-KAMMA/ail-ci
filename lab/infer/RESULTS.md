@@ -62,6 +62,127 @@ AIL numbers do not change.
 | binary size | 106,816 B (`gpt2`) | 1,898,560 B (`llama-cli`); 27,120 B (`llama-simple`) |
 | AIL compile time | 8.34 s (`--strict`, `AIL_NO_CACHE=1`; 0.57 s warm) | n/a |
 
+## Tokens per second (`bench.sh`)
+
+One command, one table, medians of 5: `bash lab/infer/bench.sh`. Same runner
+family as above but a later, noticeably slower allocation of it - llama.cpp's
+decode is 30.1 ms/forward here against 12.93 ms in the table above, and AIL's
+is 263.7 ms against 130.6 ms. The per-program tok/s are the repeatable part;
+the AIL/llama ratio also drifts between allocations because the two programs
+are timed in separate blocks. Both programs see `tokens.txt` (64 ids) and the
+same F32 weights; AIL is the
+default (release) compile, `gpt2.py` needs no `--strict` flag it does not
+already satisfy (the `--strict` and default binaries are byte-identical).
+
+| program | threads | prefill tok/s | decode tok/s | peak RSS | binary |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AIL `gpt2.py`, default build | 1 | 3.84 | 3.79 | 1053 MiB | 111,120 B |
+| llama.cpp `llama-cli` | 1 | **462.90** | **33.17** | 417 MiB | 1,898,560 B |
+| llama.cpp `llama-cli`, context row | 4 | 298.70 | 7.91 | 417 MiB | 1,898,560 B |
+
+| phase (medians of 5) | AIL | llama.cpp `-t 1` | ratio |
+| --- | ---: | ---: | ---: |
+| prefill, 64 tokens | 16.680 s (260.6 ms/token) | 138.2 ms (2.16 ms/token) | **120.5x** |
+| decode, per forward | 263.7 ms | 30.15 ms | **8.75x** |
+| load weights | 1.16 s | n/a | |
+| peak RSS | 1053 MiB | 417 MiB | 2.5x |
+| binary size | 111,120 B | 1,898,560 B | 0.06x |
+
+How the two decode tok/s are counted: AIL runs 16 decode forwards for its 16
+tokens (the last one's logits are never used); llama.cpp's first generated
+token comes out of the prefill, so its own report has 15 eval runs for 16
+tokens. Each row divides by the number of forwards it actually ran, so the
+numbers are per-forward throughput on both sides.
+
+The `-t 4` row is context only and, on this runner, slower than one thread:
+the four vCPUs are shared and the per-run spread was 75-549 prefill tok/s, so
+it is not a speedup claim and not part of the headline. Greedy ids were equal
+to `ref.py` and to `llama-cli` on all 5 runs for both `-t 1` and `-t 4`; the
+harness prints both id lists and exits non-zero if any run differs.
+llama.cpp prints generated text rather than ids, so its ids are recovered with
+`llama-tokenize` on the generated text (same model, `--no-bos`); that
+round-trip is checked to be 16 ids every run.
+
+The absolute gap from the table above is the machine: AIL and llama.cpp both
+slowed by roughly 2.3x on this allocation, so the AIL/llama ratio is the same
+story (prefill ~2x worse than before, decode slightly better). The phase
+sizes are unchanged.
+
+## Profile (`profile.sh`)
+
+`perf record` is denied on the GitHub runner (`perf_event_paranoid=4`, no
+`CAP_PERFMON`), so `profile.sh` falls back to
+`valgrind --tool=callgrind` on a one-token prompt plus 4 decode forwards -
+five copies of the same one-token forward that prefill and decode both use.
+The binary is the `--debug` build (`-g -O0`, `#line` back to `gpt2.py`), which
+is what makes the source-line column possible; the callgrind shares are of
+that `-O0` build, so they show where the work is, not the exact `-O2` split.
+
+The loader dominates a short profile of its own (`read_f32__irl` and
+`ail_bytes_get`, with a small memset remainder), so `profile.sh` runs the
+program twice - empty prompt, then one-token prompt + 4 decode forwards - and
+subtracts the load-only counts per function.  The list below is the decode
+only.  The `runtime (libc)` / `runtime (libm)` labels in the source column are
+hand annotations for symbols `profile.sh` cannot tie to a `#line` region; the
+script itself prints just `runtime` for those.
+
+| # | C function | share | AIL source |
+| ---: | --- | ---: | --- |
+| 1 | `linear__irl` | 84.40% | `gpt2.py:73-87` |
+| 2 | `__memset_avx2_unaligned_erms` | 13.65% | runtime (libc) |
+| 3 | `__memcpy_avx_unaligned_erms` | 1.28% | runtime (libc) |
+| 4 | `ck_add` | 0.15% | runtime (program.c) |
+| 5 | `py_main` | 0.12% | runtime (program.c) |
+| 6 | `ail_flist_get` | 0.08% | runtime (program.c) |
+| 7 | `gelu__irl` | 0.08% | `gpt2.py:88-98` |
+| 8 | `layer_norm__irl` | 0.05% | `gpt2.py:49-72` |
+| 9 | `__expm1_fma` | 0.05% | runtime (libm) |
+| 10 | `ail_flist_set` | 0.03% | runtime (program.c) |
+
+What each entry is, and the job that would remove it:
+
+1. **`linear__irl` (84.4%)** - the matmul inner loop of
+   `s += x[k] * w[base + k]` for qkv, attention output, up, down and the logits
+   head.  Every `w[base + k]` is an inlined bounds-checked list read (compare,
+   branch, then load) and `base + k` goes through `ck_add`, an int64 overflow
+   check; one scalar multiply-add per branch, no SIMD, no FMA.  *Follow-up:*
+   a typed f32/f64 array path (`ta.f32` is stage T3, 2-D is T6) so the inner
+   loop is a plain `for (double *p)` the vectoriser can take, or bounds-check
+   the whole row once before the loop.
+2. **`memset` (13.65%)** - every call allocates its result with `[0.0] * n`
+   (`linear`, `x`, `att`, `scores`), and every element is then overwritten.
+   *Follow-up:* an uninitialised allocation for write-only outputs (or reuse a
+   scratch buffer across layers); this is free by construction once the
+   allocation is not zeroed.
+3. **`memcpy` (1.28%)** - `ail_flist_snapshot` copies the list arguments at
+   each `linear(...)` call, i.e. the per-layer weight rows.  *Follow-up:*
+   pass weights as borrows/views instead of snapshotting them per call; with
+   flat weight lists indexed by base offset the copies disappear.
+4. **`ck_add` (0.15%)** - int64 overflow checks on index arithmetic, called
+   from the loop bodies.  *Follow-up:* hoist the check out of the loop (the
+   loop bounds already keep the index in range).
+5. **`py_main` (0.12%)** - the forward-loop glue (layer loop, KV-cache stores)
+   at `-O0`.  *Follow-up:* none needed at `-O2`; it is scheduling, not work.
+6. **`ail_flist_get` (0.08%)** - bounds-checked element read for helper calls
+   the compiler did not inline.  *Follow-up:* same as (1).
+7. **`gelu__irl` (0.08%)** - GPT-2 tanh GELU, one libm `tanh` per element
+   (3072 per layer).  *Follow-up:* use the `erf` form or a vectorised tanh;
+   only worth it after (1).
+8. **`layer_norm__irl` (0.05%)** - two passes (mean/variance, then scale) over
+   768 doubles per call.  *Follow-up:* one pass with sum and sum-of-squares,
+   or fold it into the matmul's input read.
+9. **`__expm1_fma` (0.05%)** - the softmax exponential over `pos + 1` scores
+   per head.  *Follow-up:* none; it is tiny next to the matmuls.
+10. **`ail_flist_set` (0.03%)** - bounds-checked element write (`y[j] = s`
+    when not inlined).  *Follow-up:* same as (1).
+
+The ranking says the decode is one loop: 98% of the non-load work is the
+`linear` matmul plus zeroing and copying its lists, and the arithmetic helpers
+(bounds checks, overflow checks) are inlined into it at `-O0` rather than
+showing up as named callees.  That matches the 8.75x decode gap to llama.cpp's
+vectorised F32 kernels: there is no vectorisation to lose, only the scalar
+loop to replace.
+
 ## Where the time goes (findings)
 
 AIL is 56.7x slower in prefill and 10.1x per decoded token, so it is well past
