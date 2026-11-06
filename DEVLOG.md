@@ -1,3 +1,26 @@
+## 2026-11-06 -- vibe1 review fix: correct brief, real budget, first run (job-vibe1-11070147)
+
+Review fix for vibe1; no compiler change.
+
+- `AIL_FOR_AI.md` claimed `x = d.items()` and `@property` refuse at compile time. Probes
+  (`dictview.py`, `property_dec.py`, `.agent/cmp.sh`) show both build and match CPython; only
+  `--strict` refuses the dict view. The brief now names the three real refusals (an int64
+  constant, a decorator other than @staticmethod/@property/@lru_cache/@cache, multiple
+  inheritance) and says the default build falls back to the general path for everything else.
+- `run.py` submitted every combo to the pool up front, so `--minutes` stopped nothing. It now
+  keeps only `--jobs` attempts in flight, stops scheduling at the deadline, and runs seed-outer
+  so a cut run still has complete columns. `results.json` meta is derived from the rows present
+  after a resumed run. A call over `--call-timeout` ends that attempt (gave up), not the run.
+- `run.py` now unlinks the output before an AIL build: `compile -o` refuses to overwrite an
+  existing binary, which made every fix round fail with `error: output already exists`
+  (`echo_pack` was recorded as refused after 5 such rounds; it now builds first try).
+- First real run (`deepseek-v4.1-flash` via `cmd --effort low`, 5 rounds, 300 s/call): seed 0 is
+  complete (11 tasks x 3 languages); seed 1 is partial (python 8/11, rust 1/11, ail 0/11) because
+  the wall-clock budget stopped scheduling. Seed-0 correct: python 9/11, rust 11/11, ail 7/11.
+  Silent-wrong 0 in every column; one loud stop (AIL, `tally_lang`). Every built AIL program took
+  the general path (0 typed, 8 general, 0 refused). `lab/vibe/RESULTS.md` has the tables and the
+  five-line verdict.
+
 ## 2026-11-06 -- vibe1: the vibe-coding benchmark harness (job-vibe1-11070015)
 
 New `lab/vibe/`: the same AI writes the ten compare-lab tasks and `csv_rollup` in Python, Rust

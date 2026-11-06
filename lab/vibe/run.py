@@ -154,6 +154,7 @@ def build_program(lang, src, work, exe):
         cmd = ['rustc', '-O', '--edition=2021', '-o', str(exe), str(src)]
     else:
         cmd = [sys.executable, '-B', str(AIL), 'compile', str(src), '--syntax', 'python', '-o', str(exe)]
+    exe.unlink(missing_ok=True)   # AIL refuses to overwrite an existing -o output; a fix round rebuilds
     t0 = time.perf_counter()
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=BUILD_TIMEOUT, env=compile_env(work))
@@ -465,19 +466,16 @@ def evaluate(task_name, task_dir, lang, seed, cases, model, rounds_limit):
     public_pass = False
     build_rec = None
     try:
-        consecutive_timeouts = 0
         for n in range(1, rounds_limit + 1):
             try:
                 reply = model.call(prompt, work)
-                consecutive_timeouts = 0
             except ModelTimeout as e:
-                consecutive_timeouts += 1
-                if consecutive_timeouts >= 2:
-                    raise ModelFatal(str(e))
+                # A call the model did not finish in --call-timeout ends this attempt (gave up); it must
+                # not stop the whole benchmark, and retrying a runaway generation only burns the budget.
                 rounds.append(dict(round=n, prompt_chars=len(prompt), reply_chars=0, build_ok=False,
                                    build_seconds=0.0, build_error=str(e), compiler=[], public_passed=False,
                                    public_failed=[], run_seconds=0.0, error_sent=str(e)))
-                continue
+                break
             if not (reply or '').strip():
                 err = 'the model returned no text'
                 rounds.append(dict(round=n, prompt_chars=len(prompt), reply_chars=0, build_ok=False,
