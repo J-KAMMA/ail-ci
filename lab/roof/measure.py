@@ -65,17 +65,32 @@ def invocation(binary, case):
     return [str(binary)], (open(case['path'], 'rb') if case['stdin'] else subprocess.DEVNULL), case['args']
 
 
+TIME_BIN = '/usr/bin/time' if Path('/usr/bin/time').is_file() else None
+CPUTIME = re.compile(rb'ROOFCPU ([\d.]+) ([\d.]+) ([\d.]+)')
+
+
 def time_runs(binary, case, runs):
-    walls, rc = [], None
+    walls, cpus, cores_used, rc = [], [], [], None
     for _ in range(runs):
         cmd, stdin, args = invocation(binary, case)
+        wrapper = [TIME_BIN, '-f', 'ROOFCPU %e %U %S'] if TIME_BIN else []
         t0 = time.perf_counter()
-        p = subprocess.run(cmd + args, stdin=stdin, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=1800)
-        walls.append(time.perf_counter() - t0)
+        p = subprocess.run(wrapper + cmd + args, stdin=stdin, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE, timeout=1800)
+        wall = time.perf_counter() - t0
+        walls.append(wall)
         rc = p.returncode
+        m = CPUTIME.search(p.stderr)
+        if m:
+            cpu = float(m.group(2)) + float(m.group(3))
+            cpus.append(cpu)
+            if wall > 0:
+                cores_used.append(cpu / wall)
         if case['stdin']:
             stdin.close()
-    return statistics.median(walls), walls, rc
+    return dict(wall_s=statistics.median(walls), wall_runs=walls, rc=rc,
+                cpu_s=statistics.median(cpus) if cpus else None,
+                cores=round(statistics.median(cores_used), 2) if cores_used else None)
 
 
 NUM = re.compile(r'==\d+== ([A-Za-z0-9 ]+?):\s*([\d,]+)')
@@ -83,6 +98,7 @@ NUM = re.compile(r'==\d+== ([A-Za-z0-9 ]+?):\s*([\d,]+)')
 
 def cachegrind(binary, case, out_file, timeout):
     tools = (('ir', IR_ONLY),) if os.environ.get('ROOF_IR_ONLY') else (('sim', CACHEGRIND), ('ir', IR_ONLY))
+    timed_out = None
     for label, tool in tools:
         cmd, stdin, args = invocation(binary, case)
         cg = str(out_file) + '.' + label
@@ -90,9 +106,9 @@ def cachegrind(binary, case, out_file, timeout):
             p = subprocess.run(tool + ['--cachegrind-out-file=' + cg] + cmd + args, stdin=stdin,
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=timeout)
         except subprocess.TimeoutExpired:
-            if case['stdin']:
-                stdin.close()
-            return dict(icount_method='timeout', instructions=None)
+            # fall through to the cheaper IR-only tool instead of giving up
+            timed_out = label
+            continue
         finally:
             if case['stdin']:
                 stdin.close()
@@ -100,13 +116,11 @@ def cachegrind(binary, case, out_file, timeout):
         counts = {' '.join(m.group(1).split()): int(m.group(2).replace(',', ''))
                   for m in NUM.finditer(p.stderr.decode('utf8', 'replace'))}
         if p.returncode == 0 and 'I refs' in counts:
-            rec = dict(icount_method='callgrind-' + label, instructions=counts.get('I refs'),
-                       d_refs=counts.get('D refs'), d1_misses=counts.get('D1 misses'),
-                       ll_misses=counts.get('LL misses'), lld_misses=counts.get('LLd misses'))
-            if label == 'sim':
-                return rec
-            return rec
-    return dict(icount_method='failed', instructions=None)
+            return dict(icount_method='callgrind-' + label, instructions=counts.get('I refs'),
+                        d_refs=counts.get('D refs'), d1_misses=counts.get('D1 misses'),
+                        ll_misses=counts.get('LL misses'), lld_misses=counts.get('LLd misses'))
+    return dict(icount_method='timeout-' + timed_out, instructions=None) if timed_out else \
+        dict(icount_method='failed', instructions=None)
 
 
 def one_task(task, work, runs, timeout, want_cache):
@@ -134,10 +148,12 @@ def one_task(task, work, runs, timeout, want_cache):
     for lang in ('c', 'ail'):
         if not row.get(lang + '_build_ok'):
             continue
-        wall, walls, rc = time_runs(bins[lang], case, runs)
-        row[lang + '_wall_s'] = round(wall, 4)
-        row[lang + '_wall_runs'] = [round(w, 4) for w in walls]
-        row[lang + '_rc'] = rc
+        t = time_runs(bins[lang], case, runs)
+        row[lang + '_wall_s'] = round(t['wall_s'], 4)
+        row[lang + '_wall_runs'] = [round(w, 4) for w in t['wall_runs']]
+        row[lang + '_rc'] = t['rc']
+        row[lang + '_cpu_s'] = round(t['cpu_s'], 4) if t['cpu_s'] is not None else None
+        row[lang + '_cores'] = t['cores']
         if want_cache:
             row[lang] = cachegrind(bins[lang], case, work / ('%s_%s.cg' % (task, lang)), timeout)
         else:

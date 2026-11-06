@@ -331,5 +331,38 @@
    "ll_misses": 106140957,
    "lld_misses": 106138129
   }
+ },
+ "scar_life": {
+  "task": "scar_life",
+  "input_bytes": 4196362,
+  "c_build_ok": true,
+  "ail_build_ok": true,
+  "ail_path": "typed",
+  "c_wall_s": 19.109,
+  "c_wall_runs": [
+   19.2829,
+   19.109,
+   19.108
+  ],
+  "c_rc": 0,
+  "c_cpu_s": 19.1,
+  "c_cores": 1.0,
+  "c": {
+   "icount_method": "timeout-ir",
+   "instructions": null
+  },
+  "ail_wall_s": 29.8849,
+  "ail_wall_runs": [
+   29.833,
+   29.9019,
+   29.8849
+  ],
+  "ail_rc": 0,
+  "ail_cpu_s": 29.86,
+  "ail_cores": 1.0,
+  "ail": {
+   "icount_method": "timeout-ir",
+   "instructions": null
+  }
  }
 }

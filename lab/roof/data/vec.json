@@ -1,0 +1,72 @@
+{
+ "berth_sim": {
+  "vectorized_loops": 0,
+  "not_vectorized": 101,
+  "binary_instructions": 10428,
+  "binary_simd_instructions": 114,
+  "binary_simd_share": 0.0109
+ },
+ "chain_relax": {
+  "vectorized_loops": 0,
+  "not_vectorized": 53,
+  "binary_instructions": 4605,
+  "binary_simd_instructions": 168,
+  "binary_simd_share": 0.0365
+ },
+ "echo_pack": {
+  "vectorized_loops": 0,
+  "not_vectorized": 47,
+  "binary_instructions": 4475,
+  "binary_simd_instructions": 58,
+  "binary_simd_share": 0.013
+ },
+ "ledger_bin": {
+  "vectorized_loops": 0,
+  "not_vectorized": 68,
+  "binary_instructions": 9197,
+  "binary_simd_instructions": 109,
+  "binary_simd_share": 0.0119
+ },
+ "rail_transfer": {
+  "vectorized_loops": 0,
+  "not_vectorized": 65,
+  "binary_instructions": 10384,
+  "binary_simd_instructions": 140,
+  "binary_simd_share": 0.0135
+ },
+ "scar_life": {
+  "vectorized_loops": 0,
+  "not_vectorized": 35,
+  "binary_instructions": 5424,
+  "binary_simd_instructions": 34,
+  "binary_simd_share": 0.0063
+ },
+ "tally_lang": {
+  "vectorized_loops": 0,
+  "not_vectorized": 51,
+  "binary_instructions": 10758,
+  "binary_simd_instructions": 81,
+  "binary_simd_share": 0.0075
+ },
+ "term_rank": {
+  "vectorized_loops": 0,
+  "not_vectorized": 84,
+  "binary_instructions": 12545,
+  "binary_simd_instructions": 221,
+  "binary_simd_share": 0.0176
+ },
+ "ticket_audit": {
+  "vectorized_loops": 0,
+  "not_vectorized": 133,
+  "binary_instructions": 18008,
+  "binary_simd_instructions": 503,
+  "binary_simd_share": 0.0279
+ },
+ "tree_fold": {
+  "vectorized_loops": 0,
+  "not_vectorized": 139,
+  "binary_instructions": 14626,
+  "binary_simd_instructions": 461,
+  "binary_simd_share": 0.0315
+ }
+}

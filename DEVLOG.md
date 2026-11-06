@@ -7,14 +7,16 @@ harness that builds each of the ten `lab/compare` programs as compare-lab does (
 instructions and LLC misses. This runner exposes no hardware PMU, so counters fall back to valgrind
 cachegrind with the runner's cache geometry; every row records that.
 
-Measured here: 3.211 GHz, 2.67 scalar adds/cycle, 10.7 AVX2 doubles/cycle, STREAM triad 22.6 GB/s
-DRAM-resident, random dependent load 116.5 ns (374 cycles) at DRAM. All ten AIL builds took the
-typed path. AIL is 0.67x-1.98x C's wall (median 1.29x) and 0.83x-5.40x its instruction count; no
-hot loop in any program is vectorised (0 vectorised loops in `-fopt-info-vec-all`); only
-`tree_fold` reaches 21% of STREAM, and `berth_sim` is latency-bound (78M LLC misses at 2.1 GB/s).
-Per-line attribution of the emitted C puts 75-95% of the extra in the shape of the emitted code,
-then overflow checks (up to 15.7% of `ledger_bin`), bounds (up to 10.6%) and allocation (8.4%).
-See `lab/roof/RESULTS.md`.
+Measured here: 3.211 GHz, 2.67 scalar adds/cycle, 10.7 AVX2 doubles/cycle, STREAM triad 25.10 GB/s
+DRAM-resident (25.44 at 96 MB, 46.05 at 12 MB), random dependent load 116.5 ns (374 cycles) at DRAM.
+All ten AIL builds took the typed path. AIL is 0.67x-1.98x C's wall (median 1.31x; seven of ten
+between 1.0x and 1.6x, two faster) and 0.85x-5.40x its instruction count; no hot loop in any
+program is vectorised (0 vectorised loops, 35-139 "not vectorized" reports in `-fopt-info-vec-all`);
+only `tree_fold` reaches 19% of STREAM, and `berth_sim` is latency-bound (78M LLC misses at 2.1
+GB/s). Cores used is measured from CPU time / wall (0.98-1.00). The subtraction attributes both
+builds' lines and subtracts: the emitted-code shape ("other") is 54-95% of the AIL-C difference,
+then overflow checks (up to 29.3% of `ledger_bin`'s extra), bounds (4.8-19.2%), allocation (15.4%
+of `rail_transfer`), copies (4.1%) and refcount (2.3%); boxing is 0. See `lab/roof/RESULTS.md`.
 
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 

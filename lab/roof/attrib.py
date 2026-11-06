@@ -134,13 +134,39 @@ def annotate(task, src, exe, c, work, tag):
     (work / (tag + '.annotate.txt')).write_text(ann.stdout)
     rows, hot = [], []
     in_fn = in_src = False
+    src_resolved = src.resolve()
+    seen_src = set()
+
+    def is_our_source(header_path):
+        p = Path(header_path)
+        if not p.is_absolute():
+            p = Path.cwd() / p
+        try:
+            if p.resolve() != src_resolved:
+                return False
+        except OSError:
+            if p.name != src.name:
+                return False
+        # callgrind_annotate can print two headers for one file (absolute and relative to
+        # different directories); count the file once so its lines are not summed twice.
+        if src_resolved in seen_src:
+            return False
+        seen_src.add(src_resolved)
+        return True
+
     ir_line = re.compile(r'^\s*([\d,]+)\s+\(\s*[\d.]+%\)\s+(.*)$')
     for line in ann.stdout.splitlines():
+        # the annotation ends with a summary ("N (x%) events annotated"); it must not be
+        # counted as a source line when the annotated file happens to be the last block.
+        if 'events annotated' in line:
+            break
         if 'file:function' in line:
             in_fn, in_src = True, False
             continue
-        if line.startswith('-- Auto-annotated source:'):
-            in_src = str(src) in line
+        if line.startswith('-- Auto-annotated source:') or line.startswith('-- User-annotated source:'):
+            # callgrind records the path relative to its invocation directory for some builds
+            # (absolute for others); resolve before comparing.
+            in_src = is_our_source(line.split(':', 1)[1].strip())
             in_fn = False
             continue
         m = ir_line.match(line)
@@ -159,6 +185,29 @@ def annotate(task, src, exe, c, work, tag):
 def classify(text, cat):
     rx = dict(CATS)[cat]
     return bool(rx.search(text))
+
+
+def simd_share(dis):
+    """vector mnemonics as a share of all instructions in the listed functions."""
+    total = sum(v[0] for v in dis.values() if v)
+    vec = sum(v[1] for v in dis.values() if v)
+    return vec, total, (vec / total if total else 0.0)
+
+
+def add_delta(report, task):
+    """AIL minus C per category, within the attribution build (both langs measured)."""
+    a, c = report[task].get('ail'), report[task].get('c')
+    if not a or not c or 'by_category' not in a or 'by_category' not in c:
+        return
+    d = {name: a['by_category'][name] - c['by_category'][name] for name, _ in CATS}
+    total = a['total_line_ir'] - c['total_line_ir']
+    delta = dict(by_category=d, other=a['other'] - c['other'], total=total)
+    try:
+        progs = json.loads((HERE / 'data' / 'programs.json').read_text())
+        delta['real_extra'] = progs[task]['ail']['instructions'] - progs[task]['c']['instructions']
+    except (OSError, KeyError, TypeError):
+        pass
+    report[task]['delta'] = delta
 
 
 def main():
@@ -197,9 +246,13 @@ def main():
                     if not hit:
                         other += ir
                 funcs = disasm_functions(exe, [h[1] for h in hot[:6]])
+                vec_insns, dis_total, vec_frac = simd_share(funcs)
                 report[task][lang] = dict(vec, by_category=totals, other=other,
                                           total_line_ir=sum(totals.values()) + other,
-                                          hot_functions=hot[:8], hot_disasm=funcs)
+                                          hot_functions=hot[:8], hot_disasm=funcs,
+                                          hot_simd_insns=vec_insns, hot_disasm_insns=dis_total,
+                                          hot_simd_share=round(vec_frac, 4))
+                add_delta(report, task)
                 print(task, lang, report[task][lang], flush=True)
                 (out / 'attrib.json').write_text(json.dumps(report, indent=1) + '\n')
     print('wrote', out / 'attrib.json')

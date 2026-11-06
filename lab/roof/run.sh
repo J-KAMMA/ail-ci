@@ -21,7 +21,8 @@ facts() {
     lscpu > "$DATA/lscpu.txt" 2>&1
     {
         echo "# model: $(lscpu | sed -n 's/^Model name:[[:space:]]*//p')"
-        echo "# sockets/cores/threads: $(lscpu | sed -n 's/^\(Socket(s)\|Core(s) per socket\|Thread(s) per core\):[[:space:]]*//p' | paste -sd/)"
+        # lscpu prints Thread(s) per core, then Core(s) per socket, then Socket(s); label in that order
+        echo "# threads/core,cores/socket,sockets: $(lscpu | sed -n 's/^\(Thread(s) per core\|Core(s) per socket\|Socket(s)\):[[:space:]]*//p' | paste -sd/)"
         echo "# L1d/L2/L3: $(lscpu | sed -n 's/^\(L1d\|L2\|L3\) cache:[[:space:]]*//p' | paste -sd/)"
         echo "# SIMD: $(lscpu | sed -n 's/^Flags:[[:space:]]*//p' | grep -o -w 'sse4_2\|avx\|avx2\|fma\|avx512f' | paste -sd,)"
     } > "$DATA/facts.txt"
