@@ -950,7 +950,7 @@ def fold_constants(text):
 # at the writer's own line. A construct this pass cannot map is left exactly as written (the
 # compiler's general path may still build it) and a note saying why is kept for the refusal.
 
-_HEAPQ = ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')
+_HEAPQ = ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace', 'nsmallest', 'nlargest')
 _BISECT = ('bisect_left', 'bisect_right', 'bisect', 'insort', 'insort_left', 'insort_right')
 # The AIL-only built-ins: `from ail import ...` binds these from AIL_CURRENT/ail.py for CPython,
 # and the compiler drops the import (their calls are already built under the bare name).

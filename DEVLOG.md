@@ -1,3 +1,140 @@
+## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
+
+Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a
+method -- emitted C that does not compile on the default build (`gcc: expected ')' before ';'`).
+Both `_is_heapq_select` branches in `_call_user_func` pushed the select's raw `ctx.pre`
+statements (`_t1 = 2; if (...); ...`) into `staged`, which `_call_user_func` emits inside a
+comma expression, so the first `;` ended it. Both now wrap the moved statements in the
+`({ ... (void)0; })` statement expression the listcomp branch there already uses -- a list temp
+and an `ail_slist` temp are declared at function scope by `ctx.temp`, so the wrapper changes
+nothing about their lifetime.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, both builds, all CPython-identical): select as a
+`list[int]` argument, a `list[str]` argument, a method argument, two selects in one call, `k`
+= 0 / negative / past the end, a callee that appends to its parameter (the select is a copy,
+the source list is untouched), and a select through `sum`/`len`/`min`/`sorted`/`[...]`. A
+regression case (`test_nsmallest_passed_directly_as_a_call_argument`) was added to
+`test_ail_pyreach_shapes`. Tests on the final commit: `test_ail_pyreach_shapes` 18 OK,
+`test_ail_python_syntax` 10 OK, `test_ail_safetynet` 5 OK, `test_ail_files` 18 OK (1 skipped),
+`test_ail_corpus_findings3` 2 OK, `test_ail_bytearray_loops` 1 OK, `test_ail_bytearray_refs`
+3 OK.
+
+## 2026-11-06 -- rbpyreachs2_rr1: review fixes for the re-applied pyreachs2_rr1 change (job-rbpyreachs2_rr1)
+
+The reviewer's two defects were reproduced first with probes, then fixed:
+
+- **`d["top"] = heapq.nsmallest(k, xs)` emitted C that does not compile.** The scalar `_call`
+  branch handed the select's `ail_list` temp to `ail_stab_put`, which takes an `int64_t`. A
+  list-of-str select is still answered there (`print(heapq.nsmallest(k, words))` reaches it for
+  the `ail_slist` the repr helper consumes); every other non-SLIST select reaching that scalar
+  dispatch is now refused by name, so the default build falls back to the general path and matches
+  CPython's `[2, 5]`. A name bound to a select (`top = heapq.nsmallest(k, xs); d["t"] = top`)
+  reaches the int-valued dict store the same way, so that store now refuses a whole-list value by
+  name too (this also turns the pre-existing `d["k"] = xs` gcc failure into the same named
+  refusal/fallback).
+- **`reversed(bytearray)` was an eager snapshot.** The prelude now returns a live reverse iterator
+  (`_AilBytearrayReverse`): the start index is fixed at creation but each step reads the
+  bytearray as it is now, so `ba[0] = 122` after `r = reversed(ba)` is seen
+  (`list(r) == [99, 98, 122]`), while a length change (append/delete/clear) ends the walk exactly
+  as CPython's reverse iterator does. `bytes` is immutable, so its `__reversed__` stays a snapshot.
+
+Probes (all `bash ~/tools/cmp.sh <p> $PWD`, both builds, CPython-identical): dict item store of a
+select (direct, via a name, str- and int-keyed, `nlargest`, inline subscript, `sum`), bytearray
+`reversed` (in-place item mutation, append, delete, clear, empty, `next()`, repeated `list()`,
+attribute and argument provenance), plus every previously accepted select/`extend(reversed(...))`
+probe unchanged. Tests on the final commit: `test_ail_pyreach_shapes` 17 OK,
+`test_ail_python_syntax` 10 OK, `test_ail_safetynet` 5 OK, `test_ail_files` +
+`test_ail_corpus_findings3` 20 OK (1 skipped), `test_ail_bytearray_loops` +
+`test_ail_bytearray_refs` 4 OK.
+
+## 2026-11-06 -- rbpyreachs2_rr1: re-apply pyreachs2_rr1 (job-rbpyreachs2_rr1)
+
+Re-applied the accepted `job-pyreachs2_rr1-11070228` change (its diff was taken from
+`a8b8e5a`) on this tree with a three-way merge. The `.github/workflows/agent-worker.yml`
+part was already present; `pyfunc.py` merged cleanly and kept this tree's newer bytes
+handling intact. The only conflict was this file, resolved by keeping both sides: the
+accepted job's three entries below, then the existing tree's entries. Regenerated the
+manifest with `tools/update_manifest.py` (`--check` clean). Probes for the select,
+`reversed()` iterator and `extend(reversed(...))` shapes match CPython on both builds.
+No other change.
+
+## 2026-11-06 -- pyreachs2 second review fix (job-pyreachs2_rr1-11070228)
+
+The reviewer's FIX round found three remaining defects; each was reproduced first and fixed:
+
+- **Manifest pin stale.** `test_ail_pyreach_shapes.py` was not in the manifest, so
+  `update_manifest.py --check` reported it stale and `par_check` aborted on a hash mismatch.
+  Regenerated with `python3 tools/update_manifest.py`; `--check` is now clean.
+- **`heapq.nsmallest(k, xs)` of a list of bytes emitted C that does not compile.** `_etype`
+  answers the select with the source's own kind (BLIST), so the destination was declared
+  `ail_blist *` while `_sorted_into_temp`'s bytes branch builds an `ail_list` handle list; gcc
+  rejected `ail_list_free(&v_top); v_top = v__t3;`. The task's select covers int lists and
+  int/str/bytes TUPLE lists, not a list of bytes, so the shape is now refused by name in
+  `_heapq_select` (the default build falls back to the general path and matches CPython; strict
+  names it). Probe: `bs=[b"b",b"a"]; top=heapq.nsmallest(1,bs); print(len(top))` -> `1`.
+- **`reversed()` of bytes/bytearray returned a list, not an iterator.** The prelude's
+  `__reversed__` returned the backing list, so `reversed(b"") == reversed(b"")` was `True`
+  (CPython `False`; `next(reversed(b))` also failed). Both classes now return `iter(out)`.
+  Probes: equality is `False`, `next()`/`list()`/`for` over the result match CPython for bytes
+  and bytearray, empty and non-empty.
+
+Ran: `test_ail_pyreach_shapes` (14 OK), `test_ail_safetynet` (5 OK), `test_ail_files` (18 OK,
+1 skipped), `test_ail_corpus_findings3` (2 OK), `test_ail_fuzz83` (2 OK), `test_ail_strict`
+(13 OK).
+
+## 2026-11-06 -- pyreachs2 review fix (job-pyreachs2_rr1-11062251)
+
+Three defects in the s2 shapes above were found by review and are fixed:
+
+- **`heapq.nsmallest(k, xs)` on a function parameter emitted invalid C.** `_etype` answered the
+  *element* kind of the source (`'array'` for an int-list parameter), so `top = heapq.nsmallest(...)`
+  declared `top` an array parameter (`v_top`/`v_top_len`) while `_heapq_select` built an `ail_list`,
+  and a direct `return heapq.nsmallest(...)` returned a list through an `int64_t` return. `_etype`
+  now answers the container kind the lowering builds (LIST for an int list or an array parameter,
+  SLIST for a list of str, otherwise the source's own kind, so the olist tuple refusal still fires).
+  `_return_list` / `_return_slist` build the select into that return ABI, so the parameter shapes
+  compile. `_promote_floats` pre-binds a select's `for` target STR for a list-of-str source.
+- **`xs.extend(reversed(src))` with a list-of-str source was dead code.** Its branch called `_seq` on
+  an `ail_slist`, which `_seq` never walks. It now reads the spine directly (`src.n` / `src.p[i]`),
+  re-reading it each step so a self-extend that reallocates is safe.
+- **`for w in heapq.nsmallest(k, words)` on a list of str refused with the wrong reason.** The
+  generic `_seq` fallback declared `w` an int. `_for_inner_impl` now walks the select's own slist
+  temp and binds `w` STR; `_seq` refuses a str select elsewhere by name rather than misreading the
+  `ail_str` slots as numbers.
+
+Probes (both builds, CPython-identical): `nsmallest`/`nlargest` on int and `list[str]` parameters
+(direct return, `top[0]`, `sum`, `for`), `k <= 0` / `k > len` / ties; `extend(reversed(...))` over
+`list[str]` receivers (annotation, parameter source, self-extend with reallocation); the subscript
+and `key=` refusals. Two regression cases were added to `test_ail_pyreach_shapes.py`.
+
+## 2026-11-06 -- pyreachs2 (re-run, job-pyreachs2_rr1-11062251)
+
+s2 (F5a) shapes.  This tree already carried s1-s8, so the stepped-slice, `del` and heap-subscript
+lowerings of the original s2 were present; this job filled the two gaps it found and added the
+step's test module (`AIL_CURRENT/test_ail_pyreach_shapes.py`, registered by
+`tests.d/test_ail_pyreach_shapes.txt`):
+
+- `heapq.nsmallest(k, xs)` / `nlargest(k, xs)` on a list name: lowered to `sorted(xs)[:k]` /
+  `sorted(xs, reverse=True)[:k]` (`_heapq_select`), for `list[int]` and `list[str]`; `k <= 0` is
+  `[]`, a `k` past the end is the whole sorted list.  `key=` (including the key the tuple pass
+  synthesises for a list of tuples) stays refused by name.  Wired through the value, statement,
+  `for`-loop and generated-repr argument paths; `nsmallest`/`nlargest` join the front end's heapq
+  names, the general path's `_IMPLICIT_LIB` and `shadowing.AIL_BUILTINS`.
+- `xs.extend(reversed(src))` walks the source backwards and pushes each element
+  (`_method`'s extend branch), for `list[int]`/`list[float]`/`list[str]` receivers and list, str
+  (one code point per step) or bytes sources.
+- The general path's `reversed(bytes)` now works: `prelude_bytes.py` gives `bytes`/`bytearray` a
+  `__reversed__`, so `AIL_UNIFIED_FORCE=1` matches CPython like the typed path already did.
+
+Probes: stepped slices of list/str/bytes (both signs, clamping, empty, an index from stdin up to
++-4.6e18, step 0 -> ValueError), `del` with and without a later read (UnboundLocalError kept),
+`reversed` over list/str/bytes/empty + `extend`/`list`, `heappush(free[c], v)` / `heappop(alias)`
+sharing the inner list, `nsmallest`/`nlargest` with ties, `k <= 0`, `k` past the end, str lists,
+assignment and loops.  All match CPython on the default and `AIL_UNIFIED_FORCE=1` builds.  A stdin
+index beyond int64 raises the int64 `OverflowError` on the typed path (F8, not silent; the general
+path with the tagged ints matches CPython).  `lab/compare/src/berth_sim/main.py` builds with
+`--strict` and no blocker; all ten `.ail` twins hash byte-identically to the base and the codegen
+pins are unchanged.
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for

@@ -1958,7 +1958,8 @@ def _literal_chain_attr(node):
 
 
 # names ail_syntax.py lowers as if they were builtins (the import line is dropped): name -> its module
-_IMPLICIT_LIB = {**{n: 'heapq' for n in ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')},
+_IMPLICIT_LIB = {**{n: 'heapq' for n in ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace',
+                                         'nsmallest', 'nlargest')},
                  **{n: 'bisect' for n in ('bisect_left', 'bisect_right', 'bisect', 'insort', 'insort_left',
                                           'insort_right')}}
 
