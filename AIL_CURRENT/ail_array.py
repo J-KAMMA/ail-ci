@@ -771,7 +771,8 @@ def dot(a, b, acc=None, order=None):
 
 
 def matmul(a, b):
-    """Matrix product of two 2-D f64 arrays. Output element (i, j) is `dot(a[i], b[:, j])` bit for bit: the products
+    """Matrix product of two 2-D f64, f32 or int32 arrays (int32: exact, OverflowError when a result leaves int32).
+    Output element (i, j) is `dot(a[i], b[:, j])` bit for bit: the products
     r(a[i,k] * b[k,j]) are added in the fixed order of design 3.5 along k (16 lanes, blocks of 1024, tree), so every
     element has one order whatever the loop nest, the SIMD width or the device. K = 0 gives +0.0."""
     if not isinstance(a, Array) or not isinstance(b, Array):
@@ -781,8 +782,9 @@ def matmul(a, b):
     if a._dt is not b._dt:
         raise TypeError('ail_array: %s matmul %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
                         % (a._dt, b._dt, b._dt, a._dt))
-    if a._dt is not f64:
-        raise TypeError('ail_array.matmul(): only f64 arrays are built in this version, not %s' % a._dt)
+    dt = a._dt
+    if dt not in (f64, f32, int32):
+        raise TypeError('ail_array.matmul(): only f64, f32 and int32 arrays are built in this version, not %s' % dt)
     m, k = a._sh
     k2, n = b._sh
     if k != k2:
@@ -793,8 +795,18 @@ def matmul(a, b):
     for i in range(m):
         row = xs[i * k:(i + 1) * k]
         for j in range(n):
-            out.append(_fixed_sum(f64, [row[t] * ys[t * n + j] for t in range(k)]))
-    return Array._of(f64, out, (m, n))
+            if dt is int32:
+                # exact and order-free (design 3.7); a result outside int32 raises at the first output element, row-major
+                total = 0
+                for t in range(k):
+                    total += row[t] * ys[t * n + j]
+                if total < dt.lo or total > dt.hi:
+                    raise OverflowError('int32 matmul overflow at index %d' % (i * n + j))
+                out.append(total)
+            else:
+                # f64 and f32: each product rounded to the dtype, then the fixed order of 3.5 with r_T after every add
+                out.append(_fixed_sum(dt, [_round(dt, row[t] * ys[t * n + j]) for t in range(k)]))
+    return Array._of(dt, out, (m, n))
 
 
 def _extreme(a, name, smaller):
