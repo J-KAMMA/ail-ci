@@ -39,6 +39,7 @@ SOCKS = {
     '_ail_sp_sock_shutdown': ('int', ('int', 'int')),
     '_ail_sp_sock_settimeout': ('int', ('int', 'int')),
     '_ail_sp_sock_gettimeout': ('int', ('int',)),
+    '_ail_sp_sock_addr_count': ('int', ('int',)),
     '_ail_sp_sock_setsockopt': ('int', ('int', 'int', 'int', 'int')),
     '_ail_sp_sock_local_host': ('str', ('int',)),
     '_ail_sp_sock_local_port': ('int', ('int',)),
@@ -141,6 +142,19 @@ def _ail_sock_gettimeout(s: int) -> _AilSockTimeout | None:
     return _AilSockTimeout(float(us) / 1000000.0)
 
 
+def _ail_sock_gettimeout_float(s: int) -> float:
+    us: int = _ail_sp_sock_gettimeout(s)
+    return float(us) / 1000000.0
+
+
+def _ail_sock_unpack(s: int, want: int) -> None:
+    got: int = _ail_sp_sock_addr_count(s)
+    if got > want:
+        raise ValueError("too many values to unpack")
+    if got < want:
+        raise ValueError("not enough values to unpack")
+
+
 def _ail_sock_setsockopt(s: int, level: int, opt: int, value: int) -> None:
     _ail_sp_sock_setsockopt(s, level, opt, value)
 
@@ -186,9 +200,14 @@ def _ail_sock_sendall(s: int, data: bytes) -> None:
 
 def _ail_sock_recv(s: int, n: int) -> bytes:
     return _ail_sp_sock_recvb(s, n)
+
+
+def _ail_sock_recv_len(s: int, n: int) -> int:
+    data: bytes = _ail_sp_sock_recvb(s, n)
+    return len(data)
 '''
 
-_IO_GENERAL = '''
+_IO_GENERAL_BYTES = '''
 def _ail_sock_bytes_text(data: bytes) -> str:
     return data.decode('latin-1')
 
@@ -208,6 +227,31 @@ def _ail_sock_sendall(s: int, data: bytes) -> None:
 
 def _ail_sock_recv(s: int, n: int) -> bytes:
     return _ail_sock_text_bytes(_ail_sp_sock_recv(s, n))
+
+
+def _ail_sock_recv_len(s: int, n: int) -> int:
+    data: bytes = _ail_sock_text_bytes(_ail_sp_sock_recv(s, n))
+    return len(data)
+'''
+
+# A general-path program with no bytes literal has no bytes class at all, so the socket prelude
+# carries the payload as the latin-1 text the general path already uses (one char per octet).
+_IO_GENERAL_STR = '''
+def _ail_sock_send(s: int, data: str) -> int:
+    return _ail_sp_sock_send(s, data)
+
+
+def _ail_sock_sendall(s: int, data: str) -> None:
+    _ail_sp_sock_sendall(s, data)
+
+
+def _ail_sock_recv(s: int, n: int) -> str:
+    return _ail_sp_sock_recv(s, n)
+
+
+def _ail_sock_recv_len(s: int, n: int) -> int:
+    data: str = _ail_sp_sock_recv(s, n)
+    return len(data)
 '''
 
 
@@ -223,6 +267,7 @@ class _Lowerer(ast.NodeTransformer):
         self.used = False
         self.synth = set()
         self.sock_names = set()
+        self.timeout_set = set()
         self.counter = 0
 
     # ---- helpers ---------------------------------------------------------------------------
@@ -306,6 +351,19 @@ class _Lowerer(ast.NodeTransformer):
                 return inner + '.' + node.attr
         return None
 
+    def is_sock(self, node):
+        """Whether `node` is a socket this pass created (so `.close()` etc. are ours)."""
+        if isinstance(node, ast.Name):
+            return node.id in self.sock_names
+        if isinstance(node, ast.Call):
+            return self.qual(node.func) in _FUNCS
+        return False
+
+    def name_read(self, name):
+        """Whether `name` is read anywhere: an unused accept() peer name need not be built."""
+        return any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+                   for n in ast.walk(self.tree))
+
     # ---- addresses -------------------------------------------------------------------------
     def address(self, node):
         if isinstance(node, ast.Tuple) and len(node.elts) == 2:
@@ -330,6 +388,15 @@ class _Lowerer(ast.NodeTransformer):
     # ---- calls -----------------------------------------------------------------------------
     def visit_Call(self, node):
         name = self.qual(node.func)
+        if isinstance(node.func, ast.Name) and node.func.id == 'len' and 'len' not in self.user_defs \
+                and len(node.args) == 1 and not node.keywords:
+            inner = node.args[0]
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) \
+                    and inner.func.attr == 'recv' and self.is_sock(inner.func.value) \
+                    and len(inner.args) == 1 and not inner.keywords:
+                self.used = True
+                return self.at(self.call('_ail_sock_recv_len', self.visit(inner.func.value),
+                                         self.visit(inner.args[0])), node)
         if name == 'socket.socket':
             self.used = True
             family = node.args[0] if len(node.args) > 0 else self.keyword(node, 'family', self.C(2))
@@ -382,11 +449,15 @@ class _Lowerer(ast.NodeTransformer):
         if isinstance(node.func, ast.Attribute):
             method = node.func.attr
             if method in _REFUSED_METHODS:
+                if not self.is_sock(node.func.value):
+                    return self.generic_visit(node)
                 self.refuse(node, 'socket.%s() is refused by name.\n  write instead: %s'
                             % (method, _REFUSED_METHODS[method]))
             if method in ('connect', 'bind', 'listen', 'send', 'sendall', 'recv', 'close', 'shutdown',
                           'settimeout', 'gettimeout', 'setsockopt', 'accept', 'getsockname', 'getpeername',
                           'recv_into'):
+                if not self.is_sock(node.func.value):
+                    return self.generic_visit(node)
                 return self.lower_method(node, method)
         return self.generic_visit(node)
 
@@ -416,6 +487,9 @@ class _Lowerer(ast.NodeTransformer):
         if method in ('close', 'gettimeout'):
             if args or node.keywords:
                 self.refuse(node, '%s() takes no arguments' % method)
+            if method == 'gettimeout' and isinstance(node.func.value, ast.Name) \
+                    and node.func.value.id in self.timeout_set:
+                return self.at(self.call('_ail_sock_gettimeout_float', receiver), node)
             return self.at(self.call('_ail_sock_' + method, receiver), node)
         if method == 'shutdown':
             if len(args) != 1 or node.keywords:
@@ -425,6 +499,11 @@ class _Lowerer(ast.NodeTransformer):
             if len(args) != 1 or node.keywords:
                 self.refuse(node, 'settimeout() takes one value')
             value = args[0]
+            if isinstance(node.func.value, ast.Name):
+                if isinstance(value, ast.Constant) and value.value is None:
+                    self.timeout_set.discard(node.func.value.id)
+                else:
+                    self.timeout_set.add(node.func.value.id)
             if isinstance(value, ast.Constant) and value.value is None:
                 return self.at(self.call('_ail_sock_settimeout_none', receiver), node)
             return self.at(self.call('_ail_sock_settimeout', receiver, self.visit(value)), node)
@@ -440,8 +519,12 @@ class _Lowerer(ast.NodeTransformer):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
                 and isinstance(node.value, ast.Call) and self.qual(node.value.func) in _FUNCS:
             self.sock_names.add(node.targets[0].id)
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                and isinstance(node.value, ast.Name) and node.value.id in self.sock_names:
+            self.sock_names.add(node.targets[0].id)
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Tuple) \
-                and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
+                and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) \
+                and self.is_sock(node.value.func.value):
             method = node.value.func.attr
             target = node.targets[0]
             widths = (2, 4) if method in ('getsockname', 'getpeername') else (2,)
@@ -461,12 +544,17 @@ class _Lowerer(ast.NodeTransformer):
                     else:
                         peer = self.at(self.call('_ail_sock_peer', conn), node)
                     second = ast.Assign(targets=[right], value=peer)
-                    return [self.at(first, node), self.at(second, node)]
+                    out = [self.at(first, node)]
+                    if self.name_read(right.id):
+                        out.append(self.at(second, node))
+                    return out
                 stem = 'local' if method == 'getsockname' else 'peer'
+                check = ast.Expr(value=self.at(self.call('_ail_sock_unpack', copy.deepcopy(receiver),
+                                                         self.C(len(target.elts))), node))
                 first = ast.Assign(targets=[left], value=self.at(self.call('_ail_sp_sock_' + stem + '_host', receiver), node))
                 second = ast.Assign(targets=[right], value=self.at(
                     self.call('_ail_sp_sock_' + stem + '_port', copy.deepcopy(receiver)), node))
-                out = [self.at(first, node), self.at(second, node)]
+                out = [self.at(check, node), self.at(first, node), self.at(second, node)]
                 if len(target.elts) == 4:          # CPython's AF_INET6 address: flowinfo and scope_id are 0 here
                     for extra in target.elts[2:]:
                         out.append(self.at(ast.Assign(targets=[extra], value=self.C(0)), node))
@@ -548,7 +636,13 @@ class _Lowerer(ast.NodeTransformer):
         import stdlib5
         roots = {n.id for n in ast.walk(self.tree) if isinstance(n, ast.Name) and n.id.startswith('_ail_sock_')}
         statements = []
-        prelude = _PRELUDE.replace('#SPLICE#', _IO_GENERAL if self.general else _IO_TYPED)
+        if not self.general:
+            io = _IO_TYPED
+        elif any(isinstance(n, ast.FunctionDef) and n.name == '_ail_mkb' for n in ast.walk(self.tree)):
+            io = _IO_GENERAL_BYTES
+        else:
+            io = _IO_GENERAL_STR
+        prelude = _PRELUDE.replace('#SPLICE#', io)
         source = stdlib5.shake(prelude, roots)
         parsed = ast.parse(filelower._Lowerer.surface(source) if self.general else source)
         for each in ast.walk(parsed):

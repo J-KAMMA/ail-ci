@@ -21,8 +21,8 @@ with open(os.path.join(HERE, 'ailsock_core.h'), 'r', encoding='utf-8') as _f:
 
 # exception codes reserved for this module; the DIE block gains these names only in a socket program
 SOCK_CODES = {'ConnectionRefusedError': 32, 'ConnectionResetError': 33,
-              'BrokenPipeError': 34, 'TimeoutError': 35}
-LAST_CODE = 35
+              'BrokenPipeError': 34, 'TimeoutError': 35, 'BlockingIOError': 36}
+LAST_CODE = 36
 
 TYPED = r'''
 /* ---- ffsock1 typed adapters: the socket primitives of socklib.SOCKS over ailsock_core.h ---- */
@@ -30,7 +30,18 @@ TYPED = r'''
 #define AIL_EXC_CONNRESET 33
 #define AIL_EXC_BROKENPIPE 34
 #define AIL_EXC_TIMEOUT 35
+#define AIL_EXC_BLOCKING 36
 static void ailt_sockraise(void) {
+    if (ailsk_raisecode == 10) {
+        ail_raise_value_adopt(ail_exception_new(10, (const uint8_t *)ailf_e.msg, (int64_t)strlen(ailf_e.msg), 1));
+    }
+    if (ailsk_raisecode == 36) {
+        int err = ailf_e.err ? ailf_e.err : EAGAIN;
+        const char *why = strerror(err);
+        ail_exception *value = ail_exception_new_os(err, (ail_str){(const uint8_t *)why, (int64_t)strlen(why), 0});
+        value->code = AIL_EXC_BLOCKING;
+        ail_raise_value_adopt(value);
+    }
     if (ailsk_timedout) {
         static const char m[] = "timed out";
         ail_raise_value_adopt(ail_exception_new(AIL_EXC_TIMEOUT, (const uint8_t *)m, (int64_t)sizeof m - 1, 1));
@@ -59,6 +70,7 @@ static int64_t ailt_sp_sock_close(int64_t h) { AILT_SOCKCHECK(ailsk_close(h)); r
 static int64_t ailt_sp_sock_shutdown(int64_t h, int64_t how) { AILT_SOCKCHECK(ailsk_shutdown(h, how)); return 0; }
 static int64_t ailt_sp_sock_settimeout(int64_t h, int64_t us) { AILT_SOCKCHECK(ailsk_settimeout(h, us)); return 0; }
 static int64_t ailt_sp_sock_gettimeout(int64_t h) { int64_t us = 0; if (ailsk_gettimeout(h, &us) < 0) ailt_sockraise(); return us; }
+static int64_t ailt_sp_sock_addr_count(int64_t h) { int64_t r = ailsk_addr_count(h); if (r < 0) ailt_sockraise(); return r; }
 static int64_t ailt_sp_sock_setsockopt(int64_t h, int64_t level, int64_t opt, int64_t value) { AILT_SOCKCHECK(ailsk_setsockopt(h, level, opt, value)); return 0; }
 static ail_str ailt_sp_sock_recv(ail_sarena *A, int64_t h, int64_t n) {
     ailf_buf b = {0}; int64_t r = ailsk_recv_text(h, n, &b);
@@ -122,6 +134,8 @@ static ail_str ailt_sp_sock_gethostbyname(ail_sarena *A, ail_str name) {
 GENERAL_C = r'''
 /* ---- ffsock1 general adapters: the socket primitives of socklib.SOCKS over ailsock_core.h ---- */
 static ail_st ailo_sockfail(ail_ctx *cx) {
+    if (ailsk_raisecode == 10) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, ailf_e.msg);
+    if (ailsk_raisecode == 36) return ail_raise_oserror(cx, ailf_e.err ? ailf_e.err : EAGAIN);
     if (ailsk_timedout) return ail_raise_c(cx, AIL_B_TIMEOUTERROR, "timed out");
     return ailo_fail(cx);
 }
@@ -185,6 +199,11 @@ static ail_st ailo_sp_sock_gettimeout(ail_ctx *cx, ail_obj *out, ail_obj a0) {
     int64_t i0 = 0; ail_st st = ailo_int_arg(cx, a0, &i0); if (st != AIL_OK) return st;
     int64_t us = 0; if (ailsk_gettimeout(i0, &us) < 0) return ailo_sockfail(cx);
     *out = ail_box_int(us); return AIL_OK;
+}
+static ail_st ailo_sp_sock_addr_count(ail_ctx *cx, ail_obj *out, ail_obj a0) {
+    int64_t i0 = 0; ail_st st = ailo_int_arg(cx, a0, &i0); if (st != AIL_OK) return st;
+    int64_t r = ailsk_addr_count(i0); if (r < 0) return ailo_sockfail(cx);
+    *out = ail_box_int(r); return AIL_OK;
 }
 static ail_st ailo_sp_sock_setsockopt(ail_ctx *cx, ail_obj *out, ail_obj a0, ail_obj a1, ail_obj a2, ail_obj a3) {
     int64_t i0 = 0, i1 = 0, i2 = 0, i3 = 0; ail_st st;
@@ -277,7 +296,8 @@ def patch_die(text):
         # user exception classes already occupy 32..: refuse rather than overwrite them
         raise AssertionError('socket exceptions and user exception classes share codes')
     names += [''] * (32 - len(names))
-    names += [n for n in ('ConnectionRefusedError', 'ConnectionResetError', 'BrokenPipeError', 'TimeoutError')]
+    names += [n for n in ('ConnectionRefusedError', 'ConnectionResetError', 'BrokenPipeError',
+                          'TimeoutError', 'BlockingIOError')]
     text = text[:found.start()] + found.group(1) + ', '.join('"%s"' % n for n in names) + found.group(3) + text[found.end():]
     for old, new in ((r'return code >= 1 && code <= \d+ \? names\[code\]',
                       'return code >= 1 && code <= %d ? names[code]' % LAST_CODE),

@@ -39,6 +39,7 @@ typedef struct {
     int domain;
     int listener;
     int write_closed;
+    int64_t gen;                 /* handle generation: a closed slot never aliases a new socket */
     int64_t timeout_us;          /* -1 blocking, >= 0 microseconds */
     char lhost[AILSK_HOST];
     int lport;
@@ -48,27 +49,57 @@ typedef struct {
 
 static ailsk_sock ailsk_table[AILSK_MAX];
 static int ailsk_timedout;
+static int ailsk_raisecode;      /* 0: errno mapping; 10 OverflowError; 36 BlockingIOError */
 
 static int ailsk_fail(int err) {
     ailsk_timedout = 0;
+    ailsk_raisecode = 0;
     return ailf_oserr(err, NULL, 0);
 }
 static int ailsk_failmsg(const char *text) {
     ailsk_timedout = 0;
+    ailsk_raisecode = 0;
     return ailf_fail(AILF_E_VALUE, text);
+}
+static int ailsk_overflow(const char *text) {
+    ailsk_failmsg(text);
+    ailsk_raisecode = 10;
+    return -1;
+}
+static int ailsk_blocking(int err) {
+    ailsk_fail(err);
+    ailsk_raisecode = 36;
+    return -1;
 }
 static void ailsk_timeout(void) {
     ailsk_timedout = 1;
+    ailsk_raisecode = 0;
     ailf_e.kind = AILF_E_OS;
     ailf_e.err = 0;
     ailf_e.has_fn1 = ailf_e.has_fn2 = 0;
     snprintf(ailf_e.msg, sizeof ailf_e.msg, "timed out");
 }
 static ailsk_sock *ailsk_get(int64_t h) {
-    if (h < 1 || h >= AILSK_MAX || !ailsk_table[h].used) { ailsk_fail(EBADF); return NULL; }
-    return &ailsk_table[h];
+    int64_t slot = h % AILSK_MAX;
+    if (h < 1 || slot < 1 || slot >= AILSK_MAX) { ailsk_fail(EBADF); return NULL; }
+    ailsk_sock *S = &ailsk_table[slot];
+    if (!S->used || S->gen != h / AILSK_MAX) { ailsk_fail(EBADF); return NULL; }
+    return S;
 }
-static int64_t ailsk_slot(ailsk_sock *S) { return (int64_t)(S - ailsk_table); }
+static int64_t ailsk_alloc(int fd, int domain, int64_t timeout_us) {
+    for (int i = 1; i < AILSK_MAX; i++) {
+        if (ailsk_table[i].used) continue;
+        int64_t gen = ailsk_table[i].gen + 1;
+        memset(&ailsk_table[i], 0, sizeof ailsk_table[i]);
+        ailsk_table[i].used = 1;
+        ailsk_table[i].gen = gen;
+        ailsk_table[i].fd = fd;
+        ailsk_table[i].domain = domain;
+        ailsk_table[i].timeout_us = timeout_us;
+        return i + gen * AILSK_MAX;
+    }
+    return -1;
+}
 
 static void ailsk_set_nonblock(int fd) {
     int flags;
@@ -115,7 +146,10 @@ static int ailsk_wait(ailsk_sock *S, short events) {
             if (errno == EINTR) continue;
             return ailsk_fail(errno);
         }
-        if (r == 0) { ailsk_timeout(); return -1; }
+        if (r == 0) {
+            if (S->timeout_us == 0) return ailsk_blocking(EAGAIN);
+            ailsk_timeout(); return -1;
+        }
         if (p.revents & POLLNVAL) return ailsk_fail(EBADF);
         if (p.revents & (events | POLLHUP | POLLERR)) return 0;
         return ailsk_fail(EIO);
@@ -128,17 +162,9 @@ static int64_t ailsk_new(int64_t domain, int64_t type) {
     int fd = socket((int)domain, SOCK_STREAM, 0);
     if (fd < 0) return ailsk_fail(errno);
     ailsk_set_nonblock(fd);
-    for (int i = 1; i < AILSK_MAX; i++) {
-        if (ailsk_table[i].used) continue;
-        memset(&ailsk_table[i], 0, sizeof ailsk_table[i]);
-        ailsk_table[i].used = 1;
-        ailsk_table[i].fd = fd;
-        ailsk_table[i].domain = (int)domain;
-        ailsk_table[i].timeout_us = -1;
-        return i;
-    }
-    close(fd);
-    return ailsk_failmsg("too many sockets open");
+    int64_t h = ailsk_alloc(fd, (int)domain, -1);
+    if (h < 0) { close(fd); return ailsk_failmsg("too many sockets open"); }
+    return h;
 }
 
 static int ailsk_hostname(const uint8_t *host, int64_t n, char *out, int cap) {
@@ -152,7 +178,7 @@ static int ailsk_hostname(const uint8_t *host, int64_t n, char *out, int cap) {
 static int64_t ailsk_bind(int64_t h, const uint8_t *host, int64_t hn, int64_t port) {
     ailsk_sock *S = ailsk_get(h);
     if (!S) return -1;
-    if (port < 0 || port > 65535) return ailsk_failmsg("port must be 0-65535");
+    if (port < 0 || port > 65535) return ailsk_overflow("bind(): port must be 0-65535");
     char name[AILSK_HOST];
     if (ailsk_hostname(host, hn, name, (int)sizeof name) < 0) return -1;
     char service[8]; snprintf(service, sizeof service, "%d", (int)port);
@@ -194,25 +220,17 @@ static int64_t ailsk_accept(int64_t h) {
     do { fd = accept(S->fd, NULL, NULL); } while (fd < 0 && errno == EINTR);
     if (fd < 0) return ailsk_fail(errno);
     ailsk_set_nonblock(fd);
-    for (int i = 1; i < AILSK_MAX; i++) {
-        if (ailsk_table[i].used) continue;
-        memset(&ailsk_table[i], 0, sizeof ailsk_table[i]);
-        ailsk_table[i].used = 1;
-        ailsk_table[i].fd = fd;
-        ailsk_table[i].domain = S->domain;
-        ailsk_table[i].timeout_us = S->timeout_us;
-        ailsk_update_local(&ailsk_table[i]);
-        ailsk_update_peer(&ailsk_table[i]);
-        return i;
-    }
-    close(fd);
-    return ailsk_failmsg("too many sockets open");
+    int64_t nh = ailsk_alloc(fd, S->domain, -1);     /* CPython: an accepted socket is blocking */
+    if (nh < 0) { close(fd); return ailsk_failmsg("too many sockets open"); }
+    ailsk_sock *N = ailsk_get(nh);
+    if (N) { ailsk_update_local(N); ailsk_update_peer(N); }
+    return nh;
 }
 
 static int64_t ailsk_connect(int64_t h, const uint8_t *host, int64_t hn, int64_t port) {
     ailsk_sock *S = ailsk_get(h);
     if (!S) return -1;
-    if (port < 1 || port > 65535) return ailsk_failmsg("port must be 1-65535");
+    if (port < 0 || port > 65535) return ailsk_overflow("connect(): port must be 0-65535");
     char name[AILSK_HOST];
     if (ailsk_hostname(host, hn, name, (int)sizeof name) < 0) return -1;
     if (!hn) return ailsk_failmsg("host must not be empty");
@@ -233,6 +251,12 @@ static int64_t ailsk_connect(int64_t h, const uint8_t *host, int64_t hn, int64_t
         int r;
         do { r = connect(fd, a->ai_addr, a->ai_addrlen); } while (r < 0 && errno == EINTR);
         if (r < 0 && (errno == EINPROGRESS || errno == EALREADY)) {
+            if (S->timeout_us == 0) {
+                saved = EINPROGRESS;
+                if (a != res) close(fd);
+                freeaddrinfo(res);
+                return ailsk_blocking(EINPROGRESS);
+            }
             short ev = POLLOUT;
             int timeout = S->timeout_us < 0 ? -1 : (int)((S->timeout_us + 999) / 1000);
             for (;;) {
@@ -266,8 +290,10 @@ static int64_t ailsk_connect(int64_t h, const uint8_t *host, int64_t hn, int64_t
 }
 
 static int64_t ailsk_close(int64_t h) {
-    ailsk_sock *S = ailsk_get(h);
-    if (!S) return -1;
+    int64_t slot = h % AILSK_MAX;
+    if (h < 1 || slot < 1 || slot >= AILSK_MAX) { ailsk_fail(EBADF); return -1; }
+    ailsk_sock *S = &ailsk_table[slot];
+    if (!S->used || S->gen != h / AILSK_MAX) return 0;   /* close() is idempotent in CPython */
     int r = 0;
     if (S->fd >= 0) r = close(S->fd);
     S->used = 0; S->fd = -1;
@@ -298,6 +324,11 @@ static int64_t ailsk_gettimeout(int64_t h, int64_t *us) {
     if (!S) return -1;
     *us = S->timeout_us;
     return 0;
+}
+static int64_t ailsk_addr_count(int64_t h) {
+    ailsk_sock *S = ailsk_get(h);
+    if (!S) return -1;
+    return S->domain == AF_INET6 ? 4 : 2;
 }
 
 static int64_t ailsk_setsockopt(int64_t h, int64_t level, int64_t opt, int64_t value) {
