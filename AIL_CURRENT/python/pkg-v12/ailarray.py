@@ -11,7 +11,8 @@ is returned as it was written (the same string), so its C does not change. Other
   `ail_array.py` before any C is involved;
 * operators, indexing, slices, `len`, iteration and printing on a value of known array kind become direct calls of those
   functions (typed path, no dispatch); an array whose kind cannot be told where the lowering needs it is refused with
-  file:line and what to write instead; the dtypes f32, f16 and int8 are stage T3 and refused by name.
+  file:line and what to write instead; f32 (stage T3a) is a `_AilTAS` (a list[float] of exactly-f32 values, every op
+  rounded once by `_ail_ta_r32`); the dtypes f16 and int8 are stage T3 and refused by name.
 
 A refusal leaves the program as written and adds a `note:` line (the same convention as stdlib5), after which the build
 fails because the program's own `ail_array.py` is not in the subset.
