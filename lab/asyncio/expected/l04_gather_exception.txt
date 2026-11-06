@@ -1,0 +1,5 @@
+ok
+bad
+caught boom
+done
+exit: 0

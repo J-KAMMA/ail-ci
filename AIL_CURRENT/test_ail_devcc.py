@@ -22,6 +22,11 @@ devcc = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(devcc)
 
 TCC = shutil.which('tcc')
+TCC_VERSION = devcc.tcc_version(TCC) if TCC else None
+TCC_SUPPORTED = TCC_VERSION is not None and TCC_VERSION >= devcc._TCC_MIN_VERSION
+TCC_LABEL = '.'.join(str(part) for part in TCC_VERSION) if TCC_VERSION else 'unknown'
+VERSION_REFUSAL = (r'^--cc=tcc: tcc %s cannot build this generated C; use tcc 0.9.28 '
+                   r'or later, or build without --cc$' % re.escape(TCC_LABEL))
 
 PROGRAMS = (
     'print(1 + 2 * 3)\n',
@@ -119,6 +124,43 @@ class RewriteTests(unittest.TestCase):
         self.assertRegex(message, r'^--cc=tcc: this program uses __int128 \(line 1 of the generated C\), '
                                   r'which tcc does not build identically to gcc; build without --cc$')
 
+    def test_other_tcc_constructs_refused_by_name(self):
+        for text, construct in (
+                ('unsigned __uint128_t f(void) { return 0; }\n', '__int128'),
+                ('__int128_t f(void) { return 0; }\n', '__int128'),
+                ('double f(double x) { return __builtin_fabs(x); }\n', '__builtin_fabs'),
+                ('int f(double x) { return __builtin_isinf(x); }\n', '__builtin_isinf')):
+            with self.subTest(construct=construct):
+                self.source.write_text(text)
+                with self.assertRaises(devcc.DevCCRefusal) as caught:
+                    devcc.rewrite(['/usr/bin/cc', '-o', str(self.root / 'out'), str(self.source)])
+                self.assertIn('this program uses %s (line 1 ' % construct,
+                              str(caught.exception))
+
+    def fake_version(self, version):
+        tool = self.root / 'tcc'
+        tool.write_text('#!/bin/sh\nif [ "$1" = "-v" ]; then '
+                        'echo "tcc version %s (x86_64 Linux)"; fi\nexit 0\n' % version)
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+        return str(tool)
+
+    def test_old_tcc_refused_by_version(self):
+        self.fake_version('0.9.27')
+        with self.assertRaises(devcc.DevCCRefusal) as caught:
+            devcc.rewrite(['/usr/bin/cc', '-o', str(self.root / 'out'), str(self.source)])
+        self.assertEqual(str(caught.exception),
+                         '--cc=tcc: tcc 0.9.27 cannot build this generated C; use tcc 0.9.28 or '
+                         'later, or build without --cc')
+
+    def test_release_candidate_counts_as_its_version(self):
+        tool = self.fake_version('0.9.28rc 2026-10-16 HEAD@e23dabed')
+        self.assertEqual(devcc.tcc_version(tool), (0, 9, 28))
+        prepared = devcc.rewrite(['/usr/bin/cc', '-o', str(self.root / 'out'), str(self.source)])
+        try:
+            self.assertEqual(prepared[0], tool)
+        finally:
+            devcc.cleanup(prepared)
+
 
 class DefaultBuildTests(unittest.TestCase):
     def setUp(self):
@@ -154,6 +196,21 @@ class BuildTests(DefaultBuildTests):
     def run_program(self, output):
         return subprocess.run([str(output)], capture_output=True, text=True, timeout=120)
 
+    def test_real_tcc_is_supported_or_refused_by_version(self):
+        """The tcc on PATH either builds correctly or is refused by its `tcc -v` name."""
+        build, output = self.compile(PROGRAMS[0], 'real_tcc', '--cc=tcc')
+        if TCC_SUPPORTED:
+            self.assertEqual(build.returncode, 0, build.stderr)
+            gcc_build, gcc_out = self.compile(PROGRAMS[0], 'real_tcc_gcc')
+            self.assertEqual(gcc_build.returncode, 0, gcc_build.stderr)
+            gcc_run, tcc_run = self.run_program(gcc_out), self.run_program(output)
+            self.assertEqual((gcc_run.stdout, gcc_run.stderr, gcc_run.returncode),
+                             (tcc_run.stdout, tcc_run.stderr, tcc_run.returncode))
+        else:
+            self.assertNotEqual(build.returncode, 0)
+            self.assertRegex(build.stderr, VERSION_REFUSAL)
+
+    @unittest.skipUnless(TCC_SUPPORTED, 'tcc 0.9.28 or later is not installed')
     def test_five_programs_match_gcc(self):
         for index, source in enumerate(PROGRAMS):
             with self.subTest(index=index):
@@ -165,6 +222,7 @@ class BuildTests(DefaultBuildTests):
                 self.assertEqual((gcc_run.stdout, gcc_run.stderr, gcc_run.returncode),
                                  (tcc_run.stdout, tcc_run.stderr, tcc_run.returncode))
 
+    @unittest.skipUnless(TCC_SUPPORTED, 'tcc 0.9.28 or later is not installed')
     def test_int128_program_is_refused(self):
         build, _ = self.compile('print(list(range(0, 10, 3)))\n', 'refused', '--cc=tcc')
         self.assertNotEqual(build.returncode, 0)
