@@ -15,7 +15,7 @@ normal `ail` installation.
 | `textDocument/didClose` | Clears the diagnostics for the closed document. |
 | `textDocument/publishDiagnostics` | Diagnostics from the same `ail check` front end that `ail build` uses. |
 | `textDocument/hover` | On a diagnostic: its `write instead:` rewrite. Elsewhere: a function signature, an annotation, a certain literal type, or nothing. |
-| `textDocument/definition` | The binding of the name at the cursor: a local, parameter, function, class, method through `self.m()` (or an instance), or a name imported from another module. Every binding of a name with several assignments is returned; when the target is not certain the answer is `null`. |
+| `textDocument/definition` | The binding of the name at the cursor: a local, parameter, function, class, method through `self.m()` or through a local name bound to a class or an instance of a class in the same file, or a name imported from another module. Every binding of a name with several assignments is returned; when the target is not certain the answer is `null`. |
 
 Diagnostics carry the compiler message and its `write instead:` text. A source that does not load,
 parse or type-check is an **Error**. A program the typed path refuses but the general path builds is

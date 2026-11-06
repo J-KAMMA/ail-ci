@@ -980,11 +980,6 @@ def _module_member_locations(module_path, name, read_text, depth=0):
     return _sites_locations(info["sites"].get(name, []), tree, text, module_path, [tree], read_text, depth + 1)
 
 
-def _module_member_location(module_path, name, read_text, depth=0):
-    found = _module_member_locations(module_path, name, read_text, depth)
-    return found
-
-
 def _sites_locations(sites, container, text, path, chain, read_text, depth=0):
     locations = []
     for site in sites:

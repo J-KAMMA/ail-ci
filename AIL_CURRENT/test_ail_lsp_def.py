@@ -62,10 +62,10 @@ class Client:
         self.process.stdin.write(b"Content-Length: %d\r\n\r\n" % len(data) + data)
         self.process.stdin.flush()
 
-    def request(self, method, params=None):
+    def request(self, method, params=None, timeout=300):
         identifier, self.next_id = self.next_id, self.next_id + 1
         self.send({"id": identifier, "method": method, "params": params or {}})
-        return self.until(lambda message: message.get("id") == identifier)
+        return self.until(lambda message: message.get("id") == identifier, timeout)
 
     def notify(self, method, params=None):
         self.send({"method": method, "params": params or {}})
@@ -91,6 +91,14 @@ class Client:
         return reply.get("result")
 
     def close(self):
+        # Drain the requests already sent (the didOpen notifications run `ail check`, which may still be
+        # writing a temporary sibling) before ending the session, so the server deletes its temp files.
+        if self.process.poll() is None:
+            try:
+                self.request("shutdown", timeout=120)
+                self.notify("exit")
+            except Exception:
+                pass
         try:
             self.process.stdin.close()
         except OSError:
