@@ -409,6 +409,81 @@ file changed; the change is new `lab/robo/` only (README, RESULTS, run.py, progs
 Probes: `bash ~/tools/cmp.sh` on all three programs: the general path and the default build both
 report "same stdout" (3/3 programs x 2 builds). No compiler behaviour changed, so no new
 DIFFERENCES row.
+## 2026-11-06 -- vibe1 review 3 fix: brief now matches the with/yield, dict-view and class-decorator facts (job-vibe1-11070409)
+
+Review-3 fix; no compiler change.
+
+- `AIL_FOR_AI.md` said "a `with` block around a `yield` inside a generator is refused".
+  Probe `withyield_builtin.py` (`with open(...): ... yield`) builds on both g and d, exit 0,
+  same stdout as CPython; only a user context manager is refused (`withyield_user.py`). The
+  brief and refusal list now say "user context manager" and note that builtin `open` works.
+- The brief said `x = d.items()` is fine and omitted the dict-view refusal. Probes:
+  `items_nomut.py` builds, but `items_aftermut.py` / `keys_aftermut.py` / `values_only.py`
+  are refused by name ("a dict view kept in a name ... it is a snapshot") on both builds.
+  The brief now gives the mutation boundary and the rewrite (`list(d.items())`).
+- The brief said a decorator on a class "falls back to the general path" with "the same
+  output". Probe `class_deco.py` builds but runs with exit 1 and `AttributeError: type
+  object 'C' has no attribute 'tag'`: the decorator is dropped. The brief now states that
+  a class decorator is silently dropped and warns against using one. (Pre-existing compiler
+  behaviour; no compiler change in this job.)
+- Probes re-run: `withyield_builtin` g/d same stdout; `withyield_user`, `items_aftermut`,
+  `keys_aftermut`, `values_only` refused by name; `items_nomut` same stdout;
+  `class_deco` known dropped-decorator `AttributeError`.
+- `python3 tools/par_check.py -j 2 test_ail_safetynet test_ail_files
+  test_ail_corpus_findings3`: 3 modules, 0 failed. `tools/update_manifest.py --check`: rc 0.
+
+## 2026-11-06 -- vibe1 review 2 fix: exact refusals in the brief, honest budget flag (job-vibe1-11070147)
+
+Review-2 fix; no compiler change.
+
+- `AIL_FOR_AI.md` claimed generators/`with` all work and that every decorator outside
+  @staticmethod/@property/@lru_cache/@cache is refused. Probes show a `with` (user context
+  manager) around a `yield` is refused by name (`not in the subset: \`with\` around a \`yield\``),
+  while `@classmethod` builds and prints the same as CPython. The brief now names the with/yield
+  refusal and scopes the decorator rule to a `def` (staticmethod/classmethod/property on a method,
+  lru_cache/cache on a top-level function; a class decorator falls back to the general path).
+- `run.py` `pump()` checked the deadline before the combo queue, so a run that finished every
+  combo with `--minutes` set still printed `[budget] stop scheduling` and stored
+  `stopped_early: true`. It now pulls from the queue first and stops only when work remains.
+- Probes re-run (`withyield` user-CM refused; `classmethod_dec`/`property_dec` build and match;
+  `deco.py`/`bigint.py` refused by name). A stubbed pump probe completed its only combo after the
+  deadline and recorded `stopped_early: false`.
+
+## 2026-11-06 -- vibe1 review fix: correct brief, real budget, first run (job-vibe1-11070147)
+
+Review fix for vibe1; no compiler change.
+
+- `AIL_FOR_AI.md` claimed `x = d.items()` and `@property` refuse at compile time. Probes
+  (`dictview.py`, `property_dec.py`, `.agent/cmp.sh`) show both build and match CPython; only
+  `--strict` refuses the dict view. The brief now names the real refusals (an int64
+  constant, a decorator on a def other than @staticmethod/@classmethod/@property on a method
+  or @lru_cache/@cache on a top-level function, multiple inheritance, `with` around a `yield`;
+  see the review-2 entry above) and says the default build falls back to the general path
+  for everything else.
+- `run.py` submitted every combo to the pool up front, so `--minutes` stopped nothing. It now
+  keeps only `--jobs` attempts in flight, stops scheduling at the deadline, and runs seed-outer
+  so a cut run still has complete columns. `results.json` meta is derived from the rows present
+  after a resumed run. A call over `--call-timeout` ends that attempt (gave up), not the run.
+- `run.py` now unlinks the output before an AIL build: `compile -o` refuses to overwrite an
+  existing binary, which made every fix round fail with `error: output already exists`
+  (`echo_pack` was recorded as refused after 5 such rounds; it now builds first try).
+- First real run (`deepseek-v4.1-flash` via `cmd --effort low`, 5 rounds, 300 s/call): seed 0 is
+  complete (11 tasks x 3 languages); seed 1 is partial (python 8/11, rust 1/11, ail 0/11) because
+  the wall-clock budget stopped scheduling. Seed-0 correct: python 9/11, rust 11/11, ail 7/11.
+  Silent-wrong 0 in every column; one loud stop (AIL, `tally_lang`). Every built AIL program took
+  the general path (0 typed, 8 general, 0 refused). `lab/vibe/RESULTS.md` has the tables and the
+  five-line verdict.
+
+## 2026-11-06 -- vibe1: the vibe-coding benchmark harness (job-vibe1-11070015)
+
+New `lab/vibe/`: the same AI writes the ten compare-lab tasks and `csv_rollup` in Python, Rust
+and AIL, and the harness records correct programs, fix rounds, silent-wrong and loud-stop counts
+and loop seconds. `run.py` asks a model CLI for one file, runs the task's public cases, sends the
+compiler/runtime error or first diff back for up to five rounds, then runs the hidden cases; every
+round is in `results.json`. `AIL_FOR_AI.md` (30 lines) is the language note for the AIL column,
+`vibe.yml` is a proposed manual workflow (not under `.github/`).
+
+Nothing in the compiler changed, so the only probes are for the claims in `AIL_FOR_AI.md`.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
