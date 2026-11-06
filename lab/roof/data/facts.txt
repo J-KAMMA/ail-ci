@@ -1,0 +1,4 @@
+# model: AMD EPYC 7763 64-Core Processor
+# sockets/cores/threads: 2/2/1
+# L1d/L2/L3: 64 KiB (2 instances)/1 MiB (2 instances)/32 MiB (1 instance)
+# SIMD: fma,sse4_2,avx,avx2

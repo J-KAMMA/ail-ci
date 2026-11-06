@@ -1,0 +1,4 @@
+4096 entries: min 1.589 ns/load = 5.1 cycles at 3.210 GHz
+65536 entries: min 5.844 ns/load = 18.8 cycles at 3.210 GHz
+1048576 entries: min 17.113 ns/load = 54.9 cycles at 3.210 GHz
+33554432 entries: min 116.520 ns/load = 374.0 cycles at 3.210 GHz
