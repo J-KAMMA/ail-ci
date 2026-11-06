@@ -125,6 +125,17 @@ def _nestfn():
     return _nestfn.module
 
 
+def _noneslots():
+    """python/pkg-v12/noneslots.py (`[None] * n` rows, lowered to a list per slot plus a present bit)."""
+    if not hasattr(_noneslots, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_noneslots", Path(__file__).parent / "python" / "pkg-v12" / "noneslots.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _noneslots.module = module
+    return _noneslots.module
+
+
 def _optlib():
     """python/pkg-v12/optlib.py (scalar `int | None` / `Optional[str]`, lowered onto a flag and a value)."""
     if not hasattr(_optlib, "module"):
@@ -5768,6 +5779,8 @@ def python_surface(source, notes=None, library=False):
         source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:
         source = _collib().rewrite(source, notes)
+    if "[None]" in source or "None]" in source:
+        source = _noneslots().rewrite(source)
     if "None" in source or "Optional" in source or "environ.get" in source:
         source = _optlib().rewrite(source, notes)
     if "(" in source:
