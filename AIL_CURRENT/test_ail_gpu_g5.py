@@ -498,6 +498,55 @@ print(out)
         self.assertIn('math.sqrt', r.stderr)
         self.assertFalse(exe.exists())
 
+    USER_HELPER = '''
+def _ail_gpu_sqrt(x: float) -> float:
+    return x * 2.0
+
+def g(a: list[float]) -> list[float]:
+    r = [0.0] * len(a)
+    # ail: gpu
+    for i in range(len(a)):
+        r[i] = _ail_gpu_sqrt(a[i]) + 1.0
+    return r
+
+def main():
+    print(g([4.0]))
+
+main()
+'''
+
+    USER_HELPER_AND_SQRT = '''
+import math
+
+def _ail_gpu_sqrt(x: float) -> float:
+    return x * 2.0
+
+def g(a: list[float]) -> list[float]:
+    r = [0.0] * len(a)
+    # ail: gpu
+    for i in range(len(a)):
+        r[i] = math.sqrt(a[i])
+    return r
+
+def main():
+    print(g([4.0]))
+
+main()
+'''
+
+    def test_a_user_function_named_like_the_helper_keeps_its_body(self):
+        """A user `_ail_gpu_sqrt` is inlined on every path, never lowered as sqrt: `gpu.prepare` tags the call it
+        builds and names its injected helper so that no user name (function, local, parameter) can shadow it."""
+        for name, text, expected in (('user_helper', self.USER_HELPER, '[9.0]\n'),
+                                     ('user_helper_and_sqrt', self.USER_HELPER_AND_SQRT, '[2.0]\n')):
+            with self.subTest(name):
+                src, exe, _ = self.build(name, text)
+                py = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, text=True)
+                self.assertEqual((py.stdout, py.returncode), (expected, 0), py.stderr)
+                for value in ('0', 'emu', 'force'):
+                    out, rc, err = self.run_prog(exe, AIL_GPU=value)
+                    self.assertEqual((out, rc), (py.stdout, py.returncode), 'AIL_GPU=' + value + '\n' + err)
+
 
 if __name__ == '__main__':
     unittest.main()

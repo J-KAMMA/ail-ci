@@ -488,7 +488,10 @@ kernel.
   module: the helper returns the zero unchanged (`math.sqrt(-0.0)` is `-0.0`), a positive value is the same correctly
   rounded root, NaN is the square root of NaN as CPython gives it, and a negative value raises CPython's
   `ValueError("math domain error")` (never a quiet NaN and never a different exception class, so a caller's
-  `except ValueError` still catches it). The kernel builder lowers that same call to its sqrt op, whose `GK_FDIV` flag
+  `except ValueError` still catches it). The rewrite tags the call it builds, so the kernel builder lowers only that
+  tagged call, never a call matched by name alone; the injected helper also gets a name no user function, local or
+  parameter already uses (`_ail_gpu_sqrt_1`, `_ail_gpu_sqrt_2`, ...), so a user function called `_ail_gpu_sqrt` keeps
+  its own body and is inlined as usual. The kernel lowers the tagged call to its sqrt op, whose `GK_FDIV` flag
   replays a negative operand (and zero, NaN, inf and out-of-range ones) on the CPU. A call to the surface's
   `_ail_math_sqrt` helper cannot be used for this: the typed path refuses it by name and the whole program would fall
   back to the general path. The now-unused `_ail_math_sqrt` helper the surface adds is dropped, or it would have the

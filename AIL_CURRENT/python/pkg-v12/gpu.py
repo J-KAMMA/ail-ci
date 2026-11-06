@@ -678,7 +678,7 @@ class Builder:
                 return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
             raise self.fail(node, 'math.%s has no exact GPU form (CPython uses the C library\'s result)' % fn,
                             "drop '# ail: gpu' (the loop runs on the CPU) or move the math.%s call out of the loop" % fn)
-        if n == GPU_SQRT:                             # stage G5: the helper math.sqrt was lowered to
+        if getattr(node, GPU_SQRT_CALL, False):       # stage G5: the helper math.sqrt was lowered to
             if len(node.args) != 1:
                 raise self.fail(node, 'math.sqrt() takes one argument')
             a = self.ex(node.args[0], frame)
@@ -816,13 +816,39 @@ def _half_exponent(node):
 
 
 GPU_SQRT = '_ail_gpu_sqrt'           # the typed helper math.sqrt is lowered to (see _SqrtRewrite)
-GPU_SQRT_SOURCE = '''def _ail_gpu_sqrt(x: float) -> float:
+GPU_SQRT_CALL = '_ail_gpu_sqrt_call'  # marks the call _SqrtRewrite built, so a user function of any name is inlined
+GPU_SQRT_SOURCE = '''def %s(x: float) -> float:
     if x < 0.0:
         raise ValueError("math domain error")
     if x == 0.0:
         return x
     return x ** 0.5
 '''
+
+
+def fresh_helper_name(tree):
+    """A top-level name for the sqrt helper that no name in the program binds or reads.
+
+    `prepare` injects the helper, so a user function (or local) called `_ail_gpu_sqrt` must not shadow it: a collision
+    would silently run the user's function on the device path and the helper (or the other way round) on the CPU path.
+    The kernel builder lowers only the tagged call `_SqrtRewrite` builds, never a call by name alone."""
+    used = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name):
+            used.add(n.id)
+        elif isinstance(n, ast.arg):
+            used.add(n.arg)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            used.add(n.name)
+        elif isinstance(n, ast.alias):
+            used.add(n.asname or n.name.split('.')[0])
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            used.add(n.name)
+    name, i = GPU_SQRT, 0
+    while name in used:
+        i += 1
+        name = '%s_%d' % (GPU_SQRT, i)
+    return name
 
 
 class _SqrtRewrite(ast.NodeTransformer):
@@ -836,7 +862,8 @@ class _SqrtRewrite(ast.NodeTransformer):
     caller's `except ValueError` still catches it.  The kernel builder lowers the same call to its sqrt op, whose flag
     sends a negative operand to the CPU replay (and every other guarded case with it)."""
 
-    def __init__(self):
+    def __init__(self, helper=GPU_SQRT):
+        self.helper = helper
         self.used = False
 
     @staticmethod
@@ -856,7 +883,8 @@ class _SqrtRewrite(ast.NodeTransformer):
         def as_float():
             return ast.Call(func=ast.Name(id='float', ctx=ast.Load()), args=[x], keywords=[])
 
-        out = ast.Call(func=ast.Name(id=GPU_SQRT, ctx=ast.Load()), args=[as_float()], keywords=[])
+        out = ast.Call(func=ast.Name(id=self.helper, ctx=ast.Load()), args=[as_float()], keywords=[])
+        out.__dict__[GPU_SQRT_CALL] = True
         self.used = True
         return ast.copy_location(out, node)
 
@@ -1109,20 +1137,20 @@ def prepare(tree, text):
     tagged = [n for n in ast.walk(tree) if isinstance(n, ast.stmt) and getattr(n, '_ail_gpu', False)]
     if not tagged:
         return 0
-    rewriter = _SqrtRewrite()                # math.sqrt has no typed form: lower it to a call gpu.py defines
+    helper = fresh_helper_name(tree)         # never a name the program already binds or reads
+    rewriter = _SqrtRewrite(helper)          # math.sqrt has no typed form: lower it to a call gpu.py defines
     for s in tagged:
         rewriter.visit(s)
         ast.fix_missing_locations(s)
-    if rewriter.used and not any(isinstance(n, ast.FunctionDef) and n.name == GPU_SQRT
-                                 for n in tree.body):
+    if rewriter.used:
         # a plain typed function (the typed path refuses a call to the surface's `_ail_math_*` helpers):
-        # the kernel builder lowers this name to its sqrt op, and the C text raises CPython's ValueError
+        # the kernel builder lowers the tagged call to its sqrt op, and the C text raises CPython's ValueError
         i = 0
         while i < len(tree.body) and (isinstance(tree.body[i], (ast.Import, ast.ImportFrom))
                                       or (i == 0 and isinstance(tree.body[i], ast.Expr)
                                           and isinstance(tree.body[i].value, ast.Constant))):
             i += 1
-        tree.body.insert(i, ast.parse(GPU_SQRT_SOURCE).body[0])
+        tree.body.insert(i, ast.parse(GPU_SQRT_SOURCE % helper).body[0])
         ast.fix_missing_locations(tree)
     # the surface adds a `_ail_math_sqrt` helper for the general path; with every call rewritten it is dead code that
     # would keep the whole program off the typed path (and so off the GPU), so drop it when nothing calls it any more
