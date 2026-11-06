@@ -175,6 +175,24 @@ them by name (imports/tuples outside the subset), as expected for these Python t
 tests on the final commit (`par_check -j 2`): `test_ail_docs_site`, `test_ail_files`,
 `test_ail_corpus_findings3` and `test_ail_safetynet` pass; `tools/update_manifest.py --check` is
 clean.
+## 2026-11-06 -- rbffice1: re-apply the icefuzz compiler fuzzer (job-rbffice1-11061925)
+
+Re-applied the accepted `ffice1` change (`3d6cded0`..`job-ffice1-11061532`) on this tree. The
+`.github/workflows/agent-worker.yml` part was already identical here (the `agent`/`L`/Claude Code
+token inputs are gone), so only the new `lab/icefuzz` tool was missing and was taken from the
+accepted branch unchanged:
+
+- `lab/icefuzz/mutate.py`: seeded AST mutator over the fast stdlib/compare/limits corpus; a
+  candidate that does not parse and exit 0 in CPython within 5 s is discarded.
+- `lab/icefuzz/run.py`: builds each mutant with the default AIL build under a 1.5 GB address-space
+  and 60 s limit, classifies matches/differences/refusals/internal errors, stops at the first
+  silent difference, and minimises one reproducer per group.
+- `lab/icefuzz/RESULTS.md`, `lab/icefuzz/crashes/`: the 1745-mutant run, the seed-1744
+  `NotImplemented` silent difference, and the `name_ref` internal-error reproducer.
+
+No compiler or runtime file changed. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` leaves the pins unchanged because only files outside `AIL_CURRENT`
+were added.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
