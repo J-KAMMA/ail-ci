@@ -1533,6 +1533,10 @@ class Emitter(TextEmitter):
         if op == 'list.rt':
             entry = rtc.LIST_ENTRIES[ins.attrs['callee']]
             self.parts.update(entry['parts'])
+            if ins.attrs['callee'] == 'str_split_ws':
+                # `f = line.split()` in a loop: the destination's spine is about to be replaced,
+                # so hand it to the split to fill again instead of free-then-allocate per line.
+                return self.line(depth, 'ail_str_split_ws_into(%s, %s);' % (o[0], o[1]))
             self.count += 1
             r = 'ir%d' % self.count
             return self.line(depth, '{ ail_slist %s = %s; ail_slist_free(%s); *(%s) = %s; }'
