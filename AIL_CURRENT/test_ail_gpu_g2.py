@@ -39,6 +39,7 @@ import unittest
 from pathlib import Path
 
 from test_ail_gpu_smoke import *
+from test_ail_gpu_g5 import *   # stage G5 (correctly rounded `/` and sqrt): the `gpu (lavapipe)` job runs it now
 
 ROOT = Path(__file__).resolve().parent
 PKG = ROOT / 'python' / 'pkg-v12'

@@ -36,9 +36,11 @@ import struct
 
 INT64_MIN, INT64_MAX = -(1 << 63), (1 << 63) - 1
 
-GK_INDEX, GK_ZERODIV, GK_OVERFLOW, GK_DENORM, GK_NAN, GK_RANGE = 1, 2, 4, 8, 16, 32
+GK_INDEX, GK_ZERODIV, GK_OVERFLOW, GK_DENORM, GK_NAN, GK_RANGE, GK_FDIV = 1, 2, 4, 8, 16, 32, 64
 LOCAL_SIZE = 64                 # invocations per workgroup (x); the grid is 2-D when the count needs it
 TINY_EXP = -1000                # GPU.md 3.2: |x| < 2**-1000 (nonzero) is a denormal-guard hit
+G5_LIM_EXP = 480                # GPU.md G5: `/` and sqrt are exact inside [2**-480, 2**480]; outside -> flag + replay
+G5_TINY, G5_BIG = 2.0 ** -G5_LIM_EXP, 2.0 ** G5_LIM_EXP
 MAX_STORAGE_BINDINGS = 3        # params, flags, result come before the lists
 
 
@@ -55,11 +57,11 @@ OP = dict(
     TypePointer=32, TypeFunction=33, ConstantTrue=41, ConstantFalse=42, Constant=43, Function=54, FunctionEnd=56,
     Variable=59, Load=61, Store=62, AccessChain=65, Decorate=71, MemberDecorate=72, CompositeExtract=81,
     ConvertFToS=110, ConvertSToF=111, UConvert=113, Bitcast=124, SNegate=126, FNegate=127, IAdd=128, FAdd=129,
-    ISub=130, FSub=131, IMul=132, FMul=133, SDiv=135, SRem=138, IsNan=156, IsInf=157, LogicalNotEqual=165, LogicalOr=166, LogicalAnd=167,
+    ISub=130, FSub=131, IMul=132, FMul=133, UDiv=134, SDiv=135, SRem=138, IsNan=156, IsInf=157, LogicalNotEqual=165, LogicalOr=166, LogicalAnd=167,
     LogicalNot=168, Select=169, IEqual=170, INotEqual=171, UGreaterThan=172, SGreaterThan=173, UGreaterThanEqual=174,
     SGreaterThanEqual=175, ULessThan=176, SLessThan=177, ULessThanEqual=178, SLessThanEqual=179, FOrdEqual=180,
     FUnordEqual=181, FOrdNotEqual=182, FUnordNotEqual=183, FOrdLessThan=184, FOrdGreaterThan=186,
-    FOrdLessThanEqual=188, FOrdGreaterThanEqual=190, ShiftRightLogical=194, BitwiseOr=197, BitwiseXor=198,
+    FOrdLessThanEqual=188, FOrdGreaterThanEqual=190, ShiftRightLogical=194, ShiftLeftLogical=196, BitwiseOr=197, BitwiseXor=198,
     BitwiseAnd=199, AtomicOr=241, Phi=245, LoopMerge=246, SelectionMerge=247, Label=248, Branch=249,
     BranchConditional=250, Return=253,
 )
@@ -67,7 +69,7 @@ CAP = dict(Shader=1, Float64=10, Int64=11, RoundingModeRTE=4467, SignedZeroInfNa
 DEC = dict(Block=2, ArrayStride=6, BuiltIn=11, NoContraction=42, FPRoundingMode=39, NonWritable=24, Binding=33,
            DescriptorSet=34, Offset=35)
 SC = dict(Input=1, Function=7, StorageBuffer=12)
-GLSL_FLOOR, GLSL_CEIL, GLSL_FABS = 8, 9, 4
+GLSL_FLOOR, GLSL_CEIL, GLSL_FABS, GLSL_SQRT = 8, 9, 4, 31
 
 
 def words_of_string(text):
@@ -414,6 +416,8 @@ class Gen:
     def fbin(self, name, a, b):
         U64 = self.U64
         sign = self.m.c_u64(self.SIGN)
+        if name == 'div':                  # stage G5: correctly rounded binary64 division
+            return self.fdiv(a, b)
         if name == 'mul':
             r = self.contraction(self.op('FMul', self.F, a, b))
             # a product of two normals whose exponents sum below -1000 may be a subnormal the device flushes
@@ -445,6 +449,104 @@ class Gen:
             r = self.zero_sign(r, zbits)
             return self.chk(r)
         raise Unsupported('float op %s' % name)
+
+    # -- stage G5: correctly rounded binary64 `/` and sqrt ---------------------------------------------------------
+    # Both are computed as an approximation plus an exact residual in plain NoContraction binary64 ops (Veltkamp
+    # splitting + Dekker TwoProduct + TwoSum), never OpFDiv, never OpFma:
+    #   q0 = a * r, r = 1/b from an int64 seed and three Newton steps; E = a - q0*b exactly (a double-double);
+    #   q  = fl(q0 + E*r).  E/b is a factor ~2**-105 smaller than the result, so the sum lands on the CPU's answer.
+    # sqrt is the same with s0 = GLSL Sqrt(x) and E = x - s0*s0, corrected by E/(2*s0).
+    def negf(self, x):
+        return self.from_bits(self.op('BitwiseXor', self.U64, self.bits(x), self.m.c_u64(self.SIGN)))
+
+    def split(self, x):
+        """Veltkamp split: hi + lo == x exactly, each with 27 significant bits."""
+        c = self.cf(float(2 ** 27 + 1))
+        t = self.contraction(self.op('FMul', self.F, c, x))
+        hi = self.contraction(self.op('FSub', self.F, t, self.contraction(self.op('FSub', self.F, t, x))))
+        return hi, self.contraction(self.op('FSub', self.F, x, hi))
+
+    def two_product(self, x, y):
+        """Dekker: p + e == x*y exactly (|e| <= ulp(p)/2), in plain NoContraction ops."""
+        F = self.F
+        p = self.contraction(self.op('FMul', F, x, y))
+        xh, xl = self.split(x)
+        yh, yl = self.split(y)
+        e = self.contraction(self.op('FSub', F, self.contraction(self.op('FMul', F, xh, yh)), p))
+        e = self.contraction(self.op('FAdd', F, e, self.contraction(self.op('FMul', F, xh, yl))))
+        e = self.contraction(self.op('FAdd', F, e, self.contraction(self.op('FMul', F, xl, yh))))
+        e = self.contraction(self.op('FAdd', F, e, self.contraction(self.op('FMul', F, xl, yl))))
+        return p, e
+
+    def two_sum(self, a, b):
+        """Branchless TwoSum: s + e == a + b exactly."""
+        F = self.F
+        s = self.contraction(self.op('FAdd', F, a, b))
+        bb = self.contraction(self.op('FSub', F, s, a))
+        e1 = self.contraction(self.op('FSub', F, s, bb))
+        e = self.contraction(self.op('FAdd', F, self.contraction(self.op('FSub', F, a, e1)),
+                                     self.contraction(self.op('FSub', F, b, bb))))
+        return s, e
+
+    def residual(self, a, q, b):
+        """(hi, lo) with hi + lo == a - q*b exactly (a double-double)."""
+        p, pe = self.two_product(q, b)
+        s, se = self.two_sum(a, self.negf(p))
+        t, t2 = self.two_sum(s, self.negf(pe))
+        return t, self.contraction(self.op('FAdd', self.F, t2, se))
+
+    def recip(self, b):
+        """An approximation of 1/b (relative error ~1 ulp) from an unsigned-int64 seed and three Newton steps."""
+        m, I, F, U64 = self.m, self.I, self.F, self.U64
+        bits = self.bits(b)
+        e = self.op('BitwiseAnd', U64, self.op('ShiftRightLogical', U64, bits, m.c_u32(52)), m.c_u64(0x7FF))
+        mant = self.op('BitwiseOr', U64, self.op('BitwiseAnd', U64, bits, m.c_u64((1 << 52) - 1)), m.c_u64(1 << 52))
+        y = self.op('UDiv', U64, m.c_u64(1 << 62), mant)
+        yd = self.op('ConvertSToF', F, self.op('Bitcast', I, y))
+        pbits = self.op('ShiftLeftLogical', U64, self.op('ISub', U64, m.c_u64(2036), e), m.c_u32(52))
+        pbits = self.op('BitwiseOr', U64, pbits, self.op('BitwiseAnd', U64, bits, m.c_u64(self.SIGN)))
+        r = self.contraction(self.op('FMul', F, yd, self.from_bits(pbits)))
+        two = self.cf(2.0)
+        for _ in range(3):
+            t = self.contraction(self.op('FSub', F, two, self.contraction(self.op('FMul', F, b, r))))
+            r = self.contraction(self.op('FMul', F, r, t))
+        return r
+
+    def guard_fdiv(self, x):
+        """gk_fdiv_ok: NaN, zero, inf or a magnitude outside [2**-480, 2**480] sets the flag, then the CPU replays."""
+        m = self.ext(GLSL_FABS, x)
+        bad = self.op('LogicalOr', self.B, self.op('FOrdEqual', self.B, m, self.cf(0.0)),
+                      self.op('LogicalOr', self.B, self.op('FOrdLessThan', self.B, m, self.cf(G5_TINY)),
+                              self.op('FOrdGreaterThan', self.B, m, self.cf(G5_BIG))))
+        self.flag(self.op('LogicalOr', self.B, bad, self.op('IsInf', self.B, x)), GK_FDIV)
+        self.flag(self.op('IsNan', self.B, x), GK_NAN)
+
+    def guard_sqrt(self, x):
+        """gk_fsqrt: a negative argument (CPython raises ValueError) and the range guards set the flag."""
+        self.guard_fdiv(x)
+        self.flag(self.op('FOrdLessThan', self.B, x, self.cf(0.0)), GK_FDIV)
+
+    def fdiv(self, a, b):
+        self.guard_fdiv(a)
+        self.guard_fdiv(b)
+        r = self.recip(b)
+        q0 = self.contraction(self.op('FMul', self.F, a, r))
+        eh, el = self.residual(a, q0, b)
+        c = self.contraction(self.op('FAdd', self.F,
+                                     self.contraction(self.op('FMul', self.F, eh, r)),
+                                     self.contraction(self.op('FMul', self.F, el, r))))
+        return self.chk(self.contraction(self.op('FAdd', self.F, q0, c)))
+
+    def x_sqrt(self, e):
+        x = self.to_f(self.ex(e[2]))
+        self.guard_sqrt(x)
+        s0 = self.ext(GLSL_SQRT, x)
+        eh, el = self.residual(x, s0, s0)
+        r = self.recip(self.contraction(self.op('FAdd', self.F, s0, s0)))
+        c = self.contraction(self.op('FAdd', self.F,
+                                     self.contraction(self.op('FMul', self.F, eh, r)),
+                                     self.contraction(self.op('FMul', self.F, el, r))))
+        return self.chk(self.contraction(self.op('FAdd', self.F, s0, c))), 'f'
 
     def ibin(self, name, a, b):
         I, B = self.I, self.B
@@ -560,6 +662,8 @@ class Gen:
         kind, a = e[2], self.ex(e[3])
         if kind == 'i2f':
             return self.i2f(self.to_i(a)), 'f'
+        if kind == 'i2fchk':                  # `/` and sqrt: int -> double is exact only up to 2**53
+            return self.cvt_exact(a), 'f'
         if kind == 'b2i':
             return self.to_i(a), 'i'
         x = self.to_f(a)

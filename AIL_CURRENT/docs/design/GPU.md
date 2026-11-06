@@ -457,6 +457,42 @@ budget measurement, the cost model constants (G7) and a table of tested drivers.
   parameter is read-only, and `ys = xs` is refused by name), so it is tested at the C level (output over input, same index) and by
   G1's `gk_disjoint` unit tests. **Speed: unmeasured.** Nothing in G2 measures time; lavapipe is a CPU.
 
+### 6.3 G5 as built (2026-11-06)
+
+Code: `python/pkg-v12/gpu.py` (`/`, `sqrt` and `x ** 0.5` in the kernel IR, the emulation helpers), `gpu_spirv.py` (the
+residual algorithm), tests in `test_ail_gpu_g5.py` (bit tests and four whole programs). Both G1 refusals of 3.2 are
+gone: a marked loop with `/` or `math.sqrt` is now a kernel.
+
+- **The algorithm, in both twins.** Division is `q0 = a * r` with `r` an approximation of `1/b` (an unsigned-int64 seed
+  `2**62 / mantissa` and three Newton steps, all plain `NoContraction` `FMul`/`FSub`), then the exact residual
+  `E = a - q0*b` as a double-double (Veltkamp split + Dekker TwoProduct + branchless TwoSum) and `q = fl(q0 + E*r)`.
+  `E/b` is about `2**-105` of the result, so the rounding of the sum is the CPU's. Square root is the same with
+  `s0 = GLSL Sqrt(x)`, `E = x - s0*s0` and a correction by `E/(2*s0)`; the prototype stayed bit-exact over 150k values
+  even with `s0` moved one or two ulp. No `OpFDiv` (136), no `Fma`, no fast-math decoration; every `FAdd/FSub/FMul`
+  carries `NoContraction`. Thirty-odd float ops per division, a few more for sqrt.
+- **Range guard.** Operands (and a sqrt argument) outside `[2**-480, 2**480]`, zero, inf or NaN set `GK_FDIV` (64) and
+  the CPU replays. The bound is chosen so no intermediate (the reciprocal, a product, the residual, the correction) can
+  be subnormal or overflow even at the ends: a result as small as `2**-960` still has its correction term at `2**-1012`,
+  above the smallest normal. A negative sqrt sets the same bit, so the CPU raises as it would on the CPU.
+- **The emulation is the oracle.** `gk_fdiv`/`gk_fsqrt` in `gpu.RUNTIME` apply the same guard set and then use the CPU's
+  own correctly rounded `/` and `sqrt`; the bit test compares the device against an independent implementation rather
+  than against a second copy of the same algorithm.
+- **`math.sqrt` had no typed spelling.** `pyfunc` builds a square root as `x ** 0.5` (ail_fsqrt) and refuses
+  `math.sqrt`, so a marked loop that called it fell to the general path, which never offloads. `gpu.prepare` now
+  rewrites `math.sqrt(x)` inside marked statements to
+  `(float(x) if float(x) == 0.0 else float(x) ** 0.5 if float(x) > 0.0 else 1.0 / 0.0)`: the zero keeps its sign
+  (`math.sqrt(-0.0)` is `-0.0`), a positive value is the same correctly rounded root, and a negative value is a loud
+  `ZeroDivisionError` where CPython raises `ValueError` (either way the value cannot be computed; never a quiet NaN).
+  The unused `_ail_math_sqrt` helper the surface adds is dropped, or the program would stay on the general path.
+  `x ** 0.5` written directly is the same sqrt in the kernel; every other `**` is still refused.
+- **Tests.** `test_ail_gpu_g5.py` (`SpirvG5`, `BitTests`, `Programs`), registered in `tests.d` and in `GPU_JOB`, and
+  imported by `test_ail_gpu_g2.py` so the existing `gpu (lavapipe)` job runs it. `BitTests` compares 131,072 operand
+  pairs per op (random bit patterns, `+-0`, subnormals, the smallest and largest normals, `1 +- ulp`, powers of two,
+  halfway constructions, NaN, inf) bit for bit between the device and the CPU, and requires every element the CPU flags
+  to flag on the device. `Programs` builds four marked programs (`/` on floats, int and mixed `/`, `math.sqrt` of a
+  list, `math.sqrt(a*b) + a/b`) and requires CPython, `AIL_GPU=0` and the device to print the same, with the trace
+  naming the device. Aliasing, lengths and the launch grid are the ones G2 already covers.
+
 ## 7. Colab validation (owner-started, manual)
 
 The owner has a paid Google Colab subscription with NVIDIA GPUs (T4/L4/A100 class, CUDA). It is useful as a second real
