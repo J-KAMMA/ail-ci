@@ -9,7 +9,8 @@ binary is reused by every check:
 3. the same for the binary64 kernel;
 4. with no loader (`AIL_VULKAN_LIB=/nonexistent`) the CPU fallback prints the same and the trace shows the CPU path;
 5. an index error planted at element 3000 is replayed and the program prints what CPython prints;
-6. every emitted module passes `spirv-val` (skipped only when `spirv-val` is missing outside CI).
+6. every emitted module passes `spirv-val` (skipped when `spirv-val` is missing; the gpu job, which sets
+   `AIL_GPU_REQUIRE_DEVICE=1`, fails instead because it installs spirv-tools).
 
 Each check prints one `smoke: <name> ok <ms>` line.  A missing device skips checks 1-3 locally and fails them when
 `AIL_GPU_REQUIRE_DEVICE=1` is set (as the CI job does).
@@ -33,7 +34,6 @@ CLI = ROOT / 'ail_chatgpt.py'
 CC = shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
 REQUIRE_DEVICE = os.environ.get('AIL_GPU_REQUIRE_DEVICE', '') not in ('', '0')
 SPIRV_VAL = os.environ.get('SPIRV_VAL') or shutil.which('spirv-val')
-IN_CI = os.environ.get('CI', '') not in ('', '0', 'false')
 
 SPV_ARRAY = re.compile(r'static const uint32_t (ail_gk\d+_spv)\[(\d+)\] = \{(.*?)\};', re.S)
 
@@ -177,8 +177,8 @@ class GPUSmoke(unittest.TestCase):
     def test_06_spirv_valid(self):
         started = time.perf_counter()
         if not SPIRV_VAL:
-            if IN_CI:
-                self.fail('spirv-val is missing in CI (apt install spirv-tools)')
+            if REQUIRE_DEVICE:
+                self.fail('spirv-val is missing in the GPU job (apt install spirv-tools)')
             raise unittest.SkipTest('spirv-val not installed (apt install spirv-tools)')
         total = 0
         with tempfile.TemporaryDirectory(prefix='ail-gpu-smoke-spv-') as d:
