@@ -22,6 +22,7 @@ import os
 import re
 
 import proclib
+import socklib
 import urllower
 import sqllower
 import hashlower
@@ -150,6 +151,7 @@ def rewrite_tree(tree, Unsupported, general=False):
     import pathlower
     path_need = pathlower.rewrite_tree(tree, Unsupported, general)     # G10: pathlib.Path -> prelude functions + open()
     used_proc = proclib.rewrite_tree(tree, Unsupported, general)      # G8: subprocess -> primitives + prelude
+    used_sock = socklib.rewrite_tree(tree, Unsupported, general)      # ffsock1: socket -> primitives + prelude
     used_url = urllower.rewrite_tree(tree, Unsupported, general)      # G12: urllib -> primitives + prelude
     import filelower
     lowerer = filelower._Lowerer(tree, Unsupported, general)
@@ -157,8 +159,8 @@ def rewrite_tree(tree, Unsupported, general=False):
     if path_need is not None:
         lowerer.need.update(path_need)
     if not lowerer.wants() and path_need is None:
-        ACTIVE = ACTIVE or used_proc or used_url           # subprocess and urllib raise OS-family classes too
-        return used_proc or used_url
+        ACTIVE = ACTIVE or used_proc or used_url or used_sock   # subprocess, urllib and socket raise OS-family classes too
+        return used_proc or used_url or used_sock
     lowerer.run()
     ACTIVE = True
     if os.environ.get('AIL_G7_DUMP'):
