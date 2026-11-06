@@ -1,11 +1,30 @@
+## 2026-11-06 -- pyreach s8 re-apply: restore the row-literal lowering (job-rbrbpyreachs8_rr1-11070526)
+
+Fix for the review of the re-apply. The previous commit replaced `optlib.py` with the accepted
+branch's blob, which dropped this tree's own `[None, [], ...]` literal-list lowering
+(`lower_none_row_lists`, `_NoneRowTransformer`, `_row_helper`, `_repr_helper`, `_check_row_reads`,
+`_check_col_name_uses`, `bind_guarded_locals` and their helpers). That feature is not in the
+accepted diff (the accepted `[None] * n` BinOp rewrite lives in `noneslots.py`; the two shapes are
+disjoint) and `test_ail_optional_locals` failed 5/9 on the previous commit.
+
+Rebuilt `optlib.py` as the base file with only the accepted optlib hunks (one-argument `d.get(k)`
+on a local dict of scalars, `int | None` helper-return inference) applied, restoring the row and
+guarded-local passes and their calls in `rewrite()`. `manifest.d/b2.txt` regenerated.
+`test_ail_optional_locals` (9), `test_ail_pyreach_optret` (9), `test_ail_refusal_messages` (3),
+`test_ail_strict` (13), `test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped) and
+`test_ail_corpus_findings3` (2) pass on the final tree. Probes (`/tmp/probes`, both builds, plus a
+typed-only `AIL_IR=1 AIL_NO_GENERAL=1` build for the row/`[None]*n`/`d.get`/`int|None` programs)
+match CPython stdout and exit status or are refused by name.
+
 ## 2026-11-06 -- pyreach s8 re-applied on the current tree (job-rbrbpyreachs8_rr1-11070526)
 
 Re-applied the accepted `rbpyreachs8` change (`627e3745..job-rbpyreachs8-11060251`, fetched
 anonymously). This tree already carried an earlier `[None] * n` row rewrite inside `optlib.py`;
 the accepted change moves that to the new `python/pkg-v12/noneslots.py` (loaded from
 `ail_syntax.python_surface`) and adds one-argument `d.get(k)` on a local dict of scalars and
-`int | None` helper-return inference to `optlib.py`. The old row code is the only other local
-change to `optlib.py`, so that file was taken from the accepted change; `ail_syntax.py`, the new
+`int | None` helper-return inference to `optlib.py`. The old row code was the only other local
+change to `optlib.py`, and taking the whole file from the accepted change dropped it (the
+accepted diff is additive there); the follow-up entry above restores it. `ail_syntax.py`, the new
 `test_ail_pyreach_optret.py` (with its `tests.d` registration), `noneslots.py` and the two stale
 assertions in `test_ail_refusal_messages.py` / `test_ail_strict.py` applied unchanged.
 `DEVLOG.md` conflicted only at the top: both sides' entries are kept below this one. The three
