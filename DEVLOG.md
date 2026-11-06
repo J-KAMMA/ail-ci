@@ -102,6 +102,20 @@ case, not reachable in a normal build.
 
 Final-state tests (`par_check -j 2`): test_ail_fz236, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 pass; `tools/update_manifest.py --check` is clean.
+## 2026-11-06 -- fdgpu1 suite: the smoke test no longer fails when spirv-val is absent on a non-GPU runner (job-fdgpu1-11061059)
+
+`test_ail_gpu_smoke.test_06_spirv_valid` treated any `CI=true` environment as the GPU job and failed
+when `spirv-val` was not installed. The smoke module is run by the task/CI harness on ordinary
+runners too, which set `CI=true` but install neither lavapipe nor spirv-tools, so both
+`test_ail_gpu_smoke` and `test_ail_gpu_g2` (which imports `GPUSmoke`) went red before any check ran.
+The missing-validator branch now fails only when `AIL_GPU_REQUIRE_DEVICE=1`, the marker the real
+`gpu (lavapipe)` job sets after installing spirv-tools, and skips otherwise, matching
+`test_ail_gpu_g2.Spirv.test_every_kernel_validates`. No compiler or runtime code changed.
+
+`test_ail_gpu_smoke` (6 tests, 2 skipped), `test_ail_gpu_g2` (31 tests, 11 skipped),
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass. With
+`SPIRV_VAL=/bin/true` the validator path still collects and checks every emitted module
+(`smoke: spirv-val ok`), so the skip only covers a genuinely missing tool.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
