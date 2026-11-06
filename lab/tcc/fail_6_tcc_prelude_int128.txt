@@ -5,4 +5,4 @@ construct: __int128 (no 128-bit integer type in tcc)
 first error:
   /tmp/tccquick-4vyx5p_3/measure-chain_relax/patched/program.c.tcc.c:7435: error: '__int128' undeclared
 generated C line 7435: __int128 nn = (__int128)n;
-emitted by: cruntime.py:16995 (range slice `__int128 nn = (__int128)n`), 29811 (ail_rand_floordiv); general slice and pow paths
+emitted by: cruntime.py:3835-3844 (ail__idiv_exact: exactly-rounded int `/`, 55-bit quotient with a sticky remainder), 16995-17010 (range slice `__int128 nn = (__int128)n`), 19127-19143 and 29615-29622 (int-only `pow` modular exponentiation), 29811-29819 (random randrange/floordiv), 31094 (sum reducers); general division, slice and pow paths

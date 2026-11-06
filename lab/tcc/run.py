@@ -206,6 +206,14 @@ def diagnose(stderr, c_files):
                 line_text = found
                 break
     bucket, construct = classify(text.lower(), line_text)
+    # tcc 0.9.27 reports an unknown `__uint128_t` at the line above the declaration; move the
+    # excerpt to the line that actually carries the construct.
+    if match and bucket == 'int128' and line_text and 'int128' not in line_text.lower():
+        for delta in (1, -1, 2, -2):
+            found = c_line(c_file, line_no + delta)
+            if found and 'int128' in found.lower():
+                line_no, line_text = line_no + delta, found
+                break
     return bucket, construct, line_no, line_text
 
 
@@ -472,7 +480,7 @@ CONSTRUCT_EMITTER = {
     'C11 _Thread_local storage class': 'cruntime.py:17347-17348 (ail__rep_stk / ail__rep_n), jsonrt.py:858',
     'unsized struct-array compound literal from runtime values': 'pyfunc.py:24977 (ail_stdout_parts call site; emitter cruntime.py:1542)',
     'unsized struct-array variable declaration from runtime values': 'cruntime.py:6450,6508,6538 (bytes replace/translate)',
-    '__int128 (no 128-bit integer type in tcc)': 'cruntime.py:16995 (range slice `__int128 nn = (__int128)n`), 29811 (ail_rand_floordiv); general slice and pow paths',
+    '__int128 (no 128-bit integer type in tcc)': 'cruntime.py:3835-3844 (ail__idiv_exact: exactly-rounded int `/`, 55-bit quotient with a sticky remainder), 16995-17010 (range slice `__int128 nn = (__int128)n`), 19127-19143 and 29615-29622 (int-only `pow` modular exponentiation), 29811-29819 (random randrange/floordiv), 31094 (sum reducers); general division, slice and pow paths',
     'unsupported __builtin_*': 'cruntime.py:433,4044,4065 (__builtin_unreachable); bigint_obj.py:403-411 (__builtin_*_overflow)',
 }
 

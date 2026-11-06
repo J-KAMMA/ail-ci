@@ -60,18 +60,24 @@ these are lower bounds on the incompatible constructs per file.
 | unsized struct-array compound literal from runtime values | 6 | `ail_stdout_parts((ail_str[]){a, b}, 2);` — `pyfunc.py:24977` (f-string print call site). tcc: `index too large`. |
 | unsized struct-array declaration from runtime values | 5 | `ail_bytes spans[] = {h, old, repl};` — `cruntime.py:6450,6508,6538` (bytes replace/translate). tcc: `index too large`. |
 | unsupported `__builtin_*` | 4 | `__builtin_unreachable` / `__builtin_*_overflow`. |
-| `__int128` | 2 | general runtime. |
+| `__int128` | 2 | `ail__idiv_exact` / the general runtime's 128-bit sites (see below). |
 
 **upstream 0.9.28rc, no prelude — 5/58:**
 
 | construct | count | note |
 |---|---:|---|
 | unsupported `__builtin_*` | 30 | link: `unresolved reference to '__builtin_{add,sub,mul}_overflow'`. The prelude fixes these. |
-| `__int128` | 23 | see below. |
+| `__int128` | 23 | see below; in the sampled corpus programs the first stop is `ail__idiv_exact`. |
 
 **upstream 0.9.28rc + prelude — 35/58.** The only remaining blocker is **`__int128` (23 programs:
-6/8 compare, 17/50 corpus)**, e.g. `__int128 nn = (__int128)n;` at `cruntime.py:16995` (range-slice
-path), and `ail_rand_floordiv` at `cruntime.py:29811` (int-only `pow` modular exponentiation). tcc has no 128-bit integer
+6/8 compare, 17/50 corpus)**. In the corpus-blocked programs sampled (`g03_030`, `g11_038`,
+`g11_026`) the first error is `'__uint128_t' undeclared` / `cannot convert 'unsigned long' to
+'struct __uint128__'` at `__uint128_t num, den;` / `(__uint128_t)ua << shift` inside
+`ail__idiv_exact`, `cruntime.py:3835-3844` — the exactly-rounded int `/` helper, which the typed
+path emits and calls. On the general path (`chain_relax`) the first error is the range slice
+`__int128 nn = (__int128)n;` at `cruntime.py:16995`. The general runtime's other 128-bit sites are
+int-only `pow` (`cruntime.py:19127-19143`, `29615-29622`), random `randrange`/floordiv
+(`29811-29819`) and the sum reducers (`31094`). tcc has no 128-bit integer
 type and no `__int128` mode. 0.9.28rc already parses `_Thread_local`, the `__attribute__`s,
 statement expressions, `__typeof__`, `__builtin_expect/unreachable/constant_p/memcpy/clz`, and the
 sized aggregate forms; the `vector_size`/`avx2` paths are already `#if defined(__GNUC__)`-guarded,
@@ -151,8 +157,9 @@ but not timed.
 
 Medians: gcc cold **4.620 s**, tcc cold **2.923 s**; edit+run **4.621 s → 2.926 s**, a **1.58x**
 ratio of medians (median per-program speedup **1.70x**, range 0.63-2.45x). Two program outputs are
-the same in both builds. The gains are uneven because the Python front end is 41-91% of the cold
-build (median 59%, the tcc/gcc cold ratio in the table); where the C stage dominates (`g17_004`,
+the same in both builds. The gains are uneven: the tcc/gcc cold ratio in the table runs 41-158%
+(median 59%), with `g00_036` the 158% case where the fixed Python front end dominates and tcc is
+slower. Where the C stage dominates (`g17_004`,
 `g04_006`, `g10_010`, 41-47%) tcc roughly halves the build, and where the front end dominates
 (`berth_sim`, `g19_028`, 85-91%) or the program is small (`g00_036`, where tcc is slower) it is a
 wash or worse.
@@ -169,7 +176,8 @@ is limited. Swapping the C compiler removes essentially all of the C stage (3.12
 and makes the **cold** edit-run **1.6-1.7x** faster (4.62 s → 2.93 s median); it does not change the
 warm/cached build (both ~0.4-0.5 s) and it makes the program **1.7x slower** at run time, so it is
 only defensible for the loop, never the final build. It is not the 4-10x the owner wants, because
-the Python front end is 41-91% (median 59%) of the cold build.
+the Python front end is a fixed cost: tcc's cold build is 41-158% of gcc's (median 59%, the 158%
+being `g00_036`, where tcc is slower).
 
 The blockers divide into cheap and expensive:
 
@@ -180,7 +188,8 @@ The blockers divide into cheap and expensive:
   quick mode must pin 0.9.28rc or later (the repo already documents building it).
 - **`__int128`** — the real cost. It blocks **23/58 programs, including 6/8 compare `main.py`
   tasks**, and it cannot be shimmed by a header: tcc has no 128-bit type. Removing it means either a
-  two-word int64 fallback for the general runtime's range-slice and int-`pow` paths behind an `#if`
+  two-word int64 fallback for the exactly-rounded int division (`ail__idiv_exact`, a 55-bit quotient
+  with a sticky remainder), the general runtime's range-slice and int-`pow` paths behind an `#if`
   (a correct signed 128-bit add/sub/mul/div/mod/compare, i.e. real code in `cruntime.py`, not a
   per-construct `#if` one-liner), or a different backend. Until that exists, a quick-run mode can
   only cover the typed-path subset — which is exactly the 33/50 corpus programs and 2/8 compare
@@ -195,10 +204,12 @@ front-end/build cache (warm builds are already ~0.4 s).
 
 - Two of the ten compare `main.py` sources (`tally_lang`, `tree_fold`) are refused by AIL before any
   C compiler is involved; they are outside this question.
-- `main.py` is the general path and emits the general runtime, including `__int128` for range
-  slicing and int `pow`. The typed path (`typed.py`/`main.ail`) does not; `lab/tccdev` measured all
+- `main.py` is the general path and emits the full general runtime, including `__int128` for range
+  slicing and int `pow`. The typed path (`typed.py`/`main.ail`) avoids those two, but it still emits
+  `ail__idiv_exact` (with `__int128` for the 55-bit quotient) when the program divides ints; that
+  helper is the first stop in the sampled corpus programs. `lab/tccdev` measured all
   ten typed programs building with 0.9.28rc + prelude, and this run's 33 corpus successes are the
-  same story on the subset that avoided `__int128`. So the blocker is the general runtime's
+  same story on the subset that used neither. So the blocker is the runtime's
   128-bit arithmetic, not tcc's parser.
 - One tcc version was tested for timing (0.9.28rc at `e23dabe`). Nothing here says a later tcc fixes
   `__int128`; it has no such type today.

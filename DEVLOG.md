@@ -1,17 +1,42 @@
+## 2026-11-06 -- tcc1 review 2: `__int128` blocker path and front-end ratio range
+
+`lab/tcc/` + this file only; no measured number changed.
+
+- The `__int128` blocker was attributed only to the general runtime's range slice (`16995`) and
+  `ail_rand_floordiv` (`29811`). The actual first error in the sampled corpus-blocked programs
+  (`g03_030`, `g11_038`, `g11_026`) is `ail__idiv_exact`, `cruntime.py:3835-3844`
+  (`'__uint128_t' undeclared` / `cannot convert 'unsigned long' to 'struct __uint128__'` at
+  `__uint128_t num, den;` / `(__uint128_t)ua << shift`): the typed path emits and calls the
+  exactly-rounded int `/` helper, which needs two-word 128-bit shift/div/mod. Added it to the
+  blocker table, `run.py` `CONSTRUCT_EMITTER`, the derived `fail_*_int128.txt` excerpts, the
+  "cost to remove" paragraph and the typed-path note. The general path (`chain_relax`) still first
+  stops at the range slice (7398/7435), unchanged.
+- `RESULTS.md`'s "41-91%" was the tcc/gcc cold ratio column, whose actual range is 41-158%
+  (`g00_036` = 1.424/0.903); now stated as 41-158% with `g00_036` named as the outlier, in both
+  places.
+- `run.py` `diagnose` now moves an int128 excerpt off tcc 0.9.27's one-line-earlier report to the
+  line carrying `__uint128_t` (fail_3: 3438, not 3437).
+- Probes: apt tcc 0.9.27 and upstream 0.9.28rc (`e23dabe`) on the emitted C of `g03_030`,
+  `g11_038`, `g11_026`; upstream errors at program.c 68/2930/3439, all inside `ail__idiv_exact`
+  (`chain_relax` still at the slice site 7398). cmp.sh on `g18_008`/`g04_006`; `test_ail_safetynet`,
+  `test_ail_files`, `test_ail_corpus_findings3`; manifest `--check` clean.
+
 ## 2026-11-06 -- tcc1 review fixes: blocker source pointers and refusal reasons
 
 `lab/tcc/` + this file only; no measured number changed.
 
 - `run.py` `CONSTRUCT_EMITTER` (and the derived `fail_*.txt` / `RESULTS.md` table) pointed at the
   wrong lines: `_Thread_local` is `cruntime.py:17347-17348` (not 17245), the `ail_stdout_parts`
-  call site `pyfunc.py:24977` (not 24481), and `__int128` is the range slice at `cruntime.py:16995`
-  plus `ail_rand_floordiv` at 29811 (not 29709, a comment). Fixed in all three places.
+  call site `pyfunc.py:24977` (not 24481), and `__int128` is the exactly-rounded int division
+  helper `ail__idiv_exact` at `cruntime.py:3835-3844` (the first stop in the sampled corpus
+  programs), the range slice at 16995, and `ail_rand_floordiv` at 29811 (not 29709, a comment).
+  Fixed in all three places.
 - `RESULTS.md`'s refusal reasons were wrong: `tally_lang` stops on the field `v` type error (a list
   or dict that gets bools and numbers), with tuple-shape / `re` notes; `tree_fold` stops on
   `import of 're' with a use that is not built`, with `cannot tell the type of element 0 of this
   tuple` notes at lines 44/72/85/89. Stated as the actual fatal first error, not swapped.
 - Also corrected the "front end is 60-85%" claim to the measured tcc/gcc cold ratio range
-  (41-91%, median 59%).
+  (41-158%, median 59%; `g00_036` is the 158% case where tcc is slower).
 - Probes: `/tmp/probes/emitter_pointers.py` (15 pointers + 3 stale-pointer checks: PASS) and
   `/tmp/probes/refusal_reasons.py` (both fatal messages match AIL and the report: PASS); cmp.sh on
   `g18_008`/`g04_006` still matches CPython in both builds; `test_ail_safetynet`,
