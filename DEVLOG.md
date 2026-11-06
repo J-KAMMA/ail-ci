@@ -1,3 +1,31 @@
+## 2026-11-06 -- rbpyreachs2_rr1: review fixes for the re-applied pyreachs2_rr1 change (job-rbpyreachs2_rr1)
+
+The reviewer's two defects were reproduced first with probes, then fixed:
+
+- **`d["top"] = heapq.nsmallest(k, xs)` emitted C that does not compile.** The scalar `_call`
+  branch handed the select's `ail_list` temp to `ail_stab_put`, which takes an `int64_t`. A
+  list-of-str select is still answered there (`print(heapq.nsmallest(k, words))` reaches it for
+  the `ail_slist` the repr helper consumes); every other non-SLIST select reaching that scalar
+  dispatch is now refused by name, so the default build falls back to the general path and matches
+  CPython's `[2, 5]`. A name bound to a select (`top = heapq.nsmallest(k, xs); d["t"] = top`)
+  reaches the int-valued dict store the same way, so that store now refuses a whole-list value by
+  name too (this also turns the pre-existing `d["k"] = xs` gcc failure into the same named
+  refusal/fallback).
+- **`reversed(bytearray)` was an eager snapshot.** The prelude now returns a live reverse iterator
+  (`_AilBytearrayReverse`): the start index is fixed at creation but each step reads the
+  bytearray as it is now, so `ba[0] = 122` after `r = reversed(ba)` is seen
+  (`list(r) == [99, 98, 122]`), while a length change (append/delete/clear) ends the walk exactly
+  as CPython's reverse iterator does. `bytes` is immutable, so its `__reversed__` stays a snapshot.
+
+Probes (all `bash ~/tools/cmp.sh <p> $PWD`, both builds, CPython-identical): dict item store of a
+select (direct, via a name, str- and int-keyed, `nlargest`, inline subscript, `sum`), bytearray
+`reversed` (in-place item mutation, append, delete, clear, empty, `next()`, repeated `list()`,
+attribute and argument provenance), plus every previously accepted select/`extend(reversed(...))`
+probe unchanged. Tests on the final commit: `test_ail_pyreach_shapes` 17 OK,
+`test_ail_python_syntax` 10 OK, `test_ail_safetynet` 5 OK, `test_ail_files` +
+`test_ail_corpus_findings3` 20 OK (1 skipped), `test_ail_bytearray_loops` +
+`test_ail_bytearray_refs` 4 OK.
+
 ## 2026-11-06 -- rbpyreachs2_rr1: re-apply pyreachs2_rr1 (job-rbpyreachs2_rr1)
 
 Re-applied the accepted `job-pyreachs2_rr1-11070228` change (its diff was taken from

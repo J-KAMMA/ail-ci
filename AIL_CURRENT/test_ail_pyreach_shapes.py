@@ -151,6 +151,54 @@ def main():
 main()
 '''
 
+NSMALLEST_DICT_STORE = '''import heapq
+
+
+def main():
+    xs = [5, 2, 8]
+    d = {}
+    d["top"] = heapq.nsmallest(2, xs)
+    print(d["top"])
+    e = {"top": [0]}
+    e["top"] = heapq.nlargest(2, xs)
+    print(e["top"])
+    print(xs)
+
+main()
+'''
+
+NSMALLEST_NAME_INTO_DICT = '''import heapq
+
+
+def main():
+    xs = [5, 2, 8]
+    top = heapq.nsmallest(2, xs)
+    d = {}
+    d["top"] = top
+    print(d["top"])
+    print(top)
+
+main()
+'''
+
+BA_REVERSED_LIVE = '''def main():
+    ba = bytearray(b"abc")
+    r = reversed(ba)
+    ba[0] = 122
+    print(list(r))
+    print(ba)
+    r = reversed(ba)
+    ba.append(100)
+    print(list(r))
+    r = reversed(ba)
+    del ba[0]
+    print(list(r))
+    print(ba)
+    print(list(reversed(bytearray())))
+
+main()
+'''
+
 REVERSED = '''def main():
     xs = [1, 2, 3]
     for v in reversed(xs):
@@ -462,6 +510,25 @@ class PyreachShapes(unittest.TestCase):
             result, exe = build_source(tmp, 'nsmallest_tuples', source)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('heapq.nsmallest()', result.stderr)
+
+    def test_nsmallest_into_a_dict_matches_cpython(self):
+        expected = '[2, 5]\n[8, 5]\n[5, 2, 8]\n'
+        self._both('nsmallest_dict_store', NSMALLEST_DICT_STORE, expected)
+
+    def test_nsmallest_into_a_dict_is_refused_by_name(self):
+        for name, text in (('nsmallest_dict_store', NSMALLEST_DICT_STORE),
+                           ('nsmallest_name_dict', NSMALLEST_NAME_INTO_DICT)):
+            with tempfile.TemporaryDirectory(prefix='ail-s2-') as tmp:
+                source = Path(tmp) / (name + '.py')
+                source.write_text(text, encoding='utf8')
+                result, exe = build_source(tmp, name, source)
+                self.assertNotEqual(result.returncode, 0, name)
+                self.assertIn('dict of integers', result.stderr, name)
+
+    def test_reversed_bytearray_is_live(self):
+        expected = ('[99, 98, 122]\nbytearray(b\'zbc\')\n[99, 98, 122]\n[]\n'
+                    "bytearray(b'bcd')\n[]\n")
+        self._both('ba_reversed_live', BA_REVERSED_LIVE, expected)
 
     def test_berth_sim_is_typed(self):
         source = REPO / 'lab' / 'compare' / 'src' / 'berth_sim' / 'main.py'

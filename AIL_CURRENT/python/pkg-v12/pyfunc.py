@@ -18199,6 +18199,23 @@ def _call(node, ctx):
         raise Unsupported(_heapq_refusal(node, f))
     if (f in ('nsmallest', 'nlargest') and f not in ctx.funcs and f not in ctx.classes
             and f not in ctx.kind and f not in ctx.types):
+        # A list-of-str select is still answered here: `print(heapq.nsmallest(k, words))` reaches
+        # this scalar dispatch for the `ail_slist` temp the repr helper consumes. Every other
+        # context that can hold the INT list `_heapq_select` builds intercepts it BEFORE this
+        # point (a list assignment, a `for` walk, `_seq`, a list argument, a return). Reaching here
+        # with one means the program wants a single value -- a dict item store
+        # (`d["top"] = heapq.nsmallest(...)`) is the one this branch used to answer by handing the
+        # `ail_list` temp back as if it were an int64, which emitted C gcc rejects. Refuse by name
+        # (the default build then keeps the program on the general path, which stores a list in a
+        # dict correctly) instead of guessing.
+        try:
+            select_kind = _etype(node, ctx)
+        except Unsupported:
+            select_kind = None
+        if select_kind != SLIST:
+            raise Unsupported('heapq.%s() builds a whole list, so it cannot stand in for a single '
+                              'value here (a dict item, a list element, an arithmetic operand, '
+                              '...); bind it to a list name first, then use that name' % f)
         return _heapq_select(node, ctx)[0]
     if (f in ('max', 'min') and f not in ctx.funcs and len(a) == 1
             and len(node.keywords) == 1 and node.keywords[0].arg == 'default'
@@ -25682,6 +25699,22 @@ def _setitem(target, value, ctx, ind):
             rendered = _dict_handle_expr(expr, ctx) if temp == htemp else _expr(expr, ctx)
             out += _flush(ctx, pad) + '%s%s = %s;\n' % (pad, temp, rendered)
         return out + '%sail_tab_put(&%s, %s, %s);\n' % (pad, c, ktemp, htemp)
+    if t == DICT:
+        # An int-valued dict (`ail_tab`/`ail_stab`/`ail_btab` all store an int64) has no slot for a
+        # whole container. Reaching the branches below with one used to hand their generic `_expr`
+        # an `ail_list`/`ail_slist` value and emit C gcc rejects; name the shape instead. The
+        # value-building kinds are matched here -- notably a name a `heapq.nsmallest()` assignment
+        # bound to its fresh list (`top = heapq.nsmallest(k, xs); d["t"] = top`), which the select
+        # feature made reachable. `ndict`/`ddict`/`dhandles` (which DO store containers) returned
+        # above, so no working shape is affected.
+        try:
+            value_kind = _etype(value, ctx)
+        except Unsupported:
+            value_kind = None
+        if value_kind in (LIST, FLIST, SLIST, BLIST, 'array'):
+            raise Unsupported('%r is a dict of integers; a whole list value has no slot in it -- '
+                              'store an integer, or make it a dict of lists (`%s[k] = []` then '
+                              '`%s[k].append(v)`)' % (name, name, name))
     if t == DICT and name in ctx.bkeys:
         # `d[<bytes-ish>] = <int>` on a dict keyed by bytes (see `_mark_bytes_containers`) --
         # content hashing (cruntime.BTAB): the key is a bytes VALUE, not a number, so it is built

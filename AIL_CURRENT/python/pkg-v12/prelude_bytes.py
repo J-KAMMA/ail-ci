@@ -515,6 +515,31 @@ def _ail_b_idx(n, i, what):
     return i
 
 
+class _AilBytearrayReverse:
+    """The live reverse iterator `reversed(bytearray)` returns in CPython: the start index is fixed
+    at creation, but each step READS the bytearray as it is now, so an in-place item assignment made
+    after `reversed()` was taken is seen (`ba = bytearray(b"abc"); r = reversed(ba); ba[0] = 122;
+    list(r) == [99, 98, 122]`). A length change instead ends the walk (CPython's reverse iterator
+    catches the IndexError and stops), which the `i >= len(a)` guard below reproduces."""
+    def __init__(self, owner, index):
+        self.owner = owner
+        self.index = index
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        i = self.index
+        if i < 0:
+            raise StopIteration
+        a = self.owner._a
+        if i >= len(a):
+            self.index = -1
+            raise StopIteration
+        self.index = i - 1
+        return a[i]
+
+
 class bytes:
     def __init__(self, source=None, encoding=None, errors=None):
         self._s = _ail_b_source(source, encoding, errors)
@@ -678,13 +703,9 @@ class bytearray:
         return iter(self._a)
 
     def __reversed__(self):
-        out = []
-        i = len(self._a) - 1
-        while i >= 0:
-            out.append(self._a[i])
-            i -= 1
-        # an ITERATOR, not the list itself (see the bytes class): a fresh object per call.
-        return iter(out)
+        # A LIVE reverse iterator over this bytearray (see `_AilBytearrayReverse`): a snapshot
+        # would miss an in-place `ba[i] = v` made after `reversed(ba)` was taken.
+        return _AilBytearrayReverse(self, len(self._a) - 1)
 
     def __contains__(self, x):
         return _ail_bcontains(x) in _ail_b_from_ints(self._a)
