@@ -1,3 +1,32 @@
+## 2026-11-06 -- pyreachs2 (re-run, job-pyreachs2_rr1-11062251)
+
+s2 (F5a) shapes.  This tree already carried s1-s8, so the stepped-slice, `del` and heap-subscript
+lowerings of the original s2 were present; this job filled the two gaps it found and added the
+step's test module (`AIL_CURRENT/test_ail_pyreach_shapes.py`, registered by
+`tests.d/test_ail_pyreach_shapes.txt`):
+
+- `heapq.nsmallest(k, xs)` / `nlargest(k, xs)` on a list name: lowered to `sorted(xs)[:k]` /
+  `sorted(xs, reverse=True)[:k]` (`_heapq_select`), for `list[int]` and `list[str]`; `k <= 0` is
+  `[]`, a `k` past the end is the whole sorted list.  `key=` (including the key the tuple pass
+  synthesises for a list of tuples) stays refused by name.  Wired through the value, statement,
+  `for`-loop and generated-repr argument paths; `nsmallest`/`nlargest` join the front end's heapq
+  names, the general path's `_IMPLICIT_LIB` and `shadowing.AIL_BUILTINS`.
+- `xs.extend(reversed(src))` walks the source backwards and pushes each element
+  (`_method`'s extend branch), for `list[int]`/`list[float]`/`list[str]` receivers and list, str
+  (one code point per step) or bytes sources.
+- The general path's `reversed(bytes)` now works: `prelude_bytes.py` gives `bytes`/`bytearray` a
+  `__reversed__`, so `AIL_UNIFIED_FORCE=1` matches CPython like the typed path already did.
+
+Probes: stepped slices of list/str/bytes (both signs, clamping, empty, an index from stdin up to
++-4.6e18, step 0 -> ValueError), `del` with and without a later read (UnboundLocalError kept),
+`reversed` over list/str/bytes/empty + `extend`/`list`, `heappush(free[c], v)` / `heappop(alias)`
+sharing the inner list, `nsmallest`/`nlargest` with ties, `k <= 0`, `k` past the end, str lists,
+assignment and loops.  All match CPython on the default and `AIL_UNIFIED_FORCE=1` builds.  A stdin
+index beyond int64 raises the int64 `OverflowError` on the typed path (F8, not silent; the general
+path with the tagged ints matches CPython).  `lab/compare/src/berth_sim/main.py` builds with
+`--strict` and no blocker; all ten `.ail` twins hash byte-identically to the base and the codegen
+pins are unchanged.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
