@@ -1,4 +1,6 @@
+import keyword
+
 def main() -> None:
-    ops = ['+=', '+', '==', '**=', '->', '...', ':=', '@', '//=']
+    print('count', len(keyword.softkwlist))
 main()
-del ops
+del __package__

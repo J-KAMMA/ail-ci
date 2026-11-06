@@ -6,7 +6,8 @@
 
 A seed always selects and mutates the same corpus program.  Every candidate is
 parsed again and executed by CPython 3.12 with a 5 s limit; candidates that do
-not parse or finish are discarded and the next deterministic attempt is tried.
+not parse, exit non-zero, or miss the limit are discarded and the next
+deterministic attempt is tried.
 """
 import argparse
 import ast
@@ -428,10 +429,10 @@ def _run_cpython(source, timeout=5.0):
         p = Path(d) / 'prog.py'
         p.write_text(source, encoding='utf-8')
         try:
-            subprocess.run([sys.executable, '-B', str(p)],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=timeout, cwd=d)
-            return True
+            r = subprocess.run([sys.executable, '-B', str(p)],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=timeout, cwd=d)
+            return r.returncode == 0
         except (subprocess.TimeoutExpired, OSError, ValueError):
             return False
 
