@@ -1,3 +1,13 @@
+## 2026-11-06 -- rbfdexp1: re-apply `ail explain` (job-rbfdexp1-11061345)
+
+Re-applied the accepted `fdexp1` change (`fa172a7bee`..`job-fdexp1-11061045`). The new files applied
+cleanly: `packaging/ail_lang/explain.py`, `AIL_CURRENT/test_ail_explain.py`, its `tests.d`
+registration, and `lab/explain/` (RESULTS.md and 30 probe programs). The only conflict was
+`.github/workflows/agent-worker.yml`: the newer tree had a CR/LF-stripping fix for the Claude Code
+token, but `fdexp1` deletes that token path together with the `agent=opus` input, so the deletion
+wins and the workflow now matches the accepted branch. `tools/update_manifest.py` regenerated the
+`manifest.d` pins; `tools/diff_ids.py` is not present on this tree.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an
