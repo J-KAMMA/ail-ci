@@ -48,6 +48,21 @@ Checks: `test_ail_bce` (10/10), `test_ail_range_checks`, `test_ail_ir_s1`, `test
 `p5_cursor_negative` match CPython on both builds; `p6_cursor_bigtext` stops at `int()` on both
 builds as today. Not run, for the record: the callgrind census over all ten tasks (only ledger_bin
 was measured; tally_lang's change is removals only), the 300-seed difffuzz, and compile timing.
+## 2026-11-06 -- ffbig0: explicit BigInt type design note and executable model (job-rbffbig0-11061655)
+
+Re-applied the accepted `ffbig0` change (`e4acfc4d05e8`..`4582f2f9`) on today's tree. The
+workflow hunk was already present, so the patch applied with that file excluded; the change adds
+`docs/design/BIGINT_TYPE.md` and the twelve `lab/bigtype/` programs plus `check_model.py`. No
+compiler behaviour changed: the note specifies an explicit `BigInt` annotation (`from ail.types
+import BigInt`, `BigInt = int` at run time) for locals, parameters, returns, fields and
+`list[BigInt]`, reusing the exact-int runtime, and leaves `--exact-int` unchanged.
+
+`check_model.py` runs every program twice (plain CPython output against `expected/`, and the
+instrumented flow model) and reports 12/12 output and flow matches; `08_bigint_to_int_param.py`
+is the single loud `OverflowError` boundary and `09_literal_and_demotion.py` the one demotion.
+`tools/diff_ids.py` is not present on this tree; `python3 tools/update_manifest.py` ran (the new
+paths are outside `AIL_CURRENT`, so no pin changed) and `--check` passes. Required tests on the
+final commit: `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
 
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
