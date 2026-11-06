@@ -48,11 +48,10 @@ Built with `python3 -B AIL_CURRENT/ail_chatgpt.py compile <p> --syntax python -o
 | `p15_sum_pool_map` | built, matched | unchanged: `285` — matches |
 | `p16_min_overflow` | refused | empty, rc 1, `OverflowError: ... +` — matches |
 
-So 12 probes move from refused to exactly their twin (40 runs each: 4 thread counts x 3 runs x 2
-not-checked variants are not needed; the 12 x 4 x 3 = 144 probe runs all matched). The 3 `sum(map)`
-probes were already matching and still do. `p08` is outside v1 (a `try` around the loop; the
-accumulator lives in the `try` frame struct, not a plain local) and is refused by name with a
-`write instead:` line.
+So 12 probes move from refused to exactly their twin: 12 probes x 4 thread counts x 3 runs = 144
+probe runs, all matching. The 3 `sum(map)` probes were already matching and still do. `p08` is
+outside v1 (a `try` around the loop; the accumulator lives in the `try` frame struct, not a plain
+local) and is refused by name with a `write instead:` line.
 
 ## Additional probes (self-check, in /tmp)
 
@@ -89,13 +88,16 @@ reached by no racy or safe probe (they are AIL syntax or use `threading` globals
 
 `python3 AIL_CURRENT/test_ail_par_reduce.py` (3 tests, includes 144 matching runs and the four
 refusals), `test_ail_parallel_for` (6), `test_ail_typed_parallel` (16, TSan and ASan/UBSan
-included), `test_ail_race_probes` (31, one expected failure) all pass.
+included), `test_ail_race_probes` (31, one expected failure) all pass. `test_ail_files` (18, one
+skipped) and `test_ail_corpus_findings3` (2) pass. `test_ail_safetynet` fails `S4_generators_gc`
+identically on the base tree (checked by running the same test from a `git archive HEAD` export),
+so it is not a regression from this job.
 
 ## Lowering size
 
-`pyfunc.py`: `_par_for` +3 lines (the `PARRED` part request and wording) and `_par_outline`
-about +25 (the accumulator skip, the type check, the chunk/re-run emission and the call site);
-the `_red_stmt` text rewriter (`acc += e` -> `__int128` prefix update or checked add) is 19 lines.
-The total added to `pyfunc.py` is 79 lines, above the 40-line note in the brief; the extra is the
-rewriter and the two extra declarations, with no change outside `_par_for`/`_par_outline` and the
-new helper. `parallel.py` is +31 lines and no opter file changed.
+`pyfunc.py`: 73 insertions, 12 deletions — `_par_for` (+3: the `PARRED` part request and the
+wording), `_par_outline` (the accumulator skip, the int-local type check, the chunk/re-run
+emission and the call site), and the `_red_stmt` text rewriter (`acc += e` -> `__int128` prefix
+update or checked add, 19 lines including its docstring). That is over the 40-line note in the
+brief; the extra is the rewriter and the second worker's declarations, and nothing outside
+`_par_for`/`_par_outline` changed. `parallel.py` is +31/-1, no other compiler file changed.
