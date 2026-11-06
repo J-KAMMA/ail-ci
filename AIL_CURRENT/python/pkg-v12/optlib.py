@@ -27,6 +27,7 @@ a comprehension / a `while` test, ordering comparisons and `in` of a value not k
 """
 import ast
 import copy
+import re
 
 KINDS = ('int', 'float', 'bool', 'str', 'bytes')
 ZERO = {'int': 0, 'float': 0.0, 'bool': False, 'str': '', 'bytes': b''}
@@ -501,6 +502,9 @@ class Lowerer:
             if isinstance(n, (ast.FunctionDef, ast.Lambda, ast.AsyncFunctionDef)) and n is not node:
                 nested_reads.update(m.id for m in ast.walk(n) if isinstance(m, ast.Name))
         # names that take an Optional call / another Optional name: fixpoint
+        self.fn = node
+        self._lk = _LocalKinds(node, self.return_kinds)
+        self.dict_kinds = self._scan_dict_kinds()
         changed = True
         while changed:
             changed = False
@@ -528,7 +532,6 @@ class Lowerer:
         self.local_params = {a.arg for a in node.args.args + node.args.kwonlyargs
                              if a.arg in opt and a.arg in stored}
         self.scan_function(node)
-        self.fn = node
         self.scope = _ScopeData(node, self.class_names)
         self.info = info
         self.all_names = frozenset(opt)
@@ -619,6 +622,92 @@ class Lowerer:
             elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
                 self.assigns.setdefault(n.target.id, []).append(n.value)
 
+    def _scan_dict_kinds(self):
+        """The value kind of each local dict of scalars: `d = {k: 0}` / `d[k] = v` / `d: dict[K, int]`.
+        A conflict, an empty dict with no store yet, or a container value gives no kind, so the call
+        is left to the old refusal."""
+        found = {}
+
+        def name_kind(name, seen):
+            if name in seen:
+                return None
+            kinds = set()
+            for v in self._lk.values.get(name, []):
+                if v is None or _is_none(v):
+                    continue
+                k = self._lk.expr(v)
+                if k in KINDS:
+                    kinds.add(k)
+                elif isinstance(v, ast.Name):
+                    k = name_kind(v.id, seen | {name})
+                    if k in KINDS:
+                        kinds.add(k)
+            return kinds.pop() if len(kinds) == 1 else None
+
+        def kind_of(node):
+            kind = self._lk.expr(node)
+            if kind in KINDS:
+                return kind
+            if isinstance(node, ast.Name):
+                # `a = ids.get(ku)` (maybe None) elsewhere and `a = nid` here: the scalar stores
+                # tell the value kind of the dict the Optional test later reads. `nid` itself is
+                # `nid + 1` in a loop, so only its non-recursive stores count.
+                return name_kind(node.id, set())
+            return None
+
+        def add(name, node):
+            if node is None:
+                return
+            found.setdefault(name, set()).add(kind_of(node))
+
+        def annotated(name, ann):
+            text = ast.unparse(ann)
+            match = re.match(r'dict\s*\[\s*[^,]+,\s*([A-Za-z_]+)\s*\]\s*$', text)
+            if match and match.group(1) in KINDS:
+                found.setdefault(name, set()).add(match.group(1))
+
+        for node in self._lk.nodes:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and isinstance(node.value, ast.Dict):
+                        for value in node.value.values:
+                            add(target.id, value)
+                    elif (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                          and not isinstance(target.slice, ast.Slice)):
+                        add(target.value.id, node.value)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                annotated(node.target.id, node.annotation)
+        return {name: next(iter(kinds)) for name, kinds in found.items()
+                if len(kinds) == 1 and None not in kinds}
+
+    def _dict_get_kind(self, e):
+        """`d.get(k)` with ONE argument on a local dict of scalars: the Optional value kind."""
+        if not (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute) and e.func.attr == 'get'
+                and isinstance(e.func.value, ast.Name) and len(e.args) == 1 and not e.keywords
+                and not isinstance(e.args[0], ast.Starred)):
+            return None
+        return self.dict_kinds.get(e.func.value.id)
+
+    def _dict_get_pair(self, e, facts):
+        """The (present, value) pair of `d.get(k)`: the key is evaluated once, membership decides the
+        flag, and the value subscript only runs when the key is present."""
+        kind = self._dict_get_kind(e)
+        address = e.func.value
+        key = self.ex(e.args[0], facts)
+        base = self.temp()
+        self.pre.append(ast.Assign(targets=[_name(base + 'k', ast.Store())], value=key))
+        k = _name(base + 'k')
+        p = ast.Compare(left=copy.deepcopy(k), ops=[ast.In()],
+                        comparators=[ast.Name(id=address.id, ctx=ast.Load())])
+        self.pre.append(ast.AnnAssign(target=_name(base + 'p', ast.Store()), annotation=_name('bool'),
+                                      value=p, simple=1))
+        v = ast.IfExp(test=_name(base + 'p'), body=ast.Subscript(
+            value=ast.Name(id=address.id, ctx=ast.Load()), slice=copy.deepcopy(k), ctx=ast.Load()),
+            orelse=_const(ZERO[kind]))
+        self.pre.append(ast.AnnAssign(target=_name(base + 'v', ast.Store()), annotation=_name(kind),
+                                      value=v, simple=1))
+        return kind, _name(base + 'p'), _name(base + 'v')
+
     def nonnull(self, e, seen=None):
         """Can `e` be shown not to evaluate to None? (A value wrapped as present must never be None.)"""
         seen = seen if seen is not None else set()
@@ -692,12 +781,15 @@ class Lowerer:
             return self.methods[e.func.attr].ret
         if _is_environ_get(e):
             return 'str'
+        kind = self._dict_get_kind(e)
+        if kind is not None:
+            return kind
         return None
 
     def optish(self, e):
         """Is `e` a None, an Optional name or a call of an Optional-returning function?"""
         return (_is_none(e) or (isinstance(e, ast.Name) and e.id in self.opt)
-                or _is_environ_get(e)
+                or _is_environ_get(e) or self._dict_get_kind(e) is not None
                 or (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.funcs
                     and self.funcs[e.func.id].ret is not None)
                 or (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute)
@@ -758,6 +850,13 @@ class Lowerer:
                               'a while test, or beside another call); assign it to a name first')
             p, v = self.environ_pair(e, facts)
             return 'str', p, v
+        if self._dict_get_kind(e) is not None:
+            if not self.hoist_ok:
+                raise Refused(e, 'the Optional result of %s.get() is used where it cannot be evaluated ahead '
+                              'of the statement (inside and / or, a conditional expression, a comprehension, a '
+                              'while test, or beside another call); assign it to a name first'
+                              % e.func.value.id)
+            return self._dict_get_pair(e, facts)
         fname = e.func.id if isinstance(e.func, ast.Name) else e.func.attr
         if not self.hoist_ok:
             raise Refused(e, 'the Optional result of %s() is used where it cannot be evaluated ahead of the '
@@ -908,9 +1007,12 @@ class Lowerer:
             return [ast.Return(value=ast.Tuple(elts=[_name(self.pn(value.id)), _name(self.vn(value.id))],
                                                ctx=ast.Load()))]
         if isinstance(value, ast.Call) and self.optish(value):
-            pre, _ = [], None
             saved, self.pre = self.pre, []
             try:
+                if self._dict_get_kind(value) is not None:
+                    _, p, v = self.opt_of(value, facts)
+                    hoisted = self.pre
+                    return hoisted + [ast.Return(value=ast.Tuple(elts=[p, v], ctx=ast.Load()))]
                 call = self.call(value, facts, as_value=True)
                 hoisted = self.pre
             finally:
@@ -952,6 +1054,15 @@ class Lowerer:
                 return ([ast.Assign(targets=[store(p)], value=_name(self.pn(value.id))),
                          ast.Assign(targets=[store(v)], value=_name(self.vn(value.id)))],
                         (facts | {name}) if src_present else facts - {name})
+            if self._dict_get_kind(value) is not None:
+                saved, self.pre = self.pre, []
+                try:
+                    _, src_p, src_v = self.opt_of(value, facts)
+                    hoisted = self.pre
+                finally:
+                    self.pre = saved
+                return hoisted + [ast.Assign(targets=[store(p)], value=src_p),
+                                  ast.Assign(targets=[store(v)], value=src_v)], facts - {name}
             saved, self.pre = self.pre, []
             try:
                 call = self.call(value, facts, as_value=True)
@@ -972,6 +1083,8 @@ class Lowerer:
                 raise Refused(s, 'a chained assignment to an Optional variable is not built')
             return self.assign_opt(opt_targets[0].id, s.value, facts, s)
         for t in s.targets:
+            if isinstance(t, (ast.Subscript, ast.Attribute)):
+                continue          # its index / receiver is an ordinary value use: lower_target checks presence
             for n in ast.walk(t):
                 if isinstance(n, ast.Name) and n.id in self.opt:
                     raise Refused(s, 'an Optional variable inside a tuple / subscript assignment target is not built')
@@ -1061,17 +1174,90 @@ class Lowerer:
         out = entry if _has_break(s.body) else entry | f
         return [ast.While(test=test, body=body or [ast.Pass()], orelse=orelse)], out
 
+    def _may_be_absent(self, stmts):
+        """Names whose presence a loop body can clear before the next iteration: stored None, an
+        Optional name/result, or through a tuple / with / handler target. A plain value store leaves
+        an already-present name present (chain_relax's `x = (x * ...) & M`), so a name already known
+        present before the loop stays usable at the loop head."""
+        out = set()
+
+        def stores(t):
+            for n in ast.walk(t):
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+                    out.add(n.id)
+
+        def walk(items):
+            for s in items:
+                if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(s, ast.Assign):
+                    maybe = _is_none(s.value) or self.optish(s.value)
+                    for t in s.targets:
+                        if maybe:
+                            stores(t)
+                    if not maybe:
+                        for t in s.targets:
+                            if not isinstance(t, ast.Name):
+                                stores(t)          # a tuple / subscript target may change any name it holds
+                elif isinstance(s, ast.AnnAssign):
+                    if isinstance(s.target, ast.Name):
+                        if s.value is None or _is_none(s.value) or self.optish(s.value):
+                            out.add(s.target.id)
+                    elif s.value is not None:
+                        stores(s.target)
+                elif isinstance(s, ast.AugAssign):
+                    pass                              # requires and keeps presence
+                elif isinstance(s, (ast.For, ast.AsyncFor)):
+                    stores(s.target)
+                    walk(s.body)
+                    walk(s.orelse)
+                elif isinstance(s, (ast.With, ast.AsyncWith)):
+                    for item in s.items:
+                        if item.optional_vars is not None:
+                            stores(item.optional_vars)
+                    walk(s.body)
+                elif isinstance(s, ast.ExceptHandler):
+                    if s.name:
+                        out.add(s.name)
+                    walk(s.body)
+                else:
+                    for field in ('body', 'orelse', 'finalbody'):
+                        block = getattr(s, field, None)
+                        if isinstance(block, list):
+                            walk(block)
+        walk(stmts)
+        return out
+
     def st_For(self, s, facts):
-        for n in ast.walk(s.target):
-            if isinstance(n, ast.Name) and n.id in self.opt:
-                raise Refused(s, 'a loop variable that is also an Optional variable is not built')
+        reused = {n.id for n in ast.walk(s.target)
+                  if isinstance(n, ast.Name) and n.id in self.opt
+                  and isinstance(n.ctx, (ast.Store, ast.Del))}
         pre, it = self.lower_expr(s.iter, facts)
-        entry = facts - _assigned([s])
+        body_facts = facts
+        prelude = []
+        target = s.target
+        if reused:
+            # `for a in rows:` where `a` was also an Optional local: the loop stores present
+            # values into the value half and marks the flag inside the body each iteration.
+            target = copy.deepcopy(s.target)
+            for n in ast.walk(target):
+                if isinstance(n, ast.Name) and n.id in reused and isinstance(n.ctx, (ast.Store, ast.Del)):
+                    n.id = self.vn(n.id)
+            for name in reused:
+                prelude.append(ast.Assign(targets=[_name(self.pn(name), ast.Store())], value=_const(True)))
+            body_facts = facts | reused
+        if reused:
+            entry = body_facts - (self._may_be_absent([s]) - reused)
+            after = facts
+        else:
+            entry = facts - self._may_be_absent([s])
+            after = entry
         body, _ = self.block(s.body, entry)
-        orelse, _ = self.block(s.orelse, entry)
+        orelse, _ = self.block(s.orelse, after)
         new = copy.copy(s)
-        new.iter, new.body, new.orelse = it, body or [ast.Pass()], orelse
-        return pre + [new], entry
+        new.target = target
+        new.iter, new.body, new.orelse = it, prelude + (body or [ast.Pass()]), orelse
+        return pre + [new], after
 
     def st_Try(self, s, facts):
         entry = facts - _assigned([s])
@@ -1723,10 +1909,10 @@ def annotate_none_locals(tree):
 
 # A scalar Optional result is a (flag, value) tuple.  The typed path keeps an `int(text)` that does not fit int64
 # exact only through a tagged result, which a tuple element does not carry: `-> int | None` with an `int(text)`
-# inside stops with "integer overflow" in the default build (an annotated program, as written).  An unannotated
-# function that used to be built exactly on the general path must not start doing that, so the inference stops at
-# the kinds that hold no integer.
-INFERRED_RETURN_KINDS = ('str', 'bytes', 'float')
+# inside stops with "integer overflow" in the default build (an annotated program, as written).  Since s8 a helper
+# that returns None and one int is inferred as `int | None` too (owner Q1 A, Q2 B): int64 stays the default, so a
+# value beyond it stops loudly instead of wrapping, exactly as it did on the general path with --exact-int off.
+INFERRED_RETURN_KINDS = ('int', 'str', 'bytes', 'float')
 
 
 def annotate_none_returns(tree):
@@ -1777,619 +1963,17 @@ def _replace_stmt(fn, old, new):
                 return
 
 
-def _simple_const_kind(e):
-    if not isinstance(e, ast.Constant):
-        return None
-    v = e.value
-    if isinstance(v, bool):
-        return 'bool'
-    if isinstance(v, int):
-        return 'int'
-    if isinstance(v, float):
-        return 'float'
-    if isinstance(v, str):
-        return 'str'
-    if isinstance(v, bytes):
-        return 'bytes'
-    return None
-
-
-def _none_row_list(value):
-    """A list literal with at least one None slot and only list literals elsewhere (a list of rows)."""
-    return (isinstance(value, ast.List) and any(_is_none(e) for e in value.elts)
-            and all(_is_none(e) or isinstance(e, ast.List) for e in value.elts))
-
-
-def _row_elem_kind(value):
-    kinds = set()
-    for e in value.elts:
-        if _is_none(e):
-            continue
-        for x in e.elts:
-            kinds.add(_simple_const_kind(x))
-    if not kinds:
-        return 'int'                       # empty rows: the first append settles the element kind
-    return kinds.pop() if len(kinds) == 1 and next(iter(kinds)) in KINDS else None
-
-
-def _fresh(tree, base):
-    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
-    names |= {n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
-    name = base
-    while name in names:
-        name += '_'
-    return name
-
-
-_ROW_HELPERS = {}
-_REPR_HELPERS = {}
-
-
-def _row_helper(tree, kind):
-    key = (id(tree), kind)
-    if key in _ROW_HELPERS:
-        return _ROW_HELPERS[key]
-    name = _fresh(tree, '_ail_none_row_' + kind)
-    source = (
-        'def %s(rows: list[list[%s]], present: list[bool], i: int) -> list[%s]:\n'
-        "    if not present[i]:\n"
-        "        raise IndexError(\"'NoneType' object is not subscriptable\")\n"
-        '    return rows[i]\n' % (name, kind, kind))
-    fn = ast.parse(source).body[0]
-    _ROW_HELPERS[key] = (name, fn)
-    return _ROW_HELPERS[key]
-
-
-def _repr_helper(tree, kind):
-    key = (id(tree), kind)
-    if key in _REPR_HELPERS:
-        return _REPR_HELPERS[key]
-    name = _fresh(tree, '_ail_none_repr_' + kind)
-    source = (
-        'def %s(present: list[bool], rows: list[list[%s]]) -> str:\n'
-        '    out = "["\n'
-        '    i = 0\n'
-        '    while i < len(present):\n'
-        '        if i:\n'
-        '            out += ", "\n'
-        '        if present[i]:\n'
-        '            out += "["\n'
-        '            j = 0\n'
-        '            while j < len(rows[i]):\n'
-        '                if j:\n'
-        '                    out += ", "\n'
-        '                out += repr(rows[i][j])\n'
-        '                j += 1\n'
-        '            out += "]"\n'
-        '        else:\n'
-        '            out += "None"\n'
-        '        i += 1\n'
-        '    out += "]"\n'
-        '    return out\n' % (name, kind))
-    fn = ast.parse(source).body[0]
-    _REPR_HELPERS[key] = (name, fn)
-    return _REPR_HELPERS[key]
-
-
-class _NoneRowTransformer(ast.NodeTransformer):
-    """Reads of a `[None, [], ...]` slot: the present flag for `is None`, the row (guarded by the flag)
-    for any other use, and a repr helper for printing the whole list."""
-
-    def __init__(self, tree, cols):
-        self.tree = tree
-        self.cols = cols                   # name -> (present name, tuple of present flags, kind)
-        self.row_used = set()
-        self.repr_used = set()
-        self.tmpn = 0
-
-    def _present_name(self, name):
-        return self.cols[name][0]
-
-    def _kind(self, name):
-        return self.cols[name][2]
-
-    def _flag(self, name, index):
-        return ast.Subscript(value=_name(self._present_name(name)), slice=index, ctx=ast.Load())
-
-    def _row(self, name, index):
-        present, flags, kind = self.cols[name]
-        if isinstance(index, ast.Constant) and isinstance(index.value, int) and not isinstance(index.value, bool):
-            i = index.value
-            if -len(flags) <= i < len(flags) and flags[i]:
-                return ast.Subscript(value=_name(name), slice=index, ctx=ast.Load())
-        hname, _ = _row_helper(self.tree, kind)
-        self.row_used.add(kind)
-        return ast.Call(func=_name(hname), args=[_name(name), _name(present), index], keywords=[])
-
-    def _is_col(self, node):
-        return (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
-                and node.value.id in self.cols and isinstance(node.ctx, ast.Load)
-                and not isinstance(node.slice, ast.Slice))
-
-    def _none_compare(self, node):
-        if len(node.ops) != 1 or not isinstance(node.ops[0], (ast.Is, ast.IsNot, ast.Eq, ast.NotEq)):
-            return None
-        op, left, right = node.ops[0], node.left, node.comparators[0]
-        sub = None
-        if _is_none(right) and self._is_col(left):
-            sub = left
-        elif _is_none(left) and self._is_col(right):
-            sub = right
-        if sub is None:
-            return None
-        index = self.visit(sub.slice)
-        flag = self._flag(sub.value.id, index)
-        if isinstance(op, (ast.IsNot, ast.NotEq)):
-            return flag
-        return ast.UnaryOp(op=ast.Not(), operand=flag)
-
-    def visit_Compare(self, node):
-        new = self._none_compare(node)
-        if new is not None:
-            return ast.copy_location(new, node)
-        return self.generic_visit(node)
-
-    def visit_Subscript(self, node):
-        if self._is_col(node):
-            index = self.visit(node.slice)
-            new = self._row(node.value.id, index)
-            return ast.copy_location(new, node)
-        return self.generic_visit(node)
-
-    def visit_Call(self, node):
-        if isinstance(node.func, ast.Name) and node.func.id in ('print', 'str', 'repr'):
-            def spell(arg):
-                arg = self.visit(arg)
-                if isinstance(arg, ast.Name) and arg.id in self.cols:
-                    name = arg.id
-                    hname, _ = _repr_helper(self.tree, self._kind(name))
-                    self.repr_used.add(self._kind(name))
-                    return ast.Call(func=_name(hname),
-                                    args=[_name(self._present_name(name)), _name(name)], keywords=[])
-                return arg
-            if node.func.id == 'print' or (len(node.args) == 1 and not node.keywords):
-                args = [spell(a) for a in node.args]
-                args = [a if a is old else ast.copy_location(a, old) for a, old in zip(args, node.args)]
-                return ast.copy_location(ast.Call(func=node.func, args=args, keywords=node.keywords), node)
-        return self.generic_visit(node)
-
-    def _row_read(self, e):
-        """A `wait[i]` row read after visiting: a direct present slot, or the guarded helper call."""
-        if (isinstance(e, ast.Call) and isinstance(e.func, ast.Name)
-                and e.func.id.startswith('_ail_none_row_') and len(e.args) == 3):
-            return e.args[0], e.args[1], e.args[2]
-        return None
-
-    def _guard_row(self, rows, present, index):
-        """Statements that evaluate `index` once, refuse an absent slot, and leave the row subscripted."""
-        tmp = '_ail_r%d' % self.tmpn
-        self.tmpn += 1
-        while any(isinstance(n, ast.Name) and n.id == tmp for n in ast.walk(self.tree)):
-            tmp += '_'
-        hold = ast.Assign(targets=[_name(tmp, ast.Store())], value=index)
-        flag = ast.Subscript(value=copy.deepcopy(present), slice=_name(tmp), ctx=ast.Load())
-        refuse = ast.Raise(exc=ast.Call(
-            func=_name('IndexError'),
-            args=[ast.Constant("'NoneType' object is not subscriptable")], keywords=[]), cause=None)
-        guard = ast.If(test=ast.UnaryOp(op=ast.Not(), operand=flag), body=[refuse], orelse=[])
-        return hold, guard, ast.Subscript(value=copy.deepcopy(rows), slice=_name(tmp), ctx=ast.Load())
-
-    def visit_Expr(self, node):
-        node = self.generic_visit(node)
-        call = node.value if isinstance(node, ast.Expr) else None
-        if isinstance(call, ast.Call):
-            receiver = None
-            if (isinstance(call.func, ast.Name) and call.func.id in ('heappush', 'heappop')
-                    and call.args):
-                receiver = call.args[0]
-            elif isinstance(call.func, ast.Attribute):
-                receiver = call.func.value
-            parts = self._row_read(receiver)
-            if parts is not None:
-                hold, guard, row = self._guard_row(*parts)
-                for x in (hold, guard):
-                    ast.copy_location(x, node)
-                if isinstance(call.func, ast.Name):
-                    call.args[0] = row
-                else:
-                    call.func.value = row
-                return [hold, guard, node]
-        return node
-
-    def visit_Assign(self, node):
-        node = self.generic_visit(node)
-        if len(node.targets) == 1:
-            target = node.targets[0]
-            if (isinstance(target, (ast.Tuple, ast.List)) and isinstance(node.value, (ast.Tuple, ast.List))
-                    and len(target.elts) == len(node.value.elts)
-                    and all(isinstance(t, ast.Name) for t in target.elts)
-                    and all(self._row_read(v) is not None
-                            or (isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name)
-                                and v.value.id in self.cols) for v in node.value.elts)):
-                names = {t.id for t in target.elts}
-                if not any(isinstance(n, ast.Name) and n.id in names
-                           for v in node.value.elts for n in ast.walk(v)):
-                    out = []
-                    for t, v in zip(target.elts, node.value.elts):
-                        new = ast.Assign(targets=[_name(t.id, ast.Store())], value=v)
-                        ast.copy_location(new, node)
-                        out.append(new)
-                    return out
-        return node
-
-
-def _replace_block_stmt(fn, old, new):
-    for parent in ast.walk(fn):
-        for field in ('body', 'orelse', 'finalbody'):
-            block = getattr(parent, field, None)
-            if isinstance(block, list) and old in block:
-                block[block.index(old):block.index(old) + 1] = new
-                return True
-        for h in getattr(parent, 'handlers', []) or []:
-            if old in h.body:
-                h.body[h.body.index(old):h.body.index(old) + 1] = new
-                return True
-    return False
-
-
-def lower_none_row_lists(tree):
-    """`wait = [None, [], [], []]`: a list of rows plus one present bit per slot.  Returns True when it
-    changed the tree.  A shape it cannot follow is refused by name (the Optional rewrite then leaves the
-    source as written, so the program keeps its old route)."""
-    changed = False
-    helpers = []
-    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-    fns += [m for c in tree.body if isinstance(c, ast.ClassDef) for m in c.body if isinstance(m, ast.FunctionDef)]
-    for fn in fns:
-        nodes = _own_nodes(fn)
-        found = []
-        for n in nodes:
-            if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
-                    and _none_row_list(n.value)):
-                found.append(n)
-        if not found:
-            continue
-        cols = {}
-        for n in found:
-            name = n.targets[0].id
-            others = [m for m in nodes if isinstance(m, (ast.Assign, ast.AnnAssign))
-                      and any(isinstance(t, ast.Name) and t.id == name for t in (
-                          m.targets if isinstance(m, ast.Assign) else [m.target]))]
-            if len(others) != 1:
-                raise Refused(n, 'a list with a None slot (%r) is assigned more than once; keep one literal '
-                              'binding and change the rows themselves' % name)
-            kind = _row_elem_kind(n.value)
-            if kind is None:
-                raise Refused(n, 'a list with a None slot must hold rows of one scalar kind (int, float, '
-                              'bool, str or bytes)')
-            present = [not _is_none(e) for e in n.value.elts]
-            pname = _fresh(tree, name + '__p')
-            cols[name] = (pname, tuple(present), kind)
-        for n in nodes:
-            if isinstance(n, ast.Assign):
-                targets = n.targets
-            elif isinstance(n, ast.AugAssign):
-                targets = [n.target]
-            elif isinstance(n, ast.AnnAssign):
-                targets = [n.target]
-            elif isinstance(n, ast.Delete):
-                targets = n.targets
-            else:
-                targets = []
-            for t in targets:
-                for m in ast.walk(t):
-                    if (isinstance(m, ast.Subscript) and isinstance(m.value, ast.Name)
-                            and m.value.id in cols and not isinstance(m.ctx, ast.Load)):
-                        raise Refused(m, 'a list with a None slot (%r) is only read here; assigning to or '
-                                      'deleting one of its slots is not built' % m.value.id)
-        tr = _NoneRowTransformer(tree, cols)
-        fn.body = tr.visit(fn).body
-        _check_row_reads(fn)
-        _check_col_name_uses(fn, cols, found)
-        for n in found:
-            name = n.targets[0].id
-            pname, present, kind = cols[name]
-            rows = ast.List(elts=[ast.List(elts=[] if _is_none(e) else [copy.deepcopy(x) for x in e.elts],
-                                          ctx=ast.Load()) for e in n.value.elts], ctx=ast.Load())
-            pads = ast.List(elts=[_const(p) for p in present], ctx=ast.Load())
-            new = [ast.Assign(targets=[_name(name, ast.Store())], value=rows),
-                   ast.Assign(targets=[_name(pname, ast.Store())], value=pads)]
-            for x in new:
-                ast.copy_location(x, n)
-            wrapper = ast.If(test=_const(True), body=new, orelse=[])
-            ast.copy_location(wrapper, n)
-            _replace_block_stmt(fn, n, [wrapper])
-            changed = True
-        for kind in sorted(tr.row_used):
-            helpers.append(_row_helper(tree, kind)[1])
-        for kind in sorted(tr.repr_used):
-            helpers.append(_repr_helper(tree, kind)[1])
-    if helpers:
-        seen = []
-        for h in helpers:
-            if h not in seen:
-                seen.append(h)
-        tree.body = seen + tree.body
-    return changed
-
-
-def _check_row_reads(fn):
-    """A `[None, [], ...]` slot read through the guarded helper is only built where the value is used
-    AS A LIST: the receiver of a method call, or the list argument of heappush / heappop / len.  Any
-    other read (`x = wait[0]`, `print(wait[0])`) would show None in CPython, so it is refused by name
-    rather than silently raising."""
-    parent = {}
-    for p in ast.walk(fn):
-        for c in ast.iter_child_nodes(p):
-            parent[id(c)] = p
-    ok_funcs = ('heappush', 'heappop', 'len')
-    for n in ast.walk(fn):
-        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                and n.func.id.startswith('_ail_none_row_')):
-            continue
-        p = parent.get(id(n))
-        allowed = (isinstance(p, ast.Attribute) and p.value is n and isinstance(p.ctx, ast.Load)
-                   or isinstance(p, ast.Call) and n in p.args
-                   and isinstance(p.func, ast.Name) and p.func.id in ok_funcs)
-        if not allowed:
-            raise Refused(n, 'a list slot that may be None is only read as a list (a method receiver, '
-                          'or the list argument of heappush / heappop / len); reading it as a value '
-                          'would be None in CPython, which this form cannot represent')
-
-
-def _check_col_name_uses(fn, cols, literals):
-    """After the slot reads are rewritten, the list is a plain list of rows and the None slots are gone.
-    Only the literal assignment itself and the rewritten slot reads may still mention the name: any
-    other use (iteration, unpacking, passing it on, attribute access, any other call, any mutation of the
-    list) would silently see `[]` where CPython has `None`, or would desynchronise the present bits, so
-    it is refused by name and the program keeps its old route."""
-    literal_ids = {id(t) for n in literals for t in n.targets}
-
-    def walk(node):
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Name) and child.id in cols and id(child) not in literal_ids:
-                allowed = (
-                    (isinstance(node, ast.Subscript) and node.value is child
-                     and isinstance(node.ctx, ast.Load)
-                     and not isinstance(node.slice, ast.Slice))
-                    or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                        and (node.func.id.startswith('_ail_none_row_')
-                             or node.func.id.startswith('_ail_none_repr_'))
-                        and child in node.args))
-                if not allowed:
-                    raise Refused(child, 'a list with a None slot (%r) is only read slot by slot here; '
-                                  'using the whole list (iteration, unpacking, a call argument, '
-                                  'attribute access or any mutation) would show None as [] in CPython '
-                                  'terms, so this form is refused' % child.id)
-            walk(child)
-
-    walk(fn)
-
-
-def _simple_default(e):
-    if isinstance(e, (ast.Name, ast.Constant)):
-        return True
-    if isinstance(e, (ast.List, ast.Tuple, ast.Set)):
-        return all(_simple_default(x) for x in e.elts)
-    if isinstance(e, ast.Dict):
-        return all(k is None or _simple_default(k) for k in e.keys) and all(_simple_default(v) for v in e.values)
-    if isinstance(e, ast.Attribute):
-        return _simple_default(e.value)
-    if isinstance(e, ast.Subscript):
-        return _simple_default(e.value) and _simple_default(e.slice)
-    return False
-
-
-def _loads(stmts):
-    out = []
-    for s in stmts:
-        for n in ast.walk(s):
-            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
-                out.append(n)
-    return out
-
-
-def _names_written(stmts):
-    return _assigned(stmts)
-
-
-def _opt_guard(test, name):
-    if isinstance(test, ast.Compare) and len(test.ops) == 1 \
-            and isinstance(test.ops[0], (ast.Is, ast.Eq)):
-        left, right = test.left, test.comparators[0]
-        return ((_is_none(right) and isinstance(left, ast.Name) and left.id == name)
-                or (_is_none(left) and isinstance(right, ast.Name) and right.id == name))
-    return False
-
-
-def _block_lists(fn):
-    """Every statement list of `fn`'s own scope (not entering nested functions or classes)."""
-    out = []
-
-    def walk(stmts):
-        out.append(stmts)
-        for s in stmts:
-            for f in ('body', 'orelse', 'finalbody'):
-                b = getattr(s, f, None)
-                if isinstance(b, list) and all(isinstance(x, ast.stmt) for x in b):
-                    walk(b)
-            for h in getattr(s, 'handlers', []) or []:
-                walk(h.body)
-    walk(fn.body)
-    return out
-
-
-def _direct_store(stmt):
-    """The name a single-target `name = ...` statement stores, else None."""
-    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
-            and isinstance(stmt.targets[0], ast.Name):
-        return stmt.targets[0].id
-    if isinstance(stmt, (ast.AnnAssign, ast.AugAssign)) and isinstance(stmt.target, ast.Name):
-        return stmt.target.id
-    return None
-
-
-def _stmt_block(fn):
-    loc = {}
-    for b in _block_lists(fn):
-        for i, s in enumerate(b):
-            loc[id(s)] = (b, i)
-    return loc
-
-
-def _block_parents(fn):
-    """Map id(statement list) -> (the statement that owns it, its own containing statement list)."""
-    parents = {}
-
-    def walk(stmts):
-        for s in stmts:
-            for f in ('body', 'orelse', 'finalbody'):
-                b = getattr(s, f, None)
-                if isinstance(b, list) and all(isinstance(x, ast.stmt) for x in b):
-                    parents[id(b)] = (s, stmts)
-                    walk(b)
-            for h in getattr(s, 'handlers', []) or []:
-                parents[id(h.body)] = (s, stmts)
-                walk(h.body)
-
-    walk(fn.body)
-    return parents
-
-
-def _outer_loop(block, parents):
-    """The outermost For/While statement whose body contains `block`, with its containing block."""
-    loop = None
-    while id(block) in parents:
-        stmt, parent = parents[id(block)]
-        if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
-            loop = (stmt, parent)
-        block = parent
-    return loop
-
-
-def bind_guarded_locals(tree):
-    """`bw` is assigned only in the blocks that give Optional `best` a value, and every read of `bw` is
-    after `if best is None: break/return`.  Bind `bw` once before the first such block to the simple
-    value it is first given, so the possibly-unbound pass does not wrap every later read; when the guard
-    holds the real assignment always wins.  When that first assignment is itself conditional inside a
-    loop, the fallback goes in front of the outermost enclosing loop instead, so a value carried by the
-    loop is not reset on an iteration that takes no new assignment.  Anything less regular keeps the
-    refusal."""
-    changed = False
-    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-    fns += [m for c in tree.body if isinstance(c, ast.ClassDef) for m in c.body if isinstance(m, ast.FunctionDef)]
-    for fn in fns:
-        nodes = _own_nodes(fn)
-        opt = set()
-        for n in nodes:
-            if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
-                    and _is_none(n.value)):
-                opt.add(n.targets[0].id)
-        if not opt:
-            continue
-        params = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
-        loc = _stmt_block(fn)
-        parents = _block_parents(fn)
-        loads = [n for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)]
-        done = set()
-        for optname in sorted(opt):
-            for b in _block_lists(fn):
-                for gi, guard in enumerate(b):
-                    if id(guard) in done:
-                        continue
-                    if not (isinstance(guard, ast.If) and _opt_guard(guard.test, optname)
-                            and _terminates(guard.body)):
-                        continue
-                    # the reset `opt = None` that makes the guard meaningful; keep only what follows it
-                    start = 0
-                    for j in range(gi):
-                        if (_direct_store(b[j]) == optname
-                                and isinstance(b[j], ast.Assign) and _is_none(b[j].value)):
-                            start = j + 1
-                    region = b[start:gi]
-                    region_nodes = [n for s in region for n in ast.walk(s)]
-                    region_ids = {id(n) for n in region_nodes}
-                    # candidate companions: names assigned only inside the region, each by a statement
-                    # whose own block also gives the Optional a non-None value
-                    aux_assigns = {}
-                    for n in region_nodes:
-                        if isinstance(n, ast.Assign) and len(n.targets) == 1 \
-                                and isinstance(n.targets[0], ast.Name):
-                            aux_assigns.setdefault(n.targets[0].id, []).append(n)
-                    all_assigns = {}
-                    for n in nodes:
-                        if isinstance(n, ast.Assign) and len(n.targets) == 1 \
-                                and isinstance(n.targets[0], ast.Name):
-                            all_assigns.setdefault(n.targets[0].id, []).append(n)
-                    for aux in sorted(aux_assigns):
-                        if aux in opt or aux in params:
-                            continue
-                        assigns = all_assigns.get(aux, [])
-                        if any(id(a) not in region_ids for a in assigns):
-                            continue
-                        # every assignment to aux sits in a block that also gives opt a value
-                        if not all(any(_direct_store(s) == optname and isinstance(s, ast.Assign)
-                                       and not _is_none(s.value) for s in loc[id(a)][0])
-                                   for a in assigns):
-                            continue
-                        # every non-None assignment to opt in the region is paired with aux in its block
-                        paired = True
-                        for n in region_nodes:
-                            if (isinstance(n, ast.Assign) and len(n.targets) == 1
-                                    and isinstance(n.targets[0], ast.Name) and n.targets[0].id == optname
-                                    and not _is_none(n.value)):
-                                if not any(_direct_store(s) == aux for s in loc[id(n)][0]):
-                                    paired = False
-                                    break
-                        if not paired:
-                            continue
-                        first = min(assigns, key=lambda a: a.lineno)
-                        if not _simple_default(first.value):
-                            continue
-                        # the statement of the guard's block that contains the first assignment: the
-                        # fallback goes just in front of it, so every real assignment still wins.  A first
-                        # assignment nested in a conditional (not the statement itself) would run the
-                        # fallback on every iteration, so hoist it in front of the outermost loop instead.
-                        pos = None
-                        for off, stmt in enumerate(region):
-                            if any(id(x) == id(first) for x in ast.walk(stmt)):
-                                pos = start + off
-                                break
-                        if pos is None:
-                            continue
-                        target, index = b, pos
-                        if first is not b[pos]:
-                            outer = _outer_loop(b, parents)
-                            if outer is not None:
-                                # hoisting repeats the default evaluation outside the loop; only a name
-                                # or literal has no observable extra cost or effect
-                                if not isinstance(first.value, (ast.Name, ast.Constant)):
-                                    continue
-                                loop, loop_block = outer
-                                target, index = loop_block, loop_block.index(loop)
-                        # no read of aux may happen before the guard
-                        if any(n.id == aux and n.lineno <= guard.lineno for n in loads):
-                            continue
-                        before = set(params)
-                        for n in nodes:
-                            t = _direct_store(n) if isinstance(n, ast.stmt) else None
-                            if t is not None and n.lineno < target[index].lineno:
-                                before.add(t)
-                        if any(n.id not in before for n in _loads([first.value])):
-                            continue
-                        new = ast.Assign(targets=[_name(aux, ast.Store())],
-                                         value=copy.deepcopy(first.value))
-                        ast.copy_location(new, target[index])
-                        target.insert(index, new)
-                        done.add(id(guard))
-                        changed = True
-                        break
-    return changed
+def _is_dict_get(node):
+    """A one-argument `name.get(k)` call (its dict value kind is checked by the Lowerer)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'get' and isinstance(node.func.value, ast.Name)
+            and len(node.args) == 1 and not node.keywords
+            and not isinstance(node.args[0], ast.Starred))
 
 
 def candidate(tree):
     for node in ast.walk(tree):
-        if _is_environ_get(node):
+        if _is_environ_get(node) or _is_dict_get(node):
             return True
         ann = None
         if isinstance(node, ast.arg):
@@ -2410,16 +1994,9 @@ def rewrite(source, notes=None):
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return source
-    try:
-        changed = lower_none_row_lists(tree)
-        changed = bind_guarded_locals(tree) or changed
-    except Refused as exc:
-        if notes is not None:
-            notes.append((exc.line, exc.text))
-        return source
     annotated = annotate_none_returns(tree)
     annotated += annotate_none_locals(tree)
-    if not candidate(tree) and not annotated and not changed:
+    if not candidate(tree) and not annotated:
         return source
     try:
         lowered = Lowerer(tree).run()

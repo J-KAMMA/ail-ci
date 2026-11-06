@@ -1,3 +1,24 @@
+## 2026-11-06 -- pyreach s8 re-applied on the current tree (job-rbrbpyreachs8_rr1-11070526)
+
+Re-applied the accepted `rbpyreachs8` change (`627e3745..job-rbpyreachs8-11060251`, fetched
+anonymously). This tree already carried an earlier `[None] * n` row rewrite inside `optlib.py`;
+the accepted change moves that to the new `python/pkg-v12/noneslots.py` (loaded from
+`ail_syntax.python_surface`) and adds one-argument `d.get(k)` on a local dict of scalars and
+`int | None` helper-return inference to `optlib.py`. The old row code is the only other local
+change to `optlib.py`, so that file was taken from the accepted change; `ail_syntax.py`, the new
+`test_ail_pyreach_optret.py` (with its `tests.d` registration), `noneslots.py` and the two stale
+assertions in `test_ail_refusal_messages.py` / `test_ail_strict.py` applied unchanged.
+`DEVLOG.md` conflicted only at the top: both sides' entries are kept below this one. The three
+DIFFERENCES rows use this branch's ids (`C?-job-rbrbpyreachs8_rr1-11070526-{1,2,3}`).
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` regenerated
+`manifest.d` and `--check` passes. `test_ail_pyreach_optret`, `test_ail_refusal_messages`,
+`test_ail_strict`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass
+(50 tests, 1 skipped). Probes in `/tmp/probes` (row guards with list/attribute/call/dict/argument
+indices, slice guards, unpack-target stores, a row named by a parameter, `d.get(k)` over int,
+float, bool, str and bytes values with keys from a list item, a call, an attribute and a dict
+value, `int | None` helpers, guard values, `global`/chained stores, an Optional loop variable)
+match CPython stdout and exit status on both builds.
+
 ## 2026-11-06 -- fbnarrow1: int-list census and int32 scratch patch re-applied (job-rbfbnarrow1_rr1-11061236)
 
 Re-applied the accepted `fbnarrow1_rr1` change (`4b0b7123`..`job-fbnarrow1_rr1-11060751`). It adds
@@ -91,6 +112,45 @@ unchanged and the test is stable across later compiler edits.  A corpus without 
 refused by name ("re-run --run to record them").  `test_ail_selfhost_seed` also asserts the
 snapshot is present and positive.  `test_ail_selfhost_seed` 2 OK on both this branch and a worktree
 of today's integ with the change applied.
+## 2026-11-05 -- pyreach s8 suite fix: one-argument `d.get(k)` is a local-dict Optional
+
+`optlib._scan_dict_kinds` also recorded the value kind of `dict[K, V]` function PARAMETERS, so
+`find(d: dict[int, int], k: int) -> int | None: return d.get(k)` was lowered to a tag/value pair.
+That hid the `int | None` annotation from `pyfunc._strip_nullable` and the typed path then refused
+the call `find({1: 2}, 1)` with a bogus `idict` vs `int` call-site conflict instead of the
+annotation, while the default build fell back to the general path over the REWRITTEN source (its
+DWARF lines were renumbered).  The kind scan now covers only local dicts, as `_dict_get_kind`'s
+own docstring says: a local literal, a subscript store, or an annotated local.  A dict parameter's
+`get(k)` is not a typed Optional again -- it is refused by name ("cannot show that `d.get(k)` is
+not None") and `int | None` is refused as before, so `test_ail_debug_lines`, `test_ail_fallback_note`,
+`test_ail_lsp`, `test_ail_project`, `test_ail_quirks`, `test_ail_refusal_messages`,
+`test_ail_spec_fixes` and `test_ail_strict` pass again.
+
+A local one-argument `d.get(k)` is still the s8 Optional (the job's `test_ail_pyreach_optret`
+`dict_get` case).  The obsolete `dict_get_one_argument` refusal case in
+`test_ail_refusal_messages` now uses a dict built by a helper call, which the pass does not type
+and `_ONE_ARG_GET` still refuses.
+
+## 2026-11-05 -- pyreach s8 review fix: non-simple guard index in `[None] * n` rows
+
+`noneslots._Rewrite.visit_Compare` skipped a guard whose row subscript was not a bare name or
+constant (`xs[ix[0]] is None`, `xs[b.i] is None`, `xs[idx()] is None`) while
+`_candidate_ok.role` had already accepted it as a guard, so the compiled program compared the
+empty-list sentinel with `None` and printed `present` where CPython prints `absent`.  The compare
+now rewrites every guard whose slice is not a `Slice` (a guard evaluates its index exactly once,
+so no index is evaluated twice, and side effects in it still run once).
+
+A `[None] * n` candidate whose name is a function parameter is now refused: a guard before
+`xs = [None] * n` reads the parameter's own list, but the rewrite had moved the present-bit list
+after the init, so the earlier guard died with `UnboundLocalError: cannot access local variable
+'xs__p'`.  The candidate keeps the general route; `--strict` refuses it by name (`'xs' is a
+parameter and cannot be reassigned`).
+
+Probes `/tmp/probes/n5_guard_subscript_index.py`, `n10_attr_index_guard.py`,
+`n11_guard_call_absent.py`, `n5b_guard_isnot_simple.py`, `n5c_guard_tuple_index.py`,
+`n5d_guard_no_rewrite.py` and `n9_param_shadow.py` match CPython stdout and exit status on the
+default and `AIL_UNIFIED_FORCE=1` builds.  `test_ail_pyreach_optret`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; the five codegen pins are unchanged.
 
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 
