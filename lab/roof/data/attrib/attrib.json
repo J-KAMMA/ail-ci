@@ -1,0 +1,278 @@
+{
+ "berth_sim": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 101,
+   "by_category": {
+    "overflow": 168000000,
+    "bounds": 897288354,
+    "refcount": 9000211,
+    "alloc/free": 180021992,
+    "copies": 102018998,
+    "boxing": 0
+   },
+   "other": 6864362574,
+   "total_line_ir": 8220692129,
+   "hot_functions": [
+    [
+     2302855342,
+     "py_main"
+    ],
+    [
+     1614424789,
+     "ail_keysort_perm.constprop.0"
+    ],
+    [
+     1378352094,
+     "ail__str_to_int_full.isra.0"
+    ],
+    [
+     1007695887,
+     "ail_str_split_sep.isra.0"
+    ],
+    [
+     575519474,
+     "ail_stdin_readline"
+    ],
+    [
+     441006533,
+     "ail__sarena_keep_roots_slow.constprop.0"
+    ],
+    [
+     277878293,
+     "fpop"
+    ],
+    [
+     187844570,
+     "fpush"
+    ]
+   ],
+   "hot_disasm": {
+    "py_main": [
+     5176,
+     74
+    ],
+    "ail_keysort_perm.constprop.0": [
+     453,
+     14
+    ],
+    "ail__str_to_int_full.isra.0": [
+     694,
+     0
+    ],
+    "ail_str_split_sep.isra.0": [
+     373,
+     6
+    ],
+    "ail_stdin_readline": [
+     110,
+     4
+    ],
+    "ail__sarena_keep_roots_slow.constprop.0": [
+     224,
+     0
+    ]
+   }
+  }
+ },
+ "chain_relax": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 53,
+   "by_category": {
+    "overflow": 0,
+    "bounds": 1024,
+    "refcount": 135,
+    "alloc/free": 1177,
+    "copies": 202,
+    "boxing": 0
+   },
+   "other": 1690206385,
+   "total_line_ir": 1690208923,
+   "hot_functions": [
+    [
+     1690202982,
+     "py_main"
+    ],
+    [
+     74647,
+     "__GI___tunables_init"
+    ],
+    [
+     28862,
+     "do_lookup_x"
+    ],
+    [
+     16561,
+     "_dl_relocate_object"
+    ],
+    [
+     11296,
+     "_dl_lookup_symbol_x"
+    ],
+    [
+     6909,
+     "check_match"
+    ],
+    [
+     5217,
+     "__printf_fp_buffer_1.isra.0"
+    ],
+    [
+     3990,
+     "_int_malloc"
+    ]
+   ],
+   "hot_disasm": {
+    "py_main": [
+     1396,
+     155
+    ]
+   }
+  }
+ },
+ "echo_pack": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 47,
+   "by_category": {
+    "overflow": 9304558,
+    "bounds": 170080132,
+    "refcount": 10,
+    "alloc/free": 1016442,
+    "copies": 1455032,
+    "boxing": 0
+   },
+   "other": 5246617525,
+   "total_line_ir": 5428473699,
+   "hot_functions": [
+    [
+     5054866474,
+     "pack"
+    ],
+    [
+     84200374,
+     "ail_tab_hfree_slot"
+    ],
+    [
+     79183081,
+     "ail_tab_hput"
+    ],
+    [
+     53135665,
+     "flush"
+    ],
+    [
+     42284005,
+     "ail_bytearray_extend"
+    ],
+    [
+     35540390,
+     "ail_tab_put_slow"
+    ],
+    [
+     23057694,
+     "ail_tab_hash_rearray"
+    ],
+    [
+     19293360,
+     "ail_idict_put_slow"
+    ]
+   ],
+   "hot_disasm": {
+    "pack": [
+     935,
+     7
+    ],
+    "ail_tab_hfree_slot": [
+     46,
+     0
+    ],
+    "ail_tab_hput": [
+     107,
+     0
+    ],
+    "flush": [
+     71,
+     0
+    ],
+    "ail_bytearray_extend": [
+     90,
+     0
+    ],
+    "ail_tab_put_slow": [
+     381,
+     39
+    ]
+   }
+  }
+ },
+ "ledger_bin": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 68,
+   "by_category": {
+    "overflow": 796489974,
+    "bounds": 221952119,
+    "refcount": 1869230,
+    "alloc/free": 28921437,
+    "copies": 5141565,
+    "boxing": 0
+   },
+   "other": 4018160278,
+   "total_line_ir": 5072534603,
+   "hot_functions": [
+    [
+     2897742067,
+     "py_main"
+    ],
+    [
+     1792541960,
+     "readvar"
+    ],
+    [
+     218918923,
+     "ail_keysort_perm.constprop.0"
+    ],
+    [
+     51917382,
+     "_int_malloc"
+    ],
+    [
+     28048737,
+     "_int_free"
+    ],
+    [
+     27978246,
+     "ail_tab_hfree_slot"
+    ],
+    [
+     25434685,
+     "ail_tab_hput"
+    ],
+    [
+     23320663,
+     "ail__utf8_validate"
+    ]
+   ],
+   "hot_disasm": {
+    "py_main": [
+     4495,
+     20
+    ],
+    "readvar": [
+     87,
+     0
+    ],
+    "ail_keysort_perm.constprop.0": [
+     889,
+     30
+    ],
+    "ail_tab_hfree_slot": [
+     46,
+     0
+    ]
+   }
+  }
+ }
+}

@@ -60,7 +60,9 @@ def run(binary, c, out=subprocess.DEVNULL):
 
 def build_ail(task, work):
     dbg = work / (task + '.d')
-    dbg.mkdir(parents=True, exist_ok=True)
+    if dbg.exists():
+        import shutil
+        shutil.rmtree(dbg)
     out = work / (task + '_ail')
     p = subprocess.run([sys.executable, '-B', str(AIL), 'compile', str(SRC / task / 'typed.py'),
                         '--syntax', 'python', '-o', str(out), '--debug-dir', str(dbg)],
@@ -130,20 +132,26 @@ def annotate(task, src, exe, c, work, tag):
     ann = subprocess.run(['callgrind_annotate', '--auto=yes', '--threshold=100', '--show=Ir', str(cg)],
                          capture_output=True, text=True)
     (work / (tag + '.annotate.txt')).write_text(ann.stdout)
-    rows, hot, section = [], [], None
+    rows, hot = [], []
+    in_fn = in_src = False
+    ir_line = re.compile(r'^\s*([\d,]+)\s+\(\s*[\d.]+%\)\s+(.*)$')
     for line in ann.stdout.splitlines():
-        mm = LINE.search(line)
-        if mm and mm.group(1) == src.name:
-            num = IR.match(line)
-            if num:
-                ir = int(num.group(1).replace(',', ''))
-                text = line.split(mm.group(0), 1)[1][:200] if mm.group(0) in line else ''
-                rows.append((ir, int(mm.group(2)), text))
-        fm = re.match(r'^\s*([\d,]+)\s+\(\s*[\d.]+%\)\s+(.+)$', line)
-        if 'Ir' in line and 'file:function' in line:
-            section = 'fn'
-        elif section == 'fn' and fm and '<' not in fm.group(2):
-            hot.append((int(fm.group(1).replace(',', '')), fm.group(2).strip()))
+        if 'file:function' in line:
+            in_fn, in_src = True, False
+            continue
+        if line.startswith('-- Auto-annotated source:'):
+            in_src = str(src) in line
+            in_fn = False
+            continue
+        m = ir_line.match(line)
+        if not m:
+            continue
+        ir = int(m.group(1).replace(',', ''))
+        text = m.group(2)
+        if in_fn and '.c:' in text:
+            hot.append((ir, text.split(':', 1)[1].split(' [')[0].strip() if ':' in text else text))
+        elif in_src and not text.startswith('=>'):
+            rows.append((ir, 0, text))
     cg.unlink(missing_ok=True)
     return rows, hot[:12]
 

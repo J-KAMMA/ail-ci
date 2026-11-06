@@ -82,8 +82,8 @@ NUM = re.compile(r'==\d+== ([A-Za-z0-9 ]+?):\s*([\d,]+)')
 
 
 def cachegrind(binary, case, out_file, timeout):
-    cmd, stdin, args = invocation(binary, case)
-    for label, tool in (('sim', CACHEGRIND), ('ir', IR_ONLY)):
+    tools = (('ir', IR_ONLY),) if os.environ.get('ROOF_IR_ONLY') else (('sim', CACHEGRIND), ('ir', IR_ONLY))
+    for label, tool in tools:
         cmd, stdin, args = invocation(binary, case)
         cg = str(out_file) + '.' + label
         try:

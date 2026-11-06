@@ -1,3 +1,21 @@
+## 2026-11-06 -- roof: how close each compare program is to the hardware limit (job-roof1-11070209)
+
+Measurement only; no compiler change. `lab/roof/` adds the machine filter (STREAM triad at four
+sizes, random pointer chase at four working sets, dependent-chain clock and scalar/AVX2 width) and a
+harness that builds each of the ten `lab/compare` programs as compare-lab does (C with
+`gcc -O2 -std=c11`, AIL with `compile --syntax python`) and measures wall (median of 3),
+instructions and LLC misses. This runner exposes no hardware PMU, so counters fall back to valgrind
+cachegrind with the runner's cache geometry; every row records that.
+
+Measured here: 3.211 GHz, 2.67 scalar adds/cycle, 10.7 AVX2 doubles/cycle, STREAM triad 22.6 GB/s
+DRAM-resident, random dependent load 116.5 ns (374 cycles) at DRAM. All ten AIL builds took the
+typed path. AIL is 0.67x-1.98x C's wall (median 1.29x) and 0.83x-5.40x its instruction count; no
+hot loop in any program is vectorised (0 vectorised loops in `-fopt-info-vec-all`); only
+`tree_fold` reaches 21% of STREAM, and `berth_sim` is latency-bound (78M LLC misses at 2.1 GB/s).
+Per-line attribution of the emitted C puts 75-95% of the extra in the shape of the emitted code,
+then overflow checks (up to 15.7% of `ledger_bin`), bounds (up to 10.6%) and allocation (8.4%).
+See `lab/roof/RESULTS.md`.
+
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for
