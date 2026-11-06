@@ -182,3 +182,22 @@ lowering.
   (`p13c_rebind.py`, `q13_annrebind.py`, `q13_tuple.py`, `q13_aug.py`, `q13_forreuse.py`,
   `q13_del.py`).
 
+
+## Review fixes (fifth round)
+
+* A multi-target `Assign` now rebinds every target of a scanner name: `a = it = [1, 2]` after
+  `with os.scandir(p) as it:` drops the scanner marker for both names and matches CPython
+  (`f2_chainassign.py`, `1/1/2/a 1/a 2`).
+* The close-on-`with` try/finally no longer puts a `def` or `class` inside a `try`: those stay at
+  their place in the body and the surrounding statements keep a try of their own, so a nested
+  function in the `with` body builds and matches CPython (`f1_definscan.py`, `3/2`).
+* The `if True:` the surface leaves in place of a rewritten `with open(...) as name:` now drops
+  only the actual target name. The target is read back from the original source line through the
+  line map `ail_chatgpt.py` writes next to the combined source (`lines.json`); an unrelated
+  `with open(...) as f:` in the scanner's scope therefore no longer refuses a later `for e in it:`
+  (`f3_nestedopen.py`, `A/again 0`; `g6_open_unrelated_literal.py` matches). A rewritten
+  `with open(...) as it:` is still refused by name (`g7_open_rebind_literal.py`), and when the
+  line map is not present the old conservative rule keeps the enclosing-loop case working. The
+  refusals for the shapes the surface leaves alone are unchanged (`g1`, `g2`, `g4` refused).
+* The `break` inside the `with` body already built and matched in both builds at the previous
+  commit; re-checked with `f4_break.py` (default and `AIL_UNIFIED_FORCE=1`, `0`).

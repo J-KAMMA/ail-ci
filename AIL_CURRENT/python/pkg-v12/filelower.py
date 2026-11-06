@@ -4,7 +4,10 @@ over files, `os` and `os.path`, lowered onto the primitives and the prelude (fil
 """
 import ast
 import copy
+import json
 import os
+import re
+import sys
 
 import filelib
 import filelib_prelude
@@ -273,6 +276,7 @@ class _Lowerer(ast.NodeTransformer):
         self.walk_dirs = set()         # names bound as the `dirs` of an os.walk loop
         self.scandir_names = set()     # names bound by `with os.scandir(p) as it:`
         self.scandir_rebound = set()   # scanner names a later `with ... as` rebound to something else
+        self.scandir_iterating = set() # scanner names whose `for` body is being lowered right now
         self.hoist = []                # assignments to put before the statement being lowered
         self.windows = filelib.target_windows()
 
@@ -643,8 +647,8 @@ class _Lowerer(ast.NodeTransformer):
             self.scandir_rebound.discard(target.id)
 
     def visit_Assign(self, node):
-        if len(node.targets) == 1:
-            self.rebind_scandir(node.targets[0], node.value)
+        for target in node.targets:
+            self.rebind_scandir(target, node.value)
         # head, tail = os.path.split(p) / root, ext = os.path.splitext(p)
         pn = self.path_name(self.qual(node.value.func)) if isinstance(node.value, ast.Call) else None
         if len(node.targets) == 1 and isinstance(node.targets[0], (ast.Tuple, ast.List)) \
@@ -760,10 +764,61 @@ class _Lowerer(ast.NodeTransformer):
         if isinstance(node.test, ast.Constant) and node.test.value is True and self.scandir_names \
                 and any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'open'
                         for stmt in node.body for n in ast.walk(stmt)):
+            # The target of `with open(...) as name:` is gone from the tree. Read it back from the source
+            # file when that is possible; a scanner that is the iterable of an enclosing `for e in it:`
+            # cannot be the name just rebound by this `with`, so it is left alone either way.
+            target = self.rewritten_with_target(node)
             for name in list(self.scandir_names):
+                if target is not None:
+                    if name not in target:
+                        continue
+                elif name in self.scandir_iterating:
+                    continue
                 self.scandir_names.discard(name)
                 self.scandir_rebound.add(name)
         return self.generic_visit(node)
+
+    def rewritten_with_target(self, node):
+        """The `as NAME` of the `with open(...)` the surface turned into this `if True:`, or None when
+        the original source line is not known."""
+        path, line = self.original_line(node)
+        if path is None or line is None:
+            return None
+        try:
+            with open(path, encoding='utf-8-sig') as handle:
+                lines = handle.read().splitlines()
+        except OSError:
+            return None
+        index = line - 1
+        if index < 0 or index >= len(lines) or not lines[index].lstrip().startswith('with '):
+            return None
+        header = lines[index]
+        for extra in lines[index + 1:index + 20]:
+            if header.count('(') <= header.count(')'):
+                break
+            header = header + ' ' + extra.strip()
+        found = re.search(r'\bas\s+([A-Za-z_]\w*)\s*:', header)
+        return {found.group(1)} if found else None
+
+    @staticmethod
+    def original_line(node):
+        """(path, line) in the program the author wrote for a combined-source line, from the line map
+        `ail_chatgpt.py` writes next to the combined source; (None, None) when there is none."""
+        try:
+            at = sys.argv.index('--file')
+            combined = sys.argv[at + 1]
+        except (ValueError, IndexError):
+            return None, None
+        try:
+            with open(os.path.join(os.path.dirname(combined), 'lines.json'), encoding='utf-8') as handle:
+                mapping = json.load(handle)
+        except (OSError, ValueError):
+            return None, None
+        where = mapping.get(str(node.lineno)) if isinstance(mapping, dict) else None
+        if isinstance(where, list) and len(where) >= 2 and isinstance(where[0], str) \
+                and isinstance(where[1], int):
+            return where[0], where[1]
+        return None, None
 
     def visit_With(self, node):
         items = node.items
@@ -807,9 +862,8 @@ class _Lowerer(ast.NodeTransformer):
                 path = self.visit(context.args[0]) if context.args else self.C('.')
                 target = item.optional_vars
                 close = ast.Expr(value=self.method(self.N(target.id), 'close'))
-                guarded = ast.Try(body=body, handlers=[], orelse=[], finalbody=[close])
                 body = [ast.Assign(targets=[target],
-                                   value=self.call('_ail_scan_open', path)), guarded]
+                                   value=self.call('_ail_scan_open', path))] + self.guard_scanner(body, close)
                 continue
             elif self.general:
                 item.context_expr = self.visit(item.context_expr)
@@ -827,6 +881,28 @@ class _Lowerer(ast.NodeTransformer):
             stmts.append(guarded)
             body = stmts
         return self.located(body, node)
+
+    def guard_scanner(self, body, close):
+        """Wrap a `with os.scandir(...)` body in try/finally so the scanner closes on every exit.
+        AIL cannot compile a `def` or `class` inside a `try`, so those stay outside; the statements
+        around them get a try of their own and the close after a trailing definition."""
+        out, segment, after_def = [], [], False
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if segment:
+                    out.append(ast.Try(body=segment, handlers=[], orelse=[],
+                                       finalbody=[copy.deepcopy(close)]))
+                    segment = []
+                out.append(stmt)
+                after_def = True
+            else:
+                segment.append(stmt)
+                after_def = False
+        if segment:
+            out.append(ast.Try(body=segment, handlers=[], orelse=[], finalbody=[copy.deepcopy(close)]))
+        elif after_def:
+            out.append(ast.Expr(value=copy.deepcopy(close.value)))
+        return out
 
     def visit_Try(self, node):
         return self.generic_visit(node)
@@ -895,8 +971,15 @@ class _Lowerer(ast.NodeTransformer):
             stmts.append(ast.Assign(targets=[self.N(it, True)], value=self.call('_ail_scan_open', path)))
         head = [ast.Assign(targets=[copy.deepcopy(node.target)],
                            value=self.method(self.N(it), 'entry'))]
+        outer = it in self.scandir_iterating
+        self.scandir_iterating.add(it)
+        try:
+            body = head + self.block(node.body)
+        finally:
+            if not outer:
+                self.scandir_iterating.discard(it)
         loop = ast.While(test=self.method(self.N(it), 'advance'),
-                         body=head + self.block(node.body), orelse=self.block(node.orelse))
+                         body=body, orelse=self.block(node.orelse))
         stmts.append(loop)
         if node.target.id == it:
             self.scandir_names.discard(it)          # the loop rebinds the name to an entry
