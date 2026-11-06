@@ -1,3 +1,13 @@
+## 2026-11-06 -- rbmailcap1: bundled `mailcap` re-applied on the current tree (job-rbmailcap1-11061259)
+
+Re-applied the accepted `mailcap1` change (`9ecd89bb`..`job-mailcap1-11060850`); none of its files
+were present on this tree, so the bundle, the ten `lab/stdlib/mailcap` programs, `test_ail_std_mailcap.py`
+and its `tests.d/` registration applied directly. Two conflicts were resolved by keeping both sides:
+the `agent-worker.yml` change that removes the `agent`/`opus` input and its Claude token handling is
+kept (the current tree's CR/LF token-strip fix is for that removed feature, so it goes with it), and
+the DEVLOG keeps this tree's newer entries above the accepted mailcap entry. `tools/diff_ids.py` is
+not present on this tree, so only `update_manifest.py` ran.
+
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
 str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
@@ -42,6 +52,29 @@ unchanged and the test is stable across later compiler edits.  A corpus without 
 refused by name ("re-run --run to record them").  `test_ail_selfhost_seed` also asserts the
 snapshot is present and positive.  `test_ail_selfhost_seed` 2 OK on both this branch and a worktree
 of today's integ with the change applied.
+## 2026-11-05 -- mailcap1 suite fix: `mailcap` no longer pulls the whole `re` runtime into the general compile
+
+`test_ail_std_mailcap` was the outlier of the five modules this job reported: each of its 20 builds
+(10 programs x default/forced-general) took about 65 s under load and the module needed about 18 min,
+because `import mailcap` also imported `re` and every one of these programs is built on the general
+path (the bundled `mailcap` is a general-path module: `subst` returns `str` on one path and `None` on
+the unsafe one).  The `re` prelude (relib) dominated the general compile.  CPython's `mailcap` uses
+`re` only for `_find_unsafe`, so the bundled module now scans for CPython's pattern
+`[^\xa1-\U0010FFFF\w@+=:,./-]` by code point and returns the first unsafe character (truthy) or
+`None`; the character set is identical (verified over every code point 0..0x10FFFF against CPython's
+regex) and every caller only tests truthiness.  A compile dropped to about 12-15 s and the module now
+runs 2 tests in 250 s.
+
+The other four modules named by the job pass on this tree unchanged: `test_ail_obj_refs` 3 OK (11 s),
+`test_ail_safetynet` 5 OK (179 s), `test_ail_unified` 14 OK (393 s) and `test_ail_virtual_dispatch`
+6 OK (58 s).  `test_ail_files` and `test_ail_corpus_findings3` also pass on the final commit.
+
+Probes `/tmp/probes/p1_find_unsafe.py` (every ASCII punctuation/control class, `\x7f`-`\xa1`, Latin-1,
+CJK and `\uffff`), `p2_findmatch.py` (safe/unsafe filename, wildcard, missing type, unsafe MIME type
+and plist parameter, defaults, empty caps), `p3_subst.py` (`%s`, `%t`, `%{...}`, `%%`, escapes, empty
+field, a trailing `%`, unsafe MIME/parameter, empty and `%%{x}`) and `p4_values_via.py` (values
+through an argument, list items, an attribute and dict values) match CPython 3.12 stdout on both the
+default and `AIL_UNIFIED_FORCE=1` builds.
 
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 
