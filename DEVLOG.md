@@ -1,3 +1,26 @@
+## 2026-11-06 -- rbffdocs1: re-apply the docs link checker and static-site generator (job-rbffdocs1-11061703)
+
+Re-applied the accepted `ffdocs1` change (`cda7f346`..`job-ffdocs1-11061509`) on this tree.
+The source files applied unchanged from the accepted branch: the new `tools/docs_links.py` and
+`tools/docs_site.py`, `AIL_CURRENT/test_ail_docs_site.py`, its `tests.d` registration, the
+`docs/spec/DIFFERENCES.md` companion link to `AIL_REFERENCE.md`, and the `site/` line in
+`.gitignore`. The `agent-worker.yml` hunk was already present on this tree. The `manifest.d`
+hunks were not applied by hand; `tools/update_manifest.py` regenerated the pins for the two new
+test files. `tools/diff_ids.py` does not exist on this tree, so it was not run.
+
+The docs-site test module passes against the current `docs/` tree (the generator renders every
+Markdown file, reports the fenced-block count, builds `search-index.json`, and the built site passes
+the same link checker). Probes in `/tmp/probes` exercised empty trees, missing files and anchors,
+duplicate heading ids, query/fragment links, angle-bracket destinations, fenced/inline/comment
+links, tables with escaped pipes, setext headings, reference-style links, raw HTML (refused in
+docs, allowed in published outside files), `_repo/` publishing of Markdown, assets and
+directories, output-directory cleanup, and links that leave the site root or the repository; all
+matched the expected behaviour. `cmp.sh` runs both probes under CPython and both AIL builds refuse
+them by name (imports/tuples outside the subset), as expected for these Python tools. Required
+tests on the final commit (`par_check -j 2`): `test_ail_docs_site`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass; `tools/update_manifest.py --check` is
+clean.
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an

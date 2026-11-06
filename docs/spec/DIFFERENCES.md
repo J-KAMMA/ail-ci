@@ -1,6 +1,6 @@
 # Known differences from CPython 3.12
 
-Draft 1, 2026-10-17, for branch `utf8-str` at 6635b8a (batch 5, 2026-10-19: A46, C30-C38); items C1, C5-C11, C13, C14, C16 fixed on branch `specfix-num`. Companion to [`AIL_SPEC.md`](AIL_SPEC.md).
+Draft 1, 2026-10-17, for branch `utf8-str` at 6635b8a (batch 5, 2026-10-19: A46, C30-C38); items C1, C5-C11, C13, C14, C16 fixed on branch `specfix-num`. Companion to [`AIL_REFERENCE.md`](../../AIL_CURRENT/AIL_REFERENCE.md).
 The promise is the same result as CPython 3.12, or a named compile-time refusal. Every entry below
 falls into one of three kinds:
 
