@@ -4,10 +4,12 @@ A local whose every binding is a read out of another object (a field read `n = n
 element read, or a parameter) and which is never stored, returned or captured is a *cursor*:
 the owner it was read from keeps the object alive, so it takes no retain and no release.
 
-Two accepted walks (a parameter cursor and a local cursor started from a borrowed parameter) and
-three refused ones (the owner list is cleared, the field is reassigned, the cursor is appended to
-a list) pin the rule down.  Each accepted program is run against CPython; each checks the
-generated C for the absent store helper.
+Two accepted walks (a parameter cursor and a local cursor started from a borrowed parameter),
+a walk that calls a pure reader (the callee's `ir/effects.py` summary has no write), and three
+refused ones (the owner list is cleared, the field is reassigned, the cursor is appended to a
+list) pin the rule down.  Each accepted program is run against CPython; each checks the
+generated C for the absent store helper.  A call that writes the traversed field refuses the
+cursor (`WRITER_CALL`).
 """
 import ast
 import os
@@ -130,6 +132,55 @@ def main() -> int:
 main()
 """
 
+# 4. the walk calls a pure reader: the callee's effect summary has no write, so the chain the
+#    cursor walks cannot be released while it is live -- the cursor is accepted.
+READER_CALL = NODE + """
+def score(n: Node) -> int:
+    return n.value
+
+
+def total(n: Node | None) -> int:
+    acc = 0
+    while n is not None:
+        acc += score(n)
+        n = n.next
+    return acc
+
+
+def main() -> int:
+    head = Node(1, Node(2, Node(3, None)))
+    print(total(head))
+    return 0
+
+
+main()
+"""
+
+# 5. the walk calls a function that writes the traversed field: the effect summary names
+#    `Field(?,next)`, so the keep-alive proof fails and the cursor stays owning.
+WRITER_CALL = NODE + """
+def cut(n: Node) -> int:
+    n.next = None
+    return n.value
+
+
+def total(n: Node | None) -> int:
+    acc = 0
+    while n is not None:
+        acc += cut(n)
+        n = n.next
+    return acc
+
+
+def main() -> int:
+    head = Node(4, Node(5, None))
+    print(total(head))
+    return 0
+
+
+main()
+"""
+
 # 3. the cursor is appended to a list: the list keeps its own reference, which the cursor does
 #    not own.
 APPENDED = NODE + """
@@ -160,6 +211,7 @@ class CursorTests(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory()
         cls.cases = {}
         for name, text in (("param_cursor", PARAM_CURSOR), ("local_cursor", LOCAL_CURSOR),
+                           ("reader_call", READER_CALL), ("writer_call", WRITER_CALL),
                            ("cleared", CLEARED), ("field_written", FIELD_WRITTEN),
                            ("appended", APPENDED)):
             cls.cases[name] = build(cls.directory.name, text, name)
@@ -192,6 +244,17 @@ class CursorTests(unittest.TestCase):
         self.assertNotIn("ail_obj_store_Node(&v_n", body)
         self.assertIn("v_n = v_head;", body)
         self.assertIn("v_n = (ail_nn_Node(v_n))->f_next;", body)
+
+    def test_a_pure_reader_call_keeps_the_cursor(self):
+        self.check("reader_call")
+        body = body_of(self.cases["reader_call"][1], "total")
+        self.assertNotIn("ail_obj_store_Node(&v_n", body)
+        self.assertNotIn("ail_obj_retain(v_n)", body)
+        self.assertIn("v_n = (ail_nn_Node(v_n))->f_next;", body)
+
+    def test_a_call_that_writes_the_field_refuses_the_cursor(self):
+        program = self.check("writer_call")
+        self.assertIn("ail_obj_store_Node(&v_n", body_of(program, "total"))
 
     def test_clearing_the_owner_refuses_the_cursor(self):
         program = self.check("cleared")
@@ -233,6 +296,30 @@ class AnalysisTests(unittest.TestCase):
         self.assertNotIn("item", self.cursors(CLEARED).get("scan", ()))
         self.assertNotIn("n", self.cursors(FIELD_WRITTEN).get("total", ()))
         self.assertNotIn("n", self.cursors(APPENDED).get("collect", ()))
+        self.assertNotIn("n", self.cursors(WRITER_CALL).get("total", ()))
+
+    def test_a_pure_reader_call_is_a_cursor(self):
+        self.assertIn("n", self.cursors(READER_CALL).get("total", ()))
+
+    def test_a_store_before_the_binding_does_not_refuse(self):
+        text = NODE + """
+def total(head: Node | None, other: Node) -> int:
+    other.next = None
+    n = head
+    acc = 0
+    while n is not None:
+        acc += n.value
+        n = n.next
+    return acc
+
+
+def main() -> int:
+    return 0
+
+
+main()
+"""
+        self.assertIn("n", self.cursors(text).get("total", ()))
 
     def test_stored_into_a_list_literal_is_refused(self):
         text = NODE + """

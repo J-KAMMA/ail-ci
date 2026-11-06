@@ -20,6 +20,8 @@ intersection -- a parameter is borrowed only when every same-named function borr
 import ast
 import os
 
+from . import effects as E                 # rc3: the effect vocabulary and summaries
+
 #: Calls whose arguments are only read -- no reference is stored, taken or handed on.  The
 #: copying constructors (`bytes(x)`, `list(x)`, ...) read their argument and build a new object;
 #: they never keep the argument's reference.
@@ -266,15 +268,20 @@ def analyze(tree, library=False, entries=()):
 # A local is a *cursor* when every binding of it is a read out of another object (a field
 # read `n = n.next`, an element read `n = xs[i]`, a `for` element), another cursor, or a
 # parameter (which the caller keeps alive for the whole call).  It is never stored,
-# returned or captured, and nothing in the function can release what it points at: no
-# field store, no element store, no call except a read-only builtin.  Under those
-# conditions the object is kept alive by the owner the cursor was read from, so the
-# cursor itself needs no reference: no retain on entry, no store retain/release, no
-# release at exit.
+# returned or captured, and the object it points to is kept alive by the owner it was read
+# from: while the cursor is live that owner is not written, and no call may write it.
 #
-# The keep-alive half is deliberately whole-function and conservative.  A cursor that
-# would need a path-sensitive proof (a write on another branch, a call that may write)
-# is not inferred; the local stays owning, which is always correct.
+# The keep-alive half is the effect summary of `ir/effects.py`, computed here on the source
+# AST because this runs before lowering.  Locations use the same vocabulary: `Field(?,f)`
+# is a field store (the class is unknown this early, so every class's field `f` is conflated
+# -- that only makes the proof stronger), `Elem(root)`/`Spine(root)` are a list write.  A
+# call is charged the callee's summary (a fixed point over the module's functions); an
+# unknown callee is `Effects(unknown=True)` and keeps every cursor owning.
+#
+# Liveness is path sensitive: a write counts only when the cursor is bound on some path to
+# it.  A loop whose body binds the cursor makes its whole body (and its test, re-evaluated
+# on later iterations) live.  Under these conditions the cursor needs no reference: no
+# retain on entry, no store retain/release, no release at exit.
 # ---------------------------------------------------------------------------
 
 def _deepest_name(node):
@@ -284,30 +291,92 @@ def _deepest_name(node):
     return node.id if isinstance(node, ast.Name) else None
 
 
-def _cursor_function_safe(fn):
-    """Whether nothing in `fn` can release an object a cursor points at: no field or
-    element store, no call except a read-only builtin, no del/global/nonlocal, no closure."""
+def _nodes(root):
+    """Every node under `root`, without descending into a nested function or class: those
+    have their own summary (a call to one reaches it) and a closure is refused outright."""
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        yield node
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.Lambda, ast.ClassDef)):
+                continue
+            stack.append(child)
+
+
+def _structure_ok(fn):
+    """Refusals no keep-alive proof can recover: a `del`, a global/nonlocal cell, a closure,
+    a `with`, or a loop target that is not a plain name."""
     for node in ast.walk(fn):
         if isinstance(node, (ast.Delete, ast.Global, ast.Nonlocal)):
             return False
         if node is not fn and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                                 ast.Lambda, ast.ClassDef)):
+                                                ast.Lambda, ast.ClassDef)):
             return False
-        if isinstance(node, ast.Call):
-            f = node.func
-            if not (isinstance(f, ast.Name) and f.id in READ_ONLY_CALLS):
-                return False
-        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                for sub in ast.walk(target):
-                    if isinstance(sub, (ast.Attribute, ast.Subscript)) and isinstance(sub.ctx, ast.Store):
-                        return False
-        if isinstance(node, ast.With):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
             return False
-        if isinstance(node, ast.For) and not isinstance(node.target, ast.Name):
+        if isinstance(node, (ast.For, ast.AsyncFor)) and not isinstance(node.target, ast.Name):
             return False
     return True
+
+
+def _call_effects(node, summaries, classes):
+    """The write effects of one call: a read-only builtin writes nothing; a class constructor
+    writes only a fresh heap object; a module function is its fixed-point summary; anything
+    else may write anything."""
+    f = node.func
+    if isinstance(f, ast.Name):
+        if f.id in READ_ONLY_CALLS:
+            return E.NONE
+        if f.id in classes:
+            return E.Effects(allocs=['Heap'])
+        if f.id in summaries:
+            return summaries[f.id]
+    elif isinstance(f, ast.Attribute) and f.attr in summaries:
+        return summaries[f.attr]
+    return E.UNKNOWN
+
+
+def _ast_effects(fn, summaries, classes):
+    """The write half of `fn`'s `ir/effects.py` summary, on the source AST."""
+    writes = set()
+    unknown = False
+    for node in _nodes(fn):
+        if isinstance(node, (ast.Delete, ast.Global, ast.Nonlocal, ast.With, ast.AsyncWith)):
+            unknown = True
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+            writes.add('Field(?,%s)' % node.attr)
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+            root = _deepest_name(node.value) or '?'
+            writes.add('Elem(%s)' % root)
+            writes.add('Spine(%s)' % root)
+        elif isinstance(node, ast.Call):
+            eff = _call_effects(node, summaries, classes)
+            writes |= eff.writes
+            unknown = unknown or eff.unknown
+    return E.Effects(writes=writes, unknown=unknown)
+
+
+def _summaries(fns, classes):
+    """Write summaries of every module function, iterated to a fixed point over calls (the
+    same shape as `effects.summarize_program`).  Same-named functions are merged by union:
+    the callee cannot be told apart, so the stronger summary is the sound one."""
+    groups = {}
+    for f in fns:
+        groups.setdefault(f.name, []).append(f)
+    out = {name: E.NONE for name in groups}
+    changed = True
+    while changed:
+        changed = False
+        for name, fs in groups.items():
+            eff = E.NONE
+            for f in fs:
+                eff = eff | _ast_effects(f, out, classes)
+            if eff != out[name]:
+                out[name] = eff
+                changed = True
+    return out
 
 
 def _bindings(fn):
@@ -357,9 +426,22 @@ def _base_of(kind, source):
     return None
 
 
-def _roots_ok(name, candidates, cursors, params, stores, seen=None):
+def _loop_bound(fn):
+    """Names bound anywhere inside a loop (its target or a store in the body).  The emitter
+    releases such a local at the loop point, so it cannot be the root a cursor outlives."""
+    names = set()
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            for sub in _nodes(node):
+                if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+                    names.add(sub.id)
+    return names
+
+
+def _roots_ok(name, candidates, cursors, params, stores, loop_bound, seen=None):
     """Every chain a cursor name can be reached from starts at a parameter or a local that is
-    bound exactly once (so nothing can replace or release it while the cursor lives)."""
+    bound exactly once, outside any loop (so nothing can replace or release it while the cursor
+    lives)."""
     if name in params:
         return True
     seen = set() if seen is None else seen
@@ -367,6 +449,10 @@ def _roots_ok(name, candidates, cursors, params, stores, seen=None):
         return True
     seen.add(name)
     found = False
+
+    def root_ok(base):
+        return base in params or (stores.get(base, 0) == 1 and base not in loop_bound)
+
     for kind, source in candidates.get(name, ()):
         if kind in ('field', 'elem', 'for'):
             base = _base_of(kind, source)
@@ -375,10 +461,10 @@ def _roots_ok(name, candidates, cursors, params, stores, seen=None):
             if base == name or base in seen:
                 continue
             if base in cursors:
-                if not _roots_ok(base, candidates, cursors, params, stores, seen):
+                if not _roots_ok(base, candidates, cursors, params, stores, loop_bound, seen):
                     return False
                 found = True
-            elif base in params or stores.get(base, 0) == 1:
+            elif root_ok(base):
                 found = True
             else:
                 return False
@@ -386,10 +472,10 @@ def _roots_ok(name, candidates, cursors, params, stores, seen=None):
             if source == name or source in seen:
                 continue
             if source in cursors:
-                if not _roots_ok(source, candidates, cursors, params, stores, seen):
+                if not _roots_ok(source, candidates, cursors, params, stores, loop_bound, seen):
                     return False
                 found = True
-            elif source in params or stores.get(source, 0) == 1:
+            elif root_ok(source):
                 found = True
             else:
                 return False
@@ -398,7 +484,49 @@ def _roots_ok(name, candidates, cursors, params, stores, seen=None):
     return found
 
 
-def _loads_ok(fn, name):
+def _call_borrows(call, node, borrowed, by_name, classes):
+    """Whether `node`, passed directly to `call`, sits in a position the callee borrows.
+
+    A read-only builtin reads every argument; a module function borrows exactly the positions
+    rc2 proved read-only, so it neither stores nor returns the cursor; a constructor stores its
+    arguments into a fresh object."""
+    f = call.func
+    if isinstance(f, ast.Name):
+        if f.id in READ_ONLY_CALLS:
+            return True
+        if f.id in classes:
+            return False
+        name, shift = f.id, 0
+    elif isinstance(f, ast.Attribute):
+        name, shift = f.attr, 1                # the receiver is the callee's `self`
+    else:
+        return False
+    if name not in borrowed or name not in by_name:
+        return False
+    order = param_names(by_name[name])
+    for i, arg in enumerate(call.args):
+        if arg is node:
+            return shift + i < len(order) and order[shift + i] in borrowed[name]
+    for kw in call.keywords:
+        if kw.value is node:
+            return kw.arg is not None and kw.arg in borrowed[name]
+    return False
+
+
+def _receiver_borrows(call, borrowed, by_name):
+    """Whether the method `call` names borrows its receiver (`self`), so calling it on the
+    cursor neither stores nor returns the cursor."""
+    f = call.func
+    if not isinstance(f, ast.Attribute):
+        return False
+    name = f.attr
+    if name not in borrowed or name not in by_name:
+        return False
+    order = param_names(by_name[name])
+    return bool(order) and order[0] in borrowed[name]
+
+
+def _loads_ok(fn, name, borrowed, by_name, classes):
     """Every read of the name is a read through it or a test, never a hand-off."""
     parents = {}
     for node in ast.walk(fn):
@@ -410,6 +538,11 @@ def _loads_ok(fn, name):
             continue
         parent = parents.get(node)
         if isinstance(parent, ast.Attribute) and parent.value is node:
+            grand = parents.get(parent)
+            if isinstance(grand, ast.Call) and grand.func is parent:
+                if _receiver_borrows(grand, borrowed, by_name):
+                    continue                            # n.m() with a borrowed receiver
+                return False
             continue                                    # n.next / n.value
         if isinstance(parent, ast.Subscript) and parent.value is node:
             continue                                    # n.kids[i]
@@ -422,22 +555,148 @@ def _loads_ok(fn, name):
         if isinstance(parent, ast.BoolOp):
             continue
         if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is node:
-            continue                                    # m = n (m is a cursor)
-        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
-                and parent.func.id in READ_ONLY_CALLS:
-            continue                                    # len(n) / print(n)
+            targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+            if all(isinstance(t, ast.Name) for t in targets):
+                continue                                # m = n (m is a cursor)
+            return False                                # stored into a field or an element
+        if isinstance(parent, ast.Call) and _call_borrows(parent, node, borrowed, by_name, classes):
+            continue                                    # len(n) / print(n) / a read-only callee
         if isinstance(parent, ast.IfExp) and parent.test is node:
             continue
         return False
     return True
 
 
-def _cursors_in(fn, borrowed):
-    if not _cursor_function_safe(fn):
+def _protected(name, candidates):
+    """The locations a write can release the chain through: the field names the cursor is read
+    through, and (for an element or iteration source) every list write -- this early a second
+    name for the same list cannot be told apart, so any list write counts."""
+    fields, elem = set(), False
+    for kind, source in candidates.get(name, ()):
+        if kind == 'field':
+            fields.add(source.attr)
+        elif kind in ('elem', 'for'):
+            elem = True
+    return fields, elem
+
+
+def _writes_hit(writes, unknown, fields, elem):
+    if unknown:
+        return True
+    for loc in writes:
+        if loc.startswith('Field(?,'):
+            if loc[8:-1] in fields:
+                return True
+        elif loc.startswith('Elem(') or loc.startswith('Spine('):
+            if elem:
+                return True
+    return False
+
+
+def _live_refuses(fn, name, fields, elem, summaries, classes):
+    """Whether a write that may release the chain can run while `name` is live.
+
+    A forward walk carries "bound on some path so far".  A loop whose body can bind the name
+    makes its whole body live (iteration two executes it with the cursor bound) and its test
+    too; the iterable of a `for` is evaluated once, before the body, so it uses the state on
+    entry."""
+    def danger(node):
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                eff = _call_effects(sub, summaries, classes)
+                if _writes_hit(eff.writes, eff.unknown, fields, elem):
+                    return True
+            elif isinstance(sub, ast.Attribute) and isinstance(sub.ctx, ast.Store):
+                if sub.attr in fields:
+                    return True
+            elif isinstance(sub, ast.Subscript) and isinstance(sub.ctx, ast.Store):
+                if elem:
+                    return True
+            elif isinstance(sub, ast.Delete):
+                return True
+        return False
+
+    def binds(stmts):
+        for st in stmts:
+            for sub in _nodes(st):
+                if isinstance(sub, ast.Name) and sub.id == name \
+                        and isinstance(sub.ctx, (ast.Store, ast.Del)):
+                    return True
+        return False
+
+    def seq(stmts, live):
+        for st in stmts:
+            refused, live = one(st, live)
+            if refused:
+                return True, live
+        return False, live
+
+    def one(st, live):
+        if isinstance(st, ast.If):
+            if danger(st.test):
+                return True, live
+            r, l1 = seq(st.body, live)
+            if r:
+                return True, live
+            r, l2 = seq(st.orelse, live)
+            if r:
+                return True, live
+            return False, live or l1 or l2
+        if isinstance(st, ast.While):
+            loop = live or binds(st.body)
+            if loop and danger(st.test):
+                return True, live
+            r, l = seq(st.body, loop)
+            if r:
+                return True, live
+            return False, loop or l
+        if isinstance(st, (ast.For, ast.AsyncFor)):
+            if live and danger(st.iter):
+                return True, live
+            mine = isinstance(st.target, ast.Name) and st.target.id == name
+            r, l = seq(st.body, live or mine or binds(st.body))
+            if r:
+                return True, live
+            return False, live or mine or l
+        if isinstance(st, ast.Try) or (getattr(ast, 'TryStar', None) is not None
+                                       and isinstance(st, ast.TryStar)):
+            r, l = seq(st.body, live)
+            if r:
+                return True, live
+            for h in st.handlers:
+                r, _ = seq(h.body, live or l)
+                if r:
+                    return True, live
+            r, l2 = seq(st.orelse, live or l)
+            if r:
+                return True, live
+            r, l3 = seq(st.finalbody, live)
+            if r:
+                return True, live
+            return False, live or l or l2 or l3
+        if isinstance(st, (ast.With, ast.AsyncWith)):
+            return True, live                     # `_structure_ok` already refuses it
+        if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return False, live
+        if live and danger(st):
+            return True, live
+        if any(isinstance(sub, ast.Name) and sub.id == name
+               and isinstance(sub.ctx, ast.Store) for sub in _nodes(st)):
+            return False, True
+        return False, live
+
+    return seq(fn.body, False)[0]
+
+
+def _cursors_in(fn, borrowed, summaries, classes, by_name):
+    """`borrowed` is rc2's whole map: this function's own positions come from its name, and a
+    call to another module function borrows the positions recorded for that callee."""
+    if not _structure_ok(fn):
         return set()
     candidates = _bindings(fn)
     stores = _store_counts(fn)
     params = set(param_names(fn))
+    loop_bound = _loop_bound(fn)
     names = [n for n, sources in candidates.items()
              if stores.get(n, 0) == len(sources)
              and all(kind != 'bad' for kind, _ in sources)]
@@ -456,9 +715,12 @@ def _cursors_in(fn, borrowed):
                     continue
                 ok = False
                 break
-            if not ok or not _loads_ok(fn, name):
+            if not ok or not _loads_ok(fn, name, borrowed, by_name, classes):
                 continue
-            if _roots_ok(name, candidates, cursors, params, stores):
+            fields, elem = _protected(name, candidates)
+            if _live_refuses(fn, name, fields, elem, summaries, classes):
+                continue
+            if _roots_ok(name, candidates, cursors, params, stores, loop_bound):
                 cursors.add(name)
                 changed = True
     return cursors
@@ -472,14 +734,18 @@ def analyze_cursors(tree, borrowed=None, library=False):
     if library:
         return {}
     borrowed = borrowed or {}
+    fns = _functions(tree)
+    classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
     groups = {}
-    for fn in _functions(tree):
+    for fn in fns:
         groups.setdefault(fn.name, []).append(fn)
+    by_name = {k: v[0] for k, v in groups.items() if len(v) == 1}
+    summaries = _summaries(fns, classes)
     out = {}
-    for name, fns in groups.items():
-        if len(fns) != 1:
+    for name, fs in groups.items():
+        if len(fs) != 1:
             continue
-        found = _cursors_in(fns[0], set(borrowed.get(name, ())))
+        found = _cursors_in(fs[0], borrowed, summaries, classes, by_name)
         if found:
             out[name] = frozenset(found)
     return out
