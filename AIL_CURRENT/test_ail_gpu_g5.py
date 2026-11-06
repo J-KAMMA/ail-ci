@@ -409,6 +409,58 @@ print(out[0], out[1024], out[4095], out[8191])
                 elif not ran:
                     raise unittest.SkipTest('no Vulkan device')
 
+    SQRT_EDGES = '''
+import math
+n = 6
+a = [0.0] * n
+a[0] = float('nan')
+a[1] = float('inf')
+a[2] = -0.0
+a[3] = 0.0
+a[4] = 5e-324
+a[5] = 2.0
+out = [0.0] * n
+# ail: gpu
+for i in range(n):
+    out[i] = math.sqrt(a[i])
+print(out[0] == out[0], out[1], math.copysign(1.0, out[2]), out[3], out[4], out[5])
+'''
+
+    def test_sqrt_of_nan_inf_and_zero_matches_cpython(self):
+        """GPU.md 6.3: NaN and `+inf` take the `** 0.5` arm and replay on the CPU (never a quiet nan or an error); -0
+        keeps its sign; a subnormal argument also replays."""
+        src, exe, _ = self.build('sqrt_edges', self.SQRT_EDGES)
+        py = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, text=True)
+        self.assertEqual(py.returncode, 0, py.stderr)
+        self.assertEqual(py.stdout, 'False inf -1.0 0.0 2.2227587494850775e-162 1.4142135623730951\n')
+        for value in ('0', 'emu'):
+            out, rc, err = self.run_prog(exe, AIL_GPU=value)
+            self.assertEqual((out, rc), (py.stdout, py.returncode), 'AIL_GPU=' + value + '\n' + err)
+
+    def test_hand_written_pow_half_is_refused_by_name(self):
+        """A `** 0.5` the user writes is refused: CPython makes a negative base a complex number, and the CPU replay
+        would print a quiet nan; only the `** 0.5` that `gpu.prepare` builds from `math.sqrt` is accepted."""
+        text = '''
+n = 4
+a = [0.0] * n
+out = [0.0] * n
+# ail: gpu
+for i in range(n):
+    out[i] = a[i] ** 0.5
+print(out)
+'''
+        src = self.dir / 'pow_half.py'
+        src.write_text(text.lstrip('\n'), encoding='utf-8')
+        exe = self.dir / 'pow_half.exe'
+        env = device_env()
+        env['AIL_NO_CACHE'] = '1'
+        r = subprocess.run([sys.executable, '-B', str(CLI), 'compile', str(src), '-o', str(exe), '--no-cache',
+                            '--gpu'], capture_output=True, text=True, env=env, timeout=900)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn('`** 0.5` has no exact GPU form', r.stderr)
+        self.assertIn('math.sqrt', r.stderr)
+        self.assertFalse(exe.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

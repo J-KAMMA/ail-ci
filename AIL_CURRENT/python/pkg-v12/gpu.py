@@ -471,6 +471,10 @@ class Builder:
         if isinstance(node, ast.BinOp):
             op = type(node.op)
             if op is ast.Pow and _half_exponent(node.right):
+                if not getattr(node, SQRT_REWRITE, False):
+                    raise self.fail(node, '`** 0.5` has no exact GPU form: CPython makes a negative base a complex '
+                                          'number, which the kernel cannot represent',
+                                    'write math.sqrt(x) when the operand is not negative, or drop the marker')
                 a = self.ex(node.left, frame)
                 self.num(node, a[1], 'the operand')
                 return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
@@ -809,14 +813,20 @@ def _half_exponent(node):
     return (isinstance(node, ast.Constant) and isinstance(node.value, float) and node.value == 0.5)
 
 
+SQRT_REWRITE = '_ail_sqrt_rewrite'   # marks the `** 0.5` that `math.sqrt` was lowered to (see _SqrtRewrite)
+
+
 class _SqrtRewrite(ast.NodeTransformer):
-    """math.sqrt(x) -> (float(x) if float(x) == 0.0 else (float(x) ** 0.5 if float(x) > 0.0 else 1.0 / 0.0)).
+    """math.sqrt(x) -> (float(x) if float(x) == 0.0 else (1.0 / 0.0 if float(x) < 0.0 else float(x) ** 0.5)).
 
     The typed path has no `math.sqrt` (it writes a square root as `x ** 0.5`, ail_fsqrt), so a marked loop that
     calls it would fall to the general path, which never offloads (GPU.md 1.1).  This keeps the loop typed and
     CPython-exact: the zero keeps its sign (-0.0 -> -0.0, as math.sqrt does), a positive value is the same
-    correctly rounded square root, and a negative value is a loud ZeroDivisionError where CPython raises
-    ValueError (a value the program cannot compute either way; never a quiet nan)."""
+    correctly rounded square root, NaN takes the last arm (both comparisons are false) and is the square root of
+    NaN as CPython's math.sqrt(NaN) is NaN, and a negative value is a loud ZeroDivisionError where CPython raises
+    ValueError (a value the program cannot compute either way; never a quiet nan).  The `** 0.5` it builds is
+    tagged so the kernel accepts this one spelling of a square root and still refuses a `** 0.5` written by hand,
+    whose negative case would be a complex number (see SQRT_REWRITE)."""
 
     @staticmethod
     def name_of(call):
@@ -831,17 +841,18 @@ class _SqrtRewrite(ast.NodeTransformer):
         if not self.name_of(node) or node.keywords or len(node.args) != 1:
             return node
         x = node.args[0]
-        fx = ast.Call(func=ast.Name(id='float', ctx=ast.Load()), args=[x], keywords=[])
+
+        def as_float():
+            return ast.Call(func=ast.Name(id='float', ctx=ast.Load()), args=[x], keywords=[])
+
         zero = ast.Constant(value=0.0)
-        is_zero = ast.Compare(left=ast.Call(func=ast.Name(id='float', ctx=ast.Load()),
-                                            args=[x], keywords=[]), ops=[ast.Eq()], comparators=[zero])
-        pos = ast.Compare(left=ast.Call(func=ast.Name(id='float', ctx=ast.Load()),
-                                        args=[x], keywords=[]), ops=[ast.Gt()], comparators=[ast.Constant(value=0.0)])
-        root = ast.BinOp(left=fx, op=ast.Pow(), right=ast.Constant(value=0.5))
+        is_zero = ast.Compare(left=as_float(), ops=[ast.Eq()], comparators=[zero])
+        negative = ast.Compare(left=as_float(), ops=[ast.Lt()], comparators=[ast.Constant(value=0.0)])
+        root = ast.BinOp(left=as_float(), op=ast.Pow(), right=ast.Constant(value=0.5))
+        root.__dict__[SQRT_REWRITE] = True
         loud = ast.BinOp(left=ast.Constant(value=1.0), op=ast.Div(), right=ast.Constant(value=0.0))
-        inner = ast.IfExp(test=pos, body=root, orelse=loud)
-        out = ast.IfExp(test=is_zero, body=ast.Call(func=ast.Name(id='float', ctx=ast.Load()),
-                                                    args=[x], keywords=[]), orelse=inner)
+        inner = ast.IfExp(test=negative, body=loud, orelse=root)
+        out = ast.IfExp(test=is_zero, body=as_float(), orelse=inner)
         return ast.copy_location(out, node)
 
 

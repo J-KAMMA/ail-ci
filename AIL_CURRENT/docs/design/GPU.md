@@ -459,9 +459,10 @@ budget measurement, the cost model constants (G7) and a table of tested drivers.
 
 ### 6.3 G5 as built (2026-11-06)
 
-Code: `python/pkg-v12/gpu.py` (`/`, `sqrt` and `x ** 0.5` in the kernel IR, the emulation helpers), `gpu_spirv.py` (the
-residual algorithm), tests in `test_ail_gpu_g5.py` (bit tests and four whole programs). Both G1 refusals of 3.2 are
-gone: a marked loop with `/` or `math.sqrt` is now a kernel.
+Code: `python/pkg-v12/gpu.py` (`/` and `sqrt` in the kernel IR, including the internal `x ** 0.5` spelling, and the
+emulation helpers), `gpu_spirv.py` (the residual algorithm), tests in `test_ail_gpu_g5.py` (bit tests, four whole
+programs and the sqrt edge cases). Both G1 refusals of 3.2 are gone: a marked loop with `/` or `math.sqrt` is now a
+kernel.
 
 - **The algorithm, in both twins.** Division is `q0 = a * r` with `r` an approximation of `1/b` (an unsigned-int64 seed
   `2**62 / mantissa` and three Newton steps, all plain `NoContraction` `FMul`/`FSub`), then the exact residual
@@ -484,18 +485,24 @@ gone: a marked loop with `/` or `math.sqrt` is now a kernel.
 - **`math.sqrt` had no typed spelling.** `pyfunc` builds a square root as `x ** 0.5` (ail_fsqrt) and refuses
   `math.sqrt`, so a marked loop that called it fell to the general path, which never offloads. `gpu.prepare` now
   rewrites `math.sqrt(x)` inside marked statements to
-  `(float(x) if float(x) == 0.0 else float(x) ** 0.5 if float(x) > 0.0 else 1.0 / 0.0)`: the zero keeps its sign
-  (`math.sqrt(-0.0)` is `-0.0`), a positive value is the same correctly rounded root, and a negative value is a loud
-  `ZeroDivisionError` where CPython raises `ValueError` (either way the value cannot be computed; never a quiet NaN).
-  The unused `_ail_math_sqrt` helper the surface adds is dropped, or the program would stay on the general path.
-  `x ** 0.5` written directly is the same sqrt in the kernel; every other `**` is still refused.
+  `(float(x) if float(x) == 0.0 else 1.0 / 0.0 if float(x) < 0.0 else float(x) ** 0.5)`: the zero keeps its sign
+  (`math.sqrt(-0.0)` is `-0.0`), a positive value is the same correctly rounded root, NaN and `+inf` (both comparisons
+  false) are the same roots CPython gives, and a negative value is a loud `ZeroDivisionError` where CPython raises
+  `ValueError` (either way the value cannot be computed; never a quiet NaN). The unused `_ail_math_sqrt` helper the
+  surface adds is dropped, or the program would stay on the general path. The rewritten `** 0.5` is tagged, and it is
+  the only `** 0.5` the kernel accepts: a `** 0.5` written by hand in a marked loop is refused by name, because
+  CPython makes a negative base a complex number and the CPU replay would otherwise print a quiet NaN; write
+  `math.sqrt(x)` instead. Every other `**` is still refused.
 - **Tests.** `test_ail_gpu_g5.py` (`SpirvG5`, `BitTests`, `Programs`), registered in `tests.d` and in `GPU_JOB`, and
   imported by `test_ail_gpu_g2.py` so the existing `gpu (lavapipe)` job runs it. `BitTests` compares 524,288 operand
   pairs per op (random bit patterns, `+-0`, subnormals, the smallest and largest normals, `1 +- ulp`, powers of two,
   halfway constructions, NaN, inf) bit for bit between the device and the CPU, and requires every element the CPU flags
   to flag on the device. `Programs` builds four marked programs (`/` on floats, int and mixed `/`, `math.sqrt` of a
   list, `math.sqrt(a*b) + a/b`) and requires CPython, `AIL_GPU=0` and the device to print the same, with the trace
-  naming the device. Aliasing, lengths and the launch grid are the ones G2 already covers.
+  naming the device; a fifth program covers `math.sqrt` of NaN, `+inf`, `+-0` and a subnormal (all replayed on the CPU
+  by design) and requires CPython, `AIL_GPU=0` and the emulation to print the same. A hand-written `** 0.5` is
+  asserted to be refused with exit 3 and the `math.sqrt` hint. Aliasing, lengths and the launch grid are the ones G2
+  already covers.
 
 ## 7. Colab validation (owner-started, manual)
 
