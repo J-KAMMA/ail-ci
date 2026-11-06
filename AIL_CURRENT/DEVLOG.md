@@ -1,3 +1,19 @@
+## 2026-11-06 -- bces5 re-apply: one index check per parallel-list group (job-rbbces5-11061517)
+
+Re-applied the accepted `bces5` change (`4b5e417cd3d0cdcec625633544019b6419101df4`..`job-bces5-11061041`)
+on this tree. `cruntime.py` (`IDXNORM`), `fieldfacts.py` (`mutators`), the `ir/{ir,verify,effects,emit_c}.py`
+op plumbing, the new `ir/passes/groupcse.py` and its `passes/__init__.py` registration applied cleanly;
+`test_ail_bce.py` and this file conflicted and keep both sides (this tree's while/entry probes and
+fcclass1 entry *and* the accepted group probes/tests and bces5 entries). The
+`.github/workflows/agent-worker.yml` hunk would delete this tree's newer claude-token CR/LF fix while the
+original bces5 task says not to touch workflows, so that file is unchanged. `manifest.d/*` was regenerated
+by `tools/update_manifest.py`, not hand-edited; `tools/diff_ids.py` is not present on this tree.
+
+Tests on this commit: `test_ail_bce`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+Probes in `/tmp/probes/` (default and `AIL_UNIFIED_FORCE=1` via `cmp.sh`): group reads/stores, negative and
+int64-boundary indices, growth/pop between accesses, a non-mutating call, an invalidated group, a store
+first and two objects.
+
 ## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
 
 str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
@@ -13,6 +29,39 @@ Same C: 44 programs (pyproof typed rows that emit program.c, lab/compare/src mai
 language_examples that build) byte-identical to origin/integ; 0 differ. Probes: `test_ail_fcclass1.py`
 (typed-only and AIL_UNIFIED_FORCE=1, vs CPython). Next blocker for ailtok: `Tokenizer.__init__` has
 statements other than `self.<name> = <expr>`; constructor calls to a class defined later in the file.
+## 2026-11-06 -- bces5 fix: a non-mutating call keeps the group rewrite (job-bces5-11061041)
+
+The negative-index fix in `9e8faaf` made `groupcse._cross_ok` require a provably non-negative index
+to cross a length change.  That denied the rewrite whenever a `call` sat between the two accesses
+and its IR effect summary was missing or coarse; in `tally_lang` `parse_line` the `pe1(...)` call
+between `p.s_var[s]`/`p.s_e[s]` and `p.s_a[s2]`/`p.s_b[s2]` dropped the statement group's rewrites
+**5 -> 3**, so the callgrind ratio regressed from 0.89486 to 0.94802 (below the required 7%).
+
+`fieldfacts` now also computes `mutators`: for every top-level function, the group ids a call to it
+may change the length of.  It is built from the same accepted `append`/`pop`/`clear` runs that
+validate each group (transitively over the call graph), so a valid group can only be changed by
+those calls in the function or a function it reaches.  A user-defined method, a struct constructor
+(whose `__init__` is not in that graph) and any call this pass cannot name are treated as able to
+change every struct group; builtins that may call back into user code (`map`, `filter`,
+`sorted`/`min`/`max`/`sum` with a key, ...) are likewise not trusted.  `groupcse.changes_length`
+uses `mutators` for struct groups, so `pe1` (which only appends `n_op`/`n_a`/`n_b`) no longer blocks
+the statement group's rewrite, while a call that can reach an append still does.
+
+`tally_lang` (callgrind, perf input): base 19,585,727,453 -> 17,526,407,763 Ir (ratio **0.89486**);
+stripped 71,896 -> 67,800 bytes.  Probes: the new `group_call_growth` case (`cross_peek`, a call that
+only reads `len`, with `-1` -> unchecked and matching CPython; `cross_call`, a transitive append,
+stays checked) and `group_ev_pop_between` in `test_ail_bce.py`; `/tmp/probes/cross_no_grow.py`,
+`cross_grow.py`, `cross_pop.py`, `cross_two_obj.py`, `cross_grow_transitive.py` match CPython on the
+default and `AIL_UNIFIED_FORCE=1` builds.  `test_ail_bce`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.
+
+The full `bce_census.py check --base /tmp/base` exits 1 on this branch for three tasks that bces5
+does not make slower: echo_pack 1.06419, term_rank 1.03117 and ticket_audit 1.01180.  Their
+generated C is byte-identical between the branch's export base `4b5e417` and `7612779`, and the
+same ratios are already measured at `7612779` (1.06419, 1.03292, 1.01180); the export base's
+compiler differs from `origin/integ` (`/tmp/base`) in those functions for unrelated staging work.
+`9e8faaf`/this commit leave echo_pack and ticket_audit's counts unchanged and term_rank 0.17%
+lower, so the >1 ratios are not a regression of the change.
 
 ## 2026-11-05 -- rbbces4: two field-fact soundness holes closed, re-applied (job-rbbces4-11052320)
 

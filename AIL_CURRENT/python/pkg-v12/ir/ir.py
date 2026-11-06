@@ -422,6 +422,9 @@ _op('plist.get', 2, 2)
 _op('plist.has', 2, 2)
 _op('span.of', 1, 1)
 _op('span.len', 1, 1)
+# bce s5: `idx.norm (i, n) {kind}` normalises a Python index against a length, raising exactly as
+# the checked access the index came from would (kind 'read' or 'store'); the result is in [0, n).
+_op('idx.norm', 2, 2)
 _op('span.get', 2, 2)
 _op('span.set', 3, 3)
 # Speculative selects (passes/specsel.py, design section 22): `spec.get (list or span, index, guard)` reads an

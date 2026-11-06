@@ -854,6 +854,10 @@ class Emitter(TextEmitter):
             return
         if op == 'span.len':
             return self.assign_new(depth, ins.result, self.span_names[ins.operands[0]][1])
+        if op == 'idx.norm':
+            self.parts.add('IDXNORM')
+            helper = 'ail_idx_norm_store' if ins.attrs.get('kind') == 'store' else 'ail_idx_norm_read'
+            return self.assign_new(depth, ins.result, '%s(%s, %s)' % (helper, o[0], o[1]))
         if op in ('span.get', 'span.set'):
             elem = ins.operands[0].type.args[0]
             f = 'flist' if elem == I.F64 else 'list'
@@ -1312,6 +1316,8 @@ class Emitter(TextEmitter):
             self.parts.add('FLIST')
         L = o[0]
         if op == 'list.len':
+            if ins.attrs.get('raw'):
+                return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % L)
             return self.assign_new(depth, ins.result, 'ail_%s_span_len((%s)->p, (%s)->n)' % (f, L, L))
         if op == 'list.get':
             if ins.attrs.get('mode') == 'nck':

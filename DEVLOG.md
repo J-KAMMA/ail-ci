@@ -1,3 +1,73 @@
+## 2026-11-06 -- bces5 re-apply: one index check per parallel-list group (job-rbbces5-11061517)
+
+Re-applied the accepted `bces5` change (`4b5e417cd3d0cdcec625633544019b6419101df4`..`job-bces5-11061041`)
+on this tree. `cruntime.py` (`IDXNORM`), `fieldfacts.py` (`mutators`), the `ir/{ir,verify,effects,emit_c}.py`
+op plumbing, the new `ir/passes/groupcse.py` and its `passes/__init__.py` registration applied cleanly;
+`AIL_CURRENT/test_ail_bce.py` and `AIL_CURRENT/DEVLOG.md` conflicted and keep both sides (this tree's
+while/entry probes and fcclass1 entry *and* the accepted group probes/tests and bces5 entries). The
+`.github/workflows/agent-worker.yml` hunk would delete this tree's newer claude-token CR/LF fix while the
+original bces5 task says not to touch workflows, so that file is unchanged. `manifest.d/*` was regenerated
+by `tools/update_manifest.py`, not hand-edited; `tools/diff_ids.py` is not present on this tree.
+
+Tests on this commit: `test_ail_bce`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+Probes in `/tmp/probes/` (default and `AIL_UNIFIED_FORCE=1` via `cmp.sh`): group reads/stores, negative and
+int64-boundary indices, growth/pop between accesses, a non-mutating call, an invalidated group, a store
+first and two objects.
+
+## 2026-11-05 -- bces5 review fix: negative index across a group growth (job-bces5-11060644)
+
+Review defect: `groupcse._cross_ok` returned `grow_only(gid)` unconditionally, so a *negative*
+index `i` could cross an append between `X[i]` and `Y[i]`.  `j = len_X + i` then names a
+different element than CPython's `Y[i] = len_Y + i`: `p.n_op[i]`/`p.n_a[i]`, then an append, then
+`p.n_b[i]` with `i = -1` read the wrong value.
+
+- `python/pkg-v12/ir/passes/groupcse.py`: `_cross_ok` is now `grow_only(gid) and known_nonneg`
+  (`known_nonneg` seeded from a non-negative constant index, or from an access already unchecked
+  at a normalised index).  Where the index may be negative the candidate is kept only when no
+  instruction between X and Y can change the group's length, so the rewrite is skipped and both
+  accesses stay checked.  Non-negative indices keep the previous elision.
+- `AIL_CURRENT/test_ail_bce.py`: `group_ev_neg_grow_between` covers a negative index with growth
+  in an `if` and straight-line growth (must match CPython; the `n_b[i]` sites are not rewritten)
+  plus a negative index with no growth.
+
+Probes `/tmp/rprobes` (`run.py` over `p1..p8`, CPython oracle): before, `p1/p2/p6/p7` gave `120`
+expected `167`; after, all four match on default, `AIL_UNIFIED_FORCE=1`, `AIL_BCE=0` and
+`AIL_BCE_AUDIT=1`.  `test_ail_bce` still shows `groupcse: 2` in tally_lang's `ev`, identical to
+the pre-fix commit, so the speed measurement is unchanged.  Required modules and
+`test_ail_safetynet`/`test_ail_files`/`test_ail_corpus_findings3` pass (the ASan modules need the
+`ulimit -v` lifted; under it they fail to map shadow memory, unrelated to this change).
+
+## 2026-11-05 -- bces5: one index check per parallel-list group (job-bces5-11060644)
+
+`facts['fields']['groups']` (bce s4) says which lists always share a length. A checked access
+`Y[i]` to another member of a group whose member `X` was already accessed at the same SSA index
+can reuse the index the first check produced. New IR op `idx.norm(i, len) -> i64` (`kind` =
+`read`/`store`) normalises a negative index and raises exactly where the replaced access did; the
+new pass `ir/passes/groupcse.py` runs right after the first `ranges` run and rewrites
+`X[i]` into `j = idx.norm(i, len X)` + unchecked `X[j]`, and every later `Y[i]` into unchecked
+`Y[j]`. The first access keeps its error, message and place. A length change between the two
+accesses is crossed only when the index is provably non-negative (then `j == i`); for a possibly
+negative index the rewrite requires that nothing between them can change the group's length.
+(A negative `i` normalises against X's length, but CPython's later `Y[i]` normalises against Y's
+length; after a growth those name different elements.) An `X` no `Y` uses is left alone;
+`AIL_BCE=0` leaves the C identical to the base.
+
+- `python/pkg-v12/ir/{ir,verify,effects,emit_c}.py`: the op, its typing rule (i64, i64 -> i64),
+  its effect (raises IndexError) and its C (`ail_idx_norm_read`/`ail_idx_norm_store`, in
+  `cruntime.IDXNORM`; the inserted `list.len` carries `raw`, the count the accessor's fast path
+  reads, so no slow-path layout validation is added).
+- `python/pkg-v12/ir/passes/groupcse.py` + `passes/__init__.py`: the pass, after the first
+  `ranges`.
+- `AIL_CURRENT/test_ail_bce.py`: probes for `ev` over `n_op/n_a/n_b`, `has`/`val` in both orders,
+  a store first, a store after a read, growth and popping between the accesses, two objects of
+  one struct, int64 boundary indices, and an invalidated group (no rewrite).
+
+Measured on this runner (callgrind, the perf input of `lab/beatc/bce_census.py`):
+tally_lang base 19,585,728,719 Ir, head 17,526,409,027 Ir, ratio 0.895 (-10.5%). Stripped
+binary 71896 -> 67800 bytes. Probes: `test_ail_bce` default, `AIL_UNIFIED_FORCE=1` and
+`AIL_BCE_AUDIT=1` all match CPython; the audit build never stops. `AIL_BCE=0` produces the same
+C as the base for the invalidated-group probe (no `groupcse` stat).
+
 ## 2026-11-05 -- fnvfix1: pyproof reads an `# ail-build:` reason containing an apostrophe (job-fnvfix1-11052323)
 
 Review fix. `report.py`'s `declared_flags()` ran `shlex.split()` over the whole directive, so an

@@ -550,6 +550,15 @@ class _Checker(object):
         self.want(where, elem is not None and ins.operands[1].type == I.I64
                   and ins.operands[2].type == elem, 'list.set takes (list, i64, element)')
 
+    def op_idx_norm(self, ins, scope, stack, where, top):
+        self.want(where, ins.attrs.get('kind') in ('read', 'store'),
+                  'idx.norm kind must be read or store')
+        self.want(where, len(ins.operands) == 2
+                  and all(x.type == I.I64 for x in ins.operands),
+                  'idx.norm takes (i64, i64)')
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.result.type == I.I64, 'idx.norm yields i64')
+
     def op_list_push(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
         elem = self._list_elem(ins.operands[0])
