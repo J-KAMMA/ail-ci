@@ -2272,10 +2272,22 @@ static ail_str ail_utf8_decode(ail_sarena *A, const unsigned char *b, int64_t nb
         if (w & 0x8080808080808080ull) ascii = 0;
         memcpy(q + i, &w, 8);
     }
-    for (; i < nb; i++) {
-        uint8_t c = b[i];
-        if (c >= 0x80) ascii = 0;
-        q[i] = c;
+    if (i < nb) {
+        /* The last 8 bytes as one overlapping word: a line is not a multiple of 8, and the byte
+           that the word repeats is the byte the loop already stored. Only a line shorter than a
+           word falls back to the per-byte loop. */
+        if (nb >= 8) {
+            uint64_t w;
+            memcpy(&w, b + nb - 8, 8);
+            if (w & 0x8080808080808080ull) ascii = 0;
+            memcpy(q + nb - 8, &w, 8);
+        } else {
+            for (; i < nb; i++) {
+                uint8_t c = b[i];
+                if (c >= 0x80) ascii = 0;
+                q[i] = c;
+            }
+        }
     }
     q[nb] = 0;
     if (!ascii) {
@@ -3233,15 +3245,29 @@ static ail_slist ail__str_split_ws_scan(ail_str s, ail_slist *reuse) {
         if (s.bytes) {
             /* An ASCII str: the class table's 1 means whitespace and 0 means anything else, so
                the class-2 test and the `ail__ws_width` decode can never fire. Splitting an
-               input line used to take the general per-byte path that checks both on every byte. */
+               input line used to take the general per-byte path that checks both on every byte.
+
+               The pieces go straight into the vector: the scan already knows a piece's start and
+               length, so the stack list of 32 offsets and the second pass that rebuilt every
+               piece from it are both gone. The vector grows by doubling, which for a rebinding
+               loop costs nothing after the first line. */
             for (;;) {
                 while (i < n && ail__ws_class[p[i]] == 1) i++;
                 if (i >= n) break;
                 if (k == 32) { k = -1; break; }
                 int64_t start = i++;
                 while (i < n && ail__ws_class[p[i]] != 1) i++;
-                at[2 * k] = start; at[2 * k + 1] = i - start; k++;
+                if (k == r.cap) {
+                    int64_t cap = r.cap, need = r.cap ? 2 * r.cap : 8;
+                    ail_str *np = ail__svec_take(need, &cap);
+                    for (int64_t j = 0; j < k; j++) np[j] = r.p[j];
+                    if (r.p) ail_slist_free(&r);
+                    r.p = np; r.cap = cap;
+                }
+                ail_str piece; piece.p = p + start; piece.n = i - start; piece.bytes = 1;
+                r.p[k++] = piece;
             }
+            if (k >= 0) { r.n = k; if (reuse) *reuse = r; return r; }
         } else {
             for (;;) {
                 while (i < n) {
@@ -3263,20 +3289,20 @@ static ail_slist ail__str_split_ws_scan(ail_str s, ail_slist *reuse) {
                 }
                 at[2 * k] = start; at[2 * k + 1] = i - start; k++;
             }
-        }
-        if (k == 0) { if (reuse) *reuse = r; return r; }
-        if (k > 0) {
-            if (r.cap < k) {
-                if (r.p) ail_slist_free(&r);
-                r.p = ail__svec_take(k, &r.cap);
+            if (k == 0) { if (reuse) *reuse = r; return r; }
+            if (k > 0) {
+                if (r.cap < k) {
+                    if (r.p) ail_slist_free(&r);
+                    r.p = ail__svec_take(k, &r.cap);
+                }
+                r.n = k;
+                for (int64_t j = 0; j < k; j++) {
+                    ail_str piece = ail_view(s, at[2 * j]); piece.n = at[2 * j + 1];
+                    r.p[j] = piece;
+                }
+                if (reuse) *reuse = r;
+                return r;
             }
-            r.n = k;
-            for (int64_t j = 0; j < k; j++) {
-                ail_str piece = ail_view(s, at[2 * j]); piece.n = at[2 * j + 1];
-                r.p[j] = piece;
-            }
-            if (reuse) *reuse = r;
-            return r;
         }
     }
     int64_t pieces = 0;
