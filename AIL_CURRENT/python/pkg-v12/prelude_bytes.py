@@ -530,6 +530,16 @@ class bytes:
     def __iter__(self):
         return iter(_ail_b_ints(self._s))
 
+    def __reversed__(self):
+        out = []
+        i = len(self._s) - 1
+        while i >= 0:
+            out.append(ord(self._s[i]))
+            i -= 1
+        # an ITERATOR, not the list itself: `reversed(x)` returns a fresh object every call, so
+        # `reversed(b"") == reversed(b"")` is False in CPython (and next() works on the result).
+        return iter(out)
+
     def __contains__(self, x):
         return _ail_bcontains(x) in self._s
 
@@ -666,6 +676,15 @@ class bytearray:
 
     def __iter__(self):
         return iter(self._a)
+
+    def __reversed__(self):
+        out = []
+        i = len(self._a) - 1
+        while i >= 0:
+            out.append(self._a[i])
+            i -= 1
+        # an ITERATOR, not the list itself (see the bytes class): a fresh object per call.
+        return iter(out)
 
     def __contains__(self, x):
         return _ail_bcontains(x) in _ail_b_from_ints(self._a)
