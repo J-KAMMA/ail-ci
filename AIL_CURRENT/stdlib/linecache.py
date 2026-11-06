@@ -1,5 +1,7 @@
 """Cache lines from Python source files.
 
+Derived from CPython 3.12 Lib/linecache.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 This is CPython 3.12's Lib/linecache.py as AIL source, reduced to what a compiled program can
 provide.  `getline`, `getlines`, `clearcache`, `checkcache`, `updatecache` and the `cache` dict
 keep CPython's names, signatures, entry shape and return values: a line number outside

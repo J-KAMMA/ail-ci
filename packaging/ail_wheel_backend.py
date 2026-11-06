@@ -12,7 +12,8 @@ The wheel holds three things:
                                         leaves out (experiments/, docs/design, tasks-novel, evidence/ ...)
                                         cannot get into the wheel.
 * ailc-<version>.dist-info/             METADATA, WHEEL, entry_points.txt, RECORD,
-                                        licenses/LICENSE-APACHE and licenses/LICENSE-MIT
+                                        licenses/LICENSE-APACHE, licenses/LICENSE-MIT and
+                                        licenses/LICENSE-PSF.txt (for the CPython-derived stdlib)
 
 Only a wheel is built (`pip install .`, `pip wheel .`, `python -m build --wheel`). An sdist would have to
 carry the whole private repository, so build_sdist refuses.
@@ -41,6 +42,7 @@ REQUIRES_PYTHON = ">=3.10"
 PACKAGE_FILES = ("__init__.py", "__main__.py", "cli.py", "project.py", "lsp.py")
 LICENSE_EXPRESSION = "MIT OR Apache-2.0"
 LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")      # repository root; pyproject.toml license-files lists the same
+PSF_NOTICE = SOURCE / "stdlib" / "LICENSE-PSF.txt"     # the PSF text beside the CPython-derived stdlib modules
 ENTRY_POINTS = "[console_scripts]\nail = ail_lang.cli:main\n"
 
 
@@ -163,6 +165,7 @@ def collect(work):
     entries[info + "/entry_points.txt"] = ENTRY_POINTS.encode("utf-8")
     for name in LICENSE_FILES:
         entries["%s/licenses/%s" % (info, name)] = (REPO / name).read_bytes()
+    entries["%s/licenses/LICENSE-PSF.txt" % info] = PSF_NOTICE.read_bytes()
     return entries
 
 
@@ -201,6 +204,7 @@ def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):
     (info / "licenses").mkdir(exist_ok=True)
     for name in LICENSE_FILES:
         (info / "licenses" / name).write_bytes((REPO / name).read_bytes())
+    (info / "licenses" / "LICENSE-PSF.txt").write_bytes(PSF_NOTICE.read_bytes())
     return info.name
 
 

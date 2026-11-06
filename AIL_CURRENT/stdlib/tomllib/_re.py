@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Character classes used by the TOML parser.
 
+Derived from CPython 3.12 Lib/tomllib/_re.py; MIT License (upstream tomli); PSF License text, see stdlib/LICENSE-PSF.txt.
+
 CPython's tomllib recognises dates and numbers with compiled regular
 expressions (`RE_DATETIME`, `RE_NUMBER`, `RE_LOCALTIME`).  The AIL compiler
 only builds `re.compile` for a literal pattern used through `.match(...)`
