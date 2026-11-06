@@ -48,14 +48,14 @@ STANDALONE = {'ail': True, 'ail-py': True, 'cython-main': True, 'cython-typed': 
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
 
 AIL_STUB = '''from typing import Any
-def read_stdin_bytes(size: int) -> bytes: ...
-def write_stdout_bytes(data: bytes) -> None: ...
-def read_bytes(path: str) -> bytes: ...
-def heappush(heap: list[Any], item: Any, key: Any = ...) -> None: ...
-def heappop(heap: list[Any], key: Any = ...) -> Any: ...
-def wrapping_add(a: int, b: int) -> int: ...
-def wrapping_sub(a: int, b: int) -> int: ...
-def wrapping_mul(a: int, b: int) -> int: ...
+def read_stdin_bytes(size: Any) -> bytes: ...
+def write_stdout_bytes(data: Any) -> None: ...
+def read_bytes(path: Any) -> bytes: ...
+def heappush(heap: Any, item: Any, key: Any = ...) -> None: ...
+def heappop(heap: Any, key: Any = ...) -> Any: ...
+def wrapping_add(a: Any, b: Any) -> int: ...
+def wrapping_sub(a: Any, b: Any) -> int: ...
+def wrapping_mul(a: Any, b: Any) -> int: ...
 '''
 
 
@@ -69,6 +69,11 @@ def load_rt():
 
 
 RT = load_rt()
+# A Cython-compiled task can execute 50x slower than AIL; callgrind on the 80 MB perf input then takes
+# minutes.  Cap it and record a timeout ('-') rather than a number from a different input.
+RT.CALLGRIND_TIMEOUT = 120
+RT.RUN_TIMEOUT = 180          # a rival that needs more than 3 minutes for one run has lost that column
+RT.CASE_TIMEOUT = 30
 
 
 def tail(data, n=800):
@@ -228,19 +233,58 @@ def reference_for(task, case, work):
     return dict(returncode=p.returncode, stdout=out)
 
 
+def check_cases_budget(tool, cmd, check, expected, work, budget=240):
+    """RT.check_cases with a per-tool wall budget; cases not reached are counted as not matched."""
+    tally = {'public': [0, 0], 'hidden': [0, 0]}
+    failed = []
+    skipped = 0
+    start = time.perf_counter()
+    out = work / ('chk-' + tool)
+    for kind, case_name, case in check:
+        if time.perf_counter() - start > budget:
+            skipped += 1
+            tally[kind][1] += 1
+            failed.append('%s/%s (skipped, budget)' % (kind, case_name))
+            continue
+        ok = False
+        try:
+            p = RT.exec_prog([], cmd, case, out, RT.CASE_TIMEOUT)
+            ok = (p.returncode, out.read_bytes()) == expected[(kind, case_name)]
+        except subprocess.TimeoutExpired:
+            pass
+        tally[kind][1] += 1
+        if ok:
+            tally[kind][0] += 1
+        else:
+            failed.append('%s/%s' % (kind, case_name))
+    out.unlink(missing_ok=True)
+    return dict(cases_public=tally['public'], cases_hidden=tally['hidden'], cases_failed=failed[:20],
+                cases_skipped=skipped)
+
+
 def measure(rec, task, case, expected, check, expected_cases, work, icount, mode):
     cmd = rec.get('run_cmd')
     if not cmd:
         return rec
     rec.update(RT.run_pass(rec['tool'], cmd, case, expected, work, smoke=False))
-    if check:
-        rec.update(RT.check_cases(rec['tool'], cmd, check, expected_cases, work))
+    if check and rec.get('status') == 'timeout':
+        rec['cases_note'] = 'perf run timed out; cases not run'
+    elif check:
+        rec.update(check_cases_budget(rec['tool'], cmd, check, expected_cases, work))
     if mode != 'none' and rec.get('status') in ('ok', 'MISMATCH'):
-        try:
-            rec['instructions'] = RT.count_instructions(rec['tool'], cmd, case, work, icount, mode)
-        except Exception as e:
+        wall = rec.get('wall_ms')
+        if wall is not None and wall > 4000:
+            # callgrind is ~50-100x slower than native; a 5 s run would take most of a job's budget.
             rec['instructions'] = None
-            rec['icount_error'] = type(e).__name__
+            rec['instructions_note'] = 'skipped: wall > 4 s, callgrind too slow'
+        else:
+            try:
+                rec['instructions'] = RT.count_instructions(rec['tool'], cmd, case, work, icount, mode)
+                if rec['instructions'] is None:
+                    rec['instructions_note'] = 'callgrind timeout (120 s)'
+            except Exception as e:
+                rec['instructions'] = None
+                rec['icount_error'] = type(e).__name__
     return rec
 
 
@@ -344,6 +388,10 @@ def usable(rec, key):
 def correct_label(rec):
     if not rec or not rec.get('build_ok'):
         return 'build failed'
+    if rec.get('status') == 'timeout':
+        return 'timeout'
+    if rec.get('status') == 'error':
+        return 'error'
     pub, hid = rec.get('cases_public'), rec.get('cases_hidden')
     if pub is None:
         return 'not checked'
@@ -511,7 +559,24 @@ def main():
     ap.add_argument('--no-safety', action='store_true')
     ap.add_argument('--icount', choices=['auto', 'perf', 'callgrind', 'none'], default='auto')
     ap.add_argument('--jobs', type=int, default=1)
+    ap.add_argument('--merge', metavar='DIR', help='merge the result-*.json files in DIR into --out')
     args = ap.parse_args()
+    if args.merge:
+        merged = None
+        for f in sorted(Path(args.merge).glob('*.json')):
+            part = json.loads(f.read_text())
+            if merged is None:
+                merged = part
+                merged['tasks'], merged['safety'] = {}, {}
+            merged['tasks'].update(part.get('tasks') or {})
+            merged['safety'].update(part.get('safety') or {})
+            for p in part.get('safety_probes') or []:
+                if p not in merged['safety_probes']:
+                    merged['safety_probes'].append(p)
+        Path(args.out).write_text(json.dumps(merged or {}, indent=1) + '\n', encoding='utf8')
+        (HERE / 'RESULTS.md').write_text(render(merged), encoding='utf8')
+        print('merged %d tasks into %s' % (len(merged.get('tasks') or {}), args.out), file=sys.stderr)
+        return
     tasks = [t for t in args.tasks.split() if t]
     tools = [t for t in args.tools.split(',') if t]
     for t in tasks:
