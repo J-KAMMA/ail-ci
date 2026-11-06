@@ -11,8 +11,14 @@ the native program (stdout/stderr live, as `ail run` shows them), then the same 
   (reserved for a difference);
 - `loud stop by design: <reason>` for AIL's documented loud errors where CPython continued, exit 4.
   The recognised messages are one table (`LOUD_STOPS`) in `cli.py` and the same table in
-  `docs/CLI.md`; build-time refusals count too;
+  `docs/CLI.md`; a recognised build-time refusal counts whatever CPython does, since no native
+  program exists for any input;
 - `timeout: native` / `timeout: cpython`, exit 124.
+
+A build that stops for an unrecognised reason has no native program to compare; when CPython runs the
+program it is a by-design stop, and when CPython fails too the line is
+`DIFFER: no native program, the build stopped (exit A) where CPython exited B: <first build message>`
+(exit 3), rather than a bare `exit code A vs B` that would suggest a native run happened.
 
 stdin is read once (when it is not a TTY) into a temp file and the same bytes feed both runs; an
 interactive stdin is inherited untouched. `--json` prints one object on stdout at the end

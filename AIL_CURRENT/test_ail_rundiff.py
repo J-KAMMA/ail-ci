@@ -186,6 +186,27 @@ main()
         if done.returncode == 4:
             self.assertIn(b"ail diff: loud stop by design:", done.stderr)
 
+    def test_differ_when_the_build_stops_and_cpython_fails_too(self):
+        program = self.write("fails_both_ways.py", """\
+import sys
+
+
+def main() -> None:
+    d = {}
+    d["k"] = 1
+    view = d.items()
+    print(len(view))
+    sys.exit(2)
+
+
+main()
+""")
+        done = self.ail("run", "--diff", program)
+        # the compiler may accept this program; when it does not, the build stop must be named
+        if done.returncode == 3:
+            self.assertTrue(b"DIFFER: no native program, the build stopped" in done.stderr
+                            or b"DIFFER: exit code" in done.stderr, done.stderr)
+
     def test_timeout_of_the_native_run(self):
         program = self.write("slow.py", SLOW)
         done = self.ail("run", "--diff", "--timeout", "1", program)

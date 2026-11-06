@@ -32,13 +32,24 @@ ail run --diff [--python PATH] [--timeout SEC] [--json] prog.py [args...]
    working.
 3. **Run the native program**, then `PATH prog.py args...` with the same working directory, the same
    arguments, the same environment and the same timeout. `PATH` defaults to the `python3` that runs
-   `ail` (`sys.executable`); override it with `--python`. The timeout defaults to 60 seconds per run.
+   `ail` (`sys.executable`); override it with `--python PATH` (an executable file) or `--python NAME`
+   (looked up on `PATH`). The timeout defaults to 60 seconds per run.
 4. **Compare** stdout bytes and the exit code. For an uncaught exception only the exception *type
    name* is compared, taken from the last line of stderr; the traceback text is not.
 5. **Report** one line on stderr after the program's own output, prefixed `ail diff:`.
 
 The native program's stdout and stderr are shown live, exactly as in `ail run`. CPython's output is
 captured and not shown, except where the report line quotes it.
+
+`--diff`, `--python`, `--timeout` and `--json` are read only from the words *before* the source file
+(`--timeout=5` and `--python=/path/to/python3` are accepted too). `ail run prog.py --diff` still
+passes `--diff` to the program, and `ail run` without `--diff` behaves exactly as before.
+
+If the build itself stops, there is no native run to compare. A *recognised* refusal (the last three
+rows of the table) is `loud stop by design` whatever CPython does with the same input, because no
+native program exists for any input. Any other build stop is `loud stop by design` when CPython runs
+the program fine, and otherwise a `DIFFER` that quotes the build's first message, since there is no
+native exit code to compare against.
 
 ### Outcomes and exit codes
 
@@ -48,6 +59,7 @@ captured and not shown, except where the report line quotes it.
 | `ail diff: DIFFER: stdout line N: native '...', cpython '...'` | the first line that differs, each side truncated to 200 characters | `3` |
 | `ail diff: DIFFER: exit code A vs B` | both runs finished, but with different exit codes | `3` |
 | `ail diff: DIFFER: exception A vs B` | both raised an uncaught exception, of different types | `3` |
+| `ail diff: DIFFER: no native program, the build stopped (exit A) where CPython exited B: <message>` | the build stopped for a reason that is not one of the recognised loud stops, and CPython failed too | `3` |
 | `ail diff: loud stop by design: <reason>` | the native run stopped with one of AIL's documented loud errors where CPython continued | `4` |
 | `ail diff: timeout: native` | the native run hit `--timeout` | `124` |
 | `ail diff: timeout: cpython` | the CPython run hit `--timeout` | `124` |
@@ -65,7 +77,9 @@ without parsing the text. `124` is the usual timeout code.
 `outcome` is `agree`, `differ`, `loud stop by design`, `timeout: native` or `timeout: cpython`;
 `line` is the differing stdout line number or `null`; `native` and `cpython` are the two values the
 outcome is about (the differing lines, the two exit codes, the two exception names, or the loud-stop
-reason); `exit` is the pair of exit codes and `seconds` the two wall times.
+reason); `exit` is the pair of exit codes (the side that did not finish is `null`) and `seconds` the
+two wall times. The JSON object is printed on its own line after the program's output, even when that
+output did not end with a newline.
 
 ### Loud stops that are not differences
 
@@ -86,7 +100,7 @@ compiler's stderr) and reports `loud stop by design` with exit 4 instead of a di
 | `AIL internal error: ...` | an uncatchable runtime error |
 | `... ASCII-only in this runtime` | a non-ASCII code point in an ASCII-only text method |
 | `... not in the subset ...` | a construct AIL does not build, refused at build time ([LIMITATIONS.md](LIMITATIONS.md)) |
-| `... constant expression out of range ...` | an int64 constant beyond the fixed width ([LIMITATIONS.md](LIMITATIONS.md) section 1) |
+| `... constant expression out of range ...`, `... int64 literal out of range ...` | an int64 constant beyond the fixed width ([LIMITATIONS.md](LIMITATIONS.md) section 1) |
 
 Anything else is a real difference: one of the two answers is wrong (usually the compiler's, sometimes
 the program's reliance on behaviour Python leaves unspecified). The "differ" list from a run over

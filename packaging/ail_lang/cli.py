@@ -337,6 +337,8 @@ LOUD_STOPS = (
     ("not in the subset", "build", "a construct AIL does not build (docs/LIMITATIONS.md)"),
     ("constant expression out of range", "build",
      "an int64 constant out of range (docs/LIMITATIONS.md section 1)"),
+    ("int64 literal out of range", "build",
+     "an int64 constant out of range (docs/LIMITATIONS.md section 1)"),
 )
 
 DIFF_EXIT_DIFFER = 3
@@ -399,14 +401,18 @@ def _diff_text(value):
 
 
 def _diff_stdout_line(left, right):
-    """(1-based line number, native line, cpython line) of the first differing stdout line, else None."""
+    """(1-based line number, native line, cpython line) of the first differing stdout line, else None.
+    A side that has no such line (one output is a prefix of the other) says so instead of quoting an
+    empty string."""
     absent = object()
     native_lines, cpython_lines = left.split(b"\n"), right.split(b"\n")
     for number in range(max(len(native_lines), len(cpython_lines))):
         a = native_lines[number] if number < len(native_lines) else absent
         b = cpython_lines[number] if number < len(cpython_lines) else absent
         if a != b:
-            return number + 1, b"" if a is absent else a, b"" if b is absent else b
+            return (number + 1,
+                    "<no such line>" if a is absent else _diff_text(a),
+                    "<no such line>" if b is absent else _diff_text(b))
     return None
 
 
@@ -502,8 +508,8 @@ def _diff_verdict(native_code, native_out, native_err, cpython_code, cpython_out
     differing = _diff_stdout_line(native_out, cpython_out)
     if differing:
         number, left, right = differing
-        return ("differ", "DIFFER: stdout line %d: native %r, cpython %r"
-                % (number, _diff_text(left), _diff_text(right)), number, _diff_text(left), _diff_text(right))
+        return ("differ", "DIFFER: stdout line %d: native %r, cpython %r" % (number, left, right),
+                number, left, right)
     native_exc = _exception_name(native_err, native_code)
     cpython_exc = _exception_name(cpython_err, cpython_code)
     if native_exc != cpython_exc:
@@ -515,12 +521,15 @@ def _diff_verdict(native_code, native_out, native_err, cpython_code, cpython_out
     return "agree", "agree", None, None, None
 
 
-def _diff_report(settings, kind, outcome, line, native_value, cpython_value, exit_codes, seconds):
+def _diff_report(settings, kind, outcome, line, native_value, cpython_value, exit_codes, seconds,
+                 native_stdout=b""):
     """Print the one report line (`ail diff:` on stderr, or one JSON object on stdout under --json)
     and give the exit code: the program's own on agreement, else 3, 4 or 124. `kind` is the JSON
     outcome ("agree", "differ", "loud stop by design", "timeout: native" / "timeout: cpython")."""
     if settings["json"]:
         sys.stdout.flush()
+        if native_stdout and not native_stdout.endswith(b"\n"):
+            sys.stdout.write("\n")        # keep the JSON on a line of its own after the program's output
         print(json.dumps({"outcome": kind, "line": line, "native": native_value,
                           "cpython": cpython_value, "exit": list(exit_codes),
                           "seconds": [round(one, 3) for one in seconds]}, ensure_ascii=False))
@@ -574,6 +583,9 @@ def _cmd_run_diff(argv, settings):
         finally:
             stdin_temp.close()
         stdin_path = stdin_temp.name
+    # Both runs get the same environment, inherited as it is: the compile env adds PYTHONUTF8, which
+    # is the compiler's business and would change what CPython does with text.
+    run_env = dict(os.environ)
     cpython_command = [python, source, *program_args]
     try:
         with tempfile.TemporaryDirectory(prefix="ail-run-") as directory:
@@ -583,24 +595,26 @@ def _cmd_run_diff(argv, settings):
             sys.stderr.write(built.stderr)
             executable = target if target.is_file() else Path(str(target) + EXE)
             if built.returncode:
-                return _diff_build_failed(settings, built, cpython_command, cwd, stdin_path, timeout)
+                return _diff_build_failed(settings, built, cpython_command, cwd, run_env, stdin_path, timeout)
             if not executable.is_file():
                 print("ail: the compiler reported success but produced no executable", file=sys.stderr)
                 return 2
             native_code, native_out, native_err, native_timeout, native_seconds = _diff_run(
-                [str(executable), *program_args], cwd, _env(), stdin_path, timeout, live=True)
+                [str(executable), *program_args], cwd, run_env, stdin_path, timeout, live=True)
             if native_timeout:
                 return _diff_report(settings, "timeout: native", "timeout: native", None, "timeout", None,
-                                    (DIFF_EXIT_TIMEOUT, None), (native_seconds, 0.0))
+                                    (DIFF_EXIT_TIMEOUT, None), (native_seconds, 0.0),
+                                    native_stdout=native_out)
             cpython_code, cpython_out, cpython_err, cpython_timeout, cpython_seconds = _diff_run(
-                cpython_command, cwd, _env(), stdin_path, timeout, live=False)
+                cpython_command, cwd, run_env, stdin_path, timeout, live=False)
             if cpython_timeout:
                 return _diff_report(settings, "timeout: cpython", "timeout: cpython", None, None, "timeout",
-                                    (native_code, DIFF_EXIT_TIMEOUT), (native_seconds, cpython_seconds))
+                                    (native_code, DIFF_EXIT_TIMEOUT), (native_seconds, cpython_seconds),
+                                    native_stdout=native_out)
             verdict = _diff_verdict(native_code, native_out, native_err,
                                     cpython_code, cpython_out, cpython_err)
             return _diff_report(settings, *verdict, exit_codes=(native_code, cpython_code),
-                                seconds=(native_seconds, cpython_seconds))
+                                seconds=(native_seconds, cpython_seconds), native_stdout=native_out)
     finally:
         if stdin_temp is not None:
             try:
@@ -609,21 +623,28 @@ def _cmd_run_diff(argv, settings):
                 pass
 
 
-def _diff_build_failed(settings, built, cpython_command, cwd, stdin_path, timeout):
+def _diff_build_failed(settings, built, cpython_command, cwd, run_env, stdin_path, timeout):
     """No native program exists because the build stopped. When CPython still runs the program, that
-    is AIL's own loud stop by design (a refusal or a compile-time int64 refusal); when CPython fails
-    too, the two exit codes are shown."""
-    code, out, err, timed_out, seconds = _diff_run(cpython_command, cwd, _env(), stdin_path, timeout, live=False)
+    is AIL's own loud stop by design (a refusal or a compile-time int64 refusal). When CPython fails
+    too, there is nothing to compare but the build's own stop, which is reported as such (a bare
+    "exit code A vs B" would suggest a native program ran and exited A, which is not true)."""
+    code, out, err, timed_out, seconds = _diff_run(cpython_command, cwd, run_env, stdin_path, timeout, live=False)
+    first = (built.stderr.strip().splitlines() or ["the build stopped"])[0].strip()
     if timed_out:
         return _diff_report(settings, "timeout: cpython", "timeout: cpython", None, None, "timeout",
                             (built.returncode, DIFF_EXIT_TIMEOUT), (0.0, seconds))
-    if code == 0:
-        reason = _loud_stop(built.stderr.encode("utf-8", "replace"), "build") or _diff_text(
-            (built.stderr.strip().splitlines() or ["the build refused the program"])[0].strip())
+    # A recognised refusal means no native program can exist for any input: it is AIL's own limit,
+    # whether or not CPython happens to fail on this particular case too.
+    reason = _loud_stop(built.stderr.encode("utf-8", "replace"), "build")
+    if reason is None and code == 0:
+        reason = _diff_text(first)
+    if reason is not None:
         return _diff_report(settings, "loud stop by design", "loud stop by design: %s" % reason, None,
                             reason, None, (built.returncode, code), (0.0, seconds))
-    return _diff_report(settings, "differ", "DIFFER: exit code %d vs %d" % (built.returncode, code), None,
-                        built.returncode, code, (built.returncode, code), (0.0, seconds))
+    quote = _diff_text(first)
+    return _diff_report(settings, "differ", "DIFFER: no native program, the build stopped (exit %d) where "
+                        "CPython exited %d: %s" % (built.returncode, code, quote), None,
+                        "build stopped: %s" % quote, code, (built.returncode, code), (0.0, seconds))
 
 
 def cmd_run(argv):
