@@ -27,6 +27,7 @@ sys.path.insert(0, str(REPO / 'tools'))
 import ail2py  # noqa: E402
 
 BOX = "struct Box { v: list[int]; n: int; }\n"
+RD = "struct Rd { data: bytes; pos: int; err: int; }\n"
 
 PROBES = [
     ('range_read_store', r"""
@@ -548,6 +549,98 @@ fn main() {
     emit_all(b"abc", 0, b);
 }
 """),
+    ('field_cursor_ge', RD + r"""
+fn pair(r: Rd) -> int {
+    if r.pos >= len(r.data) { r.err = 1; return -1; }
+    let a = r.data[r.pos];
+    r.pos += 1;
+    if r.pos >= len(r.data) { r.err = 2; return -1; }
+    let b = r.data[r.pos];
+    r.pos += 1;
+    return a * 256 + b;
+}
+fn run(d: bytes) -> int {
+    let r = Rd(d, 0, 0);
+    let s = 0;
+    while r.pos < len(r.data) {
+        let v = pair(r);
+        if v < 0 { return -s; }
+        s += v;
+    }
+    return s;
+}
+fn main() {
+    print(run(b""));
+    print(run(b"\x01"));
+    print(run(b"\x01\x02"));
+    print(run(b"\x01\x02\x03\x04"));
+    let r = Rd(b"\x07\x08", 0, 0);
+    print(pair(r), pair(r), r.pos, r.err);
+}
+"""),
+    ('field_cursor_gt', RD + r"""
+fn peek(r: Rd) -> int {
+    if r.pos > len(r.data) { r.err = 1; return -1; }
+    return r.data[r.pos];
+}
+fn main() {
+    let r = Rd(b"\x41\x42", 2, 0);
+    print(peek(r));
+}
+"""),
+    ('field_cursor_bump', RD + r"""
+fn bump(r: Rd) -> void { r.pos += 1; }
+fn read1(r: Rd) -> int {
+    if r.pos >= len(r.data) { r.err = 1; return -1; }
+    bump(r);
+    return r.data[r.pos];
+}
+fn main() {
+    let r = Rd(b"\x41", 0, 0);
+    print(read1(r));
+}
+"""),
+    ('field_cursor_alias', RD + r"""
+fn read2(r1: Rd, r2: Rd) -> int {
+    if r1.pos >= len(r1.data) { r1.err = 1; return -1; }
+    r2.pos = 99;
+    return r1.data[r1.pos];
+}
+fn main() {
+    let r = Rd(b"\x05\x06", 0, 0);
+    print(read2(r, r));
+}
+"""),
+    ('field_cursor_negative', RD + r"""
+fn setpos(r: Rd, k: int) -> void {
+    if k < 0 { r.pos = k; }
+}
+fn main() {
+    let r = Rd(b"\x10\x20\x30", 0, 0);
+    setpos(r, -1);
+    print(r.data[r.pos]);
+    print(r.data[-1], r.data[-len(r.data)]);
+}
+"""),
+    ('field_bytes_len', RD + r"""
+fn scan(r: Rd) -> int {
+    let n = len(r.data);
+    let s = 0;
+    for i in range(n) { s += r.data[i]; }
+    return s;
+}
+fn main() {
+    print(scan(Rd(b"\x01\x02\x03\x04", 0, 0)));
+}
+"""),
+    ('field_cursor_bigtext', RD + r"""
+fn make() -> str { return "9223372036854775808"; }
+fn main() {
+    let r = Rd(b"\x01\x02", 0, 0);
+    r.pos = int(make());
+    print(r.data[r.pos]);
+}
+"""),
 ]
 
 # A list parameter is read-only in this language, so the "list param appended inside the loop"
@@ -576,6 +669,7 @@ STOPS = {
     'big_text_index': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
     'induction_big_text': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
     'while_bound_bigtext': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
+    'field_cursor_bigtext': 'OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)',
 }
 
 S3_PROVEN = {
@@ -601,6 +695,17 @@ S7_UNVERSIONED = {
     'while_access_before_bound': ('f', 0),
     'while_bound_reassigned': ('scan', 0),
     'while_list_append': ('grow', 0),
+}
+
+S6_PROVEN = {
+    'field_cursor_ge': ('pair', 2),
+    'field_bytes_len': ('scan', 1),
+}
+S6_UNPROVEN = {
+    'field_cursor_gt': ('peek', 0),
+    'field_cursor_bump': ('read1', 0),
+    'field_cursor_alias': ('read2', 0),
+    'field_cursor_negative': ('main', 0),
 }
 
 
@@ -766,6 +871,22 @@ class BceProbeTests(unittest.TestCase):
                 self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
                 versioned = found[-1].get('passes', {}).get('versioned', 0)
                 self.assertEqual(versioned, want, '%s: %s' % (name, versioned))
+
+    def test_s6_field_load_numbering_is_visible_in_the_stats(self):
+        sources = dict(PROBES)
+        with tempfile.TemporaryDirectory(prefix='ail-bce-s6-') as directory:
+            for name, (fn, least) in S6_PROVEN.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                proven = found[-1].get('passes', {}).get('idx_ssa_proven', 0)
+                self.assertGreaterEqual(proven, least, '%s: %s' % (name, proven))
+            for name, (fn, want) in S6_UNPROVEN.items():
+                entries = _ir_stats(directory, name, sources[name])
+                found = [e for e in entries if e.get('fn') == fn]
+                self.assertTrue(found, '%s: no IR stats for %s' % (name, fn))
+                proven = found[-1].get('passes', {}).get('idx_ssa_proven', 0)
+                self.assertEqual(proven, want, '%s: %s' % (name, proven))
 
     def test_list_param_append_is_refused_by_name(self):
         # Only the .ail surface has read-only list parameters; the forced Python surface is a
