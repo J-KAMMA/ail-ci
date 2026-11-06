@@ -1,3 +1,47 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+**What the change really does:** adds `os.stat`/`os.lstat` (a new `ailf_stat_record` in `ailfile_core.h`, reached through `_ail_os_scandir` modes 2/3), `os.fspath` (identity for str/bytes), `os.scandir` lowered for `for`/`with`, and `os.path` normcase/expanduser/expandvars/getmtime/getatime/getctime/samefile/samestat. That matches the report, with one misstatement: the "dynamic `os.fspath` gap" is **not** in RESULTS.md (RESULTS only lists bytes paths, `fstat`, `list()`/`next()`).
+
+**Probes** (`bash ~/tools/cmp.sh`, both builds unless noted), HEAD 12f6d3b:
+- p1_stat_types, p2_stat_edges — match (fields, mode classes, float times, `_ns`, empty path, ENOENT/ENOTDIR text, broken symlink, stat vs lstat).
+- p3_scandir_edges, p14_withmissing — match (names sorted, `entry.path`, is_dir/file/symlink, `entry.stat`, with-on-missing).
+- p4_fspath — match (literal int → fallback → CPython text; None).
+- p5_expanduser with `HOME=/home/runner`, `HOME=`, `HOME` unset — match except `~root`.
+- p6_expandvars (`$$`, `${}`, `$`, `${HOME`, `$1`, unset) — match.
+- p7_samefile/samestat/getsize/getmtime through a dict/list — match.
+- p8_bytes_paths — identical binary and runtime `TypeError` on base and HEAD (pre-existing).
+- p9_nofeature — C diff is only the inserted header functions (`ailf_put_stat_field`, `ailf_stat_record`, the scandir comment); no existing code changed, same exe size.
+- Census spot-check (fnmatch, filecmp, tempfile): before and after first reasons reproduce RESULTS.md exactly.
+
+**Defects**
+1. `p12_comp.py` — `[e.name for e in os.scandir("/tmp/rpdata/sub2")]`. CPython: `['x.txt']`, exit 0. AIL (d and g): no stdout, `TypeError: 'instance' object is not iterable`, exit 1. Base refused by name at compile time, so the change turned a loud refusal into a runtime crash. `list(os.scandir(...))` is the same path (RESULTS says "not built", but it is not refused).
+2. `p13_afterwith.py` — `for e in it:` after the `with os.scandir(...) as it:` block. CPython: `1` then `0`, exit 0. HEAD: prints `1`, then the same TypeError, exit 1. On 8e646dd the program printed `1`/`0`; the scope fix in 12f6d3b introduced this regression (the name is dropped from `scandir_names`, so the generic loop iterates the `_AilScandir` object).
+3. `p4d_fspath_int_uncaught.py` — `def f(x): return os.fspath(x); print(f(7))`. CPython: TypeError, exit 1. AIL default build (typed, `--strict` accepts, no fallback): `7`, exit 0. Disclosed in the report, but it is a silent wrong value; a refusal would be acceptable.
+4. `p5_expanduser.py` — `~root`. CPython `/root`, AIL `~root` (both builds). Disclosed; `~user` is never expanded.
+
+**Claims:** (1) with-scope fix — the leak is fixed but it caused defect 2; (2) fspath literal — verified, dynamic gap real; (3) expanduser HOME empty/unset/trailing slash — verified; (4) file scope — verified (`filelib_prelude.py` byte-identical to base, only `ailfile_core.h`); (5) 12/12 programs — test passes; 14/14 census — 3 spot-checked only; (6) test_ail_files 18 OK verified, safetynet fails under the 1.5 GB cap identically on base (pre-existing), corpus_findings3 not run; (7) manifest `--check` rc 0.
+
+**Tests on HEAD:** `test_ail_os_stat` OK (47 s), `test_ail_files` OK (81 s), `test_ail_safetynet` 4/5 (S4_generators_gc truncated, same on base with the same `ulimit -v 1500000`).
+
+**Pre-existing:** S4 memory failure under the cap; bytes-path programs (`os.path.exists(b"..")` etc.) produce the same runtime `TypeError` on base and HEAD.
+**Unverified:** remaining 11 census modules, `test_ail_corpus_findings3`, nt/Windows paths, instruction counts (no hot path changed: new static functions plus one branch in `ailf_scandir`).
+
+VERDICT: FIX
+1. Comprehension/`list()` over `os.scandir` compiles but crashes — `p12_comp.py`: CPython `['x.txt']` exit 0, AIL empty stdout + `TypeError: 'instance' object is not iterable` exit 1 (base: named compile refusal).
+2. Iterating the scandir object after its `with` crashes — `p13_afterwith.py`: CPython `1`/`0` exit 0, HEAD `1` + TypeError exit 1 (8e646dd: `1`/`0`). Regression from the scope fix; keep the marker for the function or refuse by name.
+3. `os.fspath(dynamic non-str)` on the typed path returns the value — `p4d_fspath_int_uncaught.py`: CPython TypeError exit 1, AIL `7` exit 0; refuse it by name.
+4. `expanduser("~root")` — CPython `/root`, AIL `~root` (disclosed; needs the passwd lookup or an explicit limitation gate).
+[commandcode stop=end_turn turns=57 out_tokens=45589]
+
+
+--- ORIGINAL TASK ---
 Lane: fc-os
 
 # fcos1: `os.stat`, `os.lstat`, `os.fspath`, `os.scandir` and the missing `os.path` functions, the largest stdlib-census blocker
