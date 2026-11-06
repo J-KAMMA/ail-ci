@@ -1,5 +1,6 @@
-"""Census probe: par_range (parallel loop). This stays on the typed path and is
-the cleanest pthread blocker: newlib-nano's pthread.h has no pthread_mutex_t."""
+"""Census probe: par_range (parallel loop). This stays on the typed path; bare
+metal stops at the pool's clock (CLOCK_MONOTONIC/clock_gettime), then at the
+PTHREAD_*_INITIALIZER macros newlib omits when _POSIX_THREADS is off."""
 
 from ail import par_range
 

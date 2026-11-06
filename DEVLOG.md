@@ -1,3 +1,13 @@
+## 2026-11-06 -- robo1 review fix: par_range blocker and jitter tail (job-robo1-11070123)
+
+Review fix, docs only; no compiler or runtime change. `RESULTS.md` §2 still carried the stale
+`pthread_mutex_t` first error. Reproduced the bare-metal build: the measured first error (and
+`results.json`) is `program.c:516:38: 'CLOCK_MONOTONIC' undeclared`. newlib does declare the pthread
+types (line 473 compiles), but `_POSIX_THREADS` is off, so `PTHREAD_MUTEX_INITIALIZER` /
+`PTHREAD_COND_INITIALIZER` (lines 568/571) are undefined too. Same correction in the
+`census_par.py` docstring. `RESULTS.md` §3 now reports the true per-run worst miss, C 198-312 us
+and AIL 203-636 us (the 636 us is one alloc run), instead of 271-406 us.
+
 ## 2026-11-06 -- robo1: AIL on ARM/Cortex-M3 and 1 kHz control-loop jitter (job-robo1-11062354)
 
 Measurement probe for the owner's "could AIL be a robot language" question. No compiler or runtime
@@ -8,7 +18,8 @@ file changed; the change is new `lab/robo/` only (README, RESULTS, run.py, progs
   QEMU `mps2-an385`), and stdout matches CPython 3.12 byte for byte in all 12 cells. Bare metal needs
   `-u _printf_float`; without it every float silently prints `0.0`. Sizes 44-49 KB text, 11 KB bss.
 - Blocker census, first error per subsystem: `threading` forces the boxed path and stops at
-  `__int128`; `par_range` at `pthread_mutex_t`; `tcp_listen` at `sys/socket.h`; a >1 MiB
+  `__int128`; `par_range` at `CLOCK_MONOTONIC` (the pthread types exist; the initializer macros
+  and `clock_gettime` do not); `tcp_listen` at `sys/socket.h`; a >1 MiB
   `read_bytes` at `sys/mman.h`; `time.perf_counter`/`sleep` at `CLOCK_MONOTONIC` (newlib-nano has
   no `clock_gettime` or `nanosleep`). `read_bytes`/`write_bytes` and `get_env` build and run;
   bare metal `getenv` returns NULL, so `get_env("PATH","missing")` prints `PATH = missing`.

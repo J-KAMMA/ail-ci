@@ -49,7 +49,7 @@ in `AIL_CURRENT/python/pkg-v12/cruntime.py` (the runtime is emitted into `progra
 | area | first bare-metal error | runtime function | what is missing | one-line stub idea |
 |---|---|---|---|---|
 | threading (`threading.Thread`) | `program.c:5972:9: error: expected expression before '__int128'` | `ail_op_getslice` (boxed runtime); next `SSIZE_MAX` in `ail_bi_line_append`; 12 distinct `pthread_*` names | the boxed/general path uses `__int128`, which 32-bit arm-none-eabi does not have; newlib then has no pthread | make the boxed runtime 32-bit safe (pair of 64-bit ops instead of `__int128`), then a single-thread build flag |
-| parallel loop (`ail.par_range`) | `program.c:473:5: error: unknown type name 'pthread_mutex_t'` | `ail_par_job`, `ail_par_pool_main`, `ail_par_wait` | newlib-nano's `pthread.h` has no `pthread_mutex_t` / `pthread_cond_t` / `pthread_t` and no `PTHREAD_*_INITIALIZER` | an `AIL_PAR_SERIAL` build that runs each block on the calling thread; the typed code needs no other change |
+| parallel loop (`ail.par_range`) | `program.c:516:38: error: 'CLOCK_MONOTONIC' undeclared (first use in this function)` | `ail_par_job`, `ail_par_pool_main`, `ail_par_now` | newlib declares `pthread_mutex_t` / `pthread_cond_t` / `pthread_t` (line 473 compiles), so the type is not the blocker; `_POSIX_THREADS` is off, so `pthread.h` never defines `PTHREAD_MUTEX_INITIALIZER` / `PTHREAD_COND_INITIALIZER` (lines 568/571), and newlib-nano has no `CLOCK_MONOTONIC` / `clock_gettime` (line 516, the first hard error) | an `AIL_PAR_SERIAL` build that runs each block on the calling thread; the typed code needs no other change |
 | TCP (`ail.tcp_listen`) | `program.c:18:10: fatal error: sys/socket.h: No such file or directory` | `ail_tcpsocket_connect`, `ail_tcpsocket_close` | newlib has no socket headers; `socket`/`getaddrinfo` are absent | refuse `tcp_*` at build time for a bare-metal profile, or port to lwIP |
 | large file read (`read_bytes` of 2 MiB, iterated) | `program.c:3448:10: fatal error: sys/mman.h: No such file or directory` | `ail_win_map`, `ail_win_drop` (IR window runtime) | `mmap`, `munmap`, `madvise`, `sysconf(_SC_PAGESIZE)`, `S_ISREG` | the runtime already falls back to `read()` when `mmap` fails; the header and the type names must still exist, or set `AIL_IR_WINDOW_MIN` out of reach |
 | clock / sleeping (`time.perf_counter`, `time.sleep`) | `program.c:479:23: error: 'CLOCK_MONOTONIC' undeclared (first use in this function)` | `ail_perf_counter_ns` and the `time.sleep` helper | newlib-nano defines neither `CLOCK_MONOTONIC` nor `clock_gettime`/`nanosleep` (checked with `nm` on `libc_nano.a`) | define `CLOCK_MONOTONIC` and provide `clock_gettime`/`nanosleep` over SysTick or the vendor HAL |
@@ -78,9 +78,10 @@ This is a shared GitHub Actions VM: the C row is the noise floor, not a guarante
 
 Reading: at 1 kHz the language is invisible in the body of the distribution - all three sit at the
 kernel's ~60 us timer slack (p50 59-61 us, p99 66-72 us). The difference is in the tail: C and AIL
-had no overrun in any run (worst miss 271-406 us), while MicroPython overran 5-7 times in every run
-and its worst miss was 5.4-6.1 ms, about 20x the C worst case. Allocation does not move the C or
-AIL numbers.
+had no overrun in any run (per-run worst miss: C 198-312 us, AIL 203-636 us), while MicroPython
+overran 5-7 times in every run and its worst miss was 5.4-6.1 ms, 17-30x the C worst. The AIL
+636 us is one alloc run (the other two: 203 and 405 us; the noalloc runs were 208-263 us); the
+table's `max` column is the median of the three run maxima, so it hides that outlier.
 
 ## 4. RAM
 
