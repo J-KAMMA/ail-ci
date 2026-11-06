@@ -1,3 +1,19 @@
+## 2026-11-06 -- fcclass1: list[X] fields from object literals, empty list fields typed by their appends (job-fcclass1-op1106)
+
+str, list[int], list[float], list[str] and annotated list[X] fields already typed. What sent shtok1's
+`Tokenizer` (and the AST ports after it) to the general path was `self.toks = [Tok(...)]` -- a list literal
+of objects -- and an unannotated `self.xs = []` filled with str or objects by methods (it defaulted to
+list[int]). `_compile_init` now types the first as `(OLIST, X)` (`_object_list_literal_kind`, common base
+allowed) and the second from `_field_list_hints`: `self.<f>.append(...)` in the class's own methods, a str
+literal / f-string -> list[str], `X(...)` -> list[X], only when those agree; other appends are not read
+and every append is still type-checked, so a field given two kinds is refused by name. The old refusal
+text (`a field is int64, float or bytes only`) now says what a list field holds. SEMANTICS.md section 25.
+
+Same C: 44 programs (pyproof typed rows that emit program.c, lab/compare/src main.py + typed.py, and the
+language_examples that build) byte-identical to origin/integ; 0 differ. Probes: `test_ail_fcclass1.py`
+(typed-only and AIL_UNIFIED_FORCE=1, vs CPython). Next blocker for ailtok: `Tokenizer.__init__` has
+statements other than `self.<name> = <expr>`; constructor calls to a class defined later in the file.
+
 ## 2026-11-05 -- rbbces4: two field-fact soundness holes closed, re-applied (job-rbbces4-11052320)
 
 Re-applied the accepted `bces4` change (`876f22ae4e88`..`job-bces4-11051929`). `fieldfacts.py`
@@ -14,6 +30,18 @@ than `+=`/`-=`, or any other unclassified form retires the fact.
 No pass reads `facts['fields']`, so generated C is unchanged. Added regression cases to
 `test_ail_bce.py`: the bytes/struct-name collision, a real bytes index, and tuple/chained/`for`
 stores. `tools/diff_ids.py` is not present on this tree, so only `update_manifest.py` ran.
+## 2026-11-05 -- shseed1: the C-seed estimate comes from the corpus, not the live compiler (job-shseed1-11060533)
+
+`test_ail_selfhost_seed` failed when the shseed1 change was applied to today's integ: `--report-only`
+counted the compiler's lines and AST nodes from the working tree, so every merged compiler edit
+moved the computed estimates away from the numbers recorded in `lab/selfhost/SEED.md` (the
+"estimates" comment no longer matched on integ: binary high 5,730,451,312 vs 5,673,710,177).  `--run` now records the compiler scope (`files`, `lines`, `ast_nodes`,
+`top_functions`, `top_classes`) in `lab/selfhost/seed_corpus.json`, and `--report-only` reads that
+snapshot; the committed snapshot is the one the SEED.md numbers were measured with, so the file is
+unchanged and the test is stable across later compiler edits.  A corpus without the snapshot is
+refused by name ("re-run --run to record them").  `test_ail_selfhost_seed` also asserts the
+snapshot is present and positive.  `test_ail_selfhost_seed` 2 OK on both this branch and a worktree
+of today's integ with the change applied.
 
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 

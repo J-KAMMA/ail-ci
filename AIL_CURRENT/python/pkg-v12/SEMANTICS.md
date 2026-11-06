@@ -2230,6 +2230,21 @@ the previous revision of this section already deferred, "outside the fast path";
 is that the boundary of what is NOT deferred is now drawn tightly around a proof, not around a
 guess, and the common case that proof already covers is closed.
 
+**List fields from a literal of objects, and empty lists filled later (2026-11-06, fcclass1).**
+Fields have long held `str`, `list[int]`, `list[float]`, `list[str]` and `list[X]` (annotated, or from
+a value of that kind). Two shapes that still sent a program to the general path now type: a field
+set to a non-empty list literal whose elements are all `X` objects (or share the base `X`) --
+`self.toks = [Tok("", 0)]` -- is a `list[X]` field, built and refcounted exactly like an annotated
+`self.toks: list[X] = [...]`; and an unannotated `self.xs = []` takes its element kind from
+`self.xs.append(...)` in its own class's methods when every append whose argument kind the syntax
+alone shows agrees -- a str literal or f-string gives `list[str]`, a constructor call `X(...)` gives
+`list[X]` (`_field_list_hints`). Any other append is not read, so ints keep the old default
+`list[int]`, and every append is still checked against the chosen kind: a field the program gives a
+second kind (`append("s")` in a method, `append(4)` elsewhere; `self.v = ""` then `self.v = 3`) is
+refused by name and the general path runs the program. Still refused: a constructor call to a class
+defined later in the file inside `__init__` (its parameters are not known yet), and any `__init__`
+statement other than `self.<name> = <expr>`.
+
 ## 26. Parameter-kind propagation along the whole-program call graph (2026-09-14)
 
 Section 15 reaches exactly one function: the entry point, and exactly one caller: whoever calls
