@@ -1,3 +1,45 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 0
+[model commandcode/deepseek-v4.1-flash]
+All checks are done. Final report:
+
+## Review: fdinf1 (bench.sh + profile.sh)
+
+**What the change really does:** adds `lab/infer/bench.sh` (5-run AIL-vs-`llama-cli` tok/s table with per-run greedy-id checks), `lab/infer/profile.sh` (callgrind/perf top-10 decode profile, load-only subtracted, mapped to `gpt2.py` def lines), and README/RESULTS sections. No compiler, runtime or benchmark-program file changed: `git diff --stat work..HEAD` = `lab/infer/` only. Matches the report.
+
+**Probes / checks**
+- `bench.sh /tmp/ail-infer 5`, full run, exit 0: table printed; 5 AIL runs and 5 llama runs at `-t 1` and `-t 4`, ids equal to `ref.py` on every run (16/16 each); `prompt.txt`→64 ids check passed. `/tmp/rprobes/p1.py` (attrs/dict/list argument) and `p2.py` (int64 boundary): `cmp.sh` both `same stdout`, exit 0; `--debug-dir` C and binary for `p1` identical on HEAD vs `/tmp/base` (compiler untouched).
+- `profile.sh /tmp/ail-infer 4`, exit 0: reproduces RESULTS.md exactly — `linear__irl` 84.40%, memset 13.65%, memcpy 1.28%, `ck_add` 0.15%, `py_main` 0.12%, `ail_flist_get` 0.08%, `gelu__irl` 0.08%, `layer_norm__irl` 0.05%, `__expm1_fma` 0.05%, `ail_flist_set` 0.03%; `gpt2.py:73-87/88-98/49-72` match the real `def` lines.
+- `test_ail_safetynet`: pass (493 s, 1/1).
+
+**Claims**
+- peak RSS 1053 MiB / 417 MiB — verified. Binary 111,120 B / 1,898,560 B — verified.
+- "`--strict` and default binaries byte-identical" — verified (same sha256).
+- "perf denied, `perf_event_paranoid=4`" — verified (`perf record` and `perf stat` both fail).
+- "prefill 120.5×, decode 8.75×" — **unverified, environment-dependent**: my rerun of the same harness gave AIL 352.6 ms/token prefill / 455.7 ms/forward, llama 5.97 / 40.07 ms → 59× prefill, 11.4× decode. AIL and llama are timed in separate blocks, so runner drift biases the ratio (both still show AIL far slower). Not a code defect.
+- "loader 58% (`read_f32` 32%, `ail_bytes_get` 19%, memset 7%)" — unverified (script never prints the load profile; my load-only callgrind gives read_f32 61%, `ail_bytes_get` 34%, memset 2.2% of the load-only run).
+- Note: RESULTS.md's source column says `runtime (libc)`/`runtime (libm)`, which `profile.sh` prints as plain `runtime` — hand annotation, cosmetic. llama's ids are checked via re-tokenised text, which the report discloses.
+
+**Pre-existing:** none (no compiler/runtime change).
+
+Not checked: absolute timings under the worker's conditions; CI shards (not pushed by design).
+
+VERDICT: ACCEPT
+[commandcode stop=end_turn turns=40 out_tokens=28310]
+
+## full suite
+test_ail_modules
+
+## suite fix skipped: only 146 minutes left
+
+
+--- ORIGINAL TASK ---
 Lane: fd-infer
 
 # fdinf1: GPT-2 tokens per second, AIL against llama.cpp, plus where AIL's time goes
