@@ -71,8 +71,11 @@ its callers look `general`. The builds also run with `AIL_QUIET_FALLBACK`, `AIL_
 and `AIL_NO_GENERAL` removed from the environment, so the program's status always describes the
 default build rather than the caller's tuning. A blocker found in a later round is
 marked `(found after hiding f)`. A function no round named is `typed` only when the last round
-built on the typed path; otherwise `unknown` — never a guess. Temporary copies live in a
-temporary directory; the source file is only read.
+built on the typed path; otherwise `unknown` — never a guess. The first `--strict --json`
+build runs on the file itself, because AIL resolves imports relative to the source and a copy
+elsewhere would lose every sibling module. Only the hiding rounds use a copy, written as a
+transient sibling of the source (removed afterwards) so its imports still resolve; the source
+file itself is only read.
 
 ```
 $ python3 -m ail_lang.explain ../lab/explain/progs/g08_method_dict.py
@@ -131,11 +134,14 @@ because `print()` of a `dict` is refused. `m01`'s `show` is `general` because it
 ## Test
 
 `AIL_CURRENT/test_ail_explain.py` runs explain on 8 fast programs, compares the status column
-with each `# expect:` line, and checks that `--json` parses and agrees. It skips without a C
-compiler. Registered with `AIL_CURRENT/tests.d/test_ail_explain.txt`.
+with each `# expect:` line, and checks that `--json` parses and agrees. A third case writes a
+program importing a sibling module (one typed caller, one blocker) into a temporary directory
+and checks that both the first strict build and the hiding round resolve the import and leave
+no copy behind. It skips without a C compiler. Registered with
+`AIL_CURRENT/tests.d/test_ail_explain.txt`.
 
 ```
 $ python3 AIL_CURRENT/test_ail_explain.py
-Ran 2 tests in 7.4s
+Ran 3 tests in 8.5s
 OK
 ```

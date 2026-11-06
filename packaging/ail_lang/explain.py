@@ -8,8 +8,9 @@ A blocker names the function its construct sits in. When the blocker list stops 
 some refusals carry no position), the function-level ones are hidden -- replaced by a typed stub
 with the same signature -- and the build is run again, at most ten times, to find the rest. A
 function that no round named is `typed` only when the last round built on the typed path;
-otherwise it is `unknown`. The temporary copies live in a temporary directory: the source file is
-only read.
+otherwise it is `unknown`. The first strict build runs on the source file itself, so imports
+resolve relative to it; only the hiding rounds use a transient copy beside it, removed
+afterwards. The source file is only read.
 
 Ordinary Python 3.12 with annotations. Runnable as `python3 -m ail_lang.explain FILE [--json]`.
 """
@@ -236,6 +237,18 @@ def _source_with_stubs(text, hidden, classes=frozenset()):
     return '\n'.join(lines)
 
 
+def _hiding_copy(source, workdir):
+    """A path for the stub copy. A sibling of the source keeps its imports resolvable; a temporary
+    directory is the fallback when the source's directory is not writable."""
+    try:
+        descriptor, name = tempfile.mkstemp(
+            prefix='.ail-explain-', suffix=source.suffix, dir=str(source.parent))
+    except OSError:
+        return Path(workdir) / 'program.py'
+    os.close(descriptor)
+    return Path(name)
+
+
 # ------------------------------------------------------------------ the analysis
 
 
@@ -289,32 +302,44 @@ def explain(path, compiler):
         hidden = []        # defs replaced by stubs in the next copy
         hidden_keys = set()
         last_pass = False
-        copy = Path(workdir) / 'program.py'
-        copy.write_text(text, encoding='utf-8')
-        for round_number in range(MAX_HIDE_ROUNDS + 1):
-            payload = _strict_payload(compiler, copy, workdir, tag='strict%d' % round_number)
-            if payload.get('status') == 'passed':
-                last_pass = True
-                break
-            progress = False
-            for blocker in payload.get('blockers') or []:
-                record = _lookup(functions, blocker.get('function'))
-                if record is None:
-                    continue
-                owner = record.owner
-                if owner.key not in seen:
-                    seen[owner.key] = {
-                        'after': [fn.key for fn in hidden] or None,
-                        **_blocker_fields(blocker),
-                    }
-                    progress = True
-                if record.key not in hidden_keys:
-                    hidden.append(record)
-                    hidden_keys.add(record.key)
-                    progress = True
-            if not progress or round_number >= MAX_HIDE_ROUNDS:
-                break
-            copy.write_text(_source_with_stubs(text, hidden, classes), encoding='utf-8')
+        # Round 0 builds the file itself: AIL resolves imports relative to the source, so a copy in a
+        # temporary directory would lose every sibling module. Only the hiding rounds use a copy.
+        analysis_source = source
+        copy = None
+        try:
+            for round_number in range(MAX_HIDE_ROUNDS + 1):
+                payload = _strict_payload(compiler, analysis_source, workdir, tag='strict%d' % round_number)
+                if payload.get('status') == 'passed':
+                    last_pass = True
+                    break
+                progress = False
+                for blocker in payload.get('blockers') or []:
+                    record = _lookup(functions, blocker.get('function'))
+                    if record is None:
+                        continue
+                    owner = record.owner
+                    if owner.key not in seen:
+                        seen[owner.key] = {
+                            'after': [fn.key for fn in hidden] or None,
+                            **_blocker_fields(blocker),
+                        }
+                        progress = True
+                    if record.key not in hidden_keys:
+                        hidden.append(record)
+                        hidden_keys.add(record.key)
+                        progress = True
+                if not progress or round_number >= MAX_HIDE_ROUNDS:
+                    break
+                if copy is None:
+                    copy = _hiding_copy(source, workdir)
+                copy.write_text(_source_with_stubs(text, hidden, classes), encoding='utf-8')
+                analysis_source = copy
+        finally:
+            if copy is not None:
+                try:
+                    copy.unlink()
+                except OSError:
+                    pass
 
     for record in functions:
         if record.kind == 'nested':

@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,6 +37,12 @@ def expected(text):
 def run_explain(name, *flags):
     return subprocess.run(
         [sys.executable, '-m', 'ail_lang.explain', str(PROGS / (name + '.py'))] + list(flags),
+        capture_output=True, text=True, cwd=str(PACKAGING))
+
+
+def run_explain_path(path, *flags):
+    return subprocess.run(
+        [sys.executable, '-m', 'ail_lang.explain', str(path)] + list(flags),
         capture_output=True, text=True, cwd=str(PACKAGING))
 
 
@@ -67,6 +74,25 @@ class ExplainTest(unittest.TestCase):
                     self.assertIn('line', entry)
                     if entry['status'] == 'general':
                         self.assertTrue(entry.get('construct'), 'a general function needs a reason')
+
+    def test_sibling_import_is_analyzed_from_the_real_file(self):
+        with tempfile.TemporaryDirectory(prefix='ail-explain-import-') as workdir:
+            root = Path(workdir)
+            (root / 'helper.py').write_text(
+                'def twice(x: int) -> int:\n    return x * 2\n', encoding='utf-8')
+            main = root / 'main.py'
+            main.write_text(
+                'from helper import twice\n\n\n'
+                'def run(n: int) -> int:\n    return twice(n) + 1\n\n\n'
+                'def maybe(n: int) -> int:\n'
+                '    if n > 0:\n        return n\n    return None\n\n\n'
+                'def main() -> None:\n    print(run(maybe(3)))\n\n\nmain()\n', encoding='utf-8')
+            done = run_explain_path(main)
+            self.assertEqual(done.returncode, 0, done.stderr[-800:])
+            self.assertEqual(dict(STATUS.findall(done.stdout)),
+                             {'run': 'typed', 'maybe': 'general', 'main': 'typed'}, done.stdout)
+            self.assertEqual(sorted(p.name for p in root.iterdir()),
+                             ['helper.py', 'main.py'], 'the hiding copy was not removed')
 
 
 if __name__ == '__main__':
