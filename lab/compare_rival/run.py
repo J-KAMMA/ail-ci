@@ -566,8 +566,11 @@ def main():
         for f in sorted(Path(args.merge).glob('*.json')):
             part = json.loads(f.read_text())
             if merged is None:
-                merged = part
+                # Keep the part's metadata but start from empty containers; never mutate `part` itself,
+                # because when the first part sorts first its tasks/safety would be wiped before the update.
+                merged = {k: v for k, v in part.items() if k not in ('tasks', 'safety')}
                 merged['tasks'], merged['safety'] = {}, {}
+                merged.setdefault('safety_probes', [])
             merged['tasks'].update(part.get('tasks') or {})
             merged['safety'].update(part.get('safety') or {})
             for p in part.get('safety_probes') or []:
