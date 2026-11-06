@@ -8,20 +8,25 @@ compared at the end: one program moves, not two.
 
 A local is a **cursor** when every binding of it is a read out of another object — a field read
 (`n = n.next`), an element read (`n = xs[i]`), a `for` element, another cursor, or a parameter —
-and it is never stored, returned or captured. The keep-alive proof is whole-function and
-conservative (`ir/borrow.py`): the function must contain
+and it is never stored, returned or captured. The keep-alive proof in `ir/borrow.py` is
+path-sensitive, not whole-function:
 
-* no field store and no element store (`obj.f = v`, `xs[i] = v`);
-* no call except a read-only builtin (`print`, `len`, `int`, ...), so no call that may write or
-  release what the cursor points at;
-* no `del`, `global`, `nonlocal`, closure, or `with`;
-* for every read of the cursor: it is the base of a field/element access, a comparison, a
-  truthiness test, the right-hand side of another cursor binding, or an argument to a read-only
-  builtin.
+* every read of the cursor is a read through it or a test: the base of a field/element access, a
+  comparison, a truthiness test, the right-hand side of another cursor binding, or an argument to
+  a read-only builtin or to a position the callee borrows (rc2's fixpoint);
+* no `del`, `global`, `nonlocal`, closure, `with`, or non-name loop target;
+* a write may not release the chain *while the cursor is live*. Liveness is path-sensitive: a
+  write before the binding is harmless; a loop whose body binds the cursor makes its whole body
+  (and its test, re-evaluated on later iterations) live. Writes are the `ir/effects.py`
+  vocabulary on the AST — a field store (`Field(?,f)`), a list write (`Elem`/`Spine`), or a call
+  charged the callee's write summary by a fixed point over the module. A module function whose
+  summary is empty is therefore allowed inside the walk; an unknown callee is
+  `Effects(unknown=True)` and refuses it.
 
 The chain a cursor is reached from must start at a parameter (the caller holds it for the whole
-call, and an owned parameter is retained at entry) or at a local bound exactly once (nothing can
-replace or release it while the cursor lives). If any of this fails the local stays owning.
+call, and an owned parameter is retained at entry) or at a local bound exactly once outside any
+loop (nothing can replace or release it while the cursor lives). If any of this fails the local
+stays owning.
 
 Elision: a cursor takes no entry retain, no exit release, no cleanup-frame release and no
 retain/release at a store — the store becomes a plain pointer copy. A cursor parameter is added
@@ -41,12 +46,14 @@ hook rc2 added — `_BORROWED_PARAMS`/`object_params` — plus the generic objec
 | chain_relax | `digits_only(ch)`, `fmt(ch)` — `ch` is a `str`, not a managed reference; no new calls |
 | binarytrees, cfold, deriv, rbtree, berth_sim, echo_pack, ledger_bin, rail_transfer, scar_life, tally_lang, term_rank, ticket_audit, tree_fold | none |
 
-Only `linkedlist` changes generated code among the 16. The analysis returns no cursor for the
-other 15, so every rc3 code path is a no-op there and their `program.c` is unchanged by rc3;
-their exact dynamic helper counts match rc2's published counts to the call. (Their gcov
-instruction *estimates* are unchanged by rc3 but one of them, `term_rank`, differs from rc2's
-published table by +2.6% because `staging:integ` moved between the two jobs; that is baseline
-drift, not an rc3 cost.)
+Only `linkedlist` changes generated code among the 16. The analyses above return `objscan.item`
+and the two `chain_relax` characters, but neither is a new elision: the struct-list element is
+already held without a reference by `_mark_borrowed_aliases`, and `str` is not a managed
+reference, so both are no-ops. No other program has a cursor that rc3 can elide, so their
+`program.c` is unchanged by rc3; their exact dynamic helper counts match rc2's published counts
+to the call. (Their gcov instruction *estimates* are unchanged by rc3 but one of them,
+`term_rank`, differs from rc2's published table by +2.6% because `staging:integ` moved between
+the two jobs; that is baseline drift, not an rc3 cost.)
 
 ## Three refused cases (tests in `test_ail_rc_cursor.py`)
 
@@ -100,6 +107,19 @@ target "at least 1.03x on two programs".
   already a borrowed alias. The "two programs" half of the target is **not met**; this is a
   program-set limit, not a rule limit (the rule moves the rc2 count on linkedlist by 1.54x).
 
+  This is machine-checked, not an eyeball claim. `analyze_cursors` returns a cursor for exactly
+  two of the 16 programs: `linkedlist.total/parity` (`n`) and `objscan.scan/keysum` (`item`, a
+  list element `_mark_borrowed_aliases` already elides in rc2). For `binarytrees`, `cfold`,
+  `deriv` and `rbtree` it returns `{}`: their walks pass a field read straight to an
+  already-borrowed parameter (`check(node.left)`, `eval(e.left)`), so rc2 had already removed
+  those references; the helpers that remain are node construction (`Node(...)`, `Expr(...)`,
+  which store their arguments and therefore own references) and rbtree insert/rotate stores.
+  A cursor is never stored, so the rule cannot remove those by construction. The 10 compare
+  tasks have no managed-object cursor either (their loops index lists of ints/strings or walk
+  `bytes`/`bytearray`, which are not reference-counted object locals). Removing every reference
+  the rule could ever touch therefore leaves 15 programs byte-identical; the remaining helper
+  share on them is owned stores, outside this rule.
+
 ## Verification
 
 * **16 programs**: correct output and exit status against CPython/the task reference in the
@@ -115,14 +135,17 @@ target "at least 1.03x on two programs".
   default build and `AIL_UNIFIED_FORCE=1`, and equal again in the `AIL_RC_BORROW=0` build.
 * **Corpus**: the two corpus programs that produce a cursor (`deepseek-v4.1-flash-free/t452.py`,
   `glm-5.3-flash-free/t452.py`, both linked-list generators) match CPython in both builds; the
-  second exits 1 in CPython and in AIL, with the same stdout. A 40-program sample (the first 40
-  sorted corpus files, empty stdin) was built in the default and `AIL_RC_BORROW=0` builds:
-  **0 output/exit differences in 40/40, 0 build failures**. (rc2 also managed 40 of the 200 the
-  brief asks for; the time budget did not allow 200.)
+  second exits 1 in CPython and in AIL, with the same stdout. The first 200 sorted corpus files
+  (empty stdin) were built in the default build: **189/200 built and matched CPython stdout and
+  exit status, with 0 output/exit differences; the other 11 refuse by name** (unsupported tuple
+  iteration, `functools.cache`, re module features, non-name base classes, `**kwargs`,
+  `unicodedata.name`, `json` typing, tuple element type, and one general-path C build refusal).
+  The same 11 refuse by name in the `AIL_RC_BORROW=0` build, so none is an rc3 difference. The
+  first 40 were also run in both builds with 0 differences; the 200 are default-build only.
 * **valgrind** on `p_param_walk`, `p_elem_walk`, `p_refused_append` (the accepted cursor shapes
   and one refused one), default and `AIL_RC_BORROW=0` builds: 0 invalid reads/writes and
   `definitely lost: 0 bytes in 0 blocks` in every run.
-* `test_ail_rc_cursor` (10 tests), `test_ail_rc_borrow` (17), `test_ail_borrowed_owner`,
+* `test_ail_rc_cursor` (14 tests), `test_ail_rc_borrow` (17), `test_ail_borrowed_owner`,
   `test_ail_borrowed_elements`, `test_ail_borrowed_element_fields`,
   `test_ail_callable_owned_results`, `test_ail_exception_resources`, `test_ail_safetynet`,
   `test_ail_files`, `test_ail_corpus_findings3`: pass.
