@@ -144,7 +144,7 @@ diagnostic can name the function but not the line.
 |---|---|---|
 | ownership proof | `ir/borrow.py` (rc2), `pyfunc._to_c_once` (retain/release), `ir/ownership.py` (M/M'/B/X), `ir/effects.py` (Elem/Spine/Rebind) | `ir/proof.py` joining the demotion to a reason and a line |
 | ownership verification | `ir/verify.py` (S0 structural) | S3 rules O2/O3 checked, not trusted |
-| bounds proof | `ir/passes/ranges.py`, `symbounds.py`, `licm.py` (versioning), `ir/emit_c.py` (`bce_audit`), `cruntime.py` `BCEAUDIT`, `boundbuiltin.py`/`rangecheck.py` (legacy path) | source positions on accesses; per-site provenance for the legacy path |
+| bounds proof | `ir/passes/ranges.py`, `symbounds.py`, `licm.py` (versioning), `ir/emit_c.py` (`bce_audit`), `cruntime.py` `BCEAUDIT`, `rangecheck.py` (the legacy emitter's own AST range proof) | source positions on accesses; per-site provenance for the legacy path |
 | race proof | `parallel.py`, `typedpar.py`, `threadlib.py`, `cruntime.py` PAR part | D3 chunked append (owner decision 2026-11-05), per-region reason → line |
 | diagnostics | `pyc.fallback_note`, `AIL_IR_STATS`, `AIL_BCE_EXPLAIN`, `native_diagnostics.py` | the closed vocabulary and the three modes above |
 | measurement | this census | re-run it in CI after every job that touches these modules |
@@ -159,7 +159,7 @@ unmeasured to measured; where it is a projection, it says so.
 |---|---|---|---:|---|
 | P1 | **typed reach, top reason first** | "function on the general (boxed) path: no proof applies" | 1703 functions (34%) | up to 1703 functions into the proof's domain; rank by `pyc.last_fallback_reason` (186 functions: a `Decimal` format spec; 164: a dunder other than `__init__`; 156: a `bool` parameter given a non-bool; 120: a `list[str]` given a non-str; 108: a generator expression saved; 108: `d.get(k)` needing `Optional`; 76: a `str` parameter a caller also passes an int to; 67: `Counter`/`defaultdict`; 58: `threading` — table in RESULTS) |
 | P2 | **the report itself** | none: visibility | 2875 | names all 2875 with property+reason; the one user-facing deliverable that needs no new analysis |
-| P3 | **index sites outside the IR** | `no-index-api` + every legacy-emitter function | 4744 sites / 31 functions | makes 4744 sites measurable; no proof yet (`boundbuiltin.py` reports its own provenance) |
+| P3 | **index sites outside the IR** | `no-index-api` + every legacy-emitter function | 4744 sites / 31 functions | makes 4744 sites measurable; no proof yet (`rangecheck.py` must report its own per-site provenance) |
 | P4 | **return-transfer borrow** | "parameter returned (or yielded)" 145 + "aliased into a second local" 20 | 165 parameter pairs | up to +330 RC ops elided (16% of the 2050 measured pairs) |
 | P5 | **bounds in the compare corpus** | index kept: "no length value" / "list length may change" | 188 of 308 IR sites kept | up to 188 sites; each is one removed check |
 | P6 | **source positions on accesses** | none: makes P2/P5 diagnosable per line | 1221 IR sites | the 1221 sites P2 cannot yet locate |
@@ -179,8 +179,9 @@ ranks highest; P9 has no number attached and is the soundness precondition for t
 2. **No aliasing, so no `&mut` exclusivity.** Python has one object with many names; this system
    proves the *absence of a premature free*, not that a writer is alone. `xs.append(x)` while
    another name iterates `xs` is refused or copied, never proved safe; Rust rejects it in the type
-   system.  Two threads writing different elements of one list are safe here, but a list cannot be
-   handed to two workers at all (R2), so the safe subset is narrower than Rust's.
+   system.  Two threads writing different elements of one list is exactly the shape R2 accepts;
+   a list that is grown, shrunk, or reached through a second shape is refused instead, so the safe
+   subset is narrower than Rust's.
 3. **No `Send`/`Sync`.** Races are avoided by refusing the shapes that could race, not by proving
    that a type is safe to share.  A shape the rules do not recognise falls back to the lock, and
    a closure or a global that escapes a region is refused, not analysed.

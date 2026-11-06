@@ -11,8 +11,8 @@ plus 31 `lab/race` probes for the race section.  Full records: `census.json`.  D
    166 of 1221.  A further **4744 index sites sit in functions the IR never lowers** at all, so
    only 20.5% of syntactic index sites are even inside the proof.
 3. **Races: 79 of the 123 shared-state accesses in parallel regions are classified safe, 25 refused
-   by a named rule (D1/D3/D4), 19 unknown**; 17 of the 31 programs' shapes are lowered lock-free,
-   14 fall back to the general path's lock (rule D5).
+   by a named rule (D1/D3/D4), 19 unknown**; 17 fork-join shapes across the 31 programs are
+   lowered lock-free, 14 fall back to the general path's lock (rule D5).
 4. **Reach: only 1552 of 4958 functions (31.3%) are on the typed path**; 1703 (34.3%) are compiled
    on the general (boxed) path, where no proof applies, and 1703 are in programs both paths refuse.
 5. **Top blockers** (2875 blocker instances over 4958 functions): general path 1703, program
