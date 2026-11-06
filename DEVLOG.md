@@ -1,10 +1,11 @@
 ## 2026-11-06 -- rbfdinf1: re-apply the inference bench and profile scripts (job-rbfdinf1-11061515)
 
-Re-applied the accepted `fdinf1` change on the current tree. `.github/workflows/agent-worker.yml`
-drops the `agent` input, the Claude subscription token (`claude.key`, its scan and cleanup) and the
-`AIL_WORKER` export; `lab/infer/bench.sh` and `lab/infer/profile.sh` are new, with the matching
-"Bench and profile" README section and RESULTS tables. Only the workflow hunk conflicted (the tree
-had a newer whitespace-strip line for the removed token); the result is the accepted blob.
+Re-applied the accepted `fdinf1` change on the current tree. `lab/infer/bench.sh` and
+`lab/infer/profile.sh` are new, with the matching "Bench and profile" README section and RESULTS
+tables. fdinf1's workflow hunk was an out-of-scope revert, so
+`.github/workflows/agent-worker.yml` keeps the current tree's newer `agent=opus` support (the
+`agent` input, `claude.key` creation with the CR/LF strip, its scan and cleanup, and the
+`AIL_WORKER` export); only the `lab/infer/*` part of fdinf1 is applied there.
 
 No compiler file or test module changed, so no language probe applies. `tools/diff_ids.py` is not
 present on this tree. `python3 tools/update_manifest.py --check` passes.

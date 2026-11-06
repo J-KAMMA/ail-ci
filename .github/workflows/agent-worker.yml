@@ -21,6 +21,11 @@ on:
       extra:
         description: 'optional second job-* branch to run on this same runner'
         default: ''
+      agent:
+        # (2026-11-06 owner) 'opus': Claude Code on the owner's subscription (CLAUDE_CODE_OAUTH_TOKEN) writes the work
+        # (Opus) and reviews it (Sonnet); 'auto': the free/flat-rate chain in pipeline.sh
+        description: 'auto or opus'
+        default: 'auto'
 
 permissions:
   contents: write
@@ -46,8 +51,13 @@ jobs:
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
           C: ${{ secrets.COMMAND_CODE_API_KEY }}
           G: ${{ secrets.GH_MODELS_TOKEN }}
+          L: ${{ inputs.agent == 'opus' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
           umask 077
+          # Claude Code subscription token, only for agent=opus runs; pipeline.sh hands it to the claude process alone
+          # (2026-11-06) a token piped in from PowerShell carries a trailing CR/LF: strip whitespace, or Claude says "Not logged in"
+          [ -n "$L" ] && printf '%s' "$L" | tr -d ' \r\n\t' > "$RUNNER_TEMP/claude.key" || true
+          [ -s "$RUNNER_TEMP/claude.key" ] && echo "claude token: $(wc -c < "$RUNNER_TEMP/claude.key") bytes, prefix ok: $(head -c 10 "$RUNNER_TEMP/claude.key" | grep -c '^sk-ant-oat')" || true
           printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
           # Qoder CLI token (free DeepSeek V4.1 Flash until 2026-11-01 UTC+8); pipeline.sh reads it, public code only
           [ -n "$Q" ] && printf '%s' "$Q" > "$RUNNER_TEMP/qoder.key" || true
@@ -91,6 +101,7 @@ jobs:
         timeout-minutes: 312
         run: |
           git rev-parse HEAD > "$RUNNER_TEMP/start"
+          export AIL_WORKER="${{ inputs.agent }}"
           git config user.name "AIL agent"
           git config user.email "agent@example.com"
           # one task in checkout $1 with HOME $2 and scratch dir $3 (the shell runs it in a subshell, so HOME is per task)
@@ -147,12 +158,14 @@ jobs:
           Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
           C: ${{ secrets.COMMAND_CODE_API_KEY }}
           G: ${{ secrets.GH_MODELS_TOKEN }}
+          L: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$RUNNER_TEMP/cc.key" "$RUNNER_TEMP/ghm.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$RUNNER_TEMP/cc.key" "$RUNNER_TEMP/ghm.key" "$RUNNER_TEMP/claude.key" "$HOME/.local/share/opencode/auth.json" "$RUNNER_TEMP/home2/.local/share/opencode/auth.json"
+          rm -rf "$HOME/.claude" "$HOME/.claude.json"
           bad=0
           # scan checkout $1 (commits since the sha in $2); a clean checkout gets the marker file $3 and is pushed
           scan() {
-            for s in "$K" "$Q" "$C" "$G"; do
+            for s in "$K" "$Q" "$C" "$G" "$L"; do
               [ -n "$s" ] || continue
               if ( cd "$1" && { grep -rqF -e "$s" --exclude-dir=.git . || git log -p "$(cat "$2")..HEAD" | grep -qF -e "$s"; } ); then
                 echo "key found in results of $1: not pushing"; return 1
