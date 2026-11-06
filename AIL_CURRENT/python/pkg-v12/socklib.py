@@ -57,6 +57,17 @@ CONSTS = {
 _ALIASES = {'socket.timeout': 'TimeoutError', 'socket.error': 'OSError'}
 _FUNCS = {'socket.socket', 'socket.create_connection', 'socket.create_server',
           'socket.gethostname', 'socket.gethostbyname'}
+# Calls that can never produce a socket: a receiver built by one of these is not lowered as a socket.
+_NON_SOCKET_CALLS = {
+    'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'list', 'dict', 'set', 'frozenset',
+    'tuple', 'range', 'open', 'len', 'repr', 'abs', 'min', 'max', 'sum', 'sorted', 'reversed',
+    'enumerate', 'zip', 'map', 'filter', 'object', 'super', 'print', 'input', 'format', 'chr',
+    'ord', 'hex', 'oct', 'bin', 'round', 'divmod', 'pow', 'isinstance', 'type', 'id', 'hash',
+    'iter', 'next',
+}
+_NON_SOCKET_EXPRS = (ast.Constant, ast.List, ast.Dict, ast.Set, ast.Tuple, ast.JoinedStr,
+                     ast.BinOp, ast.BoolOp, ast.Compare, ast.UnaryOp, ast.ListComp,
+                     ast.DictComp, ast.SetComp, ast.GeneratorExp, ast.Lambda)
 _BUILT = ('Built: socket(AF_INET|AF_INET6, SOCK_STREAM), connect, bind, listen, accept, send, '
           'sendall, recv, close, shutdown, settimeout, gettimeout, setsockopt(SO_REUSEADDR|TCP_NODELAY), '
           'getsockname, getpeername, create_connection, create_server, gethostname, gethostbyname')
@@ -133,6 +144,24 @@ class _AilSockTimeout:
 
     def __str__(self) -> str:
         return str(self.seconds)
+
+    def __add__(self, other: float) -> float:
+        return self.seconds + other
+
+    def __lt__(self, other: float) -> bool:
+        return self.seconds < other
+
+    def __gt__(self, other: float) -> bool:
+        return self.seconds > other
+
+    def __le__(self, other: float) -> bool:
+        return self.seconds <= other
+
+    def __ge__(self, other: float) -> bool:
+        return self.seconds >= other
+
+    def __eq__(self, other: float) -> bool:
+        return self.seconds == other
 
 
 def _ail_sock_gettimeout(s: int) -> _AilSockTimeout | None:
@@ -267,7 +296,8 @@ class _Lowerer(ast.NodeTransformer):
         self.used = False
         self.synth = set()
         self.sock_names = set()
-        self.timeout_set = set()
+        self.non_sock_names = set()
+        self.class_names = set()
         self.counter = 0
 
     # ---- helpers ---------------------------------------------------------------------------
@@ -334,6 +364,74 @@ class _Lowerer(ast.NodeTransformer):
                     for each in ast.walk(target):
                         if isinstance(each, ast.Name):
                             self.user_defs.add(each.id)
+        self.classify()
+
+    def expr_kind(self, value, kinds):
+        """`sock`, `nonsock` or `unknown`: what a value assigned to a plain name can be."""
+        if isinstance(value, ast.Name):
+            seen = kinds.get(value.id, ())
+            if 'sock' in seen:
+                return 'sock'
+            if seen == {'nonsock'}:
+                return 'nonsock'
+            return 'unknown'
+        if isinstance(value, ast.Call):
+            if self.qual(value.func) in _FUNCS:
+                return 'sock'
+            func = value.func
+            name = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else None)
+            if name in self.class_names or name in _NON_SOCKET_CALLS:
+                return 'nonsock'
+            return 'unknown'
+        if isinstance(value, _NON_SOCKET_EXPRS):
+            return 'nonsock'
+        return 'unknown'
+
+    def classify(self):
+        """Names that are provably not sockets, even when their static kind is unknown.
+
+        A socket reaches a method through an argument, a list item, an attribute, a dict value
+        or a user function's return: those receivers stay eligible for lowering. A name that is
+        always built from a literal or a user class instance (p1_classmethods) is not."""
+        self.class_names = {n.name for n in ast.walk(self.tree) if isinstance(n, ast.ClassDef)}
+        funcs = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef):
+                params = [a.arg for a in node.args.posonlyargs + node.args.args]
+                funcs.setdefault(node.name, []).append(params)
+        assignments = []
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Assign):
+                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                if targets:
+                    assignments.append((targets, node.value))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                    and node.value is not None:
+                assignments.append(([node.target.id], node.value))
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                for params in funcs.get(node.func.id, ()):
+                    for index, arg in enumerate(node.args):
+                        if isinstance(arg, ast.Starred):
+                            break
+                        if index < len(params):
+                            assignments.append(([params[index]], arg))
+                    for kw in node.keywords:
+                        if kw.arg is not None and kw.arg in params:
+                            assignments.append(([kw.arg], kw.value))
+        kinds = {}
+        for _ in range(8):
+            changed = False
+            for targets, value in assignments:
+                kind = self.expr_kind(value, kinds)
+                for target in targets:
+                    seen = kinds.setdefault(target, set())
+                    if kind not in seen:
+                        seen.add(kind)
+                        changed = True
+            if not changed:
+                break
+        self.non_sock_names = {name for name, seen in kinds.items() if seen == {'nonsock'}}
 
     def wants(self):
         return bool(self.mods or self.names)
@@ -352,12 +450,27 @@ class _Lowerer(ast.NodeTransformer):
         return None
 
     def is_sock(self, node):
-        """Whether `node` is a socket this pass created (so `.close()` etc. are ours)."""
+        """Whether `node` can be a socket (so `.close()` etc. are lowered to our primitives).
+
+        A name this pass created is a socket; a name built only from literals or a user class
+        instance is not. Everything else -- an argument, a list item, an attribute, a dict value
+        or a user function's return -- stays eligible, because a socket can reach it that way."""
         if isinstance(node, ast.Name):
-            return node.id in self.sock_names
+            if node.id in self.sock_names:
+                return True
+            if node.id in self.non_sock_names:
+                return False
+            return True
         if isinstance(node, ast.Call):
-            return self.qual(node.func) in _FUNCS
-        return False
+            if self.qual(node.func) in _FUNCS:
+                return True
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else None)
+            if name in self.class_names:
+                return False
+            return True
+        return True
 
     def name_read(self, name):
         """Whether `name` is read anywhere: an unused accept() peer name need not be built."""
@@ -487,9 +600,6 @@ class _Lowerer(ast.NodeTransformer):
         if method in ('close', 'gettimeout'):
             if args or node.keywords:
                 self.refuse(node, '%s() takes no arguments' % method)
-            if method == 'gettimeout' and isinstance(node.func.value, ast.Name) \
-                    and node.func.value.id in self.timeout_set:
-                return self.at(self.call('_ail_sock_gettimeout_float', receiver), node)
             return self.at(self.call('_ail_sock_' + method, receiver), node)
         if method == 'shutdown':
             if len(args) != 1 or node.keywords:
@@ -499,11 +609,6 @@ class _Lowerer(ast.NodeTransformer):
             if len(args) != 1 or node.keywords:
                 self.refuse(node, 'settimeout() takes one value')
             value = args[0]
-            if isinstance(node.func.value, ast.Name):
-                if isinstance(value, ast.Constant) and value.value is None:
-                    self.timeout_set.discard(node.func.value.id)
-                else:
-                    self.timeout_set.add(node.func.value.id)
             if isinstance(value, ast.Constant) and value.value is None:
                 return self.at(self.call('_ail_sock_settimeout_none', receiver), node)
             return self.at(self.call('_ail_sock_settimeout', receiver, self.visit(value)), node)
