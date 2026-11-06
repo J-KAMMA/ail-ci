@@ -1,3 +1,45 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+**What the change does:** adds `tools/repro_check.py` (builds each corpus program twice in short/long paths with different TMPDIR/HOME/epoch and compares `program.c` + executable sha256), a results document `lab/repro/RESULTS.md`, and a 5-program ratchet test. No compiler file is touched (`git diff work..HEAD -- AIL_CURRENT` = test module + manifest pins only), so instruction counts cannot move.
+
+**Tests (HEAD 1aaf886):** `test_ail_repro` OK 17.3 s, `test_ail_safetynet` OK 179.6 s, `update_manifest.py --check` rc 0.
+
+**Probes**
+| probe | result |
+|---|---|
+| `/tmp/rprobes/p_basic.py` (no `__file__`), `--debug-dir` HEAD vs base worktree | `program.c` sha256 identical; cmp.sh CPython/g/d 0, same stdout |
+| `/tmp/rprobes/p_file.py` (`__file__`, dirname, basename) | CPython/g/d 0, same stdout (HEAD and base) |
+| `/tmp/rprobes/p_slice.py` (slice a bytearray then mutate) | CPython/g/d 0, same stdout |
+| `repro_check.py -j 1 --filter linecache` | 9 DIFF `absolute path` (line 27672/28533), 08 identical — matches the report |
+| `repro_check.py -j 1 --filter examples/ffi/libc_text.py` (also libm_math, sqlite_count, zlib_check, ffi_quick/step1_sqrt) | **DIFF with `C differs: 0, only executable differs: 1`**, `.symtab` at +2164/+1468/+2520/+1828/+798 |
+
+**Verified claims:** 9 linecache diffs with the named cause; 12 corpus programs read `__file__`; cited lines (`ail_modules.py` `dunder_node`, `ail_chatgpt.py:6035/6425`) exist; no compiler file in the diff; manifest check passes; both test modules pass.
+
+**False claims**
+- RESULTS: "only executable differs: 0" and "every program with identical C also has an identical executable … the binary adds no second source of difference". False: five `examples/ffi*` programs have identical `program.c` and different executables (symbols `ffi_put_7a7acd.cold` vs `ffi_put_093756.cold`; `readelf -sW` differs throughout). Cause: `AIL_CURRENT/ail_ffi_lower.py:519` puts `sha1(str(absolute path))[:6]` into FFI symbol names. This is exactly the class the task asked to explain, and it is absent from the class table with no follow-up hook.
+- Headline "113 measured — 83 identical, 9 different, 21 not built" is not the corpus result: 354/467 remain unmeasured, and the tool's own completed run on this branch (`/tmp/repro_baseline.log`, 467 programs) reports 392 identical, 14 different (9 C, 5 ELF-only), 61 not built. The statement that the first run "stopped after 100" is contradicted by that artifact.
+- Test docstring/RESULTS say the ratchet programs are "the ones the document lists as identical"; `heapq/closest_points.py`, `examples/tutorial_project/step1.py` and `examples/algos/rpn.py` are not listed in the measured tables (heapq is not a measured module).
+
+**Pre-existing (compiler unchanged, not caused by this change):** the five FFI executable-only differences; the `tomllib` compile crashes seen under the tool's 1.5 GB/`-j 2` limits (they build fine at `-j 1`, so the tool cannot distinguish a traceback from a named refusal and reports both as "not built").
+
+**Unverified:** the 20 shards (not pushed); instruction counts (not re-measured — no compiler file changed); `test_ail_files`/`test_ail_corpus_findings3` (not re-run, per instructions).
+
+**Defects**
+1. `lab/repro/RESULTS.md` reports 0 executable-only differences and states identical C always yields an identical executable. Actual (probe above): 5 such programs, `examples/ffi/libc_text.py` `C differs: 0, only executable differs: 1`, `.symtab` +2164; same for `libm_math.py`, `sqlite_count.py`, `zlib_check.py`, `ffi_quick/step1_sqrt.py`. Expected per the task: each listed with cause and a named hook; actual: missing and explicitly denied (cause is the path hash at `ail_ffi_lower.py:519`).
+2. The corpus number the task asks for is not delivered: 113 of 467 measured, while the doc's own completed run shows 467 (392 identical / 14 different / 61 not built), so "82 identical before and after" is not the corpus count and the difference list is incomplete.
+
+VERDICT: FIX
+[commandcode stop=end_turn turns=41 out_tokens=39371]
+
+
+--- ORIGINAL TASK ---
 Lane: ff-supply
 
 # ffrepro1: reproducible builds: the same source gives a byte-identical executable across directories and times
@@ -77,7 +119,7 @@ Stop if a fix changes any program's output or icount. Stop when 60 minutes pass.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
-- **Commits:** commit with explicit `git add` on your branch. Messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- **Commits:** commit with explicit `git add` on your branch. Messages end with a `Co-Authored-By:` line naming the model you actually are (Claude: `Claude Opus 5.5 <noreply@anthropic.com>` or `Claude Sonnet 5.5 <noreply@anthropic.com>`; other models: omit the line).
 - **Forbidden:** push, stash, rebase, reset, and deletion outside /tmp.
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
