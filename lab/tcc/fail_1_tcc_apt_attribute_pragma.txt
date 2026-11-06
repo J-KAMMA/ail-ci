@@ -1,0 +1,8 @@
+variant: tcc-apt
+program: lab/compare/src/chain_relax/main.py (compare)
+bucket: attribute/pragma
+construct: C11 _Thread_local storage class
+first error:
+  /tmp/tccquick-4vyx5p_3/gen-chain_relax-cceb078a/dbg/program.c:7729: error: ';' expected (got "void")
+generated C line 7729: static _Thread_local void *ail__rep_stk[512];
+emitted by: cruntime.py:17489-17490 (ail__rep_stk / ail__rep_n), jsonrt.py:858

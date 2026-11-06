@@ -1,0 +1,40 @@
+# Proposed (not installed by the worker): quick-run probe on a GitHub runner.
+# Install under .github/workflows/tcc.yml by the owner.
+name: tcc-quick-run-probe
+on:
+  workflow_dispatch:
+    inputs:
+      corpus:
+        description: "number of corpus programs"
+        default: "50"
+      runs:
+        description: "repetitions (median is reported)"
+        default: "3"
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchains
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tcc
+          tcc -v
+          gcc --version | head -1
+          git clone -q https://github.com/TinyCC/tinycc.git /tmp/tinycc
+          git -C /tmp/tinycc checkout -q e23dabe
+          ( cd /tmp/tinycc && ./configure --prefix=/tmp/tcc-install && make -j 2 && make install )
+          /tmp/tcc-install/bin/tcc -v
+      - name: Measure
+        run: |
+          python3 lab/tcc/run.py --tcc-apt "$(command -v tcc)" \
+            --tcc-upstream /tmp/tcc-install/bin/tcc \
+            --corpus "${{ inputs.corpus }}" --runs "${{ inputs.runs }}" \
+            --out /tmp/tcc.json --excerpts lab/tcc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-results
+          path: |
+            /tmp/tcc.json
+            lab/tcc/fail_*.txt
