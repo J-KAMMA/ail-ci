@@ -21,25 +21,39 @@ behaviour kept:
 * `os.pathsep` is not built as a value, so listmailcapfiles splits MAILCAPS on
   ":" (the POSIX separator this platform uses).  A missing or empty HOME uses
   "." through `os.environ.get`, as CPython's membership test does.
-* `re.compile(...).search` is not built as one expression, so `_find_unsafe` is a
-  function over the module-level compiled pattern.  The pattern is CPython's.
+* `re` is not imported: `_find_unsafe` scans the text for CPython's pattern
+  `[^\\xa1-\\U0010FFFF\\w@+=:,./-]` by code point and returns the first unsafe
+  character (truthy) or None.  Every caller only tests the result's truthiness,
+  exactly as CPython's regex search result is used, and the set of rejected
+  characters is the same.
 
 Compared with CPython only stdout and the exit status are intended to match; all
 warning text goes to stderr.
 """
 
 import os
-import re
 import sys
 
 __all__ = ["getcaps", "findmatch"]
 
-_unsafe_pattern = re.compile(r'[^\xa1-\U0010FFFF\w@+=:,./-]')
+_SAFE_PUNCTUATION = "@+=:,./-"
 
 
 def _find_unsafe(text):
-    """Search text for a character unsafe in a shell command (CPython's .search)."""
-    return _unsafe_pattern.search(text)
+    """Return the first character unsafe in a shell command, or None.
+
+    CPython compiles the pattern ``[^\\xa1-\\U0010FFFF\\w@+=:,./-]`` and calls
+    ``.search(text)``; this scan recognises the same characters, and only the
+    result's truthiness is ever used.
+    """
+    for ch in text:
+        code = ord(ch)
+        if code >= 0xa1:
+            continue
+        if ch in _SAFE_PUNCTUATION or ch == "_" or ch.isalnum():
+            continue
+        return ch
+    return None
 
 
 class UnsafeMailcapInput(Exception):
