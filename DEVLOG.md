@@ -1,3 +1,20 @@
+## 2026-11-07 -- err2 fix-up 3: every published edit removes its note and keeps the output (job-err2-11072002)
+
+Review 2 found three more published edits that did not hold.  `AIL0103` applied the constant
+replacement with the original AST columns after a literal replacement had shortened the line, so two
+comparisons on one line corrupted the source (`print(s == 1, s == 1)` became `print(False, sFalse`);
+both kinds of edit now go through `_apply`, which sorts right-to-left, and every offending
+comparison is edited (the note is emitted once per source shape, so editing only the first operand's
+shape left a second note behind).  `AIL0111` dropped only `assignment.lineno` from a range that
+spanned the whole multi-line `Fraction(...)` assignment; it now drops every line the assignment
+occupies (and both the import and the assignment must be lines of their own, never a `;`-compound
+line), and the `1 / 2` replacement is parenthesised so `2 / float(x)` keeps CPython's `4.0`.
+`AIL0101` dropped only the chosen saved-method line, leaving a second `sys.stdin.buffer.readline`
+assignment that still triggers the note; it now also drops other saved-method names written on their
+own top-level line and used nowhere else, and publishes no edit when the saved line is compound,
+nested, or still used.  Probes: 22 boundary programs in `/tmp/probes/check.py` pass (build, output
+equals CPython, note gone); the reviewer's p1/p2/p3/p6/p7 and q1..q18 match CPython or get no edit.
+
 ## 2026-11-07 -- err2 fix-up 2: no edit that changes the program's output (job-err2-11072002)
 
 The reviewer's five defects are fixed, and the same class of defect behind #1-#4 is closed rather
