@@ -15,13 +15,13 @@ instructions. `% extra` is the saved Ir as a share of that program's real AIL−
 
 | # | cause | measured saved | program | bound edit | % of program | % extra |
 |---:|---|---:|---|---|---:|---:|
-| 1 | Generic int-dict/table probe where a lean probe exists | **1,927M** | echo_pack | `echo_pack_dict2` | 35.4% | 53.8% |
+| 1 | Generic int-dict/table probe where a lean probe exists | **1,927M** (upper bound; also removes growth/order/cleanup) | echo_pack | `echo_pack_dict2` | 35.4% | 53.8% |
 | 2 | Container invariant test on every list operation | **1,368M** | ticket_audit | `ticket_audit_nometa` (`data/bounds_meta.json`) | 10.5% | 12.9% |
-| 3 | Recursion-depth guard checked at every function entry | **1,184M** | tally_lang | `tally_lang_norec` | 6.1% | 15.4% |
-| 4 | Overflow-checked arithmetic per Python operation | **1,012M** | ledger_bin + ticket_audit | `ledger_bin_noovf` 849M + `ticket_audit_noovf_int` 164M | 16.2% / 1.3% | 33.9% / 1.5% |
-| 5 | Generic list/sequence helpers where a direct write exists | **1,001M** | ticket_audit, tree_fold, echo_pack | `noview` 544M + `nopop` 228M + `nospan` 152M + `pushloop` 76M | | |
-| 6 | Bounds-checked accessors (`ail_bytes_get`, `ail_list_span_get`…) | **952M** (overlaps #5) | 4 programs | `tree_fold_nobget` 167M + `echo_pack_nobounds` 89M + the same calls inside `noview` | | |
-| 7 | ASCII/UTF-8 classification, generic split and int parse | **490M** | berth_sim | `berth_sim_noascii` | 5.9% | 20.6% |
+| 3 | Overflow-checked arithmetic per Python operation | **1,012M** | ledger_bin + ticket_audit | `ledger_bin_noovf` 849M + `ticket_audit_noovf_int` 164M | 16.2% / 1.3% | 33.9% / 1.5% |
+| 4 | Generic list/sequence helpers where a direct write exists | **1,001M** | ticket_audit, tree_fold, echo_pack | `noview` 544M + `nopop` 228M + `nospan` 152M + `pushloop` 76M | | |
+| 5 | Bounds-checked accessors (`ail_bytes_get`, `ail_list_span_get`…) | **952M** (overlaps #4) | 4 programs | `tree_fold_nobget` 167M + `echo_pack_nobounds` 89M + the same calls inside `noview` | | |
+| 6 | ASCII/UTF-8 classification, generic split and int parse | **490M** | berth_sim | `berth_sim_noascii` | 5.9% | 20.6% |
+| 7 | Recursion-depth guard moved to the recursive edge | **190M net** (1,184M entry-guard removal bound) | tally_lang | `tally_lang_edge` | 0.97% | 2.5% |
 | 8 | One-statement-per-op shape, local rewrite of one loop | **182M** | echo_pack | `echo_pack_cmpmatch` | 3.3% | 5.1% |
 | — | `always_inline` a helper | **4.7M (negative)** | echo_pack | `echo_pack_ai_append` | 0.09% | 0.13% |
 
@@ -31,14 +31,16 @@ Two facts set the design's priorities.
   invariant on a list header; deleting it trades correctness for 10.5% of one program. The safe
   sub-step is to hoist it from read-only views to creation/resize, which needs the same
   local-escape proof design 1 builds, so it is a follow-up rather than a step here. The three
-  **queueable** changes are therefore ranks 1, 3 and 4 (designs 1, 2, 3 below).
-* **Those three are safe, local changes with a measured bound.** Their construct bounds total 4.1e9
-  Ir across the six programs, about 13% of the 31.1e9 total extra, and they do not change the
+  **queueable** changes are therefore ranks 1, 3 and 7 (designs 1, 3 and 2 below).
+* **Those three are safe, local changes with a measured bound.** Their net bounds total about 3.1e9
+  Ir across the six programs, about 10% of the 31.1e9 total extra, and they do not change the
   semantics of a single Python operation: the probe, the depth check and the arithmetic keep their
-  meaning. Design 2's 1,184M is the cost of the entry guard with nothing put back; the correct
-  replacement pays an edge check, and the net it buys is smaller (measured separately as the
-  `tally_lang_edge` bound, and again after implementation). Designs 1 and 3 replace the construct
-  with a cheaper one and their bounds already include the replacement.
+  meaning. Design 2's 1,184M is the entry-guard removal bound, not what the change buys: the same
+  guard moved to the recursive edge measures a net **190M** (`tally_lang_edge`, 19,585,727,653 ->
+  19,396,094,852 in `data/bounds.json`), and that net is rank 7. Designs 1 and 3 replace the
+  construct with a cheaper one and their bounds already include the replacement; design 1's 1,927M
+  is an upper bound that also removes idict growth, the order list and cleanup, so its implemented
+  gain will be smaller.
 * **The shape is bigger than all of them, and no local edit bounds it.** `temporaries/one-statement`
   is 17.6e9 attributed Ir (30.7% of all emitted lines); the largest edit that removes one instance
   is 182M. Changing the expression shape means rewriting the typed emitter's expression lowering,
@@ -106,21 +108,27 @@ Two parts, both invisible to the language:
    checks unchanged.
 
 2. **IR + emitter (`ir/lower.py`, `ir/emit_c.py:dict_op`).** Mark a dict `fast` when, in the whole
-   function, it is a local created by `{}`/`dict()`, never passed to a call, never `del`'d,
-   never iterated while inserted into, and every access is `has/need/get/put` with an int key.
-   `dict_op` then emits the `_fast` names; when the marker is absent it emits exactly today's
-   names. The mark is a new attribute on the `dict.alloc` instruction, computed by the pass that
-   already walks local containers in `ir/lower.py` (`_range_arg_int64`/`slice_bounds` live there).
-   No new IR op is needed.
+   function, it is a local created by `{}`/`dict()`, never passed to a call, never `del`'d, and
+   **never observed in an order-sensitive way**: no iteration (`for k in d`, `list(d)`, `tuple(d)`,
+   `sum(d)`, comprehensions), no `repr`/`str`/print/format of the dict, no equality or ordering
+   comparison, and no view/copy method whose result can be iterated or printed (`keys`, `values`,
+   `items`, `copy`, `popitem`, `dict(d)`). Key membership (`k in d`) and `len(d)` stay allowed.
+   Every access must be `has/need/get/put` with an int key. The fast dict keeps no order list, so
+   these exclusions are what make hash order unobservable. `dict_op` then emits the `_fast` names;
+   when the marker is absent it emits exactly today's names. The mark is a new attribute on the
+   `dict.alloc` instruction, computed by the pass that already walks local containers in
+   `ir/lower.py` (`_range_arg_int64`/`slice_bounds` live there). No new IR op is needed.
 
 ### Correctness
 
 The representation of a `fast` dict is an open-addressed key array plus a parallel `used[]`
 occupancy array. Empty is `used[i] == 0`, never a reserved key value, so key `0`, negative keys and
-`INT64_MIN`/`INT64_MAX` are stored and found exactly as CPython stores them. It preserves insertion
-semantics because `ail_tab`'s order list is not used by an `idict` that is never iterated (that is
-part of the mark), and no operation deletes from a `fast` dict, so there are no tombstones. Proof
-obligations:
+`INT64_MIN`/`INT64_MAX` are stored and found exactly as CPython stores them. A `fast` dict keeps no
+`ail_tab` order list, so insertion order is not represented; the mark above excludes every operation
+that could expose that order (iteration, conversion to a sequence, `repr`/print, comparison, and the
+view/copy methods). A dict that is iterated or printed after inserts therefore gets the general
+table, whose order list still gives CPython's `[1, 2, 3]`. No operation deletes from a `fast` dict,
+so there are no tombstones. Proof obligations:
 
 * **CPython-identical on the corpus** — `.agent/cmp.sh` on every `corpus/**/*.py` program, both the
   default and `AIL_UNIFIED_FORCE=1` builds; every program must match stdout, stderr's last line and
@@ -129,8 +137,10 @@ obligations:
   `d.get(0)`), `None`/`False`-valued entries, a full table (growth), `get(k, default)` on a
   missing and a present key, a key whose hash collides with another, negative keys,
   `INT64_MIN`/`INT64_MAX` keys, a dict read after a resize, a dict inside a loop, and a dict that
-  must *not* be marked fast (passed to a function, `del`'d, iterated) — these last cases are the
-  control: their emitted C must be byte-identical to the base build.
+  must *not* be marked fast (passed to a function, `del`'d, iterated, `list(d)`'d, `repr`'d or
+  printed, compared, or copied with `d.copy()`/`dict(d)` after inserts; the concrete control is
+  `d = {1: 'a', 2: 'b'}; d[3] = 'c'; print(list(d))`, expected `[1, 2, 3]`) — these last cases
+  are the control: their emitted C must be byte-identical to the base build.
 * **icount no loss on any compare program** — build all ten `lab/compare/src/<task>` typed sources
   before and after and compare Ir with `lab/roof/measure.py` (or `tools/icount.c` on a
   hardware-PMU host); no program may regress. The expected gain is concentrated in `echo_pack`
@@ -150,11 +160,11 @@ call sites use shorter helper names but the *runtime selection* grows by one sma
 | # | step | files | test |
 |---:|---|---|---|
 | 1.1 | Add `ail_fdict`, `ail_hprobe(used, keys, mask, k)` (occupancy in a separate `used[]`; key `0` is an ordinary key) and the four `_fast` idict helpers, not yet selected by the emitter. | `AIL_CURRENT/python/pkg-v12/cruntime.py` (next to `ail_tab_hslot`, line 5350) | `AIL_CURRENT/test_ail_idict_fast.py` (unit: emitted C contains the helper; a probe program builds and runs; key `0`, `INT64_MIN`/`MAX` round-trip) |
-| 1.2 | Compute the `fast` marker in the local-container pass; add it to `dict.alloc`. | `AIL_CURRENT/python/pkg-v12/ir/lower.py` | same module: a program with a passed/iterated/deleted dict must not carry the marker |
+| 1.2 | Compute the `fast` marker in the local-container pass; add it to `dict.alloc`. | `AIL_CURRENT/python/pkg-v12/ir/lower.py` | same module: a program with a passed/iterated/deleted/printed/compared/copied dict must not carry the marker |
 | 1.3 | Emit `_fast` names in `dict_op` when the marker is set; keep the old path otherwise. | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`dict_op`, line 1693) | `AIL_CURRENT/test_ail_idict_fast.py` + `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
 | 1.4 | Measure and record: re-run `lab/emit/analyze.py --tasks echo_pack,ledger_bin` and `lab/emit/bounds.py --only echo_pack_dict2`. | `lab/emit/` | report Ir before/after; no other compare program may lose |
 
-## Design 2 — recursion check at the recursive edge (measured bound 1,184M)
+## Design 2 — recursion check at the recursive edge (measured net 190M; entry-guard removal bound 1,184M)
 
 ### What produces the cost
 
@@ -168,10 +178,11 @@ if (self.depth:
 ```
 
 `tally_lang`'s `ev__d` is called once per expression node and per operator dispatch; the compare +
-branch is 988M Ir by itself. Removing the line saves 1,184M (the line plus its effect on the
-prologue's scheduling). The same function's frame is another 3,949M (`call-frame` in
-`lab/emit/RESULTS.md`), but that is a register-pressure problem, not a removable check, and is not
-part of this step.
+branch is 988M Ir by itself. Removing the line with nothing put back saves 1,184M (the line plus
+its effect on the prologue's scheduling), but that is not the benefit of this change: the same
+guard must be paid for at the recursive edge, and the measured net is **190M** (see below). The
+same function's frame is another 3,949M (`call-frame` in `lab/emit/RESULTS.md`), but that is a
+register-pressure problem, not a removable check, and is not part of this step.
 
 ### The change
 
@@ -219,9 +230,11 @@ not return.
 
 The measured **1,184M** (`tally_lang_norec`) is the bound for *deleting* the entry guard with
 nothing put back. The correct replacement is not free: it adds one compare+branch per self-call and
-one per wrapper entry. `bounds.py` measures the net on the emitted C with the new
-`tally_lang_edge` patch (entry guard removed, both replacements added, stdout byte-identical); that
-net — not the 1,184M — is what the queued change actually buys.
+one per wrapper entry. `bounds.py` measures the net on the emitted C with the `tally_lang_edge`
+patch (entry guard removed, both replacements added, stdout byte-identical):
+**19,585,727,653 -> 19,396,094,852, net 189,632,801 Ir (190M)**. That net — not the 1,184M — is
+what the queued change buys, and it is the row recorded in `lab/emit/RESULTS.md` and
+`lab/emit/data/bounds.json`.
 
 ### Correctness evidence
 
@@ -232,7 +245,8 @@ net — not the 1,184M — is what the queued change actually buys.
   one CPython's `RecursionError` wording would produce (`maximum recursion depth exceeded`); the
   test asserts the *same* boundary as the base build, not merely "it fails".
 * **icount no loss on any compare program** — before/after Ir for all ten typed sources;
-  `tally_lang` is expected to drop by ~1.1e9 and every other program must be unchanged.
+  `tally_lang` is expected to drop by ~1.9e8 (the `tally_lang_edge` net) and every other program
+  must be unchanged.
 
 ### exe bytes
 
@@ -247,7 +261,7 @@ becomes smaller.
 |---:|---|---|---|
 | 2.1 | Emit the guard in `_depth_call` around the self-call, keeping the entry guard for now (both checks, a safe intermediate). | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`_depth_call`, line 677) | `AIL_CURRENT/test_ail_recdepth_edge.py` |
 | 2.2 | Emit the `ail_depth + 1 > LIMIT` check in the public wrapper (`emit`, line 795), assert that `_depth_call` and the wrapper are the only emitters of the static `f__d` name, then drop the entry guard at line 763; keep it when the assertion fails. The wrapper guard covers entries made while `ail_depth > 0`. | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`emit`, lines 763 and 795) | same module + `test_ail_recursion_stop.py` |
-| 2.3 | Measure `lab/emit/analyze.py --tasks tally_lang` and record the *net* drop (entry guard out, edge + wrapper guards in) against the `tally_lang_edge` bound; run the three required modules. | `lab/emit/` | `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
+| 2.3 | Measure `lab/emit/analyze.py --tasks tally_lang` and record the *net* drop (entry guard out, edge + wrapper guards in) against the `tally_lang_edge` bound (expected ≈190M, not 1,184M); run the three required modules. | `lab/emit/` | `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
 
 ## Design 3 — overflow-checked arithmetic only where it can overflow (measured bound 1,012M)
 
@@ -271,7 +285,11 @@ the result is provably in `[-2^63, 2^63-1]`:
 
 * `x + y` with `lo(x)+lo(y) >= INT64_MIN` and `hi(x)+hi(y) <= INT64_MAX`;
 * `x - y`, `x * y` with the usual interval arithmetic (bail out on unknown bounds);
-* `x << k` with a constant `k` and a proven bound on `x`, or with `hi(x) < 2^(63-k)`.
+* `x << k` with a constant `k` and a proven bound on **both sides** of `x`: `0 <= k < 63`,
+  `lo(x) >= -(2^(63-k))` and `hi(x) < 2^(63-k)`. The upper bound alone is unsound: Python's `<<`
+  overflows on magnitude, so `x = -2**62; x << 2` must stay checked (its exact value is `-2^64`,
+  outside int64). Compute `2^(63-k)` in a wider integer (it is `2^63` at `k = 0`), and keep the
+  check when `k` is unknown, outside `0 <= k < 63`, or either side is unproven.
 
 When proven, emit the plain operator (mode `wrap` already exists and emits
 `((int64_t)((uint64_t)(a) OP (uint64_t)(b)))`, which is defined for unsigned wrap); otherwise
@@ -283,9 +301,10 @@ existing `int()` digit-length check.
 Correctness rests on the soundness of `local_int_bounds`, not on testing: a wrong proof would
 silently drop an `OverflowError`. Therefore the pass must be conservative (unknown ⇒ checked) and
 the test must include the exact boundaries: `INT64_MAX + 1`, `INT64_MIN - 1`, `INT64_MAX * 2`,
-`INT64_MIN * -1`, a shift that overflows only for one input, values reaching the operation through
-an argument, a list item, an attribute and a dict value, and a loop accumulator that provably
-stays small.
+`INT64_MIN * -1`, `-2**62 << 2` (a negative left operand that overflows on magnitude, where the
+old upper-bound-only rule proved wrap), `(2**62) << 2`, a shift that overflows only for one input,
+values reaching the operation through an argument, a list item, an attribute and a dict value, and
+a loop accumulator that provably stays small.
 
 ### exe bytes
 
@@ -297,8 +316,8 @@ program, not per call). Programs that still need the checks emit exactly today's
 
 | # | step | files | test |
 |---:|---|---|---|
-| 3.1 | Add `_bounds_no_overflow(op, lo_a, hi_a, lo_b, hi_b)` to the IR package and unit-test it on the boundary table (including overflow of the bounds computation itself). | `AIL_CURRENT/python/pkg-v12/ir/lower.py` (near the `local_int_bounds` use at line 394) | `AIL_CURRENT/test_ail_ck_bounds.py` |
-| 3.2 | Use it when assigning `mode` for `add/sub/mul`; emit plain ops when proven, `ck_*` otherwise. | `AIL_CURRENT/python/pkg-v12/ir/lower.py`, `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (line 961) | same module + `test_ail_overflow.py` |
+| 3.1 | Add `_bounds_no_overflow(op, lo_a, hi_a, lo_b, hi_b)` to the IR package and unit-test it on the boundary table (including overflow of the bounds computation itself, and both the lower and upper side of `x << k`). | `AIL_CURRENT/python/pkg-v12/ir/lower.py` (near the `local_int_bounds` use at line 394) | `AIL_CURRENT/test_ail_ck_bounds.py` |
+| 3.2 | Use it when assigning `mode` for `add/sub/mul/<<`; emit plain ops when proven, `ck_*` otherwise. | `AIL_CURRENT/python/pkg-v12/ir/lower.py`, `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (line 961) | same module + `test_ail_overflow.py` |
 | 3.3 | `ail_bytes_to_int`: hoist the per-digit limit test to one final check (with a documented digit-count guard). | `AIL_CURRENT/python/pkg-v12/cruntime.py` (`ail_bytes_to_int`, line 6015) | `test_ail_ck_bounds.py` (int() boundary: 19 digits, `-2^63`, `2^63`, leading zeros, `_`, sign only) |
 | 3.4 | Measure `lab/emit/bounds.py --only ledger_bin_noovf,ticket_audit_noovf_int` equivalent on the new build; icount all ten compare programs. | `lab/emit/` | required modules + report |
 
@@ -322,7 +341,8 @@ program, not per call). Programs that still need the checks emit exactly today's
 ### Task A — `emit-lean1`: lean int-dict probe on the typed path
 
 ```
-Lane: compiler. Measured bound: 1,927M Ir on echo_pack (lab/emit/RESULTS.md, cause 1).
+Lane: compiler. Measured bound: 1,927M Ir on echo_pack (lab/emit/RESULTS.md, ranking #1; an upper
+bound that also removes idict growth, the order list and cleanup).
 
 Add a no-tombstone int-key probe and select it for dicts the IR marks fast.
 1. cruntime.py: add ail_fdict (keys[], used[], cap, n), ail_hprobe(used, keys, mask, k) and
@@ -330,10 +350,15 @@ Add a no-tombstone int-key probe and select it for dicts the IR marks fast.
    negative keys and INT64_MIN/INT64_MAX all round-trip. Keep every existing ail_idict_* function
    unchanged. Test: new AIL_CURRENT/test_ail_idict_fast.py, including {0: 'a'}[0], 0 in d,
    d.get(0), {0: 'a', 1: 'b'} and a key-0 entry that survives a resize.
-2. ir/lower.py: mark a local dict fast when it is never passed to a call, never del'd, never
-   iterated while inserted into, and all access is has/need/get/put with int keys; store the mark
-   on dict.alloc. Test: the same module's control cases (passed/iterated/deleted dicts keep the
-   old C, byte-identical to base).
+2. ir/lower.py: mark a local dict fast ONLY when it is never passed to a call, never del'd, and
+   never observed in an order-sensitive way: no iteration (for k in d, list(d), tuple(d), sum(d),
+   comprehensions), no repr/str/print/format, no equality or ordering comparison, and no
+   keys/values/items/copy/popitem/dict(d) whose result can be iterated or printed. Key membership
+   and len stay allowed. All access is has/need/get/put with int keys; store the mark on
+   dict.alloc. The fast dict has no order list, so a dict iterated or printed after inserts must
+   keep the general table. Test: the same module's control cases (passed/iterated/deleted/printed/
+   compared/copied dicts keep the old C, byte-identical to base; d={1:'a',2:'b'}; d[3]='c';
+   print(list(d)) prints [1, 2, 3]).
 3. ir/emit_c.py:dict_op (line 1693): emit the _fast names when marked, the current names otherwise.
 4. Prove: bash .agent/cmp.sh on every corpus program (both builds); test_ail_idict_fast,
    test_ail_safetynet, test_ail_files, test_ail_corpus_findings3; icount of all ten typed compare
@@ -344,8 +369,8 @@ Exe bytes may change. Do not change any message or refusal.
 ### Task B — `emit-lean2`: recursion guard at the recursive edge
 
 ```
-Lane: compiler. Entry-guard bound: 1,184M Ir on tally_lang (lab/emit/RESULTS.md, cause 3);
-the net of the correct replacement is the `tally_lang_edge` bound in the same file.
+Lane: compiler. Correct replacement net: 190M Ir on tally_lang (lab/emit/RESULTS.md, ranking #7;
+the 1,184M `tally_lang_norec` figure is only the entry-guard removal with nothing put back).
 
 Move the depth guard out of the per-node f__d entry to the two places that create the depth.
 1. ir/emit_c.py:_depth_call (line 677): wrap the self-call with
@@ -362,7 +387,7 @@ Move the depth guard out of the per-node f__d entry to the two places that creat
    caller).
 3. Prove: test_ail_recdepth_edge, test_ail_recursion_stop, test_ail_safetynet, test_ail_files,
    test_ail_corpus_findings3; cmp.sh on the corpus; icount of all ten typed compare programs shows
-   no regression (measure the net, not the 1,184M upper bound).
+   no regression (measure the net, ≈190M, not the 1,184M upper bound).
 Exe bytes may change. The rejection boundary must be identical to the base build.
 ```
 
@@ -370,11 +395,14 @@ Exe bytes may change. The rejection boundary must be identical to the base build
 
 ```
 Lane: compiler. Measured bound: 1,012M Ir (ledger_bin 849M + ticket_audit 164M;
-lab/emit/RESULTS.md, cause 3).
+lab/emit/RESULTS.md, ranking #3).
 
-Use the existing int64 bounds pass to emit plain add/sub/mul where the result cannot overflow.
+Use the existing int64 bounds pass to emit plain add/sub/mul/<< where the result cannot overflow.
 1. ir/lower.py: add _bounds_no_overflow (interval arithmetic for + - * and constant shifts) with
-   unit tests over INT64_MIN/MAX boundaries. Test: new AIL_CURRENT/test_ail_ck_bounds.py.
+   unit tests over INT64_MIN/MAX boundaries. For x << k require 0 <= k < 63 and prove BOTH
+   -(2^(63-k)) <= lo(x) and hi(x) < 2^(63-k); the upper bound alone is unsound because a negative
+   left operand overflows on magnitude (x = -2**62; x << 2 is -2^64, outside int64). Test: new
+   AIL_CURRENT/test_ail_ck_bounds.py (include -2**62 << 2 and (2**62) << 2).
 2. ir/lower.py + ir/emit_c.py:961: choose mode 'wrap' when proven, 'ck' otherwise (unknown =>
    checked).
 3. cruntime.py:ail_bytes_to_int (line 6015): hoist the per-digit limit test to one final check,

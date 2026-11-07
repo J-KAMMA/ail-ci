@@ -128,12 +128,22 @@
   },
   {
    "task": "tally_lang",
+   "variant": "tally_lang_edge",
+   "edit": "Move the ev__d entry guard to the 5 self-calls (ail_d + 1) and the ev wrapper (ail_depth + 1): the correct replacement for the entry guard",
+   "target": "one compare+branch per self-call instead of per entry",
+   "before": 19585727653,
+   "after": 19396094852,
+   "saved": 189632801,
+   "stdout_same": true
+  },
+  {
+   "task": "tally_lang",
    "variant": "tally_lang_norec",
    "edit": "Drop the per-call `if (ail_d > AIL_MAX_RECURSION_DEPTH)` from ev__d",
    "target": "one compare+branch per ev__d call",
-   "before": 19585728756,
-   "after": 18401359873,
-   "saved": 1184368883,
+   "before": 19585727653,
+   "after": 18401358764,
+   "saved": 1184368889,
    "stdout_same": true
   },
   {

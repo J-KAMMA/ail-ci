@@ -1,3 +1,39 @@
+## 2026-11-07 -- emit1 review fix: recursion-edge net, strict fast-dict mark, signed shift bound (job-emit1-11071640)
+
+Review fix; no compiler or runtime change. All three defects were still present in the tree (the
+`tally_lang_edge` patch existed but no result row did).
+
+- **Rank 3 was the wrong number.** Re-ran
+  `bounds.py --tasks tally_lang --only tally_lang_edge,tally_lang_norec`: the entry-guard deletion
+  is 19,585,727,653 -> 18,401,358,764 (saved 1,184,368,889), but the correct replacement (guard at
+  the 5 self-calls plus the wrapper) is 19,585,727,653 -> 19,396,094,852, a net **189,632,801**
+  (190M). Added the `tally_lang_edge` row to `lab/emit/data/bounds.json` and `RESULTS.md`,
+  retitled design 2 to the net, moved the recursion cause to rank 7 (below overflow, list helpers,
+  accessors and ASCII), and restated the three queueable bounds as ~3.1e9 (about 10% of 31.1e9),
+  not 4.1e9/13%. Also noted that `echo_pack_dict2`'s 1,927M is an upper bound for the whole edit
+  (it also removes growth, the order list and cleanup), not the probe alone.
+- **Design 1's fast mark was too weak.** The fast dict has no order list, so the mark now excludes
+  every order-observing operation: iteration, `list`/`tuple`/`dict` conversion, `repr`/`str`/
+  print/format, equality/ordering comparison, and `keys`/`values`/`items`/`copy`/`popitem`. The
+  control `d={1:'a',2:'b'}; d[3]='c'; print(list(d))` must keep the general table and print
+  `[1, 2, 3]`.
+- **Design 3's shift rule was unsound for a negative left operand.** It now requires a constant
+  `0 <= k < 63` and proves both `lo(x) >= -(2^(63-k))` and `hi(x) < 2^(63-k)`, with the bound
+  computed in a wider integer; `x = -2**62; x << 2` therefore stays checked (its value `-2^64` is
+  outside int64), instead of being proved wrap by the old upper-bound-only rule.
+- Old entry's check share corrected to 9.8% (5,607/57,185 in `RESULTS.md`, not 11%).
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, both builds): `/tmp/probes/emit_dict_order.py` (list,
+items, repr and `dict(d)` order after inserts) and `/tmp/probes/emit_shift_negative.py` (safe
+negative shifts `-100<<2`, `-1<<63`, `-(2**61)<<1`, `-2**62<<0`, `0<<62`, `1<<62`) are
+CPython-identical on the default and forced-general builds. `/tmp/probes/emit_shift_overflow.py`
+(`-2**62 << 2`) is refused by name at compile time (`int64 constant expression out of range`), and
+`/tmp/probes/emit_shift_negative_arg.py` (same value through an argument) stops loudly with
+`OverflowError: integer overflow in << ...` on both builds, never a silent wrap. The source was not
+changed, so the two CPython-identical probes also pass on the base tree. Tests on the final commit:
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (3/3 pass); manifest
+`--check` clean.
+
 ## 2026-11-07 -- emit1: where the typed C's extra instructions go, and a lean-emission design (job-emit1-11071326)
 
 Measurement and design only; no compiler change. `lab/emit/analyze.py` rebuilds both sides of six
@@ -8,14 +44,16 @@ stdout byte-identical. `lab/emit/classify.py` sub-classifies the `other` class b
 rebuild it with the same flags and measure the real saving.
 
 Headline: `temporaries/one-statement` is 30.7% of the emitted lines' Ir, container/dict/string
-helper bodies another 31%, and the checks (bounds + overflow + refcount + copies) 11%. Measured
-bounds, largest first: specialised int-dict probe 1.93e9 (`echo_pack`), the `ail_blist_meta`
-invariant test 1.37e9 (`ticket_audit`, a safety check reported but not queueable as a removal),
-recursion-depth guard 1.18e9 (`tally_lang`), overflow-checked arithmetic 1.01e9 (`ledger_bin` +
-`ticket_audit`), list/sequence helpers 1.00e9, ASCII scan 0.49e9, one-loop shape rewrite 0.18e9;
-`always_inline` on the append helper saves 4.7M (negative). `docs/design/EMIT_LEAN.md` ranks these
-and splits the three queueable ones (dict probe, recursion guard at the recursive edge, overflow
-checks only where provable) into eight <=2h steps with files, tests and ready-to-queue task text.
+helper bodies another 31%, and the checks (bounds + overflow + refcount + copies) 9.8%
+(5,607/57,185). Measured bounds, largest first: specialised int-dict probe 1.93e9 (`echo_pack`),
+the `ail_blist_meta` invariant test 1.37e9 (`ticket_audit`, a safety check reported but not
+queueable as a removal), overflow-checked arithmetic 1.01e9 (`ledger_bin` + `ticket_audit`),
+list/sequence helpers 1.00e9, ASCII scan 0.49e9, recursion guard moved to the recursive edge
+0.19e9 net (`tally_lang`; 1.18e9 only if the entry guard is deleted with nothing put back), and
+one-loop shape rewrite 0.18e9; `always_inline` on the append helper saves 4.7M (negative).
+`docs/design/EMIT_LEAN.md` ranks these and splits the three queueable ones (dict probe, recursion
+guard at the recursive edge, overflow checks only where provable) into eight <=2h steps with
+files, tests and ready-to-queue task text.
 Reproduce with `python3 lab/emit/analyze.py && python3 lab/emit/classify.py && python3
 lab/emit/bounds.py` (about 12 minutes of callgrind).
 

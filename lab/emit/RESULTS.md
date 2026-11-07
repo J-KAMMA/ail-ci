@@ -272,6 +272,11 @@ a varint), but the same generic-probe pattern is the largest `other` cause in `t
 (`dict-table-helper` 1,600M), `berth_sim` (1,614M, the keysort/qsort replacement),
 `ticket_audit` (1,326M) and `ledger_bin` (967M).
 
+The 1,927M is an **upper bound for the whole edit**, not the probe alone: `echo_pack_dict2` also
+replaces idict growth, the order list and cleanup with a fixed `1<<20` table whose arrays are never
+freed. Design 1 keeps growth and the `used[]` occupancy array, so its implemented gain will be
+smaller than 1,927M; the bound prices the generic-probe shape, not a literal implementation.
+
 ### 3. Per-call recursion-depth guard — `AIL_MAX_RECURSION_DEPTH`
 
 Emitted once per call of every depth-carrying function (`emit_c.py:763`). In `tally_lang`'s
@@ -287,8 +292,14 @@ After (`tally_lang_norec.diff`): the guard removed from `ev__d` only (the other 
 theirs).
 
 | hand edit | before Ir | after Ir | saved | % program | % extra |
-|---|---:|---:|---:|---:|---:|
-| `tally_lang_norec` | 19,585,728,756 | 18,401,359,873 | **1,184,368,883** | 6.05% | 15.4% |
+|---|---|---:|---:|---:|---:|
+| `tally_lang_norec` (guard deleted, nothing put back) | 19,585,727,653 | 18,401,358,764 | **1,184,368,889** | 6.05% | 15.4% |
+| `tally_lang_edge` (guard moved to the self-calls + wrapper) | 19,585,727,653 | 19,396,094,852 | **189,632,801** | 0.97% | 2.5% |
+
+The 1,184M is only the bound for *deleting* the guard. The correct replacement moves the same
+rejection boundary to the recursive edge (the 5 self-calls plus the public wrapper); the net that
+the queued change actually buys is the `tally_lang_edge` row, **189.6M**, not 1,184M. Both rows are
+recorded in `data/bounds.json`, and the ranking below uses the net.
 
 Related, and larger in the same function: the prologue/epilogue of `ev__d` (`call-frame` 3,949M,
 20.2% of `tally_lang`). The function has enough live values that gcc saves and restores a large
@@ -455,27 +466,31 @@ construct and keeps stdout identical.
 
 ## Ranking by measured Ir saved across the six programs
 
-Isolated hand-edit bounds, largest first. `programs` counts the tasks the cause is above 1% of.
+Isolated hand-edit bounds, largest first. `programs` counts the tasks the cause is measured in.
+The recursion row uses the **net** of the correct replacement (`tally_lang_edge`); the 1,184M
+`tally_lang_norec` figure is the cost of deleting the entry guard with nothing put back, not the
+benefit of the queued change.
 
 | rank | cause | measured saved | programs | bound edit |
 |---:|---|---:|---:|---|
 | 1 | generic dict/table probe (specialise it) | **1,927M** | 1 (`echo_pack`) | `echo_pack_dict2` |
 | 2 | container invariant test on every list operation | **1,368M** | 1 (`ticket_audit`) | `ticket_audit_nometa` |
-| 3 | recursive evaluator: depth guard | **1,184M** (+ 3,949M frame, attributed only) | 1 (`tally_lang`) | `tally_lang_norec` |
-| 4 | overflow-checked arithmetic | **1,012M** (`848M` + `164M`) | 3 | `ledger_bin_noovf`, `ticket_audit_noovf_int` |
-| 5 | generic list/sequence helpers where a direct write exists | **1,001M** | 3 | `ticket_audit_noview`, `tree_fold_nopop`, `tree_fold_nospan`, `echo_pack_pushloop` |
-| 6 | bounds-checked accessors | **952M** (set overlaps 5) | 4 | `ticket_audit_noview`, `tree_fold_nobget`, `echo_pack_nobounds` |
-| 7 | ASCII/UTF-8 and split/parse helpers | **490M** | 1 (`berth_sim`) | `berth_sim_noascii` |
+| 3 | overflow-checked arithmetic | **1,012M** (`848M` + `164M`) | 3 | `ledger_bin_noovf`, `ticket_audit_noovf_int` |
+| 4 | generic list/sequence helpers where a direct write exists | **1,001M** | 3 | `ticket_audit_noview`, `tree_fold_nopop`, `tree_fold_nospan`, `echo_pack_pushloop` |
+| 5 | bounds-checked accessors | **952M** (set overlaps 4) | 4 | `ticket_audit_noview`, `tree_fold_nobget`, `echo_pack_nobounds` |
+| 6 | ASCII/UTF-8 and split/parse helpers | **490M** | 1 (`berth_sim`) | `berth_sim_noascii` |
+| 7 | recursive evaluator: depth guard moved to the recursive edge | **190M net** (1,184M entry-guard removal bound; + 3,949M frame, attributed only) | 1 (`tally_lang`) | `tally_lang_edge` |
 | 8 | one-statement-per-op shape (local rewrite) | **182M** | 1 (`echo_pack`) | `echo_pack_cmpmatch` |
 | — | always-inline a helper | 4.7M (negative) | 0 | `echo_pack_ai_append` |
 
 Three cautions for the design. (a) Rank 2 is a **memory-safety check**, not an optimisation: the
 measured bound is what it costs, but removing it without an escape proof would trade correctness
 for 10% of one program, so `EMIT_LEAN.md` deliberately queues the three changes below it (dict
-probe, recursion guard, overflow) and leaves the safe sub-step (hoist the check from read-only
-views) as a follow-up gated on the same local-escape marker design 1 needs. (b) The edit bounds
-overlap: `ticket_audit_noview` removes both the invariant test and the bounds test and the call,
-so ranks 5 and 6 cannot both be claimed in full. (c) The ranking is per *edit*, not per *cause*:
+probe, recursion guard at the recursive edge, overflow) and leaves the safe sub-step (hoist the
+check from read-only views) as a follow-up gated on the same local-escape marker design 1 needs.
+(b) The edit bounds overlap: `ticket_audit_noview` removes both the invariant test and the bounds
+test and the call, so ranks 4 and 5 cannot both be claimed in full. (c) The ranking is per *edit*,
+not per *cause*:
 `temporaries/one-statement` has 17,571M of attributed Ir but no hand edit removes more than 182M
 of it, because a local rewrite cannot change the emitter's expression shape. The design queues
 the causes with a measured, reproducible bound and treats the shape as a separate, larger lane.
