@@ -1,3 +1,31 @@
+## 2026-11-07 -- err1: compiler messages an AI can act on -- measurement and design (job-err1-11071330)
+
+Design-only job; the compiler is unchanged. Collected the messages that actually fire by
+compiling the 8 vibe programs that built and 100 gdev programs (108 runs), plus the 11 AIL
+attempts in `lab/vibe/results.json`. Selected the 15 messages (vibe1's 10 plus the 5
+highest-frequency gdev-only families), wrote one trigger each in `lab/err/triggers/`, and asked
+the model vibe1 used (`cmd`, `deepseek-v4.1-flash`, `--effort low`, one turn, no tools) to fix
+each program from the message alone, 5 replies per trigger.
+
+Per-message fix rate (builds, matches CPython, message gone): 56/75 = 0.75. The dead ends are
+`_ail_l1l` row arity (0.20), "mixes bools and numbers" (0.00; the suggested `int(...)` changes
+`False` to `0`), `Fraction.__float__` (0.00; the note points at line 235 of a 3-line file), and
+the tuple/single-value note (0.40). `docs/design/AGENT_ERRORS.md` specifies an agent format
+(`file:line:col: CODE: cause` plus a literal `Replace`/`With`, and a `--json` object with
+`fix.replace_range`/`with`), rewrites all 15, and re-runs the harness on the rewritten text:
+69/75 = 0.92 (07, 11 and 14 go to 5/5; 02 stays at 0/5 because the cause is compiler-internal).
+Implementation is split into six steps of at most 2 h with files, tests and the number each
+moves. vibe1's #1 message (tuple element type) no longer fires from a user program on the
+current compiler (it was a prelude note; `test_ail_pre133` records the fix) and is kept as
+AIL0116 without a fix-rate row.
+
+Probes: a candidate fix for every trigger in `/tmp/fixes/NN.py`; `bash ~/tools/cmp.sh` on all
+15 matched CPython on both builds. `lab/err/measure.py`-side compile with fallback notes on left
+13/15 without the message (02 and 11 do not; those are the two compiler-side defects).
+
+Tests on this commit: `test_ail_safetynet` 5 OK, `test_ail_files` 18 OK (1 skipped),
+`test_ail_corpus_findings3` 2 OK.
+
 ## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
 
 Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a
