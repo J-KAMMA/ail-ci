@@ -101,11 +101,18 @@ def classify(ail_rows, c_rows, c_ranges):
     out = {name: 0 for name in CAUSES}
     for row in ail_rows:
         text, fn, ir = row['text'], row['fn'], row['ir']
+        role = role_of(fn)
+        if role == 'container-invariant':
+            # The whole body of a *_check helper is the invariant test, and attrib.py's
+            # broad `.n` regex false-positives on `T->table.n` inside it, so the function
+            # identity is the stronger evidence here.  Every other role still yields to
+            # the check classes (a checked add inside a helper is an overflow line).
+            out[role] += ir
+            continue
         ck = check_class(text)
         if ck:
             out[ck] += ir
             continue
-        role = role_of(fn)
         if role:
             out[role] += ir
             continue

@@ -15,12 +15,19 @@ The design that follows from it is in `docs/design/EMIT_LEAN.md`.
   `lab/roof/attrib.py:case()`, the same one `lab/roof/RESULTS.md` uses. stdout is compared
   byte-for-byte on every baseline and every hand-edited variant; all comparisons were identical.
 * **Per-line attribution.** `callgrind_annotate --auto=yes --show=Ir` gives Ir per line of the
-  emitted C. `analyze.py` saves every row (`line, Ir, text, function`) to `data/lines.json`.
-* **Sub-classification.** `classify.py` first gives a line `attrib.py`'s check class (overflow,
-  bounds, refcount, alloc/free, copies, boxing). A line in an emitted runtime helper then takes
-  that helper's role by function name; a line in user code (`py_main`, `pack`, `readvar`, `ev__d`,
-  …) is classed by shape: prologue/epilogue, recursion guard, one-statement-per-op temporaries, a
-  call to a generic helper, width conversion, loop control. All of `data/causes.json`.
+  emitted C. `analyze.py` saves every row (`line, Ir, text, function`) to `data/lines.json`. Rows
+  are aligned to the emitted source: a `-- line N ---` marker sets the line, a `=>` callee row
+  does not consume one (it carries the callee's inclusive cost and belongs to the call line), and
+  every recorded row is checked against the text of the line it claims. The older parser advanced
+  one line per output line, so it drifted by one row per call site (up to 63 lines); that shifted
+  functions such as `ail_idict_check`, `ail_tab_hhas` and `ail_list_push` in `lines.json`.
+* **Sub-classification.** A line in a container-invariant helper (`ail_blist_meta`, `ail_idict_check`,
+  `*_check`…) takes that role: the whole body is the invariant test, and `attrib.py`'s broad `.n`
+  regex false-positives on `T->table.n` inside it. Every other line first gets `attrib.py`'s check
+  class (overflow, bounds, refcount, alloc/free, copies, boxing), then an emitted runtime helper's
+  role by function name; a line in user code (`py_main`, `pack`, `readvar`, `ev__d`, …) is classed
+  by shape: prologue/epilogue, recursion guard, one-statement-per-op temporaries, a call to a
+  generic helper, width conversion, loop control. All of `data/causes.json`.
 * **Bounds, not estimates.** `bounds.py` applies each `patches/*.diff` to a *copy* of the emitted
   C, rebuilds with the same flags, checks stdout against the C baseline, and re-runs callgrind.
   The saved Ir is the real bound for that construct: what the instruction stream would cost if the
@@ -37,112 +44,112 @@ The design that follows from it is in `docs/design/EMIT_LEAN.md`.
 
 | task | AIL Ir | C Ir | AIL/C | extra Ir | top-10 shared functions |
 |---|---:|---:|---:|---:|---:|
-| ticket_audit | 13,001,768,557 | 2,405,978,982 | **5.40** | 10,595,789,575 | 49.9% |
-| echo_pack | 5,447,661,158 | 1,866,703,610 | **2.92** | 3,580,957,548 | 90.9% |
-| tree_fold | 8,786,004,035 | 4,445,946,990 | **1.98** | 4,340,057,045 | 59.2% |
-| ledger_bin | 5,233,460,176 | 2,732,522,608 | **1.92** | 2,500,937,568 | 90.5% |
-| tally_lang | 19,585,728,693 | 11,900,634,574 | **1.65** | 7,685,094,119 | 98.9% |
-| berth_sim | 8,289,014,902 | 5,912,491,070 | **1.40** | 2,376,523,832 | 77.3% |
+| ticket_audit | 13,002,098,682 | 2,405,978,672 | **5.40** | 10,596,120,010 | 49.3% |
+| echo_pack | 5,447,660,701 | 1,866,703,042 | **2.92** | 3,580,957,659 | 90.7% |
+| tree_fold | 8,786,003,453 | 4,445,946,422 | **1.98** | 4,340,057,031 | 60.2% |
+| ledger_bin | 5,233,459,925 | 2,732,522,292 | **1.92** | 2,500,937,633 | 88.2% |
+| tally_lang | 19,585,728,474 | 11,900,634,258 | **1.65** | 7,685,094,216 | 98.9% |
+| berth_sim | 8,289,014,320 | 5,912,490,502 | **1.40** | 2,376,523,818 | 77.1% |
 
 The ratios reproduce `lab/roof/RESULTS.md` (5.40, 2.92, 2.04, 1.92, 1.70, 1.43) to within the
 `-g`/vectorisation flags of the attribution build.
 
 ## The ten hottest emitted functions, beside the hand-written C
 
-Ir in millions. `—` means the C has no function for it: the work is inline in `main`, or the C
-does not do it at all. The C column is line attribution over `main.c` only; libc callees are not
-in it (so `tree_fold`'s `qsort` does not appear, while AIL's equivalent `AIL_KEYSORT_*` expansion
-does).
+Ir in millions. The two columns are independent rankings (row *i* is not a paired call): a `—`
+simply pads the shorter list, or marks work the C does inline, so it has no function of its own.
+The C column is line attribution over `main.c` only; libc callees are not in it (so `tree_fold`'s
+`qsort` does not appear, while AIL's equivalent `AIL_KEYSORT_*` expansion does).
 
 ### ticket_audit (typed source; C parses a `F {p,n}` struct passed by value)
 
 | emitted | Ir | hand-written C | Ir |
 |---|---:|---|---:|
-| `ail_blist_meta` | 1,276 | — (no invariant test anywhere) | — |
-| `py_main` | 1,029 | `main` | 1,350 |
-| `ail_bytes_to_int` | 505 | `num` | 224 |
-| `rec` (user) | 471 | — (inlined in `main`) | — |
-| `ail_str_catn` | 423 | — (inlined in `main`) | — |
-| `_`/`?` macro helpers | 419 | — | — |
-| `ail__utf8_validate` | 414 | — (input assumed ASCII) | — |
-| `ail_stab_check` | 401 | — | — |
-| `ail_bsplit_span` | 358 | — (`F` is a by-value view) | — |
-| `ail_shash` | 339 | — | — |
+| `ail_blist_meta` | 1,276 | `main` | 1,353 |
+| `py_main` | 1,007 | `num` | 224 |
+| `ail_bytes_to_int` | 505 | `val_event` | 183 |
+| `rec` (user) | 496 | `syn_buyer` | 164 |
+| `ail_str_catn` | 457 | `alldig` | 109 |
+| `ail__utf8_validate` | 414 | `isdig` | 67 |
+| `ail_stab_check` | 401 | `syn_seat` | 66 |
+| `ail_bsplit_span` | 358 | `syn_event` | 14 |
+| `ail_shash` | 339 | `syn_date` | 5 |
+| `ail__bpay_release` | 315 | `isup` | 3 |
 
 ### echo_pack
 
 | emitted | Ir | hand-written C | Ir |
 |---|---:|---|---:|
-| `pack` | 2,004 | `pack` | 1,461 |
-| `ail_tab_hslot` | 1,458 | `key` (inlined; probe in `pack`) | 256 |
-| `hash_of` | 288 | `hsh` (inlined) | — |
-| `ail_hash` | 241 | `key` (inlined) | — |
-| `ail_bytearray_append` | 200 | `flush` | 108 |
+| `pack` | 2,004 | `pack` | 1,474 |
+| `ail_tab_hslot` | 1,458 | `hsh` | 256 |
+| `hash_of` | 288 | `key` | 85 |
+| `ail_hash` | 241 | `flush` | 33 |
+| `ail_bytearray_append` | 200 | — (inlined in `pack`) | — |
 | `ail_list_push` | 192 | — | — |
-| `ail_tab_hget` | 166 | — | — |
+| `ail_tab_hhas` | 157 | — | — |
 | `ail_tab_put_hit` | 155 | — | — |
-| `ail_idict_next_epoch` | 147 | — | — |
+| `ail_idict_check` | 144 | — | — |
 | `ail_ir_view_get` | 83 | — | — |
 
 ### tree_fold
 
 | emitted | Ir | hand-written C | Ir |
 |---|---:|---|---:|
-| `AIL_KEYSORT_COLS` (`?`) | 1,319 | `qsort` (libc, not in `main.c`) | — |
-| `ail_list_push` | 668 | — | — |
-| `ail__key_i64_first` | 431 | `cmp` (inlined into `qsort`) | — |
-| `ail_pslist_push` | 393 | `addchild` (inlined) | — |
-| `py_main` | 369 | `main` | 1,228 |
-| `parse_tree` | 342 | `parse_tree` | 731 |
-| `ail_bl_append` | 285 | `nbadd` | 51 |
-| `rebuild` (user) | 282 | — (inlined in `main`) | — |
-| `ail_pslist_at` | 264 | `nm` (direct array) | 6 |
-| `ail_list_get` | 219 | direct `p[i]` | — |
+| `AIL_KEYSORT_COLS` (`?`) | 1,081 | `main` | 1,119 |
+| `ail_list_push` | 668 | `pre_next` | 468 |
+| `ail_pslist_push` | 623 | `parse_tree` | 417 |
+| `ail__key_i64_first` | 431 | `oput` | 179 |
+| `py_main` | 369 | `addchild` | 141 |
+| `parse_tree` | 342 | `compute_sub` | 121 |
+| `ail_list_get` | 293 | `nbadd` | 84 |
+| `ail_bl_append` | 291 | `cmp` | 68 |
+| `rebuild` (user) | 282 | `newnode` | 57 |
+| `ail_pslist_at` | 264 | `oc` | 17 |
 
 ### ledger_bin
 
 | emitted | Ir | hand-written C | Ir |
 |---|---:|---|---:|
-| `py_main` | 932 | `main` | 1,172 |
+| `py_main` | 932 | `main` | 1,184 |
 | `readvar` | 729 | `rdvar` | 881 |
-| `AIL_KEYSORT_I64`/`_COLS` (`?`) | 582 | `qsort` (libc) | — |
-| `ck_sub` | 557 | plain `%` in `rdvar` | — |
-| `ail_tab_hslot` | 466 | `hfind` | 137 |
-| `ck_mul` | 418 | plain `*` | — |
-| `ck_shl` | 373 | plain `<<` | — |
-| `ail_bytes_get` | 276 | direct `p[i]` | — |
-| `ail_ir_list_get` | 146 | direct `p[i]` | — |
-| `ail_list_push` | 111 | — | — |
+| `pymod` | 557 | `hfind` | 137 |
+| `ck_shl` | 555 | `lookup` | 91 |
+| `ail_tab_hslot` | 466 | `cmp_id` | 58 |
+| `ck_add` | 418 | `hgrow` | 4 |
+| `ail_bytes_get` | 276 | `cmp_top` | 2 |
+| `ck_mul` | 186 | — | — |
+| `ail_list_push` | 185 | — | — |
+| `AIL_KEYSORT_I64`/`_COLS` (`?`) | 169 | — (`qsort` is libc) | — |
 
 ### tally_lang
 
 | emitted | Ir | hand-written C | Ir |
 |---|---:|---|---:|
-| `ev__d` | 13,071 | `ev` | 4,298 |
-| `ail_list_span_get` | 2,645 | direct `n->a[i]` | — |
-| `py_run__try1` (outlined try body) | 1,993 | — (C has no `try`) | — |
+| `ev__d` | 13,065 | `ev` | 9,575 |
+| `ail_list_span_get` | 2,645 | `main` | 2,256 |
+| `py_run__try1` (outlined try body) | 1,993 | — (inlined in `ev`) | — |
 | `ail_sarena_keep_roots` | 373 | — | — |
-| `ev` | 319 | `ev` | — |
+| `ev` | 319 | — | — |
 | `AIL_NUMFIELD` (`?`) | 319 | — | — |
-| `pymod` | 246 | `%` | — |
-| `ck_shl` | 200 | `<<` | — |
-| `ck_add` | 123 | `+` | — |
-| `pydiv` | 80 | `/` | — |
+| `pymod` | 246 | — | — |
+| `ck_shl` | 200 | — | — |
+| `ck_add` | 123 | — | — |
+| `popcnt` | 83 | — | — |
 
 ### berth_sim
 
 | emitted | Ir | hand-written C | Ir |
 |---|---:|---|---:|
-| `AIL_KEYSORT_I64` (`?`) | 1,733 | `qsort` (libc) | — |
-| `py_main` | 990 | `main` | 718 |
-| `ail_str_to_int` | 815 | `rd` | 854 |
-| `ail__str_split_sep_raw` | 765 | — (split inline in `main`) | — |
-| `ail_stdin_readline` | 540 | `rd`'s `fread` loop | — |
-| `ail__sarena_keep_roots_slow` | 331 | — | — |
-| `ail_ir_view_get` | 331 | direct `p[i]` | — |
-| `ail_list_push` | 285 | — | — |
-| `ail__asc_to_int` | 271 | inline digit loop | — |
-| `ail__str_to_int_full` | 191 | inline digit loop | — |
+| `AIL_KEYSORT_I64` (`?`) | 1,658 | `cmpu` | 1,036 |
+| `py_main` | 990 | `rd` | 890 |
+| `ail_str_to_int` | 815 | `main` | 831 |
+| `ail__str_split_sep_raw` | 765 | `upop` | 375 |
+| `ail_stdin_readline` | 576 | `upush` | 198 |
+| `ail__sarena_keep_roots_slow` | 352 | `wpush` | 54 |
+| `ail_ir_view_get` | 331 | `wpop` | 40 |
+| `ail_list_push` | 285 | — (`qsort` is libc) | — |
+| `ail__asc_to_int` | 271 | — | — |
+| `ail__str_to_int_full` | 191 | — | — |
 
 ## Sub-classification of `other`, by cause
 
@@ -155,30 +162,30 @@ of `other`. Sums are per column, so a cause is comparable across programs.
 | cause | ticket_audit | echo_pack | tree_fold | ledger_bin | tally_lang | berth_sim | total |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | temporaries/one-statement | 1,658 | 2,308 | 788 | 1,510 | **10,130** | 1,177 | **17,571** |
-| dict-table-helper | 1,227 | **2,394** | 1,600 | 964 | 0 | 1,614 | **7,799** |
-| list-helper | 1,709 | 192 | 2,075 | 184 | 2,645 | 579 | **7,384** |
-| call-frame (prologue/epilogue) | 6 | 12 | 5 | 121 | **3,949** | 102 | **4,195** |
-| bounds | 1,073 | 170 | 1,426 | 222 | 0 | 958 | 3,849 |
-| byte-string-helper | 1,023 | 242 | 335 | 97 | 0 | **1,525** | 3,222 |
-| other-user-lines | 344 | 56 | 377 | 277 | 975 | 441 | 2,470 |
-| container-invariant | **2,018** | 0 | 214 | 1 | 0 | 156 | 2,389 |
+| dict-table-helper | 1,326 | **2,402** | 1,600 | 967 | 0 | 1,614 | **7,909** |
+| list-helper | 1,744 | 192 | 2,147 | 187 | **2,645** | 585 | **7,500** |
+| call-frame (prologue/epilogue) | 6 | 16 | 0 | 121 | **3,949** | 120 | **4,212** |
+| bounds | 678 | 26 | **1,426** | 209 | 0 | 958 | 3,296 |
+| byte-string-helper | 994 | 245 | 358 | 97 | 0 | **1,561** | 3,255 |
+| container-invariant | **2,379** | 144 | 214 | 14 | 0 | 156 | 2,908 |
+| other-user-lines | 264 | 41 | 268 | 640 | **975** | 376 | 2,565 |
 | overflow | 271 | 9 | 287 | **796** | 266 | 168 | 1,798 |
-| allocator | 921 | 0 | 159 | 13 | 373 | 243 | 1,709 |
+| allocator | **912** | 0 | 176 | 16 | 373 | 258 | 1,735 |
 | recursion-depth-guard | 0 | 0 | 0 | 0 | **988** | 0 | 988 |
-| overflow-helper | 0 | 0 | 0 | **743** | 200 | 33 | 975 |
-| alloc/free | 399 | 1 | 213 | 29 | 0 | 180 | 822 |
-| loop/condition | 176 | 43 | 77 | 10 | 7 | 507 | 819 |
-| width/int-float conversion | 9 | 0 | 61 | 97 | 53 | 325 | 545 |
-| copies | 165 | 0 | 75 | 5 | 0 | 60 | 305 |
-| refcount | 185 | 0 | 5 | 2 | 0 | 15 | 208 |
-| call-to-generic-helper | 87 | 0 | 23 | 0 | 0 | 0 | 110 |
-| exception-unwind | 26 | 0 | 0 | 0 | 0 | 0 | 26 |
+| loop/condition | 193 | 43 | 73 | 10 | 7 | **513** | 839 |
+| alloc/free | **399** | 1 | 213 | 29 | 0 | 180 | 822 |
+| overflow-helper | 0 | 0 | 5 | **371** | 200 | 17 | 592 |
+| width/int-float conversion | 9 | 0 | 61 | 97 | 53 | **325** | 545 |
+| copies | **165** | 0 | 75 | 5 | 0 | 60 | 305 |
+| refcount | **185** | 0 | 5 | 2 | 0 | 15 | 208 |
+| call-to-generic-helper | **87** | 0 | 23 | 0 | 0 | 0 | 110 |
+| exception-unwind | **26** | 0 | 0 | 0 | 0 | 0 | 26 |
 | **sum** | 11,297 | 5,427 | 7,719 | 5,073 | 19,585 | 8,084 | 57,185 |
 
 Read as a whole, the six programs say the same thing roof1 said for five: the emitted shape, not
 the checks, is the cost. `temporaries/one-statement` is 30.7% of all emitted lines' Ir; add the
 container/dict/string helper bodies (which are mostly the same per-element bookkeeping moved into
-C functions) and the share is 62%. The checks (`bounds` + `overflow` + refcount + copies) are 11%.
+C functions) and the share is 63%. The checks (`bounds` + `overflow` + refcount + copies) are 10%.
 
 ## Cause catalogue, before/after, and the measured bound
 
@@ -263,7 +270,7 @@ static int64_t sp_find(const int64_t *head, const int64_t *prev, const int64_t *
 This is the largest single bound measured in this lane. It is one program's shape (a dict keyed by
 a varint), but the same generic-probe pattern is the largest `other` cause in `tree_fold`
 (`dict-table-helper` 1,600M), `berth_sim` (1,614M, the keysort/qsort replacement),
-`ticket_audit` (1,227M) and `ledger_bin` (964M).
+`ticket_audit` (1,326M) and `ledger_bin` (967M).
 
 ### 3. Per-call recursion-depth guard — `AIL_MAX_RECURSION_DEPTH`
 
@@ -285,13 +292,16 @@ theirs).
 
 Related, and larger in the same function: the prologue/epilogue of `ev__d` (`call-frame` 3,949M,
 20.2% of `tally_lang`). The function has enough live values that gcc saves and restores a large
-callee-saved set per call; the C evaluator's `ev` is 4,298M against AIL's 13,071M in `ev__d`.
+callee-saved set per call. Note that the two call-frame figures are not directly comparable: gcc
+splits `ev__d` into a hot `ev__d'2` specialization whose entry rows the line attribution assigns to
+the `ev__d` function, so the line column (13,065M) is larger than any single summary entry, while
+the C side's inlined `ev` body (9,575M) is a single function.
 
 ### 4. Overflow-checked arithmetic per Python operation — `ck_add`/`ck_mul`/`ck_shl`/`ck_sub`
 
 The typed emitter lowers `+ - * <<` in `ck` mode to a helper call that tests overflow.
-`ledger_bin`'s varint reader does four of them per byte; `ck_sub`'s `%` (556M) is the single
-hottest line in the program.
+`ledger_bin`'s varint reader does four of them per byte; `pymod`'s `%` (557M, one 556M line) is the
+single hottest line in the program, and `ck_shl`'s five-check body (555M) is the second.
 
 Before (`readvar`):
 
@@ -321,7 +331,7 @@ int64_t ir20 = ((ir5) + (ir19));
 `berth_sim` reads lines, splits them on spaces and parses ints. `ail_stdin_readline` classifies
 every byte of every line as ASCII before choosing the fast path:
 
-Before (`ail_stdin_readline`, 540M + the scan loop 258M/162M in the profile):
+Before (`ail_stdin_readline`, 576M):
 
 ```c
 int _ascii = 1;
@@ -434,12 +444,12 @@ construct and keeps stdout identical.
 
 | named sub-cause | where it is | Ir | isolated bound |
 |---|---|---:|---|
-| struct/string passed by value | `ail_bytes`/`ail_str` are 16-byte structs passed and returned by value; the cost sits in `byte-string-helper` | 3,222M attributed | not measured: replacing the ABI with pointers changes every message and every call site, so the hand edit would not be local |
+| struct/string passed by value | `ail_bytes`/`ail_str` are 16-byte structs passed and returned by value; the cost sits in `byte-string-helper` | 3,255M attributed | not measured: replacing the ABI with pointers changes every message and every call site, so the hand edit would not be local |
 | temporaries that block register allocation (address taken) | `v__tN` slots are declared at function scope (`int64_t v__t27 = 0;`) and assigned by each statement; `temporaries/one-statement` | 17,571M attributed | only 182M by rewriting one loop (`echo_pack_cmpmatch`); no whole-shape bound |
-| repeated loads through a pointer gcc cannot prove unaliased | `(*v_data).p[...]` and `v_x->f_...` chains in `py_main`/`pack`/`ev__d`; inside `other-user-lines` | 2,470M attributed | not separated: the loads are the operands of the one-statement expressions, and removing them means rewriting the expression, not deleting a construct |
+| repeated loads through a pointer gcc cannot prove unaliased | `(*v_data).p[...]` and `v_x->f_...` chains in `py_main`/`pack`/`ev__d`; inside `other-user-lines` | 2,565M attributed | not separated: the loads are the operands of the one-statement expressions, and removing them means rewriting the expression, not deleting a construct |
 | helper calls not inlined | `ail_blist_meta` is `static inline` yet kept an out-of-line copy (1,276M); `ail_bytearray_append` forced `always_inline` | 1,276M in `ail_blist_meta` | inlining the append: **4.7M saved (negative)**, so the lever is the helper body, not the attribute |
 | generic helpers where a specialised loop exists | dict probe (`echo_pack_dict2`), `ail_bytes_to_int` per digit, `ail_str_to_int`/`ail__str_split_sep_raw` | 1,927M bound; 164M bound; 490M bound | measured, causes 1, 4, 5 |
-| redundant length/cap reloads | `ail_blist_meta`/`ail_tab_hslot` re-read `n`, `cap`, `used`; `ail_ir_view_get` re-reads `p,n` | inside `container-invariant` 2,389M | not separated: the reload is the expression operand; the view/accessor bound (cause 6, 952M) includes it |
+| redundant length/cap reloads | `ail_blist_meta`/`ail_tab_hslot` re-read `n`, `cap`, `used`; `ail_ir_view_get` re-reads `p,n` | inside `container-invariant` 2,908M | not separated: the reload is the expression operand; the view/accessor bound (cause 6, 952M) includes it |
 | int<->float or width conversions | `width/int-float conversion` lines, mostly `(int64_t)`/`(uint32_t)` around `%`, shifts and byte loads | 545M attributed | not measured; no hand edit removes only the cast |
 | exceptions/unwind state checks after calls | `ail_ir_try`, `ail_cleanup_top`, pending checks; and the outlined try body `py_run__try1` | 26M overhead lines + 1,993M in the outlined body | not measured: the body is user code (it is a `try` around the parser), not unwind overhead; the 26M is too small to isolate reliably |
 

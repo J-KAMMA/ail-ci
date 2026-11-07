@@ -17,52 +17,382 @@
  },
  "tasks": {
   "ticket_audit": {
-   "ail": 13001768557,
-   "c": 2405978982,
-   "extra": 10595789575,
+   "ail": 13002098682,
+   "c": 2405978672,
+   "extra": 10596120010,
    "ratio": 5.404,
    "stdout_same": true,
-   "top": []
+   "top": [
+    [
+     "py_main",
+     3069182335
+    ],
+    [
+     "ail_blist_push",
+     1371402864
+    ],
+    [
+     "ail_blist_release",
+     1250784685
+    ],
+    [
+     "ail_sdict_put",
+     578728752
+    ],
+    [
+     "ail_stab_slot",
+     524104168
+    ],
+    [
+     "ail_bytes_to_int",
+     512049168
+    ],
+    [
+     "ail_blist_store",
+     486336110
+    ],
+    [
+     "ail_str_catn.constprop.0",
+     464932966
+    ],
+    [
+     "ail_blist_view",
+     433897525
+    ],
+    [
+     "ail__utf8_validate",
+     414226752
+    ]
+   ],
+   "top_c": [
+    [
+     "main",
+     1868322360
+    ],
+    [
+     "val_event.isra.0",
+     183040000
+    ],
+    [
+     "alldig",
+     143026030
+    ],
+    [
+     "syn_code",
+     1033600
+    ]
+   ]
   },
   "echo_pack": {
-   "ail": 5447661158,
-   "c": 1866703610,
-   "extra": 3580957548,
+   "ail": 5447660701,
+   "c": 1866703042,
+   "extra": 3580957659,
    "ratio": 2.918,
    "stdout_same": true,
-   "top": []
+   "top": [
+    [
+     "pack",
+     5054866474
+    ],
+    [
+     "ail_tab_hfree_slot",
+     84200374
+    ],
+    [
+     "ail_tab_hput",
+     79183081
+    ],
+    [
+     "flush",
+     53135665
+    ],
+    [
+     "ail_bytearray_extend",
+     42284005
+    ],
+    [
+     "ail_tab_put_slow",
+     35540390
+    ],
+    [
+     "ail_tab_hash_rearray",
+     23057694
+    ],
+    [
+     "ail_idict_put_slow",
+     19293360
+    ],
+    [
+     "ail_bytearray_reserve",
+     18188406
+    ],
+    [
+     "ail_tab_order_append",
+     17262713
+    ]
+   ],
+   "top_c": [
+    [
+     "main",
+     1815542342
+    ],
+    [
+     "flush",
+     32765390
+    ]
+   ]
   },
   "tree_fold": {
-   "ail": 8786004035,
-   "c": 4445946990,
-   "extra": 4340057045,
+   "ail": 8786003453,
+   "c": 4445946422,
+   "extra": 4340057031,
    "ratio": 1.976,
    "stdout_same": true,
-   "top": []
+   "top": [
+    [
+     "do_sort",
+     2117254914
+    ],
+    [
+     "rebuild",
+     1021183434
+    ],
+    [
+     "parse_tree",
+     823652829
+    ],
+    [
+     "ail_pslist_push.isra.0",
+     737617258
+    ],
+    [
+     "py_main",
+     510680204
+    ],
+    [
+     "do_fold",
+     476632356
+    ],
+    [
+     "do_print",
+     449308616
+    ],
+    [
+     "compact",
+     385849097
+    ],
+    [
+     "ail_str_from_int",
+     246484069
+    ],
+    [
+     "ail_list_pop",
+     204881712
+    ]
+   ],
+   "top_c": [
+    [
+     "main",
+     1755073052
+    ],
+    [
+     "pre_next",
+     256277782
+    ],
+    [
+     "compute_sub",
+     209498239
+    ]
+   ]
   },
   "ledger_bin": {
-   "ail": 5233460176,
-   "c": 2732522608,
-   "extra": 2500937568,
+   "ail": 5233459925,
+   "c": 2732522292,
+   "extra": 2500937633,
    "ratio": 1.915,
    "stdout_same": true,
-   "top": []
+   "top": [
+    [
+     "py_main",
+     2897742067
+    ],
+    [
+     "readvar",
+     1792541960
+    ],
+    [
+     "ail_keysort_perm.constprop.0",
+     218918923
+    ],
+    [
+     "ail_tab_hfree_slot",
+     27978246
+    ],
+    [
+     "ail_tab_hput",
+     25434685
+    ],
+    [
+     "ail__utf8_validate",
+     23320567
+    ],
+    [
+     "ail_slist_push",
+     21683280
+    ],
+    [
+     "ail_tab_put_slow",
+     13084255
+    ],
+    [
+     "ail_tab_hash_rearray",
+     11523332
+    ],
+    [
+     "ail_sarena_pushn",
+     9720518
+    ]
+   ],
+   "top_c": [
+    [
+     "main",
+     1186139962
+    ],
+    [
+     "rdvar",
+     881209657
+    ],
+    [
+     "hfind",
+     137302697
+    ],
+    [
+     "lookup",
+     90584959
+    ],
+    [
+     "cmp_id",
+     58112037
+    ]
+   ]
   },
   "tally_lang": {
-   "ail": 19585728693,
-   "c": 11900634574,
-   "extra": 7685094119,
+   "ail": 19585728474,
+   "c": 11900634258,
+   "extra": 7685094216,
    "ratio": 1.646,
    "stdout_same": true,
-   "top": []
+   "top": [
+    [
+     "ev__d'2",
+     11773623601
+    ],
+    [
+     "py_run__try1",
+     4135463425
+    ],
+    [
+     "ev__d",
+     3593092496
+    ],
+    [
+     "popcnt",
+     83141125
+    ],
+    [
+     "ail_list_pop.constprop.0",
+     60024
+    ],
+    [
+     "lex",
+     21685
+    ]
+   ],
+   "top_c": [
+    [
+     "ev'2",
+     7139385702
+    ],
+    [
+     "ev",
+     2435326295
+    ],
+    [
+     "main",
+     2255786750
+    ]
+   ]
   },
   "berth_sim": {
-   "ail": 8289014902,
-   "c": 5912491070,
-   "extra": 2376523832,
+   "ail": 8289014320,
+   "c": 5912490502,
+   "extra": 2376523818,
    "ratio": 1.402,
    "stdout_same": true,
-   "top": []
+   "top": [
+    [
+     "py_main",
+     3015145048
+    ],
+    [
+     "ail_keysort_perm.constprop.0",
+     1614424789
+    ],
+    [
+     "ail_str_split_sep.isra.0",
+     1007695887
+    ],
+    [
+     "ail_stdin_readline",
+     575519474
+    ],
+    [
+     "ail__str_to_int_full.isra.0",
+     562527594
+    ],
+    [
+     "ail__sarena_keep_roots_slow.constprop.0",
+     392999934
+    ],
+    [
+     "fpop",
+     277878293
+    ],
+    [
+     "fpush",
+     187844570
+    ],
+    [
+     "ail__blk_take",
+     99002134
+    ],
+    [
+     "ail_sarena_pushn",
+     78001722
+    ]
+   ],
+   "top_c": [
+    [
+     "cmpu",
+     1035846082
+    ],
+    [
+     "main",
+     924991968
+    ],
+    [
+     "rd",
+     890440220
+    ],
+    [
+     "upop",
+     375336399
+    ],
+    [
+     "upush",
+     198224834
+    ]
+   ]
   }
  }
 }

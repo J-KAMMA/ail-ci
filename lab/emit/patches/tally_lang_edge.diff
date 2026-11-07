@@ -1,0 +1,54 @@
+--- a/program.c
++++ b/program.c
+@@ -6630,7 +6630,6 @@
+ 
+ static
+ int64_t ev__d(ail_obj_Prog *v_p, int64_t v_i, int64_t ail_d) {
+-    if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");
+     ail_list *ir1 = (&(v_p)->f_n_op);
+     ail_list *ir3 = (&(v_p)->f_n_a);
+     int64_t ir2, ir4;
+@@ -6661,30 +6660,30 @@
+     }
+     int64_t ir13 = (ir2 == 20LL);
+     if (ir13) {
+-        int64_t ir14 = ev__d(v_p, ir4, ail_d + 1);
++        int64_t ir14 = (ail_d + 1 > AIL_MAX_RECURSION_DEPTH ? (ail_die("maximum recursion depth exceeded"), 0) : ev__d(v_p, ir4, ail_d + 1));
+         int64_t ir15 = ck_sub(0LL, ir14);
+         int64_t ir16 = (ir15 & 4294967295LL);
+         return ir16;
+     }
+     int64_t ir17 = (ir2 == 13LL);
+     if (ir17) {
+-        int64_t ir18 = ev__d(v_p, ir4, ail_d + 1);
++        int64_t ir18 = (ail_d + 1 > AIL_MAX_RECURSION_DEPTH ? (ail_die("maximum recursion depth exceeded"), 0) : ev__d(v_p, ir4, ail_d + 1));
+         int64_t ir19 = popcnt(ir18);
+         return ir19;
+     }
+     int64_t ir20 = (ir2 == 14LL);
+     if (ir20) {
+-        int64_t ir21 = ev__d(v_p, ir4, ail_d + 1);
++        int64_t ir21 = (ail_d + 1 > AIL_MAX_RECURSION_DEPTH ? (ail_die("maximum recursion depth exceeded"), 0) : ev__d(v_p, ir4, ail_d + 1));
+         int64_t ir22 = (ir21 == 0LL);
+         if (ir22) {
+             return 1LL;
+         }
+         return 0LL;
+     }
+-    int64_t ir23 = ev__d(v_p, ir4, ail_d + 1);
++    int64_t ir23 = (ail_d + 1 > AIL_MAX_RECURSION_DEPTH ? (ail_die("maximum recursion depth exceeded"), 0) : ev__d(v_p, ir4, ail_d + 1));
+     ail_list *ir24 = (&(v_p)->f_n_b);
+     int64_t ir25 = ail_list_span_get((ir24)->p, (ir24)->n, v_i);
+-    int64_t ir26 = ev__d(v_p, ir25, ail_d + 1);
++    int64_t ir26 = (ail_d + 1 > AIL_MAX_RECURSION_DEPTH ? (ail_die("maximum recursion depth exceeded"), 0) : ev__d(v_p, ir25, ail_d + 1));
+     int64_t ir27 = (ir2 == 1LL);
+     if (ir27) {
+         int64_t ir28 = (ir23 > ir26);
+@@ -6780,6 +6779,7 @@
+     return ir59;
+ }
+ int64_t ev(ail_obj_Prog *v_p, int64_t v_i) {
++    if (ail_depth + 1 > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");
+     return ev__d(v_p, v_i, ail_depth + 1);
+ }
+ 

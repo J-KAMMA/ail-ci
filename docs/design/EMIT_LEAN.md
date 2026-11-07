@@ -32,9 +32,13 @@ Two facts set the design's priorities.
   sub-step is to hoist it from read-only views to creation/resize, which needs the same
   local-escape proof design 1 builds, so it is a follow-up rather than a step here. The three
   **queueable** changes are therefore ranks 1, 3 and 4 (designs 1, 2, 3 below).
-* **Those three are safe, local changes with a measured bound.** They total 4.1e9 Ir across the six
-  programs, about 13% of the 31.1e9 total extra, and they do not change the semantics of a single
-  Python operation: the probe, the depth check and the arithmetic keep their meaning.
+* **Those three are safe, local changes with a measured bound.** Their construct bounds total 4.1e9
+  Ir across the six programs, about 13% of the 31.1e9 total extra, and they do not change the
+  semantics of a single Python operation: the probe, the depth check and the arithmetic keep their
+  meaning. Design 2's 1,184M is the cost of the entry guard with nothing put back; the correct
+  replacement pays an edge check, and the net it buys is smaller (measured separately as the
+  `tally_lang_edge` bound, and again after implementation). Designs 1 and 3 replace the construct
+  with a cheaper one and their bounds already include the replacement.
 * **The shape is bigger than all of them, and no local edit bounds it.** `temporaries/one-statement`
   is 17.6e9 attributed Ir (30.7% of all emitted lines); the largest edit that removes one instance
   is 182M. Changing the expression shape means rewriting the typed emitter's expression lowering,
@@ -78,21 +82,28 @@ four-line inlined hash and `pack` probes four parallel arrays directly.
 
 Two parts, both invisible to the language:
 
-1. **Runtime (`cruntime.py`).** Add a no-tombstone, single-array probe used only by dicts that the
-   IR marks `fast`:
+1. **Runtime (`cruntime.py`).** Add a no-tombstone probe used only by dicts that the IR marks
+   `fast`. Occupancy is a **separate `used[]` array**, never a sentinel in `keys[]`: every int64
+   value is a legal Python key, so a `keys[i] == 0` (or `INT64_MIN`) sentinel would make `{0: x}`
+   unreadable and unwritable. The fast dict is
 
    ```c
-   /* keys[i] == 0 means empty; no deletion, so a probe stops at the first empty slot. */
+   typedef struct { int64_t *keys; uint8_t *used; int64_t cap, n; } ail_fdict;
+
+   /* used[i] != 0 means occupied; a probe stops at the first unoccupied slot. No deletion,
+      so there are no tombstones and no second array of entry structs. */
    static inline __attribute__((always_inline))
-   int64_t ail_hprobe(const int64_t *keys, int64_t mask, int64_t k) {
+   int64_t ail_hprobe(const uint8_t *used, const int64_t *keys, int64_t mask, int64_t k) {
        int64_t i = ail_hash(k) & mask;
-       while (keys[i] && keys[i] != k) i = (i + 1) & mask;
+       while (used[i] && keys[i] != k) i = (i + 1) & mask;
        return i;
    }
    ```
 
-   `ail_idict_need_fast`, `_has_fast`, `_put_fast`, `_get_fast` call it; the existing
-   `ail_idict_*` functions keep the general table and its checks unchanged.
+   `ail_idict_need_fast`, `_has_fast`, `_put_fast`, `_get_fast` take the `ail_fdict` and call it;
+   a put writes `used[i] = 1` next to `keys[i] = k` and grows (reinserting only occupied slots)
+   when `4 * n >= 3 * cap`. The existing `ail_idict_*` functions keep the general table and its
+   checks unchanged.
 
 2. **IR + emitter (`ir/lower.py`, `ir/emit_c.py:dict_op`).** Mark a dict `fast` when, in the whole
    function, it is a local created by `{}`/`dict()`, never passed to a call, never `del`'d,
@@ -104,18 +115,22 @@ Two parts, both invisible to the language:
 
 ### Correctness
 
-The representation of a `fast` dict is the same open-addressed key array with a distinct empty
-sentinel; it preserves insertion semantics because `ail_tab`'s order list is not used by an
-`idict` that is never iterated (that is part of the mark). Proof obligations:
+The representation of a `fast` dict is an open-addressed key array plus a parallel `used[]`
+occupancy array. Empty is `used[i] == 0`, never a reserved key value, so key `0`, negative keys and
+`INT64_MIN`/`INT64_MAX` are stored and found exactly as CPython stores them. It preserves insertion
+semantics because `ail_tab`'s order list is not used by an `idict` that is never iterated (that is
+part of the mark), and no operation deletes from a `fast` dict, so there are no tombstones. Proof
+obligations:
 
 * **CPython-identical on the corpus** — `.agent/cmp.sh` on every `corpus/**/*.py` program, both the
   default and `AIL_UNIFIED_FORCE=1` builds; every program must match stdout, stderr's last line and
   exit status, or be refused by name. The new test module drives the boundaries directly: empty
-  dict, one key, a full table (growth), `get(k, default)` on a missing and a present key, a key
-  whose hash collides with another, negative keys, `INT64_MIN`/`INT64_MAX` keys, a dict read after
-  a resize, a dict inside a loop, and a dict that must *not* be marked fast (passed to a
-  function, `del`'d, iterated) — these last cases are the control: their emitted C must be
-  byte-identical to the base build.
+  dict, one key, **key `0` alone and mixed with other keys** (`{0: 'a'}[0]`, `0 in d`,
+  `d.get(0)`), `None`/`False`-valued entries, a full table (growth), `get(k, default)` on a
+  missing and a present key, a key whose hash collides with another, negative keys,
+  `INT64_MIN`/`INT64_MAX` keys, a dict read after a resize, a dict inside a loop, and a dict that
+  must *not* be marked fast (passed to a function, `del`'d, iterated) — these last cases are the
+  control: their emitted C must be byte-identical to the base build.
 * **icount no loss on any compare program** — build all ten `lab/compare/src/<task>` typed sources
   before and after and compare Ir with `lab/roof/measure.py` (or `tools/icount.c` on a
   hardware-PMU host); no program may regress. The expected gain is concentrated in `echo_pack`
@@ -134,7 +149,7 @@ call sites use shorter helper names but the *runtime selection* grows by one sma
 
 | # | step | files | test |
 |---:|---|---|---|
-| 1.1 | Add `ail_hprobe` and the four `_fast` idict helpers, not yet selected by the emitter. | `AIL_CURRENT/python/pkg-v12/cruntime.py` (next to `ail_tab_hslot`, line 5350) | `AIL_CURRENT/test_ail_idict_fast.py` (unit: emitted C contains the helper; a probe program builds and runs) |
+| 1.1 | Add `ail_fdict`, `ail_hprobe(used, keys, mask, k)` (occupancy in a separate `used[]`; key `0` is an ordinary key) and the four `_fast` idict helpers, not yet selected by the emitter. | `AIL_CURRENT/python/pkg-v12/cruntime.py` (next to `ail_tab_hslot`, line 5350) | `AIL_CURRENT/test_ail_idict_fast.py` (unit: emitted C contains the helper; a probe program builds and runs; key `0`, `INT64_MIN`/`MAX` round-trip) |
 | 1.2 | Compute the `fast` marker in the local-container pass; add it to `dict.alloc`. | `AIL_CURRENT/python/pkg-v12/ir/lower.py` | same module: a program with a passed/iterated/deleted dict must not carry the marker |
 | 1.3 | Emit `_fast` names in `dict_op` when the marker is set; keep the old path otherwise. | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`dict_op`, line 1693) | `AIL_CURRENT/test_ail_idict_fast.py` + `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
 | 1.4 | Measure and record: re-run `lab/emit/analyze.py --tasks echo_pack,ledger_bin` and `lab/emit/bounds.py --only echo_pack_dict2`. | `lab/emit/` | report Ir before/after; no other compare program may lose |
@@ -160,27 +175,53 @@ part of this step.
 
 ### The change
 
-Depth only grows on a self-call, and `ir/emit_c.py:_depth_call` (line 677) already knows which
-calls those are — it rewrites a self-call of a depth function to `f__d(args, ail_d + 1)`. Move the
-test there:
+The entry guard is not simply dropped: it is moved to the two places that create the depth it
+tests. `f__d` is `static`, and the emitter writes its name in exactly two places:
+
+* **a self-call**, rewritten by `ir/emit_c.py:_depth_call` (line 677) to
+  `f__d(args, ail_d + 1)`;
+* **the generated public wrapper** `f`, emitted at `ir/emit_c.py:emit` (line 795) as
+  `return f__d(args, ail_depth + 1)`. It does **not** pass the literal `0`.
+
+Every non-self entry goes through that wrapper (`f__d` is static, so no other unit can name it),
+and non-depth functions that call `f` have already passed their own
+`if (++ail_depth > LIMIT) ail_die(...)` at entry. So the guard becomes:
 
 ```c
-/* at each self-call site */
+/* at each self-call site; the callee would have received exactly ail_d + 1 */
 (ail_d + 1 > AIL_MAX_RECURSION_DEPTH
      ? (ail_die("maximum recursion depth exceeded"), 0)
      : ev__d(v_p, ir25, ail_d + 1))
+
+/* in the public wrapper, once per non-self entry -- off the hot per-node path */
+int64_t ev(ail_obj_Prog *v_p, int64_t v_i) {
+    if (ail_depth + 1 > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");
+    return ev__d(v_p, v_i, ail_depth + 1);
+}
 ```
 
-and keep the entry guard only for functions that can receive a depth other than 0 from outside
-the depth-carrying set (the IR knows: a depth function is entered from a non-depth caller with the
-literal `0`, from `ev`-style wrappers with `0`, and from itself through `_depth_call`).
+and the line is removed from `f__d`'s body. The emitter must assert the two-emitter invariant
+(`_depth_call` and the wrapper are the only producers of `f__d`'s name) before it drops the entry
+guard; if any other caller is found, it keeps the guard.
 
-Correctness is exact, not approximate: the old code rejects a call when the *callee entry* sees
-`ail_d > LIMIT`; the new code rejects the *call* when `ail_d + 1 > LIMIT`. Since the only call
-that can raise `ail_d` by one is that self-call, the set of call stacks rejected is identical, and
-the `ail_die` happens before the callee frame exists (same message, same exit status). The
-one-argument `ev` wrapper calls `ev__d(..., 0)`; no guard is needed on an entry whose depth is a
-compile-time 0.
+Correctness is exact, not approximate. The base rejects at `f__d` entry iff `ail_d > LIMIT`. The
+new code rejects exactly when the value the callee would have received exceeds `LIMIT`:
+
+* self-call: `ail_d + 1 > LIMIT`, the callee's would-be `ail_d`;
+* wrapper: `ail_depth + 1 > LIMIT`, the callee's would-be `ail_d` on a non-self entry, **including
+  every entry made while `ail_depth > 0`** (a non-depth caller at the limit enters `ev`, and the
+  wrapper stops it before `ev__d` runs, just as the entry guard did).
+
+Because every `f__d` entry has one of those two provenance, the set of call stacks rejected is
+identical: same message, same exit status. The only difference is where the `ail_die` runs (before
+the call instead of at the top of the callee); nothing Python-visible is lost, and `ail_die` does
+not return.
+
+The measured **1,184M** (`tally_lang_norec`) is the bound for *deleting* the entry guard with
+nothing put back. The correct replacement is not free: it adds one compare+branch per self-call and
+one per wrapper entry. `bounds.py` measures the net on the emitted C with the new
+`tally_lang_edge` patch (entry guard removed, both replacements added, stdout byte-identical); that
+net — not the 1,184M — is what the queued change actually buys.
 
 ### Correctness evidence
 
@@ -205,8 +246,8 @@ becomes smaller.
 | # | step | files | test |
 |---:|---|---|---|
 | 2.1 | Emit the guard in `_depth_call` around the self-call, keeping the entry guard for now (both checks, a safe intermediate). | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`_depth_call`, line 677) | `AIL_CURRENT/test_ail_recdepth_edge.py` |
-| 2.2 | Drop the entry guard only for depth functions whose every non-self caller passes the literal 0; keep it otherwise. Record the caller classification on the function. | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`emit`, line 763), `AIL_CURRENT/python/pkg-v12/ir/lower.py` (depth-call marking) | same module + `test_ail_recursion_stop.py` |
-| 2.3 | Measure `lab/emit/analyze.py --tasks tally_lang` and record the drop; run the three required modules. | `lab/emit/` | `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
+| 2.2 | Emit the `ail_depth + 1 > LIMIT` check in the public wrapper (`emit`, line 795), assert that `_depth_call` and the wrapper are the only emitters of the static `f__d` name, then drop the entry guard at line 763; keep it when the assertion fails. The wrapper guard covers entries made while `ail_depth > 0`. | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`emit`, lines 763 and 795) | same module + `test_ail_recursion_stop.py` |
+| 2.3 | Measure `lab/emit/analyze.py --tasks tally_lang` and record the *net* drop (entry guard out, edge + wrapper guards in) against the `tally_lang_edge` bound; run the three required modules. | `lab/emit/` | `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
 
 ## Design 3 — overflow-checked arithmetic only where it can overflow (measured bound 1,012M)
 
@@ -284,8 +325,11 @@ program, not per call). Programs that still need the checks emit exactly today's
 Lane: compiler. Measured bound: 1,927M Ir on echo_pack (lab/emit/RESULTS.md, cause 1).
 
 Add a no-tombstone int-key probe and select it for dicts the IR marks fast.
-1. cruntime.py: add ail_hprobe(keys, mask, k) and ail_idict_{need,has,get,put}_fast; keep every
-   existing ail_idict_* function unchanged. Test: new AIL_CURRENT/test_ail_idict_fast.py.
+1. cruntime.py: add ail_fdict (keys[], used[], cap, n), ail_hprobe(used, keys, mask, k) and
+   ail_idict_{need,has,get,put}_fast; occupancy is used[i], NOT a sentinel key, so key 0,
+   negative keys and INT64_MIN/INT64_MAX all round-trip. Keep every existing ail_idict_* function
+   unchanged. Test: new AIL_CURRENT/test_ail_idict_fast.py, including {0: 'a'}[0], 0 in d,
+   d.get(0), {0: 'a', 1: 'b'} and a key-0 entry that survives a resize.
 2. ir/lower.py: mark a local dict fast when it is never passed to a call, never del'd, never
    iterated while inserted into, and all access is has/need/get/put with int keys; store the mark
    on dict.alloc. Test: the same module's control cases (passed/iterated/deleted dicts keep the
@@ -300,18 +344,25 @@ Exe bytes may change. Do not change any message or refusal.
 ### Task B — `emit-lean2`: recursion guard at the recursive edge
 
 ```
-Lane: compiler. Measured bound: 1,184M Ir on tally_lang (lab/emit/RESULTS.md, cause 2).
+Lane: compiler. Entry-guard bound: 1,184M Ir on tally_lang (lab/emit/RESULTS.md, cause 3);
+the net of the correct replacement is the `tally_lang_edge` bound in the same file.
 
-Move the depth guard from every function entry to the self-call sites that can grow depth.
+Move the depth guard out of the per-node f__d entry to the two places that create the depth.
 1. ir/emit_c.py:_depth_call (line 677): wrap the self-call with
    (ail_d + 1 > AIL_MAX_RECURSION_DEPTH ? (ail_die("maximum recursion depth exceeded"), 0) : ...).
    Keep the entry guard at this step (both checks).
-2. ir/emit_c.py:emit (line 763) + ir/lower.py: drop the entry guard only when every non-self
-   caller passes the literal 0; keep it otherwise. Test: new AIL_CURRENT/test_ail_recdepth_edge.py
-   (depth LIMIT completes, LIMIT+1 stops with the same message as the base build).
+2. ir/emit_c.py:emit (line 795): emit
+   if (ail_depth + 1 > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");
+   in the public wrapper before it calls f__d(..., ail_depth + 1) -- the wrapper, not the literal 0,
+   is how every non-self entry is made, including entries while ail_depth > 0. Then, only after
+   asserting that _depth_call and the wrapper are the sole emitters of the static f__d name, drop
+   the entry guard at line 763; keep it if the assertion fails. Test: new
+   AIL_CURRENT/test_ail_recdepth_edge.py (depth LIMIT completes, LIMIT+1 stops with the same
+   message as the base build; also a depth function entered at ail_depth > 0 by a non-depth
+   caller).
 3. Prove: test_ail_recdepth_edge, test_ail_recursion_stop, test_ail_safetynet, test_ail_files,
    test_ail_corpus_findings3; cmp.sh on the corpus; icount of all ten typed compare programs shows
-   no regression.
+   no regression (measure the net, not the 1,184M upper bound).
 Exe bytes may change. The rejection boundary must be identical to the base build.
 ```
 

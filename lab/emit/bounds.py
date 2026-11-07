@@ -33,6 +33,9 @@ DESCRIPTIONS = {
                         'and sp_find; emit the chain link directly', 'ail_idict_has/need/get/put per packet key'),
     'tally_lang_norec': ('Drop the per-call `if (ail_d > AIL_MAX_RECURSION_DEPTH)` from ev__d',
                          'one compare+branch per ev__d call'),
+    'tally_lang_edge': ('Move the ev__d entry guard to the 5 self-calls (ail_d + 1) and the ev '
+                        'wrapper (ail_depth + 1): the correct replacement for the entry guard',
+                        'one compare+branch per self-call instead of per entry'),
     'ledger_bin_noovf': ('readvar: ck_add/ck_mul/ck_shl/ck_add -> plain C operators',
                          'four overflow-checked operations per varint byte'),
     'ticket_audit_noovf_int': ('ail_bytes_to_int: drop the per-digit (limit-d)/10 test',
