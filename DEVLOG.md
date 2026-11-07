@@ -1,3 +1,17 @@
+## 2026-11-07 -- energy1: joules per run, published-energy model and Landauer floor (job-energy1-11071819)
+
+New measurement lane `lab/energy/`, no compiler change. `run.sh` probes for RAPL first: this runner
+exposes no PMU (`perf power/energy-pkg/` fails), no `/sys/class/powercap` counter, and its
+`/dev/cpu/*/msr` is root-only, so every `J measured` cell is `n/a` and is never invented. The model
+column uses one published source, Horowitz ISSCC 2014 at 45 nm (0.1 pJ per 32-bit int add, 640 pJ per
+32-bit DRAM read = 160 pJ/B), and is labelled a lower-bound dynamic estimate. AIL/C instruction and
+LLC counts reuse roof1's `lab/roof/data/programs.json`; Rust and CPython were measured here with
+valgrind 3.22 cachegrind (the harness unpacks the Ubuntu package under `$TMPDIR` because the image
+does not ship valgrind). The table, the Landauer counting rule (1 bit per retired instruction + every
+output bit, kT ln 2 = 2.871e-21 J at 300 K) and the ranked avoidable-energy split are in
+`lab/energy/RESULTS.md`. Coverage and the cells that stay `n/a` (CPython except `rail_transfer` and
+`scar_life`; AIL `main.py` on the four long tasks; `scar_life` for AIL/C/Rust) are stated there.
+
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched
