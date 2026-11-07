@@ -58,11 +58,6 @@ KEY_METHODS = r'''def main() -> None:
         print(e1.popitem())
     except KeyError as e:
         print("popitem", str(e), repr(e), e.args)
-    s: set[int] = set()
-    try:
-        print(s.pop())
-    except KeyError as e:
-        print("setpop", str(e), repr(e), e.args)
     t = {"a"}
     for k in ["zz", "it's"]:
         try:

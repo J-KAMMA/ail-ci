@@ -944,7 +944,27 @@ static inline int ail2_print_scalar(ail_obj x) {
         || x.tag == AIL_T_NONE || x.tag == AIL_T_FLOAT;
 }
 
+/* A set/frozenset does not walk in CPython's order here: AIL keeps insertion order, and CPython
+   follows its hash table (per-run random for a set of str). Any user-visible walk, print, str()
+   or repr() of one is refused by name with the rewrite; `in`, len, sorted, min, max and sum never
+   pass through these helpers, so they stay order-free. */
+static inline ail_st ail2_refuse_set_order(ail_ctx *cx, ail_obj x) {
+    if (x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET)
+        return ail_raise_c(cx, AIL_B_TYPEERROR,
+            "walking a set or frozenset shows an order that differs from CPython; write `sorted(s)` "
+            "for a fixed order (`in`, len, sorted, min, max and sum stay order-free)");
+    return AIL_OK;
+}
+static inline ail_st ail2_iter_visible(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    ail_st st = ail2_refuse_set_order(cx, x);
+    if (st != AIL_OK) return st;
+    return ail_iter(cx, out, x);
+}
 static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end) {
+    for (int64_t i = 0; i < n; i++) {
+        ail_st _st = ail2_refuse_set_order(cx, vals[i]);
+        if (_st != AIL_OK) return _st;
+    }
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -978,6 +998,10 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
    strictly between real print() arguments and nowhere else. */
 static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
                                          int64_t n, ail_obj sep, ail_obj end) {
+    for (int64_t i = 0; i < n; i++) {
+        ail_st _st = ail2_refuse_set_order(cx, vals[i]);
+        if (_st != AIL_OK) return _st;
+    }
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -2180,6 +2204,7 @@ class Ctx:
         self.qualname = ''         # CPython's __qualname__ of the function being compiled
         self.self_name = None      # set for a method: its own first parameter's name
         self.class_locals = None   # class body name -> module slot, while a class attribute expression is compiled
+        self.order_free = 0        # >0 while evaluating an iterable whose order cannot show (sorted/sum/min/max)
 
     def emit(self, line):
         if self.where is not None:
@@ -5018,6 +5043,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
             ctx.check()
             return val
+        self._refuse_set_walk(iter_node, ctx)
         # G12: with threads another thread may change the list between iterations; iterate the slice
         plan = None if self.threads else self._slice_iter_plan(iter_node, ctx)
         if plan is not None:
@@ -5078,7 +5104,8 @@ class Compiler(boxclosure.ClosureMixin):
                      ' %s = ail_str_view(_s.sv.backing, _s.sv.off + %s, 1); %s++; }'
                      % (it, idx, val, idx, idx))
             return val
-        ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
+        ctx.emit('st = %s(cx, &%s, %s);' % (
+            'ail_iter' if getattr(ctx, 'order_free', 0) else 'ail2_iter_visible', it, src))
         ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
@@ -6984,6 +7011,8 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
             return t
         t = ctx.tmp()
+        ctx.emit('st = ail2_refuse_set_order(cx, %s);' % val)
+        ctx.check()
         if biggate.ON:
             ctx.emit('st = ail_obj_str_st(cx, &%s, %s);' % (t, val))
             ctx.check()
@@ -8332,6 +8361,12 @@ class Compiler(boxclosure.ClosureMixin):
             return 'ail_box_none()'
         elif fobj is not None:
             raise Unsupported('print() with file= or flush=')
+        # Refuse a provable set here, but let a set display/constructor be evaluated first: a
+        # literal that cannot even be built (`print({[1, 2]})`) must raise its own error, and
+        # `ail2_do_print` refuses it at run time anyway.
+        for a in args:
+            if not isinstance(a, ast.Starred) and not self._set_display_or_ctor(a):
+                self._refuse_set_walk(a, ctx)
         vs = []
         flags = []
         any_flat = False
@@ -8552,6 +8587,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, v))
             ctx.check()
         else:
+            ctx.emit('st = ail2_refuse_set_order(cx, %s);' % v); ctx.check()
             if biggate.ON:
                 ctx.emit('st = ail_obj_repr_st(cx, &%s, %s);' % (t, v)); ctx.check()
             else:
@@ -8582,9 +8618,37 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_to_bool(%s);' % (t, v))
         return t
 
+    def _set_display_or_ctor(self, node):
+        """A set display/comprehension or a `set(...)`/`frozenset(...)` call: evaluate it before
+        the run-time set-order guard, so an unhashable element raises CPython's own error."""
+        if isinstance(node, (ast.Set, ast.SetComp)):
+            return True
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ('set', 'frozenset'))
+
+    def _refuse_set_walk(self, node, ctx):
+        """Refuse a user-visible walk of a statically known set or frozenset (see
+        `ail2_refuse_set_order` for the run-time half of the same rule). An iterable that a
+        `sorted`/`sum`/`min`/`max` consumes is order-free, so its walk may build."""
+        if getattr(ctx, 'order_free', 0):
+            return
+        kind = self.infer_kind(node, ctx)
+        if kind in ('set', 'frozenset'):
+            refusal = Unsupported(
+                'walking a %s shows the order its elements were inserted, where CPython walks its '
+                'hash table (and a set of str in a per-run random order); the two can differ, so '
+                'this is refused rather than printed wrong.\n'
+                '  write instead: `sorted(%s)` for a fixed order; `x in s`, `len(s)`, `sorted(s)`, '
+                '`min(s)`, `max(s)` and `sum(s)` are order-free and still build'
+                % (kind, getattr(node, 'id', 's')))
+            refusal.source_line = getattr(node, 'lineno', None)
+            raise refusal
+
     def _b_list(self, args, kwargs, ctx):
         if kwargs or len(args) > 1:
             raise Unsupported('list() with other than 0 or 1 positional argument')
+        if args:
+            self._refuse_set_walk(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('%s = ail_list_new(cx);' % t)
         if args:
@@ -8664,11 +8728,13 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _extend_from_iter(self, listexpr, src, ctx, ordered=True, unpack=False):
         it = ctx.tmp(); val = ctx.tmp()
-        # ordered=False: the order the elements arrive in cannot show (sorted() with no key), so a set whose
-        # CPython order cannot be reproduced (str ...) may still be read
+        # ordered=False: the order the elements arrive in cannot show (sorted()), so a set whose
+        # CPython order cannot be reproduced (str ...) may still be read; otherwise a set is
+        # refused by name, because its insertion order is not CPython's hash order.
         # unpack=True: this materialises a starred unpack target, so a missing iteration protocol
         # gets CPython's "cannot unpack non-iterable ... object" wording.
-        ctx.emit('st = %s(cx, &%s, %s);' % ('ail2_unpack_iter' if unpack else 'ail_iter', it, src))
+        ctx.emit('st = %s(cx, &%s, %s);' % ('ail2_unpack_iter' if unpack else
+                                            ('ail_iter' if not ordered else 'ail2_iter_visible'), it, src))
         ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
@@ -9417,8 +9483,9 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_iter(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('iter() with other than exactly one positional argument')
+        self._refuse_set_walk(args[0], ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_iter(cx, &%s, %s);' % (t, self._resolve_iter_src(args[0], ctx)))
+        ctx.emit('st = ail2_iter_visible(cx, &%s, %s);' % (t, self._resolve_iter_src(args[0], ctx)))
         ctx.check()
         return t
 
@@ -9443,8 +9510,9 @@ class Compiler(boxclosure.ClosureMixin):
                                   '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
             src = self._resolve_iter_src(first.iter, ctx)
+            self._refuse_set_walk(first.iter, ctx)
             opened = ctx.tmp()
-            ctx.emit('st = ail_iter(cx, &%s, %s);' % (opened, src))
+            ctx.emit('st = ail2_iter_visible(cx, &%s, %s);' % (opened, src))
             ctx.check()
             if len(args) == 2:
                 dflt = self.expr(args[1], ctx)
@@ -9626,10 +9694,18 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_sorted(self, args, kwargs, ctx):
         if len(args) != 1:
             raise Unsupported('sorted() with other than exactly one positional argument')
-        src = self._resolve_iter_src(args[0], ctx)
+        # Without key= the input order cannot show, so a set walked here may build.
+        free = 'key' not in kwargs
+        if free:
+            ctx.order_free += 1
+        try:
+            src = self._resolve_iter_src(args[0], ctx)
+        finally:
+            if free:
+                ctx.order_free -= 1
         t = ctx.tmp()
         ctx.emit('%s = ail_list_new(cx);' % t)
-        self._extend_from_iter(t, src, ctx, ordered=('key' in kwargs))
+        self._extend_from_iter(t, src, ctx, ordered=False)   # sorted() is order-free
         if 'key' in kwargs and self._cmp_to_key_arg(kwargs['key']) is not None:
             self._sort_with_cmp(t, kwargs, ctx, 'sorted()')
             return t
@@ -9735,7 +9811,15 @@ class Compiler(boxclosure.ClosureMixin):
         has_default = 'default' in kwargs
         dflt = None
         if len(args) == 1:
-            src = self._resolve_iter_src(args[0], ctx)
+            # Without key= the answer does not depend on the order the elements arrive in.
+            free = 'key' not in kwargs
+            if free:
+                ctx.order_free += 1
+            try:
+                src = self._resolve_iter_src(args[0], ctx)
+            finally:
+                if free:
+                    ctx.order_free -= 1
             if has_default:
                 dflt = self.expr(kwargs['default'], ctx)
         elif len(args) >= 2:
@@ -9813,7 +9897,12 @@ class Compiler(boxclosure.ClosureMixin):
         if not args or len(args) > 2 or (kwargs and set(kwargs) - {'start'}) or \
                 (len(args) == 2 and 'start' in kwargs):
             raise Unsupported('sum() with other than (iterable[, start])')
-        src = self._resolve_iter_src(args[0], ctx)
+        # A sum treats its input as a multiset: the order the elements arrive in cannot show.
+        ctx.order_free += 1
+        try:
+            src = self._resolve_iter_src(args[0], ctx)
+        finally:
+            ctx.order_free -= 1
         acc = ctx.tmp()
         start_node = args[1] if len(args) == 2 else kwargs.get('start')
         ctx.emit('%s = %s;' % (acc, self.expr(start_node, ctx) if start_node is not None else 'ail_box_int(0)'))
@@ -9928,7 +10017,12 @@ class Compiler(boxclosure.ClosureMixin):
                     c.emit('if (ail_obj_truthy(%s)) { %s = ail_box_bool(1); goto %s; }' % (v, res, done))
                 else:
                     c.emit('if (!ail_obj_truthy(%s)) { %s = ail_box_bool(0); goto %s; }' % (v, res, done))
-            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
+            # The aggregate (any/all) does not depend on the order the elements arrive in.
+            ctx.order_free += 1
+            try:
+                self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
+            finally:
+                ctx.order_free -= 1
             ctx.emit('%s: ;' % done)
             return res
         src = self._resolve_iter_src(arg, ctx)

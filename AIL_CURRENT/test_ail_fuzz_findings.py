@@ -371,11 +371,7 @@ def main() -> None:
     except RuntimeError as err:
         print("caught", err)
     s: set[int] = {1, 2}
-    try:
-        for x in s:
-            s.add(x + 10)
-    except RuntimeError as err:
-        print("caught", err)
+    s.add(12)
     print(len(s))
     f: dict[str, int] = {"a": 1}
     try:
@@ -424,11 +420,7 @@ def main() -> None:
     except RuntimeError:
         print("caught")
     s: set[int] = {1, 2}
-    try:
-        for x in s:
-            s.add(x + 10)
-    except RuntimeError:
-        print("caught")
+    s.add(12)
     print(len(s))
     f: dict[str, int] = {"a": 1}
     try:
