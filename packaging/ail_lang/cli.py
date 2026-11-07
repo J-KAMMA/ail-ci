@@ -10,6 +10,8 @@
     ail build --strict prog.py     the same, but refuse (listing every blocker) instead of falling back
                                    to the slow general path; `ail run --strict` and AIL_STRICT=1 too
     ail check prog.py              strict source/type check, no C compiler needed (ail_chatgpt.py check)
+    ail check --perf prog.py       static advice about slow algorithms in loops (docs/CLI.md); --json,
+                                   --strict (exit 5 on a hit); exit 0 otherwise
     ail new NAME                   create a project directory (ail.toml, src/main.py)
     ail build | run | check        with no source file: the project of the current directory (ail.toml or [tool.ail])
     ail build --debug              -g -O0 with #line directives back to the source, for gdb; stdout buffered at a crash is lost
@@ -46,6 +48,7 @@ USAGE = """usage: ail <command> ...
   ail run prog.py [args...]     compile to a temporary executable and run it
   ail build prog.py [-o prog]   compile to an executable (default output: the file name without .py)
   ail check prog.py             strict source/type check (needs no C compiler)
+  ail check --perf prog.py      report slow algorithm patterns in loops (--json, --strict exits 5)
   ail new NAME                  create a project: NAME/ail.toml and NAME/src/main.py
   ail build | run | check       no source file: the project found from the current directory upwards
                                 (ail.toml, or [tool.ail] in pyproject.toml); the program is build/NAME
@@ -247,7 +250,28 @@ def _no_project(command):
     return 2
 
 
+def _cmd_check_perf(argv):
+    """`ail check --perf`: static advice only; it never builds the program."""
+    from . import perflint
+    json_output = "--json" in argv
+    strict = "--strict" in argv
+    args = [word for word in argv if word not in ("--perf", "--json", "--strict")]
+    options, source, rest = _split_source(args)
+    files = []
+    if source is not None:
+        files.append(source)
+    files.extend(word for word in rest if not word.startswith("-"))
+    if not files:
+        found = _project()
+        if found is None:
+            return _no_project("check")
+        files.append(str(found.entry))
+    return perflint.main(files, json_output=json_output, strict=strict)
+
+
 def cmd_check(argv):
+    if "--perf" in argv:
+        return _cmd_check_perf(argv)
     options, source, rest = _split_source(argv)
     if source is None:
         found = _project()

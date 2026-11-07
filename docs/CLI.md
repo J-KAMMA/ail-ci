@@ -7,6 +7,7 @@ program needs while it is being written:
 ail run prog.py [args...]      compile to a temporary executable and run it
 ail build prog.py [-o prog]    compile to an executable (default: the file name without .py)
 ail check prog.py              strict source/type check, no C compiler needed
+ail check --perf prog.py       static advice about slow algorithms in loops (--json, --strict)
 ail new NAME                   create a project (ail.toml, src/main.py)
 ail build | run | check        no source file: the project of the current directory
 ail lsp                        language server on stdio
@@ -116,3 +117,46 @@ written, network requests made, rows inserted, money spent. Use `--diff` on a pr
 effects are safe to repeat (a pure computation, a read-only analysis), or point its output at a
 scratch directory. The stdin bytes are shared, so a program that reads stdin to the end sees the same
 input both times; a program that consumes stdin only partially still starts from the same bytes.
+
+## `ail check --perf`: find slow algorithms and give the fix
+
+The wrong algorithm costs more than any gap to the hardware limit, and AI-written programs tend to
+contain a few shapes over and over. `ail check --perf` reads the Python AST (it does not build or run
+the program) and reports the first version of six rules when the pattern is inside a loop:
+
+```text
+ail check --perf [--json] [--strict] prog.py
+```
+
+| id | pattern inside a loop over n items | fix |
+| --- | --- | --- |
+| P1 | `x in L`, `L.index(x)` or `L.count(x)` where `L` is a list | build a `set`/`dict` once before the loop |
+| P2 | `L.pop(0)`, `L.insert(0, x)` or `del L[0]` | `collections.deque` |
+| P3 | `s += str` building a string | collect in a list and `''.join` once after the loop |
+| P4 | `sorted(L)`, `L.sort()`, `min(L)`, `max(L)` or `sum(L)` of an unchanged list | hoist it out of the loop |
+| P5 | nested loops comparing every pair to find matches by key | group by key in a dict |
+| P6 | `L = L + [x]` or `L = [*L, x]` | `L.append(x)` |
+
+"Loop" means a `for`, `while` or comprehension body; a nested function, lambda or class body is a new
+scope and is not counted as running on each iteration. The rules are deliberately local: a name is
+treated as a list or a string only when that is obvious from its annotations, literals, builtins or
+list methods. A membership test on a `set` or dict, a call outside a loop, and a list that is rebound
+or mutated in the loop (for P1 and P4) are not reported. P5 only looks at loops over items (not two
+`range`/`enumerate`/`zip` index loops) and ignores subscript indices, so a dynamic-programming table
+is not mistaken for a pairwise search.
+
+Each hit is one line on stderr, with 1-based line and column:
+
+```text
+prog.py:12:9: perf P1: membership test on the list 'seen' inside a loop (O(n) per iteration); fix: build a set/dict once before the loop and test membership on it
+```
+
+`--json` prints one object per hit on stdout instead, so an agent can apply the fix directly:
+
+```json
+{"rule": "P1", "file": "prog.py", "line": 12, "col": 9, "message": "...", "fix": "...", "loop_line": 10}
+```
+
+`loop_line` is the line of the nearest loop the hit runs inside (for P5, the outer pair loop). The exit
+status is always `0` when the advice ran, even when there are hits; `--strict` makes any hit exit `5`.
+A source that cannot be read or parsed is a real error (exit `2`).

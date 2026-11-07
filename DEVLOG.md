@@ -1,3 +1,13 @@
+## 2026-11-07 -- algo1: `ail check --perf`, static slow-algorithm advice (job-algo1-11071446)
+
+New `packaging/ail_lang/perflint.py` and the `ail check --perf [--json] [--strict] prog.py` entry in
+the CLI. It reads the Python AST and reports six local rules inside loops (list membership/index/count,
+`pop(0)`/`insert(0)`/`del L[0]`, `s += str`, sorting/reducing an unchanged list, nested pairwise key
+searches, and `L = L + [x]`/`[*L, x]`) with one `file:line:col: perf Pn: ...; fix: ...` line on stderr
+or one JSON object per hit. Exit 0 (5 with `--strict`). Documented in `docs/CLI.md`. `test_ail_perflint`
+covers a positive and negative case per rule, the JSON/text shapes and the exit codes; `lab/algo/`
+holds the census and before/after measurements.
+
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched
