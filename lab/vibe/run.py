@@ -542,7 +542,7 @@ def evaluate(task_name, task_dir, lang, seed, cases, model, rounds_limit):
                     surface_error = 'line %d: %s' % (lno, getattr(e, 'message', str(e)))
                     build_src = None
                     build_rec = dict(ok=False, seconds=0.0, cmd=[], typed=None,
-                                     stderr=('surface error at ' + surface_error).encode(), stdout=b'')
+                                     stderr='surface error at ' + surface_error, stdout='')
             if build_src is not None:
                 build_rec = build_program(lang, build_src, work, exe, line_map)
             loop_seconds += build_rec['seconds']
@@ -638,9 +638,10 @@ class Store:
         if path.is_file():
             try:
                 old = json.loads(path.read_text())
-                for r in old.get('results', []):
-                    self.rows[(r['task'], r['lang'], r['seed'])] = r
                 old_meta = old.get('meta') or {}
+                for r in old.get('results', []):
+                    self.rows[(r['task'], r['lang'], r['seed'],
+                               r.get('model') or old_meta.get('model'))] = r
                 for k in ('started', 'harness'):
                     if k in old_meta and k not in self.meta:
                         self.meta[k] = old_meta[k]
@@ -650,7 +651,7 @@ class Store:
     def put(self, rec):
         with self.lock:
             rec['model'] = self.meta.get('model')
-            self.rows[(rec['task'], rec['lang'], rec['seed'])] = rec
+            self.rows[(rec['task'], rec['lang'], rec['seed'], rec['model'])] = rec
             self.write()
 
     def write(self):
@@ -664,14 +665,26 @@ class Store:
             self.meta['tasks'] = sorted({r['task'] for r in every})
         data = dict(meta=self.meta, results=rows)
         data['summary'] = summarize(every)
-        data['ail_errors'] = ail_error_table([r for r in every if r['lang'] in AIL_LANGS])
+        models = sorted({r.get('model') or '' for r in every})
+        data['ail_errors'] = {
+            m: ail_error_table([r for r in every
+                                if r['lang'] in AIL_LANGS and (r.get('model') or '') == m])
+            for m in models}
         tmp = self.path.with_suffix('.tmp')
         tmp.write_text(json.dumps(data, indent=1) + '\n')
         tmp.replace(self.path)
 
 
 def summarize(rows):
-    """Per language: n, correct, public pass, gave up, silent wrong, loud stops, rounds and seconds."""
+    """Per model, then per language: n, correct, public pass, gave up, silent wrong, loud stops,
+    rounds and seconds. Rows from different models never merge."""
+    out = {}
+    for model in sorted({r.get('model') or '' for r in rows}):
+        out[model] = _summarize_langs([r for r in rows if (r.get('model') or '') == model])
+    return out
+
+
+def _summarize_langs(rows):
     out = {}
     for lang in LANGS:
         rs = [r for r in rows if r['lang'] == lang]
@@ -766,7 +779,7 @@ def main():
                 key = '%s:%s:%d' % (name, lang, seed)
                 if args.only and key != args.only:
                     continue
-                if (name, lang, seed) in store.rows:
+                if (name, lang, seed, args.model) in store.rows:
                     continue
                 combos.append((name, tdir, lang, seed))
 

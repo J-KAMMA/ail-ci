@@ -1,0 +1,143 @@
+fn is_name(s: str) -> bool:
+  let n: int = len(s)
+  if n < 1 or n > 16:
+    return False
+  var i: int = 0
+  while i < n:
+    let ch: str = s[i]
+    if ch == "_" or (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9"):
+      i = i + 1
+    else:
+      return False
+  return True
+
+fn parse_qty(s: str) -> Result[int]:
+  let n: int = len(s)
+  if n == 0:
+    return Err("qty")
+  var i: int = 0
+  var neg: bool = False
+  if s[0] == "-":
+    neg = True
+    i = 1
+    if n == 1:
+      return Err("qty")
+  var v: int = 0
+  while i < n:
+    let ch: str = s[i]
+    if ch < "0" or ch > "9":
+      return Err("qty")
+    v = v * 10 + int(ch)
+    if v > 1000:
+      return Err("qty")
+    i = i + 1
+  if neg:
+    return Ok(-v)
+  return Ok(v)
+
+fn parse_price(s: str) -> Result[int]:
+  let n: int = len(s)
+  if n == 0:
+    return Err("price")
+  var i: int = 0
+  var v: int = 0
+  while i < n:
+    let ch: str = s[i]
+    if ch < "0" or ch > "9":
+      return Err("price")
+    v = v * 10 + int(ch)
+    if v > 10000000:
+      return Err("price")
+    i = i + 1
+  return Ok(v)
+
+var text: str = read_stdin()
+if len(text) > 0 and text[len(text) - 1] == "\n":
+  text = text[0:len(text) - 1]
+let lines: list[str] = text.split("\n")
+var good: int = 0
+var bad: int = 0
+let rows_list: list[tuple[str, str, int, int]] = []
+var idx: int = 1
+while idx < len(lines):
+  let line: str = lines[idx]
+  idx = idx + 1
+  let fields: list[str] = line.split(",")
+  if len(fields) != 4:
+    bad = bad + 1
+    continue
+  let region: str = fields[0]
+  let product: str = fields[1]
+  if not is_name(region) or not is_name(product):
+    bad = bad + 1
+    continue
+  match parse_qty(fields[2]):
+    case Ok(qv):
+      match parse_price(fields[3]):
+        case Ok(pv):
+          good = good + 1
+          rows_list.append((region, product, qv, qv * pv))
+        case Err(e):
+          bad = bad + 1
+    case Err(e):
+      bad = bad + 1
+
+let sorted_rows: list[tuple[str, str, int, int]] = sorted(rows_list)
+let grp_r: list[str] = []
+let grp_p: list[str] = []
+let grp_q: list[int] = []
+let grp_rev: list[int] = []
+for row: tuple[str, str, int, int] in sorted_rows:
+  let r: str = row[0]
+  let p: str = row[1]
+  let q: int = row[2]
+  let rv: int = row[3]
+  let ln: int = len(grp_r)
+  if ln > 0 and grp_r[ln - 1] == r and grp_p[ln - 1] == p:
+    grp_q[ln - 1] = grp_q[ln - 1] + q
+    grp_rev[ln - 1] = grp_rev[ln - 1] + rv
+  else:
+    grp_r.append(r)
+    grp_p.append(p)
+    grp_q.append(q)
+    grp_rev.append(rv)
+
+write("rows " + str(good) + " bad " + str(bad) + " groups " + str(len(grp_r)) + "\n")
+
+let items: list[tuple[int, str, str, int, int]] = []
+var gi: int = 0
+while gi < len(grp_r):
+  items.append((-grp_rev[gi], grp_r[gi], grp_p[gi], grp_q[gi], grp_rev[gi]))
+  gi = gi + 1
+let ordered: list[tuple[int, str, str, int, int]] = sorted(items)
+let limit: int = min(len(ordered), 10)
+var oi: int = 0
+while oi < limit:
+  let it: tuple[int, str, str, int, int] = ordered[oi]
+  write(it[1] + " " + it[2] + " " + str(it[3]) + " " + str(it[4]) + "\n")
+  oi = oi + 1
+
+let reg_names: list[str] = []
+let reg_sums: list[int] = []
+var ri: int = 0
+while ri < len(grp_r):
+  let rn: str = grp_r[ri]
+  let ln2: int = len(reg_names)
+  if ln2 > 0 and reg_names[ln2 - 1] == rn:
+    reg_sums[ln2 - 1] = reg_sums[ln2 - 1] + grp_rev[ri]
+  else:
+    reg_names.append(rn)
+    reg_sums.append(grp_rev[ri])
+  ri = ri + 1
+
+var rj: int = 0
+while rj < len(reg_names):
+  write("region " + reg_names[rj] + " revenue " + str(reg_sums[rj]) + "\n")
+  rj = rj + 1
+
+var total_rev: int = 0
+var ti: int = 0
+while ti < len(grp_rev):
+  total_rev = total_rev + grp_rev[ti]
+  ti = ti + 1
+write("total " + str(total_rev) + "\n")

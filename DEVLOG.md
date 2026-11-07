@@ -1,10 +1,15 @@
 ## 2026-11-07 -- vibe2: five surfaces on the vibe1 tasks (job-vibe2-11071844)
 
-Added `lab/vibe2/` (`STRICT_SPEC.md`, `NEW_SURFACE.md`, `translate.py`, `test_translate.py`) and
-extended `lab/vibe/run.py` with the `ail-strict` and `ail-new` arms, reply-token accounting and a
-`--programs` option. The vibe1 arms still run unchanged. `ail-new` translates the AIL-N surface to
-AIL Python with a kept line map and compiles that; a translator error is fed back as a surface
-error. No compiler change.
+Added `lab/vibe2/` (`STRICT_SPEC.md`, `NEW_SURFACE.md`, `translate.py`, `test_translate.py`,
+`RESULTS.md`, `results.json`) and extended `lab/vibe/run.py` with the `ail-strict` and `ail-new`
+arms, reply-token accounting and a `--programs` option. The vibe1 arms still run unchanged.
+`ail-new` translates the AIL-N surface to AIL Python with a kept line map and compiles that; a
+translator error is fed back as a surface error (the synthetic stderr is a `str`, so
+`compiler_messages` no longer raises and the attempt is recorded; the real run exercised this on
+`rail_transfer`). `Store.rows` is keyed `(task, lang, seed, model)`, and `summary`/`ail_errors` are
+per model, so one results file holds several models. Run: 5 arms x 11 tasks x 1 model
+(`deepseek-v4.1-flash`) x 1 seed; `reflection/beam:free` was confirmed callable but not run (budget
+cut, stated in `RESULTS.md`). No compiler change.
 
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 

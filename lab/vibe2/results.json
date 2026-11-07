@@ -1,6 +1,6 @@
 {
  "meta": {
-  "started": "2026-11-07T11:05:29Z",
+  "started": "2026-11-07T11:48:29Z",
   "harness": "lab/vibe/run.py",
   "model": "deepseek-v4.1-flash",
   "cli": "cmd",
@@ -13,7 +13,8 @@
    "python",
    "rust",
    "ail",
-   "ail-strict"
+   "ail-strict",
+   "ail-new"
   ],
   "tasks": [
    "berth_sim",
@@ -32,7 +33,10 @@
   "case_timeout": 90,
   "mode": "python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax python; ail-strict = AIL with lab/vibe2/STRICT_SPEC.md; ail-new = lab/vibe2/NEW_SURFACE.md translated to AIL Python by lab/vibe2/translate.py",
   "seed_note": "seed = independent repeated attempt; the CLI exposes no sampling seed",
-  "updated": "2026-11-07T11:25:42Z"
+  "updated": "2026-11-07T11:55:50Z",
+  "stopped_early": false,
+  "completed_attempts": 2,
+  "scheduled_attempts": 2
  },
  "results": [
   {
@@ -70,6 +74,212 @@
      "error_sent": "model call timed out after 240s"
     }
    ],
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "berth_sim",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 23,
+   "hidden": [
+    {
+     "name": "no_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_ship",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_cargo",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "setup_same_operator",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "operator_memory_per_berth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "priority_then_arrival_then_id",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "small_berth_chooses_first",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "berth_number_order_within_class",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_ship_waits",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "depart_and_arrive_same_minute",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "ceil_division",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "extreme_values",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unsorted_input",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "wait_max_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "many_berths_few_ships",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_busy",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_calm",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 24.236,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 51967,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6961,
+     "reply_chars": 7529,
+     "reply_tokens": 34382,
+     "build_ok": true,
+     "build_seconds": 11.975,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because h.append(): 'h' is a list parameter, which is read-only here. write instead: build and return a new list (`out = h.copy()`, change `out`, `return out`), or keep the li"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "small",
+      "single_berth_queue",
+      "random_small"
+     ],
+     "run_seconds": 0.003,
+     "error_sent": "public case 'small' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nships 6\nmakespan 19\nwait total 25 max 11 ship 9\nberth 0 ships 3 busy 16\nberth 1 ships 3 busy 19\ndigest 848173799\n\nprogram stderr:\nIndexError: list index out of range\n\n\npublic case 'single_berth_queue' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nships 5\nmakespan 25\nwait total 67 max 22 ship 13\nberth 0 ships 5 busy 25\ndigest 855453969\n\nprogram stderr:\nIndexError: list index out of range\n\n\npublic case 'random_small' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nships 12\nmakespan 261\nwait total 651 max 199 ship 357919224\nberth 0 ships 9 busy 260\nberth 1 ships 2 busy 23\nberth 2 ships 1 busy 108\ndigest 893529614\n\nprogram stderr:\nIndexError: list index out of range\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 15390,
+     "reply_chars": 7529,
+     "reply_tokens": 17585,
+     "build_ok": true,
+     "build_seconds": 12.256,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because h.append(): 'h' is a list parameter, which is read-only here. write instead: build and return a new list (`out = h.copy()`, change `out`, `return out`), or keep the li"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe2/programs/berth_sim/ail-new-0.nw",
    "model": "deepseek-v4.1-flash"
   },
   {
@@ -539,6 +749,43 @@
     }
    ],
    "program": "lab/vibe2/programs/chain_relax/ail-0.py",
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "chain_relax",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 29,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6563,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
    "model": "deepseek-v4.1-flash"
   },
   {
@@ -1267,6 +1514,110 @@
   },
   {
    "task": "csv_rollup",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 6,
+   "hidden": [
+    {
+     "name": "empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "long_names",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_mixed",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 14.329,
+   "final_run_seconds": 0.002,
+   "reply_tokens": 19971,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6759,
+     "reply_chars": 3539,
+     "reply_tokens": 16336,
+     "build_ok": true,
+     "build_seconds": 7.748,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because parse_qty: return paths disagree on which class instance (('obj', '_AilT_b_i') vs ('obj', '_AilT_b_s')); run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "basic",
+      "ties_bad",
+      "zeros"
+     ],
+     "run_seconds": 0.002,
+     "error_sent": "public case 'basic' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nrows 4 bad 0 groups 3\nus apple 5 500\neu pear 1 250\nus pear -2 -100\nregion eu revenue 250\nregion us revenue 400\ntotal 650\n\nprogram stderr:\nTypeError: argument of type '_AilD_Ps_sQ__LiE' is not iterable\n\n\npublic case 'ties_bad' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nrows 3 bad 8 groups 2\na b 3 20\nz z 2 20\nregion a revenue 20\nregion z revenue 20\ntotal 40\n\nprogram stderr:\nTypeError: argument of type '_AilD_Ps_sQ__LiE' is not iterable\n\n\npublic case 'zeros' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nrows 4 bad 0 groups 3\nr1 p 7 70\nr2 q 1 70\nr3 s -5 -50\nregion r1 revenue 70\nregion r2 revenue 70\nregion r3 revenue -50\ntotal 90\n\nprogram stderr:\nTypeError: argument of type '_AilD_Ps_sQ__LiE' is not iterable\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 11245,
+     "reply_chars": 3652,
+     "reply_tokens": 3635,
+     "build_ok": true,
+     "build_seconds": 6.576,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because parse_qty returns a tuple on one path and a single value on another; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.002
+    }
+   ],
+   "program": "lab/vibe2/programs/csv_rollup/ail-new-0.nw",
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "csv_rollup",
    "lang": "ail-strict",
    "seed": 0,
    "public_pass": true,
@@ -1856,6 +2207,398 @@
     }
    ],
    "program": "lab/vibe2/programs/echo_pack/ail-0.py",
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "echo_pack",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 54,
+   "hidden": [
+    {
+     "name": "pack_empty",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_one_byte",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_four_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_five_same",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_overlap_period3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tail_short",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_128",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_literal_257",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_hidden_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_visible_long_match",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_limit",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_distance_just_inside",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_tie_largest_p",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_max_len_131",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_binary_all_bytes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_stream",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_text",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_zero_run",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_custom_valid",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_overlap_dist1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_empty_input",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_bad_magic",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_short_length",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_literal",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_truncated_distance",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_zero",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_dist_too_far",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_copy_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_literal_too_long",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_missing_hash",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_trailing_byte",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_too_big",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_length_zero_with_token",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_mode",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "two_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "pack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "pack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "unpack_corrupt0",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt1",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt2",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    },
+    {
+     "name": "unpack_corrupt3",
+     "status": "pass",
+     "exit": 2,
+     "expected_exit": 2
+    }
+   ],
+   "loop_seconds": 29.602,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 12435,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 7739,
+     "reply_chars": 3601,
+     "reply_tokens": 8941,
+     "build_ok": true,
+     "build_seconds": 14.562,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because 'idx' is annotated dict[int, list[int]], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str,"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [
+      "pack_sample",
+      "unpack_sample",
+      "unpack_bad_hash"
+     ],
+     "run_seconds": 0.002,
+     "error_sent": "public case 'pack_sample' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nb'EP10\\x00\\x00\\x00\\x02abc\\x88\\x00\\x03\\x05 hello\\x89\\x00\\x06\\x06world, \\x82\\x00 \\x00!\\x8b\\xeb\\xf5A'\n\npublic case 'unpack_sample' failed.\nprogram exit 1, expected 0\nprogram stdout:\n\nexpected stdout:\nabcabcabcabcabc hello hello hello world, abcabc!\n\npublic case 'unpack_bad_hash' failed.\nprogram exit 1, expected 2"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 11842,
+     "reply_chars": 3573,
+     "reply_tokens": 3494,
+     "build_ok": true,
+     "build_seconds": 15.035,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because 'idx' is annotated dict[int, list[int]], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str,"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe2/programs/echo_pack/ail-new-0.nw",
    "model": "deepseek-v4.1-flash"
   },
   {
@@ -2979,6 +3722,43 @@
   },
   {
    "task": "ledger_bin",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 9933,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "ledger_bin",
    "lang": "ail-strict",
    "seed": 0,
    "public_pass": true,
@@ -4069,6 +4849,196 @@
   },
   {
    "task": "rail_transfer",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 21,
+   "hidden": [
+    {
+     "name": "no_queries",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "single_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "isolated_station",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "stay_on_line_back_and_forth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "transfer_cost_at_start_free",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "zero_times",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "parallel_segments",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "same_line_rejoin",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "fewer_boardings_win_tie",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "self_loops_only",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "big_numbers",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "line_ids_sparse",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random0",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random1",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random2",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random3",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random4",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random5",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_medium",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_zero_xfer",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 6.933,
+   "final_run_seconds": 0.002,
+   "reply_tokens": 36051,
+   "surface_error_rounds": 1,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 5958,
+     "reply_chars": 5053,
+     "reply_tokens": 23122,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "surface error at line 33: 'best' is a let binding and cannot be reassigned; declare it with var",
+     "compiler": [
+      [
+       "surface",
+       "line 33: 'best' is a let binding and cannot be reassigned; declare it with var"
+      ]
+     ],
+     "surface_error": true,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "AIL-N surface error:\nline 33: 'best' is a let binding and cannot be reassigned; declare it with var"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 11206,
+     "reply_chars": 5053,
+     "reply_tokens": 12929,
+     "build_ok": true,
+     "build_seconds": 6.93,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because typed dict parameters are read-only; run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.002
+    }
+   ],
+   "program": "lab/vibe2/programs/rail_transfer/ail-new-0.nw",
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "rail_transfer",
    "lang": "ail-strict",
    "seed": 0,
    "public_pass": true,
@@ -4653,6 +5623,365 @@
     }
    ],
    "program": "lab/vibe2/programs/scar_life/ail-0.py",
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "scar_life",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": true,
+   "correct": true,
+   "rounds_used": 2,
+   "gave_up": false,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 50,
+   "hidden": [
+    {
+     "name": "gens_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_leading_zeros",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "empty_rule",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "born_zero",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "all_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "high_codes",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_dead",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_stays",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "one_cell_alive_dies",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "height_one",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "width_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "two_by_two",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "torus_wrap",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "scars_block_birth",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "no_final_newline",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_a",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_b",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_c",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_d",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "random_e",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "gens_max",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    },
+    {
+     "name": "rule_lowercase",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_lower_code",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_repeat",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_code_D",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_missing_slash",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_extra",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "rule_swapped",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_negative",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_plus",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "gens_empty",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "no_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "three_args",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "empty_input",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_only",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_leading_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_zero",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_too_big",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "header_two_spaces",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "short_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "long_row",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_few_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "too_many_rows",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "trailing_empty_line",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "crlf",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_x",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "bad_char_O",
+     "status": "pass",
+     "exit": 1,
+     "expected_exit": 1
+    },
+    {
+     "name": "max_width_row",
+     "status": "pass",
+     "exit": 0,
+     "expected_exit": 0
+    }
+   ],
+   "loop_seconds": 27.702,
+   "final_run_seconds": 0.003,
+   "reply_tokens": 26834,
+   "surface_error_rounds": 0,
+   "path": "general",
+   "final_build_ok": true,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 6795,
+     "reply_chars": 7119,
+     "reply_tokens": 16344,
+     "build_ok": false,
+     "build_seconds": 0.122,
+     "build_error": "/tmp/vibe-scar_life-ail-new-0-yutvjxal/main.ail:3:10: invalid syntax\n",
+     "compiler": [],
+     "surface_error": false,
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "compiler error:\n/tmp/vibe-scar_life-ail-new-0-yutvjxal/main.ail:3:10: invalid syntax\n"
+    },
+    {
+     "round": 2,
+     "prompt_chars": 14095,
+     "reply_chars": 6974,
+     "reply_tokens": 10490,
+     "build_ok": true,
+     "build_seconds": 27.578,
+     "build_error": "",
+     "compiler": [
+      [
+       "note",
+       "built on the general path (about 20x slower) because parse_codes: return paths disagree on which class instance (('obj', '_AilT_b_LiE') vs ('obj', '_AilT_b_s')); run with --strict to see why"
+      ]
+     ],
+     "surface_error": false,
+     "public_passed": true,
+     "public_failed": [],
+     "run_seconds": 0.003
+    }
+   ],
+   "program": "lab/vibe2/programs/scar_life/ail-new-0.nw",
    "model": "deepseek-v4.1-flash"
   },
   {
@@ -5716,6 +7045,43 @@
   },
   {
    "task": "tally_lang",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 72,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 10074,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "tally_lang",
    "lang": "ail-strict",
    "seed": 0,
    "public_pass": false,
@@ -6541,6 +7907,43 @@
     }
    ],
    "program": "lab/vibe2/programs/term_rank/ail-0.py",
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "term_rank",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 40,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 7998,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
    "model": "deepseek-v4.1-flash"
   },
   {
@@ -7979,6 +9382,43 @@
     }
    ],
    "program": "lab/vibe2/programs/ticket_audit/ail-0.py",
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "ticket_audit",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 88,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 9203,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
    "model": "deepseek-v4.1-flash"
   },
   {
@@ -9559,6 +10999,43 @@
   },
   {
    "task": "tree_fold",
+   "lang": "ail-new",
+   "seed": 0,
+   "public_pass": false,
+   "correct": false,
+   "rounds_used": 1,
+   "gave_up": true,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "hidden_total": 52,
+   "hidden": [],
+   "loop_seconds": 0.0,
+   "final_run_seconds": 0.0,
+   "reply_tokens": 0,
+   "surface_error_rounds": 0,
+   "path": null,
+   "final_build_ok": false,
+   "rounds": [
+    {
+     "round": 1,
+     "prompt_chars": 7765,
+     "reply_chars": 0,
+     "reply_tokens": 0,
+     "build_ok": false,
+     "build_seconds": 0.0,
+     "build_error": "model call timed out after 240s",
+     "compiler": [],
+     "public_passed": false,
+     "public_failed": [],
+     "run_seconds": 0.0,
+     "error_sent": "model call timed out after 240s"
+    }
+   ],
+   "model": "deepseek-v4.1-flash"
+  },
+  {
+   "task": "tree_fold",
    "lang": "ail-strict",
    "seed": 0,
    "public_pass": false,
@@ -9984,149 +11461,173 @@
   }
  ],
  "summary": {
-  "python": {
-   "n": 11,
-   "correct": 9,
-   "public_pass": 9,
-   "gave_up": 2,
-   "silent_wrong": 0,
-   "loud_stop": 0,
-   "other_wrong": 0,
-   "rounds_median": 1,
-   "reply_tokens": 156282,
-   "tokens_per_correct": 17364.7,
-   "surface_error_rounds": 0,
-   "loop_seconds": 0.45,
-   "final_run_seconds": 0.445,
-   "paths": null
-  },
-  "rust": {
-   "n": 11,
-   "correct": 7,
-   "public_pass": 7,
-   "gave_up": 4,
-   "silent_wrong": 0,
-   "loud_stop": 0,
-   "other_wrong": 0,
-   "rounds_median": 1,
-   "reply_tokens": 89312,
-   "tokens_per_correct": 12758.9,
-   "surface_error_rounds": 0,
-   "loop_seconds": 3.07,
-   "final_run_seconds": 0.018,
-   "paths": null
-  },
-  "ail": {
-   "n": 11,
-   "correct": 8,
-   "public_pass": 8,
-   "gave_up": 3,
-   "silent_wrong": 0,
-   "loud_stop": 0,
-   "other_wrong": 0,
-   "rounds_median": 1.0,
-   "reply_tokens": 152447,
-   "tokens_per_correct": 19055.9,
-   "surface_error_rounds": 0,
-   "loop_seconds": 157.84,
-   "final_run_seconds": 0.021,
-   "paths": {
-    "typed": 0,
-    "general": 8,
-    "refused": 0
-   }
-  },
-  "ail-strict": {
-   "n": 11,
-   "correct": 6,
-   "public_pass": 7,
-   "gave_up": 4,
-   "silent_wrong": 0,
-   "loud_stop": 1,
-   "other_wrong": 0,
-   "rounds_median": 1,
-   "reply_tokens": 134267,
-   "tokens_per_correct": 22377.8,
-   "surface_error_rounds": 0,
-   "loop_seconds": 81.07,
-   "final_run_seconds": 0.019,
-   "paths": {
-    "typed": 2,
-    "general": 5,
-    "refused": 0
+  "deepseek-v4.1-flash": {
+   "python": {
+    "n": 11,
+    "correct": 9,
+    "public_pass": 9,
+    "gave_up": 2,
+    "silent_wrong": 0,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 1,
+    "reply_tokens": 156282,
+    "tokens_per_correct": 17364.7,
+    "surface_error_rounds": 0,
+    "loop_seconds": 0.45,
+    "final_run_seconds": 0.445,
+    "paths": null
+   },
+   "rust": {
+    "n": 11,
+    "correct": 7,
+    "public_pass": 7,
+    "gave_up": 4,
+    "silent_wrong": 0,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 1,
+    "reply_tokens": 89312,
+    "tokens_per_correct": 12758.9,
+    "surface_error_rounds": 0,
+    "loop_seconds": 3.07,
+    "final_run_seconds": 0.018,
+    "paths": null
+   },
+   "ail": {
+    "n": 11,
+    "correct": 8,
+    "public_pass": 8,
+    "gave_up": 3,
+    "silent_wrong": 0,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 1.0,
+    "reply_tokens": 152447,
+    "tokens_per_correct": 19055.9,
+    "surface_error_rounds": 0,
+    "loop_seconds": 157.84,
+    "final_run_seconds": 0.021,
+    "paths": {
+     "typed": 0,
+     "general": 8,
+     "refused": 0
+    }
+   },
+   "ail-strict": {
+    "n": 11,
+    "correct": 6,
+    "public_pass": 7,
+    "gave_up": 4,
+    "silent_wrong": 0,
+    "loud_stop": 1,
+    "other_wrong": 0,
+    "rounds_median": 1,
+    "reply_tokens": 134267,
+    "tokens_per_correct": 22377.8,
+    "surface_error_rounds": 0,
+    "loop_seconds": 81.07,
+    "final_run_seconds": 0.019,
+    "paths": {
+     "typed": 2,
+     "general": 5,
+     "refused": 0
+    }
+   },
+   "ail-new": {
+    "n": 11,
+    "correct": 5,
+    "public_pass": 5,
+    "gave_up": 6,
+    "silent_wrong": 0,
+    "loud_stop": 0,
+    "other_wrong": 0,
+    "rounds_median": 2,
+    "reply_tokens": 147258,
+    "tokens_per_correct": 29451.6,
+    "surface_error_rounds": 1,
+    "loop_seconds": 102.8,
+    "final_run_seconds": 0.013,
+    "paths": {
+     "typed": 0,
+     "general": 5,
+     "refused": 0
+    }
    }
   }
  },
- "ail_errors": [
-  {
-   "kind": "error",
-   "message": "built on the general path (about 20x slower) because Tree.weights has unsupported field type array; fields require a known nonnullable scalar, container or managed class type; run with --strict to see why",
-   "occurrences": 2,
-   "fixed_next": 1,
-   "fixed_rate": 0.5
-  },
-  {
-   "kind": "error",
-   "message": "built on the general path (about 20x slower) because `sold[ev] = set()` uses `sold` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of",
-   "occurrences": 2,
-   "fixed_next": 1,
-   "fixed_rate": 0.5
-  },
-  {
-   "kind": "note",
-   "message": "built on the general path (about 20x slower) because 'ALLOWED' is read before it is assigned; run with --strict to see why",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  },
-  {
-   "kind": "note",
-   "message": "built on the general path (about 20x slower) because 'counts' is annotated dict[bytes, int], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, ",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  },
-  {
-   "kind": "note",
-   "message": "built on the general path (about 20x slower) because 'parent' is a list parameter, which is read-only; to change it in a helper, keep the list in a class field and pass the class (`s.xs[i] = v` and `s.xs.append(v)` work)",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  },
-  {
-   "kind": "note",
-   "message": "built on the general path (about 20x slower) because Tree.subtree_weights must take plain positional arguments, no defaults, *args or **kwargs; run with --strict to see why",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  },
-  {
-   "kind": "note",
-   "message": "built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  },
-  {
-   "kind": "error",
-   "message": "built on the general path (about 20x slower) because call to format(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. write instead: define `format` yourself wi",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  },
-  {
-   "kind": "error",
-   "message": "built on the general path (about 20x slower) because class list comprehensions are unsupported; run with --strict to see why",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  },
-  {
-   "kind": "error",
-   "message": "built on the general path (about 20x slower) because comparing a str with a number; str and bytes are separate types here and a str is never a number -- this is refused by name rather than answered. write instead: compar",
-   "occurrences": 1,
-   "fixed_next": 0,
-   "fixed_rate": 0.0
-  }
- ]
+ "ail_errors": {
+  "deepseek-v4.1-flash": [
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'idx' is annotated dict[int, list[int]], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str,",
+    "occurrences": 2,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "error",
+    "message": "built on the general path (about 20x slower) because Tree.weights has unsupported field type array; fields require a known nonnullable scalar, container or managed class type; run with --strict to see why",
+    "occurrences": 2,
+    "fixed_next": 1,
+    "fixed_rate": 0.5
+   },
+   {
+    "kind": "error",
+    "message": "built on the general path (about 20x slower) because `sold[ev] = set()` uses `sold` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of",
+    "occurrences": 2,
+    "fixed_next": 1,
+    "fixed_rate": 0.5
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because h.append(): 'h' is a list parameter, which is read-only here. write instead: build and return a new list (`out = h.copy()`, change `out`, `return out`), or keep the li",
+    "occurrences": 2,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'ALLOWED' is read before it is assigned; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'counts' is annotated dict[bytes, int], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, ",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because 'parent' is a list parameter, which is read-only; to change it in a helper, keep the list in a class field and pass the class (`s.xs[i] = v` and `s.xs.append(v)` work)",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because Tree.subtree_weights must take plain positional arguments, no defaults, *args or **kwargs; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "error",
+    "message": "built on the general path (about 20x slower) because call to format(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. write instead: define `format` yourself wi",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   }
+  ]
+ }
 }
