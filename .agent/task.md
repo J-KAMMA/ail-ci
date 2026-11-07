@@ -1,4 +1,4 @@
-**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_bigint test_ail_examples_algos test_ail_fuzz81 test_ail_pyreach_dictrows test_ail_re_value test_ail_std_difflib test_ail_std_pprint.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_re_value.
 
 Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
