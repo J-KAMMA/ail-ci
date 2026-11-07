@@ -50,9 +50,10 @@ build pipeline as the `CTIME_FE` wall and own times, and the first 200 sorted
 make no calls).  All runs used `ulimit -v 1500000`.  The debug pipeline is used only by
 `ccheck.py` (section 6), which measures C identity, not call counts.
 
-The wrapper still inflates a predicate's own time (about a microsecond per call), so the
-cacheable **fraction** `f = probe cacheable / probe own` is applied to the real own time measured
-by `CTIME_FE.json`; the scale factor is exactly `fe own / probe own`.  For a task whose
+The wrapper still inflates a predicate's own time (measured 0.8 to 12.9 microseconds per call,
+`Ctx.type_of` to `_etype`), so the cacheable **fraction** `f = probe cacheable / probe own` is
+applied to the real own time measured by `CTIME_FE.json`; the scale factor is exactly
+`fe own / probe own`.  For a task whose
 `CTIME_FE.json` row reports the predicate, the task's own ratio is used; otherwise the pooled
 `fe own / probe own` fills the gap.  Because a fraction is scale-free, a predicate's cacheable
 seconds on a task with a measured row cannot exceed that row's own time.  `n` and the repeats are
@@ -117,9 +118,9 @@ upper bound that a plain cache cannot actually reach.
 | **pooled** | **30.795** | **0.146** | **1.0048** | **1.0024** | **2.200** | **1.0385** |
 
 Eligible predicates total 928,175 calls; the lookup they add costs `1.25e-7 * 928,175 =
-0.116 s` pooled, against 0.222 s of cacheable own time (net 0.106 s, 0.34% of the pooled cold
-wall).  Even the unreachable all-predicate upper bound (2.544 s cacheable, 0.419 s of lookup)
-only reaches 1.038x halved pooled.
+0.116 s` pooled, against 0.262 s of cacheable own time on the per-task scale (net 0.146 s,
+0.474% of the pooled cold wall).  Even the unreachable all-predicate upper bound (2.619 s
+cacheable, 0.419 s of lookup) only reaches 1.038x halved pooled.
 
 ## 6. Stop rule: the wrapper observes only
 
@@ -148,7 +149,7 @@ clears 1.03x, so ctpred2 does not build a predicate memo cache and the predicate
 The predicates with 0 changed repeats over all 210 inputs, ordered by cacheable seconds:
 `_is_owned_bytes_call` (0.1259 s), `_map_kind` (0.0965 s), `_param_kinds` (0.0000 s, no repeats
 -- a cache would be pure cost).  If the line is ever revisited, `_is_owned_bytes_call` and
-`_map_kind` are the only safe keys; the cacheable total (0.222 s, 0.7% of the pooled cold wall)
+`_map_kind` are the only safe keys; the cacheable total (0.262 s, 0.9% of the pooled cold wall)
 is too small to pay for the lookup.
 
 The four predicates ctimes2 priced highest -- `_etype`, `_is_str_expr`, `_is_slist_expr`,
