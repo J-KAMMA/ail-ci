@@ -1,11 +1,11 @@
 --------------------------------------------------------------------------------
 -- Metadata
 --------------------------------------------------------------------------------
-Invocation:       /tmp/energy-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/tree_fold_fold_flat.cg
+Invocation:       /tmp/layout-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/tree_fold_flat.cg
 I1 cache:         32768 B, 64 B, 8-way associative
 D1 cache:         32768 B, 64 B, 8-way associative
 LL cache:         33554432 B, 64 B, 16-way associative
-Command:          /tmp/layout-2xf4jn7z/tree_fold_fold_flat
+Command:          /tmp/layout-9w_shgs4/tree_fold_flat
 Events recorded:  Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
 Events shown:     Ir Dr Dw D1mr D1mw DLmr DLmw
 Event sort order: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
@@ -17,14 +17,14 @@ Annotation:       on
 --------------------------------------------------------------------------------
 Ir___________ Dr___________ Dw___________ D1mr______ D1mw______ DLmr______ DLmw______ 
 
-9,069,910,163 2,730,519,414 1,382,851,914 51,298,010 35,595,102 27,321,832 20,806,341  PROGRAM TOTALS
+9,069,910,159 2,730,519,414 1,382,851,914 51,298,010 35,595,102 27,321,832 20,806,341  PROGRAM TOTALS
 
 --------------------------------------------------------------------------------
 -- File:function summary
 --------------------------------------------------------------------------------
   Ir___________ Dr___________ Dw_________ D1mr______ D1mw______ DLmr______ DLmw______  file:function
 
-< 6,814,804,510 2,097,542,565 844,541,097 44,477,178 23,909,427 24,451,020 15,632,941  /tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c:
+< 6,814,804,510 2,097,542,565 844,541,097 44,477,178 23,909,427 24,451,020 15,632,941  /tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c:
   1,211,523,983   608,662,351 218,163,814  8,770,850      1,696  1,819,369          1    ail_layout_cmp_idx
   1,034,615,905   389,659,923 120,929,931  8,355,350  5,263,206  7,282,673  4,398,935    rebuild
     824,320,543   140,274,971  40,818,491    436,457  1,126,301    399,139  1,057,077    parse_tree
@@ -45,8 +45,8 @@ Ir___________ Dr___________ Dw___________ D1mr______ D1mw______ DLmr______ DLmw_
      36,727,999     7,503,335   5,746,337         51        466          6          1    ail__bl_append_slow.isra.0
      10,607,792     1,767,963          56          5          3          2          3    ail__blk_release
 
-< 2,176,041,963   631,117,642 517,029,606  6,820,832 11,685,672  2,870,812  5,173,400  ???:
-  1,982,535,951   583,414,785 489,497,878  6,811,634 11,683,100  2,870,431  5,173,334    ???
+< 2,176,041,959   631,117,642 517,029,606  6,820,832 11,685,672  2,870,812  5,173,400  ???:
+  1,982,535,947   583,414,785 489,497,878  6,811,634 11,683,100  2,870,431  5,173,334    ???
     130,827,968    28,287,115  15,911,513          8          2          4          2    calloc
      54,809,792    17,680,521  10,608,200        175         13        148          7    free
 
@@ -59,59 +59,59 @@ Ir___________ Dr___________ Dw___________ D1mr______ D1mw______ DLmr______ DLmw_
 --------------------------------------------------------------------------------
   Ir___________ Dr_________ Dw_________ D1mr______ D1mw______ DLmr_____ DLmw_____  function:file
 
-> 1,982,535,951 583,414,785 489,497,878  6,811,634 11,683,100 2,870,431 5,173,334  ???:???
+> 1,982,535,947 583,414,785 489,497,878  6,811,634 11,683,100 2,870,431 5,173,334  ???:???
 
-> 1,211,523,983 608,662,351 218,163,814  8,770,850      1,696 1,819,369         1  ail_layout_cmp_idx:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+> 1,211,523,983 608,662,351 218,163,814  8,770,850      1,696 1,819,369         1  ail_layout_cmp_idx:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
-> 1,034,615,905 389,659,923 120,929,931  8,355,350  5,263,206 7,282,673 4,398,935  rebuild:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+> 1,034,615,905 389,659,923 120,929,931  8,355,350  5,263,206 7,282,673 4,398,935  rebuild:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
 >   835,966,036 262,263,460 147,523,306     25,947  3,597,849         1 2,048,795  ail_pslist_push.isra.0:
-    770,400,200 262,263,460 131,131,847     25,947  3,597,849         1 2,048,795    /tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+    770,400,200 262,263,460 131,131,847     25,947  3,597,849         1 2,048,795    /tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
      65,565,836           0  16,391,459          0          0         0         0    /usr/include/x86_64-linux-gnu/bits/string_fortified.h
 
->   824,320,543 140,274,971  40,818,491    436,457  1,126,301   399,139 1,057,077  parse_tree:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   824,320,543 140,274,971  40,818,491    436,457  1,126,301   399,139 1,057,077  parse_tree:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
 >   510,680,388  88,965,630  29,020,530  6,249,826  1,209,196 4,802,189 1,158,211  py_main:
-    510,680,312  88,965,630  29,020,498  6,249,826  1,209,193 4,802,189 1,158,211    /tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+    510,680,312  88,965,630  29,020,498  6,249,826  1,209,193 4,802,189 1,158,211    /tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
 >   500,170,592 147,732,943  62,061,224  2,344,619  1,876,907 2,102,296 1,617,185  do_fold:
-    489,015,782 145,873,807  58,342,954  2,344,619  1,876,907 2,102,296 1,617,185    /tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+    489,015,782 145,873,807  58,342,954  2,344,619  1,876,907 2,102,296 1,617,185    /tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
      11,154,810   1,859,136   3,718,270          0          0         0         0    /usr/include/x86_64-linux-gnu/bits/string_fortified.h
 
->   449,398,374  91,474,901  40,425,225    774,264    244,810   773,106   244,806  do_print:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   449,398,374  91,474,901  40,425,225    774,264    244,810   773,106   244,806  do_print:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->   410,006,794 158,954,140  48,231,064 10,981,440  7,924,912 3,034,816 2,858,137  compact:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   410,006,794 158,954,140  48,231,064 10,981,440  7,924,912 3,034,816 2,858,137  compact:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->   246,484,069  26,472,441  36,121,469          0          6         0         3  ail_str_from_int:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   246,484,069  26,472,441  36,121,469          0          6         0         3  ail_str_from_int:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->   204,881,712  59,757,166  34,146,952      3,592          0        18         0  ail_list_pop:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   204,881,712  59,757,166  34,146,952      3,592          0        18         0  ail_list_pop:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->   165,041,955  31,436,584  15,718,322  2,949,007    982,400 2,417,798   982,399  subw__irl:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   165,041,955  31,436,584  15,718,322  2,949,007    982,400 2,417,798   982,399  subw__irl:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->   144,264,323  22,933,189  15,000,105          0          1         0         1  ail__utf8_validate:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   144,264,323  22,933,189  15,000,105          0          1         0         1  ail__utf8_validate:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->   134,365,552  26,873,117  13,436,593  2,516,392          6 1,245,014         2  counts__irl:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>   134,365,552  26,873,117  13,436,593  2,516,392          6 1,245,014         2  counts__irl:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
 >   130,827,968  28,287,115  15,911,513          8          2         4         2  calloc:???
 
 >    54,809,792  17,680,521  10,608,200        175         13       148         7  free:???
 
 >    45,967,432  21,215,688  14,143,823          9         29         6        22  ail_sarena_pushn:
-     45,967,420  21,215,684  14,143,819          9         29         6        22    /tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+     45,967,420  21,215,684  14,143,819          9         29         6        22    /tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->    43,732,528          88   9,718,444         24    607,395        23   607,391  do_sort:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>    43,732,528          88   9,718,444         24    607,395        23   607,391  do_sort:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
 >    39,070,667   7,503,335   6,917,671         51        466         6         1  ail__bl_append_slow.isra.0:
-     36,727,999   7,503,335   5,746,337         51        466         6         1    /tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+     36,727,999   7,503,335   5,746,337         51        466         6         1    /tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->    39,041,929   7,436,569   5,577,446    692,928    466,760   363,629   284,930  do_mirror:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>    39,041,929   7,436,569   5,577,446    692,928    466,760   363,629   284,930  do_mirror:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->    39,000,527   6,000,085   6,000,140    374,879    375,002   210,085   374,979  do_prune:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>    39,000,527   6,000,085   6,000,140    374,879    375,002   210,085   374,979  do_prune:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
->    10,607,792   1,767,963          56          5          3         2         3  ail__blk_release:/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+>    10,607,792   1,767,963          56          5          3         2         3  ail__blk_release:/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 
 --------------------------------------------------------------------------------
--- Annotated source file: /tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c
+-- Annotated source file: /tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c
 --------------------------------------------------------------------------------
 Ir_________ Dr_________ Dw_________ D1mr______ D1mw______ DLmr_____ DLmw_____ 
 
@@ -3120,5 +3120,5 @@ Ir___________ Dr___________ Dw_________ D1mr______ D1mw______ DLmr______ DLmw___
             0             0           0          0          0          0          0  unannotated: files known & above threshold & two or more non-identical
             0             0           0          0          0          0          0  unannotated: files known & above threshold & unreadable 
            44             0          11          0          0          0          0  unannotated: files known & below threshold
-2,176,041,963   631,117,642 517,029,606  6,820,832 11,685,672  2,870,812  5,173,400  unannotated: files unknown
+2,176,041,959   631,117,642 517,029,606  6,820,832 11,685,672  2,870,812  5,173,400  unannotated: files unknown
 

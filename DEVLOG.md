@@ -1,3 +1,27 @@
+## 2026-11-07 -- layout1: flat-layout measurement and ranking (job-layout1-11080009)
+
+Measurement and design only; no compiler, runtime, test or bench change. `lab/layout/` now has
+`RESULTS.md` (the required output), `TASKS.md` (four ready-to-queue steps with guard tests),
+`measure.py`, `analyze.py`, `probe.py`, `mkinput.py`, `run.sh`, seven hand-edit scripts under
+`edits/`, and raw cachegrind/annotated data under `data/` for tree_fold, berth_sim, ticket_audit,
+echo_pack and ledger_bin (LLC 32 MiB / L2 512 KiB / D1 32 KiB, the same geometry as lab/roof and
+lab/energy). The headline result: tree_fold's keyed sort, rewritten to sort the index list in place
+over the tree's own columns (no key columns, permutation, merge buffer or `perm_apply`), removes
+41.4M LLC misses -- 59.5% of tree_fold's 69.6M excess over C -- plus 34.7 MiB RSS and 8.0% wall
+time, and all 25 probe cases match CPython. berth_sim's and echo_pack's edits recover 3.9-4.4M LLC
+each without a wall-time gain; echo_pack's dict-to-array edit is 0.6M worse.
+
+Review fix on the same branch: `data/layout.json` and `data/analysis.json` were a partial run and
+named the tree_fold variant `fold_flat` (the script is `tree_fold_flat.py`), while `directcmp` had
+raw data and no JSON row. The tree_fold row was re-measured from the committed scripts (`flat`,
+`directcmp`), `analysis.json` regenerated, and the orphan `*_fold_flat`, `*_pack_flathead`,
+`*_pack_prev32` and `*_sim_directsort` cachegrind/annotated files removed. `probe.py`'s berth_sim
+`all-same-keys` boundary declared `S=1` with three ships (the original AIL and CPython disagree on
+that malformed input); it is now `S=3`, and the edit matches. The 89.6M LLC here vs energy1's
+106.1M is emitted-code drift: the same 27,877,476-byte input, and this tree's C build reproduces
+roof1's C row, while the current compiler emits 8.832e9 Ir against roof1's 9.053e9. `RESULTS.md`
+records the explanation. `tools/update_manifest.py` regenerated the manifest.
+
 ## 2026-11-07 -- pyreach9 re-applied: typed-path census and next steps (job-rbpyreach9-11071805)
 
 Re-applied the accepted `job-pyreach9-11071621` change, fetched anonymously, on this tree.

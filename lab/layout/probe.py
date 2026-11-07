@@ -91,7 +91,7 @@ EXTRA = {
     'berth_sim': [('zero-ships', b'1 0\n1 1\n'),
                   ('one-ship', b'1 1\n1 1\n1 0 1 5 1 0\n'),
                   ('two-ships-same-arrival', b'1 2\n1 1\n1 0 1 5 1 0\n2 0 1 5 1 0\n'),
-                  ('all-same-keys', b'1 1\n1 1\n1 0 1 5 1 0\n1 0 2 5 1 0\n1 0 1 5 1 0\n')],
+                  ('all-same-keys', b'1 3\n1 1\n1 0 1 5 1 0\n1 0 2 5 1 0\n1 0 1 5 1 0\n')],
     'echo_pack': [('empty', b''),
                   ('one-byte', b'a'),
                   ('three-bytes', b'abc'),

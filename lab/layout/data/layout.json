@@ -5218,21 +5218,21 @@
      "ll_write": 36602253
     },
     "wall": {
-     "best_s": 1.1343,
-     "median_s": 1.1376,
+     "best_s": 1.1076,
+     "median_s": 1.1131,
      "runs_s": [
-      1.138,
-      1.1376,
-      1.1362,
-      1.1392,
-      1.1343
+      1.1193,
+      1.1131,
+      1.1076,
+      1.1126,
+      1.1221
      ],
      "rc": 0,
-     "rss_kib": 367420
+     "rss_kib": 367448
     },
     "functions": [
      [
-      "/tmp/layout-2xf4jn7z/tree_fold.d/program.c:",
+      "/tmp/layout-9w_shgs4/tree_fold.d/program.c:",
       {
        "Ir": 7819947340,
        "Dr": 2338373244,
@@ -6561,11 +6561,1332 @@
      }
     }
    },
-   "fold_flat": {
+   "directcmp": {
+    "ok": true,
+    "bytes": 430192,
+    "counts": {
+     "instructions": 9516994740,
+     "d_refs": 4337548523,
+     "d1_misses": 93904332,
+     "d1_read": 55106623,
+     "d1_write": 38797709,
+     "ll_misses": 55110683,
+     "ll_read": 31110660,
+     "ll_write": 24000023
+    },
+    "wall": {
+     "best_s": 1.1025,
+     "median_s": 1.1077,
+     "runs_s": [
+      1.1076,
+      1.1025,
+      1.1077,
+      1.1091,
+      1.1097
+     ],
+     "rc": 0,
+     "rss_kib": 354832
+    },
+    "functions": [
+     [
+      "/tmp/layout-9w_shgs4/tree_fold_tree_fold_directcmp/program.c:",
+      {
+       "Ir": 7260731286,
+       "Dr": 2248175771,
+       "Dw": 917428229,
+       "D1mr": 48121325,
+       "D1mw": 26949305,
+       "DLmr": 28262202,
+       "DLmw": 18674823
+      }
+     ],
+     [
+      "ail_layout_cmp_idx",
+      {
+       "Ir": 1211523983,
+       "Dr": 608662351,
+       "Dw": 218163814,
+       "D1mr": 8769302,
+       "D1mw": 4520,
+       "DLmr": 2378793,
+       "DLmw": 3
+      }
+     ],
+     [
+      "rebuild",
+      {
+       "Ir": 1034615905,
+       "Dr": 389659923,
+       "Dw": 120929931,
+       "D1mr": 8357531,
+       "D1mw": 5263166,
+       "DLmr": 7291937,
+       "DLmw": 4399956
+      }
+     ],
+     [
+      "parse_tree",
+      {
+       "Ir": 824320543,
+       "Dr": 140274971,
+       "Dw": 40818491,
+       "D1mr": 436457,
+       "D1mw": 1126301,
+       "DLmr": 399139,
+       "DLmw": 1057077
+      }
+     ],
+     [
+      "ail_pslist_push.isra.0",
+      {
+       "Ir": 770400184,
+       "Dr": 262263460,
+       "Dw": 131131847,
+       "D1mr": 25861,
+       "D1mw": 3597981,
+       "DLmr": 1,
+       "DLmw": 2048794
+      }
+     ],
+     [
+      "py_main",
+      {
+       "Ir": 510680312,
+       "Dr": 88965630,
+       "Dw": 29020498,
+       "D1mr": 6249824,
+       "D1mw": 1209187,
+       "DLmr": 4770735,
+       "DLmw": 1156442
+      }
+     ],
+     [
+      "do_fold",
+      {
+       "Ir": 489891300,
+       "Dr": 145873807,
+       "Dw": 58342954,
+       "D1mr": 2344230,
+       "D1mw": 1876937,
+       "DLmr": 2077529,
+       "DLmw": 1609632
+      }
+     ],
+     [
+      "do_print",
+      {
+       "Ir": 451190368,
+       "Dr": 91474901,
+       "Dw": 40425225,
+       "D1mr": 774067,
+       "D1mw": 244810,
+       "DLmr": 750633,
+       "DLmw": 244806
+      }
+     ],
+     [
+      "compact",
+      {
+       "Ir": 410006794,
+       "Dr": 158954140,
+       "Dw": 48231064,
+       "D1mr": 10981230,
+       "D1mw": 7924891,
+       "DLmr": 3021660,
+       "DLmw": 2873353
+      }
+     ],
+     [
+      "do_sort",
+      {
+       "Ir": 344998956,
+       "Dr": 111760182,
+       "Dw": 58309858,
+       "D1mr": 3644417,
+       "D1mw": 1822183,
+       "DLmr": 3279741,
+       "DLmw": 1822179
+      }
+     ],
+     [
+      "ail_str_from_int",
+      {
+       "Ir": 246484069,
+       "Dr": 26472441,
+       "Dw": 36121469,
+       "D1mr": 0,
+       "D1mw": 6,
+       "DLmr": 0,
+       "DLmw": 3
+      }
+     ],
+     [
+      "ail_list_pop",
+      {
+       "Ir": 204881712,
+       "Dr": 59757166,
+       "Dw": 34146952,
+       "D1mr": 3597,
+       "D1mw": 0,
+       "DLmr": 18,
+       "DLmw": 0
+      }
+     ],
+     [
+      "subw__irl",
+      {
+       "Ir": 165041955,
+       "Dr": 31436584,
+       "Dw": 15718322,
+       "D1mr": 2949008,
+       "D1mw": 982400,
+       "DLmr": 2423173,
+       "DLmw": 982399
+      }
+     ],
+     [
+      "ail__utf8_validate",
+      {
+       "Ir": 144264323,
+       "Dr": 22933189,
+       "Dw": 15000105,
+       "D1mr": 0,
+       "D1mw": 1,
+       "DLmr": 0,
+       "DLmw": 1
+      }
+     ],
+     [
+      "ail_slist_push",
+      {
+       "Ir": 140915984,
+       "Dr": 38873359,
+       "Dw": 24295866,
+       "D1mr": 1,
+       "D1mw": 1822185,
+       "DLmr": 1,
+       "DLmw": 1822185
+      }
+     ],
+     [
+      "counts__irl",
+      {
+       "Ir": 134365552,
+       "Dr": 26873117,
+       "Dw": 13436593,
+       "D1mr": 2516392,
+       "D1mw": 6,
+       "DLmr": 1257460,
+       "DLmw": 2
+      }
+     ],
+     [
+      "ail_sarena_pushn",
+      {
+       "Ir": 45967420,
+       "Dr": 21215684,
+       "Dw": 14143819,
+       "D1mr": 9,
+       "D1mw": 29,
+       "DLmr": 6,
+       "DLmw": 22
+      }
+     ],
+     [
+      "do_mirror",
+      {
+       "Ir": 39041929,
+       "Dr": 7436569,
+       "Dw": 5577446,
+       "D1mr": 692928,
+       "D1mw": 466760,
+       "DLmr": 366587,
+       "DLmw": 282937
+      }
+     ],
+     [
+      "do_prune",
+      {
+       "Ir": 39000527,
+       "Dr": 6000085,
+       "Dw": 6000140,
+       "D1mr": 374880,
+       "D1mw": 374998,
+       "DLmr": 243934,
+       "DLmw": 374974
+      }
+     ],
+     [
+      "ail__bl_append_slow.isra.0",
+      {
+       "Ir": 37805761,
+       "Dr": 7503335,
+       "Dw": 5746337,
+       "D1mr": 51,
+       "D1mw": 467,
+       "DLmr": 6,
+       "DLmw": 1
+      }
+     ],
+     [
+      "ail__blk_release",
+      {
+       "Ir": 10607792,
+       "Dr": 1767963,
+       "Dw": 56,
+       "D1mr": 5,
+       "D1mw": 3,
+       "DLmr": 2,
+       "DLmw": 3
+      }
+     ],
+     [
+      "???:",
+      {
+       "Ir": 2177199764,
+       "Dr": 631446303,
+       "Dw": 517357802,
+       "D1mr": 6985298,
+       "D1mw": 11848401,
+       "DLmr": 2848458,
+       "DLmw": 5325200
+      }
+     ],
+     [
+      "???",
+      {
+       "Ir": 1983693002,
+       "Dr": 583743250,
+       "Dw": 489825966,
+       "D1mr": 6976046,
+       "D1mw": 11845827,
+       "DLmr": 2848028,
+       "DLmw": 5325127
+      }
+     ],
+     [
+      "calloc",
+      {
+       "Ir": 130827968,
+       "Dr": 28287115,
+       "Dw": 15911513,
+       "D1mr": 7,
+       "D1mw": 2,
+       "DLmr": 4,
+       "DLmw": 2
+      }
+     ],
+     [
+      "free",
+      {
+       "Ir": 54810034,
+       "Dr": 17680595,
+       "Dw": 10608236,
+       "D1mr": 181,
+       "D1mw": 13,
+       "DLmr": 154,
+       "DLmw": 7
+      }
+     ],
+     [
+      "/usr/include/x86_64-linux-gnu/bits/string_fortified.h:",
+      {
+       "Ir": 79063646,
+       "Dr": 1859207,
+       "Dw": 21281200,
+       "D1mr": 0,
+       "D1mw": 3,
+       "DLmr": 0,
+       "DLmw": 0
+      }
+     ],
+     [
+      "ail_pslist_push.isra.0",
+      {
+       "Ir": 65565836,
+       "Dr": 0,
+       "Dw": 16391459,
+       "D1mr": 0,
+       "D1mw": 0,
+       "DLmr": 0,
+       "DLmw": 0
+      }
+     ],
+     [
+      "do_fold",
+      {
+       "Ir": 11154810,
+       "Dr": 1859136,
+       "Dw": 3718270,
+       "D1mr": 0,
+       "D1mw": 0,
+       "DLmr": 0,
+       "DLmw": 0
+      }
+     ]
+    ],
+    "classes": {
+     "code:ail__huge_hint": {
+      "Ir": 1085,
+      "Dr": 107,
+      "Dw": 74,
+      "D1mr": 12,
+      "D1mw": 2,
+      "DLmr": 2,
+      "DLmw": 1
+     },
+     "code:ail_alloc": {
+      "Ir": 12375671,
+      "Dr": 1767961,
+      "Dw": 3535898,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_alloc_raw": {
+      "Ir": 33,
+      "Dr": 0,
+      "Dw": 5,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail__need_elems": {
+      "Ir": 139097238,
+      "Dr": 5577423,
+      "Dw": 24,
+      "D1mr": 13,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_str_eq": {
+      "Ir": 2482,
+      "Dr": 366,
+      "Dw": 249,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail__tops_clear": {
+      "Ir": 133,
+      "Dr": 20,
+      "Dw": 33,
+      "D1mr": 2,
+      "D1mw": 3,
+      "DLmr": 2,
+      "DLmw": 3
+     },
+     "code:ail__blk_cache_put": {
+      "Ir": 7072095,
+      "Dr": 1767990,
+      "Dw": 80,
+      "D1mr": 6,
+      "D1mw": 4,
+      "DLmr": 3,
+      "DLmw": 4
+     },
+     "code:ail__blk_take": {
+      "Ir": 684,
+      "Dr": 169,
+      "Dw": 154,
+      "D1mr": 13,
+      "D1mw": 0,
+      "DLmr": 13,
+      "DLmw": 0
+     },
+     "code:ail__blk_release": {
+      "Ir": 3536028,
+      "Dr": 14,
+      "Dw": 33,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail__sarena_arrays_free": {
+      "Ir": 124,
+      "Dr": 38,
+      "Dw": 22,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "runtime:ail_sarena": {
+      "Ir": 47062004,
+      "Dr": 1859190,
+      "Dw": 25390344,
+      "D1mr": 4,
+      "D1mw": 38,
+      "DLmr": 2,
+      "DLmw": 22
+     },
+     "code:ail_sarena_free": {
+      "Ir": 447,
+      "Dr": 236,
+      "Dw": 0,
+      "D1mr": 21,
+      "D1mw": 0,
+      "DLmr": 20,
+      "DLmw": 0
+     },
+     "code:ail_sarena_pushn": {
+      "Ir": 28287674,
+      "Dr": 21215684,
+      "Dw": 3535975,
+      "D1mr": 9,
+      "D1mw": 26,
+      "DLmr": 6,
+      "DLmw": 20
+     },
+     "code:ail_sarena_keep_roots": {
+      "Ir": 142609149,
+      "Dr": 42425139,
+      "Dw": 9434801,
+      "D1mr": 23,
+      "D1mw": 1,
+      "DLmr": 7,
+      "DLmw": 0
+     },
+     "code:ail_str_cat": {
+      "Ir": 90,
+      "Dr": 12,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail__str_cat_slow": {
+      "Ir": 159,
+      "Dr": 33,
+      "Dw": 33,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_str_catn": {
+      "Ir": 1575,
+      "Dr": 411,
+      "Dw": 160,
+      "D1mr": 17,
+      "D1mw": 10,
+      "DLmr": 17,
+      "DLmw": 8
+     },
+     "code:ail_str_from_int": {
+      "Ir": 204727142,
+      "Dr": 22845369,
+      "Dw": 17803713,
+      "D1mr": 0,
+      "D1mw": 6,
+      "DLmr": 0,
+      "DLmw": 3
+     },
+     "code:ail_str_from_int_buf": {
+      "Ir": 1778,
+      "Dr": 0,
+      "Dw": 106,
+      "D1mr": 0,
+      "D1mw": 6,
+      "DLmr": 0,
+      "DLmw": 6
+     },
+     "code:ail_str_write": {
+      "Ir": 7,
+      "Dr": 0,
+      "Dw": 3,
+      "D1mr": 0,
+      "D1mw": 1,
+      "DLmr": 0,
+      "DLmw": 1
+     },
+     "code:ail_stdin_flush_stdout": {
+      "Ir": 3,
+      "Dr": 1,
+      "Dw": 0,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 1,
+      "DLmw": 0
+     },
+     "code:ail__utf8_validate": {
+      "Ir": 144264323,
+      "Dr": 22933189,
+      "Dw": 15000105,
+      "D1mr": 0,
+      "D1mw": 1,
+      "DLmr": 0,
+      "DLmw": 1
+     },
+     "code:?": {
+      "Ir": 108003815,
+      "Dr": 36000610,
+      "Dw": 18000546,
+      "D1mr": 29,
+      "D1mw": 1124984,
+      "DLmr": 0,
+      "DLmw": 1057096
+     },
+     "code:ail__bcap": {
+      "Ir": 74431531,
+      "Dr": 0,
+      "Dw": 316888,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "runtime:ail_bl": {
+      "Ir": 3718706,
+      "Dr": 26,
+      "Dw": 3718532,
+      "D1mr": 2,
+      "D1mw": 36,
+      "DLmr": 0,
+      "DLmw": 36
+     },
+     "code:ail_bl_set": {
+      "Ir": 22309627,
+      "Dr": 3718271,
+      "Dw": 1859140,
+      "D1mr": 155,
+      "D1mw": 1,
+      "DLmr": 1,
+      "DLmw": 1
+     },
+     "code:ail__bl_append_slow": {
+      "Ir": 30974246,
+      "Dr": 7503335,
+      "Dw": 5429449,
+      "D1mr": 51,
+      "D1mw": 467,
+      "DLmr": 6,
+      "DLmw": 1
+     },
+     "code:ail_bl_append": {
+      "Ir": 292571585,
+      "Dr": 47875484,
+      "Dw": 39406400,
+      "D1mr": 117958,
+      "D1mw": 244802,
+      "DLmr": 117916,
+      "DLmw": 244798
+     },
+     "runtime:ail_str": {
+      "Ir": 21,
+      "Dr": 1,
+      "Dw": 20,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 1,
+      "DLmw": 0
+     },
+     "code:ail_str_return_owned": {
+      "Ir": 52,
+      "Dr": 24,
+      "Dw": 12,
+      "D1mr": 1,
+      "D1mw": 1,
+      "DLmr": 1,
+      "DLmw": 1
+     },
+     "runtime:ail_slist": {
+      "Ir": 48591967,
+      "Dr": 14577496,
+      "Dw": 24295982,
+      "D1mr": 5,
+      "D1mw": 5,
+      "DLmr": 5,
+      "DLmw": 4
+     },
+     "code:ail_slist_push": {
+      "Ir": 126338462,
+      "Dr": 38873359,
+      "Dw": 14577528,
+      "D1mr": 1,
+      "D1mw": 1822185,
+      "DLmr": 1,
+      "DLmw": 1822185
+     },
+     "code:ail_slist_reserve": {
+      "Ir": 52,
+      "Dr": 8,
+      "Dw": 6,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_slist_reverse": {
+      "Ir": 213,
+      "Dr": 60,
+      "Dw": 45,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_slist_get": {
+      "Ir": 40,
+      "Dr": 16,
+      "Dw": 8,
+      "D1mr": 8,
+      "D1mw": 4,
+      "DLmr": 8,
+      "DLmw": 4
+     },
+     "code:ail_slist_free": {
+      "Ir": 512,
+      "Dr": 166,
+      "Dw": 208,
+      "D1mr": 8,
+      "D1mw": 10,
+      "DLmr": 6,
+      "DLmw": 6
+     },
+     "code:ail_slist_snapshot": {
+      "Ir": 2,
+      "Dr": 1,
+      "Dw": 0,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_str_join": {
+      "Ir": 829,
+      "Dr": 192,
+      "Dw": 109,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_pslist_at": {
+      "Ir": 264308995,
+      "Dr": 127240910,
+      "Dw": 14577456,
+      "D1mr": 4301624,
+      "D1mw": 2,
+      "DLmr": 2657420,
+      "DLmw": 2
+     },
+     "code:ail_pslist_get": {
+      "Ir": 60320880,
+      "Dr": 26064664,
+      "Dw": 0,
+      "D1mr": 633512,
+      "D1mw": 0,
+      "DLmr": 607399,
+      "DLmw": 0
+     },
+     "runtime:ail_pslist": {
+      "Ir": 196024649,
+      "Dr": 19436572,
+      "Dw": 108067231,
+      "D1mr": 1,
+      "D1mw": 23612,
+      "DLmr": 0,
+      "DLmw": 15
+     },
+     "code:ail_pslist_free": {
+      "Ir": 76,
+      "Dr": 38,
+      "Dw": 38,
+      "D1mr": 8,
+      "D1mw": 5,
+      "DLmr": 5,
+      "DLmw": 1
+     },
+     "code:ail_pslist_push": {
+      "Ir": 540919644,
+      "Dr": 262263460,
+      "Dw": 32783093,
+      "D1mr": 25861,
+      "D1mw": 3574385,
+      "DLmr": 1,
+      "DLmw": 2048791
+     },
+     "code:ail_pslist_move": {
+      "Ir": 60,
+      "Dr": 30,
+      "Dw": 30,
+      "D1mr": 4,
+      "D1mw": 0,
+      "DLmr": 2,
+      "DLmw": 0
+     },
+     "code:ail_pslist_reserve": {
+      "Ir": 255,
+      "Dr": 70,
+      "Dw": 50,
+      "D1mr": 0,
+      "D1mw": 3,
+      "DLmr": 0,
+      "DLmw": 1
+     },
+     "code:ail_list_push": {
+      "Ir": 667971270,
+      "Dr": 227422121,
+      "Dw": 200334933,
+      "D1mr": 78383,
+      "D1mw": 16036367,
+      "DLmr": 11,
+      "DLmw": 11121667
+     },
+     "runtime:ail_list": {
+      "Ir": 339986623,
+      "Dr": 98443619,
+      "Dw": 69598327,
+      "D1mr": 6756498,
+      "D1mw": 1447221,
+      "DLmr": 4930152,
+      "DLmw": 1214809
+     },
+     "code:ail_list_reserve": {
+      "Ir": 1320,
+      "Dr": 396,
+      "Dw": 132,
+      "D1mr": 4,
+      "D1mw": 2,
+      "DLmr": 4,
+      "DLmw": 0
+     },
+     "code:ail_list_get": {
+      "Ir": 326175432,
+      "Dr": 99740166,
+      "Dw": 0,
+      "D1mr": 3011003,
+      "D1mw": 0,
+      "DLmr": 2335097,
+      "DLmw": 0
+     },
+     "code:ail_list_set": {
+      "Ir": 40453421,
+      "Dr": 3287361,
+      "Dw": 20442163,
+      "D1mr": 13,
+      "D1mw": 979388,
+      "DLmr": 0,
+      "DLmw": 326985
+     },
+     "code:ail_list_pop": {
+      "Ir": 179271498,
+      "Dr": 59757166,
+      "Dw": 8536738,
+      "D1mr": 3597,
+      "D1mw": 0,
+      "DLmr": 18,
+      "DLmw": 0
+     },
+     "code:ail_ir_list_set": {
+      "Ir": 5,
+      "Dr": 0,
+      "Dw": 1,
+      "D1mr": 0,
+      "D1mw": 1,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_ir_view_get": {
+      "Ir": 105041771,
+      "Dr": 14577396,
+      "Dw": 0,
+      "D1mr": 1760436,
+      "D1mw": 0,
+      "DLmr": 1168963,
+      "DLmw": 0
+     },
+     "code:ail_ir_view_set": {
+      "Ir": 5577399,
+      "Dr": 0,
+      "Dw": 1859133,
+      "D1mr": 0,
+      "D1mw": 234366,
+      "DLmr": 0,
+      "DLmw": 50545
+     },
+     "code:ail_list_span_len": {
+      "Ir": 8,
+      "Dr": 0,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_list_span_get": {
+      "Ir": 159170882,
+      "Dr": 51706717,
+      "Dw": 1859135,
+      "D1mr": 10833321,
+      "D1mw": 0,
+      "DLmr": 5626838,
+      "DLmw": 0
+     },
+     "code:ail_list_snapshot": {
+      "Ir": 8,
+      "Dr": 0,
+      "Dw": 1,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_obj_field_list_move": {
+      "Ir": 147,
+      "Dr": 42,
+      "Dw": 84,
+      "D1mr": 3,
+      "D1mw": 1,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_sfield_append": {
+      "Ir": 15000000,
+      "Dr": 9000000,
+      "Dw": 0,
+      "D1mr": 12,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_list_view_get": {
+      "Ir": 29154792,
+      "Dr": 9718264,
+      "Dw": 0,
+      "D1mr": 1214786,
+      "D1mw": 0,
+      "DLmr": 1214786,
+      "DLmw": 0
+     },
+     "code:ail_bytes_get": {
+      "Ir": 144424159,
+      "Dr": 24247437,
+      "Dw": 0,
+      "D1mr": 217969,
+      "D1mw": 0,
+      "DLmr": 199810,
+      "DLmw": 0
+     },
+     "code:ail_bytes_slice": {
+      "Ir": 51000315,
+      "Dr": 0,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_barena_free": {
+      "Ir": 12,
+      "Dr": 5,
+      "Dw": 2,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 1,
+      "DLmw": 0
+     },
+     "code:ail_barena_push": {
+      "Ir": 16,
+      "Dr": 4,
+      "Dw": 5,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_bytes_decode_utf8": {
+      "Ir": 101,
+      "Dr": 55,
+      "Dw": 25,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_bytes_decode_utf8_view": {
+      "Ir": 27000000,
+      "Dr": 3000000,
+      "Dw": 3000000,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_stdin_fill_bytes": {
+      "Ir": 263,
+      "Dr": 1,
+      "Dw": 11,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_stdin_begin_binary": {
+      "Ir": 3,
+      "Dr": 1,
+      "Dw": 1,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 1,
+      "DLmw": 0
+     },
+     "code:ail_stdin_read_bytes": {
+      "Ir": 2,
+      "Dr": 0,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ck_add": {
+      "Ir": 185200057,
+      "Dr": 59273367,
+      "Dw": 7095786,
+      "D1mr": 4680156,
+      "D1mw": 0,
+      "DLmr": 2225117,
+      "DLmw": 0
+     },
+     "code:ck_sub": {
+      "Ir": 74316451,
+      "Dr": 13436536,
+      "Dw": 5330,
+      "D1mr": 753198,
+      "D1mw": 0,
+      "DLmr": 748664,
+      "DLmw": 0
+     },
+     "code:ck_mul": {
+      "Ir": 18247420,
+      "Dr": 0,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ck_neg": {
+      "Ir": 14577398,
+      "Dr": 0,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_pool_refill": {
+      "Ir": 16,
+      "Dr": 3,
+      "Dw": 3,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "runtime:ail_obj": {
+      "Ir": 374,
+      "Dr": 53,
+      "Dw": 217,
+      "D1mr": 9,
+      "D1mw": 12,
+      "DLmr": 5,
+      "DLmw": 6
+     },
+     "code:ail_obj_new": {
+      "Ir": 4,
+      "Dr": 0,
+      "Dw": 1,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_obj_dealloc": {
+      "Ir": 6,
+      "Dr": 1,
+      "Dw": 2,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 1,
+      "DLmw": 0
+     },
+     "code:ail_obj_retain": {
+      "Ir": 125,
+      "Dr": 25,
+      "Dw": 25,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_obj_release": {
+      "Ir": 287,
+      "Dr": 78,
+      "Dw": 25,
+      "D1mr": 1,
+      "D1mw": 0,
+      "DLmr": 1,
+      "DLmw": 0
+     },
+     "code:ail_obj_drop_T": {
+      "Ir": 2,
+      "Dr": 2,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:ail_obj_store_T": {
+      "Ir": 26,
+      "Dr": 0,
+      "Dw": 26,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:is_lower": {
+      "Ir": 52,
+      "Dr": 0,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:parse_tree": {
+      "Ir": 322216964,
+      "Dr": 27116727,
+      "Dw": 11,
+      "D1mr": 217634,
+      "D1mw": 2,
+      "DLmr": 199328,
+      "DLmw": 0
+     },
+     "field:f_nm": {
+      "Ir": 29064862,
+      "Dr": 14532393,
+      "Dw": 11532389,
+      "D1mr": 23217,
+      "D1mw": 596,
+      "DLmr": 20,
+      "DLmw": 2
+     },
+     "field:f_w": {
+      "Ir": 41988498,
+      "Dr": 36411055,
+      "Dw": 1859137,
+      "D1mr": 232830,
+      "D1mw": 0,
+      "DLmr": 232405,
+      "DLmw": 0
+     },
+     "field:f_dep": {
+      "Ir": 29874214,
+      "Dr": 29782962,
+      "Dw": 0,
+      "D1mr": 14,
+      "D1mw": 0,
+      "DLmr": 4,
+      "DLmw": 0
+     },
+     "field:f_par": {
+      "Ir": 187472807,
+      "Dr": 150729304,
+      "Dw": 0,
+      "D1mr": 37111,
+      "D1mw": 0,
+      "DLmr": 22,
+      "DLmw": 0
+     },
+     "code:parse_num": {
+      "Ir": 72,
+      "Dr": 7,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:name_ok": {
+      "Ir": 184,
+      "Dr": 4,
+      "Dw": 0,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:compact": {
+      "Ir": 33833759,
+      "Dr": 9628132,
+      "Dw": 4814124,
+      "D1mr": 13106,
+      "D1mw": 1208433,
+      "DLmr": 5,
+      "DLmw": 573549
+     },
+     "code:rebuild": {
+      "Ir": 80619495,
+      "Dr": 33591379,
+      "Dw": 147,
+      "D1mr": 30,
+      "D1mw": 25,
+      "DLmr": 16,
+      "DLmw": 25
+     },
+     "code:counts__irl": {
+      "Ir": 53746273,
+      "Dr": 45,
+      "Dw": 13436566,
+      "D1mr": 18,
+      "D1mw": 6,
+      "DLmr": 4,
+      "DLmw": 2
+     },
+     "code:subw__irl": {
+      "Ir": 23577513,
+      "Dr": 45,
+      "Dw": 7859164,
+      "D1mr": 20,
+      "D1mw": 6,
+      "DLmr": 17,
+      "DLmw": 6
+     },
+     "code:do_mirror": {
+      "Ir": 5577460,
+      "Dr": 21,
+      "Dw": 1859149,
+      "D1mr": 7,
+      "D1mw": 0,
+      "DLmr": 6,
+      "DLmw": 0
+     },
+     "code:ail_layout_cmp_idx": {
+      "Ir": 1102432013,
+      "Dr": 499575933,
+      "Dw": 218163814,
+      "D1mr": 8763192,
+      "D1mw": 4520,
+      "DLmr": 2377824,
+      "DLmw": 3
+     },
+     "code:do_sort": {
+      "Ir": 72887208,
+      "Dr": 9718318,
+      "Dw": 88,
+      "D1mr": 1214800,
+      "D1mw": 2,
+      "DLmr": 981926,
+      "DLmw": 2
+     },
+     "code:do_prune": {
+      "Ir": 21000048,
+      "Dr": 3000016,
+      "Dw": 13,
+      "D1mr": 374878,
+      "D1mw": 0,
+      "DLmr": 243932,
+      "DLmw": 0
+     },
+     "code:find_first": {
+      "Ir": 2146,
+      "Dr": 4,
+      "Dw": 0,
+      "D1mr": 3,
+      "D1mw": 0,
+      "DLmr": 2,
+      "DLmw": 0
+     },
+     "code:do_cut": {
+      "Ir": 42712,
+      "Dr": 10682,
+      "Dw": 15,
+      "D1mr": 1338,
+      "D1mw": 0,
+      "DLmr": 671,
+      "DLmw": 0
+     },
+     "code:do_fold": {
+      "Ir": 41135013,
+      "Dr": 7436549,
+      "Dw": 7436579,
+      "D1mr": 452,
+      "D1mw": 247742,
+      "DLmr": 4,
+      "DLmw": 214201
+     },
+     "code:do_print": {
+      "Ir": 19202441,
+      "Dr": 1859145,
+      "Dw": 11,
+      "D1mr": 3,
+      "D1mw": 3,
+      "DLmr": 3,
+      "DLmw": 3
+     },
+     "code:do_find": {
+      "Ir": 284,
+      "Dr": 36,
+      "Dw": 181,
+      "D1mr": 2,
+      "D1mw": 5,
+      "DLmr": 1,
+      "DLmw": 3
+     },
+     "code:py_main": {
+      "Ir": 315929498,
+      "Dr": 47224052,
+      "Dw": 146,
+      "D1mr": 2853923,
+      "D1mw": 7,
+      "DLmr": 2393698,
+      "DLmw": 4
+     },
+     "runtime:ail_barena": {
+      "Ir": 2,
+      "Dr": 0,
+      "Dw": 2,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:run": {
+      "Ir": 7,
+      "Dr": 1,
+      "Dw": 3,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     },
+     "code:main": {
+      "Ir": 5,
+      "Dr": 0,
+      "Dw": 1,
+      "D1mr": 0,
+      "D1mw": 0,
+      "DLmr": 0,
+      "DLmw": 0
+     }
+    }
+   },
+   "flat": {
     "ok": true,
     "bytes": 416640,
     "counts": {
-     "instructions": 9069910163,
+     "instructions": 9069910159,
      "d_refs": 4113371328,
      "d1_misses": 86893112,
      "d1_read": 51298010,
@@ -6575,21 +7896,21 @@
      "ll_write": 20806341
     },
     "wall": {
-     "best_s": 1.0368,
-     "median_s": 1.0403,
+     "best_s": 1.0191,
+     "median_s": 1.0253,
      "runs_s": [
-      1.0443,
-      1.0403,
-      1.0368,
-      1.0392,
-      1.0429
+      1.0272,
+      1.0236,
+      1.0306,
+      1.0253,
+      1.0191
      ],
      "rc": 0,
-     "rss_kib": 331860
+     "rss_kib": 331876
     },
     "functions": [
      [
-      "/tmp/layout-2xf4jn7z/tree_fold_tree_fold_flat/program.c:",
+      "/tmp/layout-9w_shgs4/tree_fold_tree_fold_flat/program.c:",
       {
        "Ir": 6814804510,
        "Dr": 2097542565,
@@ -6831,7 +8152,7 @@
      [
       "???:",
       {
-       "Ir": 2176041963,
+       "Ir": 2176041959,
        "Dr": 631117642,
        "Dw": 517029606,
        "D1mr": 6820832,
@@ -6843,7 +8164,7 @@
      [
       "???",
       {
-       "Ir": 1982535951,
+       "Ir": 1982535947,
        "Dr": 583414785,
        "Dw": 489497878,
        "D1mr": 6811634,
@@ -7866,14 +9187,14 @@
      "ll_write": 4812996
     },
     "wall": {
-     "best_s": 0.8798,
-     "median_s": 0.8879,
+     "best_s": 0.8534,
+     "median_s": 0.8577,
      "runs_s": [
-      0.8811,
-      0.8892,
-      0.8798,
-      0.8879,
-      0.8889
+      0.8577,
+      0.8534,
+      0.86,
+      0.8548,
+      0.8622
      ],
      "rc": 0,
      "rss_kib": 198116

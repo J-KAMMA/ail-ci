@@ -1,7 +1,7 @@
 desc: I1 cache:         32768 B, 64 B, 8-way associative
 desc: D1 cache:         32768 B, 64 B, 8-way associative
 desc: LL cache:         33554432 B, 64 B, 16-way associative
-cmd: /tmp/layout-2xf4jn7z/tree_fold_c
+cmd: /tmp/layout-9w_shgs4/tree_fold_c
 events: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw 
 fl=/home/runner/work/ail-ci/ail-ci/lab/compare/src/tree_fold/main.c
 fn=addchild

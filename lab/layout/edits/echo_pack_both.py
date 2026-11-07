@@ -3,8 +3,12 @@
 
     python3 lab/layout/edits/echo_pack_both.py in/program.c out/program.c
 
-Both echo_pack causes in one file, to show the saving is additive: the int32 element width
-(`echo_pack_prev32.py`) and the single-probe unconditional store (`echo_pack_uncond.py`).
+Both echo_pack causes in one file: the int32 element width (`echo_pack_prev32.py`) and the
+single-probe unconditional store (`echo_pack_uncond.py`).
+
+Measured: 4.13M LLC removed, i.e. about the same as either edit alone, not their sum. The two
+touch the same `prev` array, and `prev32`'s replacement initialisation re-introduces an int32
+fill that cancels `uncond`'s saving; RESULTS.md records the overlap.
 """
 import subprocess
 import sys

@@ -1,11 +1,11 @@
 --------------------------------------------------------------------------------
 -- Metadata
 --------------------------------------------------------------------------------
-Invocation:       /tmp/energy-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/tree_fold_c.cg
+Invocation:       /tmp/layout-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/tree_fold_c.cg
 I1 cache:         32768 B, 64 B, 8-way associative
 D1 cache:         32768 B, 64 B, 8-way associative
 LL cache:         33554432 B, 64 B, 16-way associative
-Command:          /tmp/layout-2xf4jn7z/tree_fold_c
+Command:          /tmp/layout-9w_shgs4/tree_fold_c
 Events recorded:  Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
 Events shown:     Ir Dr Dw D1mr D1mw DLmr DLmw
 Event sort order: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
