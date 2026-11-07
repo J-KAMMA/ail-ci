@@ -12214,6 +12214,18 @@ SET_OPS = {ast.BitAnd: 'and', ast.BitOr: 'or', ast.Sub: 'minus', ast.BitXor: 'xo
 
 def _set_into_temp(arg, ctx):
     """`set(e)` as a value: one table, built once, freed with the rest."""
+    # The table here is the int table (ail_tab): a set of str or float elements built this way was
+    # handed to the C compiler as an int key and failed there (`len(set(suits))` with `suits` a
+    # list[str]). Refuse it by name instead, so the default build keeps the general path.
+    kind = None
+    if isinstance(arg, ast.Name):
+        try:
+            kind = ctx.type_of(arg.id)
+        except Unsupported:
+            kind = None
+    if kind in (SLIST, FLIST) or _is_str_expr(arg, ctx):
+        raise Unsupported('set() of a %s used inline (as in `len(set(xs))`); an inline set built from a '
+                          'sequence is built for int elements only' % ('str' if kind != FLIST else 'list of float'))
     ctx.parts.add('TAB')
     c, _ = ctx.temp(SET)
     lo, n, elem, pre = _iter_plan(arg, ctx)
@@ -18751,6 +18763,16 @@ def _call(node, ctx):
             return _setcomp_len(a[0], ctx)
         lo, n, _, pre = _iter_plan(a[0], ctx)          # len(set(xs)), len(sorted(xs)), ...
         ctx.pre.extend(pre)
+        if (isinstance(a[0], ast.Name) and ctx.types.get(a[0].id) == RANGE
+                and len(ctx.ranges.get(a[0].id, ())) == 2
+                or isinstance(a[0], ast.Call) and isinstance(a[0].func, ast.Name)
+                and a[0].func.id == 'range' and len(a[0].args) in (1, 2)
+                and 'range' not in ctx.funcs and 'range' not in ctx.classes):
+            # `len(range(a, b))`: its two bounds, not their bare difference -- an empty range
+            # (b <= a) is 0, and a length past int64 (`range(-n, n)`) stops loudly, never wraps
+            ctx.parts.add('RANGEITER')
+            ctx.has_try = True
+            return 'ail_range_count(%s, %s, 1)' % (lo, n)
         return '(%s - %s)' % (n, lo) if lo != '0' else n
     if f in ('sum', 'max', 'min', 'any', 'all') and f not in ctx.funcs and len(a) == 1:
         return _inline_fold(f, a[0], ctx)
