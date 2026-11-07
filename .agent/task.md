@@ -1,3 +1,53 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## What the change really does
+
+Adds `lab/vibe2/` (`STRICT_SPEC.md`, `NEW_SURFACE.md`, an AIL-N→AIL-Python translator `translate.py`, its tests, `RESULTS.md`, `results.json`) and extends `lab/vibe/run.py` with `ail-strict`/`ail-new` arms, reply-token accounting, `--programs`, per-model `Store` keys and surface-error feedback. No compiler/runtime/benchmark file is touched, so `cmp.sh`/`icount` probes do not apply. The report's one-line description matches the diff.
+
+## Claims
+
+- Missing deliverables added, 55 rows, 1 model × 1 seed, cut stated — **verified** (`results.json`: 55 rows, 5 arms × 11; logs 10:24–11:55; summary/ail_errors per model).
+- Surface-error path fixed; `rail_transfer` recovered — **verified** (round 1 records `line 33: 'best' is a let binding…`, round 2 passes all 24 cases when rebuilt).
+- `Store` keyed by `(task, lang, seed, model)`, per-model summary — **verified** (two-model probe: 2 rows, both summaries).
+- Numbers in the main table — **verified** by recomputation (correct 9/7/8/6/5; 19 timeouts; tokens/correct 17365/12759/19056/22378/29452; paths 0/8/0, 2/5/0, 0/5/0; ticket_audit `random4` loud stop exit 6 vs 0 reproduced).
+- Tests: `test_ail_safetynet` ok, `test_translate.py` 13/13 ok, `update_manifest.py --check` pass — **verified**; `test_ail_files`, `test_ail_corpus_findings3` not re-run per review scope — **unverified**. `tests.d` would break preflight (`registry_problems` requires `AIL_CURRENT/test_translate.py`) — **verified** by reading `ail_check.py`.
+- Second model callable but not run; pre-fix crash; the `/tmp` probes — **unverified**.
+- Compiler-message table/counts — **false** (below).
+- Saved-program provenance — **false** for 2 rows.
+
+## Defects
+
+1. **`div_ceil` is wrong for a negative divisor.** `lab/vibe2/translate.py` emits `(a+b-1)//b`.
+   Probe `write(str(div_ceil(5, -2)))` → generated code runs and prints `-1`; ceiling division is `-2`. Any AI solution that uses this advertised builtin with a signed divisor gets wrong arithmetic.
+2. **The translator accepts constructs its own surface forbids**, so the `ail-new` arm is not the surface described in `NEW_SURFACE.md`:
+   - `let s: str = rf"x{1}"` is accepted (surface: "No f-strings"); the f-string test only matches `f"`/`f'`.
+   - A nested `fn` is accepted and emitted as a nested `def` (surface: "no nested function").
+   - `match 3: case 0: …` with no `_` is accepted as an `if` with no `else`, and duplicate `case 0` arms are accepted (surface: "exhaustive", "`_` last only").
+   Also, a top-level `let g` reassigned after an intervening `fn` is refused with `declare the binding first…` instead of the `let … cannot be reassigned` message (wrong diagnostic, still a refusal).
+3. **`RESULTS.md` misreports the compiler-message table.** It says "The general-path notes (10 of 13 messages) are not errors … the two typed-path errors it saw were fixed half the time." Observed: 14 occurrences over 10 distinct messages, *all* general-path notes; three rows (Tree.weights/`unsupported`, dict-of-containers, `format()`/`refuses`) are misclassified as `error` by `compiler_messages`' substring rule, and not one is a typed-path error. The `surface 1 / 1.0` row shown in RESULTS.md is absent from `results.json`'s `ail_errors` (table truncated by `rows[:10]`).
+4. **Two referenced programs do not exist.** `results.json` records `program: lab/vibe2/programs/berth_sim/ail-new-0.nw` and `…/echo_pack/ail-new-0.nw`, but neither file is in the tree, so those two "correct" `ail-new` rows cannot be checked. (The three present `.nw` files do reproduce 0 failures.)
+5. Minor: `meta.started`/`completed_attempts` reflect only the last invocation (says started 11:48, 2 completed) although the 55 rows span 10:24–11:55.
+
+Pre-existing: none applicable (no compiler/runtime change; `cmp.sh` probes not relevant).
+
+Unverified: `test_ail_files`, `test_ail_corpus_findings3`; second-model callability; the report's `/tmp/probes/*`; the two missing `ail-new` programs; seed-to-seed spread (one seed).
+
+VERDICT: FIX
+1. `lab/vibe2/translate.py` `__div_ceil` returns `-1` for `div_ceil(5, -2)`; expected `-2` (ceiling division).
+2. `translate.py` f-string check misses `rf"…"`/`fr"…"`; nested `fn` and non-exhaustive/duplicate `match` arms are accepted although `NEW_SURFACE.md` forbids them — the `ail-new` arm did not enforce its documented surface.
+3. `RESULTS.md` compiler-message analysis is false: 14 occurrences, all general-path notes, three rows mislabeled `error`; the reported `surface` row is missing from `results.json` because `ail_error_table` truncates to 10.
+4. `results.json` points at two nonexistent programs (`berth_sim/ail-new-0.nw`, `echo_pack/ail-new-0.nw`); commit them or clear the fields.
+[commandcode stop=end_turn turns=27 out_tokens=32520]
+
+
+--- ORIGINAL TASK ---
 Lane: vibe
 
 # vibe2: is Python syntax right for an AI language, or only familiar? A/B of three surfaces on the vibe1 tasks
