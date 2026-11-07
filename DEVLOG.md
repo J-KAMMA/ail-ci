@@ -48,6 +48,38 @@ but dropped its value, so `ail run --diff -I . prog.py` reached the build with a
 source (usage, exit 2). It now copies the option and its value, and detects `--diff` in a single scan
 of the option words rather than by membership, so a value is never mistaken for `--diff`. `docs/CLI.md`
 says so; a regression test covers `-I .`, `--syntax python` and `--debug-dir DIR`.
+## 2026-11-07 -- arena1 S3: reserve the known trip count before append loops (job-arena1s3_rr1)
+
+A `for` over `range(a, b)`, `range(n)` or a list local/parameter, or over `len()` of a list local or
+list field, now reserves the trip count before the loop when its body appends to a plain local
+`list[int]`/`list[float]`/`list[str]` at most once on every path.  The append may sit under an
+`if`/`else` or after a `continue`; an append in an inner loop keeps the reserve away from the outer
+loop.  The bound must be pure (an int name, an int constant, or `len()` of a list local/array/field),
+the step must be `1`, and a non-`range` source must not mention the target list.  A `break` on
+`range(10**12)` reserves the existing 4194304-element cap instead of the whole range.  The helper now
+covers both plain and packed-string locals; packed locals keep the field text-length hint.
+
+This re-run replaces the old `_emptied_name`/preceding-statement rule: it no longer requires
+`x = []` immediately before the loop, so `compact`/`do_fold`'s `w`/`dep`/`par` and the packed `nm`
+reserve unconditionally.  A list read before the append (`xs[i]`, another iteration) or the target
+being iterated still does not reserve.
+
+`tree_fold`, N = 3M, `tools/rss_phases.py`, default glibc: base 366.4 -> 358.7 MiB peak (-7.7 MiB,
+-2.1%); with the fixed mmap threshold 358.8 -> 358.9 (flat, the holes are gone both ways).  At N = 1M
+both builds peak at 120.4 MiB.  `run_task.py --langs ail` on all ten compare tasks: every public and
+hidden case matches CPython on the final tree (all typed path); RSS deltas stay within -2.1%..+1.1%
+and `tree_fold` wall is 1442 -> 1337 ms (median 5).  The generated C is byte-identical for eight of
+the other nine tasks; `term_rank` differs only inside two reserves (same capacity, reordered
+operands), and `tree_fold` gains the expected reserves.
+
+`AIL_CURRENT/test_ail_arena1s3.py` is registered by `tests.d/test_ail_arena1s3.txt` (9 tests:
+unconditional/conditional/branch/continue reserves, the huge-range cap, runtime and empty ranges,
+side-effecting and two-append exclusions, nested/self-iterating exclusions, list parameter and field
+length reserves, ASan/UBSan).  Modules run on the final tree: `test_ail_arena1s3` 9 OK,
+`test_ail_arena1s4` + `test_ail_safetynet` + `test_ail_files` + `test_ail_corpus_findings3`
+43 OK (1 skipped), `test_ail_slist_reserve` 1 OK; the same six via `tools/par_check.py -j 2` green.
+Probe `/tmp/probes/arena1s3.py` matched CPython on both builds.  No new DIFFERENCES row: output is
+unchanged.
 
 ## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
 
