@@ -1,0 +1,635 @@
+{
+ "method": {
+  "lines": "/home/runner/work/_temp/w2/lab/emit/data/lines.json",
+  "checks": "lab/roof/attrib.py CATS on the line text",
+  "roles": "function name, then line shape inside user functions"
+ },
+ "tasks": {
+  "ticket_audit": {
+   "ail": 11296716633,
+   "c": 2195421990,
+   "extra": 9101294643,
+   "causes": {
+    "overflow": 271029170,
+    "bounds": 678197699,
+    "refcount": 185361728,
+    "alloc/free": 399359206,
+    "copies": 165306155,
+    "boxing": 0,
+    "overflow-helper": 120000,
+    "container-invariant": 2379429832,
+    "list-helper": 1743539429,
+    "dict-table-helper": 1325682052,
+    "byte-string-helper": 994023306,
+    "allocator": 911860751,
+    "exception-unwind": 26347243,
+    "call-frame (prologue/epilogue)": 6045102,
+    "recursion-depth-guard": 0,
+    "temporaries/one-statement": 1657947234,
+    "call-to-generic-helper": 86790706,
+    "width/int-float conversion": 8716816,
+    "loop/condition": 192985143,
+    "other-user-lines": 263975061
+   },
+   "top_emitted": [
+    [
+     "ail_blist_meta",
+     1275784179
+    ],
+    [
+     "py_main",
+     1007189371
+    ],
+    [
+     "ail_bytes_to_int",
+     505247564
+    ],
+    [
+     "rec",
+     496029699
+    ],
+    [
+     "ail_str_catn",
+     456530563
+    ],
+    [
+     "ail__utf8_validate",
+     414226752
+    ],
+    [
+     "ail_stab_check",
+     400734692
+    ],
+    [
+     "ail_bsplit_span",
+     357757254
+    ],
+    [
+     "ail_shash",
+     338992628
+    ],
+    [
+     "ail__bpay_release",
+     315295851
+    ]
+   ],
+   "top_c": [
+    [
+     "main",
+     1352621179
+    ],
+    [
+     "num",
+     223636655
+    ],
+    [
+     "val_event",
+     183040000
+    ],
+    [
+     "syn_buyer",
+     164108637
+    ],
+    [
+     "alldig",
+     108700426
+    ],
+    [
+     "isdig",
+     67403306
+    ],
+    [
+     "syn_seat",
+     65684160
+    ],
+    [
+     "syn_event",
+     14300000
+    ],
+    [
+     "syn_date",
+     5160000
+    ],
+    [
+     "isup",
+     3164800
+    ]
+   ]
+  },
+  "echo_pack": {
+   "ail": 5427018667,
+   "c": 1848307902,
+   "extra": 3578710765,
+   "causes": {
+    "overflow": 9304558,
+    "bounds": 25774698,
+    "refcount": 10,
+    "alloc/free": 1016443,
+    "copies": 4,
+    "boxing": 0,
+    "overflow-helper": 0,
+    "container-invariant": 144305437,
+    "list-helper": 192000013,
+    "dict-table-helper": 2401961305,
+    "byte-string-helper": 245071855,
+    "allocator": 102,
+    "exception-unwind": 20,
+    "call-frame (prologue/epilogue)": 15648496,
+    "recursion-depth-guard": 0,
+    "temporaries/one-statement": 2307716470,
+    "call-to-generic-helper": 0,
+    "width/int-float conversion": 2797,
+    "loop/condition": 42836113,
+    "other-user-lines": 41380346
+   },
+   "top_emitted": [
+    [
+     "pack",
+     2004054500
+    ],
+    [
+     "ail_tab_hslot",
+     1457568835
+    ],
+    [
+     "hash_of",
+     288000004
+    ],
+    [
+     "ail_hash",
+     240627810
+    ],
+    [
+     "ail_bytearray_append",
+     199611946
+    ],
+    [
+     "ail_list_push",
+     192000000
+    ],
+    [
+     "ail_tab_hhas",
+     156549084
+    ],
+    [
+     "ail_tab_put_hit",
+     154922785
+    ],
+    [
+     "ail_idict_check",
+     144305434
+    ],
+    [
+     "ail_ir_view_get",
+     82760112
+    ]
+   ],
+   "top_c": [
+    [
+     "pack",
+     1474130477
+    ],
+    [
+     "hsh",
+     256000005
+    ],
+    [
+     "key",
+     85411826
+    ],
+    [
+     "flush",
+     32765390
+    ],
+    [
+     "rd",
+     170
+    ],
+    [
+     "main",
+     34
+    ]
+   ]
+  },
+  "tree_fold": {
+   "ail": 7719268398,
+   "c": 2693178405,
+   "extra": 5026089993,
+   "causes": {
+    "overflow": 287482200,
+    "bounds": 1425562742,
+    "refcount": 5304138,
+    "alloc/free": 212871367,
+    "copies": 74583108,
+    "boxing": 0,
+    "overflow-helper": 4859132,
+    "container-invariant": 213672861,
+    "list-helper": 2147213722,
+    "dict-table-helper": 1599909514,
+    "byte-string-helper": 357776194,
+    "allocator": 176202029,
+    "exception-unwind": 208,
+    "call-frame (prologue/epilogue)": 732,
+    "recursion-depth-guard": 0,
+    "temporaries/one-statement": 788131237,
+    "call-to-generic-helper": 23154963,
+    "width/int-float conversion": 60888952,
+    "loop/condition": 73186110,
+    "other-user-lines": 268469189
+   },
+   "top_emitted": [
+    [
+     "?",
+     1080739366
+    ],
+    [
+     "ail_list_push",
+     667976959
+    ],
+    [
+     "ail_pslist_push",
+     622876931
+    ],
+    [
+     "ail__key_i64_first",
+     431350303
+    ],
+    [
+     "py_main",
+     369200453
+    ],
+    [
+     "parse_tree",
+     342004849
+    ],
+    [
+     "ail_list_get",
+     293392539
+    ],
+    [
+     "ail_bl_append",
+     291395308
+    ],
+    [
+     "rebuild",
+     282167904
+    ],
+    [
+     "ail_pslist_at",
+     264298585
+    ]
+   ],
+   "top_c": [
+    [
+     "main",
+     1118883756
+    ],
+    [
+     "pre_next",
+     468463109
+    ],
+    [
+     "parse_tree",
+     417189533
+    ],
+    [
+     "oput",
+     179072264
+    ],
+    [
+     "addchild",
+     141004206
+    ],
+    [
+     "compute_sub",
+     121406193
+    ],
+    [
+     "nbadd",
+     84480796
+    ],
+    [
+     "cmp",
+     67758905
+    ],
+    [
+     "newnode",
+     57001012
+    ],
+    [
+     "oc",
+     16982247
+    ]
+   ]
+  },
+  "ledger_bin": {
+   "ail": 5072534539,
+   "c": 2357539758,
+   "extra": 2714994781,
+   "causes": {
+    "overflow": 796489974,
+    "bounds": 208615838,
+    "refcount": 1869230,
+    "alloc/free": 28921429,
+    "copies": 5141559,
+    "boxing": 0,
+    "overflow-helper": 370631642,
+    "container-invariant": 14458025,
+    "list-helper": 187067599,
+    "dict-table-helper": 967298663,
+    "byte-string-helper": 96842146,
+    "allocator": 16449688,
+    "exception-unwind": 36,
+    "call-frame (prologue/epilogue)": 121412942,
+    "recursion-depth-guard": 0,
+    "temporaries/one-statement": 1509871828,
+    "call-to-generic-helper": 0,
+    "width/int-float conversion": 96902517,
+    "loop/condition": 10437734,
+    "other-user-lines": 640123689
+   },
+   "top_emitted": [
+    [
+     "py_main",
+     931680924
+    ],
+    [
+     "readvar",
+     729022581
+    ],
+    [
+     "pymod",
+     557223976
+    ],
+    [
+     "ck_shl",
+     554879676
+    ],
+    [
+     "ail_tab_hslot",
+     466342545
+    ],
+    [
+     "ck_add",
+     417854704
+    ],
+    [
+     "ail_bytes_get",
+     276133209
+    ],
+    [
+     "ck_mul",
+     185707564
+    ],
+    [
+     "ail_list_push",
+     184583912
+    ],
+    [
+     "?",
+     169018758
+    ]
+   ],
+   "top_c": [
+    [
+     "main",
+     1184003688
+    ],
+    [
+     "rdvar",
+     881209657
+    ],
+    [
+     "hfind",
+     137302697
+    ],
+    [
+     "lookup",
+     90584959
+    ],
+    [
+     "cmp_id",
+     58112037
+    ],
+    [
+     "hgrow",
+     4190446
+    ],
+    [
+     "cmp_top",
+     2136274
+    ]
+   ]
+  },
+  "tally_lang": {
+   "ail": 19585461840,
+   "c": 11830507580,
+   "extra": 7754954260,
+   "causes": {
+    "overflow": 266150638,
+    "bounds": 19148,
+    "refcount": 434,
+    "alloc/free": 9207,
+    "copies": 771,
+    "boxing": 0,
+    "overflow-helper": 199600000,
+    "container-invariant": 9863,
+    "list-helper": 2644935577,
+    "dict-table-helper": 8057,
+    "byte-string-helper": 14223,
+    "allocator": 372626001,
+    "exception-unwind": 284,
+    "call-frame (prologue/epilogue)": 3949007569,
+    "recursion-depth-guard": 988083612,
+    "temporaries/one-statement": 10130337591,
+    "call-to-generic-helper": 0,
+    "width/int-float conversion": 53223250,
+    "loop/condition": 6654422,
+    "other-user-lines": 974781193
+   },
+   "top_emitted": [
+    [
+     "ev__d",
+     13064562780
+    ],
+    [
+     "ail_list_span_get",
+     2644854058
+    ],
+    [
+     "py_run__try1",
+     1992863116
+    ],
+    [
+     "ail_sarena_keep_roots",
+     372623740
+    ],
+    [
+     "ev",
+     319397804
+    ],
+    [
+     "?",
+     319391248
+    ],
+    [
+     "pymod",
+     246209784
+    ],
+    [
+     "ck_shl",
+     199600000
+    ],
+    [
+     "ck_add",
+     123094294
+    ],
+    [
+     "popcnt",
+     83141125
+    ]
+   ],
+   "top_c": [
+    [
+     "ev",
+     9574711997
+    ],
+    [
+     "main",
+     2255769655
+    ],
+    [
+     "tokenize",
+     15453
+    ],
+    [
+     "varidx",
+     1719
+    ],
+    [
+     "parse_line",
+     1344
+    ],
+    [
+     "p_mul",
+     1234
+    ],
+    [
+     "p_un",
+     1156
+    ],
+    [
+     "p_add",
+     1042
+    ],
+    [
+     "p_expr",
+     774
+    ],
+    [
+     "p_rot",
+     644
+    ]
+   ]
+  },
+  "berth_sim": {
+   "ail": 8084110040,
+   "c": 3424839503,
+   "extra": 4659270537,
+   "causes": {
+    "overflow": 168000000,
+    "bounds": 958032906,
+    "refcount": 15000146,
+    "alloc/free": 180021363,
+    "copies": 60011664,
+    "boxing": 0,
+    "overflow-helper": 17104918,
+    "container-invariant": 156165141,
+    "list-helper": 585279437,
+    "dict-table-helper": 1614424767,
+    "byte-string-helper": 1561242300,
+    "allocator": 258007550,
+    "exception-unwind": 10,
+    "call-frame (prologue/epilogue)": 119786780,
+    "recursion-depth-guard": 0,
+    "temporaries/one-statement": 1177039258,
+    "call-to-generic-helper": 0,
+    "width/int-float conversion": 324803303,
+    "loop/condition": 513054808,
+    "other-user-lines": 376135689
+   },
+   "top_emitted": [
+    [
+     "?",
+     1658485257
+    ],
+    [
+     "py_main",
+     989689961
+    ],
+    [
+     "ail_str_to_int",
+     815274439
+    ],
+    [
+     "ail__str_split_sep_raw",
+     764691420
+    ],
+    [
+     "ail_stdin_readline",
+     575519186
+    ],
+    [
+     "ail__sarena_keep_roots_slow",
+     352499940
+    ],
+    [
+     "ail_ir_view_get",
+     330986004
+    ],
+    [
+     "ail_list_push",
+     285003208
+    ],
+    [
+     "ail__asc_to_int",
+     270765111
+    ],
+    [
+     "ail__str_to_int_full",
+     191255913
+    ]
+   ],
+   "top_c": [
+    [
+     "cmpu",
+     1035846082
+    ],
+    [
+     "rd",
+     890440220
+    ],
+    [
+     "main",
+     830821796
+    ],
+    [
+     "upop",
+     375336399
+    ],
+    [
+     "upush",
+     198224834
+    ],
+    [
+     "wpush",
+     53902390
+    ],
+    [
+     "wpop",
+     40267782
+    ]
+   ]
+  }
+ }
+}

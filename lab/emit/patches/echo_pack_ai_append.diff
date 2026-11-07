@@ -1,0 +1,11 @@
+--- a/program.c
++++ b/program.c
+@@ -4897,7 +4897,7 @@
+ static void ail__bytearray_append_slow(ail_bytearray *B, int64_t value);
+ /* One byte into spare capacity is the common case of `out.append(c)` in a decoder loop; the full
+    metadata validation and reserve below were a third of an LLM-written JSON getter. */
+-static inline void ail_bytearray_append(ail_bytearray *B, int64_t value) {
++static inline __attribute__((always_inline)) void ail_bytearray_append(ail_bytearray *B, int64_t value) {
+     if (B && B->refs && (uint64_t)B->n < (uint64_t)B->cap && (uint64_t)value <= 255) {
+         B->p[B->n++] = (unsigned char)value;
+         return;

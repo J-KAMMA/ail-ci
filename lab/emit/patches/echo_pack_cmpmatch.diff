@@ -1,0 +1,61 @@
+--- a/program.c
++++ b/program.c
+@@ -5291,56 +5291,8 @@
+                 } else {
+                     ir65 = 0;
+                 }
+-                int64_t ir66 = 0;
+-                if (ir65) {
+-                    int64_t ir67 = 0;
+-                    int64_t ir68 = 4LL;
+-                    for (;;) {
+-                        int64_t ir69 = (ir68 < ir46);
+-                        int64_t ir70 = 0;
+-                        if (ir69) {
+-                            int64_t ir71 = ((ir52) + (ir68));
+-                            int64_t ir72 = ((int64_t)(v_d).p[ir71]);
+-                            int64_t ir73 = ((ir20) + (ir68));
+-                            int64_t ir74 = ((int64_t)(v_d).p[ir73]);
+-                            int64_t ir75 = (ir72 == ir74);
+-                            ir70 = ir75;
+-                        } else {
+-                            ir70 = 0;
+-                        }
+-                        if (!(ir70)) {
+-                            ir67 = ir68;
+-                            break;
+-                        }
+-                        int64_t ir76 = ((ir68) + (1LL));
+-                        ir68 = ir76;
+-                    }
+-                    ir66 = ir67;
+-                } else {
+-                    int64_t ir77 = 0;
+-                    int64_t ir78 = 4LL;
+-                    for (;;) {
+-                        int64_t ir79 = (ir78 < ir46);
+-                        int64_t ir80 = 0;
+-                        if (ir79) {
+-                            int64_t ir81 = ck_add(ir52, ir78);
+-                            int64_t ir82 = ail_bytes_get(v_d, ir81);
+-                            int64_t ir83 = ((ir20) + (ir78));
+-                            int64_t ir84 = ((int64_t)(v_d).p[ir83]);
+-                            int64_t ir85 = (ir82 == ir84);
+-                            ir80 = ir85;
+-                        } else {
+-                            ir80 = 0;
+-                        }
+-                        if (!(ir80)) {
+-                            ir77 = ir78;
+-                            break;
+-                        }
+-                        int64_t ir86 = ((ir78) + (1LL));
+-                        ir78 = ir86;
+-                    }
+-                    ir66 = ir77;
+-                }
++                int64_t ir66 = 4LL;
++                while (ir66 < ir46 && v_d.p[ir52 + ir66] == v_d.p[ir20 + ir66]) ir66++;
+                 int64_t ir87 = (ir66 > ir50);
+                 int64_t ir88 = 0;
+                 int64_t ir89 = 0;
