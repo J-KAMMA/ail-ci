@@ -1,8 +1,7 @@
 """`ail build --cpython`: typed functions in a CPython extension, everything else in CPython.
-
-The hybrid is explicit (the flag is new; the standalone build is untouched).  For a program whose
-functions are typed-compilable, the generated extension is loaded and the Python module output must
-equal CPython byte for byte, including the cases that must abandon the native call: an int outside
+The hybrid is explicit (the standalone build is untouched).  For a program whose functions are
+typed-compilable, the generated extension is loaded and the Python module output must equal
+CPython byte for byte, including the cases that must abandon the native call: an int outside
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
 (default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
 (indexing, division by a variable, arbitrary calls, raise/try) stay in CPython; that includes
@@ -129,6 +128,7 @@ class CPythonHybrid(unittest.TestCase):
             self.assertEqual(got.returncode, want.returncode)
             # the launcher needs a CPython at run time, and the original is kept beside the hybrid copy
             self.assertTrue((out / 'prog.orig.py').is_file())
+            self.assertTrue((out / 'prog_run.py').is_file())
             self.assertTrue((out / 'prog.py').is_file())
 
     def test_container_calls_keep_the_gil(self):
