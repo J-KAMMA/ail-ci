@@ -1,3 +1,23 @@
+## 2026-11-07 -- fz239: constant shift beyond int64 is already refused by name (job-fz239-11080433)
+
+The daily fuzzer (seed 2076418519) reported `line 1: cpython='False -7 -147573952589676412912'
+ail='158'`: the seed prints `str((-9223372036854775807 << 4))` inside a `try`/`finally`, and at the
+fuzz run AIL stopped at the int64 boundary after the `finally` had printed `158`.  The difference
+does not reproduce on this tree.  `bash ~/tools/cmp.sh /tmp/probes/fz239.py $PWD` fails both builds
+at compile time with a named refusal (`p.ail:71:13: ... a constant integer expression overflows
+int64 ...`), and `lab/fuzz/run.py --start 2076418519 --count 1 --modes default,ir` classes both
+modes as `refused`.  The generator output for the seed is byte-identical to the reported program,
+so this is not a stale reproducer.  With the shift line replaced, the rest of the seed matches
+CPython on the forced-general and default builds (`g same stdout`, `d same stdout`).  No compiler
+change was made; the refusal is the correct int64 behaviour (`--exact-int` computes the big value
+and matches CPython).  Added `test_ail_fz239.py` (registered in `tests.d`) pinning the refusal
+(two wordings), in-range shifts/powers (including INT64_MIN), and the routed values that cannot be
+folded (argument, list item, attribute, dict value, argument through `try`/`finally`): they keep the
+declared int64 contract (exit 1, `integer overflow`, stdout a prefix of CPython's) and match
+CPython with `--exact-int`, on the default and `AIL_IR=1` builds.  Tests on this commit:
+`test_ail_fz239`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (4/4 pass);
+manifest `--check` clean.
+
 ## 2026-11-07 -- pyreach9 re-applied: typed-path census and next steps (job-rbpyreach9-11071805)
 
 Re-applied the accepted `job-pyreach9-11071621` change, fetched anonymously, on this tree.
