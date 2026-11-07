@@ -1529,21 +1529,23 @@ def _ail_re_test(p: list[int], s: str, mode: int) -> bool:
 
 
 def _ail_re_dop(p: list[int], s: str, mode: int, pos: int, endpos: int, hasend: int) -> _ail_re_Match | None:
-    m = len(s)
-    if pos < 0:
-        pos = 0
-    if pos > m:
-        pos = m
+    _ail_ln = len(s)
+    _ail_at = pos
+    if _ail_at < 0:
+        _ail_at = 0
+    if _ail_at > _ail_ln:
+        _ail_at = _ail_ln
     if hasend == 1:
-        if endpos < 0:
-            endpos = 0
-        if endpos < pos:
+        _ail_to = endpos
+        if _ail_to < 0:
+            _ail_to = 0
+        if _ail_to < _ail_at:
             if mode != 0:
                 return None
             raise ValueError("re: match() with endpos before pos is not built")
-        if endpos < m:
-            return _ail_re_dos(p, s[:endpos], mode, pos)
-    return _ail_re_dos(p, s, mode, pos)
+        if _ail_to < _ail_ln:
+            return _ail_re_dos(p, s[:_ail_to], mode, _ail_at)
+    return _ail_re_dos(p, s, mode, _ail_at)
 
 
 def _ail_re_dos(p: list[int], s: str, mode: int, pos: int) -> _ail_re_Match | None:
@@ -1903,6 +1905,7 @@ class Library:
         self.sub_keys = {}
         self.uses_escape = False
         self.uses_any = False        # a span()/group(a, b) tuple binds its receiver through _ail_re_any
+        self.uses_pos = False        # PATTERN.match(s, pos[, endpos]): _ail_re_dop / _ail_re_dos are added
 
     def pattern(self, pattern, flags, is_bytes=False):
         key = (pattern, flags, is_bytes)
@@ -2101,6 +2104,9 @@ def %(name)s(s: %(kind)s, repl, count: int) -> %(kind)s:
                 named.append('        if self.pid == %d and name == %r:\n            return %d' % (index, name, group))
         named.append('        if self.pid < 0:\n            return 0')
         shared, flavor, api = _blocks()
+        if not self.uses_pos:
+            api = '\n\n\n'.join(block for block in api.split('\n\n\n')
+                                if not block.startswith(('def _ail_re_dop(', 'def _ail_re_dos(')))
         api = api.replace('@NAMED@', '\n'.join(named))
         have_l = self.uses_escape or any(not p.is_bytes for p in self.programs)
         prefixes = [(index, program.literal_prefix()) for index, program in enumerate(self.programs)

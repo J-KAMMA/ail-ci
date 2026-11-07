@@ -58,23 +58,23 @@ def tokenize(s):
 
 for line in ["x + 12 == (y-3)", "a $ b", "", "   ", "q<1>2", "922337203685477580"]:
     print(tokenize(line))
-s = 'xx abc dé'
-print(WORD.match(s, 1) is None, WORD.match(s, 3).group(0), WORD.search(s, 4).group(0), WORD.search(s, 7).group(0))
+subj = 'xx abc dé'
+print(WORD.match(subj, 1) is None, WORD.match(subj, 3).group(0), WORD.search(subj, 4).group(0), WORD.search(subj, 7).group(0))
 print(START.match('ab', 1) is None, AFTER.match('ab', 1).span(), AFTER.search('xbab', 0).start())
 print(END.search('abcd', 0, 3).span(), END.search('abcd', 0) is None, END.match('abc', 2, 3).group(0))
 print(NODE.fullmatch('zz ab:12', 3).group(1), NODE.fullmatch('zz ab:12x', 3) is None, NODE.fullmatch('zz ab:12x', 3, 8).group(2))
 print(NODE.search('..ab:5', pos=1).group(0), NODE.match('ab:5x', endpos=4).group(0), NODE.match('ab:5', endpos=3) is None)
 print(NODE.match('ab:5', -4).end(), NODE.match('ab:5', 10) is None, EMPTY.match('abc', 10).span())
 print(EMPTY.search('abc', 2, 1) is None, NODE.fullmatch('abc', 2, 1) is None, EMPTY.match('abc', 3, 99).span())
-t = 'ñab:7'
-print(NODE.match(t, 1).group(0), NODE.search(t, 0).start(), NODE.search(t, 2).span(), NODE.search(t, 4) is None)
+txt = 'ñab:7'
+print(NODE.match(txt, 1).group(0), NODE.search(txt, 0).start(), NODE.search(txt, 2).span(), NODE.search(txt, 4) is None)
 if NODE.match('ab:1', 0):
     print('ok')
 if not NODE.match('ab:1', 1):
     print('no')
 print(BYTES.match(b'a12x', 1).group(1), BYTES.search(b'aa3x', 1).span(), BYTES.match(b'a12x', 1, 3) is None)
-m = OPT.match('a1b', 1)
-print(m.group(1), m.group(2) is None, m.span())
+found = OPT.match('a1b', 1)
+print(found.group(1), found.group(2) is None, found.span())
 '''
 
 ALIAS = r'''import re

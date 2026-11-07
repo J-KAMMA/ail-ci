@@ -2795,6 +2795,7 @@ class _Surface:
         sfx = 'B' if program.is_bytes else ''
         if name in _RE_MODES and ('pos' in given or 'endpos' in given):
             # PATTERN.match(s, pos, endpos): `^` / `\A` / lookbehind see the text before pos, endpos cuts the text
+            lib.uses_pos = True
             found = call('_ail_re_dop' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]),
                          given.get('pos', ast.Constant(value=0)), given.get('endpos', ast.Constant(value=0)),
                          ast.Constant(value=1 if 'endpos' in given else 0))
