@@ -1,4 +1,51 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I've finished the review. Summary of what I ran: diff read, 12 probes in `/tmp/rprobes/`, `cmp.sh` output checks, `--debug-dir` C comparison against `/tmp/base`, and `python3 ../tools/par_check.py -j 2 test_ail_agent_errors test_ail_safetynet` (both `ok`: 458s / 137s).
+
+**What the change really does:** adds a new 785-line `ail_agent_errors.py` that pattern-matches the 15 human messages, re-parses the user's source with `ast` to re-derive `line/col/cause` and a `fix.replace_range`/`with`, and attaches `agent_diagnostics` to `compile --json`, `compile --strict --json` and failed `compile` builds; `pyc.fallback_note` now delegates to the same table. The worker report itself is empty ("no final text"), so I checked the DEVLOG/DIFFERENCES claims.
+
+**Probes (all HEAD):**
+| probe | result |
+|---|---|
+| p4 no feature, `--debug-dir` | `program.c` byte-identical to base; notes identical on trigger 12 |
+| p5 two fallbacks, refusal p13, empty p12 | no crash; `message` byte-for-byte vs stderr (note and `AIL0000` error) |
+| p6 Fraction with a line between import and print | fix **changes output** |
+| p7 stdin with a line between save and call | fix **changes output** |
+| p1/p2 str `==`/`!=` where the str equals the literal | fix **changes output**; `!=` cause says "always False" |
+| p3/p9 `d.get(k)` key absent | fix **changes output** (`None` → `-1`) |
+
+**Defects**
+1. `AIL0111` fix deletes user lines. p6: `from fractions import Fraction` / `x = Fraction(1, 2)` / `print("side")` / `print(float(x))` → `replace_range [1,4]`, `with "print(1 / 2)"`; expected `side\n0.5\n`, actual `0.5\n`. `_loc_fraction` builds `with_text` only over the statement but spans from the import line.
+2. `AIL0101` fix deletes user lines. p7 (`stdin="hello\n"`): `import sys` / `read = ...readline` / `print("mid")` / `print(read()...)` → `[2,4]`, `with "print(sys.stdin.readline().strip())"`; expected `mid\nhello\n`, actual `hello\n`. Same range/text mismatch in `_loc_stdin_buffer`.
+3. `AIL0103` fix changes the branch. p1: `s = "1"; if s == 1: …` expected `not one\n`, actual `one\n`; p2 `if s != 1` expected `taken\n`, actual `not\n`. The cause for `!=` says "this comparison is always False" although it is always True.
+4. `AIL0104` fix changes the answer. p3: `d={"a":1}; k="b"; print(d.get(k))` expected `None\n`, actual `-1\n` (also p9, bool dict). A fix is published for every `.get(k)` even when the key may be missing, contradicting "With must … keep the program's output" (design rule 3) and `docs/CLI.md`.
+5. Minor: the empty file gets `AIL0000` with `line:null,col:null`; `docs/CLI.md` says an uncatalogued refusal "still carries … a position".
+
+**Claims checked:** stable codes/families, 14/15 edits remove the message (AIL0102 remains), `message` byte-for-byte, failed-build and strict JSON fields, `pyc.fallback_fields` reachable, `ail build … --json` pass-through, tests.d/manifest check: **verified**. "Applying the pair keeps the program's output": **false** (1–4). No program-output or C change for non-feature programs: verified.
+
+**Pre-existing:** none of the above; empty-file refusal text itself is pre-existing.
+
+**Unverified:** no speed/icount run (change touches only compile-time Python, not generated code); wider suite and the fix-rate harness not rerun; the 243-line locator claim not re-probed.
+
+VERDICT: FIX
+1. `AIL0111` edit range spans lines its `with` does not reproduce (p6: expected `side\n0.5\n`, actual `0.5\n`).
+2. `AIL0101` edit range spans lines its `with` does not reproduce (p7: expected `mid\nhello\n`, actual `hello\n`).
+3. `AIL0103` edit changes output and its cause is wrong for `!=` (p1 expected `not one\n`, actual `one\n`; p2 expected `taken\n`, actual `not\n`).
+4. `AIL0104` edit changes output when the key is missing (p3 expected `None\n`, actual `-1\n`).
+5. Minor: `AIL0000` on an empty file has `line/col` null despite `docs/CLI.md`.
+[commandcode stop=end_turn turns=43 out_tokens=34851]
+
+
+--- ORIGINAL TASK ---
 Lane: err
+Needs: err1
 
 # err2: `--json` diagnostic schema for compiler errors and fallback notes
 
