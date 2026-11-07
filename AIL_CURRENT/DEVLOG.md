@@ -1,3 +1,11 @@
+## 2026-11-07 -- spec1: first draft of the language specification (job-spec1-11071506)
+
+Added `docs/SPEC/`: `README.md`, `INVENTORY.md`, eight semantic chapters and `OPEN.md` (owner
+decisions). The docs state AIL's semantics as AIL's own, with CPython output as a compatibility
+mode and every divergence a named refusal or a declared difference; see
+`docs/SPEC/README.md`. Also added two sentences to the "What AIL is for" section of
+`docs/ROADMAP.md`. Docs only: no compiler or test change.
+
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
 Re-applied the accepted `job-fclist1-op1106` change (`8c2c99c1`..`FETCH_HEAD`, 3 commits) on this
