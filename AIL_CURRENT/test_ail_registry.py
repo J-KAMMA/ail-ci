@@ -201,6 +201,27 @@ class ThrowawayRepository(unittest.TestCase):
         self.assertEqual(pins[name][1], 's')
         self.assertIn(name, ail_manifest.load(self.src('.'))['sdk_files'])
 
+    def test_a_regenerated_module_imported_by_the_compiler_keeps_the_sdk_flag(self):
+        # ail_chatgpt.py imports ail_agent_errors by name; a merge that keeps the other side of its
+        # pin line left the module out of sdk_files and a fresh SDK died with ModuleNotFoundError.
+        self.src('ail_chatgpt.py').write_text('import newhelper\n', encoding='utf-8')
+        self.src('newhelper.py').write_text('# imported by the compiler\n', encoding='utf-8')
+        git(self.repo, 'add', '-A')
+        self.assertEqual(self.tool().returncode, 0)
+        pins = ail_manifest.read_pins(self.src('.'))
+        self.assertEqual(pins['newhelper.py'][1], 's')
+        shard = self.src('manifest.d') / ail_manifest.shard_name('newhelper.py')
+        shard.write_text(''.join(line for line in shard.read_text(encoding='utf-8').splitlines(True)
+                                 if 'newhelper.py' not in line), encoding='utf-8')
+        self.assertEqual(self.tool().returncode, 0)
+        pins = ail_manifest.read_pins(self.src('.'))
+        self.assertEqual(pins['newhelper.py'][1], 's')
+        self.assertIn('newhelper.py', ail_manifest.load(self.src('.'))['sdk_files'])
+        shard.write_text(shard.read_text(encoding='utf-8').replace(' s newhelper.py', ' - newhelper.py'),
+                         encoding='utf-8')
+        self.assertEqual(self.tool().returncode, 0)
+        self.assertEqual(ail_manifest.read_pins(self.src('.'))['newhelper.py'][1], 's')
+
     def make_branch(self, branch, source, new_test):
         git(self.repo, 'checkout', '-q', '-b', branch, 'integ')
         self.src(source).write_text('line 1\nline 2\nline 3\n' + branch + '\n', encoding='utf-8')

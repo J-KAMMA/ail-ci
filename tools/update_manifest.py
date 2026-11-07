@@ -10,8 +10,11 @@ Resolving a merge: take either side of any manifest.d conflict (or leave the mar
 this script without --check; it tolerates conflict markers in the shards and recomputes every pin from
 the files, so the result is the same whichever side was kept.  A new compiler source under
 python/pkg-v12 or stdlib is pinned with the s flag even when the kept side had no pin for it, so the
-wheel still selects it.  A legacy MANIFEST.json that still holds the sha256/files/sdk_files maps is
-converted to the shard layout on the first write.
+wheel still selects it.  A top-level module the compiler imports by name (ail_chatgpt.py's `import`
+lines) is pinned the same way: a merge that keeps the other side of its pin line once left
+ail_agent_errors.py out of sdk_files, and a fresh SDK died with ModuleNotFoundError at import time.
+A legacy MANIFEST.json that still holds the sha256/files/sdk_files maps is converted to the shard
+layout on the first write.
 """
 import hashlib, json, re, subprocess, sys
 from pathlib import Path
@@ -29,8 +32,22 @@ def sha(name):
     return hashlib.sha256((SRC / name).read_bytes()).hexdigest()
 
 
+def compiler_imports():
+    """Top-level modules ail_chatgpt.py imports by name: an exported SDK must carry them."""
+    try:
+        text = (SRC / "ail_chatgpt.py").read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    return {name + ".py" for name in re.findall(r"^(?:import|from)\s+([a-z][a-z0-9_]*)\b", text, re.M)}
+
+
+COMPILER_IMPORTS = compiler_imports()
+
+
 def sdk_source(name):
     """A compiler source that the wheel and an exported SDK must carry."""
+    if name in COMPILER_IMPORTS:
+        return True
     return (name.startswith(("python/pkg-v12/", "stdlib/")) and name.endswith((".py", ".h", ".c"))
             and "__pycache__" not in name.split("/"))
 
@@ -90,7 +107,7 @@ def main():
     must |= {n for n in names if n.startswith("tests.d/") and n.endswith(".txt")}
     must |= {n for n in names if n.endswith(".py") and (n.startswith("python/pkg-v12/") or n[:-3] in registered)}
     must |= {n for n in names if sdk_source(n)}
-    compiler = {n for n in names if is_compiler_source(n)}
+    compiler = {n for n in names if is_compiler_source(n)} | (names & COMPILER_IMPORTS)
     must |= compiler
     unpinned = sorted(n for n in must if n in names and not pins.get(n, ("",))[0])
     for name in unpinned:
