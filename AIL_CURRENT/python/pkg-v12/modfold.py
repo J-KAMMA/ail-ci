@@ -385,10 +385,17 @@ def _literal(v, seen, count):
     raise _Stop('kind')
 
 
-def _uses_ok(tree, name, value, run_ids):
-    """Whether every use of the folded name outside its own run only reads it (see the docstring)."""
+def _uses_ok(tree, name, value, run_ids, module_names):
+    """Whether every use of the folded name outside its own run only reads it (see the docstring).
+    `module_names` are the names the module binds (a builtin it rebinds is not the builtin)."""
     if _immutable(value) and not isinstance(value, frozenset):
         return True
+    if isinstance(value, dict):
+        contents = list(value.keys()) + list(value.values())
+    else:
+        contents = list(value)
+    if not all(_immutable(x) for x in contents):
+        return False        # `D[k].append(x)` would change a row the literal rules cannot see
     is_set = isinstance(value, (set, frozenset))
     for node, chain in _global_uses(tree, name):
         if any(id(c) in run_ids for c in chain):
@@ -403,7 +410,8 @@ def _uses_ok(tree, name, value, run_ids):
                 and isinstance(parent.ops[0], (ast.In, ast.NotIn)) and not is_set:
             continue        # `X in Y` reads X; only Y could be changed by it
         if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and node in parent.args \
-                and parent.func.id in (_SET_READ_FUNCS if is_set else _READ_FUNCS):
+                and parent.func.id in (_SET_READ_FUNCS if is_set else _READ_FUNCS) \
+                and parent.func.id not in module_names:
             continue
         if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
                 and parent.func.attr == 'translate' and parent.args == [node] and not is_set:
@@ -513,7 +521,8 @@ def _fold(source):
         tree = ast.parse(source)
     except SyntaxError:
         return source
-    if any(isinstance(n, ast.Name) and n.id in _DYNAMIC or isinstance(n, ast.Attribute) and n.attr == '__dict__'
+    if any(isinstance(n, ast.Name) and n.id in _DYNAMIC
+           or isinstance(n, ast.Attribute) and n.attr in ('__dict__', 'modules')
            for n in ast.walk(tree)):
         return source
     counts, globals_ = _module_bindings(tree)
@@ -621,7 +630,7 @@ def _try_fold(tree, source, run, name, ann, consts, counts, globals_, shadowed, 
                 {'__builtins__': {'frozenset': frozenset, 'set': set}})
     if type(back) is not type(value) or back != value:
         return None
-    if not _uses_ok(tree, name, value, run_ids):
+    if not _uses_ok(tree, name, value, run_ids, {k for k, v in counts.items() if v}):
         return None
     if ann is not None:
         head = '%s: %s = ' % (name, ast.get_source_segment(source, ann) or ast.unparse(ann))
