@@ -31447,6 +31447,212 @@ SOURCE['PARRED'] = PARRED
 REQUIRES['PARRED'] = ['PAR', 'PARN']
 
 
+# D3 (owner decision 2026-11-06): `out.append(v)` in a map-like parallel body. Each block appends into
+# its own buffer (the worker asks ail_par_buf_for(_lo) once per block), and after the region the buffers
+# are appended to `out` in block-start order -- equal to the sequential order because blocks are
+# contiguous. A block that traps keeps its partial buffer; the join stops after the failing block, so
+# `out` holds exactly what the sequential loop would. Kinds: 0 int64, 1 double, 2 ail_str (a view, moved
+# by a struct copy, no extra retain). A program with an append region carries PARBUF.
+PARBUF = r"""
+typedef struct { int64_t lo, n, cap; unsigned char *p; } ail_par_buf;
+AIL_LINK_STATE(ail_par_buf **, ail_pb_tab, = NULL);
+AIL_LINK_STATE(int64_t, ail_pb_n, = 0);
+AIL_LINK_STATE(int64_t, ail_pb_cap, = 0);
+AIL_LINK_STATE(pthread_mutex_t, ail_pb_mu, = PTHREAD_MUTEX_INITIALIZER);
+
+/* One buffer per block start. Individual buffers are malloc'd and never move; only the table of
+   pointers grows, under the mutex, so a worker's pointer stays valid. */
+static ail_par_buf *ail_par_buf_for(int64_t lo) {
+    pthread_mutex_lock(&ail_pb_mu);
+    for (int64_t i = 0; i < ail_pb_n; i++)
+        if (ail_pb_tab[i]->lo == lo) {
+            ail_par_buf *b = ail_pb_tab[i];
+            pthread_mutex_unlock(&ail_pb_mu);
+            return b;
+        }
+    if (ail_pb_n == ail_pb_cap) {
+        int64_t c = ail_pb_cap ? ail_pb_cap * 2 : 16;
+        ail_par_buf **q = (ail_par_buf **)realloc(ail_pb_tab, (size_t)c * sizeof *q);
+        if (!q) { pthread_mutex_unlock(&ail_pb_mu); ail_die("out of memory"); }
+        ail_pb_tab = q; ail_pb_cap = c;
+    }
+    ail_par_buf *b = (ail_par_buf *)malloc(sizeof *b);
+    if (!b) { pthread_mutex_unlock(&ail_pb_mu); ail_die("out of memory"); }
+    b->lo = lo; b->n = 0; b->cap = 0; b->p = NULL;
+    ail_pb_tab[ail_pb_n++] = b;
+    pthread_mutex_unlock(&ail_pb_mu);
+    return b;
+}
+static void ail_par_buf_grow(ail_par_buf *b, size_t sz) {
+    if (b->n < b->cap) return;
+    int64_t c = b->cap ? b->cap * 2 : 16;
+    if (sz && (uint64_t)c > (uint64_t)(SIZE_MAX / sz)) ail_die("allocation too large");
+    void *q = realloc(b->p, (size_t)c * sz);
+    if (!q) ail_die("out of memory");
+    b->p = (unsigned char *)q; b->cap = c;
+}
+static void ail_par_buf_push_i(ail_par_buf *b, int64_t v) {
+    ail_par_buf_grow(b, sizeof v);
+    memcpy(b->p + (size_t)b->n * sizeof v, &v, sizeof v);
+    b->n++;
+}
+static void ail_par_buf_push_f(ail_par_buf *b, double v) {
+    ail_par_buf_grow(b, sizeof v);
+    memcpy(b->p + (size_t)b->n * sizeof v, &v, sizeof v);
+    b->n++;
+}
+static void ail_par_buf_push_s(ail_par_buf *b, ail_str v) {
+    ail_par_buf_grow(b, sizeof v);
+    memcpy(b->p + (size_t)b->n * sizeof v, &v, sizeof v);
+    b->n++;
+}
+static int ail_pb_cmp(const void *a, const void *b) {
+    int64_t x = (*(ail_par_buf *const *)a)->lo, y = (*(ail_par_buf *const *)b)->lo;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+/* Append the records in block-start order, up to and including the block at fail_at (an exception:
+   every block before it, its partial buffer, and nothing after). */
+static void ail_par_buf_join(void *dst, int kind, int64_t fail_at) {
+    qsort(ail_pb_tab, (size_t)ail_pb_n, sizeof *ail_pb_tab, ail_pb_cmp);
+    for (int64_t i = 0; i < ail_pb_n; i++) {
+        ail_par_buf *b = ail_pb_tab[i];
+        if (fail_at != INT64_MAX && b->lo > fail_at) break;
+        for (int64_t j = 0; j < b->n; j++) {
+            if (kind == 0) ail_list_push((ail_list *)dst, ((int64_t *)b->p)[j]);
+            else if (kind == 1) ail_flist_push((ail_flist *)dst, ((double *)b->p)[j]);
+            else ail_slist_push((ail_slist *)dst, ((ail_str *)b->p)[j]);
+        }
+    }
+}
+static void ail_par_buf_reset(void) {
+    for (int64_t i = 0; i < ail_pb_n; i++) { free(ail_pb_tab[i]->p); free(ail_pb_tab[i]); }
+    ail_pb_n = 0;
+}
+/* Run the region exactly as ail_par_run does, but capture a failure instead of raising it at once, so
+   the buffers of the blocks that ran can be appended to `dst` first (the state the sequential loop
+   leaves after its exception). */
+static void ail_par_buf_run(ail_par_fn fn, void **args, int64_t lo, int64_t hi,
+                            ail_par_site *S, void *dst, int kind) {
+    int64_t fail_at = INT64_MAX;
+    int fcode = 0;
+    char fmsg[192];
+    fmsg[0] = 0;
+    ail_par_buf_reset();
+    if (hi <= lo) return;
+    int64_t n = hi - lo;
+    ail_par_ctx c;
+    ail_par_job J;
+    J.fn = fn; J.args = args; J.lo = lo; J.hi = hi; J.fail_block = INT64_MAX;
+    int sequential = (lo < 0 || n < 0 || n < 2 || ail_par_threads() <= 1 || ail_par_cur);
+    int64_t i = lo;
+    if (!sequential && n > 64) {
+        if (n <= S->light_n) {
+            int64_t t0 = ail_par_now();
+            ail_par_ctx *save = ail_par_cur;
+            ail_par_cur = &c;
+            int bad = ail_par_block(&c, &J, lo, hi);
+            ail_par_cur = save;
+            if (bad) { fail_at = lo; fcode = c.code; memcpy(fmsg, c.msg, sizeof fmsg); }
+            if (ail_par_now() - t0 > 2 * AIL_PAR_MIN_NS) S->light_n = n - 1;
+            goto done;
+        }
+        if (!S->heavy_n || n < S->heavy_n) {
+            int64_t t0 = ail_par_now(), step = 1;
+            for (;;) {
+                int64_t e = i + step;
+                if (e > hi || e < i) e = hi;
+                ail_par_ctx *save = ail_par_cur;
+                ail_par_cur = &c;
+                int bad = ail_par_block(&c, &J, i, e);
+                ail_par_cur = save;
+                if (bad) { fail_at = i; fcode = c.code; memcpy(fmsg, c.msg, sizeof fmsg); goto done; }
+                i = e;
+                if (i >= hi) { S->light_n = n; goto done; }
+                int64_t spent = ail_par_now() - t0;
+                if (spent >= AIL_PAR_PROBE_NS) {
+                    S->ns_per_iter = (double)spent / (double)(i - lo);
+                    if (S->ns_per_iter * (double)(hi - i) >= (double)AIL_PAR_MIN_NS) break;
+                }
+                step *= 2;
+            }
+            S->heavy_n = n;
+        }
+    }
+    if (sequential || hi - i < 2) {
+        ail_par_ctx *save = ail_par_cur;
+        ail_par_cur = &c;
+        int bad = ail_par_block(&c, &J, i, hi);
+        ail_par_cur = save;
+        if (bad) { fail_at = i; fcode = c.code; memcpy(fmsg, c.msg, sizeof fmsg); }
+        goto done;
+    }
+    {
+        int64_t mb = 0;
+        if (ail_par_guided()) {
+            mb = S->ns_per_iter > 0.0 ? (int64_t)((double)AIL_PAR_GUIDED_NS / S->ns_per_iter) : 1;
+            if (mb < 1) mb = 1;
+        }
+        ail_par_sched_min_block = mb;
+        int64_t m = hi - i;
+        int nt = ail_par_threads();
+        if (nt > m) nt = (int)m;
+        while (ail_par_pool < nt - 1) {
+            pthread_t t;
+            if (pthread_create(&t, NULL, ail_par_pool_main, (void *)(intptr_t)__atomic_load_n(&ail_par_gen, __ATOMIC_ACQUIRE))) break;
+            pthread_detach(t);
+            ail_par_pool++;
+        }
+        ail_par_job *Q = &ail_par_slot;
+        Q->fn = fn; Q->args = args; Q->lo = i; Q->hi = hi;
+        Q->block = m / ((int64_t)(ail_par_pool < nt - 1 ? ail_par_pool + 1 : nt) * 8);
+        if (Q->block < 1) Q->block = 1;
+        Q->nblocks = (m + Q->block - 1) / Q->block;
+        Q->n = m;
+        Q->threads = ail_par_pool < nt - 1 ? ail_par_pool + 1 : nt;
+        Q->min_block = ail_par_sched_min_block;
+        ail_par_sched_min_block = 0;
+        Q->next = 0; Q->fail_block = INT64_MAX; Q->abort = 0; Q->fail_code = 0; Q->fail_msg[0] = 0;
+        if (ail_par_pool == 0) { ail_par_work(Q); }
+        else {
+            __atomic_store_n(&ail_par_state, AIL_PAR_OPEN, __ATOMIC_RELEASE);
+            __atomic_add_fetch(&ail_par_gen, 1, __ATOMIC_RELEASE);
+            pthread_mutex_lock(&ail_par_mu);
+            if (ail_par_sleepers) pthread_cond_broadcast(&ail_par_go);
+            pthread_mutex_unlock(&ail_par_mu);
+            ail_par_work(Q);
+            __atomic_and_fetch(&ail_par_state, ~AIL_PAR_OPEN, __ATOMIC_ACQ_REL);
+            int64_t t0 = ail_par_now();
+            for (unsigned k = 1; __atomic_load_n(&ail_par_state, __ATOMIC_ACQUIRE); k++) {
+                AIL_PAR_RELAX();
+                if (!(k & 127) && ail_par_now() - t0 > AIL_PAR_SPIN_NS) break;
+            }
+            if (__atomic_load_n(&ail_par_state, __ATOMIC_ACQUIRE)) {
+                pthread_mutex_lock(&ail_par_mu);
+                while (__atomic_load_n(&ail_par_state, __ATOMIC_ACQUIRE)) pthread_cond_wait(&ail_par_done, &ail_par_mu);
+                pthread_mutex_unlock(&ail_par_mu);
+            }
+        }
+        if (Q->fail_block != INT64_MAX) {
+            fail_at = Q->lo + (Q->min_block > 0 ? Q->fail_block : Q->fail_block * Q->block);
+            fcode = Q->fail_code;
+            memcpy(fmsg, Q->fail_msg, sizeof fmsg);
+        }
+    }
+done:
+    ail_par_buf_join(dst, kind, fail_at);
+    if (fail_at != INT64_MAX) {
+        if (fmsg[0] && fcode)
+            ail_raise_value_adopt(ail_exception_new(fcode, (const uint8_t *)fmsg, (int64_t)strlen(fmsg), 1));
+        if (fmsg[0]) ail_die(fmsg);
+        ail_raise_named(fcode ? fcode : AIL_EXC_RUNTIME);
+    }
+}
+"""
+ORDER.insert(max(ORDER.index(x) for x in ('LIST', 'FLIST', 'SLIST')) + 1, 'PARBUF')
+SOURCE['PARBUF'] = PARBUF
+REQUIRES['PARBUF'] = ['PAR', 'LIST', 'FLIST', 'SLIST']
+
+
 # json.loads fast path (jsonlib.py lowers a typed json.loads to calls of these; the text is in jsonrt.py).
 # One part per declared type, so a program carries only the scanners it reaches.
 import os as _os

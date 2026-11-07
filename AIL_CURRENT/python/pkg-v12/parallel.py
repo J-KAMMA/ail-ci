@@ -66,6 +66,10 @@ class _Body:
         # D1/exact reductions (docs/design/PAR_REDUCE.md): `acc += e` on an int local that only these
         # statements touch.  v1 lowers them on the Python surface; the AIL surface keeps the refusal.
         self.reductions = {}
+        # D3 (2026-11-06): one list `out` defined before the loop whose only use in the body is
+        # `out.append(v)`; each block appends into its own buffer, joined in block order.
+        self.appends = []
+        self.appends_ok = True
         if os.environ.get('AIL_SURFACE') == 'python':
             nodes = list(ast.walk(ast.Module(body=loop.body, type_ignores=[])))
             aug = {}
@@ -160,6 +164,8 @@ class _Body:
         if isinstance(s, (ast.Break, ast.Continue, ast.Pass)):
             return defined
         if isinstance(s, ast.Expr):
+            if self._append(s.value, defined):
+                return defined
             raise self.refuse(s, 'a call or expression statement (print, append, a helper) is not allowed; '
                                  'the body may only compute values' + _HOW)
         if isinstance(s, ast.Return):
@@ -178,11 +184,39 @@ class _Body:
             return defined
         raise self.refuse(target, 'only a local name or a list/bytearray element can be assigned')
 
+    def _append(self, call, defined):
+        """Accept `out.append(v)` -- one list, defined before the loop, whose only body use is this.
+        Returns False for any other expression statement (so the caller refuses it as before)."""
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == 'append' and isinstance(call.func.value, ast.Name)
+                and len(call.args) == 1 and not call.keywords):
+            return False
+        name, value = call.func.value.id, call.args[0]
+        if not self.appends_ok:
+            return False
+        if name in self.stored:
+            raise self.refuse(call, '%r is assigned inside the body, so it cannot be appended to'
+                              % name)
+        if self.appends and name not in self.appends:
+            raise self.refuse(call, 'the body appends to two lists (%r and %r); one buffered list per '
+                              'parallel body is supported. Write instead: two loops, or append '
+                              'into %r only' % (self.appends[0], name, self.appends[0]))
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            pass                                    # a str element: the list of str shape
+        else:
+            self.expr(value, defined)
+        if name not in self.appends:
+            self.appends.append(name)
+        return True
+
     # -- expressions ------------------------------------------------------------------------
     def access(self, node, write, defined):
         base = node.value
         if not isinstance(base, ast.Name) or isinstance(node.slice, ast.Slice):
             raise self.refuse(node, 'only xs[index] on a plain name is allowed (no slices, fields or nested indexing)')
+        if base.id in self.appends:
+            raise self.refuse(node, '%r is appended to in the body, so it cannot be read there; its '
+                                     'only use must be `%s.append(v)`' % (base.id, base.id))
         if base.id in self.stored:
             raise self.refuse(node, '%r is assigned inside the body, so it cannot be indexed' % base.id)
         self.expr(node.slice, defined)
@@ -194,6 +228,9 @@ class _Body:
                 return
             raise self.refuse(e, 'only int, float and bool constants are allowed (no str, bytes or None)')
         if isinstance(e, ast.Name):
+            if e.id in self.appends:
+                raise self.refuse(e, '%r is appended to in the body, so its only use there must be '
+                                     '`%s.append(v)`' % (e.id, e.id))
             if e.id in self.stored and e.id not in defined:
                 raise self.refuse(e, '%r is read before the body assigns it. Each iteration starts with fresh '
                                      'locals, so a value carried between iterations (a running total, a '
@@ -338,6 +375,7 @@ class _Callee(_Body):
                        orelse=[])
         super().__init__(loop, funcs, Unsupported)
         self.reductions = {}       # a callee's `x += e` is ordinary local arithmetic, not a reduction
+        self.appends_ok = False    # a callee gets no containers, so it cannot append
         self.fn, self.stack = fn, stack
         self.stored = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
         self.stored -= {a.arg for a in fn.args.args}
@@ -441,6 +479,9 @@ def _make(node, funcs, counter, U):
         raise _refuse(U, node, 'the loop needs a single loop variable and no else branch')
     body = _Body(node, funcs, U)
     body.block(node.body, {body.var})
+    if body.reductions and body.appends:
+        raise _refuse(U, node, 'the body both reduces (`acc += e`) and appends to a list; a chunk '
+                               'that is re-run would append twice. Write instead: two loops')
     if body.reductions and body.writes:
         acc, base = sorted(body.reductions)[0], sorted(body.writes)[0]
         raise _refuse(U, node, '%r is a reduction (`%s += e`), and the body also writes '
@@ -460,7 +501,7 @@ def _make(node, funcs, counter, U):
                          args=[ast.Name(id=lo_name, ctx=ast.Load()), ast.Name(id=hi_name, ctx=ast.Load())],
                          keywords=[])
     node.par = {'k': k, 'private': private, 'lo': lo_name, 'hi': hi_name, 'callees': sorted(body.callees),
-                'writes': sorted(body.writes),
+                'writes': sorted(body.writes), 'appends': list(body.appends),
                 'reductions': [(n, body.reductions[n]) for n in sorted(body.reductions)]}
     pre = [ast.Assign(targets=[ast.Name(id=lo_name, ctx=ast.Store())], value=lo),
            ast.Assign(targets=[ast.Name(id=hi_name, ctx=ast.Store())], value=hi)]
