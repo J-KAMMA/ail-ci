@@ -1,3 +1,28 @@
+## 2026-11-07 -- hybrid cpyhyb2b landed: 40/40 CPython match, 1 function native (job-cpyhyb2d-11080311)
+
+Re-applied the finished `job-cpyhyb2b-11040506` work (commit `aeac2bb9e`, "agent work") on this tree with a
+cherry-pick; conflicts were resolved in favour of `integ` (and the job infrastructure kept), so
+`ail_chatgpt.py`/`program.c` are untouched and `ail build --cpython` keeps writing `ail.cpython_hybrid/2`.
+No compiler change: `lab/hybrid/check.py` still builds 40/40 programs (10 compare-lab + 30 corpus) to stdout,
+exit status and last-stderr equality against `python3 SOURCE`; 1 function (`reverse_words` in `t079.py`) goes
+native and the 7 other candidates stay in Python under `_select`/`_unsafe_body`.  `test_ail_cpython_hybrid`
+passes 7/7, and the manifest was regenerated (`--check` passes).
+
+## 2026-11-03 -- hybrid cpyhyb2b: 40 programs match CPython, program.c unchanged
+
+Finished the hybrid job from `66200052` without touching `ail_chatgpt.py` (restored to `integ`), so the
+`--hybrid` CLI rename is dropped and `ail build --cpython SOURCE -o DIR` stays the documented path.  The
+hybrid build now writes `ail.cpython_hybrid/2` and a `<stem>_run.py` beside the unchanged source, and
+`python3 AIL_CURRENT/ail_cpython_hybrid.py SOURCE [-o DIR]` is a standalone entry (default output
+`SOURCE.parent/<stem>_hybrid`) that prints `built DIR: N function(s) accelerated` and the run file.
+
+`lab/hybrid/check.py` builds each program into a fresh directory and compares stdout, exit status and the
+last stderr line against `python3 SOURCE`: the 10 compare-lab tasks on their performance input and the first
+30 corpus programs, 40/40 match.  One function (`reverse_words` in `t079.py`) was
+accelerated; the other candidates stay in Python under the existing `_select`/`_unsafe_body` safety filters,
+listed with their reasons in `lab/hybrid/RESULTS.md`.  `lab/hybrid/measure.py` records wall time and the
+`program.c` comparison; see RESULTS.md for the numbers and the standalone out-of-memory note.
+
 ## 2026-11-07 -- pyreach9 re-applied: typed-path census and next steps (job-rbpyreach9-11071805)
 
 Re-applied the accepted `job-pyreach9-11071621` change, fetched anonymously, on this tree.
