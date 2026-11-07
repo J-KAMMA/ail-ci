@@ -6307,12 +6307,15 @@ class Compiler(boxclosure.ClosureMixin):
             return None
 
         def type_call(n):
-            return (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'type'
-                    and len(n.args) == 1 and not n.keywords and not isinstance(n.args[0], ast.Starred))
+            # type(x), or x.__class__ (the same class object for every value this path builds)
+            return ((isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'type'
+                     and len(n.args) == 1 and not n.keywords and not isinstance(n.args[0], ast.Starred))
+                    or (isinstance(n, ast.Attribute) and n.attr == '__class__' and isinstance(n.ctx, ast.Load)))
 
         def name_of(n):
             if type_call(n):
-                return ast.Attribute(value=ast.Attribute(value=n.args[0], attr='__class__', ctx=ast.Load()),
+                return ast.Attribute(value=ast.Attribute(value=n.args[0] if isinstance(n, ast.Call) else n.value,
+                                                         attr='__class__', ctx=ast.Load()),
                                      attr='__ail_ident__' if classname.active() else '__name__', ctx=ast.Load())
             if isinstance(n, ast.Name) and (n.id in self._TYPE_NAMES and n.id not in self.functions
                                             and n.id not in self.classes and n.id not in self.module_names
