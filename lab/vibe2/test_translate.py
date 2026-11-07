@@ -181,6 +181,27 @@ write_bytes(raw[0:2])
         self.assertTrue(written)
         self.assertEqual(map_line(tr['line_map'], written[0]), 2)
 
+    def test_div_ceil_signs(self):
+        self.check('''\
+let a: int = div_ceil(5, -2)
+let b: int = div_ceil(-5, 2)
+let c: int = div_ceil(-5, -2)
+let d: int = div_ceil(5, 2)
+write(str(a) + " " + str(b) + " " + str(c) + " " + str(d) + "\\n")
+''', '-2 -2 3 3\n')
+
+    def test_let_reassigned_after_fn(self):
+        with self.assertRaises(TranslateError) as cm:
+            translate('''\
+let g: int = 1
+fn f() -> int:
+  return g
+g = 2
+write(str(f() + g) + "\\n")
+''')
+        self.assertIn('let binding', cm.exception.message)
+        self.assertNotIn('declare the binding', cm.exception.message)
+
     def test_surface_errors(self):
         for src, needle in [
             ('x = 1\n', 'let'),
@@ -189,12 +210,23 @@ write_bytes(raw[0:2])
             ('import os\n', 'not in the surface'),
             ('class C:\n  pass\n', 'not in the surface'),
             ('let x: Optional[int] = 1\n', 'not in the surface'),
+            ('let s: str = rf"x{1}"\n', 'f-strings'),
+            ('let s: str = fr"x{1}"\n', 'f-strings'),
+            ('let s: str = Rf"x"\n', 'f-strings'),
+            ('fn outer() -> int:\n  fn inner() -> int:\n    return 1\n  return inner()\n',
+             'nested function'),
+            ('match 3:\n  case 0:\n    write("a")\n', 'not exhaustive'),
+            ('match 3:\n  case 0:\n    write("a")\n  case 0:\n    write("b")\n  case _:\n    write("c")\n',
+             'duplicate'),
+            ('match Ok(1):\n  case Ok(v):\n    write(str(v))\n  case Ok(w):\n    write(str(w))\n',
+             'duplicate'),
             ('for a, b in [(1, 2)]:\n  write(str(a))\n', 'for target'),
             ('match x:\n  case 1:\n    write("a")\n  case _:\n    write("b")\n  case 2:\n    write("c")\n',
              'case after'),
         ]:
-            with self.assertRaises(TranslateError, msg=src):
+            with self.assertRaises(TranslateError, msg=src) as cm:
                 translate(src)
+            self.assertIn(needle, cm.exception.message, msg=src)
 
     @unittest.skipIf('--quick' in sys.argv, 'AIL build skipped')
     def test_ail_builds_and_agrees(self):
@@ -217,6 +249,7 @@ for x: int in [0, 2, 5]:
       write(e + " ")
   total = total + x
 write(str(total) + "\\n")
+write(str(div_ceil(5, -2)) + " " + str(div_ceil(-5, 2)) + "\\n")
 '''
         tr = translate(src)
         with tempfile.TemporaryDirectory() as d:

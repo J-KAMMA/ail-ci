@@ -8,6 +8,7 @@ become `(True, x)`/`(False, e)`. `translate(source)` returns `{'code', 'line_map
 message about the generated Python can be shown with the AI's line. A construct outside the
 surface raises `TranslateError(line, message)`.
 """
+import ast
 import re
 
 PRELUDE = '''\
@@ -15,7 +16,7 @@ import sys
 import math
 
 def __div_ceil(a: int, b: int) -> int:
-    return (a + b - 1) // b
+    return -((-a) // b)
 
 def __sqrt(x: float) -> float:
     return math.sqrt(x)
@@ -66,6 +67,30 @@ def _skip_string(text, i):
             return j + 1
         j += 1
     raise TranslateError(0, 'unclosed string literal')
+
+FSTRING_PREFIX = ('f', 'rf', 'fr')
+
+def _has_fstring(text):
+    """True when a string literal carries an f prefix (`f`, `rf` or `fr`, any case)."""
+    i = 0
+    while i < len(text):
+        if text[i] in '"\'':
+            k = i
+            while k > 0 and text[k - 1].isalpha():
+                k -= 1
+            if text[k:i].lower() in FSTRING_PREFIX:
+                return True
+            i = _skip_string(text, i)
+        else:
+            i += 1
+    return False
+
+def _literal_key(pattern):
+    """A canonical key for a match literal, so `0`/`-0` and `"a"`/`'a'` collide."""
+    try:
+        return repr(ast.literal_eval(pattern))
+    except (ValueError, SyntaxError):
+        return pattern
 
 def _split_args(text):
     """Split call arguments at top-level commas, ignoring strings and brackets."""
@@ -168,7 +193,7 @@ def _rewrite_calls(text, line):
     return ''.join(out)
 
 def rewrite_expr(text, line):
-    if re.search(r'(?<![A-Za-z0-9_])f["\']', text):
+    if _has_fstring(text):
         raise TranslateError(line, 'not in the surface: f-strings; use str() and +')
     plain = ''.join(c if not s else ' ' for c, s in _split_strings(text))
     for pat, what in ((FORBIDDEN, '%s(...); use the operations in NEW_SURFACE.md'),
@@ -251,7 +276,21 @@ def _split_params(params, line):
 def translate(source):
     src_lines = source.splitlines()
     out = [(text, 0) for text in PRELUDE]
-    contexts, counter, immutable, declared = [], [0], set(), set()
+    contexts, counter = [], [0]
+    top = {'declared': set(), 'immutable': set()}
+    active = [top]
+
+    def lookup(name):
+        for frame in reversed(active):
+            if name in frame['declared']:
+                return frame
+        return None
+
+    def close_match(ctx):
+        if ctx.get('closed') or (ctx.get('has_ok') and ctx.get('has_err')):
+            return
+        raise TranslateError(ctx['line'], 'match is not exhaustive; add a final `case _:` arm '
+                             '(or one Ok and one Err arm for a Result)')
 
     def emit(text, ai_line, at=None):
         for piece in text.split('\n'):
@@ -269,12 +308,15 @@ def translate(source):
             raise TranslateError(no, 'indent must be a multiple of two spaces')
         pad = ' ' * indent
         while contexts and indent <= contexts[-1]['base']:
-            contexts.pop()
+            close_match(contexts.pop())
+        if indent == 0:
+            del active[1:]          # a top-level statement ends any function scope
 
         m = re.match(r'^match\s+(.+?):$', stripped)
         if m:
             counter[0] += 1
-            ctx = {'base': indent, 'temp': '__m%d' % counter[0], 'first': True, 'case': None}
+            ctx = {'base': indent, 'temp': '__m%d' % counter[0], 'first': True, 'case': None,
+                   'closed': False, 'line': no, 'arms': set(), 'has_ok': False, 'has_err': False}
             emit('%sif True:\n%s  %s = %s' % (pad, pad, ctx['temp'], rewrite_expr(m.group(1), no)), no)
             contexts.append(ctx)
             continue
@@ -290,6 +332,19 @@ def translate(source):
                 raise TranslateError(no, 'case must be indented two spaces under match')
             pat, bind, kw = m.group(1).strip(), None, 'if' if ctx['first'] else 'elif'
             if pat == '_':
+                key = ('default',)
+            elif LITERAL.match(pat):
+                key = ('literal', _literal_key(pat))
+            else:
+                cm = re.match(r'^(Ok|Err)\(\s*([A-Za-z_]\w*)\s*\)$', pat)
+                if not cm:
+                    raise TranslateError(no, 'unsupported match pattern %r; use a literal, Ok(v), '
+                                         'Err(e) or _' % pat)
+                key = ('ok' if cm.group(1) == 'Ok' else 'err',)
+            if key in ctx['arms']:
+                raise TranslateError(no, 'duplicate case arm %r; each pattern may appear once' % pat)
+            ctx['arms'].add(key)
+            if pat == '_':
                 if ctx['first']:
                     raise TranslateError(no, 'case _ must be last')
                 emit(pad + 'else:', no)
@@ -298,11 +353,11 @@ def translate(source):
                 emit('%s%s %s == %s:' % (pad, kw, ctx['temp'], pat), no)
                 ctx['first'] = False
             else:
-                cm = re.match(r'^(Ok|Err)\(\s*([A-Za-z_]\w*)\s*\)$', pat)
-                if not cm:
-                    raise TranslateError(no, 'unsupported match pattern %r; use a literal, Ok(v), '
-                                         'Err(e) or _' % pat)
                 val = 'True' if cm.group(1) == 'Ok' else 'False'
+                if val == 'True':
+                    ctx['has_ok'] = True
+                else:
+                    ctx['has_err'] = True
                 emit('%s%s %s[0] == %s:' % (pad, kw, ctx['temp'], val), no)
                 ctx['first'] = False
                 bind = cm.group(2)
@@ -312,10 +367,10 @@ def translate(source):
 
         m = re.match(r'^fn\s+([A-Za-z_]\w*)\s*\((.*)\)\s*->\s*(.+?):$', stripped)
         if m:
-            immutable.clear()
-            declared.clear()
+            if indent != 0:
+                raise TranslateError(no, 'not in the surface: nested function; define it at top level')
             params, names = _split_params(m.group(2), no)
-            declared.update(names)
+            active.append({'declared': set(names), 'immutable': set()})
             emit('%sdef %s(%s) -> %s:' % (pad, m.group(1), params,
                                           rewrite_type(m.group(3).strip(), no)), no)
             continue
@@ -329,9 +384,9 @@ def translate(source):
                 raise TranslateError(no, 'a binding needs an initializer')
             emit('%s%s: %s = %s' % (pad, name, rewrite_type(typ.strip(), no),
                                     rewrite_expr(expr, no)), no)
-            declared.add(name)
+            active[-1]['declared'].add(name)
             if kind == 'let':
-                immutable.add(name)
+                active[-1]['immutable'].add(name)
             continue
         if re.match(r'^(let|var)\b', stripped):
             raise TranslateError(no, 'bindings are written `let name: Type = expr` or '
@@ -340,10 +395,11 @@ def translate(source):
         m = re.match(r'^([A-Za-z_]\w*)\s*=\s*(.*)$', stripped)
         if m:
             name = m.group(1)
-            if name not in declared:
+            frame = lookup(name)
+            if frame is None:
                 raise TranslateError(no, 'declare the binding first with `let %s: Type = ...` or '
                                      '`var %s: Type = ...`' % (name, name))
-            if name in immutable:
+            if name in frame['immutable']:
                 raise TranslateError(no, '%r is a let binding and cannot be reassigned; declare it '
                                      'with var' % name)
             emit('%s%s = %s' % (pad, name, rewrite_expr(m.group(2), no)), no)
@@ -351,7 +407,7 @@ def translate(source):
 
         m = re.match(r'^for\s+([A-Za-z_]\w*)\s*:\s*(.+?)\s+in\s+(.+):$', stripped)
         if m:
-            declared.add(m.group(1))
+            active[-1]['declared'].add(m.group(1))
             emit('%sfor %s in %s:' % (pad, m.group(1), rewrite_expr(m.group(3), no)), no)
             continue
         if re.match(r'^for\s', stripped):
@@ -379,6 +435,8 @@ def translate(source):
             raise TranslateError(no, 'not in the surface: augmented assignment; write `x = x + 1`')
         emit(pad + rewrite_expr(stripped, no), no)          # bare expression / call
 
+    while contexts:
+        close_match(contexts.pop())
     code = '\n'.join(text for text, _ in out) + '\n'
     return {'code': code, 'line_map': [ai for _, ai in out]}
 

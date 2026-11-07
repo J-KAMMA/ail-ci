@@ -454,16 +454,21 @@ def failure_feedback(case, actual):
 
 
 def compiler_messages(stderr):
-    """Normalized compiler error/note lines from a build's stderr."""
+    """Normalized compiler error/note lines from a build's stderr.
+
+    The compiler writes informational diagnostics as `note:` lines (often "built on the general
+    path ..."); those stay notes even when their text contains words like "unsupported" or
+    "refuses". Only a real diagnostic marker makes a line an error.
+    """
     msgs = []
     for line in (stderr or '').splitlines():
         s = line.strip()
         if not s:
             continue
-        if re.search(r'not in the subset|error:|Error|refus|out of range|unsupported', s):
-            msgs.append(('error', norm_message(s)))
-        elif s.startswith('note:') or 'general path' in s:
+        if s.startswith('note:') or 'built on the general path' in s:
             msgs.append(('note', norm_message(s)))
+        elif re.search(r'not in the subset|error:|^error\b', s, re.I):
+            msgs.append(('error', norm_message(s)))
     return msgs
 
 
@@ -491,7 +496,7 @@ def ail_error_table(records):
     rows = sorted(counts.values(), key=lambda r: (-r['occurrences'], r['message']))
     for r in rows:
         r['fixed_rate'] = round(r['fixed_next'] / r['occurrences'], 3) if r['occurrences'] else 0.0
-    return rows[:10]
+    return rows
 
 
 # --------------------------------------------------------------------------------------------
@@ -635,6 +640,7 @@ class Store:
     def __init__(self, path, meta):
         self.path, self.meta, self.lock = path, meta, threading.Lock()
         self.rows = {}
+        self.prev_scheduled = 0
         if path.is_file():
             try:
                 old = json.loads(path.read_text())
@@ -642,9 +648,13 @@ class Store:
                 for r in old.get('results', []):
                     self.rows[(r['task'], r['lang'], r['seed'],
                                r.get('model') or old_meta.get('model'))] = r
-                for k in ('started', 'harness'):
-                    if k in old_meta and k not in self.meta:
-                        self.meta[k] = old_meta[k]
+                # `started` is the first run that wrote this file; a resumed run must not reset it.
+                if 'started' in old_meta:
+                    self.meta['started'] = old_meta['started']
+                if 'harness' in old_meta and 'harness' not in self.meta:
+                    self.meta['harness'] = old_meta['harness']
+                self.prev_scheduled = max(int(old_meta.get('scheduled_attempts') or 0),
+                                          len(self.rows))
             except (OSError, ValueError):
                 pass
 
@@ -861,8 +871,8 @@ def main():
     store.meta['stopped_early'] = bool(fatal) or stopped[0]
     if fatal:
         store.meta['fatal'] = fatal
-    store.meta['completed_attempts'] = done
-    store.meta['scheduled_attempts'] = len(combos)
+    store.meta['completed_attempts'] = len(store.rows)
+    store.meta['scheduled_attempts'] = store.prev_scheduled + len(combos)
     store.write()
     s = summarize(list(store.rows.values()))
     print(json.dumps(s, indent=1))
