@@ -52,6 +52,25 @@ last stderr line against `python3 SOURCE`: the 10 compare-lab tasks on their per
 accelerated; the other candidates stay in Python under the existing `_select`/`_unsafe_body` safety filters,
 listed with their reasons in `lab/hybrid/RESULTS.md`.  `lab/hybrid/measure.py` records wall time and the
 `program.c` comparison; see RESULTS.md for the numbers and the standalone out-of-memory note.
+## 2026-11-07 -- fz239: constant shift beyond int64 is already refused by name (job-fz239-11080433)
+
+The daily fuzzer (seed 2076418519) reported `line 1: cpython='False -7 -147573952589676412912'
+ail='158'`: the seed prints `str((-9223372036854775807 << 4))` inside a `try`/`finally`, and at the
+fuzz run AIL stopped at the int64 boundary after the `finally` had printed `158`.  The difference
+does not reproduce on this tree.  `bash ~/tools/cmp.sh /tmp/probes/fz239.py $PWD` fails both builds
+at compile time with a named refusal (`p.ail:71:13: ... a constant integer expression overflows
+int64 ...`), and `lab/fuzz/run.py --start 2076418519 --count 1 --modes default,ir` classes both
+modes as `refused`.  The generator output for the seed is byte-identical to the reported program,
+so this is not a stale reproducer.  With the shift line replaced, the rest of the seed matches
+CPython on the forced-general and default builds (`g same stdout`, `d same stdout`).  No compiler
+change was made; the refusal is the correct int64 behaviour (`--exact-int` computes the big value
+and matches CPython).  Added `test_ail_fz239.py` (registered in `tests.d`) pinning the refusal
+(two wordings), in-range shifts/powers (including INT64_MIN), and the routed values that cannot be
+folded (argument, list item, attribute, dict value, argument through `try`/`finally`): they keep the
+declared int64 contract (exit 1, `integer overflow`, stdout a prefix of CPython's) and match
+CPython with `--exact-int`, on the default and `AIL_IR=1` builds.  Tests on this commit:
+`test_ail_fz239`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (4/4 pass);
+manifest `--check` clean.
 
 ## 2026-11-07 -- pyreach9 re-applied: typed-path census and next steps (job-rbpyreach9-11071805)
 
@@ -345,6 +364,114 @@ translator error is fed back as a surface error (the synthetic stderr is a `str`
 per model, so one results file holds several models. Run: 5 arms x 11 tasks x 1 model
 (`deepseek-v4.1-flash`) x 1 seed; `reflection/beam:free` was confirmed callable but not run (budget
 cut, stated in `RESULTS.md`). No compiler change.
+## 2026-11-07 -- err2 suite fix 2: the manifest repair keeps a compiler-imported module in sdk_files (job-err2-11080418)
+
+`test_ail_packaging` and `test_ail_sdk_environment` failed on the integration branch although they
+pass on this tree: the `manifest.d` line that pins `ail_agent_errors.py` with the `s` flag had been
+lost on the merged side, so `ail_manifest.load()` left the module out of `sdk_files`, `export_sdk()`
+and the wheel omitted it, and every fresh-SDK run died at `ail_chatgpt.py`'s import with
+`ModuleNotFoundError: No module named 'ail_agent_errors'` (reproduced on a scratch merge of integ plus
+this change: `test_ail_sdk_environment` failed in 0.7 s with that traceback). `tools/update_manifest.py`
+could not heal it, because its "must be an SDK source" rule knew only `python/pkg-v12/` and `stdlib/`.
+
+`tools/update_manifest.py` now scans the top-level module names `ail_chatgpt.py` imports (`import X` /
+`from X import`) and treats a tracked `AIL_CURRENT/X.py` as an SDK source: an unpinned one is pinned
+with `s`, and a pin that lost its `s` flag gets it back on the next run, so the integration repair step
+heals the loss whichever side a shard conflict kept. On a tree without `ail_chatgpt.py` (the throwaway
+repositories the manifest tests build) the scan is empty. `test_ail_registry` gains
+`test_a_regenerated_module_imported_by_the_compiler_keeps_the_sdk_flag`: it adds an imported module,
+then removes its pin line and demotes the flag to `-`; both `update_manifest.py` runs restore `s` and
+the name in `sdk_files`.
+
+Probes: the manifest before/after (line removed -> `pinned ail_agent_errors.py`; flag `-` ->
+`selected ail_agent_errors.py`), `update_manifest.py --check` rc 0 here, and on the scratch merge
+`test_ail_sdk_environment` went from 1 failure (0.7 s, `ModuleNotFoundError`) to passing, with
+`test_ail_packaging` 22/22 OK in the same run. No compiler, runtime or generated-C change:
+`bash ~/tools/cmp.sh` p1_plain / p2_strnum (AIL0103 shape) / p3_fraction (AIL0111 shape) match CPython
+stdout and exit status on both the general and default builds. Tests on the final commit, `-j 2` via
+`tools/par_check.py`: `test_ail_registry`, `test_ail_manifest_compiler`, `test_ail_packaging`,
+`test_ail_sdk_environment`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_agent_errors` -- 8/8 modules, 0 failed (510 s).
+
+## 2026-11-07 -- err2 fix-up 4: a published edit replaces the whole span of the node it rewrites (job-err2-11072315)
+
+Review 3 found that `AIL0101`'s edit was keyed to `statement.lineno` while the columns belonged to
+`statement.value.args[0]`, so a multi-line `print(` produced a corrupt `with`
+(`prinsys.stdin.readline()...`, `print(...strip()\n      .decode().strip())`) and the fixed program
+did not build.  The replacement now goes through a new `_span_rows` helper that replaces the whole
+source span of the node (`args[0]`, `float(...)`) as one row: the text before it on its first line
+and after it on its last line are kept.  `AIL0111` had the same defect for a `float(` split across
+lines (`print((1 / 2)float(\n    x))`, `unmatched ')'`); it uses the same helper.  Both now publish
+an edit that builds and prints CPython's output: `print(\n    read()...` -> `print(\n    sys.stdin.readline().strip())`,
+`print(read()\n      .decode()...)` -> `print(sys.stdin.readline().strip())`,
+`print(float(\n    x))` -> `print((1 / 2))`.  Five such shapes are regression tests in
+`test_split_call_shapes_keep_the_output`.  Probes: m1/m2 (the reviewer's), n1..n8, s1..s5, t1..t3,
+f1..f3 — 20 programs, each either an edit whose build matches CPython stdout byte for byte with the
+note gone, or no edit at all.
+
+## 2026-11-07 -- err2 fix-up 3: every published edit removes its note and keeps the output (job-err2-11072002)
+
+Review 2 found three more published edits that did not hold.  `AIL0103` applied the constant
+replacement with the original AST columns after a literal replacement had shortened the line, so two
+comparisons on one line corrupted the source (`print(s == 1, s == 1)` became `print(False, sFalse`);
+both kinds of edit now go through `_apply`, which sorts right-to-left, and every offending
+comparison is edited (the note is emitted once per source shape, so editing only the first operand's
+shape left a second note behind).  `AIL0111` dropped only `assignment.lineno` from a range that
+spanned the whole multi-line `Fraction(...)` assignment; it now drops every line the assignment
+occupies (and both the import and the assignment must be lines of their own, never a `;`-compound
+line), and the `1 / 2` replacement is parenthesised so `2 / float(x)` keeps CPython's `4.0`.
+`AIL0101` dropped only the chosen saved-method line, leaving a second `sys.stdin.buffer.readline`
+assignment that still triggers the note; it now also drops other saved-method names written on their
+own top-level line and used nowhere else, and publishes no edit when the saved line is compound,
+nested, or still used.  Probes: 22 boundary programs in `/tmp/probes/check.py` pass (build, output
+equals CPython, note gone); the reviewer's p1/p2/p3/p6/p7 and q1..q18 match CPython or get no edit.
+
+## 2026-11-07 -- err2 fix-up 2: no edit that changes the program's output (job-err2-11072002)
+
+The reviewer's five defects are fixed, and the same class of defect behind #1-#4 is closed rather
+than patched case by case.  `AIL0111` and `AIL0101` built `with_text` from the statement alone but
+spanned from the import: the range now starts at the import / saved-method line and `with` keeps
+every line the user wrote between it and the call byte for byte (p6 `side\n0.5\n`, p7
+`mid\nhello\n`, both matching CPython).  `AIL0103` wrote `s == "1"`, which flips the branch when the
+str *is* `"1"`: it now writes the number as a string only when the str provably differs from that
+text, and otherwise replaces the always-`False`/always-`True` comparison with the constant, and its
+cause says "always True" for `!=`.  `AIL0104` published `d.get(k, -1)` for every `.get(k)`, turning a
+real `None` into `-1`: the edit is published only when the key is provably in a dict literal that
+nothing else writes (`d["b"] = 5` disqualifies it), so an absent key keeps its `None` and gets no
+edit.  The same gate covers `input()`-derived strings, which the hard-coded trigger block used to
+"fix" into a different branch.  An empty file's `AIL0000` now carries `line:1,col:1`, as
+`docs/CLI.md` promises.  The table's literal `replace`/`with` pair is still used for the other
+families when the whole block occurs verbatim, but a locator that decides no edit is safe sets
+`no_fallback`, so a computed range can never come from the trigger program.
+
+## 2026-11-07 -- err2 fix-up: positions and edits read from the user's source (job-err2-11071812)
+
+The reviewer's defects are fixed. `ail_agent_errors.py` now locates each family in the user's AST
+instead of searching for one hard-coded trigger block: the position is the construct the note is
+about (`AIL0111`/`AIL0112` are moved off the prelude line even when that line number falls inside a
+long user file), and the edit is rebuilt from the user's names. Verified on the reviewer's probes:
+renamed `Fraction` (line 3), shifted `Decimal` (line 4), a 243-line file (line 243, range 241-243),
+renamed class comprehension (line 6), a number return in the *second* function (line 8, output
+unchanged), a renamed `.get` receiver (fix present), and two identical comparisons (one range fixes
+both). The `cause` text no longer names `_ail_*` or a file length. A failed build now carries
+`agent_diagnostics` with `severity:"error"` (uncatalogued refusals use `AIL0000`), and
+`--strict --json` adds the same field to `ail.strict/1`. `pyc.fallback_fields` is called by
+`fallback_note`, so the compiler-side helper is no longer dead. `docs/CLI.md` no longer claims
+`ail build --json` without a source; `ail build prog.py --json` was run through the wrapper.
+`test_ail_agent_errors.py` adds the six variant shapes, the async refusal and strict JSON.
+
+## 2026-11-07 -- err2: `--json` agent diagnostics for compiler errors and fallback notes (job-err2-11071812)
+
+`compile --json` keeps the `ail.build/1` report and adds `agent_diagnostics`: one object per known
+diagnostic family with stable `code` (`AIL0101`..`AIL0116`), `severity`, `file`, `line`, `col`, a
+one-sentence `cause` in the user's names, the human `message` byte for byte, and a literal
+`fix.replace_range`/`with` pair. The family table and its `Replace`/`With` blocks follow
+`docs/design/AGENT_ERRORS.md`; a note that points at a standard-library prelude (or has no position)
+is moved to the user's line when the literal edit is found. `lab/err/triggers/` supplies one program
+per family. The new `test_ail_agent_errors.py` compiles each with `--json`, parses the object, applies
+the edit and rebuilds: every family builds and matches CPython; 14/15 lose their message, while
+AIL0102 still needs the compiler-side row-arity fix from implementation step 2. No program output
+changes; the field is additive and `--json` still prints one report object.
 
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
