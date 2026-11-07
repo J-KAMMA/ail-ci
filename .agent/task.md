@@ -1,3 +1,39 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+**What the change actually does:** adds two measurement-only scripts (`lab/profile/pred_probe.py`, `lab/profile/ccheck.py`) and their report/data (`CTIME_PRED.md`, `CTIME_PRED.json`). No file under `AIL_CURRENT/`, `pyfunc.py`, runtime or C emitter is touched, so no program semantics change — the diff is exactly the four new lab files.
+
+**Verified**
+- `pred_probe.py` reproduces the committed numbers: re-running `--tasks echo_pack` on HEAD gave calls/repeats/changed identical to the JSON for all 8 predicates (`_etype` 95153/92172/16513, `_map_kind` 122210/119229/0, `type_of` 301359/301104/83893), and cacheable after the documented `fe_own/probe_own` scaling matches to ~0.1%.
+- Whole-record consistency: a fresh `ccheck --check` builds (220/220) matched every `c`/`exe`/`rc` hash; only one refusal hash differs (defect 1).
+- Probe is observe-only: `pred_probe --tasks tree_fold --debug` produced `sha256(program.c)=36cc65e7…`, the same as the no-probe/`typed.py` build recorded in `byte_identity`.
+- `test_ail_safetynet`: pass (256 s, `-j 2`). No test modules were added/edited.
+- JSON has all 10 tasks × 8 predicates with calls/repeats/changed/cacheable; per-task saving/projection/halved arithmetic recomputes exactly; ends with the no-go at 1.0052x best halved (the 1.03x rule fails by a wide margin). Decision is sound and robust to the probe's timing inflation.
+
+**Defects**
+1. The committed `byte_identity` record is stale relative to the final `ccheck.py`. Commit c9d747e added `ailc-<tmp>` normalization, but the record was made by the older version. Reproduce: JSON row `lab/corpus/programs/glm-5.3-flash-free/t131.py`, expected refusal `e968cda8…` (HEAD), actual fresh build `998da936…`; `python3 lab/profile/ccheck.py --check` on HEAD therefore prints `MISMATCH … t131.py refusal` and exits 1 instead of `all 220 inputs identical`. (My initial `--check` passed only because a stray `ccheck --base` rewrote the working-tree JSON at 23:50:35; not run by me, left uncommitted.)
+2. `CTIME_PRED.md` §5 prose contradicts its own table: it says eligible cacheable "0.222 s" and net "0.106 s (0.34%)", but the listed-predicate savings column (0.146 s, 1.0048x pooled / 0.474%) correspond to 0.262 s cacheable (0.1176 `_map_kind` + 0.1444 `_is_owned_bytes_call`). Expected 0.262/0.474%, actual 0.222/0.34%.
+3. Minor: §2 says the wrapper inflates own time "about a microsecond per call"; measured inflation is 0.8 µs (`type_of`) to 12.9 µs (`_etype`) per call. Scaling makes this non-blocking.
+
+**Notes:** `_param_kinds` keys on `id()` of dict/tuple arguments, so it can only under-count repeats; with 0 repeats anyway the conclusion is unaffected. §1's "halved 1.123x" is carried from `CTIME_CUT.md` as instructed. Commit trailers on 64211aa/3d61a4e name "Claude Sonnet 5.5" while the worker header shows deepseek attempts — unverifiable which model authored, flagging only.
+
+**Pre-existing:** none identified (no compiler change).
+
+**Unverified:** berth_sim/chain_relax/tally_lang sub-step runs; the 200-corpus changed-repeat rows (probe outputs not committed — only aggregates); CI shards / PR (remote branch is still at the base, so nothing was pushed).
+
+VERDICT: FIX
+1. Regenerate `byte_identity` with the final `ccheck.py` and commit it: probe `lab/profile/ccheck.py --check` on HEAD, expected `all 220 inputs identical` / exit 0, actual `MISMATCH lab/corpus/programs/glm-5.3-flash-free/t131.py refusal` / exit 1 (recorded `e968cda8…`, fresh `998da936…`).
+2. Correct `CTIME_PRED.md` §5: expected eligible cacheable 0.262 s / net 0.146 s (0.474% of wall), actual text says 0.222 s / 0.106 s (0.34%).
+[commandcode stop=end_turn turns=50 out_tokens=40162]
+
+
+--- ORIGINAL TASK ---
 Lane: fa-ctpred
 
 > Re-run of ctpred1, whose GitHub run was lost (no verdict 6.5 h after dispatch). If its branch job-ctpred1-* has work commits, cherry-pick them first and continue; otherwise do the task from scratch on origin/integ. Commit and push after every sub-step, so a cancel does not lose the work again.
