@@ -167,7 +167,7 @@ jobs:
 
   wheel:
     name: wheel
-    # Cheap (about 2 minutes): only on pull requests that touch packaging, the docs or the tutorial test. Builds the ail-lang
+    # Cheap (about 2 minutes): only on pull requests that touch packaging, the docs or the tutorial test. Builds the ailc
     # wheel in a fresh venv, installs it, runs `ail run` on a hello world and a typed program, then every sample of
     # docs/tutorial.md through the installed `ail` (tools/wheel_check.py). Nothing is uploaded or published.
     if: ${{ github.event_name == 'pull_request' }}
