@@ -179,21 +179,40 @@ class Scope(object):
         self._collect()
         self._resolve()
 
-    def _add_edge(self, name, other, line):
+    def _add_edge(self, name, other, line, value=None):
         """Record that `name` is bound to `other` (or to a non-alias value when other is None)."""
-        self._name_edges.setdefault(name, []).append((line, other))
+        self._name_edges.setdefault(name, []).append((line, other, value))
+
+    def _value_is_alias(self, value):
+        """Whether a value read from a container shares the object rather than copying it.
+
+        A slice (`items[:]`) is a copy and an element of a list of scalars (`items[0]` for
+        `list[int]`) is the scalar itself; neither aliases the container.  An element of a list of
+        lists does alias its sublist.  For a container whose element kind is not proven, keep the
+        conservative alias edge.
+        """
+        if not isinstance(value, ast.Subscript):
+            return True
+        if isinstance(value.slice, ast.Slice):
+            return False
+        base_kind, base_element = self._expr_kind(value.value)
+        if base_kind == "list":
+            return base_element == "list"
+        if base_kind == "str":
+            return False
+        return True
 
     def _active_aliases(self, name, before):
         """The names `name` aliases through the last binding before line `before`."""
         edges = self._name_edges.get(name, ())
         latest = None
         targets = set()
-        for line, other in edges:
+        for line, other, value in edges:
             if before is not None and line >= before:
                 continue
             if latest is None or line > latest:
                 latest, targets = line, set()
-            if line == latest and other is not None:
+            if line == latest and other is not None and self._value_is_alias(value):
                 targets.add(other)
         return targets
 
@@ -345,10 +364,10 @@ class Scope(object):
         line = getattr(value, "lineno", getattr(target, "lineno", 0))
         names = _edge_names(value)
         if not names:
-            self._add_edge(root, None, line)
+            self._add_edge(root, None, line, value)
         for other in names:
             if other != root:
-                self._add_edge(root, other, line)
+                self._add_edge(root, other, line, value)
 
     def _collect_mutation(self, target):
         if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
@@ -374,7 +393,10 @@ class Scope(object):
             changed = False
             for name in self.touched:
                 candidate, element = self._classify(name)
-                if candidate is not None and self.kinds.get(name) != candidate:
+                if candidate is None:
+                    continue
+                if self.kinds.get(name) != candidate or \
+                        (candidate == "list" and element and self.elements.get(name) != element):
                     self.kinds[name] = candidate
                     if element:
                         self.elements[name] = element
@@ -392,8 +414,6 @@ class Scope(object):
                 break
 
     def _classify(self, name):
-        if name in self.kinds:
-            return self.kinds[name], self.elements.get(name)
         kinds = set(self.explicit.get(name, ()))
         element = None
         unknown = False
@@ -569,30 +589,68 @@ def _loop_touches(loop, name, ignore=None, accumulate=None, aliases=()):
     """
     if _loop_touches_one(loop, name, ignore, accumulate):
         return True
-    return any(_loop_mutates_one(loop, alias) for alias in aliases if alias != name)
+    targets = _loop_target_names(loop.node)
+    return any(alias != name and alias not in targets and _loop_mutates_alias(loop, alias)
+               for alias in aliases)
 
 
-def _loop_mutates_one(loop, name):
-    """Whether this loop mutates the object `name` refers to, without rebinding the name.
+def _position(node):
+    return getattr(node, "lineno", 0), getattr(node, "col_offset", 0)
 
-    A mutator called on `name`, `name[i]`, `name.attr`, `name[i].attr` and so on mutates the object
-    rooted at `name`; the whole root is treated as touched (conservative, so no wrong advice).
+
+def _is_mutation_of(node, name):
+    """Whether `node` mutates the object rooted at `name` (an `append`, store, del or `+=`)."""
+    if isinstance(node, ast.Call):
+        func = node.func
+        return (isinstance(func, ast.Attribute) and func.attr in MUTATORS
+                and _root_name(func.value) == name)
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)) \
+            and _root_name(node.value) == name:
+        return True
+    if isinstance(node, ast.AugAssign) and _root_name(node.target) == name:
+        return True
+    if isinstance(node, ast.Delete):
+        return any(_root_name(target) == name for target in node.targets)
+    return False
+
+
+def _rebinds_name(node, name):
+    """Whether this loop-body statement rebinds `name` to a different object."""
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AnnAssign):
+        if node.value is None:
+            return False
+        targets = [node.target]
+    elif isinstance(node, ast.NamedExpr):
+        targets = [node.target]
+    elif isinstance(node, (ast.For, ast.AsyncFor)):
+        return name in _target_names(node.target)
+    elif isinstance(node, ast.With):
+        return any(isinstance(item.optional_vars, ast.Name) and item.optional_vars.id == name
+                   for item in node.items)
+    else:
+        return False
+    return any(isinstance(child, ast.Name) and child.id == name
+               and isinstance(child.ctx, ast.Store)
+               for target in targets for child in ast.walk(target))
+
+
+def _loop_mutates_alias(loop, name):
+    """Whether a mutation through the alias `name` reaches the object it aliased at loop entry.
+
+    A top-level rebinding of the alias earlier in the same iteration replaces it before the
+    mutation, so the later mutation touches the new object, not the original.  A rebinding nested
+    in a branch does not dominate the mutation, so it stays conservative (no wrong advice).
     """
+    rebinds = [_position(statement) for statement in loop.body
+               if _rebinds_name(statement, name)]
     for node in _walk_no_scopes(_loop_parts(loop)):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Attribute) and func.attr in MUTATORS \
-                    and _root_name(func.value) == name:
-                return True
-        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)) \
-                and _root_name(node.value) == name:
-            return True
-        elif isinstance(node, ast.AugAssign) and _root_name(node.target) == name:
-            return True
-        elif isinstance(node, ast.Delete):
-            for target in node.targets:
-                if _root_name(target) == name:
-                    return True
+        if not _is_mutation_of(node, name):
+            continue
+        if any(rebind < _position(node) for rebind in rebinds):
+            continue
+        return True
     return False
 
 

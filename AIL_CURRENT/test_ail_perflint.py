@@ -415,6 +415,55 @@ def f(items: list[int]) -> int:
     return total
 '''
 
+SLICE_COPY = '''\
+def f(items: list[int]) -> int:
+    view = items[:]
+    total = 0
+    for i in range(3):
+        view.append(i)
+        total += sum(items)
+    return total
+'''
+
+ITEM_COPY = '''\
+def f(items: list[int]) -> int:
+    view = items[0]
+    total = 0
+    for i in range(3):
+        view += 1
+        total += sum(items)
+    return total
+'''
+
+SLICE_COPY_P6 = '''\
+def f(items: list[int]) -> list[int]:
+    view = items[:]
+    for i in range(3):
+        view.append(i)
+        items = items + [i]
+    return items
+'''
+
+REBIND_INSIDE = '''\
+def total_of(items: list[int]) -> int:
+    view = items
+    total = 0
+    for i in range(3):
+        view = []
+        view.append(i)
+        total += sum(items)
+    return total
+
+
+def rebuild(items: list[int]) -> list[int]:
+    view = items
+    for i in range(3):
+        view = []
+        view.append(i)
+        items = items + [i]
+    return items
+'''
+
 
 class RuleTests(Base):
     def test_p1_list_membership_index_count_inside_a_loop(self):
@@ -463,6 +512,16 @@ class RuleTests(Base):
 
     def test_rebinding_an_alias_before_the_loop_does_not_hide_a_p4_hit(self):
         self.assertEqual(self.rules(ALIAS_REBIND_BEFORE), ["P4"])
+
+    def test_a_slice_copy_or_scalar_element_does_not_hide_a_p4_hit(self):
+        self.assertEqual(self.rules(SLICE_COPY), ["P4"])
+        self.assertEqual(self.rules(ITEM_COPY), ["P4"])
+
+    def test_a_slice_copy_does_not_hide_a_p6_hit(self):
+        self.assertEqual(self.rules(SLICE_COPY_P6), ["P6"])
+
+    def test_rebinding_an_alias_inside_the_loop_does_not_hide_a_p4_or_p6_hit(self):
+        self.assertEqual(self.rules(REBIND_INSIDE), ["P4", "P6"])
 
     def test_p4_sort_and_reductions_inside_a_loop(self):
         self.assertEqual(self.rules(P4), ["P4", "P4", "P4", "P4", "P4"])

@@ -145,9 +145,11 @@ result is a list). A membership test on a `set` or dict, a call outside a loop, 
 rebound or mutated in the loop (for P1, P3, P4 and P6), or a list mutated in the loop through an
 alias (`view = items`, `box.items = items`, or a value read back from a container such as
 `pair = [items]; view = pair[0]` or `d = {"xs": items}; view = d["xs"]`) (for P1, P4 and P6), are not
-reported; P3 and P6 also stay silent when the name is the loop target, so a string or list that is
-recreated each iteration is not called O(n^2). Rebinding an alias before the loop, or using it as the
-loop target, does not change the shared list and does not suppress a hit.
+reported; a slice copy (`items[:]`) and a scalar element (`items[0]` of a `list[int]`) are not aliases.
+P3 and P6 also stay silent when the name is the loop target, so a string or list that is recreated
+each iteration is not called O(n^2). Rebinding an alias before the loop, rebinding it at the top of
+the loop body before the mutation, or using it as the loop target, does not change the shared list and
+does not suppress a hit.
 P4 stays silent when the `key` or `reverse` value reads a loop variable, because hoisting would change
 the result. P5 only looks at loops over items (not two
 `range`/`enumerate`/`zip` index loops) and ignores subscript indices, so a dynamic-programming table

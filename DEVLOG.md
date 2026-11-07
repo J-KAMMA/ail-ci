@@ -1,3 +1,18 @@
+## 2026-11-07 -- algo1 review 4 fix: copy/scalar subscript reads and in-loop alias rebinding
+
+Fixed the two blocking defects in `packaging/ail_lang/perflint.py`. A `Subscript` edge now aliases only
+when the read really shares the container: a slice (`items[:]`) is a copy and `items[0]` of a
+`list[int]` is a scalar, so `view = items[:]; view.append(i); sum(items)` reports P4/P6 again, while
+`pair = [items]; view = pair[0]` and `d = {"xs": items}; view = d["xs"]` still suppress. Element
+inference now re-runs until it stops changing, so the `pair[0]` case keeps its list element kind
+regardless of name order. Alias mutation is time-scoped inside the loop too: a top-level rebinding of
+the alias before the mutation (`view = []; view.append(i)`) means the append no longer touches the
+original list, restoring P4/P6 there while an earlier mutation still suppresses. Regression tests
+`SLICE_COPY`, `ITEM_COPY`, `SLICE_COPY_P6` and `REBIND_INSIDE` cover the four probes; `docs/CLI.md`
+states the copy/scalar and in-loop-rebinding qualifiers. Required modules `test_ail_perflint`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass; the manifest is
+regenerated.
+
 ## 2026-11-07 -- algo1 review fix: P3/P6 resets, P4 loop-dependent sort key
 
 Review probes found three false positives in `perflint.py`, fixed here. P3 and P6 now suppress a hit
