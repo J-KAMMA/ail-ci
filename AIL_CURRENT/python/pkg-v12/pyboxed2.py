@@ -949,9 +949,27 @@ static inline int ail2_print_scalar(ail_obj x) {
    or repr() of one is refused by name with the rewrite; `in`, len, sorted, min, max and sum never
    pass through these helpers, so they stay order-free. A set of 0 or 1 elements has only one
    possible order, so a walk, print or repr of one is order-free too (`set()` prints `set()`, a
-   loop over `{7}` yields 7). */
+   loop over `{7}` yields 7) -- but only when its element does not itself show an order: printing
+   `{frozenset([3, 1, 2])}` renders the inner set, so it is refused. A set can hold only hashable
+   values, so the walk descends through frozensets and tuples alone. */
+static inline int ail2_set_order_hidden(ail_obj x) {
+    if (x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET) {
+        int64_t n = ail_set_len(x);
+        if (n > 1) return 1;
+        if (n == 0) return 0;
+        int64_t pos = 0; ail_setentry *e;
+        if (!ail_setx_next(AIL_SETOBJ(x), &pos, &e)) return 0;
+        return ail2_set_order_hidden(e->key);
+    }
+    if (x.tag == AIL_T_TUPLE) {
+        ail_vecobj *v = (ail_vecobj *)x.o;
+        for (int64_t i = 0; i < v->n; i++)
+            if (ail2_set_order_hidden(v->p[i])) return 1;
+    }
+    return 0;
+}
 static inline ail_st ail2_refuse_set_order(ail_ctx *cx, ail_obj x) {
-    if ((x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET) && ail_set_len(x) > 1)
+    if ((x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET) && ail2_set_order_hidden(x))
         return ail_raise_c(cx, AIL_B_TYPEERROR,
             "walking a set or frozenset shows an order that differs from CPython; write `sorted(s)` "
             "for a fixed order (`in`, len, sorted, min, max and sum stay order-free)");

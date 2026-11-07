@@ -1,3 +1,26 @@
+## 2026-11-07 -- setord1 review fix 2: a one-element set whose element shows an order is refused
+
+The reviewer found a regression from the singleton exemption: a one-element display (or a name proven
+small) was let through at compile time without looking at its element, and the run-time guard checked
+only the top-level length. So `print({frozenset([3, 1, 2])})` printed AIL's insertion order for the
+inner set with exit 0, where base refused it by name. Fix (general path only): the run-time guard
+`ail2_refuse_set_order` now uses `ail2_set_order_hidden`, which descends through the single element of
+a set/frozenset and through tuples (the only containers a set can hold, since its elements must be
+hashable), and refuses when any reachable set/frozenset has more than one element. A top-level tuple
+or list is still not descended (pre-existing behaviour). This covers the display, a name, an argument,
+a list item, an attribute and a dict value, and the print/str/repr/f-string/iteration paths that call
+the guard. `test_ail_setorder.py` gains `s7`: `{frozenset([1])}` and `{(1, frozenset([2]))}` match
+CPython, and `print({frozenset([3, 1, 2])})` is refused by name at run time on the general and default
+builds.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`), both builds: `n1`-`n5` (nested multi-element set in a
+one-element display, a name, str/repr/f-string, a tuple element and a frozenset element) are refused
+by name; `p1` (`{frozenset([1])}`, `{(1, 2)}`, `{frozenset()}`, `{(1, frozenset([2]))}`), `p4`
+(singleton/empty print, pop, walk, f-string, list/tuple) and `p7` (order-free `len`/`in` on a nested
+singleton) match CPython; `p2` (argument), `p3` (attribute/dict value/list item) and `n6`/`n7`
+(`list`/`tuple` of the nested singleton) are refused by name; `p6` (`frozenset([9])`) stays refused
+at compile time as on base.
+
 ## 2026-11-07 -- setord1 suite fix 3: a set of 0 or 1 elements is order-free (singleton print/walk/pop)
 
 The integration branch's new `test_ail_re_value` (its ALIAS program) does `s = {7}`, `sp = s.pop`,

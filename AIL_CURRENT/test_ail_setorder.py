@@ -103,6 +103,19 @@ ORDER_FREE_ONE = '''def main():
 main()
 '''
 
+NESTED_ORDER_OK = '''def main():
+    s = {frozenset([1])}
+    print(s, list(s), tuple(s))
+    t = {(1, frozenset([2]))}
+    print(t)
+main()
+'''
+
+NESTED_ORDER_REFUSED = '''def main():
+    print({frozenset([3, 1, 2])})
+main()
+'''
+
 ORDERED_METHODS = '''def main():
     x = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 40, 41, 42}
     y = {5, 6, 7, 200, 300, 400, 3, 41}
@@ -183,6 +196,26 @@ class SetOrderTests(unittest.TestCase):
                 got = run_exe(exe)
                 self.assertEqual(got.stdout, want.stdout, '%s: %s' % (mode, got.stderr[-600:]))
                 self.assertEqual(got.returncode, 0, mode)
+
+    def test_s7_a_one_element_set_holding_a_set_is_refused(self):
+        # A set of one element has one iteration order, but printing it renders that element: a
+        # nested set of two or more elements still shows AIL's insertion order, so the walk is
+        # refused by name at run time (the compile-time exemption looks only at the outer length).
+        with tempfile.TemporaryDirectory() as directory:
+            want = run_cpython(directory, NESTED_ORDER_OK, 'nestedok')
+            self.assertEqual(want.returncode, 0, want.stderr)
+            for mode in ('general', 'default'):
+                built, exe = build(directory, NESTED_ORDER_OK, 'nestedok', mode)
+                self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
+                got = run_exe(exe)
+                self.assertEqual(got.stdout, want.stdout, '%s: %s' % (mode, got.stderr[-600:]))
+                self.assertEqual(got.returncode, 0, mode)
+                built, exe = build(directory, NESTED_ORDER_REFUSED, 'nestedbad', mode)
+                self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
+                got = run_exe(exe)
+                self.assertNotEqual(got.returncode, 0,
+                                    '%s printed an inner set order:\n%s' % (mode, got.stdout))
+                self.assertIn(RUNTIME_REFUSAL, got.stderr, '%s: %s' % (mode, got.stderr[-600:]))
 
     def test_s2_every_order_revealing_construct_is_refused_by_name(self):
         with tempfile.TemporaryDirectory() as directory:
