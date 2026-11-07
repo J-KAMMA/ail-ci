@@ -11,8 +11,8 @@ is returned as it was written (the same string), so its C does not change. Other
   `ail_array.py` before any C is involved;
 * operators, indexing, slices, `len`, iteration and printing on a value of known array kind become direct calls of those
   functions (typed path, no dispatch); an array whose kind cannot be told where the lowering needs it is refused with
-  file:line and what to write instead; f32 (stage T3a) is a `_AilTAS` (a list[float] of exactly-f32 values, every op
-  rounded once by `_ail_ta_r32`); the dtypes f16 and int8 are stage T3 and refused by name.
+  file:line and what to write instead; f32 (stage T3a/T3b) is a `_AilTAS` (a bytearray of binary32 patterns, every op
+  the binary64 op rounded once by `_ail_ta_r32`, native kernels on the typed path: f32rt.py); the dtypes f16 and int8 are stage T3 and refused by name.
 
 A refusal leaves the program as written and adds a `note:` line (the same convention as stdlib5), after which the build
 fails because the program's own `ail_array.py` is not in the subset.
@@ -576,6 +576,9 @@ class Lower(ast.NodeTransformer):
         self.b = typer.b
         self.env = typer.genv
         self.temp = 0
+        self.hoist = None       # f32 walks bound to a name before the statement (a list while that is allowed)
+        self.cond = 0           # > 0 inside a part that may not run (if-expression arms, and/or, comprehension bodies)
+        self.compvars = set()   # names bound by the enclosing comprehensions
 
     # -- helpers ---------------------------------------------------------------------------------------------------------
     def k(self, node):
@@ -673,10 +676,49 @@ class Lower(ast.NodeTransformer):
             node.elts = [self.annot(e) for e in node.elts]
         return node
 
+    HOIST_STMTS = (ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Return)
+
+    def visit_stmt(self, st):
+        """visit a statement; the walks of f32 arrays in a simple statement are bound to names in front of it when nothing
+        in the statement can change an array (the typed path walks a name, not a call), so the copy is the same."""
+        saved, cond, comps = self.hoist, self.cond, self.compvars
+        self.hoist, self.cond, self.compvars = None, 0, set()
+        mine = None
+        if isinstance(st, self.HOIST_STMTS) and self.f32_change([st]) is None:
+            mine = self.hoist = []
+        new = self.visit(st)
+        self.hoist, self.cond, self.compvars = saved, cond, comps
+        if mine:
+            new = [ast.Assign(targets=[ast.Name(id=t, ctx=ast.Store())], value=v) for t, v in mine] + _flat(new)
+        return new
+
+    def generic_visit(self, node):
+        # ast.NodeTransformer.generic_visit, with the statements of a body visited by visit_stmt
+        for field, old in ast.iter_fields(node):
+            if isinstance(old, list):
+                new = []
+                for value in old:
+                    if isinstance(value, ast.AST):
+                        value = self.visit_stmt(value) if isinstance(value, ast.stmt) else self.visit(value)
+                        if value is None:
+                            continue
+                        if not isinstance(value, ast.AST):
+                            new.extend(value)
+                            continue
+                    new.append(value)
+                old[:] = new
+            elif isinstance(old, ast.AST):
+                new_node = self.visit(old)
+                if new_node is None:
+                    delattr(node, field)
+                else:
+                    setattr(node, field, new_node)
+        return node
+
     def block(self, stmts):
         out = []
         for st in stmts:
-            new = self.visit(st)
+            new = self.visit_stmt(st)
             if new is None:
                 continue
             if isinstance(new, list):
@@ -714,14 +756,21 @@ class Lower(ast.NodeTransformer):
 
     def visit_IfExp(self, node):
         self.truth(node.test)
-        self.generic_visit(node)
+        node.test = self.visit(node.test)
+        self.cond += 1
+        node.body = self.visit(node.body)
+        node.orelse = self.visit(node.orelse)
+        self.cond -= 1
         return node
 
     def visit_BoolOp(self, node):
         for v in node.values:
             if self.k(v) in ARR:
                 no(v, 'an array as an operand of and/or', 'len(a) > 0')
-        self.generic_visit(node)
+        first = self.visit(node.values[0])
+        self.cond += 1
+        node.values = [first] + [self.visit(v) for v in node.values[1:]]
+        self.cond -= 1
         return node
 
     def print_hazard(self, call_node):
@@ -762,35 +811,142 @@ class Lower(ast.NodeTransformer):
         return node
 
     def visit_For(self, node):
+        if self.k(node.iter) == 'AS':
+            # an f32 array is a bytearray of binary32 patterns: walk the indices and read element k when step k starts,
+            # as the reference's __iter__ does (a store into the array inside the body is seen by the later steps)
+            self.temp += 1
+            src, idx = '_ail_ta_t%d' % self.temp, '_ail_ta_k%d' % self.temp
+            pre = ast.Assign(targets=[ast.Name(id=src, ctx=ast.Store())], value=self.visit(node.iter))
+            self.env = dict(self.env)
+            self.env[src] = 'AS'
+            read = ast.Assign(targets=[self.visit(node.target)],
+                              value=call('_ail_tz_get', ast.Attribute(value=n(src), attr='b', ctx=ast.Load()), n(idx)))
+            loop = ast.For(target=ast.Name(id=idx, ctx=ast.Store()),
+                           iter=call('range', ast.Attribute(value=n(src), attr='n', ctx=ast.Load())),
+                           body=[read] + self.block(node.body),
+                           orelse=[self.visit(s) for s in node.orelse] if node.orelse else [], type_comment=None)
+            return [pre, loop]
+        if self.lazy_f32(node.iter):
+            self.f32_walk_safe(node.iter, node.body + node.orelse, node)
+        saved = self.hoist
+        mine = self.hoist = [] if self.f32_change([node.iter]) is None else None
         if self.k(node.iter) in ARR:
             node.iter = self.iter_of(node.iter)
         else:
             node.iter = self.visit(node.iter)
+        self.hoist = saved
         node.target = self.visit(node.target)
         node.body = self.block(node.body)
-        node.orelse = [self.visit(s) for s in node.orelse] if node.orelse else []
+        node.orelse = self.block(node.orelse) if node.orelse else []
+        if mine:
+            return [ast.Assign(targets=[ast.Name(id=t, ctx=ast.Store())], value=v) for t, v in mine] + [node]
         return node
 
     def iter_of(self, node):
         if self.k(node) in TWO:
             no(node, 'iterating over a 2-D array', 'for i in range(len(M)): and M[i] (one row as a 1-D array)')
+        if self.k(node) == 'AS':
+            walk = call('_ail_tas_tolist', self.visit(node))
+            if self.hoist is not None and self.cond == 0 and self.pure(node) and not (
+                    {x.id for x in ast.walk(node) if isinstance(x, ast.Name)} & self.compvars):
+                self.temp += 1
+                name = '_ail_ta_w%d' % self.temp
+                self.hoist.append((name, walk))
+                return n(name)
+            return walk
         return ast.Attribute(value=self.visit(node), attr='d', ctx=ast.Load())
+
+    # -- f32 walks: a list of the elements is taken where the walk starts, which is what the reference's lazy __iter__
+    # gives unless the array changes during the walk; a walk during which an array could change is refused by name.
+    LAZY = ('enumerate', 'zip', 'reversed')
+    EAGER = ('list', 'sorted', 'sum', 'min', 'max', 'any', 'all', 'tuple', 'set')
+    SAFE_CALLS = {'abs', 'all', 'any', 'bool', 'divmod', 'enumerate', 'float', 'int', 'isinstance', 'len', 'list', 'max',
+                  'min', 'print', 'range', 'repr', 'reversed', 'round', 'sorted', 'str', 'sum', 'tuple', 'zip', 'set',
+                  'hex', 'oct', 'bin', 'chr', 'ord', 'pow', 'hash', 'format'}
+    SAFE_LIST_METHODS = {'append', 'extend', 'insert', 'pop', 'index', 'count'}
+
+    def lazy_f32(self, node):
+        """Whether node is enumerate / zip / reversed of an f32 array (directly or nested), a walk read as it goes."""
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.LAZY
+                and node.func.id not in self.t.funcs):
+            return False
+        return any(self.k(a) == 'AS' or self.lazy_f32(a) for a in node.args)
+
+    def mark_walk(self, node):
+        if isinstance(node, ast.Call):
+            node._ail_walk_ok = True
+            for a in node.args:
+                if self.lazy_f32(a):
+                    self.mark_walk(a)
+
+    def f32_change(self, roots):
+        """The first node under roots that could change an f32 array: a store into an array element, an in-place
+        operator on an array, an assignment expression, or a call of anything but a built-in, math, ail_array or a
+        non-mutating list / array method. None when there is none."""
+        for root in roots:
+            for x in ast.walk(root):
+                if isinstance(x, ast.NamedExpr):
+                    return x
+                if isinstance(x, ast.AugAssign) and (self.k(x.target) in ARR or isinstance(x.target, ast.Subscript)
+                                                      and self.k(x.target.value) in ARR):
+                    return x
+                if isinstance(x, ast.Subscript) and isinstance(x.ctx, (ast.Store, ast.Del)) and self.k(x.value) in ARR:
+                    return x
+                if isinstance(x, ast.Call):
+                    f = x.func
+                    if self.b.attr(f) is not None:
+                        continue
+                    if isinstance(f, ast.Name) and f.id in self.SAFE_CALLS and f.id not in self.t.funcs:
+                        continue
+                    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == 'math':
+                        continue
+                    if isinstance(f, ast.Attribute) and self.k(f.value) in ARR and f.attr in ('copy', 'tolist', 'tobytes', 'astype'):
+                        continue
+                    if isinstance(f, ast.Attribute) and self.k(f.value) in ('LF', 'LI') and f.attr in self.SAFE_LIST_METHODS:
+                        continue
+                    return x
+        return None
+
+    def f32_walk_safe(self, it, roots, where):
+        bad = self.f32_change(roots)
+        if bad is not None:
+            no(bad, 'this can change an array while an f32 array is walked by %s (an f32 walk reads a copy of the '
+               'elements taken where it starts)' % ('a comprehension' if isinstance(where, ast.expr) else 'enumerate / zip / reversed'),
+               'walk a copy explicitly, a.tolist(), or index it: for k in range(len(a)): x = a[k]')
+        self.mark_walk(it)
 
     def visit_comprehension(self, node):
         if self.k(node.iter) in ARR:
             node.iter = self.iter_of(node.iter)
         else:
             node.iter = self.visit(node.iter)
+        self.cond += 1
         node.ifs = [self.visit(x) for x in node.ifs]
+        self.cond -= 1
         return node
 
     def comp(self, node):
         saved = self.env
         self.env = self.t.comp_env(node.generators, self.env)
-        node.generators = [self.visit_comprehension(g) for g in node.generators]
+        if any(self.k(g.iter) == 'AS' or self.lazy_f32(g.iter) for g in node.generators):
+            if isinstance(node, ast.GeneratorExp) and not getattr(node, '_ail_eager', False):
+                no(node, 'a generator expression over an f32 array that is not consumed at once (an f32 walk reads a copy '
+                   'of the elements taken where it starts)', 'a list comprehension, or sum(...) / list(...) of it directly')
+            parts = [g for g in node.generators] + [getattr(node, f) for f in ('elt', 'key', 'value') if hasattr(node, f)]
+            self.f32_walk_safe(ast.Tuple(elts=[g.iter for g in node.generators], ctx=ast.Load()), parts, node)
+            for g in node.generators:
+                self.mark_walk(g.iter)
+        comps = self.compvars
+        self.compvars = comps | {x.id for g in node.generators for x in ast.walk(g.target) if isinstance(x, ast.Name)}
+        first, node.generators = node.generators[0], node.generators[1:]
+        first = self.visit_comprehension(first)
+        self.cond += 1
+        node.generators = [first] + [self.visit_comprehension(g) for g in node.generators]
         for field in ('elt', 'key', 'value'):
             if hasattr(node, field):
                 setattr(node, field, self.visit(getattr(node, field)))
+        self.cond -= 1
+        self.compvars = comps
         self.env = saved
         return node
 
@@ -801,7 +957,9 @@ class Lower(ast.NodeTransformer):
         self.env = dict(self.env)
         for arg in node.args.args:
             self.env[arg.arg] = None
+        hoist, self.hoist = self.hoist, None
         node.body = self.visit(node.body)
+        self.hoist = hoist
         self.env = saved
         return node
 
@@ -1171,6 +1329,12 @@ class Lower(ast.NodeTransformer):
 
     # -- calls ------------------------------------------------------------------------------------------------------------------
     def visit_Call(self, node):
+        if isinstance(node.func, ast.Name) and node.func.id in self.EAGER and node.func.id not in self.t.funcs:
+            for a in node.args:
+                if isinstance(a, ast.GeneratorExp):
+                    a._ail_eager = True
+                elif self.lazy_f32(a):
+                    self.mark_walk(a)
         found = self.b.attr(node.func)
         if found is not None:
             return self.module_call(node, found)
@@ -1180,6 +1344,8 @@ class Lower(ast.NodeTransformer):
         argk = [self.k(a) for a in node.args] + [self.k(k.value) for k in node.keywords]
         if isinstance(f, ast.Name) and any(x in ARR for x in argk) and f.id not in self.t.funcs:
             if f.id == 'len' and len(node.args) == 1 and not node.keywords:
+                if self.k(node.args[0]) == 'AS':
+                    return ast.Attribute(value=self.visit(node.args[0]), attr='n', ctx=ast.Load())
                 return call('len', ast.Attribute(value=self.visit(node.args[0]), attr='d', ctx=ast.Load())) \
                     if self.k(node.args[0]) not in TWO else ast.Attribute(value=self.visit(node.args[0]), attr='r', ctx=ast.Load())
             if f.id in ('str', 'repr') and len(node.args) == 1 and not node.keywords and self.k(node.args[0]) in ARR:
@@ -1205,6 +1371,13 @@ class Lower(ast.NodeTransformer):
                     no(node, 'list() of a 2-D array', 'M[i].tolist() for one row')
                 return call(P[self.k(node.args[0])[1]] + 'tolist', self.visit(node.args[0]))
             if f.id in BUILTIN_ITER:
+                if f.id in self.LAZY and self.lazy_f32(node) and not getattr(node, '_ail_walk_ok', False):
+                    no(node, '%s() of an f32 array kept for later (an f32 walk reads a copy of the elements taken where it '
+                       'starts)' % f.id, 'use it directly as the iterable of a for loop or a comprehension, or walk a.tolist()')
+                if (f.id in ('sorted', 'sum', 'min', 'max') and len(node.args) == 1 and not node.keywords
+                        and self.k(node.args[0]) == 'AS' and not (self.hoist is not None and self.cond == 0
+                                                                  and self.pure(node.args[0]))):
+                    return call('_ail_tas_b' + f.id, self.visit(node.args[0]))
                 node.args = [self.iter_of(a) if self.k(a) in ARR else self.visit(a) for a in node.args]
                 node.keywords = [ast.keyword(arg=k.arg, value=self.visit(k.value)) for k in node.keywords]
                 return node
@@ -1327,6 +1500,8 @@ class Lower(ast.NodeTransformer):
         if kd in TWO:
             no(node, 'ta.array of a 2-D array', 'M.copy()')
         if kd in ARR:
+            if kd == 'AS' and dt in FLOATS:
+                return call('_ail_tas_tolist', self.visit(node))
             if kd[1] == dt or (kd[1] in FLOATS and dt in FLOATS):
                 return ast.Attribute(value=self.visit(node), attr='d', ctx=ast.Load())
             if dt in FLOATS:
@@ -2007,7 +2182,7 @@ def rewrite_text(source, notes=None):
         typer = Typer(tree, binder)
         typer.analyze()
         lower = Lower(typer)
-        tree.body = [s for st in tree.body for s in _flat(lower.visit(st))]
+        tree.body = [s for st in tree.body for s in _flat(lower.visit_stmt(st))]
         fuser = Fuser()                                    # element-wise fusion (docs/design/TYPED_ARRAY.md 5.2a)
         tree.body = [fuser.visit(st) for st in tree.body]
         ast.fix_missing_locations(tree)

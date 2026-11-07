@@ -31493,6 +31493,10 @@ REQUIRES['SQLEXC'] = ['FILEEXC']           # G11: sqlite3 exception codes (filer
 import clockrt as _clockrt
 _clockrt.register(ORDER, SOURCE, REQUIRES)
 
+# ail_array f32 kernels on the 4-byte storage (f32rt.py, job fdarr3)
+import f32rt as _f32rt
+_f32rt.register(ORDER, SOURCE, REQUIRES)
+
 
 # str() / repr() of a flat list -- `print(xs)`, `f"{xs}"` -- for a list of ints, floats or strs: CPython's
 # list repr, the elements' reprs joined by ", " inside brackets (pyfunc._list_text). Each element's text is
