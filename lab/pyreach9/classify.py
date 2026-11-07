@@ -122,7 +122,10 @@ def category(blocker):
 def fallback_category(rec):
     text = (rec.get('default_note') or '') + ' :: ' + (rec.get('strict_first') or '') + \
         ' :: ' + (rec.get('default_first') or '')
-    low = text.lower()
+    # A note carries the compiler's reason followed by explanatory "write instead"
+    # prose.  The prose names unrelated constructs (it explains what to write, not
+    # what the program does), so only the reason before it may pick the category.
+    text = re.split(r'\bwrite instead\b|\bwrite_instead\b|; run with --strict', text)[0]
     for name, pat in RULES:
         if re.search(pat, text, re.I):
             return name

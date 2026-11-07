@@ -11,7 +11,7 @@ vibe     refused   lab/vibe/programs/berth_sim/python-0.py            generated-
 vibe     general   lab/vibe/programs/berth_sim/python-1.py            buffer-io, str-number-concat, value-kind-lostx2
 vibe     refused   lab/vibe/programs/chain_relax/python-0.py          int64-literal
 vibe     refused   lab/vibe/programs/chain_relax/python-1.py          int64-literal
-vibe     general   lab/vibe/programs/csv_rollup/ail-0.py              buffer-io
+vibe     general   lab/vibe/programs/csv_rollup/ail-0.py              str-number-compare
 vibe     general   lab/vibe/programs/csv_rollup/python-0.py           bytes-str-methodsx2, mixed-return-kind, value-kind-lostx2
 vibe     general   lab/vibe/programs/echo_pack/ail-0.py               none-optional
 vibe     general   lab/vibe/programs/echo_pack/python-0.py            bytes-str-methods, none-optionalx2, unsupported-module
@@ -113,7 +113,7 @@ other                         11     1     12  c1/v2/g8
 class-dunders                 10     1     43  c1/v1/g8
 class-shape                    6     1      8  c0/v3/g3
 numeric-kind                   4     1      4  c0/v0/g4
-buffer-io                      3     1      3  c0/v3/g0
+str-number-compare             2     1      2  c0/v2/g0
 module-level-constant         13     0     18  c1/v6/g6
 mixed-return-kind             10     0     10  c1/v7/g2
 bytes-str-methods              9     0     16  c2/v6/g1
@@ -121,13 +121,13 @@ unsupported-builtin            5     0      7  c1/v0/g4
 slice-for-number               4     0     11  c0/v3/g1
 str-number-concat              4     0      4  c1/v3/g0
 annotation-caller-conflict     2     0      2  c0/v0/g2
+buffer-io                      2     0      2  c0/v2/g0
 bytes-sequence-param           2     0     23  c0/v2/g0
 records-annotation             2     0      2  c0/v0/g2
 tuple-holds                    2     0      2  c1/v1/g0
 exceptions                     1     0      1  c0/v1/g0
 key-argument                   1     0      1  c0/v1/g0
 nested-def-in-loop             1     0     10  c1/v0/g0
-str-number-compare             1     0      1  c0/v1/g0
 while-else                     1     0      1  c0/v1/g0
 
 sole-category programs:
@@ -140,7 +140,7 @@ comprehension              2 (c0/v1/g1): lab/vibe/programs/scar_life/ail-0.py, c
 tuple-unpack               2 (c0/v0/g2): corpus/gdev/g00_008.py, corpus/gdev/g10_008.py
 mixed-container            2 (c0/v0/g2): corpus/gdev/g03_016.py, corpus/gdev/g03_036.py
 unsupported-module         2 (c0/v0/g2): corpus/gdev/g03_032.py, corpus/gdev/g21_022.py
-buffer-io                  1 (c0/v1/g0): lab/vibe/programs/csv_rollup/ail-0.py
+str-number-compare         1 (c0/v1/g0): lab/vibe/programs/csv_rollup/ail-0.py
 generic-annotation         1 (c0/v0/g1): corpus/gdev/g00_004.py
 dict-of-containers         1 (c0/v0/g1): corpus/gdev/g01_026.py
 value-kind-lost            1 (c0/v0/g1): corpus/gdev/g05_022.py

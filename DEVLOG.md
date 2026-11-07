@@ -1,3 +1,18 @@
+## 2026-11-07 -- pyreach9 review fix: corrected census labels and move claims (job-pyreach9-11071331)
+
+Review fix (no compiler change). `classify.py`'s no-blocker fallback no longer scans the
+compiler's explanatory "write instead" prose: `vibe/csv_rollup/ail-0.py` is
+`str-number-compare`, not `buffer-io` (buffer-io 2 programs / 0 sole; str-number-compare 2 / 1).
+`RESULTS.md` lists the five actual vibe refusals (`rail_transfer/python-0` is general, not
+refused) and no longer claims `scar_life` gets `--exact-int` (its `census.jsonl` record has
+`flags: []`, and it carries no `# ail-build:` directive). `PYREACH_NEXT.md` now matches
+`strict_incomplete`: the array prelude is 2 moves (`berth_sim/python-0`,
+`rail_transfer/python-0`, both incomplete), not 3 (`berth_sim/ail-0`'s sole blocker is the
+`_ail_l1l` lowering-name conflict); namedtuple typing moves 0 clean programs (`g06_008` has no
+NamedTuple; `g01_022` also carries a `tuple[Field, ...]` annotation, a module-level `FIELDS`
+list and a false caller conflict); deque `g11_002` and `g03_032` are incomplete-list moves.
+`programs.txt` regenerated from the fixed classifier.
+
 ## 2026-11-07 -- pyreach9 census: why plain `.py` still takes the general path (job-pyreach9-11071331)
 
 Measurement and design only; the compiler is unchanged.  `lab/pyreach9/census.py` built 134

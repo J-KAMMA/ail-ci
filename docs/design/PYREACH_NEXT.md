@@ -57,9 +57,11 @@ Those sources are Python, they implement a stdlib module for the general path, a
 - regex: `_ail_re_dp/ds/dm/sub0`, which `pyboxed2._native_re` already replaces with native
   primitives on the normal build — but the `--strict` check runs before/without that pass.
 
-Five programs have nothing else wrong: `vibe/berth_sim/ail-0.py`,
-`vibe/berth_sim/python-0.py`, `vibe/rail_transfer/python-0.py`, `gdev/g01_008.py`,
-`gdev/g11_002.py`.
+Five programs have nothing else wrong: `vibe/berth_sim/python-0.py`,
+`vibe/rail_transfer/python-0.py`, `gdev/g01_008.py`, `gdev/g11_002.py`, and
+`vibe/berth_sim/ail-0.py`. The last is not a prelude blocker: its sole blocker is a
+compiler-generated lowering name (`_ail_l1l` bound from popping rows of 1 fields in one
+place and 5 in another), so typing the prelude does not move it.
 
 ### Semantics that must hold
 
@@ -83,7 +85,7 @@ Three layers, in order:
    prelude, and have `strictmode` label a blocker `generated: true` when its line is inside
    one. A user blocker stays a refusal; a prelude blocker is reported separately as
    “module support code not typed”. This changes no build decision.
-2. **Type the preludes module by module**, starting with `prelude_array.py` (three sole
+2. **Type the preludes module by module**, starting with `prelude_array.py` (two sole
    programs), then namedtuple/enum/csv/deque/datetime. Keep `_native_re` applied before the
    strict check so the regex engine is not checked as Python.
 3. **If a prelude cannot be typed**, the general-path implementation may be called from typed
@@ -101,12 +103,18 @@ Three layers, in order:
 
 ### Programs moved
 
-- array prelude: `vibe/berth_sim/ail-0.py`, `vibe/berth_sim/python-0.py`,
-  `vibe/rail_transfer/python-0.py` (3, complete-list moves).
-- namedtuple: `gdev/g01_022.py`, `gdev/g06_008.py`.
-- enum: `gdev/g25_000.py`, `gdev/g25_022.py`.
-- csv: `gdev/g01_032.py`. deque: `gdev/g11_002.py` (1, complete-list).
-- datetime: `gdev/g01_008.py` (1, complete-list).
+- array prelude: `vibe/berth_sim/python-0.py`, `vibe/rail_transfer/python-0.py` (2, both
+  `strict_incomplete`, so fixing them may reveal a later blocker). `vibe/berth_sim/ail-0.py`
+  is not an array move: its sole blocker is the `_ail_l1l` lowering-name conflict above.
+- namedtuple: 0 clean moves. `gdev/g01_022.py` carries the namedtuple prelude blockers but
+  also a `tuple[Field, ...]` annotation, a module-level `FIELDS` list and a false caller
+  conflict, so typing the prelude alone does not move it. `gdev/g06_008.py` has no
+  NamedTuple; its blockers are the tuple-repr helper (`_ail_trepr_s_i`) and a `set` walked
+  as a sequence.
+- enum: `gdev/g25_000.py`, `gdev/g25_022.py` (both `strict_incomplete`).
+- csv: `gdev/g01_032.py` (incomplete, and also an unsupported builtin). deque:
+  `gdev/g11_002.py` (1, `strict_incomplete`).
+- datetime: `gdev/g01_008.py` (1, complete list).
 - regex: `gdev/g20_010.py`, `gdev/g20_030.py`, `compare/tally_lang`, `compare/term_rank`
   (these also carry other blockers).
 
@@ -115,8 +123,8 @@ Three layers, in order:
 | step | work | files | tests | probes | moves |
 |---|---|---|---|---|---|
 | 1a | attribution: mark prelude lines, `generated` flag in `ail.strict/1` | `ail_chatgpt._load_sources`, `strictmode.py` | `test_ail_strict` | `--strict --json` on `berth_sim/python-0.py` shows the array blockers as `generated: true`, the rest as user | 0 (exposes the real count) |
-| 1b | type `prelude_array.py`: plain-positional `__init__`, `__delitem__`, module constants, `_ail_arr_check` return | `prelude_array.py`, `pyfunc.py` (`_function` dunder/`__init__`, module constants) | `test_ail_std_array`, `test_ail_array_core`, `test_ail_array_ref` | array indexing, slice, `del a[i]`, `a.typecode`, empty array, negative index, both builds | 3 |
-| 1c | namedtuple prelude: `__eq__/__lt__/__len__/__iter__/__contains__/__hash__`, `_replace`, `_asdict` | `prelude_namedtuple.py` (or wherever `_AilNT` is built), `pyfunc.py` | `test_ail_collections` | `_replace`, `_asdict`, compare two namedtuples, tuple unpacking, both builds | 2 |
+| 1b | type `prelude_array.py`: plain-positional `__init__`, `__delitem__`, module constants, `_ail_arr_check` return | `prelude_array.py`, `pyfunc.py` (`_function` dunder/`__init__`, module constants) | `test_ail_std_array`, `test_ail_array_core`, `test_ail_array_ref` | array indexing, slice, `del a[i]`, `a.typecode`, empty array, negative index, both builds | 2 |
+| 1c | namedtuple prelude: `__eq__/__lt__/__len__/__iter__/__contains__/__hash__`, `_replace`, `_asdict` | `prelude_namedtuple.py` (or wherever `_AilNT` is built), `pyfunc.py` | `test_ail_collections` | `_replace`, `_asdict`, compare two namedtuples, tuple unpacking, both builds | 0 clean (prerequisite for `g01_022`) |
 | 1d | enum prelude: numeric dunders and member constants | `prelude_enum.py`, `pyfunc.py` module constants | `test_ail_collections` | `IntEnum + int`, `<`, `str`, member iteration, both builds | 2 |
 | 1e | csv prelude `__next__` / iterator protocol | `prelude_csv.py`, `iterlower.py` | `test_ail_std_csv`, `test_ail_csv_writer` | reader over 0/1/many rows, `next()`, `for row in reader`, both builds | 1 |
 | 1f | deque prelude `buf` field type | `prelude_collections.py` (or `prelude_deque.py`), `pyfunc.py` | `test_ail_std_collections`, `test_ail_deqctr` | deque append/popleft/index, empty, both builds | 1 |
@@ -381,7 +389,8 @@ the Python front end refuses by name in `pyfunc.py`.
 ### Programs moved
 
 `json` typing (5a): `g21_000`, `g21_004`, `g21_008`, `g21_012`, `g21_022`, `g13_024`.
-`statistics` (5b): `g03_012`, `g03_018`, `g03_032` (1 complete-list sole: g03_032).
+`statistics` (5b): `g03_012`, `g03_018`, `g03_032` (1 sole move, `g03_032`, whose blocker
+list is `strict_incomplete`).
 `itertools` (5c): `g18_014`, `g18_026`, `g14_022`, `g16_032`.
 `collections` (5d): `g05_018`, `vibe/echo_pack/python-0`, `vibe/echo_pack/python-1`,
 `vibe/term_rank/python-1`, `compare/term_rank`.
@@ -460,8 +469,8 @@ Files: AIL_CURRENT/python/pkg-v12/prelude_array.py (plain-positional __init__, _
   module constants), pyfunc.py (module-level Constant, dunder where needed).
 Tests: test_ail_std_array, test_ail_array_core, test_ail_array_ref, test_ail_safetynet.
 Probes: array create/index/slice/del/typecode/append; empty, negative index; both builds.
-Expected: vibe/berth_sim/python-0.py, vibe/rail_transfer/python-0.py,
-  vibe/berth_sim/ail-0.py become strict-typed (3 programs, complete lists).
+Expected: vibe/berth_sim/python-0.py, vibe/rail_transfer/python-0.py become strict-typed
+  (2 programs; both blocker lists are strict_incomplete).
 ```
 
 ### T3 — pyreach10c: int64 constant allow-list (needs owner decision)
@@ -548,7 +557,8 @@ Goal: median/stdev/pstdev/geometric_mean/harmonic_mean match CPython or refuse b
 Files: statlib.py, statbrt.py, stdlib5.py.
 Tests: test_ail_std_statistics, test_ail_std_stat.
 Probes: empty (raises), one value, even/odd median, int vs float list; both builds.
-Expected: g03_012, g03_018, g03_032 (3; g03_032 is a complete-list sole move).
+Expected: g03_012, g03_018, g03_032 (3; g03_032 is a sole move but its blocker list is
+  strict_incomplete).
 ```
 
 ### T10 — pyreach10j: module-level pure constants

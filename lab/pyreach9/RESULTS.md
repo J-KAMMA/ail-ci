@@ -10,8 +10,8 @@ The compiler was not changed; this lane measures and designs only.
 
 1. `compile --syntax python --strict --json` — a strict build either passes (path **typed**)
    or refuses with exit 3 and prints the full blocker list (`ail.strict/1`, produced by
-   `python/pkg-v12/strictmode.py::collect`). `--exact-int` is passed for `chain_relax`,
-   `rail_transfer` (compare-lab does) and `scar_life` (its `# ail-build:` directive).
+   `python/pkg-v12/strictmode.py::collect`). `--exact-int` is passed for the compare
+   `chain_relax` and `rail_transfer` programs, the flags `run_task.py` uses.
 2. the default build — **general** when it prints “built on the general path”, otherwise
    **refused**. A parse-stage failure (exit 2) is refused even by the strict build.
 
@@ -45,9 +45,10 @@ incomplete blocker list**, so “sole” is exact only for the other 56. The tab
 
 The two typed compare programs are `berth_sim` and `echo_pack`; the other eight are on the
 general path or refused, matching `lab/roof/RESULTS.md`. **No AI-written program
-(`lab/vibe`) reaches the typed path.** The five vibe refusals are both `chain_relax` seeds
-(int64 literal), `berth_sim/python-0` and `rail_transfer/python-0` (the injected `array`
-prelude), and `tally_lang/python-0` / `scar_life/python-1` (other blockers).
+(`lab/vibe`) reaches the typed path.** The five vibe refusals are `berth_sim/python-0`
+(the injected `array` prelude), both `chain_relax` seeds (int64 literal), and
+`tally_lang/python-0` / `scar_life/python-1` (other blockers). `rail_transfer/python-0`
+also carries the `array` prelude but builds on the general path.
 
 ## Reasons, ranked by programs whose only remaining blocker is the reason
 
@@ -73,7 +74,7 @@ whole blocker list is this reason; `sole-c` = the same restricted to complete li
 | 14 | class-dunders | 10 | 1 | 1 | 43 | 1/1/8 |
 | 15 | class-shape | 6 | 1 | 1 | 8 | 0/3/3 |
 | 16 | numeric-kind | 4 | 1 | 1 | 4 | 0/0/4 |
-| 17 | buffer-io | 3 | 1 | 1 | 3 | 0/3/0 |
+| 17 | str-number-compare | 2 | 1 | 1 | 2 | 0/2/0 |
 | — | module-level-constant | 13 | 0 | 0 | 18 | 1/6/6 |
 | — | mixed-return-kind | 10 | 0 | 0 | 10 | 1/7/2 |
 | — | bytes-str-methods | 9 | 0 | 0 | 16 | 2/6/1 |
@@ -81,11 +82,12 @@ whole blocker list is this reason; `sole-c` = the same restricted to complete li
 | — | str-number-concat | 4 | 0 | 0 | 4 | 1/3/0 |
 | — | slice-for-number | 4 | 0 | 0 | 11 | 0/3/1 |
 | — | annotation-caller-conflict | 2 | 0 | 0 | 2 | 0/0/2 |
+| — | buffer-io | 2 | 0 | 0 | 2 | 0/2/0 |
 | — | bytes-sequence-param | 2 | 0 | 0 | 23 | 0/2/0 |
 | — | records-annotation | 2 | 0 | 0 | 2 | 0/0/2 |
 | — | tuple-holds | 2 | 0 | 0 | 2 | 1/1/0 |
 | — | nested-def-in-loop | 1 | 0 | 0 | 10 | 1/0/0 |
-| — | exceptions, key-argument, str-number-compare, while-else | 1 each | 0 | 0 | 1 each | |
+| — | exceptions, key-argument, while-else | 1 each | 0 | 0 | 1 each | |
 
 ## The sole-blocked programs
 
@@ -106,11 +108,15 @@ whole blocker list is this reason; `sole-c` = the same restricted to complete li
 | class-dunders | `gdev/g13_012.py` |
 | class-shape | `gdev/g14_006.py` |
 | numeric-kind | `gdev/g09_006.py` |
-| buffer-io | `vibe/csv_rollup/ail-0.py` |
+| str-number-compare | `vibe/csv_rollup/ail-0.py` |
 | other | `gdev/g14_022.py` (itertools.groupby) |
 
-Note that `g01_008.py` (datetime) and `g11_002.py` (deque) are sole *because* the only
-blockers are in the injected prelude: their user code is already in the subset.
+Note that `g01_008.py` (datetime), `g11_002.py` (deque), `berth_sim/python-0.py` and
+`rail_transfer/python-0.py` (array) are sole *because* the only blockers are in the
+injected prelude: their user code is already in the subset. `berth_sim/ail-0.py` is also
+sole `generated-prelude`, but its blocker is a compiler-generated lowering name
+(`_ail_l1l` bound with two arities), not a prelude module, so typing the prelude does not
+move it.
 
 ## AI-typical vs corpus-typical
 
@@ -130,7 +136,7 @@ Rates are programs per corpus: vibe has 24 programs, gdev 100, compare 10, so a 
 | generated-prelude | 4/24 | 10/100 | `from array import array`; `collections.Counter`/`deque`; `re`, `csv`, `enum`, `datetime` |
 | none-optional | 3/24 | 6/100 | `d.get(k)` with no default, `None` sentinels |
 | int64-literal | 2/24 | 0/100 | `18446744073709551615` masks |
-| buffer-io | 3/24 | 0/100 | `sys.stdin.buffer.readline()`, `sys.stdout.buffer` |
+| buffer-io | 2/24 | 0/100 | `sys.stdin.buffer.readline()`, `sys.stdout.buffer` |
 
 **Corpus-typical** (gdev only or mostly):
 
