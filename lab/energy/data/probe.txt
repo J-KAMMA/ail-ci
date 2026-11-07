@@ -1,0 +1,29 @@
+# runner 2026-11-07T09:46:51Z
+# cpu AMD EPYC 7763 64-Core Processor
+# threads/core,cores/socket,sockets: 2/2/1
+# L1d/L2/L3: 64 KiB (2 instances)/1 MiB (2 instances)/32 MiB (1 instance)
+
+## perf power/energy-pkg
+Unable to find PMU or event on a PMU of 'power'
+Run 'perf list' for a list of valid events
+
+ Usage: perf stat [<options>] [<command>]
+
+    -e, --event <event>   event selector. use 'perf list' to list available events
+
+## /sys/class/powercap
+absent
+
+## /dev/cpu/*/msr
+crw------- 1 root root 202, 0 Nov  7 09:18 /dev/cpu/0/msr
+crw------- 1 root root 202, 1 Nov  7 09:18 /dev/cpu/1/msr
+crw------- 1 root root 202, 2 Nov  7 09:18 /dev/cpu/2/msr
+crw------- 1 root root 202, 3 Nov  7 09:18 /dev/cpu/3/msr
+
+## tools
+perf: perf version 7.0.14
+valgrind: valgrind-3.22.0
+cg_annotate: /tmp/energy-valgrind/usr/bin/cg_annotate
+
+## conclusion
+no readable package-energy counter: J measured = n/a (no value is invented)
