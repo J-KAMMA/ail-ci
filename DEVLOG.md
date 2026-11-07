@@ -1,3 +1,16 @@
+## 2026-11-07 -- pyreach9 review fix 2: move counts and module counts (job-pyreach9-11071621)
+
+Review fix (no compiler change). `PYREACH_NEXT.md` now separates programs *touched* from
+sole moves: step 2b moves 0 (`compare/rail_transfer/main.py`'s int64 blocker is a shift and
+its `INF = 1 << 200` is a refused list-element/assignment shape), step 3c moves 0
+(`vibe/ledger_bin/python-0.py` carries four other reasons), step 4b moves 1 (`g16_030` also
+needs `min()`), and §5 is json/statistics/itertools/collections = 1/1/1/0 sole moves rather
+than 5-6/3/4/4-5 touched programs. Census module counts are corrected (json 6 not 8;
+itertools 5; re 4; the `traceback`/`logging` boilerplate in `g15_024`/`g15_028` is not a
+module use). `classify.py` now recognises `_AilEnum`/`_AilStrEnum`/`_AilFlag` as generated
+prelude code, so `g25_000`/`g25_022` are sole generated-prelude: generated-prelude 7 sole /
+138 blockers, class-dunders 8 programs / 33 blockers. `programs.txt` regenerated.
+
 ## 2026-11-07 -- pyreach9 review fix: corrected census labels and move claims (job-pyreach9-11071331)
 
 Review fix (no compiler change). `classify.py`'s no-blocker fallback no longer scans the
@@ -21,7 +34,7 @@ with `--strict --json` and the default build: **37 typed, 81 general, 16 refused
 corpus is 0 typed / 19 general / 5 refused.  `lab/pyreach9/classify.py` groups the ranked
 strict blockers (full dump in `lab/pyreach9/programs.txt`) and `RESULTS.md` reports the
 ranking, the sole-blocked programs, and AI-typical vs corpus-typical reasons.  Ranked by
-programs whose only blocker is the reason: generated-prelude 5, int64-literal 3,
+programs whose only blocker is the reason: generated-prelude 7, int64-literal 3,
 parameter-readonly 3, generator-yield 3, unsupported-module 2; by programs touched:
 unsupported-module 21, dict-of-containers 18, generated-prelude/tuple-unpack 16,
 mixed-container 15, value-kind-lost 14.  41 of the 97

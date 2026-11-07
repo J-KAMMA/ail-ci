@@ -16,7 +16,7 @@ The task ranks a reason by *programs whose only remaining blocker is that reason
 
 | # | reason | sole | programs touched |
 |---:|---|---:|---:|
-| 1 | generated-prelude (compiler-injected module code checked as user code) | 5 | 16 |
+| 1 | generated-prelude (compiler-injected module code checked as user code) | 7 | 16 |
 | 2 | int64-literal | 3 | 4 |
 | 3 | parameter-readonly (a container parameter cannot be mutated) | 3 | 4 |
 | 4 | generator-yield | 3 | 4 |
@@ -39,7 +39,7 @@ the first is fixed. Each step below says which of its programs are complete-list
 
 ### What the census sees
 
-16 programs and 128 blocker instances (the largest single count) are refusals in code the
+16 programs and 138 blocker instances (the largest single count) are refusals in code the
 user did not write. `stdlib5.prelude(name)` reads `python/pkg-v12/prelude_<name>.py` and
 `smalllib5.run_array` appends `prelude_array.py`; `pyboxed2`'s regex pass appends `_ail_re_*`.
 Those sources are Python, they implement a stdlib module for the general path, and
@@ -51,15 +51,16 @@ Those sources are Python, they implement a stdlib module for the general path, a
 - namedtuple: `_AilNT.__eq__/__lt__/__len__/__iter__/__contains__/__hash__`, `_replace`,
   `_asdict`.
 - csv: `_AilCsvReader.__next__`, `_AIL_CSV_ESCAPE_NUMERIC = False`.
-- enum: `_AilIntEnum`'s numeric dunders and `_ail_en_<Enum>_<MEMBER> = <Enum>(...)` constants.
+- enum: `_AilEnum`/`_AilIntEnum` dunders and `_ail_en_<Enum>_<MEMBER> = <Enum>(...)` constants.
 - deque: `_AilDeque_*.buf` has field type `array`.
 - datetime: `_ail_dt_from_iso_datetime` (`'s' is annotated str`, caller supplies bytes).
 - regex: `_ail_re_dp/ds/dm/sub0`, which `pyboxed2._native_re` already replaces with native
   primitives on the normal build — but the `--strict` check runs before/without that pass.
 
-Five programs have nothing else wrong: `vibe/berth_sim/python-0.py`,
-`vibe/rail_transfer/python-0.py`, `gdev/g01_008.py`, `gdev/g11_002.py`, and
-`vibe/berth_sim/ail-0.py`. The last is not a prelude blocker: its sole blocker is a
+Seven programs have nothing else wrong: `vibe/berth_sim/python-0.py`,
+`vibe/rail_transfer/python-0.py`, `gdev/g01_008.py`, `gdev/g11_002.py`,
+`gdev/g25_000.py`, `gdev/g25_022.py`, and `vibe/berth_sim/ail-0.py`. The last is not a
+prelude blocker: its sole blocker is a
 compiler-generated lowering name (`_ail_l1l` bound from popping rows of 1 fields in one
 place and 5 in another), so typing the prelude does not move it.
 
@@ -201,15 +202,18 @@ This is a source-level rewrite with an exact proof per shape; it never emits the
 
 `compare/chain_relax/main.py` (mask + `(1<<64)-1`); `vibe/chain_relax/python-1.py` (comparison);
 `vibe/chain_relax/python-0.py` only if its `parse_bounded` bound is one of the folded shapes
-(verify before claiming). `rail_transfer`'s `1 << 200` is an `INF` used in comparisons and
-would need a second allow-list shape (`x < 2**200` is `True`, `x >= 2**200` is `False`).
+(verify before claiming). `compare/rail_transfer/main.py` is **not** a move: its int64
+blocker is `main()` shifting beyond int64, while `INF = 1 << 200` is a list element
+(`[INF] * ...`) and an assigned/compared value — shapes this section keeps refused. It also
+carries `none-optional`, `tuple-unpack` and `str-number-concat` blockers. The `2**200`
+comparison allow-list therefore moves 0 programs.
 
 ### Steps
 
 | step | work | files | tests | probes | moves |
 |---|---|---|---|---|---|
 | 2a | mask/comparison allow-list for `2**64-1` / `0xFFFFFFFFFFFFFFFF` | `pyfront.py` constant folder, `intmode.py` | `test_ail_optint_exact`, `test_ail_pre9` / `test_ail_pre345` (they pin the refusal text) | `x & M`, `x > M`, `x <= M` for the five boundary values; bare literal still refused | 1-2 |
-| 2b | extend the allow-list to `2**200` (`INF`) comparisons | `pyfront.py` | same | `INF = 1 << 200; x < INF`, `x >= INF`, both builds | 1 (`rail_transfer`) |
+| 2b | extend the allow-list to `2**200` (`INF`) comparisons | `pyfront.py` | same | `INF = 1 << 200; x < INF`, `x >= INF`, both builds | 0 (`compare/rail_transfer/main.py` is not sole; its int64 blocker is a shift, not the `INF` shape) |
 
 **Needs owner decision.** A context-aware literal is a language-semantics change: the same
 source text means different things in different positions (allowed as a mask, refused as a
@@ -281,7 +285,7 @@ path) or a copy-in/copy-out that is proved unaliased.
 |---|---|---|---|---|---|
 | 3a | fclist1 for `LIST` element stores (no resize) | `pyfunc.py` (`_written_list_argument`, store branch) | `test_ail_fclist1`, `test_ail_list_ops`, `test_ail_safety_itermut` | in-place sort of a list param, aliased names, read-only callee, append still refused, empty list, negative index, both builds | 1 |
 | 3b | `dict[k] = v`, `d.setdefault`, `set.add/remove` on a proven written parameter | `pyfunc.py`, `collib.py` | `test_ail_fclist1`, `test_ail_int_dict_set`, `test_ail_collections` | recursive set mutation (8-queens), dict accumulation, alias, both builds | 2 |
-| 3c | scalar parameter reassignment when unobservable | `pyfunc.py:3404`, `rebinding.py` | `test_ail_pyreach_shapes` | `def f(pos): pos += 1; return pos`, caller's `pos` unchanged, both builds | 1 (`ledger_bin/python-0`) |
+| 3c | scalar parameter reassignment when unobservable | `pyfunc.py:3404`, `rebinding.py` | `test_ail_pyreach_shapes` | `def f(pos): pos += 1; return pos`, caller's `pos` unchanged, both builds | 0 (`vibe/ledger_bin/python-0.py` also blocks on `dict-of-containers`, `str-number-concat`, `tuple-unpack` and `value-kind-lost`) |
 
 **Needs owner decision for 3b.** Allowing a typed function to mutate the caller's dict/set
 is a language change (the current rule is an ownership rule, not an oversight: `SEMANTICS`
@@ -325,7 +329,7 @@ Two independent pieces:
    those uses; the proof must also show the generator is not stored or aliased.
 2. **A real iterator** (state machine or a C struct with a resume point) for lazy/infinite
    generators. This is a runtime feature and is larger than one step; it is the only way to
-   move `g16_000`/`g16_030`.
+   move `g16_000`. `g16_030` needs this plus `unsupported-builtin` (`min()`, `next()`).
 
 ### Proof obligations
 
@@ -337,20 +341,22 @@ Two independent pieces:
 
 ### Programs moved
 
-Step 4a: `g16_006`, `g16_038` (2, complete-list). Step 4b (real iterator): `g16_000`,
-`g16_030` (2).
+Step 4a: `g16_006`, `g16_038` (2, complete-list). Step 4b (real iterator): `g16_000` (1,
+complete list). `g16_030` is not a 4b move: it also blocks on `unsupported-builtin`
+(`min()`, `next()`).
 
 ### Steps
 
 | step | work | files | tests | probes | moves |
 |---|---|---|---|---|---|
 | 4a | eager lowering for finite, fully-consumed generators | `pyfunc.py`, `genlib.py`, `iterlower.py` | `test_ail_genlib`, `test_ail_gen_speed` | sliding windows (0/1/n items), tokenizer (empty string, operators), side-effect order, stored generator refused, `next()` refused, both builds | 2 |
-| 4b | iterator protocol / state machine for lazy generators | `genlib.py`, `prelude_genlib.py`, `cruntime.py` | `test_ail_genlib`, new `test_ail_genlazy` | Fibonacci first 20 via `zip`, Hamming first 20, infinite generator not materialised, `next`, exhaustion, both builds | 2 |
+| 4b | iterator protocol / state machine for lazy generators | `genlib.py`, `prelude_genlib.py`, `cruntime.py` | `test_ail_genlib`, new `test_ail_genlazy` | Fibonacci first 20 via `zip`, Hamming first 20, infinite generator not materialised, `next`, exhaustion, both builds | 1 (`g16_000`; `g16_030` also needs `min()`) |
 
 **Needs owner decision.** Eager lowering changes *when* side effects happen relative to
 consumption; it is only safe under the stated proof. A real iterator changes the runtime.
-Options: (a) eager only, refuse lazy (2 moved, small); (b) real iterator (4 moved, large);
-(c) keep refusal. Recommendation: (a) now, (b) queued separately.
+Options: (a) eager only, refuse lazy (2 moved, small); (b) real iterator (3 moved, large;
+`g16_030` still needs `min()`); (c) keep refusal. Recommendation: (a) now, (b) queued
+separately.
 
 ---
 
@@ -358,17 +364,25 @@ Options: (a) eager only, refuse lazy (2 moved, small); (b) real iterator (4 move
 
 ### What the census sees
 
-21 programs (the largest family), 2 sole, 32 blocker instances:
+21 programs carry an `unsupported-module` blocker (2 sole, 32 blocker instances). Across all
+non-typed programs the module names occur as follows (a program can appear under more than
+one module; the `traceback`/`logging` refusal boilerplate that lists the modelled modules is
+not counted as a use):
 
-- `json` 8 programs: `json.loads(s)` “the type of the result is not declared here”,
-  `json.dumps(x)` “the type of this value is not known here”, `json.dump(obj, fp)`,
-  `json.JSONEncoder`, `cls=`.
-- `statistics` 3: `median`, `stdev`, `pstdev`, `geometric_mean`, `harmonic_mean`; one
-  refusal notes that `stdev` of floats needs CPython's exact fractions.
-- `collections` 5: `Counter`, `OrderedDict`, `defaultdict`, `deque`.
-- `itertools` 4: `pairwise`, `takewhile`, `dropwhile`, `groupby`, `permutations` tuple shape.
-- `functools` 1 (`partial`), `re` 2 (pattern used as a value / `re.Match` annotation),
-  `tempfile` 1.
+- `json` 6 programs (`g13_024`, `g21_000`, `g21_004`, `g21_008`, `g21_012`, `g21_022`):
+  `json.loads(s)` “the type of the result is not declared here”, `json.dumps(x)` “the type
+  of this value is not known here”, `json.dump(obj, fp)`, `json.JSONEncoder`, `cls=`.
+- `statistics` 3 (`g03_012`, `g03_018`, `g03_032`): `median`, `stdev`, `pstdev`,
+  `geometric_mean`, `harmonic_mean`; one refusal notes that `stdev` of floats needs
+  CPython's exact fractions.
+- `collections` 5 (`compare/term_rank`, `vibe/echo_pack/python-0`,
+  `vibe/echo_pack/python-1`, `vibe/term_rank/python-1`, `g05_018`): `Counter`,
+  `OrderedDict`, `defaultdict`, `deque`.
+- `itertools` 5 (`g06_026`, `g14_022`, `g16_032`, `g18_014`, `g18_026`): `pairwise`,
+  `takewhile`, `dropwhile`, `groupby`, `permutations` tuple shape.
+- `functools` 1 (`g17_024`, `partial`), `re` 4 (`compare/tree_fold` and `g20_004` use a
+  pattern as a value; `g20_010` and `g20_030` annotate `re.Match`), `tempfile` 1
+  (`g21_004`), plus one `traceback` (`g15_024`) and one `logging` (`g15_028`) refusal.
 
 These are mostly **loud refusals**, which is the right failure mode, but they keep ordinary
 Python off the typed path. Several are one function away.
@@ -388,21 +402,26 @@ the Python front end refuses by name in `pyfunc.py`.
 
 ### Programs moved
 
-`json` typing (5a): `g21_000`, `g21_004`, `g21_008`, `g21_012`, `g21_022`, `g13_024`.
-`statistics` (5b): `g03_012`, `g03_018`, `g03_032` (1 sole move, `g03_032`, whose blocker
-list is `strict_incomplete`).
-`itertools` (5c): `g18_014`, `g18_026`, `g14_022`, `g16_032`.
-`collections` (5d): `g05_018`, `vibe/echo_pack/python-0`, `vibe/echo_pack/python-1`,
-`vibe/term_rank/python-1`, `compare/term_rank`.
+These are the programs each step *touches*; only a program whose whole blocker list is that
+reason becomes typed. The counts below are the sole moves.
+
+- `json` typing (5a) touches `g21_000`, `g21_004`, `g21_008`, `g21_012`, `g21_022`,
+  `g13_024`; sole move: `g21_022` (1).
+- `statistics` (5b) touches `g03_012`, `g03_018`, `g03_032`; sole move: `g03_032` (1,
+  `strict_incomplete`).
+- `itertools` (5c) touches `g18_014`, `g18_026`, `g14_022`, `g16_032`; sole move:
+  `g14_022` (1, classified `other` because its blocker is `groupby`'s key-purity rule).
+- `collections` (5d) touches `g05_018`, `vibe/echo_pack/python-0`,
+  `vibe/echo_pack/python-1`, `vibe/term_rank/python-1`, `compare/term_rank`; sole moves: 0.
 
 ### Steps
 
 | step | work | files | tests | probes | moves |
 |---|---|---|---|---|---|
-| 5a | `json.loads` uses the declared target type; `json.dumps` of a typed value | `jsonlib.py`, `jsonrt.py`, `pyfunc.py` inference | `test_ail_std_json`, `test_ail_json_fast` | loads into `list[int]`, `dict[str,int]`, nested; dumps of int/str/bool/None; empty; escaping; both builds | 5-6 |
-| 5b | `statistics.median/stdev/pstdev/geometric_mean/harmonic_mean` on typed lists | `statlib.py`, `statbrt.py`, `stdlib5.py` | `test_ail_std_statistics`, `test_ail_std_stat` | empty (raises), one value, even/odd median, int vs float list, both builds | 3 |
-| 5c | `itertools.pairwise/takewhile/dropwhile/groupby` in `for`/comprehension | `itlib.py` | `test_ail_modules`, `test_ail_modules3` | empty, one, many; takewhile stops; groupby key reuse; both builds | 4 |
-| 5d | `Counter`/`OrderedDict`/`defaultdict`/`deque` typed | `collib.py`, preludes | `test_ail_modules`, `test_ail_sets_general` | Counter most_common, OrderedDict order, defaultdict default factory, deque endpoints; both builds | 4-5 |
+| 5a | `json.loads` uses the declared target type; `json.dumps` of a typed value | `jsonlib.py`, `jsonrt.py`, `pyfunc.py` inference | `test_ail_std_json`, `test_ail_json_fast` | loads into `list[int]`, `dict[str,int]`, nested; dumps of int/str/bool/None; empty; escaping; both builds | 1 (`g21_022`; the other five `json` programs also carry other blockers) |
+| 5b | `statistics.median/stdev/pstdev/geometric_mean/harmonic_mean` on typed lists | `statlib.py`, `statbrt.py`, `stdlib5.py` | `test_ail_std_statistics`, `test_ail_std_stat` | empty (raises), one value, even/odd median, int vs float list, both builds | 1 (`g03_032`, `strict_incomplete`) |
+| 5c | `itertools.pairwise/takewhile/dropwhile/groupby` in `for`/comprehension | `itlib.py` | `test_ail_modules`, `test_ail_modules3` | empty, one, many; takewhile stops; groupby key reuse; both builds | 1 (`g14_022`, classified `other`) |
+| 5d | `Counter`/`OrderedDict`/`defaultdict`/`deque` typed | `collib.py`, preludes | `test_ail_modules`, `test_ail_sets_general` | Counter most_common, OrderedDict order, defaultdict default factory, deque endpoints; both builds | 0 (all five `collections` programs also carry other blockers) |
 | 5e | `tempfile.TemporaryDirectory`, `re.Match` annotation / compiled pattern value | `filelib.py`, `relib.py`, `pyfunc.py` | `test_ail_files`, `test_ail_std_re` | with-block file write and read, `m.group`, pattern bound to a name; both builds | 2 |
 
 No owner decision: every item is a loud refusal today, so adding it is a pure widening; the
@@ -484,7 +503,9 @@ Tests: test_ail_optint_exact, test_ail_pre9, test_ail_pre345 (update refusal tex
   the shapes change).
 Probes: x in {0,1,-1,INT64_MIN,INT64_MAX} for each shape; bare literal refused; --exact-int
   still exact. Both builds.
-Expected: compare/chain_relax/main.py and vibe/chain_relax/python-1.py (verify python-0).
+Expected: compare/chain_relax/main.py and vibe/chain_relax/python-1.py (verify
+  python-0). The 2**200 shape moves 0: compare/rail_transfer/main.py's int64 blocker is a
+  shift and it also blocks on none-optional, tuple-unpack and str-number-concat.
 Options for the owner: (a) context-aware allow-list [recommended]; (b) typed bigint;
   (c) leave refused.
 ```
@@ -535,7 +556,8 @@ Goal: real generators for infinite/lazy uses (Fibonacci via zip, Hamming via nex
 Files: genlib.py, prelude_genlib.py, cruntime.py.
 Tests: test_ail_genlib, new test_ail_genlazy.
 Probes: first 20 via zip and via next; exhaustion; two generators interleaved; both builds.
-Expected: corpus/gdev/g16_000.py, corpus/gdev/g16_030.py (2).
+Expected: corpus/gdev/g16_000.py (1). corpus/gdev/g16_030.py also blocks on
+  unsupported-builtin (min(), next()), so it is not a 4b move.
 ```
 
 ### T8 — pyreach10h: json typed through the declared destination
@@ -547,7 +569,8 @@ Files: jsonlib.py, jsonrt.py, pyfunc.py inference.
 Tests: test_ail_std_json, test_ail_json_fast.
 Probes: loads list[int], dict[str,int], nested; dumps of int/str/bool/None; empty; escaping;
   both builds.
-Expected: g21_000, g21_004, g21_008, g21_012, g21_022, g13_024 (5-6).
+Expected: touches g21_000, g21_004, g21_008, g21_012, g21_022, g13_024; sole move
+g21_022 (1; the other five also carry other blockers).
 ```
 
 ### T9 — pyreach10i: statistics on typed lists
@@ -557,7 +580,7 @@ Goal: median/stdev/pstdev/geometric_mean/harmonic_mean match CPython or refuse b
 Files: statlib.py, statbrt.py, stdlib5.py.
 Tests: test_ail_std_statistics, test_ail_std_stat.
 Probes: empty (raises), one value, even/odd median, int vs float list; both builds.
-Expected: g03_012, g03_018, g03_032 (3; g03_032 is a sole move but its blocker list is
+Expected: touches g03_012, g03_018, g03_032; sole move g03_032 (1; its blocker list is
   strict_incomplete).
 ```
 

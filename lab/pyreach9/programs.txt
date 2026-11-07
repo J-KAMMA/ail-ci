@@ -92,12 +92,12 @@ gdev     general   corpus/gdev/g22_026.py                             bytes-str-
 gdev     general   corpus/gdev/g23_006.py                             mixed-container, numeric-kind
 gdev     general   corpus/gdev/g23_012.py                             dict-of-containers, numeric-kind, tuple-unpack
 gdev     general   corpus/gdev/g23_032.py                             class-dundersx10, dict-of-containers
-gdev     general   corpus/gdev/g25_000.py                             class-dundersx5, generated-preludex35
+gdev     general   corpus/gdev/g25_000.py                             generated-preludex40
 gdev     general   corpus/gdev/g25_008.py                             generic-annotationx2, module-level-constant
-gdev     general   corpus/gdev/g25_022.py                             class-dundersx5, generated-preludex35
+gdev     general   corpus/gdev/g25_022.py                             generated-preludex40
 
 reason                     progs  sole    blk  appears (c/v/g)
-generated-prelude             16     5    128  c2/v4/g10
+generated-prelude             16     7    138  c2/v4/g10
 generator-yield                4     3      5  c0/v0/g4
 int64-literal                  4     3      4  c2/v2/g0
 parameter-readonly             4     3      5  c0/v1/g3
@@ -110,7 +110,7 @@ dict-of-containers            18     1     24  c3/v4/g11
 value-kind-lost               14     1     37  c0/v9/g5
 generic-annotation            11     1     14  c0/v0/g11
 other                         11     1     12  c1/v2/g8
-class-dunders                 10     1     43  c1/v1/g8
+class-dunders                  8     1     33  c1/v1/g6
 class-shape                    6     1      8  c0/v3/g3
 numeric-kind                   4     1      4  c0/v0/g4
 str-number-compare             2     1      2  c0/v2/g0
@@ -131,7 +131,7 @@ nested-def-in-loop             1     0     10  c1/v0/g0
 while-else                     1     0      1  c0/v1/g0
 
 sole-category programs:
-generated-prelude          5 (c0/v3/g2): lab/vibe/programs/berth_sim/ail-0.py, lab/vibe/programs/berth_sim/python-0.py, lab/vibe/programs/rail_transfer/python-0.py, corpus/gdev/g01_008.py, corpus/gdev/g11_002.py
+generated-prelude          7 (c0/v3/g4): lab/vibe/programs/berth_sim/ail-0.py, lab/vibe/programs/berth_sim/python-0.py, lab/vibe/programs/rail_transfer/python-0.py, corpus/gdev/g01_008.py, corpus/gdev/g11_002.py, corpus/gdev/g25_000.py, corpus/gdev/g25_022.py
 int64-literal              3 (c1/v2/g0): lab/compare/src/chain_relax/main.py, lab/vibe/programs/chain_relax/python-0.py, lab/vibe/programs/chain_relax/python-1.py
 parameter-readonly         3 (c0/v0/g3): corpus/gdev/g04_010.py, corpus/gdev/g08_002.py, corpus/gdev/g08_034.py
 generator-yield            3 (c0/v0/g3): corpus/gdev/g16_000.py, corpus/gdev/g16_006.py, corpus/gdev/g16_038.py

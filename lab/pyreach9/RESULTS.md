@@ -58,7 +58,7 @@ whole blocker list is this reason; `sole-c` = the same restricted to complete li
 
 | # | reason | progs | sole | sole-c | blk | c/v/g |
 |---:|---|---:|---:|---:|---:|---|
-| 1 | generated-prelude | 16 | **5** | 1 | 128 | 2/4/10 |
+| 1 | generated-prelude | 16 | **7** | 1 | 138 | 2/4/10 |
 | 2 | int64-literal | 4 | **3** | 3 | 4 | 2/2/0 |
 | 3 | parameter-readonly | 4 | **3** | 1 | 5 | 0/1/3 |
 | 4 | generator-yield | 4 | **3** | 3 | 5 | 0/0/4 |
@@ -71,7 +71,7 @@ whole blocker list is this reason; `sole-c` = the same restricted to complete li
 | 11 | value-kind-lost | 14 | 1 | 1 | 37 | 0/9/5 |
 | 12 | other (long tail) | 11 | 1 | 1 | 12 | 1/2/8 |
 | 13 | generic-annotation | 11 | 1 | 1 | 14 | 0/0/11 |
-| 14 | class-dunders | 10 | 1 | 1 | 43 | 1/1/8 |
+| 14 | class-dunders | 8 | 1 | 1 | 33 | 1/1/6 |
 | 15 | class-shape | 6 | 1 | 1 | 8 | 0/3/3 |
 | 16 | numeric-kind | 4 | 1 | 1 | 4 | 0/0/4 |
 | 17 | str-number-compare | 2 | 1 | 1 | 2 | 0/2/0 |
@@ -93,7 +93,7 @@ whole blocker list is this reason; `sole-c` = the same restricted to complete li
 
 | reason | programs |
 |---|---|
-| generated-prelude | `vibe/berth_sim/ail-0.py`, `vibe/berth_sim/python-0.py`, `vibe/rail_transfer/python-0.py`, `gdev/g01_008.py` (datetime), `gdev/g11_002.py` (deque) |
+| generated-prelude | `vibe/berth_sim/ail-0.py`, `vibe/berth_sim/python-0.py`, `vibe/rail_transfer/python-0.py`, `gdev/g01_008.py` (datetime), `gdev/g11_002.py` (deque), `gdev/g25_000.py` and `gdev/g25_022.py` (enum) |
 | int64-literal | `compare/chain_relax/main.py`, `vibe/chain_relax/python-0.py`, `vibe/chain_relax/python-1.py` |
 | parameter-readonly | `gdev/g04_010.py`, `gdev/g08_002.py`, `gdev/g08_034.py` |
 | generator-yield | `gdev/g16_000.py`, `gdev/g16_006.py`, `gdev/g16_038.py` |
@@ -145,7 +145,7 @@ Rates are programs per corpus: vibe has 24 programs, gdev 100, compare 10, so a 
 | generic-annotation | 11/100 | 0/24 | `list[T]`, `Any`, `Type[...]`, `int \| tuple`, `tuple[str, ...]`, `re.Match` |
 | dict-of-containers | 11/100 | 4/24 | dict whose values are lists/tuples |
 | generated-prelude | 10/100 | 4/24 | `datetime`, `namedtuple`, `csv`, `enum`, `random`, `re` preludes |
-| class-dunders | 8/100 | 1/24 | `__str__`/`__repr__`/`__eq__`/`__lt__`, `print(object)`, `@property`, `__slots__` |
+| class-dunders | 6/100 | 1/24 | `__str__`/`__repr__`/`__eq__`/`__lt__`, `print(object)`, `@property`, `__slots__` |
 | tuple-unpack | 8/100 | 7/24 | mixed |
 | unsupported-module | 15/100 | 3/24 | `json`, `statistics`, `collections`, `itertools`, `functools`, `re`, `tempfile` |
 | comprehension | 6/100 | 1/24 | 2-clause comprehensions, class-body comprehensions |
@@ -153,17 +153,19 @@ Rates are programs per corpus: vibe has 24 programs, gdev 100, compare 10, so a 
 ## Reading of the numbers
 
 - **The single largest mover is compiler-generated code, not the user's Python.**
-  `generated-prelude` is 16 programs and 128 blocker instances, and 5 programs have no
+  `generated-prelude` is 16 programs and 138 blocker instances, and 7 programs have no
   other blocker. The blocks are in `prelude_array.py` (`_AilArray.__init__`, `__delitem__`,
   `_AIL_ARRAY_PRELUDE`, `_AIL_ARR_MISSING`, `_ail_arr_check`), the namedtuple prelude
   (`_AilNT` dunders, `_replace`, `_asdict`), the csv prelude (`_AilCsvReader.__next__`), the
-  enum prelude (`_AilIntEnum` numeric dunders and module constants), the `deque` prelude
+  enum prelude (`_AilEnum`/`_AilIntEnum` dunders and module constants), the `deque` prelude
   (`_AilDeque.buf` field of array type), the datetime helper
   (`_ail_dt_from_iso_datetime`), the random helper (`_ail_rng`), and the regex engine
   (`_ail_re_dp/ds/dm`, `_ail_re_sub0`). `stdlib5.prelude()` / `smalllib5.run_array` inject
   these as Python; `strictmode` then checks them as if the user wrote them.
-- **`unsupported-module` is the biggest user-visible family** (21 programs): `json` 8,
-  `statistics` 3, `collections` 5, `itertools`/`functools`/`re` 1-2 each, `tempfile` 1.
+- **`unsupported-module` is the biggest user-visible family** (21 programs): `json` 6,
+  `statistics` 3, `collections` 5, `itertools` 5, `functools` 1, `re` 4, `tempfile` 1,
+  plus one `traceback` and one `logging` refusal. (The module list in the
+  `traceback`/`logging` refusal text is boilerplate, not a use.)
   These are refusals by name, so they are loud, but they keep plain Python off the typed
   path. Several are one function away from the subset (`itertools.pairwise`, `takewhile`,
   `statistics.median`, `collections.Counter`).

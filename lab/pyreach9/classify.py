@@ -30,7 +30,8 @@ CENSUS = HERE / 'census.jsonl'
 RULES = [
     ('int64-literal', r'int64 literal out of range|does not fit in a 64-bit signed integer|'
                       r'integer literal out of signed 64-bit|shifts beyond int64'),
-    ('generated-prelude', r'\b_ail_|_AIL_|_AilArray|_AilDeque|_AilNT|_AilT_|_AilCSV|_AilIntEnum|'
+    ('generated-prelude', r'\b_ail_|_AIL_|_AilArray|_AilDeque|_AilNT|_AilT_|_AilCSV|'
+                          r'_AilEnum|_AilIntEnum|_AilStrEnum|_AilFlag|'
                           r'AIL_ARRAY_PRELUDE|\bAilArray\b'),
     ('none-optional', r'the constant None|d\.get\(k\) with one argument|'
                       r'with one argument needs Optional|only a class type can be None|'
