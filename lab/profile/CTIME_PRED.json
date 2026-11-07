@@ -1,0 +1,2071 @@
+{
+ "base": "export of staging:integ (aea334f)",
+ "byte_identity": {
+  "alias_study_trans": false,
+  "count": 220,
+  "inputs": {
+   "berth_sim/main.py": {
+    "c": "f5ff480c92b4d50ce5352d03cc05edc334b2b4745668c0fe0a8f6f440aa9859c",
+    "exe": "d0416633cff8cd418a2d72824ca251ecbde9dce69e1f21cdd014d4d6522cef34",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.py"
+   },
+   "berth_sim/typed.py": {
+    "c": "6e27a407ace8780f695832126748e819e344b133d8bb2a49c784bbb06e256ebc",
+    "exe": "ba40da4767e9961902eed79d4a3e4337deb1eb11b3e2adb66c1cdc18d23ae9ce",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/typed.py"
+   },
+   "chain_relax/main.py": {
+    "reason": "write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower",
+    "refusal": "e7c1e0838634f110f6627f829a80150146e1512c1d6ef5aac365948e7a2e1941",
+    "returncode": 2,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/chain_relax/main.py"
+   },
+   "chain_relax/typed.py": {
+    "c": "865f18c0c1f989e922969d569b6941b01b3013232ffbaf4607ea8b2c2dc3f042",
+    "exe": "5f8b6c0b5aad70148fb1c5e429d7ecd24c9f0b2c5fa47167a254f9edf60101b6",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/chain_relax/typed.py"
+   },
+   "echo_pack/main.py": {
+    "c": "86bb96ec0aff8d025e8e3982ec541d40e9799b8ef35c6f2bc6ea81fd0011ed2d",
+    "exe": "3802168da13f93cdef006c7b2cd8a5ebbcb2248d5aaef315ad99784481e616ae",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/echo_pack/main.py"
+   },
+   "echo_pack/typed.py": {
+    "c": "8c63efc027b85bdc8ec905a43c99495b4bdfe39c64201767ff9d4c0f23f73c31",
+    "exe": "8a78ade7dc21f2434f736153c85c37ac2d17ee19cf078cbd2dadc79293f6dddf",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/echo_pack/typed.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t001.py": {
+    "c": "10ae04cc88fed69fb43a7480c875d40cf08a4603d2c4f4bb13afe71c6bfa26ac",
+    "exe": "d28071ef9ef1ec7cdbb431bf7b2aed63eacb8d51165c4b45bf1fee52dfc39400",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t001.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t003.py": {
+    "c": "071e6ef2eafb50f525ff1d387bec22d3a65a43816eeaf632277ba87c7504f14d",
+    "exe": "2cde01e4cd76ac2d6ff29014cccc6cdac603235992e177f28ff3880e5803ff47",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t003.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t004.py": {
+    "c": "8b8bc922a202e9a3ad139005faf0852b02e7189ef5a1150109a036f75bb03214",
+    "exe": "25fb4d5cc83d0150a7fb94c417d7a0bd3ffef4d8b37a4c8d6751425d05f48349",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t004.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t005.py": {
+    "c": "b7aa2b30a84748736cdfc69f6eb244e4510bc5e0fc382e7888d1d4d4f2604050",
+    "exe": "0d95fff6c436c9241579b859204f5c991721bdfe563e6543165f68c7861e6b48",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t005.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t008.py": {
+    "c": "44b26d5c51535d4d0bb503caa96ce62ae9777648fb67cfd8718b3ea8cce37445",
+    "exe": "363843c9d8cef80bcb3079541689262de3dd4885cdb57d5c63ab45598f361cdd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t008.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t009.py": {
+    "c": "27f8a6904efebbf20744b90533797bc89f3527fc71e46420b6aebdd603fe123e",
+    "exe": "cf285abd7552fbca9ce50fafeff15e38bebb30d852e01f35327b9f3cae78414b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t009.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t010.py": {
+    "c": "5d2eaa380446826e7df02cc66efcc43fcdf38181d7a33a482b10eb1696c84524",
+    "exe": "4153083bdfa2aab0c1868d1dfd4c0264215163cb18099550ec7ff2cc713692bb",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t010.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t012.py": {
+    "c": "c8be19631c5f5a9b98432fccf198460a15490dd4c1b96ce6bced8da7591d7b55",
+    "exe": "ae7e5b1b9300e5cd543a65998850596818a82fd171414ed18fe5794c7545a40e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t012.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t014.py": {
+    "c": "dd570396ea381dc944bf4ae1e93e22442c11b5984e0e1e7bcd8ecfdf4de404fa",
+    "exe": "6804ec2587007dea94ef5b8b92ebaabfa5e44abd691487b2043bcdba6500bc93",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t014.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t015.py": {
+    "c": "2b16231a237b2d89e79c7d236414b9e6079cb18c7f6e382d2bdd62fe864851a5",
+    "exe": "4fe8810673cf5a1632956ceaff40e2afb9b4b7cc66dd60804f5436f71f6378a3",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t015.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t016.py": {
+    "c": "9a9c813056d501b792a15010235d77e90e96320a8f566a220d58dca71bb8f7ec",
+    "exe": "8f66020998732e275874235fd7638f26b447eb6419bc22b9a9d3b601e1083edf",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t016.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t017.py": {
+    "c": "35a0ba22822e6da09482d2795fbb64492d52a6739086b481dc18b62d5f6bdb8f",
+    "exe": "c7f6ba76df93addf6bd6b2b4c26938099e3fad5eb1cf55b7f721ff009910ab4c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t017.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t018.py": {
+    "c": "0dc8c15779ed3553c1cabff6beed8942bf101210a347583068714ce88517b7e7",
+    "exe": "6eb11100942d713db0673ac8c75b5102ebd9e7f9b51ad43e932550399d3871a7",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t018.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t054.py": {
+    "c": "718ffbd94462c0968670f3042605d7f9afe77d29dd14de99542906153d214d3d",
+    "exe": "0cf193c149d788e944d1736a9b80ac4434031cd29070e6efcdd2eba0e767a552",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t054.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t055.py": {
+    "c": "76180f3482996ebc08d9f2bbef57d1ad4dd86bb476814ad58a39426df2779d65",
+    "exe": "4bce56c958c1b73442de8023779085fd5e8d88813526a5a1a5165c383253888f",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t055.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t065.py": {
+    "c": "260ad8ac33a4b4c3690772e0d9885d5f3d2f044289c2d0191d05e7c514fac49b",
+    "exe": "aa06eeab694fe42cdfa831ab511c0cb3bb804bb0713648daba4205fa40e7aedd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t065.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t067.py": {
+    "c": "21dfe80bac7d73e21751bac5065a9bd7a97e774663aa6345c8d1fdc9f7a0c1ae",
+    "exe": "8b2f157b07d8a469a55b719563f95e26a48ba439809ba5926707792c2047648f",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t067.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t069.py": {
+    "c": "ba04bcabb1d46f61d31d359d9ac3b8dd13b254dc60bba1c23e027722ae90cd30",
+    "exe": "826ef2b8acf39855890c59d236386e16d8b5223f3637063682748e5aed2cf76f",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t069.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t078.py": {
+    "c": "4dd75fa2ef9e0dc3c996f61f5059c69dca2083cf69b5a313b46e125904035f9c",
+    "exe": "883219df847d0489ed38f72439ef2ef63eeb9ce848f3d81626cd65492ba458a5",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t078.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t079.py": {
+    "c": "e6d6b466e008540bf8c5172c1f376ea62b1fdea9d5e3edd327af3befb7ecfc41",
+    "exe": "15b2e172ac532012508de4016587b0ae9a3398d76f9416beab73c00bdc93b2d6",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t079.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t080.py": {
+    "c": "4c6b9da33d64b4b1b1664dbaa6a14b655fae4d0b29a7ad0e8025437bd290f8f5",
+    "exe": "3cb04f74513a6248925f7412066e3bae051321176b14afa33af32309b3b44e24",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t080.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t081.py": {
+    "c": "dcfb918bb1cae0da96248a82bc15de75e3484a075a372aeba754570701e75dee",
+    "exe": "09ff371202b4136cd724337f652ca2c1f5532f30b57cc3ba3497c943857b0d25",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t081.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t087.py": {
+    "c": "d003e4747cbb0179c7019f32b1ed5f647c37e644b55d0aba249fb52c94ba6bcf",
+    "exe": "968d2c11339a939eac3feef980a89b8512e18ace0447c49b11e18b70c7341fd0",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t087.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t094.py": {
+    "c": "c4d7cd8fb40d45b55519de34124dedb5b579bb9c704d46bf30058ef8772f92da",
+    "exe": "a974ba72ac1b4684b845eecf69b7f5403ba5e2a735c639a9a677ad6cbb6f064d",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t094.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t095.py": {
+    "c": "97db68bb302e09a5ca52d477d039c605038e10a9eb8c6ad4053a214295107748",
+    "exe": "d15d686a36778c44ccad4e6cca926d1e1bb1403025ae637320c1a4f2860bbe96",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t095.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t098.py": {
+    "c": "fd1437f89220539eecd0c6f5e0ce5b7dddcfbb96cac7d89788ff8348b0fce739",
+    "exe": "379afbc2eae6c3805898c283ee7b4cd6b097cefab345532013234c54b743acb1",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t098.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t100.py": {
+    "c": "b849178cf2d15994fc70e512532a7f7bbde40b1ffe969e5ead6b93ff67ff52f8",
+    "exe": "9548745b30e0cc186a52c49697ba398726c65394e09056f6d0e06f7fcb067d8b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t100.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t103.py": {
+    "c": "ac91c6b17fd0e4ff4e005c075d8790b7be3000ce8246cbc3ef6c6819df4254fc",
+    "exe": "6121c00b9b0a87a17666510e205509687c7d44bb477866ff7ee0f0cc3ca59497",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t103.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t104.py": {
+    "c": "42362a28346cb1250d57c4c7b7ddc6ef1cac3b655ce1480c9e8df23a9033c80d",
+    "exe": "97995aecb82c5b016df90f456483c1ac591c41079160573be37e5785ff6927fb",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t104.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t107.py": {
+    "c": "6fed4a421a26e03c4fdba60b157182a7e4e65919608c932bbaddc9fa59025071",
+    "exe": "b54f93bb4fbcd2cd316bb54cf52e77e63373dcdf884ffae48ddbbf0f45e06264",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t107.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t108.py": {
+    "c": "537f7740abf5eee1356eb92aeb1de5eee7566e01041bc05cf9cc3dbaaad41eb1",
+    "exe": "9906f4ba2b8779f3866c290b6b14438c840b07bd18d91d3974303403421b4c99",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t108.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t110.py": {
+    "c": "e2b908c6033180acc65852092a7ac2e51d112baa7cc355d8fce5eaf075386d47",
+    "exe": "8e8e29437e0ad1cfdfa593c67bb65561ebf8f5beedea2ab0ca5b5d2f2b8c2407",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t110.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t112.py": {
+    "c": "96f1f078e05c47641c85690cd34b463f017dd760a00e2ef1e86c51d977b3eea5",
+    "exe": "74220b081a6f26acb10701eb6071bad0c026a5c0334162dcad08811be480412c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t112.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t115.py": {
+    "c": "0305ad632d6384aa8f56dda2d72dfce041efb1ff012311c096b616c4aeb9cc26",
+    "exe": "1410c4babc5bf5cf11feb71590e0a54d466cf7b7132358a04574f124f34ff17c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t115.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t116.py": {
+    "c": "a4e468bbf5a7573dc1a1e531883d2f8ed7f0624080905ca5e57d116ce03e0386",
+    "exe": "f33685cc2664b2f7132dee0e21597f9d17d0d4a8bc2452327f3fca1185d8b0c1",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t116.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t117.py": {
+    "c": "4bb9ea482575390365b3abdeba015370f84d54fb34e4a087ee77e42caa02d9d2",
+    "exe": "6c8febc1660da2256467c4dd44f6285c7a62dd8758150c3d8d8ec2500f11743a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t117.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t121.py": {
+    "c": "4fc09b72065f18a4bbfac1240da0523839024b6bd0dcc895e51a150399a9568b",
+    "exe": "9bc420b78c687c1bab90f3c6c66b6d4ec309be601cd6531dcd8943df6b7de8d7",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t121.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t125.py": {
+    "c": "f834c47b97689f600ce708c535d8149b94e2e9982a578c2dc8cd6ca6772c33e9",
+    "exe": "01d4179d3b15fdc45e33f2b0022a3188f20521d764cc99c33f48a3f9050b9895",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t125.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t130.py": {
+    "c": "8dbef0a210a27c1d20b89679518552fc1a54d38ce9ad98e4b2a2f3b07b34f251",
+    "exe": "c026c7050c9a4af2a44be6cd1bf1fa3cf54a9e7c706caac3d1bea87800c315bd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t130.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t131.py": {
+    "c": "7fab5e5426f51dfc75984242adf5089b384a1bc9f996ae65ea7b4b8eaa468d2c",
+    "exe": "2d3d556407a25638f74b83ae2c42e16e7ee520f3a24cb0dbf4d6f846d365d700",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t131.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t137.py": {
+    "c": "2032812e76a6eb7b51da9e2e5640931c447bd87a010ed7ecb213b9993971eaf3",
+    "exe": "db3246ded26fe090ab5ea5a3e065bd57ecaa89e96348ecdf3d79b1ad155245f9",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t137.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t139.py": {
+    "c": "fa28a26d466615f6db89f6fcefcb69c5e71e0cceccfd759dd875630b1cfd5121",
+    "exe": "ddc1a56af07f8d85e27cb14499421715f5717ba7bb9afdda681a63cdd21f0955",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t139.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t140.py": {
+    "c": "914cfc00fd1c50cb5084eb36ce370fb13d3600fe23032117ed37e11f746a26db",
+    "exe": "63e3eca24d8760409a6ec9c405fe8c15236394ba07bf2a978b26accd00b59fef",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t140.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t141.py": {
+    "c": "47d3299bee555a52399235c62bb17e426f1e460fba6677cccfa3c7ab9e00fdd4",
+    "exe": "762d7822a42f115eae58f187ebcbf51b6093ab96aa5997928f0d3119ba3abdb2",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t141.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t143.py": {
+    "c": "eaf3b85a93c955546511e22f9ec30364d41593c8c15c5108eddc058e20d90ff1",
+    "exe": "ee96c91d41eb151010bb735572771d065c08240c2ced6b859681c2d04b1bf839",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t143.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t149.py": {
+    "c": "aa770fba69ffdd0aa0e277dd583a02de68ff052a5f1af3d42b18c19696f51ea3",
+    "exe": "68aa8f27c07249810a40ae8669657da1900d4c279ada624d68a3b5c77ad5ff09",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t149.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t150.py": {
+    "c": "91c2d7791ff4421849ae164147e30dd1b31e88211ad2f75d40c0b20feb993d29",
+    "exe": "63789e1b7ddaf515eafb1afcc52d6395ec157a057af7cda955a1aa51e019849c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t150.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t151.py": {
+    "c": "861cc7ae8d76573f7d51df500d18d973fb9779bf8ac2940bd6ca0da9b75c9331",
+    "exe": "cbeb871b469cb0fe9b84987d9a417393a1cb7758cc74d30be25e939572077613",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t151.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t155.py": {
+    "c": "c0e6ba3a0897ac9e2162b1d66095fc11c6770f9de63e9fb97ace55cba194ff10",
+    "exe": "34e4f9f7fdf9efe4db190bcdaae32d9eb3560a9b04fd97f1a0f0aa68b579dd61",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t155.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t161.py": {
+    "c": "fa139609bba8aea0e553376b2670e34d009e958b6228d88d2aeb398a46a8f7f8",
+    "exe": "9d1ced130ff885aa16de3b0a1c23e370d95c7edcafe9d6edc368e02654820bda",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t161.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t166.py": {
+    "c": "6d33621f18d9933ff64321210ca392c066f43b2e8c2c2d40ab54e501db1a61a2",
+    "exe": "595b6dfdae4f098d565954643f33e77b9b81d842b547edd79f6cfff7f930f67b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t166.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t168.py": {
+    "c": "99803ddc2b415177e5714bf9c21b55645726cc0f8fcc30982623b9f1306b3142",
+    "exe": "2ce0423f1ccb38bde325f6dc878f5badfdedcc768580ff43e264db519f7258f9",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t168.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t170.py": {
+    "c": "475dfc1583a328cf680c4cfdd4fbe1e173683a902681e5b1a314b73417b3219e",
+    "exe": "3f1654c682743377ad50beaf47381fb4a2383009b4299ed5d4cd2877f2dcde0a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t170.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t171.py": {
+    "c": "8be23943ef1c0a932ea684f0cacfd537fd1492a469f5a1711a7564fc50e44982",
+    "exe": "bc346e2bfb796591ec2fcf9b2f3946f12cf617163c60c0333a1c3809321fee62",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t171.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t172.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:24: iterating over a tuple",
+    "refusal": "f0df77efc12a5a7cf46f7c4b8b0ffdb95bd397d5ed4ff6428e60a20c0b482504",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t173.py": {
+    "c": "7e7a43f8d01e23b836677500641cd1bd76329ee4f15e602d9e2ef4aed2e5da31",
+    "exe": "830200618d27f5be336c30940e3768dadb79a740c6544fb38aff174124025657",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t173.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t176.py": {
+    "c": "36b6802bd4a7d8129fc45b4e1c85ee9d58afc69f8b32eed02057b43429353669",
+    "exe": "61eac33576b5ea30a891fc3069619016de78607d46c0051920fc039ef4bfaf77",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t176.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t178.py": {
+    "c": "ecb9c1bf4750f7b007eaaab827edaf77447e7e1effd8ae018e9ec5e6596361b7",
+    "exe": "c0ebe48764b399ff9c79cadf63792cb92ae5ba25ae603ca4ddcd830c5e432c49",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t178.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t180.py": {
+    "c": "d19d7d9365037663f748303655abf12dc7a3157e8d4a15661b539640e5025b21",
+    "exe": "2ecb0e6fe09bbd4a144bb2d6f4a312eace0100e244b7a8627ae368889d6d983e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t180.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t184.py": {
+    "c": "416074389002fc0d3ef54b850c529fca13079422205a664f0f8bc47e297186ae",
+    "exe": "7b0c481625ff5028fe40cef6a0adf8df13b7f4164938a5047e8a565d336b5df0",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t184.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t188.py": {
+    "c": "2ffbbcb90a853d3a58079e68884934fc9f708f70f16333debe3d66e2bd644534",
+    "exe": "49aaa7b31fdb0be832406b32621a6dbdc0bd1bece9fd57223f25e14b2098c08e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t188.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t193.py": {
+    "c": "ad91c0229c06dc07038e07de666f5c66ca73d04aee59146e2657b16449d07f40",
+    "exe": "95f180d2c893814aa5a32ea1e11582b5e335666a4bcd85eeca904f2c68560e8a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t193.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t196.py": {
+    "c": "de5ec3a949ac6677d33f1bf4451b410992a8df883d07af86cdbd4868c0e66448",
+    "exe": "67a90a026b3ca9d666ea0c9601ab18cb9b639491443716dc6a38e8a70fc125b0",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t196.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t198.py": {
+    "c": "50cae34c8571a3934ed5f28d121a90c278b4d0204073ceed4ac944932e01a6ff",
+    "exe": "edcb99a4d7329226ececd333a4ba8b119332a45433ae7eefc5844b8c4078f21a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t198.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t208.py": {
+    "c": "b713f867c358b1bed506de4280b3b680fd80f0dd9ca93f22e32220c7d013e97d",
+    "exe": "9e662cbe56a7247436c3b726def205e7f6688616099895137891db4eacf7c564",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t208.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t210.py": {
+    "c": "1bd741c9d821eed7dbcdbfd803162a8ee9d9d19c85c503b6962175b36056d120",
+    "exe": "10f78b5cb0bfa92ccca921e813c4fc0e736006bdec3ddc9d9e4759b8c2ea2d56",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t210.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t211.py": {
+    "c": "c352923e3349f5e264edddd783f9dac4241f33a6bc02f953c37dfdbf3978fadd",
+    "exe": "b002e3195565188c956fc8ed29ceae4ca4b169ae1e335d420de0f1784ad979f8",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t211.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t216.py": {
+    "c": "cf7be60a2867ecc0a9de7c313351f30c579af70aa3f5a3d4c335e754c81edb41",
+    "exe": "fe9d86c8d8024fb92b816179231dd598b8e96fc072c9ba81de3fd13a24decd88",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t216.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t219.py": {
+    "c": "0f33c8697a609f015c12fe7b7e7c3a0b58e72d150ff58480e01348bf8f8c36ec",
+    "exe": "f1a6e7a1797ba8bf1a84455a9a11694257345384b6d58e7f5bcf10020ea83b57",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t219.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t223.py": {
+    "c": "b4fea9ef676363e6cd47a0ee89e3eb9b0892bbcce6130bb4e4ee4bdcd33a2450",
+    "exe": "f9289af68c2720106b150a78de58a8333cca1c320724c29486f339758a2515e6",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t223.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t224.py": {
+    "c": "5e508863d007808a61886ffef197399a59b62f2107deafc1e483577c74f9fe54",
+    "exe": "e091a090eacc435f4dcf38da4d04397eba960496e114dc354756ef72586ee27e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t224.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t230.py": {
+    "c": "fd43d59f7a40880385e8bbacd7872b82ce2939428d505c314cd92f98114aacc7",
+    "exe": "adb4965849f68620ed24c6dff6ac1994c21d74d8154d227b29dedc7c5efa18ca",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t230.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t237.py": {
+    "c": "bad04af5530554ea42f4084a156b4ce819dc274c228ead743535f23a961703f7",
+    "exe": "64b27657c8a7181fe119375ba1cc18d521d3572ba021e69b22861af72153e5ed",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t237.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t239.py": {
+    "c": "908ca9ef953bf19b2e10d5a3d5f3aa6e88f2f0bb991414582773f9e6c54a37ea",
+    "exe": "e6d20f09d441f53cd49ebb057d4de3e1bbe8aac2aa00388e5ca5f243c65bb09f",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t239.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t241.py": {
+    "c": "b51a918c83c91b12d7f3e680569aaefccd050aa1ad614cb9af8d810cccf42ffc",
+    "exe": "af3a8febcaed942b8ce5abbb9c7754e1b76e4ee1cef8184be45666c62f9382de",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t241.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t243.py": {
+    "c": "6106a469f2f51d32295de9a288d55d7ecb452480aa711300322b786b8dc82ff0",
+    "exe": "14697dcf170537a2b392df50ed4aa8e367d8aa015c3aa7948e8b5f71fc2f9eda",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t243.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t244.py": {
+    "c": "92cb03bef560be2aa46489aa8d77a5c062f1959833730c426c93cc0e33bc700b",
+    "exe": "27a170f938d438d5761517ea538a5285b34a289ecec3cbc471b16c8781aa7498",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t244.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t251.py": {
+    "c": "84d60c6c1df84c73b1eda299ee38c7d4bf7d74008075c5c1f9fd3ea3cf1148a6",
+    "exe": "5530192b865effcd15c8e6f440bc6cce866a9f33640f0d6cb12e2b0732982e6b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t251.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t255.py": {
+    "c": "a77b927b8cb14af993b917442db726f6b98e5e70e228a43cbee6586a6a4e22ba",
+    "exe": "b3ed1dcbf6abfcac09fb0e9a0504f41b8e2272c596921264ca211dd76b6359d6",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t255.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t256.py": {
+    "c": "334cb2dadc4557cbb55b15bb84e233015150e7c0bb1642397ce0ac6d066f3895",
+    "exe": "8b3acf1b8696e815e8f1ffa0dcccd2725ca51a2eed6a0ffe770582e40cc64da0",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t256.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t257.py": {
+    "c": "9f1b2f72da3ca3e57d563a1c10a60125ba43805f1ba47bee1f1c344526223609",
+    "exe": "df2d56b2e3a2798b51c0547153d236833d0909c69aa25c6c45c0df1f9b887435",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t257.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t258.py": {
+    "c": "47cf17568dc471c3058e94c159f9e95ae0cca9aebcbbd9dff417bd023f22a386",
+    "exe": "398004227b19dc41fd07848a7617ec5102720d5b0402e3d791b1d4e3126b102c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t258.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t261.py": {
+    "c": "81aef9fd22141c829d1ce39f460a08f18d2c9ff4a59511010085c22feacb6cc8",
+    "exe": "18213fe9b82a298d2ab8cbbf93bd3dbb177f0f2f54b4db9d4bc1961cd31b82cb",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t261.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t264.py": {
+    "c": "7ddde3202e68f4d6236da114d1e14d45cff7a16b17df257a557b332b795479c4",
+    "exe": "d495e7e5a7a372585461955d56b8c975ee99c141e954edc5eb3d99a2da5de77c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t264.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t265.py": {
+    "c": "c322c2f82051aa68495d548bbbd0aa767b3d2c104b13d029fdb76fe30ad10c1d",
+    "exe": "3cca8966e96bf53137da3503c99e6c57986a3a420af9a803c239130d3558fa81",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t265.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t266.py": {
+    "c": "a6a48ceb8e36d05cafc94c8c7ac307c16ac5a0bc1b39f28e905b7bae2915fd52",
+    "exe": "f4816b69664968fb2f8e083df8ab9b24f9f23e2be57ae340e506467535f33129",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t266.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t271.py": {
+    "c": "8255984401ace864ab1d716f5306a5cf6dc5a109a3117ba9422f86143b046fa3",
+    "exe": "8bf0649b43f19e7cb39e314028997dd70ebc2a8d1ded0957b54ea725abb85a4f",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t271.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t275.py": {
+    "c": "197d5d913e4ac7064512a73a20fb258c6497848bd7943a90fafc31cea8f6c6a6",
+    "exe": "c37c98a08d60b88e8c09e21548d99e15925663dbecd49b428b4b4f55b1265b7e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t275.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t278.py": {
+    "c": "3e1e4d3896e38bb90bbcbcdbad48525ea997f359b98ff4228995fabb7b290ed5",
+    "exe": "2e9ecb0fbece9547aa99515da4b51c75f55aab0371b06a2296c3a5cb401e59dc",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t278.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t283.py": {
+    "c": "fa9a5045479ebb7889677ea0789c38d5f5c87951fd2fa8aa9063efa33f52baae",
+    "exe": "af938d3ad548566a732af877e7ec0d1870a2f89d442c44fdccfaf56609d6b231",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t283.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t284.py": {
+    "c": "d275757eac5abf54874ac0441cf45ab46787e49984622ceb86dc97b94d403fab",
+    "exe": "c63c913c14d611ff5459c824bdeae35674b97e7aa6836ca7dff99e43445edee5",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t284.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t300.py": {
+    "c": "2032ee48d7346518e877f69780c889c661e5ffb5030dfad2bf15fb17aa69305a",
+    "exe": "486444a4357f3b7240fa8689ad869bb164ead04c7e7dd4b987d37bfc6250c7ce",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t300.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t303.py": {
+    "c": "14d9068e6fce79792305ee075f82d66c3c4098400ff03ef7b93f2da3a6101f6f",
+    "exe": "6f507a1faf4f255bdc53e5fdd660d3ace65c31f2d2d730c8f3c04cc22dd71f75",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t303.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t306.py": {
+    "c": "23031ee200c8dd38f98712c77c1e774be481247120255aab3610d24a73744b27",
+    "exe": "7d904dd349ce9a369cb69106f1a37726dd796df5522eeea4ec441b424b75a459",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t306.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t307.py": {
+    "c": "91ae3bdb74ce941d3b9d975077994cf05b389374ed78299f979645a556aa348f",
+    "exe": "f5c953b143f82ac7d70fb6effac2eb8275f0265a3e6de5d6169b82a5610e2d4b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t307.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t308.py": {
+    "c": "2e2ec75dc3abcd5fec952701940ddeed9cefa7e58b1e9bec2dc65179726ac4a5",
+    "exe": "43bdcca0e0669c7aad7588a875c69ad77504ee869bea71eb0c5c5348b9b20998",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t308.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t310.py": {
+    "c": "98c611425c564ad37ad303eae6997837c7e931c8fef7cdc7927db4cd4879bae7",
+    "exe": "d26eb3f516ae30b44d9b624585e9ba9e4c9ce399604fad4376b1ad140138542b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t310.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t313.py": {
+    "c": "7169d27b50bf86f1eb83ea4cd5207279cb8a81676c0e2a7c6c30fdee660b4401",
+    "exe": "45d56a12464544921bba393f6e47123e9103975b163e5f921605b8dc3da8b41c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t313.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t314.py": {
+    "c": "65d4f6d0eb8bea4c6df5c1c74edfc107a59b61bc2c69798c2dc22f06507cc6d4",
+    "exe": "21070467d64d38d2065b375b270583940afb82e5ffedda6d9e6d964976e798f2",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t314.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t315.py": {
+    "c": "cf41f1d36981306036b26a480c4e6c35931c70ccd31af2a6ee2387969594fc82",
+    "exe": "07c5aca4e1de4a65d27fd1cf885b30a1f657834b124a44e0f3fb1fef858ee8da",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t315.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t318.py": {
+    "c": "6ba2aea7d9e072d101bca14eca751a514b29dbec0138cfeb1a4a46c1574eef14",
+    "exe": "f1034cd79721afd75f1d5e2c1a3b1632a66cb21d7a8b9fb230da16783023bf50",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t318.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t319.py": {
+    "c": "0b185d3560a7953174e40848382e7bbf19a901d9228d61d3004556456b744d5b",
+    "exe": "8203c9925daab874e3d65eb878c968a994dacd83beade041133a4443ccef665d",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t319.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t320.py": {
+    "c": "fdad56c314cdbba70b4716f82609b00d4a9915a2664ac3b36ef855b9c1f64cc7",
+    "exe": "0f4b708e811de07518c18dae93d46162b56c917bf88c999eb0e555109acf658c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t320.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t323.py": {
+    "c": "e8ded149ae22cbe320e1cab130457e184c594af04218d9186f28f38324c723ad",
+    "exe": "510396066ad42e224e9100d6587c7ba7f37954cada2360c8991133c2b6cdcd38",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t323.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t325.py": {
+    "c": "c7e94e131551c9ef9b72351ab40fc8802a70ab72076e47d92ec75755c63a6f91",
+    "exe": "6b0db8123e8a8f31fbf85208e32db2493e8a1527fa108d01c71e0630932ab66c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t325.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t328.py": {
+    "c": "4476d1b98d73d66eab8e5aa8211762636b96ce0d5b3dafbec08116fb02b55390",
+    "exe": "9209d88320100445df0b7ed92c36611ef96c15a5cabadd6a56e47a98fed89c25",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t328.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t336.py": {
+    "c": "1f96ac7d04c951261cdb590011d10419ebfce162343a5cfdda41b906abc1d5a5",
+    "exe": "9a93e6b120f9e96319d82db24b121d96d82f647cd6152950884562231189febb",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t336.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t338.py": {
+    "c": "c5b7d9ed17419f79965597c30dd8cb4d7d57547c468c28a7edf43fa2d4c84ea0",
+    "exe": "7a9bdc80dbb50f7cb4ec3205e97125bc731a0aa83d1794d1c9488fad46dece10",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t338.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t339.py": {
+    "c": "2ff74491f8af9123134b051e56a97131150e46e15cacaa52725dd51f0bb1e7fa",
+    "exe": "41c11e4012e27505a1d1b729e4f1b6de21096695cdc1e0dc817d0bd6efedad52",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t339.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t341.py": {
+    "c": "86337f37d69d1e1a0349739ee129b7436581be933f32a098be71c8313636415c",
+    "exe": "581a249bf1639bc78ce7d31d86ba47fabf6937898559a1375880fc5709be1c7b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t341.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t347.py": {
+    "c": "200aed696be36af10a6b0a6a4a715042d7f25b3a070137487f43ef30e1dd004b",
+    "exe": "b245d7132cf47ea3dc5d7f42065a5dfc97bbd3f3e4cc026b1aac0fe60e6e614a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t347.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t353.py": {
+    "c": "ea78e46fa36085e988fce92d8a5ade9011c20ee1b3b7df9a2c99be38ab37615c",
+    "exe": "db478c3996ff2477fbb59ed3d442fea70141b77355a8facc0de41271ae27cb0a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t353.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t360.py": {
+    "c": "ff3da6dd59179709c82b3d9f09038e78d3066f256d535ddb4f18a34a43b8a3f4",
+    "exe": "df84f0a72ec48c8eb3c3eb22ff03802ba8efc0185c04147d61c14dece0af2188",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t360.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t366.py": {
+    "c": "aeb338e22d3464861d5ac8591532ebd13c1321573493e548e2e2e0babc3bb28a",
+    "exe": "c8f4fce940971b3519fa9c75b41ddfdfa2ed99055b9152edf292911f297d3918",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t366.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t370.py": {
+    "c": "17176ec500d9323ef4e42133858f47dd208376b49b30d204d38ec6686a1d37e5",
+    "exe": "93ad16c7bdd6840ac41db64b61340da0c976e8ca973f483d96a2936a9cb4fdbd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t370.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t371.py": {
+    "c": "baab847c91cb5aca1e82fd959542b52062f0ede40b3cece4052de2d2c41dd9c7",
+    "exe": "46875fa772b9fa48c55b33f93918eebe1748da27043805788fce5ad15f9e3fa2",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t371.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t374.py": {
+    "c": "f14a3c6e7b9be860872e272430f4a714f560642b1cbfe22bc244841938ff4931",
+    "exe": "f43f10b19d45884cddfc793248d9c8e2cf7f69c89c7329871fb1bb967d111d68",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t374.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t375.py": {
+    "c": "b210183d1c14bf5a517ba8bb4bdd91e4a56693eb80b116f584ac97942d31d35c",
+    "exe": "53017053c011efde7cb2ddf6fea85694ad11862e558c55cee712d8d7159a48b4",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t375.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t376.py": {
+    "c": "fe7f39ac669ee941d19f08c76d278865eb330c707708f316731eeb2c2b6605c6",
+    "exe": "4303982999aebee5a9df676a0eaa4d7f739a286ef648cb75b41c5d69c2923c6a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t376.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t379.py": {
+    "c": "ec9943ac517c7b738c2f5fb09dce65bf1fba8dc37c7dc6b79a77f6af314da10e",
+    "exe": "f8273fcd58908263eef5c6aa2056f7dd49cc562ee99c079c99178685fba2daa1",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t379.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t380.py": {
+    "c": "d141c701c81238cd4e3fbf7d111a67ad02e9123dc44c60c12296b791860f7419",
+    "exe": "be9ea3116ef02574f1df30a69e67640315b632151663c17c40afa632b8fa36ed",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t380.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t382.py": {
+    "c": "993a445d96e04561bb4c2df91062afee5e68372bd662e9a8ea491b6f9307c275",
+    "exe": "4ca4b57a636e35e63951407be528eaf34034186f06dfc8e207fab384ca1af694",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t382.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t385.py": {
+    "c": "db3fae318301936c9d09cc95cc7b87e262486310060c5adeb067c8b93051e64e",
+    "exe": "2ae8ca8cd29afad43778ac5159bc0d23b2bb3b052d3042f1b23078ade185c8a9",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t385.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t388.py": {
+    "c": "72674b7871a85162327db888185fc1379418de51012360cbe27b95d17504b6e7",
+    "exe": "277b6ed09e8794c2f814a39c84b04964c931e2333defcc3187ab6654e4a32e78",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t388.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t391.py": {
+    "c": "4919dfa5c4d7d119fb8fdabc6326887ee45f98dd657ea23842aeb7d528200d37",
+    "exe": "dbe8d3a0e107ba3406dba4a1522bd95af88c7ffea9fc60618f6ef6044ba3adaf",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t391.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t394.py": {
+    "c": "60db6643b535f55042c79db8ceefc9211b95d5700fc9742dadf700d53907fa49",
+    "exe": "ad210f204d72762451ff348d1ebb8ea052d5132bca470e07ebdc5b91b3b3b1d1",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t394.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t401.py": {
+    "c": "e0bd52f1d2e69c69dfdc276a5b3e854d25124ba3eddc4e3a34262659e3361c30",
+    "exe": "d5b3c5c32413414b5db273c768fdddc4d1cc8180912364dcf13d546338151528",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t401.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t402.py": {
+    "c": "a9045f9f8fe550681cdca35cd61c1c6f7f039df823dd6d05c4144e6ae67ecd2a",
+    "exe": "2640deb795578e4ee2fc8c6572293047c8574b74a681b09b8c51675a1fe60979",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t402.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t403.py": {
+    "c": "3c1c9eec507053158487e5ec9c1c01cf0dd6c5ddfdf8b91ea1b5f97a9d6fbcc5",
+    "exe": "ceac2dae772da5c881d5b5370c8ecc1a5fbadfa3e012e9501099eef49c601488",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t403.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t404.py": {
+    "c": "3b65c07af1ea0d02eef75a2224f70ddeb4ff15777631b3f6a7b8035112167d58",
+    "exe": "d2bfe960a4d7ac658e0e7b9f6c39c1b371269db892d954303c87b1ab09cb60a6",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t404.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t410.py": {
+    "c": "c174689cc20fff853bf51d793795be3db047c5c5c336da44eb906ee46a3e2bf2",
+    "exe": "0f17dd0f7caae3087ef2ad824cb29a65e8d0d7ee25da3bab2b58a29e1653d239",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t410.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t411.py": {
+    "c": "ce5e0237992fd02fc254ae8eca1ffca70873143852eae088d03bb9e712b5cff4",
+    "exe": "8351a0416bfc085d014334e21ad4c706ebbca9dc0c34991795c67e10e81a7266",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t411.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t412.py": {
+    "c": "031ede7215b19d64ba08bfcf3071c2897fe338ec0f53d2f7b81e464893a102c2",
+    "exe": "9f9b7f17cdb046bad19d19b956bc21e3d3f10e6dc0e65194832d48f5dda08afd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t412.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t414.py": {
+    "c": "f9458dfb24e5e657f4b38b70ea37ce6a92cc36e53de44442284adb9ae6c729c5",
+    "exe": "0ae8771a6849cdd6a4c38fa0be4300e691057c8f0c3f714b0d14799faa7598a3",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t414.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t419.py": {
+    "c": "4f97fa7ae7d6ddb64eeb0d93d9104c87b30052bd742c6d4d21c040db50e41e82",
+    "exe": "678aebccb218a071c000e6eea1c5ef216f5d2a6f9635f3eb7a53811ce3df88ba",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t419.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t432.py": {
+    "c": "6b623a11eeefaf8e2f6fc3fe9b6869779c4f58c3f5b65a71ec8433bfa03aa5fb",
+    "exe": "af6c19f86d52c80863c4cc58f82c7927b6961855562d9c1aa3a25b88b6334250",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t432.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t434.py": {
+    "c": "621952c2115273970326d0c059796ce6b2f444949d89ec821c2f0cb20eea5110",
+    "exe": "29dc4bfa4a3ee5060ca64c7ee87f5df855f2a88e4a505ededfed51ed482b8f25",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t434.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t437.py": {
+    "c": "32d960e0148f68cca62ea0753ebeede8a608aa5ab14bf5caa7bd0e2a10f1243f",
+    "exe": "0f21aea31cdf28700be23e02be95c38c6588d9269a5028a96896178ba61f4459",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t437.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t440.py": {
+    "reason": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t440.py:17:5: not in the subset: functools cache: .cache_info is not built (the general path could not build this program either); general path: the method .cache_info() (on a value of unknown static kind)",
+    "refusal": "87e865c64ed37776b70c09a260d6150d2644a56adb82c4e850dac0b1f8ea61a8",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t440.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t441.py": {
+    "c": "39d8fbebfa268a58c72696b9cadbb49d0320fac6864bc29e0b3f9bddd81ec019",
+    "exe": "64a53719317229a7389eae467fd48f07c2063b9410c4938df864fa1e3db99af4",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t441.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t443.py": {
+    "c": "f029a10bb3fafe7cb94aae0c5e3a5a8dc099688539556db64556c3a253fc2aac",
+    "exe": "323c5d08af34686954bc018b31311c38a75c8d06b81951ceffa390bcbdcf1e31",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t443.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t447.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py:5: a module-level constant whose type cannot be told and that holds a tuple is not built; build it inside a function",
+    "refusal": "cf122c3f422766cb7dca54cedab62de2f316b149afea6239f0a213181b39f213",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t449.py": {
+    "c": "346f2bbeff808cb50ae90ca55b9385269f4ceb4235bd6fb55cff18177da69fae",
+    "exe": "f613971e66ced2a7b365f9002178c861ce2ea89f3b8505f75b814d80cc1d9aa0",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t449.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t452.py": {
+    "c": "25e746b4a9eeb60595692e6ab4e9ef3eee0267d33f01b02386e3a608ff23d74b",
+    "exe": "2be020ca01902ad6267e31f80fa9d3f2f4927bbc5a171098a40d7657d7da161d",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t452.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t455.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py:5: re.compile(): re.compile is built only as `NAME = re.compile(literal[, flags])` bound once; use NAME.match(...) and so on; built here: re.match / fullmatch / search / findall / finditer / split / sub / subn",
+    "refusal": "bcc7b04399a4ee4eec2d6f42f72d410410e4608f280de6d82d8d4eab742e1938",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t456.py": {
+    "reason": "write instead: a standalone class that holds the other as a field (`self.base = Base(...)`)",
+    "refusal": "0f67c6e57e8dec44f38cf0ae0a8a61caaa2c3c134f784916648d76eea1969c42",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t456.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t457.py": {
+    "c": "33b891c4213ed9c474b6bd10e65f3844d553a12720e75432e5c6b8c5afeaed8b",
+    "exe": "8b7535582bb371ec89cd294375c3b9d730664b08526c4bfd5795c6d005eca677",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t457.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t459.py": {
+    "c": "16891c952703b538984f90de6500d9c93919441076dc106088671f7fa98db6b1",
+    "exe": "6b6c18984d3885319ba0254b7da388afd3bea3b5c4c36d118efd1317908f6bca",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t459.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t460.py": {
+    "c": "f6356d3e4bfc98022ee02a0c617ded1b31a9e19fd08c00cc9353537828441930",
+    "exe": "2e5dc3dd2488981e25b95a514790ebe1b25452f1d205711715cb94fb9e4053c4",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t460.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t461.py": {
+    "c": "2591300602d8ac0ed157743ae60c05970e7e6d2d8717960fa6648fe1094de361",
+    "exe": "52cb4b8de753106121f15e58fdb758bd9fd14c6e09af1cb8338593807c3b435f",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t461.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t467.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py:1: a *argument in a call",
+    "refusal": "1afd8b4acfdb17dd2a91c3839fcb7993136d46d077f53e9d1afa47cbf1577192",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t468.py": {
+    "c": "ae78fb244e48bf99754eb4e1c8f099ecd31917169af2e04c5762d2559f332973",
+    "exe": "7630b48cce17fb723a0109262f02e629715fd3c21d27e49c148bd7cdc637989e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t468.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t470.py": {
+    "c": "d47e906701fa447d969e0ac56f2ebf375d04d69134e2ff194dbc7610582412a5",
+    "exe": "18cc3ba7f8d2d17621e7a487e70bc83bde964028c65c034ab7af60483e37265e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t470.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t472.py": {
+    "c": "e5115583643b624d48e7ef0d3e7e07c77ecee02892eaebfd6570f77323aae9c3",
+    "exe": "5e4178f312c173dfa4dd8cc182707fd35e05723043aee200929bc8bd0014c234",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t472.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t474.py": {
+    "c": "ef0cffbfa6ed3d0ac5cfc0a7be12ae699f7fee9335a0556b0121636c97204b1f",
+    "exe": "5d32743090d66d9f0da1254cd45790c6654f73753e54712957e2dbc68edb2b36",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t474.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t475.py": {
+    "c": "e70c68674bf983c87a73549ef18f40267c448355a10ca95ce14d89f310db50cc",
+    "exe": "35495f549ecbe763d7e3d1579b5d9441d345d879bf7280d843780c33853514bc",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t475.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t481.py": {
+    "c": "734cc3fc061bc17248aed6378de6b3cb5352cdf2f904fbd853ecfee98f4f104e",
+    "exe": "e9cd079150b17b3125c4816ae71516586ac6e51cbe3b636c1780f4500aaa66f0",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t481.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t482.py": {
+    "c": "9af706a65cdedacc682d26807d52e19924f754ce13b34b2ecbbe4b193efda450",
+    "exe": "85a548ff05e4f76a163e258b223fdd11e66c6aa403c22431fabb3b1e356e8683",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t482.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t483.py": {
+    "c": "57bd1da5ce941d52758f2e0f7fe4fd8250389f995d1abf4916478686a9935c27",
+    "exe": "2baec03db2ad46281fdc14b364515c547e94315be5e1de16db08602ac31aeab4",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t483.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t484.py": {
+    "reason": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t484.py:11:5: not in the subset: field _AilT_b_b.fb0 is declared bool, but `letters` is not a bool (Python would keep the number and print it as one); write a bool: True/False, a comparison, `not`, or `letters != 0` (the ge",
+    "refusal": "91ee3546c1eba31e0035ee83bbc15eb1596ad9e0b67719efbad90f37e94065d9",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t484.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t486.py": {
+    "c": "3ca981406ee8d13492b53eaf6a146fc8b029ad1d110fa7a47297a3bb23d111a6",
+    "exe": "75885e98f0f60ed53850f3f49528d61c1ffacd6efba0d58a19031db15522fe0c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t486.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t489.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py:10: unicodedata.name is not supported; write instead: use the str methods (isalpha, isdigit, isspace, isupper, islower, isalnum, isprintable), ord() / chr(), or unicodedata.category(ch), which is built",
+    "refusal": "81cfc56862b4cd4bb56866037a3ecb08c7c2581bc4e172aaa6835c8a1854bc6a",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t493.py": {
+    "c": "869a2ebef8dbe0f73fe90be69b6d95925c81e609d16bbe80848d1bb4cc46051b",
+    "exe": "b1eba1682dc31f7723da03262020faa5b2c23f6861f22de24b59b149579f04bd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t493.py"
+   },
+   "lab/corpus/programs/deepseek-v4.1-flash-free/t498.py": {
+    "c": "6ade23206cae6f7c6e00a7ae21ecbc495b8da93f185d93365b676b5355d79d91",
+    "exe": "f710460b8a66fa717d61c5a4cca7c27d338f4a08aaed1ca2bae65773a53b0064",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/deepseek-v4.1-flash-free/t498.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t010.py": {
+    "c": "886850c8d28d94fc9797d5c65fb199c617690c0203b413895d965573dd9347e9",
+    "exe": "6f00ce105587dc43da9b3604d8361c578c89ab108d69b6f01353c957d27bb3fa",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t010.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t014.py": {
+    "c": "6222faedd380a44c49d7d0b4b715cf16db3f8f9e160978dedf60af27413c84b8",
+    "exe": "9c19513014fef0540fd5305ae11544c0b87f53cffeabcfb76ebbc93da27f885c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t014.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t028.py": {
+    "c": "8209586edc893c4a7f05cce065b30f4c7f8ba7086260d01c9b8174c0f72ba69c",
+    "exe": "7b3a3e2b3d922861a950b345d6d3462ab331b9fa126fcb816ca6136bfadbf076",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t028.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t055.py": {
+    "c": "d6054bf96b38d977fb486860d5d7b2a94e254990263bba94d2ff4f9eec5f228c",
+    "exe": "c49f07cb3f30f3781b63b1181861a34937bb90728efac2a68e70d0daf911e417",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t055.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t069.py": {
+    "c": "b1264704192aaddc14c2cafc64f171fb9ea71f375da794463b06d25a60d03a85",
+    "exe": "04477f33d0b92861b905669d2c214aa31667a5f95d3a6693114c6c51f2764b3b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t069.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t072.py": {
+    "c": "3c81b8102de2ca2551a05e2c5594f2f269baeea1d1d95aae730fdf4ea2969e75",
+    "exe": "545ec9b62745dff91a242345987c29fd59132f388190da53a42c3efc46884c4c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t072.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t080.py": {
+    "c": "c721317cc842697b77563641f15c3ae0cdae034f7bcf28d360a28db8edea952f",
+    "exe": "e3622d9772d940406c9319fc608b330cd818976ac087b4d3e1d4cfb3eb553b34",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t080.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t081.py": {
+    "c": "9f68cc0628361e22574db940c0bfb99dd75177fac66c6caa1ff10bb53e96a95f",
+    "exe": "bd38ee2865718176d90f4110a25b10a7358c1df2861ec9a3da733d393ef5d6d6",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t081.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t094.py": {
+    "c": "8144c23f62bcdff117c5ed41c3a6de7cf496b30bb585cd832c594a59548b3035",
+    "exe": "1d5ec96923c15e0a182ef7f62ec7b9db9dee56619a98f4e5e0484a2ec806cb35",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t094.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t095.py": {
+    "c": "d9aabd8511a8844a4c470bdb722d1cb38a486eec490b6df348d41fc6b05e79b6",
+    "exe": "3d96d551228908ac8ee461aaab1b78b7b8e30afb9d07dbd4b3db1d459ef0eb66",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t095.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t103.py": {
+    "c": "cbd2778f228ce018c988b41d7eeddb85a387047559239aa32c1d62649b1ba465",
+    "exe": "dae7ea6a85dd4a58c1982e7785e46d82adcc8a2f94d31d7d8a377c275e6d6557",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t103.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t108.py": {
+    "c": "ec76a432778e21284575a12d8cd344c3de5d50d937eb7c8441f13a9e752889c9",
+    "exe": "5f7513794e1ef3a268020e5f46465175bdabd1283988fba7c94ec6ae49d554d3",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t108.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t131.py": {
+    "c": "ea1efe684fab40c4015e2577f018ad562665b70d6bd77aa19312ab53c94518bc",
+    "reason": "|              ^",
+    "refusal": "998da93659de31b392bbc5afdfc3a23d170a5b2b173872e38110ede187056f0f",
+    "returncode": 4,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t131.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t155.py": {
+    "c": "5e5f661596b82a52a96aa267c5494e14f3883de18426a7c3fc3e8be0904750d3",
+    "exe": "4c97082b0bc0116333c170d9f65ce77c30b92e335399d60b05e51921d7a66d6e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t155.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t166.py": {
+    "c": "2b3458e461f627a2d6e3b1696643e7833cc4e9ef023aea0a53c3447d9e613226",
+    "exe": "efbfea8eb1d7f4a164158fe180160b065c0a8f6eef4ca1a8bd1fdd608bc068bb",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t166.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t168.py": {
+    "c": "d2891b40de02b03a743a6e177e2c1874708725a09e3597c58fea70c0a182c080",
+    "exe": "c5548a08ec18dbbdb5a59734e9e0d8af27694de4babcb12e2fd56ce2621453af",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t168.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t173.py": {
+    "c": "eff282dc886f0612b8526f09b3a0655f87f9cee5989dc6df91e866ab023b55ed",
+    "exe": "83b0f67e4575421988206c86191b4031218c54eb21e7989a842f72fa84cf5164",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t173.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t176.py": {
+    "reason": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t176.py:7:5: not in the subset: json.loads(s): the type of the result is not declared here; write the type down: `data: dict[str, int] = json.loads(s)` (the types are int, float, str, bool, list[T], list[list[T]], dict[str, T]) (",
+    "refusal": "ef2f731585824511d526170ce9fd3fc8141fefbf233136fc9f8298b54620009b",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t176.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t184.py": {
+    "c": "154a6d0b6569e5c0496c7d46d8324698dbe7eaf456559f457a8c4f2c830bab06",
+    "exe": "d5e865ad5b3d29fce2512276b275b9df8fea91fde3319c261a5e94b4dcb40aad",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t184.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t196.py": {
+    "c": "d3fff2b84a2a58d1697365b3d47e0743221bb9d7dee574b693f74c509118f56a",
+    "exe": "14c3d697b8b5d9c8ff3fdf7e7b0885cf833b6c6deab34c436f3ca6e811bd9160",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t196.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t223.py": {
+    "c": "6204b4ed56c9a9764069598346c5b59410c242b3991c76e00d4bf10e2afe29e9",
+    "exe": "ce838e224180a332a7c45fa78fe91c3cdf3609a3a29c4d8ea740029441e6ffe2",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t223.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t224.py": {
+    "c": "e04e188418a1106b83344570609f0c9b92027f4d3312c4d1fd2ed02e11ce2fd8",
+    "exe": "2f71fb25e7a06bf4554742fba262f5cb02434daba3295195ebb81ca74557b4e4",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t224.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t239.py": {
+    "c": "a0f1c45ed8e234c4a0f57c06a438211c1db69527b756b0ce9f9fe95e14d69ada",
+    "exe": "9538c71f8be494f1c7b30ee8b3350976f17d999c3addfbe159810a91620e1564",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t239.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t243.py": {
+    "c": "0438d1bd711b04e69bdcb3a5d445124fe237d1ec07ddd0d7b71d3d88a7f1a075",
+    "exe": "d6aa884382a453310ef5e034dcede268597e24861a5ecb49d28527631e838bdb",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t243.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t251.py": {
+    "c": "253f1713253b632f302c400528218e009b52c5dd026a0f014d9f8267bc43fcfd",
+    "exe": "9bcfae09061d4e5d79bcfeb7eb8c481a44625a771e8c48381c2d7b5fc257a17c",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t251.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t264.py": {
+    "c": "52bf776a2aa54b921237f8213fa96ebe8027a2206ce788e0070e9cb1a4882361",
+    "exe": "33a9302861823f6275a9f6d9049c7e3c34f79ead4a74f2c3337a4857b7a1b7cd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t264.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t265.py": {
+    "c": "7157b70e2aac63668392ff1e2b97d6f81f91138cd0f4707a60d0d42302efb0ca",
+    "exe": "8a24abfe1542f6d07b43d1b1646987a25d3ff0072c3953ede05f5a938c013c3b",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t265.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t275.py": {
+    "c": "405f7a43e366412b987cae4886401772eecc78fe8246b1cb9e0bbd753ae014b5",
+    "exe": "f5180c4852c8d1291629cd9a1b00e8c66510d5cf576438f6cd183d20b3f04b29",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t275.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t278.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t278.py:42: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+    "refusal": "01cd7b766db3d3e71f86af9531cafe033d5078609210c76907f8b1fde608b77d",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t278.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t284.py": {
+    "c": "e0fb5e269c219b4fec37a2b508fce4aefa60d95050d7d960ff8b66d619c176f6",
+    "exe": "babeb05dd37a12478de464ca0cc058dca806b4274317df1073cb4da030bd1425",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t284.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t306.py": {
+    "c": "dfb1f06d6f934b1857f9b0108420fa167d4257e65b6655cd5704f788829307c3",
+    "exe": "b2e18b6f6b82dea17c3e0706349d7cbef537cb9788f2c590e75931b377e59a73",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t306.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t307.py": {
+    "c": "0dde4d364aa41423c01732dcddb9eda24981d9be982fd9be432172d12dda0fa5",
+    "exe": "7c48d7fe71fcb4a771a62622cadfb1f5f4eb029a7267fa834bf3127287925ddf",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t307.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t308.py": {
+    "c": "f531b133cd9f2afd99fd1a18a18355e2755a0b22e715184c17d00c1ef582adc3",
+    "exe": "785f38c8ba8124e1cde473a79c595363d490fc5604c956037aeb1acb0fec0139",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t308.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t318.py": {
+    "c": "6e7d12c9d3c79b4d92c2467eb56aef45e811536d4d367713cb862749a384dded",
+    "exe": "1e75eaaca5177190ee52c5f44868fbe300920edd63dd3c2c3be47d6ab0fd7ddd",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t318.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t339.py": {
+    "c": "2248f343ba661df6740fe0b845b37cbf3e87216a53cb897442bdaf74067a1357",
+    "exe": "f8385bd8df8059cde4e97b57753d220d1d5be39472b4c546c4e5abc088f62247",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t339.py"
+   },
+   "lab/corpus/programs/glm-5.3-flash-free/t341.py": {
+    "c": "7289e5372141d669cddef4e1db912e464a472a1b7bc5adc9622c7d3c36876647",
+    "exe": "4463099ff1d072b256ad39c9ddbbcb85b5125abfe45a1c548ed8f1abee16a0d2",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/corpus/programs/glm-5.3-flash-free/t341.py"
+   },
+   "ledger_bin/main.py": {
+    "c": "82f44e363015932dbbe3c4dbd3b05bf4fbbd282276f39e2b8d4c2bd7c4706060",
+    "exe": "1f70334d4b464866127b38201a697ef08c07cb91634339c8091c640f19674e13",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.py"
+   },
+   "ledger_bin/typed.py": {
+    "c": "4a74ae34fa2bf043aa73c64a2fd302141206ab32e7f98e575b4f93db5ff8eb7f",
+    "exe": "77344fdb1e8db5669f146274e4566ef67e2308b00820267c78eb47bfaa1f2c5a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/typed.py"
+   },
+   "rail_transfer/main.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/rail_transfer/main.py:53: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation",
+    "refusal": "b0098147dd71b1bef532b9771929b8047ee925d0038b220b2754bf534317b5bd",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/rail_transfer/main.py"
+   },
+   "rail_transfer/typed.py": {
+    "c": "2943c24280e613cb47345d8914bc7dc1fa7036a3ad75c1e91cc04fac2bf312c0",
+    "exe": "e8efba86b6d374c19bec19fecbf8341ad6eadeb8183550ff503c9acf35e53006",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/rail_transfer/typed.py"
+   },
+   "scar_life/main.py": {
+    "c": "c476b2fed9b24de7e9c7f7e1a6020bd10a2f447cae7619ffc9c8e74947aa6199",
+    "exe": "0ed915fc8a9fcb4c6cbfeff54cbf28dfdb9e6b1a4b637430137458093a26cf8e",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/scar_life/main.py"
+   },
+   "scar_life/typed.py": {
+    "c": "4e9492d8089ec95b3544eb0146bf34f280baa5cc267bc2ab717795438c75d8e1",
+    "exe": "ac3f64e575dfbf0fd8212372a9d39122dec85ba119aab965aabcea0532ffc3e6",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/scar_life/typed.py"
+   },
+   "tally_lang/main.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.py:22: the compiled pattern TOK is used as a value; only TOK.match / fullmatch / search / findall / finditer / split / sub / subn (...) calls are built",
+    "refusal": "b7fa1e58df0e5f52c4297da127f75dea9c839a4d8fa9c7549070bfaa25b19441",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.py"
+   },
+   "tally_lang/typed.py": {
+    "c": "72d6d67f255514aebd99b2d6e30df061a092bb37c61f8ed5cab33f229ff746ae",
+    "exe": "3c847c4afe61c7870af908e54668e37d3196cbff5e58816edccfb8bd226f89d3",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/typed.py"
+   },
+   "term_rank/main.py": {
+    "c": "239a48c056981209fc5502a4bb513b261573616f847da236bce2186442c310d4",
+    "exe": "1d6262b255b439ea71a0c62b3f4ea7971e9926cc598dd9a0f9e6c433144f98c1",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/term_rank/main.py"
+   },
+   "term_rank/typed.py": {
+    "c": "5c5ed035d205d0bfde1df81d694d09517f596f9545c4da307a89ecf1df3438b7",
+    "exe": "19048a581ca08c352986b53197f2f8e8371876ca25a3ff67053813635e9dd120",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/term_rank/typed.py"
+   },
+   "ticket_audit/main.py": {
+    "c": "81f836f7112f1e1cfd37e349ef333e9b68b87e672cf9b64b1f4093283159fc4a",
+    "exe": "6c0bba8f79d072c0f5e6e7e0e0e6f99e32119fb6a4913327cc7a357f4d50ec40",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/main.py"
+   },
+   "ticket_audit/typed.py": {
+    "c": "507468087d347b1a61e4d349603dabd491665902ede7cc8e3ab9d57e1b155eaf",
+    "exe": "3ff3e3c8922230b8035a997140b08fd94e18b38c90642de339a2aaa2f47f981a",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/typed.py"
+   },
+   "tree_fold/main.py": {
+    "reason": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/tree_fold/main.py:20: the compiled pattern NODE is used as a value; only NODE.match / fullmatch / search / findall / finditer / split / sub / subn (...) calls are built",
+    "refusal": "5e1f19c161ea934f2057d88419926c876a3ab17be6d2ad2da04b58bdc1568896",
+    "returncode": 3,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/tree_fold/main.py"
+   },
+   "tree_fold/typed.py": {
+    "c": "cabab7895f3d4f0523f646aec9dddb8bddc96a14c3d383651971380b0bddbf32",
+    "exe": "f3066635632c5ce96c3bb915cba5bf69a9ae631c49fbcb10c8a19f88216df6df",
+    "returncode": 0,
+    "source": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/tree_fold/typed.py"
+   }
+  }
+ },
+ "corpus_inputs": 200,
+ "date": "2026-11-06",
+ "listed": [
+  "_is_owned_bytes_call",
+  "_map_kind",
+  "_param_kinds"
+ ],
+ "lookup_ns": 125.0,
+ "lookup_s": 1.2500000000000002e-07,
+ "predicate_summary": [
+  {
+   "cacheable_s": 1.178642,
+   "calls": 513296,
+   "changed": 90900,
+   "changed_all_inputs": 215064,
+   "changed_corpus": 124164,
+   "corpus_calls": 1288131,
+   "eligible": false,
+   "fe_own_s": 1.812015,
+   "fe_probe_ratio": 0.215022,
+   "predicate": "_etype",
+   "probe_cacheable_s": 5.481502,
+   "probe_own_s": 8.427125,
+   "repeat_share": 0.917,
+   "repeats": 470714
+  },
+  {
+   "cacheable_s": 0.748055,
+   "calls": 430695,
+   "changed": 771,
+   "changed_all_inputs": 12106,
+   "changed_corpus": 11335,
+   "corpus_calls": 890961,
+   "eligible": false,
+   "fe_own_s": 0.852403,
+   "fe_probe_ratio": 0.236315,
+   "predicate": "_is_str_expr",
+   "probe_cacheable_s": 3.165506,
+   "probe_own_s": 3.60707,
+   "repeat_share": 0.9032,
+   "repeats": 388999
+  },
+  {
+   "cacheable_s": 0.240162,
+   "calls": 325390,
+   "changed": 65,
+   "changed_all_inputs": 1207,
+   "changed_corpus": 1142,
+   "corpus_calls": 688194,
+   "eligible": false,
+   "fe_own_s": 0.280945,
+   "fe_probe_ratio": 0.243194,
+   "predicate": "_is_slist_expr",
+   "probe_cacheable_s": 0.987534,
+   "probe_own_s": 1.155231,
+   "repeat_share": 0.8768,
+   "repeats": 285315
+  },
+  {
+   "cacheable_s": 0.096509,
+   "calls": 483928,
+   "changed": 0,
+   "changed_all_inputs": 0,
+   "changed_corpus": 0,
+   "corpus_calls": 983939,
+   "eligible": true,
+   "fe_own_s": 0.109527,
+   "fe_probe_ratio": 0.112833,
+   "predicate": "_map_kind",
+   "probe_cacheable_s": 0.855328,
+   "probe_own_s": 0.970699,
+   "repeat_share": 0.9145,
+   "repeats": 442559
+  },
+  {
+   "cacheable_s": 0.120364,
+   "calls": 108028,
+   "changed": 810,
+   "changed_all_inputs": 1914,
+   "changed_corpus": 1104,
+   "corpus_calls": 194124,
+   "eligible": false,
+   "fe_own_s": 0.149759,
+   "fe_probe_ratio": 0.176627,
+   "predicate": "_is_bytes_expr",
+   "probe_cacheable_s": 0.681461,
+   "probe_own_s": 0.847885,
+   "repeat_share": 0.8337,
+   "repeats": 90062
+  },
+  {
+   "cacheable_s": 0.12589,
+   "calls": 443701,
+   "changed": 0,
+   "changed_all_inputs": 0,
+   "changed_corpus": 0,
+   "corpus_calls": 847855,
+   "eligible": true,
+   "fe_own_s": 0.141497,
+   "fe_probe_ratio": 0.203604,
+   "predicate": "_is_owned_bytes_call",
+   "probe_cacheable_s": 0.618309,
+   "probe_own_s": 0.694961,
+   "repeat_share": 0.8978,
+   "repeats": 398373
+  },
+  {
+   "cacheable_s": 0.033847,
+   "calls": 1044004,
+   "changed": 403929,
+   "changed_all_inputs": 798455,
+   "changed_corpus": 394526,
+   "corpus_calls": 1697062,
+   "eligible": false,
+   "fe_own_s": 0.047543,
+   "fe_probe_ratio": 0.054363,
+   "predicate": "type_of",
+   "probe_cacheable_s": 0.622618,
+   "probe_own_s": 0.874546,
+   "repeat_share": 0.9944,
+   "repeats": 1038181
+  },
+  {
+   "cacheable_s": 0.0,
+   "calls": 546,
+   "changed": 0,
+   "changed_all_inputs": 0,
+   "changed_corpus": 0,
+   "corpus_calls": 4041,
+   "eligible": true,
+   "fe_own_s": 0.09204,
+   "fe_probe_ratio": 0.080414,
+   "predicate": "_param_kinds",
+   "probe_cacheable_s": 0.0,
+   "probe_own_s": 1.14457,
+   "repeat_share": 0.0,
+   "repeats": 0
+  }
+ ],
+ "tasks": [
+  {
+   "halved_all": 1.0681,
+   "halved_listed": 1.0047,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.534482,
+     "calls": 178134,
+     "changed": 36884,
+     "repeats": 165031
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.068336,
+     "calls": 39943,
+     "changed": 0,
+     "repeats": 33552
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.068436,
+     "calls": 162622,
+     "changed": 0,
+     "repeats": 147954
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.114578,
+     "calls": 115295,
+     "changed": 65,
+     "repeats": 102991
+    },
+    "_is_str_expr": {
+     "cacheable": 0.343036,
+     "calls": 153607,
+     "changed": 217,
+     "repeats": 140711
+    },
+    "_map_kind": {
+     "cacheable": 0.056,
+     "calls": 178974,
+     "changed": 0,
+     "repeats": 166258
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 51,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.009456,
+     "calls": 384303,
+     "changed": 156579,
+     "repeats": 382188
+    }
+   },
+   "projection_all": 1.1361,
+   "projection_listed": 1.0095,
+   "saving_all": 1.0427,
+   "saving_listed": 0.0817,
+   "task": "berth_sim",
+   "wall": 8.7022
+  },
+  {
+   "halved_all": 1.056,
+   "halved_listed": 1.0037,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.058329,
+     "calls": 36129,
+     "changed": 16350,
+     "repeats": 34307
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.012184,
+     "calls": 10269,
+     "changed": 0,
+     "repeats": 9521
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.011932,
+     "calls": 43398,
+     "changed": 0,
+     "repeats": 41369
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.021198,
+     "calls": 32212,
+     "changed": 0,
+     "repeats": 30408
+    },
+    "_is_str_expr": {
+     "cacheable": 0.069707,
+     "calls": 41612,
+     "changed": 151,
+     "repeats": 39745
+    },
+    "_map_kind": {
+     "cacheable": 0.008924,
+     "calls": 39142,
+     "changed": 0,
+     "repeats": 37301
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 16,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.001581,
+     "calls": 113507,
+     "changed": 94442,
+     "repeats": 113310
+    }
+   },
+   "projection_all": 1.112,
+   "projection_listed": 1.0074,
+   "saving_all": 0.1443,
+   "saving_listed": 0.0105,
+   "task": "chain_relax",
+   "wall": 1.4332
+  },
+  {
+   "halved_all": 1.1234,
+   "halved_listed": 1.0052,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.239191,
+     "calls": 95153,
+     "changed": 16513,
+     "repeats": 92172
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.029729,
+     "calls": 24082,
+     "changed": 0,
+     "repeats": 22809
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.026091,
+     "calls": 104152,
+     "changed": 0,
+     "repeats": 100884
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.049323,
+     "calls": 79764,
+     "changed": 0,
+     "repeats": 76845
+    },
+    "_is_str_expr": {
+     "cacheable": 0.161351,
+     "calls": 103696,
+     "changed": 0,
+     "repeats": 100723
+    },
+    "_map_kind": {
+     "cacheable": 0.026276,
+     "calls": 122210,
+     "changed": 0,
+     "repeats": 119229
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 24,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.034407,
+     "calls": 301359,
+     "changed": 83893,
+     "repeats": 301104
+    }
+   },
+   "projection_all": 1.2468,
+   "projection_listed": 1.0104,
+   "saving_all": 0.4626,
+   "saving_listed": 0.0241,
+   "task": "echo_pack",
+   "wall": 2.337
+  },
+  {
+   "halved_all": 1.0365,
+   "halved_listed": 1.0018,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.099751,
+     "calls": 51740,
+     "changed": 4240,
+     "repeats": 47157
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.009756,
+     "calls": 9204,
+     "changed": 110,
+     "repeats": 7331
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.010576,
+     "calls": 40311,
+     "changed": 0,
+     "repeats": 35080
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.01807,
+     "calls": 29183,
+     "changed": 0,
+     "repeats": 24754
+    },
+    "_is_str_expr": {
+     "cacheable": 0.054373,
+     "calls": 38406,
+     "changed": 20,
+     "repeats": 33966
+    },
+    "_map_kind": {
+     "cacheable": 0.009092,
+     "calls": 46017,
+     "changed": 0,
+     "repeats": 41425
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 22,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.002663,
+     "calls": 92531,
+     "changed": 22285,
+     "repeats": 92039
+    }
+   },
+   "projection_all": 1.073,
+   "projection_listed": 1.0037,
+   "saving_all": 0.1659,
+   "saving_listed": 0.0089,
+   "task": "ledger_bin",
+   "wall": 2.4369
+  },
+  {
+   "halved_all": 1.0188,
+   "halved_listed": 1.001,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.046392,
+     "calls": 38939,
+     "changed": 4144,
+     "repeats": 35308
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.00536,
+     "calls": 5601,
+     "changed": 0,
+     "repeats": 4127
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.005904,
+     "calls": 21274,
+     "changed": 0,
+     "repeats": 17354
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.008458,
+     "calls": 14226,
+     "changed": 0,
+     "repeats": 10905
+    },
+    "_is_str_expr": {
+     "cacheable": 0.023866,
+     "calls": 19676,
+     "changed": 0,
+     "repeats": 16174
+    },
+    "_map_kind": {
+     "cacheable": 0.003269,
+     "calls": 18237,
+     "changed": 0,
+     "repeats": 14865
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 18,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.000978,
+     "calls": 31063,
+     "changed": 11554,
+     "repeats": 30624
+    }
+   },
+   "projection_all": 1.0376,
+   "projection_listed": 1.002,
+   "saving_all": 0.0756,
+   "saving_listed": 0.0042,
+   "task": "rail_transfer",
+   "wall": 2.0838
+  },
+  {
+   "halved_all": 1.0127,
+   "halved_listed": 1.0011,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.024815,
+     "calls": 22478,
+     "changed": 3122,
+     "repeats": 19937
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.00232,
+     "calls": 3136,
+     "changed": 0,
+     "repeats": 2022
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.004884,
+     "calls": 12877,
+     "changed": 0,
+     "repeats": 9985
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.00445,
+     "calls": 7911,
+     "changed": 0,
+     "repeats": 5449
+    },
+    "_is_str_expr": {
+     "cacheable": 0.012752,
+     "calls": 11393,
+     "changed": 0,
+     "repeats": 8859
+    },
+    "_map_kind": {
+     "cacheable": 0.001731,
+     "calls": 10650,
+     "changed": 0,
+     "repeats": 8135
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 17,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.000539,
+     "calls": 18212,
+     "changed": 9177,
+     "repeats": 17931
+    }
+   },
+   "projection_all": 1.0254,
+   "projection_listed": 1.0022,
+   "saving_all": 0.0407,
+   "saving_listed": 0.0037,
+   "task": "scar_life",
+   "wall": 1.6408
+  },
+  {
+   "halved_all": 1.0061,
+   "halved_listed": 1.0002,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.019514,
+     "calls": 8369,
+     "changed": 390,
+     "repeats": 5991
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.001285,
+     "calls": 1668,
+     "changed": 0,
+     "repeats": 984
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.001668,
+     "calls": 6611,
+     "changed": 0,
+     "repeats": 4382
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.003152,
+     "calls": 5280,
+     "changed": 0,
+     "repeats": 3052
+    },
+    "_is_str_expr": {
+     "cacheable": 0.008959,
+     "calls": 6638,
+     "changed": 0,
+     "repeats": 4352
+    },
+    "_map_kind": {
+     "cacheable": 0.001132,
+     "calls": 6905,
+     "changed": 0,
+     "repeats": 4628
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 66,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.000455,
+     "calls": 11568,
+     "changed": 1486,
+     "repeats": 11255
+    }
+   },
+   "projection_all": 1.0123,
+   "projection_listed": 1.0004,
+   "saving_all": 0.0303,
+   "saving_listed": 0.0011,
+   "task": "tally_lang",
+   "wall": 2.4948
+  },
+  {
+   "halved_all": 1.018,
+   "halved_listed": 1.001,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.055536,
+     "calls": 37138,
+     "changed": 3617,
+     "repeats": 33570
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.002672,
+     "calls": 3735,
+     "changed": 256,
+     "repeats": 2532
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.005519,
+     "calls": 19935,
+     "changed": 0,
+     "repeats": 16143
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.008645,
+     "calls": 15664,
+     "changed": 0,
+     "repeats": 12345
+    },
+    "_is_str_expr": {
+     "cacheable": 0.02357,
+     "calls": 20567,
+     "changed": 257,
+     "repeats": 17089
+    },
+    "_map_kind": {
+     "cacheable": 0.004114,
+     "calls": 21151,
+     "changed": 0,
+     "repeats": 17675
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 38,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.001591,
+     "calls": 40657,
+     "changed": 10359,
+     "repeats": 40154
+    }
+   },
+   "projection_all": 1.036,
+   "projection_listed": 1.0019,
+   "saving_all": 0.0818,
+   "saving_listed": 0.0045,
+   "task": "term_rank",
+   "wall": 2.3512
+  },
+  {
+   "halved_all": 1.0082,
+   "halved_listed": 1.0002,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.03662,
+     "calls": 17137,
+     "changed": 782,
+     "repeats": 14256
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.002081,
+     "calls": 3132,
+     "changed": 0,
+     "repeats": 1978
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.002766,
+     "calls": 10615,
+     "changed": 0,
+     "repeats": 8012
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.006561,
+     "calls": 9191,
+     "changed": 0,
+     "repeats": 6548
+    },
+    "_is_str_expr": {
+     "cacheable": 0.017741,
+     "calls": 12208,
+     "changed": 0,
+     "repeats": 9497
+    },
+    "_map_kind": {
+     "cacheable": 0.002125,
+     "calls": 14991,
+     "changed": 0,
+     "repeats": 12214
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 170,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.000702,
+     "calls": 16620,
+     "changed": 3178,
+     "repeats": 16319
+    }
+   },
+   "projection_all": 1.0165,
+   "projection_listed": 1.0005,
+   "saving_all": 0.0581,
+   "saving_listed": 0.0017,
+   "task": "ticket_audit",
+   "wall": 3.5844
+  },
+  {
+   "halved_all": 1.0135,
+   "halved_listed": 1.0007,
+   "predicates": {
+    "_etype": {
+     "cacheable": 0.058447,
+     "calls": 28079,
+     "changed": 4858,
+     "repeats": 22985
+    },
+    "_is_bytes_expr": {
+     "cacheable": 0.006549,
+     "calls": 7258,
+     "changed": 444,
+     "repeats": 5206
+    },
+    "_is_owned_bytes_call": {
+     "cacheable": 0.006634,
+     "calls": 21906,
+     "changed": 0,
+     "repeats": 17210
+    },
+    "_is_slist_expr": {
+     "cacheable": 0.010384,
+     "calls": 16664,
+     "changed": 0,
+     "repeats": 12018
+    },
+    "_is_str_expr": {
+     "cacheable": 0.029365,
+     "calls": 22892,
+     "changed": 126,
+     "repeats": 17883
+    },
+    "_map_kind": {
+     "cacheable": 0.004901,
+     "calls": 25651,
+     "changed": 0,
+     "repeats": 20829
+    },
+    "_param_kinds": {
+     "cacheable": 0.0,
+     "calls": 124,
+     "changed": 0,
+     "repeats": 0
+    },
+    "type_of": {
+     "cacheable": 0.001615,
+     "calls": 34184,
+     "changed": 10976,
+     "repeats": 33257
+    }
+   },
+   "projection_all": 1.0271,
+   "projection_listed": 1.0015,
+   "saving_all": 0.0983,
+   "saving_listed": 0.0056,
+   "task": "tree_fold",
+   "wall": 3.7305
+  }
+ ]
+}

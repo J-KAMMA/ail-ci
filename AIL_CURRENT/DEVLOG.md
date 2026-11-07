@@ -1,3 +1,17 @@
+## 2026-11-07 -- ctpred1_rr1 re-applied: pyfunc predicate cacheability measurement (job-ctpred1_rr1-11071000)
+
+Re-applied the accepted `job-ctpred1_rr1-11071000` change (`aea334f`..`FETCH_HEAD`) on this
+tree.  It is exactly the four new measurement files, all under `lab/profile/`: `pred_probe.py`
+(wraps the eight `pyfunc` type/kind predicates from outside through a child-process
+`sitecustomize`, so `pyfunc.py` is untouched), `ccheck.py` (byte identity of the C, executable
+and refusal text over 220 inputs), and `CTIME_PRED.md`/`CTIME_PRED.json` (the measurement and the
+no-go decision).  No compiler, runtime, emitter, test or `AIL_CURRENT` file changes, so no program
+semantics are altered.  The `.github/workflows/agent-worker.yml` hunk in the original diff is
+already present here byte-for-byte (the removal of the `agent`/Claude-token path), so only the
+four lab files were added.  `tools/diff_ids.py` is not present on this tree, so only
+`python3 tools/update_manifest.py` ran (`--check` passes).  No DIFFERENCES rows and no test module
+registration: the change adds measurement scripts only.
+
 ## 2026-11-06 -- rbarena1s2c re-applied: read-only field aliases and call-site str errors (job-rbrbarena1s2c_rr1-11070527)
 
 Re-applied the accepted `job-rbarena1s2c-11042050` change (`ff0c868f`..`FETCH_HEAD`, 5 commits) on
