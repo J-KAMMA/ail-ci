@@ -1,3 +1,180 @@
+## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
+
+Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a
+method -- emitted C that does not compile on the default build (`gcc: expected ')' before ';'`).
+Both `_is_heapq_select` branches in `_call_user_func` pushed the select's raw `ctx.pre`
+statements (`_t1 = 2; if (...); ...`) into `staged`, which `_call_user_func` emits inside a
+comma expression, so the first `;` ended it. Both now wrap the moved statements in the
+`({ ... (void)0; })` statement expression the listcomp branch there already uses -- a list temp
+and an `ail_slist` temp are declared at function scope by `ctx.temp`, so the wrapper changes
+nothing about their lifetime.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, both builds, all CPython-identical): select as a
+`list[int]` argument, a `list[str]` argument, a method argument, two selects in one call, `k`
+= 0 / negative / past the end, a callee that appends to its parameter (the select is a copy,
+the source list is untouched), and a select through `sum`/`len`/`min`/`sorted`/`[...]`. A
+regression case (`test_nsmallest_passed_directly_as_a_call_argument`) was added to
+`test_ail_pyreach_shapes`. Tests on the final commit: `test_ail_pyreach_shapes` 18 OK,
+`test_ail_python_syntax` 10 OK, `test_ail_safetynet` 5 OK, `test_ail_files` 18 OK (1 skipped),
+`test_ail_corpus_findings3` 2 OK, `test_ail_bytearray_loops` 1 OK, `test_ail_bytearray_refs`
+3 OK.
+
+## 2026-11-06 -- rbpyreachs2_rr1: review fixes for the re-applied pyreachs2_rr1 change (job-rbpyreachs2_rr1)
+
+The reviewer's two defects were reproduced first with probes, then fixed:
+
+- **`d["top"] = heapq.nsmallest(k, xs)` emitted C that does not compile.** The scalar `_call`
+  branch handed the select's `ail_list` temp to `ail_stab_put`, which takes an `int64_t`. A
+  list-of-str select is still answered there (`print(heapq.nsmallest(k, words))` reaches it for
+  the `ail_slist` the repr helper consumes); every other non-SLIST select reaching that scalar
+  dispatch is now refused by name, so the default build falls back to the general path and matches
+  CPython's `[2, 5]`. A name bound to a select (`top = heapq.nsmallest(k, xs); d["t"] = top`)
+  reaches the int-valued dict store the same way, so that store now refuses a whole-list value by
+  name too (this also turns the pre-existing `d["k"] = xs` gcc failure into the same named
+  refusal/fallback).
+- **`reversed(bytearray)` was an eager snapshot.** The prelude now returns a live reverse iterator
+  (`_AilBytearrayReverse`): the start index is fixed at creation but each step reads the
+  bytearray as it is now, so `ba[0] = 122` after `r = reversed(ba)` is seen
+  (`list(r) == [99, 98, 122]`), while a length change (append/delete/clear) ends the walk exactly
+  as CPython's reverse iterator does. `bytes` is immutable, so its `__reversed__` stays a snapshot.
+
+Probes (all `bash ~/tools/cmp.sh <p> $PWD`, both builds, CPython-identical): dict item store of a
+select (direct, via a name, str- and int-keyed, `nlargest`, inline subscript, `sum`), bytearray
+`reversed` (in-place item mutation, append, delete, clear, empty, `next()`, repeated `list()`,
+attribute and argument provenance), plus every previously accepted select/`extend(reversed(...))`
+probe unchanged. Tests on the final commit: `test_ail_pyreach_shapes` 17 OK,
+`test_ail_python_syntax` 10 OK, `test_ail_safetynet` 5 OK, `test_ail_files` +
+`test_ail_corpus_findings3` 20 OK (1 skipped), `test_ail_bytearray_loops` +
+`test_ail_bytearray_refs` 4 OK.
+
+## 2026-11-06 -- rbpyreachs2_rr1: re-apply pyreachs2_rr1 (job-rbpyreachs2_rr1)
+
+Re-applied the accepted `job-pyreachs2_rr1-11070228` change (its diff was taken from
+`a8b8e5a`) on this tree with a three-way merge. The `.github/workflows/agent-worker.yml`
+part was already present; `pyfunc.py` merged cleanly and kept this tree's newer bytes
+handling intact. The only conflict was this file, resolved by keeping both sides: the
+accepted job's three entries below, then the existing tree's entries. Regenerated the
+manifest with `tools/update_manifest.py` (`--check` clean). Probes for the select,
+`reversed()` iterator and `extend(reversed(...))` shapes match CPython on both builds.
+No other change.
+
+## 2026-11-06 -- pyreachs2 second review fix (job-pyreachs2_rr1-11070228)
+
+The reviewer's FIX round found three remaining defects; each was reproduced first and fixed:
+
+- **Manifest pin stale.** `test_ail_pyreach_shapes.py` was not in the manifest, so
+  `update_manifest.py --check` reported it stale and `par_check` aborted on a hash mismatch.
+  Regenerated with `python3 tools/update_manifest.py`; `--check` is now clean.
+- **`heapq.nsmallest(k, xs)` of a list of bytes emitted C that does not compile.** `_etype`
+  answers the select with the source's own kind (BLIST), so the destination was declared
+  `ail_blist *` while `_sorted_into_temp`'s bytes branch builds an `ail_list` handle list; gcc
+  rejected `ail_list_free(&v_top); v_top = v__t3;`. The task's select covers int lists and
+  int/str/bytes TUPLE lists, not a list of bytes, so the shape is now refused by name in
+  `_heapq_select` (the default build falls back to the general path and matches CPython; strict
+  names it). Probe: `bs=[b"b",b"a"]; top=heapq.nsmallest(1,bs); print(len(top))` -> `1`.
+- **`reversed()` of bytes/bytearray returned a list, not an iterator.** The prelude's
+  `__reversed__` returned the backing list, so `reversed(b"") == reversed(b"")` was `True`
+  (CPython `False`; `next(reversed(b))` also failed). Both classes now return `iter(out)`.
+  Probes: equality is `False`, `next()`/`list()`/`for` over the result match CPython for bytes
+  and bytearray, empty and non-empty.
+
+Ran: `test_ail_pyreach_shapes` (14 OK), `test_ail_safetynet` (5 OK), `test_ail_files` (18 OK,
+1 skipped), `test_ail_corpus_findings3` (2 OK), `test_ail_fuzz83` (2 OK), `test_ail_strict`
+(13 OK).
+
+## 2026-11-06 -- pyreachs2 review fix (job-pyreachs2_rr1-11062251)
+
+Three defects in the s2 shapes above were found by review and are fixed:
+
+- **`heapq.nsmallest(k, xs)` on a function parameter emitted invalid C.** `_etype` answered the
+  *element* kind of the source (`'array'` for an int-list parameter), so `top = heapq.nsmallest(...)`
+  declared `top` an array parameter (`v_top`/`v_top_len`) while `_heapq_select` built an `ail_list`,
+  and a direct `return heapq.nsmallest(...)` returned a list through an `int64_t` return. `_etype`
+  now answers the container kind the lowering builds (LIST for an int list or an array parameter,
+  SLIST for a list of str, otherwise the source's own kind, so the olist tuple refusal still fires).
+  `_return_list` / `_return_slist` build the select into that return ABI, so the parameter shapes
+  compile. `_promote_floats` pre-binds a select's `for` target STR for a list-of-str source.
+- **`xs.extend(reversed(src))` with a list-of-str source was dead code.** Its branch called `_seq` on
+  an `ail_slist`, which `_seq` never walks. It now reads the spine directly (`src.n` / `src.p[i]`),
+  re-reading it each step so a self-extend that reallocates is safe.
+- **`for w in heapq.nsmallest(k, words)` on a list of str refused with the wrong reason.** The
+  generic `_seq` fallback declared `w` an int. `_for_inner_impl` now walks the select's own slist
+  temp and binds `w` STR; `_seq` refuses a str select elsewhere by name rather than misreading the
+  `ail_str` slots as numbers.
+
+Probes (both builds, CPython-identical): `nsmallest`/`nlargest` on int and `list[str]` parameters
+(direct return, `top[0]`, `sum`, `for`), `k <= 0` / `k > len` / ties; `extend(reversed(...))` over
+`list[str]` receivers (annotation, parameter source, self-extend with reallocation); the subscript
+and `key=` refusals. Two regression cases were added to `test_ail_pyreach_shapes.py`.
+
+## 2026-11-06 -- pyreachs2 (re-run, job-pyreachs2_rr1-11062251)
+
+s2 (F5a) shapes.  This tree already carried s1-s8, so the stepped-slice, `del` and heap-subscript
+lowerings of the original s2 were present; this job filled the two gaps it found and added the
+step's test module (`AIL_CURRENT/test_ail_pyreach_shapes.py`, registered by
+`tests.d/test_ail_pyreach_shapes.txt`):
+
+- `heapq.nsmallest(k, xs)` / `nlargest(k, xs)` on a list name: lowered to `sorted(xs)[:k]` /
+  `sorted(xs, reverse=True)[:k]` (`_heapq_select`), for `list[int]` and `list[str]`; `k <= 0` is
+  `[]`, a `k` past the end is the whole sorted list.  `key=` (including the key the tuple pass
+  synthesises for a list of tuples) stays refused by name.  Wired through the value, statement,
+  `for`-loop and generated-repr argument paths; `nsmallest`/`nlargest` join the front end's heapq
+  names, the general path's `_IMPLICIT_LIB` and `shadowing.AIL_BUILTINS`.
+- `xs.extend(reversed(src))` walks the source backwards and pushes each element
+  (`_method`'s extend branch), for `list[int]`/`list[float]`/`list[str]` receivers and list, str
+  (one code point per step) or bytes sources.
+- The general path's `reversed(bytes)` now works: `prelude_bytes.py` gives `bytes`/`bytearray` a
+  `__reversed__`, so `AIL_UNIFIED_FORCE=1` matches CPython like the typed path already did.
+
+Probes: stepped slices of list/str/bytes (both signs, clamping, empty, an index from stdin up to
++-4.6e18, step 0 -> ValueError), `del` with and without a later read (UnboundLocalError kept),
+`reversed` over list/str/bytes/empty + `extend`/`list`, `heappush(free[c], v)` / `heappop(alias)`
+sharing the inner list, `nsmallest`/`nlargest` with ties, `k <= 0`, `k` past the end, str lists,
+assignment and loops.  All match CPython on the default and `AIL_UNIFIED_FORCE=1` builds.  A stdin
+index beyond int64 raises the int64 `OverflowError` on the typed path (F8, not silent; the general
+path with the tagged ints matches CPython).  `lab/compare/src/berth_sim/main.py` builds with
+`--strict` and no blocker; all ten `.ail` twins hash byte-identically to the base and the codegen
+pins are unchanged.
+## 2026-11-06 -- pyreach s8 re-apply: restore the row-literal lowering (job-rbrbpyreachs8_rr1-11070526)
+
+Fix for the review of the re-apply. The previous commit replaced `optlib.py` with the accepted
+branch's blob, which dropped this tree's own `[None, [], ...]` literal-list lowering
+(`lower_none_row_lists`, `_NoneRowTransformer`, `_row_helper`, `_repr_helper`, `_check_row_reads`,
+`_check_col_name_uses`, `bind_guarded_locals` and their helpers). That feature is not in the
+accepted diff (the accepted `[None] * n` BinOp rewrite lives in `noneslots.py`; the two shapes are
+disjoint) and `test_ail_optional_locals` failed 5/9 on the previous commit.
+
+Rebuilt `optlib.py` as the base file with only the accepted optlib hunks (one-argument `d.get(k)`
+on a local dict of scalars, `int | None` helper-return inference) applied, restoring the row and
+guarded-local passes and their calls in `rewrite()`. `manifest.d/b2.txt` regenerated.
+`test_ail_optional_locals` (9), `test_ail_pyreach_optret` (9), `test_ail_refusal_messages` (3),
+`test_ail_strict` (13), `test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped) and
+`test_ail_corpus_findings3` (2) pass on the final tree. Probes (`/tmp/probes`, both builds, plus a
+typed-only `AIL_IR=1 AIL_NO_GENERAL=1` build for the row/`[None]*n`/`d.get`/`int|None` programs)
+match CPython stdout and exit status or are refused by name.
+
+## 2026-11-06 -- pyreach s8 re-applied on the current tree (job-rbrbpyreachs8_rr1-11070526)
+
+Re-applied the accepted `rbpyreachs8` change (`627e3745..job-rbpyreachs8-11060251`, fetched
+anonymously). This tree already carried an earlier `[None] * n` row rewrite inside `optlib.py`;
+the accepted change moves that to the new `python/pkg-v12/noneslots.py` (loaded from
+`ail_syntax.python_surface`) and adds one-argument `d.get(k)` on a local dict of scalars and
+`int | None` helper-return inference to `optlib.py`. The old row code was the only other local
+change to `optlib.py`, and taking the whole file from the accepted change dropped it (the
+accepted diff is additive there); the follow-up entry above restores it. `ail_syntax.py`, the new
+`test_ail_pyreach_optret.py` (with its `tests.d` registration), `noneslots.py` and the two stale
+assertions in `test_ail_refusal_messages.py` / `test_ail_strict.py` applied unchanged.
+`DEVLOG.md` conflicted only at the top: both sides' entries are kept below this one. The three
+DIFFERENCES rows use this branch's ids (`C?-job-rbrbpyreachs8_rr1-11070526-{1,2,3}`).
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` regenerated
+`manifest.d` and `--check` passes. `test_ail_pyreach_optret`, `test_ail_refusal_messages`,
+`test_ail_strict`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass
+(50 tests, 1 skipped). Probes in `/tmp/probes` (row guards with list/attribute/call/dict/argument
+indices, slice guards, unpack-target stores, a row named by a parameter, `d.get(k)` over int,
+float, bool, str and bytes values with keys from a list item, a call, an attribute and a dict
+value, `int | None` helpers, guard values, `global`/chained stores, an Optional loop variable)
+match CPython stdout and exit status on both builds.
+
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for
@@ -650,6 +827,25 @@ from base); `_btab_value_call` gives `.get`/`.pop` the dict's value kind.
 `ticket_audit` is still not typed: `--strict` stops at `e = events.get(ev)` (one-argument `get`,
 Optional values, s8); `events[ev] = [vc, cents, set()]` (a set inside a record list) is behind it.
 
+## 2026-11-05 -- rbpyreachs8: re-apply the pyreach s8 series on the current tree (job-rbpyreachs8-11060251)
+
+The accepted `pyreachs8` change (`06559a5..job-pyreachs8-11052318`) did not apply as one patch on
+this tree: only `DEVLOG.md` conflicted (the incoming four s8 entries land below this one, both
+sides' entries kept).  The source hunks applied cleanly: `ail_syntax.py` loads the new
+`python/pkg-v12/noneslots.py` row rewrite, `optlib.py` infers `int | None` helper returns and
+lowers one-argument `d.get(k)` on a local dict of scalars, plus the loop/store relaxations; the
+new `test_ail_pyreach_optret.py` and its `tests.d` registration are in place, and the two stale
+assertions in `test_ail_refusal_messages.py` / `test_ail_strict.py` are updated.  The
+`.github/workflows/agent-worker.yml` hunk was already this tree's state.  DIFFERENCES ids use this
+branch (`C?-job-rbrbpyreachs8_rr1-11070526-{1,2,3}`).  `manifest.d` was regenerated with
+`python3 tools/update_manifest.py` (`--check` passes); `tools/diff_ids.py` is not present here.
+Probes `/tmp/probes/p{1..10}` (int|None helpers, dict.get kinds and keys from an argument / list
+item / attribute / dict value, `[None]*n` rows with guards/append/negative index, non-simple
+guard index, reuse of an Optional loop variable, slice guards, unpack-target stores, a row named
+by a parameter) match CPython on both builds or are refused by name.
+`test_ail_pyreach_optret`, `test_ail_refusal_messages`, `test_ail_strict`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-11-05 -- rbpyproof1: re-apply the pyproof typed-reach census (job-rbpyproof1-11051621)
 
 The accepted `pyproof1` diff (`803122d3`..`job-pyproof1-11051358`) no longer applied to this
@@ -685,6 +881,91 @@ GitHub Models key wiring (both sides' fixes).
 new pins for the test module and its `tests.d` registration and `--check` passes.  `tools/diff_ids.py`
 is not present on this tree.  `test_ail_release_check`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass on the final commit.
+
+## 2026-11-05 -- pyreach s8 third review fix: slice guards, unpack-target stores (job-pyreachs8-11052148)
+
+Two more shapes the row rewrite accepted but did not lower exactly, both in
+`python/pkg-v12/noneslots.py`:
+
+- A guard on a slice (`xs[0:1] is not None`, `xs[0:0] is None`) is no longer rewritten to a
+  read of the present-bit list (which printed `[False]` / `[]`).  `_candidate_ok.role` no
+  longer classifies a Slice subscript as a guard, and `visit_Compare` additionally requires
+  `_is_simple(sub.slice)`, so the candidate is refused and the program keeps the general
+  route.
+- A row store inside an unpack target (`xs[0], z = None, 2`, `*xs[0], w = ...`) is refused:
+  the single-Subscript-target rewrite never lowered it, leaving the present bit stale while
+  the value guard read that bit.  `_candidate_ok` now walks the target through
+  Tuple/List/Starred nodes in Store context.
+
+Probes `/tmp/rprobes/m1_slice_guard.py` (`True True`), `m2_tuple_store_present.py`
+(`True 2`) and the previous `q22`, `q16`, `q3`, `q28` all match CPython on both builds.
+`test_ail_pyreach_optret` gains `test_slice_guards_keep_cpython_semantics` and
+`test_unpack_target_store_keeps_cpython_semantics` (9/9 pass), plus
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and `test_ail_strict`
+on the final commit.
+
+## 2026-11-05 -- pyreach s8 re-review fix: row guards in values, side-effecting stores, global rows (job-pyreachs8-11052148)
+
+Fixed the three defects of the re-review, all in `python/pkg-v12/noneslots.py`:
+
+- `_Rewrite.visit_Expr` and the non-row path of `visit_Assign` now call `generic_visit`, so an
+  `xs[i] is None` / `is not None` test used as a bare expression statement or as an assignment
+  value reads the present bit instead of comparing the empty-list sentinel.  The row-store and
+  `.append` branches also descend into their value now, covering a guard nested in a list value.
+- A row store whose index is not `_is_simple` is refused (the flag store would evaluate the index
+  a second time), as is a chained store (`xs[0] = ys = [4]`, which the single-target rewrite
+  cannot express).  Both keep the old general route; `--strict` refuses them by name.
+- A candidate whose name is declared `global` or `nonlocal` is refused, since the present-bit
+  list would stay in the declaring function while the value name is shared.
+
+Probes `/tmp/probes/q22_slots_assign_value.py` (`True True True / True`), `q16_slots_neg_append.py`
+(`2 False True`), `q3b_store_sideeffect_guard.py`, `q30_multitarget_slots.py` and
+`q28_global_rows.py` all match CPython on both builds; the first two still build typed under
+`AIL_NO_GENERAL=1`, the other three keep the general route (strict refusal by name).
+`test_ail_pyreach_optret` gains `test_slot_guards_in_values_and_append_none` (typed) and
+`test_unsafe_row_shapes_refuse_or_fall_back` (7/7 pass), plus `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` and `test_ail_strict` on the final commit.
+
+## 2026-11-05 -- pyreach s8 review fix: refuse unlowered `[None] * n` row uses (job-pyreachs8-11051935)
+
+The row rewrite now rejects a candidate unless every use is a shape it actually translates.  A
+plain subscript read (`print(xs[0])`, `xs[0] == None`, `row = xs[0]`, passing `xs[0]` as an
+argument), a `del xs[i]`, an augmented target and an alias assignment are refused, so the program
+keeps its old route instead of reading the empty-list sentinel where CPython has `None`.  Reads and
+`.append` on a row inside an `if xs[i] is None` / `is not None` branch (with a simple, unmodified
+index) are still lowered: the branch that knows the row is present may use it.
+
+`test_ail_pyreach_optret`'s slots probe now wraps its prints in those guards; the refused shapes are
+covered by `/tmp/rprobes/p1`, `p2`, `p3`, `p5`, `p9`, which now match CPython on both builds.
+`codegen_diff` on the ten `.ail` tasks and the five pins is byte-identical.
+
+## 2026-11-05 -- pyreach s8: int|None helper returns, one-argument dict.get, [None]*n rows (job-pyreachs8-11051935)
+
+Landed the first three s8 shapes (owner Q1 A, Q2 B):
+
+- `optlib.annotate_none_returns` now infers `int | None` for an unannotated helper whose returns
+  are `None` and one int (it previously stopped at str/bytes/float).  The int64 default stays, so
+  a value beyond it still stops loudly; probes compare before converting.
+- A one-argument `d.get(k)` on a local dict of scalars lowers to a key temporary, `k in d` as the
+  present flag and `d[k] if present else <zero>` as the value (`optlib._dict_get_pair`).  The dict
+  value kind comes from its literal / subscript stores / `dict[K, V]` annotation, following a
+  scalar name through its other stores (`a = ids.get(ku)` beside `a = nid`).
+- New `python/pkg-v12/noneslots.py` lowers `xs = [None] * n` rows to `xs = [[] for ...]` plus a
+  `xs__p` present-bit list; `xs[i] is None` reads the bit, `xs[i] = [..]` sets it and
+  `xs.append([])` grows both.  It only runs when every use is one of those shapes.
+- Optional lowering now keeps a name present at a loop head when the body only stores plain
+  values (`x = (x * ...) & M`), allows a loop target that reuses an Optional local by storing into
+  its value half and setting the flag each iteration, and lets an Optional name appear in a
+  subscript index (`dt[a] = 1`) once it is known present.
+
+Probes `/tmp/probes/t_parse2.py`, `t_get.py`, `t_getlower*.py`, `t_slots.py`, `t_nested.py`,
+`t_wait.py`, `t_optional.py` match CPython on both builds or keep the old named refusal.
+`chain_relax` with its 64-bit literal replaced builds typed with the None code unchanged.
+`test_ail_pyreach_optret` (new, registered through tests.d) is 4/4; `test_ail_pyreach_infer`,
+`test_ail_pyreach_unpack`, `test_ail_pyreach_dictrows`, `test_ail_optint_exact`, `test_ail_strict`
+(one stale assertion updated: s8 removes the None blocker and exposes the pre-existing idict
+call-site conflict), `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+Feature 4 (dict of Optional values) and 5 (None in a tuple return) were not landed.
 
 ## 2026-11-04 -- rbprog17_rr1: re-apply prog17 typed reach on the current tree (job-rbprog17_rr1-11050850)
 

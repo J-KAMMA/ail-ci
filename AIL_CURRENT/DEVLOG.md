@@ -1,3 +1,71 @@
+## 2026-11-06 -- rbarena1s2c re-applied: read-only field aliases and call-site str errors (job-rbrbarena1s2c_rr1-11070527)
+
+Re-applied the accepted `job-rbarena1s2c-11042050` change (`ff0c868f`..`FETCH_HEAD`, 5 commits) on
+this tree: the `_elide_readonly_field_aliases` AST pass and its `_to_c_sorted`/`_to_c_once` wiring
+in `pyfunc.py`, `test_ail_readonly_field_alias.py` (4 tests) with its `tests.d` registration, and the
+three arena1 S2 DEVLOG entries.  The `str` actual handling in `_explicit_annotation_conflicts` is
+already here from sdkdiag1; the conflicting hunk was resolved by keeping both sides' rules (a str
+actual is left to the call-site guard, numeric claims still raise at the declaration) and the
+docstring now states both.  `AIL_CURRENT/DEVLOG.md` conflicted only at the top and both sides were
+kept; `manifest.d/45.txt` was regenerated.  `tools/diff_ids.py` is not present on this tree, so only
+`python3 tools/update_manifest.py` ran (`--check` passes).
+
+Tests on the final commit, `-j 2`: `test_ail_readonly_field_alias` (4), `test_ail_argument_type_details`,
+`test_ail_check_repair_context`, `test_ail_collections`, `test_ail_source_check`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (8/8, 723 s);
+`test_ail_ir_cover`, `test_ail_sort_keys`, `test_ail_struct_list_inplace`, `test_ail_field_views`
+and `test_ail_heapq_bisect` (5/5, 45 s).
+
+Probes: `/tmp/probes/p1_alias_basic.py` (list[int]/list[float]/list[str] sort keys, empty,
+negative, int64 edges, values through an argument, a list item and an attribute; typed path, C shows
+`f_par`/`f_nm`/`f_fl` read in place), `p2_alias_mutation.py` (append/item store/sort/field pop/
+escape via call/alias/rebind), `p3_alias_shadow.py` (lambda parameter shadowing the struct and the
+alias, comprehension target, global and nonlocal), `p7_dict_value.py` (index from a dict value),
+`p4*_str_*.py`, `p5_str_annotation_nonstr.py`, `p6_float_vs_int.py` all match CPython on the default
+and `AIL_UNIFIED_FORCE=1` builds (or, for the `p9_alias.ail` forced build, are refused by name).
+`p7_str_call.ail`-style checks report `passing str where take() wants int` (`operation: argument`,
+line/column of the call), `passing a str where f() wants a list of str`, and
+`'x' is annotated str ... caller also supplies int` (`operation: parameter`, declaration).
+## 2026-11-06 -- pyreach s8 re-apply: restore the row-literal lowering (job-rbrbpyreachs8_rr1-11070526)
+
+Fix for the review of the re-apply. The previous commit replaced `optlib.py` with the accepted
+branch's blob, which dropped this tree's own `[None, [], ...]` literal-list lowering
+(`lower_none_row_lists`, `_NoneRowTransformer`, `_row_helper`, `_repr_helper`, `_check_row_reads`,
+`_check_col_name_uses`, `bind_guarded_locals` and their helpers). That feature is not in the
+accepted diff (the accepted `[None] * n` BinOp rewrite lives in `noneslots.py`; the two shapes are
+disjoint) and `test_ail_optional_locals` failed 5/9 on the previous commit.
+
+Rebuilt `optlib.py` as the base file with only the accepted optlib hunks (one-argument `d.get(k)`
+on a local dict of scalars, `int | None` helper-return inference) applied, restoring the row and
+guarded-local passes and their calls in `rewrite()`. `manifest.d/b2.txt` regenerated.
+`test_ail_optional_locals` (9), `test_ail_pyreach_optret` (9), `test_ail_refusal_messages` (3),
+`test_ail_strict` (13), `test_ail_safetynet` (5), `test_ail_files` (18, 1 skipped) and
+`test_ail_corpus_findings3` (2) pass on the final tree. Probes (`/tmp/probes`, both builds, plus a
+typed-only `AIL_IR=1 AIL_NO_GENERAL=1` build for the row/`[None]*n`/`d.get`/`int|None` programs)
+match CPython stdout and exit status or are refused by name.
+
+## 2026-11-06 -- pyreach s8 re-applied on the current tree (job-rbrbpyreachs8_rr1-11070526)
+
+Re-applied the accepted `rbpyreachs8` change (`627e3745..job-rbpyreachs8-11060251`, fetched
+anonymously). This tree already carried an earlier `[None] * n` row rewrite inside `optlib.py`;
+the accepted change moves that to the new `python/pkg-v12/noneslots.py` (loaded from
+`ail_syntax.python_surface`) and adds one-argument `d.get(k)` on a local dict of scalars and
+`int | None` helper-return inference to `optlib.py`. The old row code was the only other local
+change to `optlib.py`, and taking the whole file from the accepted change dropped it (the
+accepted diff is additive there); the follow-up entry above restores it. `ail_syntax.py`, the new
+`test_ail_pyreach_optret.py` (with its `tests.d` registration), `noneslots.py` and the two stale
+assertions in `test_ail_refusal_messages.py` / `test_ail_strict.py` applied unchanged.
+`DEVLOG.md` conflicted only at the top: both sides' entries are kept below this one. The three
+DIFFERENCES rows use this branch's ids (`C?-job-rbrbpyreachs8_rr1-11070526-{1,2,3}`).
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` regenerated
+`manifest.d` and `--check` passes. `test_ail_pyreach_optret`, `test_ail_refusal_messages`,
+`test_ail_strict`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass
+(50 tests, 1 skipped). Probes in `/tmp/probes` (row guards with list/attribute/call/dict/argument
+indices, slice guards, unpack-target stores, a row named by a parameter, `d.get(k)` over int,
+float, bool, str and bytes values with keys from a list item, a call, an attribute and a dict
+value, `int | None` helpers, guard values, `global`/chained stores, an Optional loop variable)
+match CPython stdout and exit status on both builds.
+
 ## 2026-11-06 -- fbnarrow1: int-list census and int32 scratch patch re-applied (job-rbfbnarrow1_rr1-11061236)
 
 Re-applied the accepted `fbnarrow1_rr1` change (`4b0b7123`..`job-fbnarrow1_rr1-11060751`). It adds
@@ -223,6 +291,45 @@ unchanged and the test is stable across later compiler edits.  A corpus without 
 refused by name ("re-run --run to record them").  `test_ail_selfhost_seed` also asserts the
 snapshot is present and positive.  `test_ail_selfhost_seed` 2 OK on both this branch and a worktree
 of today's integ with the change applied.
+## 2026-11-05 -- pyreach s8 suite fix: one-argument `d.get(k)` is a local-dict Optional
+
+`optlib._scan_dict_kinds` also recorded the value kind of `dict[K, V]` function PARAMETERS, so
+`find(d: dict[int, int], k: int) -> int | None: return d.get(k)` was lowered to a tag/value pair.
+That hid the `int | None` annotation from `pyfunc._strip_nullable` and the typed path then refused
+the call `find({1: 2}, 1)` with a bogus `idict` vs `int` call-site conflict instead of the
+annotation, while the default build fell back to the general path over the REWRITTEN source (its
+DWARF lines were renumbered).  The kind scan now covers only local dicts, as `_dict_get_kind`'s
+own docstring says: a local literal, a subscript store, or an annotated local.  A dict parameter's
+`get(k)` is not a typed Optional again -- it is refused by name ("cannot show that `d.get(k)` is
+not None") and `int | None` is refused as before, so `test_ail_debug_lines`, `test_ail_fallback_note`,
+`test_ail_lsp`, `test_ail_project`, `test_ail_quirks`, `test_ail_refusal_messages`,
+`test_ail_spec_fixes` and `test_ail_strict` pass again.
+
+A local one-argument `d.get(k)` is still the s8 Optional (the job's `test_ail_pyreach_optret`
+`dict_get` case).  The obsolete `dict_get_one_argument` refusal case in
+`test_ail_refusal_messages` now uses a dict built by a helper call, which the pass does not type
+and `_ONE_ARG_GET` still refuses.
+
+## 2026-11-05 -- pyreach s8 review fix: non-simple guard index in `[None] * n` rows
+
+`noneslots._Rewrite.visit_Compare` skipped a guard whose row subscript was not a bare name or
+constant (`xs[ix[0]] is None`, `xs[b.i] is None`, `xs[idx()] is None`) while
+`_candidate_ok.role` had already accepted it as a guard, so the compiled program compared the
+empty-list sentinel with `None` and printed `present` where CPython prints `absent`.  The compare
+now rewrites every guard whose slice is not a `Slice` (a guard evaluates its index exactly once,
+so no index is evaluated twice, and side effects in it still run once).
+
+A `[None] * n` candidate whose name is a function parameter is now refused: a guard before
+`xs = [None] * n` reads the parameter's own list, but the rewrite had moved the present-bit list
+after the init, so the earlier guard died with `UnboundLocalError: cannot access local variable
+'xs__p'`.  The candidate keeps the general route; `--strict` refuses it by name (`'xs' is a
+parameter and cannot be reassigned`).
+
+Probes `/tmp/probes/n5_guard_subscript_index.py`, `n10_attr_index_guard.py`,
+`n11_guard_call_absent.py`, `n5b_guard_isnot_simple.py`, `n5c_guard_tuple_index.py`,
+`n5d_guard_no_rewrite.py` and `n9_param_shadow.py` match CPython stdout and exit status on the
+default and `AIL_UNIFIED_FORCE=1` builds.  `test_ail_pyreach_optret`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; the five codegen pins are unchanged.
 
 ## 2026-11-05 -- refuzz95 suite fix: the typed KEYSORT names a NaN tuple key (job-rbprog18_rr1-11051321)
 
@@ -344,6 +451,39 @@ test_ail_float_argument_widening and test_ail_refusal_messages pass (one skip).
 `compileall -j 2` passes with `language_examples/binary_numbers.py` excluded: its line 2 comment
 contains `encoding:` and is the separate PEP 263 break PR #376 fixes.  Added DIFFERENCES row
 `C?-job-sdkdiag1-11041645-1`.
+## 2026-11-04 -- str argument mismatches report at the call, not the declaration (job-rbarena1s2c-11042050)
+
+Four modules in the full suite (`test_ail_argument_type_details`, `test_ail_check_repair_context`,
+`test_ail_collections`, `test_ail_source_check`) expected a str handed to an `int`/`list[str]`
+parameter to be refused at the CALL (`passing str where take() wants int`, `operation:
+argument`), but `_signatures` runs before any body compile and `_propagate_signatures_pass`'s
+explicit-annotation check raised the declaration-site `signature_override` refusal first.
+
+`_explicit_annotation_conflicts` now leaves a `str` actual for `_call_user_func`'s own argument
+guards, which name the call. Every other kind keeps the declaration-site refusal (a float actual
+against an `int` annotation, and a str ANNOTATION contradicted by a non-str claim, still report
+`operation: parameter`). The change is one condition in `pyfunc.py`.
+
+Probes (both builds): an int parameter given a str literal, a str from `.split()` indexed in a
+local, and a `list[str]` parameter given a str all match CPython or are refused by name with the
+call in the message; a valid `str` parameter and read-only list-field aliases (`list[int]` and
+`list[str]`, including the mutation shapes) still match CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds. `test_ail_argument_type_details`, `test_ail_check_repair_context`,
+`test_ail_collections`, `test_ail_source_check`, `test_ail_readonly_field_alias`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass at `-j 2` (8/8).
+
+## 2026-11-04 -- arena1 S2 re-applied on the integ tree (job-rbarena1s2c-11041649)
+
+Re-applied the accepted `job-arena1s2c-11041356` change (read-only list-field alias elision in
+`pyfunc.py`, `test_ail_readonly_field_alias.py`, its `tests.d` registration, the worker-key
+cleanup, and the three arena1 S2 DEVLOG entries) on top of the integ tree.  The `pyfunc.py` hunks
+applied cleanly; `AIL_CURRENT/DEVLOG.md` conflicted at the top only, and both sides were kept
+(this entry, the fz226 entry and the three arena1 entries).  `tools/diff_ids.py` is not present on
+this tree; `python3 tools/update_manifest.py` regenerated the shard pins, and `--check` passes.
+
+Verification on the final commit: `test_ail_readonly_field_alias` (4 tests), `test_ail_sort_keys`,
+`test_ail_struct_list_inplace`, `test_ail_field_views`, `test_ail_heapq_bisect`,
+`test_ail_ir_cover`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
 
 ## 2026-11-04 -- fz226: constant integer subtraction beyond int64 is already refused by name (job-fz226-11041145)
 
@@ -362,6 +502,46 @@ in `tests.d`; added DIFFERENCES row `C?-job-fz226-11041145-1`.  The load-time re
 which `lab/fuzz/run.py` currently classes as `crash` (it only counts exit 3 as `refused`); that
 is a fuzzer-classification issue, not a silent language difference.  Final-state tests:
 test_ail_fz226, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-11-04 -- arena1 S2 fix: local struct field aliases stay on the IR path
+
+The read-only field-alias pass also elided `x = s.f` when `s` was a struct local, not a parameter.
+That hid the `list.share` the IR ownership pass turns into a field borrow, so the grid `main`
+(`bs = ru.b`, `ss = ru.s`) reported `field_borrows == 0` and `test_ail_ir_cover` failed.  The pass
+now elides only when the owner is a function parameter; a struct local's alias is left for the IR
+(`field_borrows == 2` again), while the parameter shapes in `test_ail_readonly_field_alias` and the
+`global`/`nonlocal` guard still behave as before.
+
+`test_ail_ir_cover` passes (5 tests); `test_ail_readonly_field_alias` (4),
+`test_ail_ir_s3b` (14) and `test_ail_ir_f1` (13) also pass.
+
+## 2026-11-04 -- arena1 S2 fix: outer-scope aliases keep their store
+
+Review 1 found that a `global` (or `nonlocal`) alias name was elided: the `Global`/`Nonlocal`
+check ran only over the alias's live range, so a declaration before the range was missed and
+`global g; g = t.par` lost its only store (HEAD printed `2\n1`, CPython `2\n2`).  The pass now
+scans the whole function for `Global`/`Nonlocal` declarations and refuses the elision when either
+the alias name or its owner is declared outer.  The typed path then falls back to the general
+path, which performs the store correctly.
+
+Added `test_global_and_nonlocal_aliases_match_cpython` to `test_ail_readonly_field_alias.py`
+(global alias, global owner, nonlocal alias; default and `AIL_UNIFIED_FORCE=1`).  Probes
+`/tmp/probes/p10_global.py`, `p10b_global_owner.py`, `p10c_nonlocal.py`, `p10d_global_read.py`
+and `p10e_normal.py` match CPython on both builds; the normal shape still reads `f_nm`/`f_par`
+in place.  `test_ail_readonly_field_alias`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass at `-j 2`.
+
+## 2026-11-04 -- arena1 S2 fix: shadowing lambda parameters keep the alias copy
+
+The read-only field-alias pass substituted `o.f` inside a sort-key lambda whose parameter
+shadowed the struct name, so the key read the element's field instead of the outer struct's
+(e.g. `p = o.par; sorted(xs, key=lambda o: p[o.idx])`).  The pass now rejects any lambda in the
+alias's live range whose parameters bind `o` or `x`, and the copy is kept for that shape.
+
+Negative tests added for a lambda parameter shadowing the struct name, one shadowing the alias
+name, and a comprehension whose target shadows the struct; all three are compared with CPython,
+and the generated C keeps `ail_list_snapshot` for the shadowed shape.  The `do_sort` shape still
+elides both snapshots.  Probes (`p_shadow_o`, `p_shadow_x`, `p_comp_shadow`, plus the twelve
+earlier probes) match CPython on the default and `AIL_UNIFIED_FORCE=1` builds.
 
 ## 2026-11-03 -- rails3: element-bounded range counters stay int64 (job-rails3-11040144)
 
@@ -381,6 +561,45 @@ default and unified builds; the overflow probe stops loudly on both int64 paths 
 `--exact-int`, and the >2**64 list-element probe stays exact.  Added
 `test_ail_range_element_bounds.py` and registered it in `tests.d`; the targeted modules,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on the final commit.
+## 2026-11-03 -- arena1 S2: read-only list-field aliases feed sort keys in place (job-arena1s2b-11040443)
+
+`x = o.f` for a `list[int]`, `list[float]` or `list[str]` field normally copies the field into
+a private list.  The new AST pass in `pyfunc.py` (`_elide_readonly_field_aliases`, run in
+`_to_c_once` before `sortkeys.rewrite` and on the write-stage probe) drops that copy only when
+every use between the assignment and the last mention is read-only and the value cannot escape:
+`x` is assigned once, `o` is a plain name not rebound in the range, no attribute/element store or
+mutating method touches `x` or `o.f`, every call passes the borrow check, no user function
+receives `o` or the struct, `x` is not returned or aliased, and it is not captured by a
+non-sort-key lambda.  `do_sort` now reads `f_nm` / `f_par` in place.
+
+`_borrow_call_safe` is called through `_alias_call_safe`, which treats any typing context the
+light alias scope cannot supply as unsafe.  That fixes the crash on `t.par.pop()` (the field
+method path asked the scope for `type_of`) and keeps the copy, as the task requires.  A refused
+rewritten compile is retried with `_alias_elide=False`, so the old route survives.
+
+tree_fold, N=3,000,000, same input and runner:
+
+| | peak RSS | wall (median 5) | minor faults |
+|---|---:|---:|---:|
+| before (`b47e3fa9`) | 414,172 KiB | 1,536 ms | 135,313 |
+| after | 367,284 KiB | 1,490 ms | 136,124 |
+
+The target ≤415 MB is met (367.3 MB, −46.9 MB / −11.3%).  Wall is inside the noise band (direct
+runs: 1.45 s before, 1.48 s after).  Minor faults did **not** fall on this runner (they are 0.6%
+higher and the two ranges do not overlap), so that part of the plan's expectation is not met.
+
+The generated `do_sort` has no `ail_pslist_snapshot` / `ail_list_snapshot`.  The C diff is not
+limited to those lines: removing the local copies also lets the sort lowering take its `ir`
+form, so the rest of the body uses `ir` temporaries and reads the fields in place.
+
+Verification on this commit: `test_ail_readonly_field_alias` (now with the field-pop negative),
+`test_ail_sort_keys`, `test_ail_struct_list_inplace`, `test_ail_field_views`,
+`test_ail_heapq_bisect`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass at `-j 2`; all ten lab/compare tasks are correct on the typed path with every public and
+hidden case; a 300 s bounded `lab/corpus/check.py` run is 188 same / 1 refused / 1 limit (default)
+and 191 same / 1 refused / 1 limit (`AIL_IR=1`) with no DIFF or crash; twelve `/tmp/probes` programs
+match CPython on both builds; ASan+UBSan are clean on tree_fold's example case and on the mixed
+regression program.  The full corpus (219 programs) was not re-run.
 
 ## 2026-11-03 -- fz220: round() of a constant float expression outside int64 is refused by name (job-fz220-11032207)
 

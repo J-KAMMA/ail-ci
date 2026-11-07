@@ -273,7 +273,9 @@ class FallbackNote(Base):
         report = json.loads(result.stdout)
         self.assertEqual(report['blocker_count'], 1)
         self.assertEqual(report['blockers'][0]['line'], 3)
-        self.assertIn('None', report['blockers'][0]['construct'])
+        # `d.get(x)` on a dict PARAMETER is not a typed Optional (s8 only lowers a local dict
+        # literal), so the blocker is the `int | None` annotation itself.
+        self.assertIn('int | None', report['blockers'][0]['construct'])
         self.assertIn('sentinel', report['blockers'][0]['write_instead'])
 
 

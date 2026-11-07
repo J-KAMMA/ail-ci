@@ -1917,6 +1917,33 @@ def _etype(node, ctx):
         if f in _HEAPQ_NAMES and f not in ctx.funcs:
             # still a call here only when the lowering refused it: say why, before a type guess
             raise Unsupported(_heapq_refusal(node, f))
+        if (f in ('nsmallest', 'nlargest') and f not in ctx.funcs and f not in ctx.classes
+                and f not in ctx.kind and f not in ctx.types and len(a) == 2
+                and isinstance(a[1], ast.Name)):
+            # `heapq.nsmallest(k, xs)` builds a FRESH CONTAINER, so its kind is the container kind
+            # `_heapq_select` actually builds, never the element kind `_etype(xs)` would answer:
+            # an int-list local or an int-array parameter becomes a LIST (the lowering boxes the
+            # elements into an `ail_list`), a list of str becomes an SLIST. Returning 'array' here
+            # used to declare the destination as an array parameter (`v_top`/`v_top_len`) and
+            # emit C that does not compile. `type_of` may not know the source yet in a pre-pass
+            # (`words` is settled later), so an unknown source defaults to LIST instead of
+            # aborting the pass with "read before it is assigned".
+            try:
+                source_kind = ctx.type_of(a[1].id)
+            except Unsupported:
+                source_kind = None
+            if source_kind == SLIST:
+                return SLIST
+            if source_kind in (LIST, 'array'):
+                return LIST
+            # Any other container kind (a list of tuple instances, a float list, ...) keeps the
+            # source's own answer, exactly as this branch did before: the select is refused by
+            # name in `_heapq_select`, and the surrounding olist/repr machinery must still see
+            # the kind it expects rather than a plain LIST.
+            try:
+                return _etype(a[1], ctx)
+            except Unsupported:
+                return LIST
         if f == 'jscharat':
             return STR
         if _is_int_hex_call(node, ctx):
@@ -2419,7 +2446,8 @@ def _scan_module_consts(tree):
                 # The Python front end (ail_syntax.python_surface) drops these imports when every
                 # use is a function that is built in; one that is not is what kept it here.
                 error = Unsupported("import of %r with a function that is not built in; heappush, "
-                                    "heappop, heapify, heappushpop, heapreplace, bisect_left, "
+                                    "heappop, heapify, heappushpop, heapreplace, nsmallest, nlargest, "
+                                    "bisect_left, "
                                     "bisect_right, bisect, insort, insort_left and insort_right are "
                                     "built in (no import needed), nothing else from heapq or bisect is"
                                     % builtin)
@@ -5431,6 +5459,14 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
     reversed_for_iters = {id(n.iter) for n in ast.walk(fn)
                           if isinstance(n, ast.For) and isinstance(n.iter, ast.Call)
                           and isinstance(n.iter.func, ast.Name) and n.iter.func.id == 'reversed'}
+    # `xs.extend(reversed(src))` is the same walk written as a method call (`_method`'s extend
+    # branch lowers it), so its reversed() is a built shape too.
+    reversed_for_iters |= {id(n.args[0]) for n in ast.walk(fn)
+                           if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                           and n.func.attr == 'extend' and len(n.args) == 1
+                           and not n.keywords and isinstance(n.args[0], ast.Call)
+                           and isinstance(n.args[0].func, ast.Name)
+                           and n.args[0].func.id == 'reversed'}
     for node in ast.walk(fn):
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
             array.add(node.value.id)
@@ -5447,6 +5483,10 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
                         array.add(a.id)
             if node.func.id == 'reversed' and node.args and isinstance(node.args[0], ast.Name):
                 array.add(node.args[0].id)
+            if (node.func.id in ('nsmallest', 'nlargest') and len(node.args) == 2
+                    and isinstance(node.args[1], ast.Name)):
+                # `heapq.nsmallest(k, xs)` walks xs as a sequence
+                array.add(node.args[1].id)
             if node.func.id in ('reversed',) and id(node) not in reversed_for_iters:
                 raise Unsupported('reversed(); walk the sequence backwards by index instead '
                                   '(i = len(xs) - 1, then while i >= 0: ... i -= 1)')
@@ -6160,6 +6200,16 @@ def _seq(node, ctx):
             temporary, value = _list_repeat_value(node, LIST, ctx)
             ctx.pre.append('(void)%s;' % value)
             return '%s.p' % temporary, '%s.n' % temporary
+    if _is_heapq_select(node, ctx):
+        if _etype(node, ctx) == SLIST:
+            # Its elements are `ail_str` structs, not numbers: every caller of `_seq` folds or
+            # walks a flat int64 run. The plain `for` over one is handled in `_for_inner_impl`
+            # before it reaches here; any other use is refused by name rather than misread.
+            raise Unsupported('heapq.%s() of a list of str is used here where a flat sequence of '
+                              'numbers is required; bind it to a list of str and loop over that'
+                              % node.func.id)
+        temporary, _ = _heapq_select(node, ctx)
+        return '%s.p' % temporary, '%s.n' % temporary
     raise Unsupported(_bind_first(node))
 
 
@@ -12295,6 +12345,16 @@ def _iter_plan(node, ctx):
         if len(args) == 2:
             return args[0], args[1], '@', pre
         raise Unsupported('range() with %d arguments here' % len(args))
+    if _is_heapq_select(node, ctx):
+        # `heapq.nsmallest(k, xs)` used INLINE -- `print(...)`, `for x in ...`: `_heapq_select`
+        # builds the sorted copy into a temp and truncates it to k, exactly the walk of
+        # `sorted(xs)[:k]` (`_sorted_into_temp`'s own inline branch just below).
+        c, tname = _heapq_select(node, ctx)
+        pre.extend(ctx.pre); ctx.pre = []
+        if tname is not None and tname in ctx.tstride:
+            ctx.parts.update(('FLIST', 'FROWS') if tname in ctx.trowsf else ('LIST', 'ROWS'))
+            return '0', ctx.rows_n(tname), '@', pre
+        return '0', '%s.n' % c, '%s.p[@]' % c, pre
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted':
         # `sorted(ps)` used INLINE -- not bound to a name first -- where `ps` (or whatever `sorted`
         # is given) is a list of k-tuples. `_sorted_into_temp` still builds exactly the temp it
@@ -13097,6 +13157,61 @@ def _sorted_into_temp(node, ctx):
                        '{ int64_t _t = %s.p[_i]; %s.p[_i] = %s.p[_j]; %s.p[_j] = _t; }'
                        % (c, c, c, c, c))
     return c, None
+
+
+def _is_heapq_select(node, ctx):
+    """`heapq.nsmallest(k, xs)` / `nlargest(k, xs)` -- the two heapq SELECTS this compiler builds
+    as `sorted(xs)[:k]` (`_heapq_select`), as opposed to a heap operation on a receiver."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('nsmallest', 'nlargest')
+            and node.func.id not in ctx.funcs and node.func.id not in ctx.classes
+            and node.func.id not in ctx.kind and node.func.id not in ctx.types
+            and len(node.args) == 2)
+
+
+def _heapq_select(node, ctx):
+    """`heapq.nsmallest(k, xs)` / `nlargest(k, xs)` on a list NAME: CPython documents both as
+    exactly `sorted(xs)[:k]` / `sorted(xs, reverse=True)[:k]`, which is what this builds -- a fresh
+    list, as CPython returns, never a view into `xs`. `k <= 0` is the empty list (CPython's own
+    rule), and a `k` past the end is the whole sorted list. Refused by name for `key=`, for an
+    argument that is not a bound list name, and for every list kind `sorted()` does not sort."""
+    f, a = node.func.id, node.args
+    if node.keywords:
+        raise Unsupported('heapq.%s() with keyword arguments is not built; key= (including the key '
+                          'a list of tuples is sorted by) has no route here -- write '
+                          'sorted(xs)[:k] (or sorted(xs, reverse=True)[:k]) yourself' % f)
+    if len(a) != 2 or any(isinstance(arg, ast.Starred) for arg in a):
+        raise Unsupported('heapq.%s() takes exactly two positional arguments (k, list)' % f)
+    _need_int(a[0], ctx, 'the k of heapq.%s()' % f)
+    source = a[1]
+    if not isinstance(source, ast.Name):
+        raise Unsupported('heapq.%s() is built for a list NAME only; bind the sequence to a '
+                          'typed local first' % f)
+    if source.id in ctx.blist:
+        # A bytes list keeps its elements as bytes-pool HANDLES in an `ail_list`, but `_etype`
+        # answers the select with the SOURCE's kind (BLIST) -- the destination was declared
+        # `ail_blist *` and the temp's `ail_list` assigned into it, which gcc rejects. The
+        # original task's select covers ints and int/str/bytes TUPLE lists, never a list of
+        # bytes, so refuse this shape by name (the default build then keeps it on the general
+        # path, as before this step) rather than build a mismatched temp.
+        raise Unsupported('heapq.%s() of a list of bytes is not built; a bytes list holds '
+                          'bytes-pool handles, not a comparable flat sequence -- sort it '
+                          'yourself with an index loop, or keep the elements as ints' % f)
+    count, _ = ctx.temp(INT)
+    ctx.pre.append('%s = %s;' % (count, _map_inline(lambda: _expr(a[0], ctx), ctx)))
+    keywords = ([ast.keyword(arg='reverse', value=ast.Constant(value=True))]
+                if f == 'nlargest' else [])
+    call = ast.copy_location(ast.Call(func=ast.Name(id='sorted', ctx=ast.Load()),
+                                      args=[source], keywords=keywords), node)
+    result, logical = _sorted_into_temp(call, ctx)
+    ctx.pre.append('if (%s < 0) %s = 0;' % (count, count))
+    stride = ctx.tstride.get(logical) if logical is not None else None
+    if stride:
+        ctx.pre.append('if (%s < %s.n / %d) %s.n = %s * %d;'
+                       % (count, result, stride, result, count, stride))
+    else:
+        ctx.pre.append('if (%s < %s.n) %s.n = %s;' % (count, result, result, count))
+    return result, logical
 
 
 def _is_chainable_receiver(node, ctx):
@@ -17110,6 +17225,21 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                 if dynamic is None:
                     ctx.list_input_calls.add((symbol, pname))
                 arg = ast.Name(id=local, ctx=ast.Load())
+            if _is_heapq_select(arg, ctx):
+                # `_ail_lrepr_i(heapq.nsmallest(k, xs))` -- the tuple pass's generated repr helper
+                # takes a sequence, so build the select into a temp local first (exactly what
+                # `_numeric_field_value` does for a list literal just above). The fill statements
+                # move into `staged` in argument order: `_bind_call_args` refuses a call whose
+                # arguments leave statements behind. `staged` entries are emitted inside a comma
+                # expression, so the statements must be wrapped in a statement expression -- the
+                # same `({ ... (void)0; })` the listcomp branch below uses; a bare `x = 1;` there
+                # ends the comma expression early and emits invalid C.
+                before = len(ctx.pre)
+                temporary, _ = _heapq_select(arg, ctx)
+                staged.append('({ %s (void)0; })' % ' '.join(ctx.pre[before:]))
+                del ctx.pre[before:]
+                arg = ast.Name(id=next(n for n in ctx.locals if ctx.cname(n) == temporary),
+                               ctx=ast.Load())
             if not isinstance(arg, ast.Name):
                 raise Unsupported('passing %s where %s() wants a sequence'
                                   % (type(arg).__name__, fname))
@@ -17308,6 +17438,18 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                 staged.append('({ const ail_%s *_source = %s; ail_%s_replace(&%s, ail_%s_copy(_source)); })' % (kind, pointer, kind, temporary, kind))
                 out.append('&%s' % temporary)
         elif kind == SLIST:
+            if _is_heapq_select(arg, ctx):
+                # `_ail_lrepr_s(heapq.nsmallest(k, words))`: the select's temp, with its fill
+                # statements moved into `staged` in argument order -- wrapped in a statement
+                # expression for the same reason as the LIST branch above.
+                before = len(ctx.pre)
+                temporary, _ = _heapq_select(arg, ctx)
+                staged.append('({ %s (void)0; })' % ' '.join(ctx.pre[before:]))
+                del ctx.pre[before:]
+                out.append(temporary)
+                ctx.parts.add('SLIST')
+                groups[index] = out
+                continue
             # `ail_slist` ({p, n, cap}) passed by value, the identical convention BYTES/STR just
             # above already use -- AIL_TASK_strparam_20260916.md. `_is_slist_expr` recognises both
             # shapes this compiler ever builds one from: an already-bound SLIST name, or an inline
@@ -18082,6 +18224,26 @@ def _call(node, ctx):
         return 'ail_str_charat(%s, %s)' % (_str_value(a[0], ctx), rec(a[1]))
     if f in _HEAPQ_NAMES and f not in ctx.funcs:
         raise Unsupported(_heapq_refusal(node, f))
+    if (f in ('nsmallest', 'nlargest') and f not in ctx.funcs and f not in ctx.classes
+            and f not in ctx.kind and f not in ctx.types):
+        # A list-of-str select is still answered here: `print(heapq.nsmallest(k, words))` reaches
+        # this scalar dispatch for the `ail_slist` temp the repr helper consumes. Every other
+        # context that can hold the INT list `_heapq_select` builds intercepts it BEFORE this
+        # point (a list assignment, a `for` walk, `_seq`, a list argument, a return). Reaching here
+        # with one means the program wants a single value -- a dict item store
+        # (`d["top"] = heapq.nsmallest(...)`) is the one this branch used to answer by handing the
+        # `ail_list` temp back as if it were an int64, which emitted C gcc rejects. Refuse by name
+        # (the default build then keeps the program on the general path, which stores a list in a
+        # dict correctly) instead of guessing.
+        try:
+            select_kind = _etype(node, ctx)
+        except Unsupported:
+            select_kind = None
+        if select_kind != SLIST:
+            raise Unsupported('heapq.%s() builds a whole list, so it cannot stand in for a single '
+                              'value here (a dict item, a list element, an arithmetic operand, '
+                              '...); bind it to a list name first, then use that name' % f)
+        return _heapq_select(node, ctx)[0]
     if (f in ('max', 'min') and f not in ctx.funcs and len(a) == 1
             and len(node.keywords) == 1 and node.keywords[0].arg == 'default'
             and not isinstance(a[0], ast.Starred)):
@@ -19759,6 +19921,58 @@ def _method(node, ctx, *, as_stmt=False):
         return _slist_copy_c(ctx.cname(name), ctx)[1]
     if m == 'extend' and name in ctx.locals and name not in ctx.nlist and name not in ctx.tstride and t in (LIST, FLIST, SLIST):
         declared = t
+    if (m == 'extend' and len(a) == 1 and not node.keywords and not record
+            and name not in ctx.nlist and name not in ctx.tstride
+            and (declared in (LIST, FLIST, SLIST) or declared is None and t in (LIST, FLIST, SLIST))
+            and isinstance(a[0], ast.Call) and isinstance(a[0].func, ast.Name)
+            and a[0].func.id == 'reversed' and a[0].func.id not in ctx.funcs
+            and a[0].func.id not in ctx.classes and len(a[0].args) == 1
+            and not a[0].keywords and isinstance(a[0].args[0], ast.Name)):
+        # `xs.extend(reversed(src))` -- CPython walks `src` backwards and appends each element, the
+        # loop `for v in reversed(src): xs.append(v)` writes. The receiver keeps its own element
+        # kind, so a source whose elements are a different kind is refused below, by name, rather
+        # than truncated the way a blind `ail_list_push` would.
+        declared = declared if declared in (LIST, FLIST, SLIST) else t
+        source = a[0].args[0]
+        kind = ctx.type_of(source.id)
+        dst = ctx.cname(name)
+        if declared == LIST and kind in (LIST, 'array'):
+            p, n = _seq(source, ctx)
+            ctx.parts.add('LIST')
+            return ('({ int64_t _n = %s; for (int64_t _i = _n - 1; _i >= 0; _i--) '
+                    'ail_list_push(&%s, %s[_i]); })' % (n, dst, p))
+        if declared == FLIST and kind == FLIST:
+            p, n = _seq(source, ctx)
+            ctx.parts.add('FLIST')
+            return ('({ int64_t _n = %s; for (int64_t _i = _n - 1; _i >= 0; _i--) '
+                    'ail_flist_push(&%s, %s[_i]); })' % (n, dst, p))
+        if declared == LIST and kind == BYTES:
+            ctx.parts.add('LIST')
+            value = _map_inline(lambda: _bytes_value(source, ctx), ctx)
+            return ('({ ail_bytes _src = %s; for (int64_t _i = _src.n - 1; _i >= 0; _i--) '
+                    'ail_list_push(&%s, (int64_t)_src.p[_i]); })' % (value, dst))
+        if declared == SLIST and kind == SLIST:
+            # `_seq` has no rule for an `ail_slist` -- its elements are `ail_str` structs, never a
+            # flat int64 sequence -- so this reads the spine directly, the same `%s.n`/`%s.p[@]`
+            # shape `_for_inner_impl`'s own list-of-str branch uses. `src` is re-read every step
+            # (rather than captured in a struct copy) so `words.extend(reversed(words))` sees the
+            # spine after a `push` reallocates it.
+            src = _slist_arg_c(source, ctx)
+            ctx.parts.add('SLIST')
+            return ('({ int64_t _n = %s.n; for (int64_t _i = _n - 1; _i >= 0; _i--) '
+                    'ail_slist_push(&%s, %s.p[_i]); })' % (src, dst, src))
+        if declared == SLIST and kind == STR:
+            # `out.extend(reversed(s))` -- one code point per step, exactly the backwards str walk
+            # `_for_inner_impl` builds for `for c in reversed(s):`, so a multi-byte code point is
+            # one element, not one byte.
+            ctx.parts.update(('SLIST', 'STR'))
+            value = _map_inline(lambda: _str_value(source, ctx), ctx)
+            return ('({ ail_str _src = %s; for (int64_t _k = _src.n; _k > 0; ) { '
+                    'int64_t _s = ail_str_prev_unit(_src, _k); '
+                    'ail_slist_push(&%s, (ail_str){_src.p + _s, _k - _s, _src.p[_s] < 0x80}); '
+                    '_k = _s; } })' % (value, dst))
+        raise Unsupported('list extend requires a list name or literal; `reversed(%r)` gives %s '
+                          'elements' % (source.id, _diagnostic_type(kind)))
     if declared in (LIST, FLIST, SLIST) and name not in ctx.nlist and name not in ctx.tstride and m == 'extend' and len(a) == 1 and not node.keywords:
         expected = {LIST: INT, FLIST: FLT, SLIST: STR}[declared]
         prefix = {LIST: 'list', FLIST: 'flist', SLIST: 'slist'}[declared]
@@ -21145,6 +21359,13 @@ def _return_list(value, ctx, pad):
     copy has already happened -- so the container is freed at every return, exactly as every other
     container here is, and nothing that escapes the function is ever freed out from under it.
     """
+    if _is_heapq_select(value, ctx):
+        # `return heapq.nsmallest(k, xs)` -- `_heapq_select` builds the same fresh `ail_list` a
+        # `sorted(xs)[:k]` assignment would, and the ordinary list-return ABI copies it out.
+        c, _ = _heapq_select(value, ctx)
+        ctx.parts.update(('LIST', 'LISTRET'))
+        pre = _flush(ctx, pad)
+        return pre + '%sreturn ail_list_return(&%s, _out, _cap);\n' % (pad, c)
     if _numeric_field_kind(value, ctx) == LIST:
         temporary, expression = _numeric_field_value(value, LIST, ctx)
         ctx.parts.update(('LIST', 'LISTRET'))
@@ -21261,6 +21482,13 @@ def _return_flist(value, ctx, pad):
 
 def _return_slist(value, ctx, pad):
     """Return a packed owned copy before callee cleanup; callers adopt it into their arena."""
+    if _is_heapq_select(value, ctx):
+        # `return heapq.nsmallest(k, words)` -- the select builds a fresh `ail_slist`; the
+        # same owned-copy return every list-of-str return uses packs it before cleanup.
+        c, _ = _heapq_select(value, ctx)
+        ctx.parts.add('SLIST')
+        pre = _flush(ctx, pad)
+        return pre + '%sreturn ail_slist_return_owned(%s);\n' % (pad, c)
     if not isinstance(value, ast.List) and not _is_slist_expr(value, ctx):
         raise Unsupported('returning %s as a list of str; return a name built up with .append() '
                           'in a loop' % type(value).__name__)
@@ -23052,6 +23280,20 @@ def _stmt_inner(node, ctx, ind):
                 numeric = FLIST
             elif t.id in ctx.strlist:
                 numeric = None
+        if _is_heapq_select(node.value, ctx):
+            # `top = heapq.nsmallest(k, xs)`: the sorted copy is built into a private temp whose
+            # spine moves into the local, the same move `names = [f(x) for x in xs]` makes below.
+            kind = _etype(node.value, ctx)
+            if t.id not in ctx.locals:
+                # a `type_of` read of the name earlier defaulted it to INT; the assignment is
+                # what settles its kind
+                ctx.types[t.id] = kind
+            temporary, _ = _heapq_select(node.value, ctx)
+            destination = ctx.declare(t.id, kind)
+            free = ('ail_slist_free' if kind == SLIST else
+                    'ail_flist_free' if kind == FLIST else 'ail_list_free')
+            return (_flush(ctx, pad) + '%s%s(&%s); %s = %s; %s = (ail_%s){0};\n'
+                    % (pad, free, destination, destination, temporary, temporary, kind))
         if numeric and t.id not in ctx.handles | ctx.nlist | ctx.ndict | ctx.dhandles | ctx.ddict:
             temporary, expression = _numeric_field_value(node.value, numeric, ctx)
             destination = ctx.declare(t.id, numeric)
@@ -25484,6 +25726,22 @@ def _setitem(target, value, ctx, ind):
             rendered = _dict_handle_expr(expr, ctx) if temp == htemp else _expr(expr, ctx)
             out += _flush(ctx, pad) + '%s%s = %s;\n' % (pad, temp, rendered)
         return out + '%sail_tab_put(&%s, %s, %s);\n' % (pad, c, ktemp, htemp)
+    if t == DICT:
+        # An int-valued dict (`ail_tab`/`ail_stab`/`ail_btab` all store an int64) has no slot for a
+        # whole container. Reaching the branches below with one used to hand their generic `_expr`
+        # an `ail_list`/`ail_slist` value and emit C gcc rejects; name the shape instead. The
+        # value-building kinds are matched here -- notably a name a `heapq.nsmallest()` assignment
+        # bound to its fresh list (`top = heapq.nsmallest(k, xs); d["t"] = top`), which the select
+        # feature made reachable. `ndict`/`ddict`/`dhandles` (which DO store containers) returned
+        # above, so no working shape is affected.
+        try:
+            value_kind = _etype(value, ctx)
+        except Unsupported:
+            value_kind = None
+        if value_kind in (LIST, FLIST, SLIST, BLIST, 'array'):
+            raise Unsupported('%r is a dict of integers; a whole list value has no slot in it -- '
+                              'store an integer, or make it a dict of lists (`%s[k] = []` then '
+                              '`%s[k].append(v)`)' % (name, name, name))
     if t == DICT and name in ctx.bkeys:
         # `d[<bytes-ish>] = <int>` on a dict keyed by bytes (see `_mark_bytes_containers`) --
         # content hashing (cruntime.BTAB): the key is a bytes VALUE, not a number, so it is built
@@ -29688,6 +29946,19 @@ def _for_inner_impl(node, ctx, ind):
         head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
             pad, idx, idx, c, idx, pad, v, c, idx)
         return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+    if _is_heapq_select(it, ctx) and _etype(it, ctx) == SLIST:
+        # `for w in heapq.nsmallest(k, words)` -- the select builds a fresh `ail_slist`
+        # (`_heapq_select` -> `_sorted_into_temp`'s own list-of-str branch), so the target is a
+        # str and the walk reads that temp's spine, exactly the shape the `sorted(words)` branch
+        # just above uses for the same element kind. Without this the generic `_seq` fallback
+        # below declared `w` the default int and the `ail_str` slots were misread as numbers.
+        c, _ = _heapq_select(it, ctx)
+        ctx.parts.add('SLIST')
+        v = ctx.declare(node.target.id, STR)
+        pre = _flush(ctx, pad)
+        head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
+            pad, idx, idx, c, idx, pad, v, c, idx)
+        return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
     if _is_list_call(it, ctx) or _is_flist_call(it, ctx):
         value, local = _list_call_value(it, ctx)
         ctx.pre.append('(void)%s;' % value)
@@ -30105,6 +30376,19 @@ def _promote_floats(fn, ctx):
     # loop (`for n in nums:`) needs `nums` in `slist_names` before ITS OWN target can be marked
     # STR -- an unbounded chain, exactly the reason `obj_names` below needs its own `while _grown`.
     slist_names = set()
+
+    def _select_source_is_slist(node):
+        """`heapq.nsmallest(k, xs)` where `xs` is statically a list of str -- True when the
+        select's result is the fresh list of str `_heapq_select` builds. Reads `slist_names`
+        (grown below) as well as the settled kinds, so the pre-binding of a `for` target before
+        emission sees the same answer `_for`'s own STR branch will."""
+        if not _is_heapq_select(node, ctx):
+            return False
+        src = node.args[1]
+        return (isinstance(src, ast.Name)
+                and (src.id in slist_names or ctx.kind.get(src.id) == SLIST
+                     or ctx.types.get(src.id) == SLIST))
+
     for _ in range(8):
         changed = False
         # AIL_TASK_strcontainers_20260916.md mechanisms 4/5: a best-effort, this-iteration-only
@@ -30210,7 +30494,8 @@ def _promote_floats(fn, ctx):
                 changed = True
             elif (isinstance(n, ast.For) and isinstance(n.target, ast.Name)
                   and isinstance(n.iter, ast.Name)
-                  and (n.iter.id in slist_names or ctx.kind.get(n.iter.id) == SLIST)
+                  and (n.iter.id in slist_names or ctx.kind.get(n.iter.id) == SLIST
+                       or ctx.types.get(n.iter.id) == SLIST)
                   and n.target.id not in ctx.kind and ctx.types.get(n.target.id) is None):
                 # `for line in lines:` over a KNOWN slist-producing name, OR (AIL_TASK_strparam_
                 # 20260916.md) an SLIST-kind PARAMETER, which `slist_names` itself never covers
@@ -30218,6 +30503,13 @@ def _promote_floats(fn, ctx):
                 # loop target here too, in the SAME fixed point, so a split() call on `line`
                 # inside this loop's own body (reached later in this very pass, or in a later
                 # pass if it comes textually earlier in `ast.walk`'s order) is recognised.
+                ctx.types[n.target.id] = STR
+                changed = True
+            elif (isinstance(n, ast.For) and isinstance(n.target, ast.Name)
+                  and _select_source_is_slist(n.iter)
+                  and n.target.id not in ctx.kind and ctx.types.get(n.target.id) is None):
+                # `for w in heapq.nsmallest(k, words):` -- the select is a fresh list of str, so
+                # a chained `.split()` on `w` in the body needs STR here as well.
                 ctx.types[n.target.id] = STR
                 changed = True
             elif (isinstance(n, ast.For) and isinstance(n.target, ast.Name)
@@ -30594,6 +30886,13 @@ def _promote_floats(fn, ctx):
                                      # `container_names`'s own comment above already describes for
                                      # LIST/SET/DICT -- caught by `count_on_stripped_and_split_
                                      # element`/every other split()-assigning case in test_strops.py
+            if _is_heapq_select(n.value, ctx):
+                # `xs = heapq.nsmallest(k, words)` -- a fresh list, settled in `_stmt`'s own
+                # select branch, not here. A list-of-str result joins `slist_names` too, so a
+                # later `for w in xs:` binds `w` STR instead of this pass's INT default.
+                if _select_source_is_slist(n.value):
+                    slist_names.add(name)
+                continue
             if _is_handle_producing(n.value, ctx):
                 continue            # `h = g[0]`, `h = d[k]` -- a handle, settled in `_stmt`, not
                                     # here; pre-binding `h` to INT would only fight that later
@@ -30673,8 +30972,15 @@ def _promote_floats(fn, ctx):
                 # must not fight a stale INT default.
                 ctx.bind(n.target.id, STR)
                 continue
+            if _select_source_is_slist(n.iter):
+                # `for w in heapq.nsmallest(k, words)` -- the select builds a fresh list of str
+                # (`_heapq_select` -> `_sorted_into_temp`'s own branch), and `_for` declares the
+                # target STR; this pass's INT default would fight that later, correct declare.
+                ctx.bind(n.target.id, STR)
+                continue
             if isinstance(n.iter, ast.Name) and (n.iter.id in slist_names
-                                                 or ctx.kind.get(n.iter.id) == SLIST):
+                                                 or ctx.kind.get(n.iter.id) == SLIST
+                                                 or ctx.types.get(n.iter.id) == SLIST):
                 # `for w in words:` over a list of str (AIL_TASK_strops_20260915.md Part B) --
                 # `ctx.kind.get(...) == SLIST` (AIL_TASK_strparam_20260916.md) is the SAME
                 # condition for an SLIST-kind PARAMETER `slist_names` was never going to have --
@@ -31745,6 +32051,515 @@ def _mark_freeable_objects(fn, ctx):
             escaping.add(n.value.id)                     # `q = p` -- an alias; neither is freed
             escaping.add(n.targets[0].id)
     return candidates - escaping
+
+
+_ALIAS_MUTATING_METHODS = frozenset((
+    'append', 'pop', 'sort', 'extend', 'insert', 'remove', 'clear', 'reverse', '__setitem__'))
+_ALIAS_SAFE_LIST_METHODS = frozenset(('copy', 'count', 'index'))
+
+
+def _alias_field_element(annotation):
+    if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+            and annotation.value.id in ('list', '__ail_checked_list')
+            and isinstance(annotation.slice, ast.Name)
+            and annotation.slice.id in ('int', 'float', 'str')):
+        return annotation.slice.id
+    return None
+
+
+def _alias_annotation_class(annotation, class_names):
+    if isinstance(annotation, ast.Name) and annotation.id in class_names:
+        return annotation.id
+    return None
+
+
+def _alias_annotation_list_class(annotation, class_names):
+    if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+            and annotation.value.id in ('list', '__ail_checked_list')
+            and isinstance(annotation.slice, ast.Name) and annotation.slice.id in class_names):
+        return annotation.slice.id
+    return None
+
+
+def _alias_class_fields(tree):
+    class_names = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    info = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            info[node.name] = {
+                'list': {}, 'obj': {}, 'objs': {}, 'methods': set(), 'own': set(),
+                'bases': [base.id for base in node.bases if isinstance(base, ast.Name)]}
+
+    def note(table, field, value):
+        if value is None:
+            return
+        if field in table and table[field] != value:
+            table.pop(field, None)
+        else:
+            table[field] = value
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        own = info[node.name]
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef):
+                own['methods'].add(item.name)
+                if item.name == '__init__':
+                    for arg in item.args.args[1:]:
+                        own['own'].add(arg.arg)
+                        note(own['list'], arg.arg, _alias_field_element(arg.annotation))
+                        note(own['obj'], arg.arg, _alias_annotation_class(arg.annotation, class_names))
+                        note(own['objs'], arg.arg, _alias_annotation_list_class(arg.annotation, class_names))
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                own['own'].add(item.target.id)
+                note(own['list'], item.target.id, _alias_field_element(item.annotation))
+                note(own['obj'], item.target.id, _alias_annotation_class(item.annotation, class_names))
+                note(own['objs'], item.target.id, _alias_annotation_list_class(item.annotation, class_names))
+    changed = True
+    while changed:
+        changed = False
+        for info_ in info.values():
+            for base in info_['bases']:
+                parent = info.get(base)
+                if parent is None:
+                    continue
+                for table in ('list', 'obj', 'objs'):
+                    for field, value in parent[table].items():
+                        if field not in info_['own'] and field not in info_[table]:
+                            info_[table][field] = value
+                            changed = True
+    return class_names, info
+
+
+def _alias_own_nodes(fn):
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _alias_blocks(fn):
+    found = []
+    stack = [fn.body]
+    while stack:
+        body = stack.pop()
+        for index, statement in enumerate(body):
+            found.append((body, index, statement))
+            for field in ('body', 'orelse', 'finalbody'):
+                inner = getattr(statement, field, None)
+                if isinstance(inner, list) and inner and isinstance(inner[0], ast.stmt):
+                    stack.append(inner)
+            if isinstance(statement, ast.Try):
+                for handler in statement.handlers:
+                    stack.append(handler.body)
+            if isinstance(statement, ast.Match):
+                for case in statement.cases:
+                    stack.append(case.body)
+    return found
+
+
+def _alias_name_classes(fn, class_names, info):
+    owner, lists = {}, {}
+
+    def note(table, name, value):
+        if value is None:
+            return
+        if name in table:
+            if table[name] != value:
+                table[name] = None
+        else:
+            table[name] = value
+
+    def value_class(node):
+        if isinstance(node, ast.Name):
+            return owner.get(node.id)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in class_names):
+            return node.func.id
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            parent = owner.get(node.value.id)
+            return info.get(parent, {}).get('obj', {}).get(node.attr)
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+            return value_list_class(node.value)
+        return None
+
+    def value_list_class(node):
+        if isinstance(node, ast.Name):
+            return lists.get(node.id)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            parent = owner.get(node.value.id)
+            return info.get(parent, {}).get('objs', {}).get(node.attr)
+        if isinstance(node, ast.Call):
+            if (isinstance(node.func, ast.Name) and node.func.id in ('list', 'sorted')
+                    and node.args):
+                return value_list_class(node.args[0])
+            if (isinstance(node.func, ast.Attribute) and node.func.attr == 'copy'
+                    and not node.args):
+                return value_list_class(node.func.value)
+        return None
+
+    args = [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]
+    for arg in args:
+        if arg.arg not in class_names:
+            note(owner, arg.arg, _alias_annotation_class(arg.annotation, class_names))
+            note(lists, arg.arg, _alias_annotation_list_class(arg.annotation, class_names))
+    changed = True
+    while changed:
+        changed = False
+        for node in _alias_own_nodes(fn):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if len(targets) != 1 or not isinstance(targets[0], ast.Name):
+                    continue
+                name, value = targets[0].id, node.value
+                if value is None:
+                    continue
+                before = (owner.get(name), lists.get(name))
+                if isinstance(node, ast.AnnAssign):
+                    note(owner, name, _alias_annotation_class(node.annotation, class_names))
+                    note(lists, name, _alias_annotation_list_class(node.annotation, class_names))
+                note(owner, name, value_class(value))
+                note(lists, name, value_list_class(value))
+                changed |= before != (owner.get(name), lists.get(name))
+            elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name):
+                before = owner.get(node.target.id)
+                note(owner, node.target.id, value_list_class(node.iter))
+                changed |= before != owner.get(node.target.id)
+    return owner, lists
+
+
+def _alias_refers(node, x, field):
+    if isinstance(node, ast.Name):
+        return node.id == x
+    if isinstance(node, ast.Attribute):
+        return node.attr == field or _alias_refers(node.value, x, field)
+    if isinstance(node, ast.Subscript):
+        return _alias_refers(node.value, x, field)
+    return False
+
+
+def _alias_expr_struct(node, o, owner, info):
+    if isinstance(node, ast.Name):
+        return node.id == o or owner.get(node.id) is not None
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id in info
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        parent = owner.get(node.value.id)
+        return node.attr in info.get(parent, {}).get('obj', {})
+    return False
+
+
+class _AliasScope:
+    def __init__(self, fn, info, funcs):
+        methods = set()
+        for entry in info.values():
+            methods.update(entry['methods'])
+        self.methods = methods
+        local_names = {n.id for n in ast.walk(fn)
+                       if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+        local_names.update(arg.arg for arg in [*fn.args.posonlyargs, *fn.args.args,
+                                               *fn.args.kwonlyargs])
+        self.classes = {name: _AliasClass(entry) for name, entry in info.items()
+                        if name not in local_names}
+        self.locals = local_names
+        self.kind = {}
+        self.types = {}
+        self.local_annotations = {}
+        self.strlist = set()
+        self.flist = set()
+        self.skeys = set()
+        self.bkeys = set()
+        self.nlist = set()
+        self.ndict = set()
+        self.funcs = {name: signature for name, signature in funcs.items()
+                      if name not in local_names}
+
+
+class _AliasClass:
+    def __init__(self, entry):
+        self.methods = entry['methods']
+
+
+def _alias_signature(fn, class_names):
+    classes = class_names
+    params = []
+    for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]:
+        try:
+            params.append((arg.arg, _annotation_kind(arg.annotation, classes)))
+        except Unsupported:
+            params.append((arg.arg, ('unknown', 'annotation')))
+    try:
+        result = _annotation_kind(fn.returns, classes)
+    except Unsupported:
+        result = ('unknown', 'return')
+    return params, result
+
+
+def _alias_assignment_candidate(statement, owner, info):
+    if isinstance(statement, ast.Assign):
+        if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            return None
+        target, value = statement.targets[0], statement.value
+    elif isinstance(statement, ast.AnnAssign):
+        if not isinstance(statement.target, ast.Name) or statement.value is None:
+            return None
+        target, value = statement.target, statement.value
+    else:
+        return None
+    if not (isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name)
+            and isinstance(value.ctx, ast.Load)):
+        return None
+    field = value.attr
+    parent = owner.get(value.value.id)
+    element = info.get(parent, {}).get('list', {}).get(field)
+    if element not in ('int', 'float', 'str'):
+        return None
+    return target.id, value.value.id, field
+
+
+def _alias_target_stores(target, x, o, field):
+    hit = None
+    for node in ast.walk(target):
+        if isinstance(node, ast.Name) and node.id == o:
+            hit = 'o'
+        elif isinstance(node, ast.Attribute) and node.attr == field:
+            hit = 'f'
+        elif isinstance(node, ast.Subscript) and _alias_refers(node.value, x, field):
+            hit = 'x'
+        elif isinstance(node, ast.Attribute) and _alias_refers(node.value, x, field):
+            hit = 'x'
+    return hit
+
+
+def _alias_call_targets(fn):
+    targets = []
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete,
+                             ast.For, ast.AsyncFor, ast.With, ast.comprehension, ast.NamedExpr)):
+            if isinstance(node, ast.Assign):
+                targets.extend(node.targets)
+            elif isinstance(node, (ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+                targets.append(node.target)
+            elif isinstance(node, ast.Delete):
+                targets.extend(node.targets)
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                targets.append(node.target)
+            elif isinstance(node, ast.With):
+                targets.extend(item.optional_vars for item in node.items
+                               if item.optional_vars is not None)
+            elif isinstance(node, ast.comprehension):
+                targets.append(node.target)
+    return targets
+
+
+def _alias_safe_use(node, parents, allowed_names, scope):
+    parent = parents.get(node)
+    if parent is None:
+        return False
+    if isinstance(parent, ast.Subscript) and parent.value is node:
+        return True
+    if isinstance(parent, (ast.For, ast.AsyncFor)) and parent.iter is node:
+        return True
+    if isinstance(parent, ast.comprehension) and parent.iter is node:
+        return True
+    if isinstance(parent, ast.Attribute) and parent.value is node:
+        grand = parents.get(parent)
+        return (parent.attr in _ALIAS_SAFE_LIST_METHODS
+                and isinstance(grand, ast.Call) and grand.func is parent)
+    if isinstance(parent, ast.Call) and parent.func is not node:
+        func = parent.func
+        return (isinstance(func, ast.Name) and func.id in allowed_names
+                and func.id not in scope.funcs and func.id not in scope.classes
+                and func.id not in scope.locals)
+    return False
+
+
+def _alias_call_safe(node, scope):
+    """`_borrow_call_safe` against the light alias scope: any typing context this scope does not
+    carry is treated as unsafe, so a call it cannot classify keeps the copy instead of crashing."""
+    try:
+        return _borrow_call_safe(node, scope, scope.methods)
+    except (AttributeError, KeyError, TypeError, Unsupported):
+        return False
+
+
+def _elide_readonly_field_alias_in_function(fn, class_names, info, funcs):
+    if not class_names or not info:
+        return 0
+    owner, _lists = _alias_name_classes(fn, class_names, info)
+    if not owner:
+        return 0
+    candidates = []
+    blocks = _alias_blocks(fn)
+    for body, index, statement in blocks:
+        found = _alias_assignment_candidate(statement, owner, info)
+        if found is not None:
+            candidates.append((body, index, statement, found))
+    if not candidates:
+        return 0
+    own = list(_alias_own_nodes(fn))
+    params = {arg.arg for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]}
+    stores = {}
+    declared_outer = set()
+    for node in own:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            stores[node.name] = stores.get(node.name, 0) + 1
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            # A `global`/`nonlocal` name is a binding outside this function's locals. Eliding its
+            # only store (`x = o.f`) would leave the outer slot unwritten, so neither an alias
+            # name nor its owner may be declared outer, wherever the declaration sits in the
+            # function. The block-local check below still catches `o`; this catches `x` and any
+            # declaration that precedes the alias's live range.
+            declared_outer.update(node.names)
+    parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    scope = _AliasScope(fn, info, funcs)
+    targets = _alias_call_targets(fn)
+    changed = 0
+    valid = []
+    for body, index, statement, (x, o, field) in candidates:
+        if x in params or x in declared_outer or o in declared_outer or stores.get(x, 0) != 1:
+            continue
+        if o not in params:
+            # A struct local's field alias is a field borrow the IR ownership pass can take
+            # (`list.share` from a field to a local); eliding it here would hide the borrow and
+            # leave the local's field lists without the ownership the IR path expects.
+            continue
+        last = index
+        for later in range(index, len(body)):
+            if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(body[later])):
+                last = later
+        block = body[index:last + 1]
+        allowed = set()
+        for item in block:
+            allowed.update(id(n) for n in ast.walk(item))
+        outside = False
+        for node in own:
+            if isinstance(node, ast.Name) and node.id == x and id(node) not in allowed:
+                outside = True
+                break
+        if outside:
+            continue
+        ok = True
+        for item in block:
+            for node in ast.walk(item):
+                if isinstance(node, ast.Call):
+                    if not _alias_call_safe(node, scope):
+                        ok = False
+                        break
+                    func = node.func
+                    user = ((isinstance(func, ast.Name)
+                             and (func.id in scope.funcs or func.id in scope.classes))
+                            or (isinstance(func, ast.Attribute) and func.attr in scope.methods))
+                    if user:
+                        args = [*node.args, *(kw.value for kw in node.keywords)]
+                        if isinstance(func, ast.Attribute):
+                            args.append(func.value)
+                        if any(_alias_expr_struct(arg, o, owner, info) for arg in args
+                               if not isinstance(arg, ast.Starred)):
+                            ok = False
+                            break
+                elif isinstance(node, ast.Lambda):
+                    bound = {arg.arg for arg in [*node.args.posonlyargs, *node.args.args,
+                                                 *node.args.kwonlyargs]}
+                    if node.args.vararg is not None:
+                        bound.add(node.args.vararg.arg)
+                    if node.args.kwarg is not None:
+                        bound.add(node.args.kwarg.arg)
+                    if o in bound or x in bound:
+                        ok = False
+                        break
+                    if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(node)):
+                        if not _borrow_lambda_ok(node, parents):
+                            ok = False
+                            break
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(node)):
+                        ok = False
+                        break
+                elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                    if o in node.names:
+                        ok = False
+                        break
+                elif isinstance(node, ast.ExceptHandler) and node.name == o:
+                    ok = False
+                    break
+            if not ok:
+                break
+        if not ok:
+            continue
+        if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr in _ALIAS_MUTATING_METHODS
+               and _alias_refers(n.func.value, x, field) for item in block for n in ast.walk(item)):
+            continue
+        target_hit = False
+        for node in targets:
+            in_block = any(any(sub is node for sub in ast.walk(item)) for item in block)
+            if not in_block:
+                continue
+            if node is statement or (isinstance(statement, ast.Assign)
+                                     and any(node is target for target in statement.targets)):
+                continue
+            if _alias_target_stores(node, x, o, field):
+                target_hit = True
+                break
+        if target_hit:
+            continue
+        escapes = False
+        for item in block:
+            for node in ast.walk(item):
+                if not (isinstance(node, ast.Name) and node.id == x
+                        and isinstance(node.ctx, ast.Load)):
+                    continue
+                if not _alias_safe_use(node, parents, _ALIAS_SAFE_CALLS, scope):
+                    escapes = True
+                    break
+            if escapes:
+                break
+        if escapes:
+            continue
+        valid.append((body, statement, x, o, field))
+    for body, statement, x, o, field in valid:
+        index = next(i for i, item in enumerate(body) if item is statement)
+        last = index
+        for later in range(index, len(body)):
+            if any(isinstance(n, ast.Name) and n.id == x for n in ast.walk(body[later])):
+                last = later
+        for item in body[index:last + 1]:
+            class Replace(ast.NodeTransformer):
+                def visit_Name(self, node):
+                    if node.id == x and isinstance(node.ctx, ast.Load):
+                        replacement = ast.Attribute(
+                            value=ast.Name(id=o, ctx=ast.Load()), attr=field, ctx=ast.Load())
+                        return ast.copy_location(replacement, node)
+                    return node
+            Replace().visit(item)
+        body.remove(statement)
+        changed += 1
+    if changed:
+        ast.fix_missing_locations(fn)
+    return changed
+
+
+def _elide_readonly_field_aliases(tree):
+    class_names, info = _alias_class_fields(tree)
+    funcs = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name not in funcs:
+            funcs[node.name] = _alias_signature(node, class_names)
+    changed = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            changed += _elide_readonly_field_alias_in_function(node, class_names, info, funcs)
+    return changed
 
 
 _C_TOKENS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/|[A-Za-z_]\w*')
@@ -33388,6 +34203,14 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
     expression and the original source position; raising it here would instead point at
     the callee's declaration, which is less useful for a repair loop. The claim is
     dropped instead, leaving the function's own annotation in place.
+
+    A `str` actual is the one kind deliberately NOT raised here, and it is left for
+    `_call_user_func`'s own argument guards, which name the CALL: the argument-details
+    contract (`test_ail_argument_type_details.py`, `test_ail_source_check.py`) reports
+    `passing str where take() wants int` at the call site rather than a declaration-site
+    `signature_override` one. Raising here would reach the parameter first, since
+    `_signatures` runs before any body compile. Other kinds (a float actual against an
+    `int` annotation) keep the declaration-site refusal.
     """
     for pname, text in override.items():
         given = _sig_override_kind(fn, pname, text)
@@ -33401,7 +34224,7 @@ def _explicit_annotation_conflicts(fn, override, classes=None):
         for a in fn.args.args:
             if a.arg == pname and a.annotation is not None:
                 expected = _annotation_kind(a.annotation, classes or ())
-                if given == STR:
+                if given == STR and expected != STR:
                     continue    # a str claim is reported at its call site as an argument error
                 if given != expected and not (expected == FLT and given == INT):
                     return True
@@ -38467,6 +39290,15 @@ def _refusal_line_from_names(source, message):
     return None
 
 
+def _alias_elision_count(source):
+    """How many read-only field aliases the new pass would elide in `source` (a throwaway parse)."""
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return 0
+    return _elide_readonly_field_aliases(tree)
+
+
 def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None):
     """Compile `source`; see `_to_c_once` for what the arguments mean.
 
@@ -38476,8 +39308,25 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
     A program that compiles without the lowering is compiled exactly as before, and a refusal
     that has nothing to do with a sort is reported as it always was."""
     snapshot = dict(info) if info is not None else None
+    alias_applies = _alias_elision_count(source) > 0
+
+    def attempt(stage):
+        # The alias rewrite only removes copies, but keep the old route on any refusal: compile
+        # again without it when the rewritten function cannot build on the typed path.
+        try:
+            return _to_c_once(source, name, strict, info, entry, sig, library, external,
+                              _sort_stage=stage)
+        except Unsupported:
+            if not alias_applies:
+                raise
+            if info is not None:
+                info.clear()
+                info.update(snapshot)
+            return _to_c_once(source, name, strict, info, entry, sig, library, external,
+                              _sort_stage=stage, _alias_elide=False)
+
     try:
-        return _to_c_once(source, name, strict, info, entry, sig, library, external)
+        return attempt(0)
     except Unsupported as failure:
         first = failure
     if 'sort' not in source:
@@ -38492,6 +39341,7 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
     report, previous = first, 0
     for stage in (1, 2, 3):
         probe = ast.parse(source.strip())
+        _elide_readonly_field_aliases(probe)
         try:
             count = sortkeys.rewrite(probe, stage, _old_sort_key_shape, Unsupported)
         except Unsupported as refusal:
@@ -38503,8 +39353,7 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
             info.clear()
             info.update(snapshot)
         try:
-            return _to_c_once(source, name, strict, info, entry, sig, library, external,
-                              _sort_stage=stage)
+            return attempt(stage)
         except Unsupported as error:
             # Named as coming from the key-column lowering only when it is raised at a sort's
             # own line; a refusal elsewhere in the program is reported exactly as written.
@@ -38552,7 +39401,7 @@ def _script_entry(tree, names):
     return None
 
 
-def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0):
+def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0, _alias_elide=True):
     """C for every `def` in the source, with the last one as the entry point.
 
     Functions may call each other, including themselves, directly or in a cycle. Recursion shares
@@ -38684,6 +39533,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                         if isinstance(_a, ast.Attribute):
                             _written.add(_a.attr)
         _FROZEN_LINKS.update(_ClassFieldNames(tree) - _written)
+    if _alias_elide:
+        _elide_readonly_field_aliases(tree)
     if _sort_stage:
         sortkeys.rewrite(tree, _sort_stage, _old_sort_key_shape, Unsupported)
     if any('file_chunks' in external.get(section, {}) for section in ('exports', 'constants', 'structs')):
@@ -39563,7 +40414,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         retry_info = dict(info) if info is not None else None
         retried = _to_c_once(source, name, strict, retry_info, entry, sig, library, external,
                              _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
-                             _tint_retry=_tint_retry + 1)
+                             _tint_retry=_tint_retry + 1, _alias_elide=_alias_elide)
         if info is not None and 'c_split' in retry_info:
             info['c_split'] = retry_info['c_split']
         return retried

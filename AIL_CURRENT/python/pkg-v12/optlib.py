@@ -27,6 +27,7 @@ a comprehension / a `while` test, ordering comparisons and `in` of a value not k
 """
 import ast
 import copy
+import re
 
 KINDS = ('int', 'float', 'bool', 'str', 'bytes')
 ZERO = {'int': 0, 'float': 0.0, 'bool': False, 'str': '', 'bytes': b''}
@@ -501,6 +502,9 @@ class Lowerer:
             if isinstance(n, (ast.FunctionDef, ast.Lambda, ast.AsyncFunctionDef)) and n is not node:
                 nested_reads.update(m.id for m in ast.walk(n) if isinstance(m, ast.Name))
         # names that take an Optional call / another Optional name: fixpoint
+        self.fn = node
+        self._lk = _LocalKinds(node, self.return_kinds)
+        self.dict_kinds = self._scan_dict_kinds()
         changed = True
         while changed:
             changed = False
@@ -528,7 +532,6 @@ class Lowerer:
         self.local_params = {a.arg for a in node.args.args + node.args.kwonlyargs
                              if a.arg in opt and a.arg in stored}
         self.scan_function(node)
-        self.fn = node
         self.scope = _ScopeData(node, self.class_names)
         self.info = info
         self.all_names = frozenset(opt)
@@ -619,6 +622,92 @@ class Lowerer:
             elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
                 self.assigns.setdefault(n.target.id, []).append(n.value)
 
+    def _scan_dict_kinds(self):
+        """The value kind of each local dict of scalars: `d = {k: 0}` / `d[k] = v` / `d: dict[K, int]`.
+        A conflict, an empty dict with no store yet, or a container value gives no kind, so the call
+        is left to the old refusal."""
+        found = {}
+
+        def name_kind(name, seen):
+            if name in seen:
+                return None
+            kinds = set()
+            for v in self._lk.values.get(name, []):
+                if v is None or _is_none(v):
+                    continue
+                k = self._lk.expr(v)
+                if k in KINDS:
+                    kinds.add(k)
+                elif isinstance(v, ast.Name):
+                    k = name_kind(v.id, seen | {name})
+                    if k in KINDS:
+                        kinds.add(k)
+            return kinds.pop() if len(kinds) == 1 else None
+
+        def kind_of(node):
+            kind = self._lk.expr(node)
+            if kind in KINDS:
+                return kind
+            if isinstance(node, ast.Name):
+                # `a = ids.get(ku)` (maybe None) elsewhere and `a = nid` here: the scalar stores
+                # tell the value kind of the dict the Optional test later reads. `nid` itself is
+                # `nid + 1` in a loop, so only its non-recursive stores count.
+                return name_kind(node.id, set())
+            return None
+
+        def add(name, node):
+            if node is None:
+                return
+            found.setdefault(name, set()).add(kind_of(node))
+
+        def annotated(name, ann):
+            text = ast.unparse(ann)
+            match = re.match(r'dict\s*\[\s*[^,]+,\s*([A-Za-z_]+)\s*\]\s*$', text)
+            if match and match.group(1) in KINDS:
+                found.setdefault(name, set()).add(match.group(1))
+
+        for node in self._lk.nodes:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and isinstance(node.value, ast.Dict):
+                        for value in node.value.values:
+                            add(target.id, value)
+                    elif (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                          and not isinstance(target.slice, ast.Slice)):
+                        add(target.value.id, node.value)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                annotated(node.target.id, node.annotation)
+        return {name: next(iter(kinds)) for name, kinds in found.items()
+                if len(kinds) == 1 and None not in kinds}
+
+    def _dict_get_kind(self, e):
+        """`d.get(k)` with ONE argument on a local dict of scalars: the Optional value kind."""
+        if not (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute) and e.func.attr == 'get'
+                and isinstance(e.func.value, ast.Name) and len(e.args) == 1 and not e.keywords
+                and not isinstance(e.args[0], ast.Starred)):
+            return None
+        return self.dict_kinds.get(e.func.value.id)
+
+    def _dict_get_pair(self, e, facts):
+        """The (present, value) pair of `d.get(k)`: the key is evaluated once, membership decides the
+        flag, and the value subscript only runs when the key is present."""
+        kind = self._dict_get_kind(e)
+        address = e.func.value
+        key = self.ex(e.args[0], facts)
+        base = self.temp()
+        self.pre.append(ast.Assign(targets=[_name(base + 'k', ast.Store())], value=key))
+        k = _name(base + 'k')
+        p = ast.Compare(left=copy.deepcopy(k), ops=[ast.In()],
+                        comparators=[ast.Name(id=address.id, ctx=ast.Load())])
+        self.pre.append(ast.AnnAssign(target=_name(base + 'p', ast.Store()), annotation=_name('bool'),
+                                      value=p, simple=1))
+        v = ast.IfExp(test=_name(base + 'p'), body=ast.Subscript(
+            value=ast.Name(id=address.id, ctx=ast.Load()), slice=copy.deepcopy(k), ctx=ast.Load()),
+            orelse=_const(ZERO[kind]))
+        self.pre.append(ast.AnnAssign(target=_name(base + 'v', ast.Store()), annotation=_name(kind),
+                                      value=v, simple=1))
+        return kind, _name(base + 'p'), _name(base + 'v')
+
     def nonnull(self, e, seen=None):
         """Can `e` be shown not to evaluate to None? (A value wrapped as present must never be None.)"""
         seen = seen if seen is not None else set()
@@ -692,12 +781,15 @@ class Lowerer:
             return self.methods[e.func.attr].ret
         if _is_environ_get(e):
             return 'str'
+        kind = self._dict_get_kind(e)
+        if kind is not None:
+            return kind
         return None
 
     def optish(self, e):
         """Is `e` a None, an Optional name or a call of an Optional-returning function?"""
         return (_is_none(e) or (isinstance(e, ast.Name) and e.id in self.opt)
-                or _is_environ_get(e)
+                or _is_environ_get(e) or self._dict_get_kind(e) is not None
                 or (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.funcs
                     and self.funcs[e.func.id].ret is not None)
                 or (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute)
@@ -758,6 +850,13 @@ class Lowerer:
                               'a while test, or beside another call); assign it to a name first')
             p, v = self.environ_pair(e, facts)
             return 'str', p, v
+        if self._dict_get_kind(e) is not None:
+            if not self.hoist_ok:
+                raise Refused(e, 'the Optional result of %s.get() is used where it cannot be evaluated ahead '
+                              'of the statement (inside and / or, a conditional expression, a comprehension, a '
+                              'while test, or beside another call); assign it to a name first'
+                              % e.func.value.id)
+            return self._dict_get_pair(e, facts)
         fname = e.func.id if isinstance(e.func, ast.Name) else e.func.attr
         if not self.hoist_ok:
             raise Refused(e, 'the Optional result of %s() is used where it cannot be evaluated ahead of the '
@@ -908,9 +1007,12 @@ class Lowerer:
             return [ast.Return(value=ast.Tuple(elts=[_name(self.pn(value.id)), _name(self.vn(value.id))],
                                                ctx=ast.Load()))]
         if isinstance(value, ast.Call) and self.optish(value):
-            pre, _ = [], None
             saved, self.pre = self.pre, []
             try:
+                if self._dict_get_kind(value) is not None:
+                    _, p, v = self.opt_of(value, facts)
+                    hoisted = self.pre
+                    return hoisted + [ast.Return(value=ast.Tuple(elts=[p, v], ctx=ast.Load()))]
                 call = self.call(value, facts, as_value=True)
                 hoisted = self.pre
             finally:
@@ -952,6 +1054,15 @@ class Lowerer:
                 return ([ast.Assign(targets=[store(p)], value=_name(self.pn(value.id))),
                          ast.Assign(targets=[store(v)], value=_name(self.vn(value.id)))],
                         (facts | {name}) if src_present else facts - {name})
+            if self._dict_get_kind(value) is not None:
+                saved, self.pre = self.pre, []
+                try:
+                    _, src_p, src_v = self.opt_of(value, facts)
+                    hoisted = self.pre
+                finally:
+                    self.pre = saved
+                return hoisted + [ast.Assign(targets=[store(p)], value=src_p),
+                                  ast.Assign(targets=[store(v)], value=src_v)], facts - {name}
             saved, self.pre = self.pre, []
             try:
                 call = self.call(value, facts, as_value=True)
@@ -972,6 +1083,8 @@ class Lowerer:
                 raise Refused(s, 'a chained assignment to an Optional variable is not built')
             return self.assign_opt(opt_targets[0].id, s.value, facts, s)
         for t in s.targets:
+            if isinstance(t, (ast.Subscript, ast.Attribute)):
+                continue          # its index / receiver is an ordinary value use: lower_target checks presence
             for n in ast.walk(t):
                 if isinstance(n, ast.Name) and n.id in self.opt:
                     raise Refused(s, 'an Optional variable inside a tuple / subscript assignment target is not built')
@@ -1061,17 +1174,90 @@ class Lowerer:
         out = entry if _has_break(s.body) else entry | f
         return [ast.While(test=test, body=body or [ast.Pass()], orelse=orelse)], out
 
+    def _may_be_absent(self, stmts):
+        """Names whose presence a loop body can clear before the next iteration: stored None, an
+        Optional name/result, or through a tuple / with / handler target. A plain value store leaves
+        an already-present name present (chain_relax's `x = (x * ...) & M`), so a name already known
+        present before the loop stays usable at the loop head."""
+        out = set()
+
+        def stores(t):
+            for n in ast.walk(t):
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+                    out.add(n.id)
+
+        def walk(items):
+            for s in items:
+                if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(s, ast.Assign):
+                    maybe = _is_none(s.value) or self.optish(s.value)
+                    for t in s.targets:
+                        if maybe:
+                            stores(t)
+                    if not maybe:
+                        for t in s.targets:
+                            if not isinstance(t, ast.Name):
+                                stores(t)          # a tuple / subscript target may change any name it holds
+                elif isinstance(s, ast.AnnAssign):
+                    if isinstance(s.target, ast.Name):
+                        if s.value is None or _is_none(s.value) or self.optish(s.value):
+                            out.add(s.target.id)
+                    elif s.value is not None:
+                        stores(s.target)
+                elif isinstance(s, ast.AugAssign):
+                    pass                              # requires and keeps presence
+                elif isinstance(s, (ast.For, ast.AsyncFor)):
+                    stores(s.target)
+                    walk(s.body)
+                    walk(s.orelse)
+                elif isinstance(s, (ast.With, ast.AsyncWith)):
+                    for item in s.items:
+                        if item.optional_vars is not None:
+                            stores(item.optional_vars)
+                    walk(s.body)
+                elif isinstance(s, ast.ExceptHandler):
+                    if s.name:
+                        out.add(s.name)
+                    walk(s.body)
+                else:
+                    for field in ('body', 'orelse', 'finalbody'):
+                        block = getattr(s, field, None)
+                        if isinstance(block, list):
+                            walk(block)
+        walk(stmts)
+        return out
+
     def st_For(self, s, facts):
-        for n in ast.walk(s.target):
-            if isinstance(n, ast.Name) and n.id in self.opt:
-                raise Refused(s, 'a loop variable that is also an Optional variable is not built')
+        reused = {n.id for n in ast.walk(s.target)
+                  if isinstance(n, ast.Name) and n.id in self.opt
+                  and isinstance(n.ctx, (ast.Store, ast.Del))}
         pre, it = self.lower_expr(s.iter, facts)
-        entry = facts - _assigned([s])
+        body_facts = facts
+        prelude = []
+        target = s.target
+        if reused:
+            # `for a in rows:` where `a` was also an Optional local: the loop stores present
+            # values into the value half and marks the flag inside the body each iteration.
+            target = copy.deepcopy(s.target)
+            for n in ast.walk(target):
+                if isinstance(n, ast.Name) and n.id in reused and isinstance(n.ctx, (ast.Store, ast.Del)):
+                    n.id = self.vn(n.id)
+            for name in reused:
+                prelude.append(ast.Assign(targets=[_name(self.pn(name), ast.Store())], value=_const(True)))
+            body_facts = facts | reused
+        if reused:
+            entry = body_facts - (self._may_be_absent([s]) - reused)
+            after = facts
+        else:
+            entry = facts - self._may_be_absent([s])
+            after = entry
         body, _ = self.block(s.body, entry)
-        orelse, _ = self.block(s.orelse, entry)
+        orelse, _ = self.block(s.orelse, after)
         new = copy.copy(s)
-        new.iter, new.body, new.orelse = it, body or [ast.Pass()], orelse
-        return pre + [new], entry
+        new.target = target
+        new.iter, new.body, new.orelse = it, prelude + (body or [ast.Pass()]), orelse
+        return pre + [new], after
 
     def st_Try(self, s, facts):
         entry = facts - _assigned([s])
@@ -1723,10 +1909,10 @@ def annotate_none_locals(tree):
 
 # A scalar Optional result is a (flag, value) tuple.  The typed path keeps an `int(text)` that does not fit int64
 # exact only through a tagged result, which a tuple element does not carry: `-> int | None` with an `int(text)`
-# inside stops with "integer overflow" in the default build (an annotated program, as written).  An unannotated
-# function that used to be built exactly on the general path must not start doing that, so the inference stops at
-# the kinds that hold no integer.
-INFERRED_RETURN_KINDS = ('str', 'bytes', 'float')
+# inside stops with "integer overflow" in the default build (an annotated program, as written).  Since s8 a helper
+# that returns None and one int is inferred as `int | None` too (owner Q1 A, Q2 B): int64 stays the default, so a
+# value beyond it stops loudly instead of wrapping, exactly as it did on the general path with --exact-int off.
+INFERRED_RETURN_KINDS = ('int', 'str', 'bytes', 'float')
 
 
 def annotate_none_returns(tree):
@@ -2387,9 +2573,17 @@ def bind_guarded_locals(tree):
     return changed
 
 
+def _is_dict_get(node):
+    """A one-argument `name.get(k)` call (its dict value kind is checked by the Lowerer)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'get' and isinstance(node.func.value, ast.Name)
+            and len(node.args) == 1 and not node.keywords
+            and not isinstance(node.args[0], ast.Starred))
+
+
 def candidate(tree):
     for node in ast.walk(tree):
-        if _is_environ_get(node):
+        if _is_environ_get(node) or _is_dict_get(node):
             return True
         ann = None
         if isinstance(node, ast.arg):

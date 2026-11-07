@@ -40,9 +40,11 @@ CASES = [
      'def find(d: dict[int, int], k: int) -> int | None:\n    return d.get(k)\n\n\n'
      'def main() -> None:\n    print(find({1: 2}, 1))\n\n\nmain()\n',
      '1:', ['int | None: only a class type can be None', 'return a sentinel']),
+    # a local dict literal is a typed Optional since s8; one built by a helper call is not
     ('dict_get_one_argument', 'python',
-     'def main() -> None:\n    d = {"a": 1}\n    v = d.get("b")\n    print(v)\n\n\nmain()\n',
-     '3:', ['d.get(k) with one argument', '`d.get(k, -1)`']),
+     'def make() -> dict[str, int]:\n    return {"a": 1}\n\n\n'
+     'def main() -> None:\n    d = make()\n    v = d.get("a")\n    print(v)\n\n\nmain()\n',
+     '7:', ['d.get(k) with one argument', '`d.get(k, -1)`']),
     # (@staticmethod is built since the dunders pass; a property setter is still refused)
     ('property_setter', 'python',
      'class M:\n    def __init__(self) -> None:\n        self._x = 0\n\n    @property\n    def x(self) -> int:\n'
