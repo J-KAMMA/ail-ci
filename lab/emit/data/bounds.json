@@ -1,0 +1,160 @@
+{
+ "method": {
+  "tool": "callgrind Ir only",
+  "ail_cflags": [
+   "-O2",
+   "-g",
+   "-fno-tree-slp-vectorize",
+   "-ffp-contract=off",
+   "-fopenmp-simd"
+  ],
+  "c_cflags": [
+   "-O2",
+   "-g",
+   "-std=c11"
+  ],
+  "edits": "lab/emit/patches/*.diff"
+ },
+ "bounds": [
+  {
+   "task": "ticket_audit",
+   "variant": "ticket_audit_noovf_int",
+   "edit": "ail_bytes_to_int: drop the per-digit (limit-d)/10 test",
+   "target": "divide + compare + branch per input digit",
+   "before": 13002099013,
+   "after": 12838442944,
+   "saved": 163656069,
+   "stdout_same": true
+  },
+  {
+   "task": "ticket_audit",
+   "variant": "ticket_audit_noview",
+   "edit": "40 constant-index ail_blist_view calls -> B->p[i]",
+   "target": "bounds check + call per ticket field",
+   "before": 13002099013,
+   "after": 12458391444,
+   "saved": 543707569,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_ai_append",
+   "edit": "always_inline ail_bytearray_append",
+   "target": "append call overhead only (negative result)",
+   "before": 5447661169,
+   "after": 5442925485,
+   "saved": 4735684,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_cmpmatch",
+   "edit": "Collapse the nested byte-compare loops into one while",
+   "target": "loop bookkeeping and repeated bounds tests per compared byte",
+   "before": 5447661169,
+   "after": 5265742555,
+   "saved": 181918614,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_dict2",
+   "edit": "Replace the ail_idict chain with four parallel arrays (head/prev/key) and sp_find; emit the chain link directly",
+   "target": "ail_idict_has/need/get/put per packet key",
+   "before": 5447661169,
+   "after": 3520409975,
+   "saved": 1927251194,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_nobounds",
+   "edit": "ail_bytes_get + ail_ir_view_get -> direct p[i]",
+   "target": "two bounds-checked accessors per packed byte",
+   "before": 5447661169,
+   "after": 5358448246,
+   "saved": 89212923,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_pushloop",
+   "edit": "list push init loop -> direct length/reserve/index writes",
+   "target": "call + capacity test per initialized element",
+   "before": 5447661169,
+   "after": 5371292437,
+   "saved": 76368732,
+   "stdout_same": true
+  },
+  {
+   "task": "tree_fold",
+   "variant": "tree_fold_nobget",
+   "edit": "parse_tree: ail_bytes_get(v_data, pos) -> v_data.p[pos]",
+   "target": "bounds check + call per parsed byte",
+   "before": 8786004032,
+   "after": 8619057995,
+   "saved": 166946037,
+   "stdout_same": true
+  },
+  {
+   "task": "tree_fold",
+   "variant": "tree_fold_nopop",
+   "edit": "ail_list_pop -> --n / p[--n] in the worklist",
+   "target": "call + empty test per stack pop",
+   "before": 8786004032,
+   "after": 8557620257,
+   "saved": 228383775,
+   "stdout_same": true
+  },
+  {
+   "task": "tree_fold",
+   "variant": "tree_fold_nospan",
+   "edit": "20 ail_list_span_get(v_*, i) -> (v_*)->f_*.p[i]",
+   "target": "call + bounds test per tree node",
+   "before": 8786004032,
+   "after": 8634230026,
+   "saved": 151774006,
+   "stdout_same": true
+  },
+  {
+   "task": "ledger_bin",
+   "variant": "ledger_bin_noovf",
+   "edit": "readvar: ck_add/ck_mul/ck_shl/ck_add -> plain C operators",
+   "target": "four overflow-checked operations per varint byte",
+   "before": 5233460211,
+   "after": 4384684791,
+   "saved": 848775420,
+   "stdout_same": true
+  },
+  {
+   "task": "tally_lang",
+   "variant": "tally_lang_edge",
+   "edit": "Move the ev__d entry guard to the 5 self-calls (ail_d + 1) and the ev wrapper (ail_depth + 1): the correct replacement for the entry guard",
+   "target": "one compare+branch per self-call instead of per entry",
+   "before": 19585727653,
+   "after": 19396094852,
+   "saved": 189632801,
+   "stdout_same": true
+  },
+  {
+   "task": "tally_lang",
+   "variant": "tally_lang_norec",
+   "edit": "Drop the per-call `if (ail_d > AIL_MAX_RECURSION_DEPTH)` from ev__d",
+   "target": "one compare+branch per ev__d call",
+   "before": 19585727653,
+   "after": 18401358764,
+   "saved": 1184368889,
+   "stdout_same": true
+  },
+  {
+   "task": "berth_sim",
+   "variant": "berth_sim_noascii",
+   "edit": "stdin_readline: skip the per-line ASCII scan (force _ascii=1)",
+   "target": "UTF-8/ASCII classification pass per input line",
+   "before": 8289014899,
+   "after": 7799368411,
+   "saved": 489646488,
+   "stdout_same": true
+  }
+ ]
+}

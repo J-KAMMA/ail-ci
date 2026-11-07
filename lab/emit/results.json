@@ -1,0 +1,532 @@
+{
+ "method": {
+  "source": "lab/compare/src/<task>/typed.py; C baseline lab/compare/src/<task>/main.c",
+  "compiler": "AIL_CURRENT/ail_chatgpt.py compile <typed.py> --syntax python --debug-dir",
+  "ail_cflags": [
+   "-O2",
+   "-g",
+   "-fno-tree-slp-vectorize",
+   "-ffp-contract=off",
+   "-fopenmp-simd",
+   "-lm"
+  ],
+  "c_cflags": [
+   "-O2",
+   "-g",
+   "-std=c11",
+   "-lm"
+  ],
+  "tool": "valgrind 3.22.0 callgrind, --cache-sim=no --branch-sim=no, Ir only",
+  "input": "lab/roof/attrib.py:case() perf case per task, same stdin/argv for both builds",
+  "note": "AIL and C stdout compared byte-for-byte; every baseline and every variant reports stdout_same=true"
+ },
+ "baselines": {
+  "ticket_audit": {
+   "ail": 13001767691,
+   "c": 2405978092,
+   "extra": 10595789599,
+   "ratio": 5.404,
+   "top": [
+    [
+     "py_main",
+     3069182335
+    ],
+    [
+     "ail_blist_push",
+     1371402864
+    ],
+    [
+     "ail_blist_release",
+     1250784685
+    ],
+    [
+     "ail_sdict_put",
+     578728752
+    ],
+    [
+     "ail_stab_slot",
+     524104168
+    ],
+    [
+     "ail_bytes_to_int",
+     512049168
+    ],
+    [
+     "ail_blist_store",
+     486336110
+    ],
+    [
+     "ail_str_catn.constprop.0",
+     464932966
+    ],
+    [
+     "ail_blist_view",
+     433897525
+    ],
+    [
+     "ail__utf8_validate",
+     414226752
+    ]
+   ],
+   "stdout_same": true
+  },
+  "echo_pack": {
+   "ail": 5447660268,
+   "c": 1866702615,
+   "extra": 3580957653,
+   "ratio": 2.918,
+   "top": [
+    [
+     "pack",
+     5054866474
+    ],
+    [
+     "ail_tab_hfree_slot",
+     84200374
+    ],
+    [
+     "ail_tab_hput",
+     79183081
+    ],
+    [
+     "flush",
+     53135665
+    ],
+    [
+     "ail_bytearray_extend",
+     42284005
+    ],
+    [
+     "ail_tab_put_slow",
+     35540390
+    ],
+    [
+     "ail_tab_hash_rearray",
+     23057694
+    ],
+    [
+     "ail_idict_put_slow",
+     19293360
+    ],
+    [
+     "ail_bytearray_reserve",
+     18188406
+    ],
+    [
+     "ail_tab_order_append",
+     17262713
+    ]
+   ],
+   "stdout_same": true
+  },
+  "tree_fold": {
+   "ail": 8786003012,
+   "c": 4445945995,
+   "extra": 4340057017,
+   "ratio": 1.976,
+   "top": [
+    [
+     "do_sort",
+     2117254914
+    ],
+    [
+     "rebuild",
+     1021183434
+    ],
+    [
+     "parse_tree",
+     823652829
+    ],
+    [
+     "ail_pslist_push.isra.0",
+     737617258
+    ],
+    [
+     "py_main",
+     510680204
+    ],
+    [
+     "do_fold",
+     476632356
+    ],
+    [
+     "do_print",
+     449308616
+    ],
+    [
+     "compact",
+     385849097
+    ],
+    [
+     "ail_str_from_int",
+     246484069
+    ],
+    [
+     "ail_list_pop",
+     204881712
+    ]
+   ],
+   "stdout_same": true
+  },
+  "ledger_bin": {
+   "ail": 5233459310,
+   "c": 2732521718,
+   "extra": 2500937592,
+   "ratio": 1.915,
+   "top": [
+    [
+     "py_main",
+     2897742067
+    ],
+    [
+     "readvar",
+     1792541960
+    ],
+    [
+     "ail_keysort_perm.constprop.0",
+     218918923
+    ],
+    [
+     "ail_tab_hfree_slot",
+     27978246
+    ],
+    [
+     "ail_tab_hput",
+     25434685
+    ],
+    [
+     "ail__utf8_validate",
+     23320567
+    ],
+    [
+     "ail_slist_push",
+     21683280
+    ],
+    [
+     "ail_tab_put_slow",
+     13084255
+    ],
+    [
+     "ail_tab_hash_rearray",
+     11523332
+    ],
+    [
+     "ail_sarena_pushn",
+     9720518
+    ]
+   ],
+   "stdout_same": true
+  },
+  "tally_lang": {
+   "ail": 19585727826,
+   "c": 11900633684,
+   "extra": 7685094142,
+   "ratio": 1.646,
+   "top": [
+    [
+     "ev__d'2",
+     11773623601
+    ],
+    [
+     "py_run__try1",
+     4135463425
+    ],
+    [
+     "ev__d",
+     3593092496
+    ],
+    [
+     "popcnt",
+     83141125
+    ],
+    [
+     "ail_list_pop.constprop.0",
+     60024
+    ],
+    [
+     "lex",
+     21685
+    ],
+    [
+     "py_main",
+     10417
+    ],
+    [
+     "ail_stab_slot",
+     7149
+    ],
+    [
+     "parse_line.part.0",
+     4732
+    ],
+    [
+     "push",
+     4206
+    ]
+   ],
+   "stdout_same": true
+  },
+  "berth_sim": {
+   "ail": 8289013879,
+   "c": 5912490075,
+   "extra": 2376523804,
+   "ratio": 1.402,
+   "top": [
+    [
+     "py_main",
+     3015145048
+    ],
+    [
+     "ail_keysort_perm.constprop.0",
+     1614424789
+    ],
+    [
+     "ail_str_split_sep.isra.0",
+     1007695887
+    ],
+    [
+     "ail_stdin_readline",
+     575519474
+    ],
+    [
+     "ail__str_to_int_full.isra.0",
+     562527594
+    ],
+    [
+     "ail__sarena_keep_roots_slow.constprop.0",
+     392999934
+    ],
+    [
+     "fpop",
+     277878293
+    ],
+    [
+     "fpush",
+     187844570
+    ],
+    [
+     "ail__blk_take",
+     99002134
+    ],
+    [
+     "ail_sarena_pushn",
+     78001722
+    ]
+   ],
+   "stdout_same": true
+  }
+ },
+ "totals": {
+  "ail": 60343631986,
+  "c": 29264272179,
+  "extra": 31079359807
+ },
+ "bounds": [
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_dict2",
+   "edit": "Replace ail_idict chained head with specialized bucket+key+prev arrays and sp_find; no per-access idict helper",
+   "target": "ail_idict_has/need/get/put in pack/hash_of -> direct probe over four parallel arrays",
+   "before": 5447660268,
+   "after": 3520409092,
+   "saved": 1927251176,
+   "pct_total": 35.38,
+   "pct_extra": 53.82,
+   "stdout_same": true
+  },
+  {
+   "task": "tally_lang",
+   "variant": "tally_lang_norec",
+   "edit": "Drop the per-call `if (ail_d > AIL_MAX_RECURSION_DEPTH)` from ev__d (the check stays on every other function)",
+   "target": "one depth compare+branch per ev__d call (ev__d and ev__d'2)",
+   "before": 19585727826,
+   "after": 18401358937,
+   "saved": 1184368889,
+   "pct_total": 6.05,
+   "pct_extra": 15.41,
+   "stdout_same": true
+  },
+  {
+   "task": "ledger_bin",
+   "variant": "ledger_bin_noovf",
+   "edit": "readvar: ck_add/ck_mul/ck_shl/ck_add -> plain C operators",
+   "target": "per varint byte: 4 overflow-checked operations",
+   "before": 5233459310,
+   "after": 4384683884,
+   "saved": 848775426,
+   "pct_total": 16.22,
+   "pct_extra": 33.94,
+   "stdout_same": true
+  },
+  {
+   "task": "ticket_audit",
+   "variant": "ticket_audit_noovf_int",
+   "edit": "ail_bytes_to_int: remove the per-digit (limit-d)/10 overflow test",
+   "target": "per input digit: divide + compare + branch",
+   "before": 13001767691,
+   "after": 12838111626,
+   "saved": 163656065,
+   "pct_total": 1.26,
+   "pct_extra": 1.54,
+   "stdout_same": true
+  },
+  {
+   "task": "ticket_audit",
+   "variant": "ticket_audit_noview",
+   "edit": "40 constant-index ail_blist_view calls -> B->p[i]",
+   "target": "per ticket field: ail_blist_view bounds check + call",
+   "before": 13001767691,
+   "after": 12458060136,
+   "saved": 543707555,
+   "pct_total": 4.18,
+   "pct_extra": 5.13,
+   "stdout_same": true
+  },
+  {
+   "task": "tree_fold",
+   "variant": "tree_fold_nobget",
+   "edit": "parse_tree: ail_bytes_get(v_data, pos) -> v_data.p[pos]",
+   "target": "per parsed byte: bytes bounds check + call",
+   "before": 8786003012,
+   "after": 8619057102,
+   "saved": 166945910,
+   "pct_total": 1.9,
+   "pct_extra": 3.85,
+   "stdout_same": true
+  },
+  {
+   "task": "tree_fold",
+   "variant": "tree_fold_nopop",
+   "edit": "ail_list_pop -> --n / p[--n] in the worklist",
+   "target": "per stack pop: list_pop call + empty/bounds test",
+   "before": 8786003012,
+   "after": 8557619383,
+   "saved": 228383629,
+   "pct_total": 2.6,
+   "pct_extra": 5.26,
+   "stdout_same": true
+  },
+  {
+   "task": "tree_fold",
+   "variant": "tree_fold_nospan",
+   "edit": "20 ail_list_span_get(v_*, i) -> (v_*)->f_*.p[i]",
+   "target": "per tree node: span helper call + bounds test",
+   "before": 8786003012,
+   "after": 8634229133,
+   "saved": 151773879,
+   "pct_total": 1.73,
+   "pct_extra": 3.5,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_pushloop",
+   "edit": "list push init loop -> direct length/reserve/index writes",
+   "target": "per initialized element: ail_list_push call and capacity test",
+   "before": 5447660268,
+   "after": 5371291561,
+   "saved": 76368707,
+   "pct_total": 1.4,
+   "pct_extra": 2.13,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_nobounds",
+   "edit": "ail_bytes_get + ail_ir_view_get -> direct p[i]",
+   "target": "per packed byte: two bounds-checked accessors",
+   "before": 5447660268,
+   "after": 5358447370,
+   "saved": 89212898,
+   "pct_total": 1.64,
+   "pct_extra": 2.49,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_cmpmatch",
+   "edit": "Collapse the nested byte-compare loops into one while",
+   "target": "per compared byte: loop bookkeeping and repeated bounds tests",
+   "before": 5447660268,
+   "after": 5265741679,
+   "saved": 181918589,
+   "pct_total": 3.34,
+   "pct_extra": 5.08,
+   "stdout_same": true
+  },
+  {
+   "task": "echo_pack",
+   "variant": "echo_pack_ai_append",
+   "edit": "always_inline ail_bytearray_append",
+   "target": "append call overhead only; kept as a negative result",
+   "before": 5447660268,
+   "after": 5442924609,
+   "saved": 4735659,
+   "pct_total": 0.09,
+   "pct_extra": 0.13,
+   "stdout_same": true
+  },
+  {
+   "task": "berth_sim",
+   "variant": "berth_sim_noascii",
+   "edit": "stdin_readline: skip the per-line ASCII scan (force _ascii=1)",
+   "target": "per input line: UTF-8/ASCII classification pass",
+   "before": 8289013879,
+   "after": 7799367523,
+   "saved": 489646356,
+   "pct_total": 5.91,
+   "pct_extra": 20.6,
+   "stdout_same": true
+  }
+ ],
+ "grouped": {
+  "dict/table": {
+   "variants": [
+    "echo_pack_dict2"
+   ],
+   "saved": 1927251176
+  },
+  "recursion guard": {
+   "variants": [
+    "tally_lang_norec"
+   ],
+   "saved": 1184368889
+  },
+  "overflow/range": {
+   "variants": [
+    "ledger_bin_noovf",
+    "ticket_audit_noovf_int"
+   ],
+   "saved": 1012431491
+  },
+  "bounds/element": {
+   "variants": [
+    "ticket_audit_noview",
+    "tree_fold_nobget",
+    "tree_fold_nospan",
+    "echo_pack_nobounds"
+   ],
+   "saved": 951640242
+  },
+  "string/byte": {
+   "variants": [
+    "berth_sim_noascii"
+   ],
+   "saved": 489646356
+  },
+  "sequence": {
+   "variants": [
+    "tree_fold_nopop",
+    "echo_pack_pushloop"
+   ],
+   "saved": 304752336
+  },
+  "one-statement/temporaries": {
+   "variants": [
+    "echo_pack_cmpmatch"
+   ],
+   "saved": 181918589
+  }
+ },
+ "grouped_note": "Sum of isolated hand edits; edits target different program points and are not additive. Hand edits were applied to a copy of the generated C, not to the compiler."
+}

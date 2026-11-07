@@ -1,0 +1,108 @@
+--- a/program.c
++++ b/program.c
+@@ -7774,12 +7774,12 @@
+         if ((ail_list_get(&(ail_list){(int64_t *)v_keep, v_keep_len, v_keep_len}, v_i)) != 0) {
+             ((&v_mp)->p[v_i] = (v_nm.n));
+             (void)(ail_pslist_push(&v_nm, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); })));
+-            (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
+-            (void)(ail_list_push(&v_dep, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
+-            if ((((v__t7 = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t8 = 0LL), (v__t7 < v__t8)))) {
++            (void)(ail_list_push(&v_w, (v_t)->f_w.p[v_i]));
++            (void)(ail_list_push(&v_dep, (v_t)->f_dep.p[v_i]));
++            if ((((v__t7 = (v_t)->f_par.p[v_i]), (v__t8 = 0LL), (v__t7 < v__t8)))) {
+                 (void)(ail_list_push(&v_par, -1LL));
+             } else {
+-                (void)(ail_list_push(&v_par, ail_list_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
++                (void)(ail_list_push(&v_par, ail_list_get(&v_mp, (v_t)->f_par.p[v_i])));
+             }
+         }
+     }
+@@ -7900,12 +7900,12 @@
+         v_k = v__k1;
+         v_o = ail_list_get(&v_ord, v_k);
+         (void)(ail_pslist_push(&v_nm, ({ (void)0; int64_t _index = v_o; ail_pslist_get(&(v_t)->f_nm, _index); })));
+-        (void)(ail_list_push(&v_w, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
+-        (void)(ail_list_push(&v_dep, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); })));
+-        if ((((v__t20 = ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t21 = 0LL), (v__t20 < v__t21)))) {
++        (void)(ail_list_push(&v_w, (v_t)->f_w.p[v_o]));
++        (void)(ail_list_push(&v_dep, (v_t)->f_dep.p[v_o]));
++        if ((((v__t20 = (v_t)->f_par.p[v_o]), (v__t21 = 0LL), (v__t20 < v__t21)))) {
+             (void)(ail_list_push(&v_par, -1LL));
+         } else {
+-            (void)(ail_list_push(&v_par, ail_list_get(&v_ni, ({ (void)0; int64_t _index = v_o; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
++            (void)(ail_list_push(&v_par, ail_list_get(&v_ni, (v_t)->f_par.p[v_o])));
+         }
+     }
+     ail_list_free(&v_ord);
+@@ -8460,12 +8460,12 @@
+     v__t12 = v_n;
+     for (v__k1 = 0; v__k1 < v__t12; v__k1 += 1) {
+         v_i = v__k1;
+-        if ((((((v__t13 = v_i), (v__t14 = 0LL), (v__t13 > v__t14)))) != 0 && ((((v__t15 = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t16 = 0LL), (v__t15 > v__t16)))) != 0 && ((((v__t17 = ail_list_get(&v_cc, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))), (v__t18 = 1LL), (v__t17 == v__t18)))) != 0)) {
++        if ((((((v__t13 = v_i), (v__t14 = 0LL), (v__t13 > v__t14)))) != 0 && ((((v__t15 = (v_t)->f_par.p[v_i]), (v__t16 = 0LL), (v__t15 > v__t16)))) != 0 && ((((v__t17 = ail_list_get(&v_cc, (v_t)->f_par.p[v_i])), (v__t18 = 1LL), (v__t17 == v__t18)))) != 0)) {
+             continue;
+         }
+         v_k = v_nm.n;
+         ail_bl_set(&v_name, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); }));
+-        v_wt = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); });
++        v_wt = (v_t)->f_w.p[v_i];
+         ((&v_mp)->p[v_i] = (v_k));
+         if ((((v__t19 = v_i), (v__t20 = 0LL), (v__t19 > v__t20)))) {
+             v_j = v_i;
+@@ -8477,19 +8477,19 @@
+                     v_j = ((v__t23 = v_j), (v__t24 = 1LL), ck_add(v__t23, v__t24));
+                     ail_bl_append(&v_name, (ail_str){(const uint8_t *)("\x2B"), 1, 1});
+                     ail_bl_append(&v_name, ({ (void)0; int64_t _index = v_j; ail_pslist_get(&(v_t)->f_nm, _index); }));
+-                    v_wt = ((v__t25 = v_wt), (v__t26 = ({ (void)0; int64_t _index = v_j; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })), ck_add(v__t25, v__t26));
++                    v_wt = ((v__t25 = v_wt), (v__t26 = (v_t)->f_w.p[v_j]), ck_add(v__t25, v__t26));
+                     ail_list_set(&v_mp, v_j, v_k);
+                 }
+             }
+         }
+         (void)(ail_pslist_push(&v_nm, v_name));
+         (void)(ail_list_push(&v_w, v_wt));
+-        if ((((v__t27 = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })), (v__t28 = 0LL), (v__t27 < v__t28)))) {
++        if ((((v__t27 = (v_t)->f_par.p[v_i]), (v__t28 = 0LL), (v__t27 < v__t28)))) {
+             (void)(ail_list_push(&v_par, -1LL));
+             (void)(ail_list_push(&v_dep, 0LL));
+         } else {
+-            (void)(ail_list_push(&v_par, ail_list_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); }))));
+-            (void)(ail_list_push(&v_dep, ((v__t29 = ail_list_get(&v_dep, ail_list_get(&v_mp, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); })))), (v__t30 = 1LL), ck_add(v__t29, v__t30))));
++            (void)(ail_list_push(&v_par, ail_list_get(&v_mp, (v_t)->f_par.p[v_i])));
++            (void)(ail_list_push(&v_dep, ((v__t29 = ail_list_get(&v_dep, ail_list_get(&v_mp, (v_t)->f_par.p[v_i]))), (v__t30 = 1LL), ck_add(v__t29, v__t30))));
+         }
+     }
+     ail_list_free(&v_cc);
+@@ -8555,8 +8555,8 @@
+             v_i = v__k2;
+             ail_sarena_keep_roots(&v__sarena, _fmark1, _froots1, 0);
+             if ((((v__t2 = v_i), (v__t3 = 0LL), (v__t2 > v__t3)))) {
+-                v_pd = ({ (void)0; int64_t _index = ((v__t4 = v_i), (v__t5 = 1LL), ((v__t4) - (v__t5))); ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); });
+-                v_d = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); });
++                v_pd = (v_t)->f_dep.p[((v__t4 = v_i), (v__t5 = 1LL), ((v__t4) - (v__t5)))];
++                v_d = (v_t)->f_dep.p[v_i];
+                 if ((((v__t6 = v_d), (v__t7 = v_pd), (v__t6 > v__t7)))) {
+                     ail_bl_append(&v_out, (ail_str){(const uint8_t *)("\x5B"), 1, 1});
+                 } else {
+@@ -8570,10 +8570,10 @@
+             }
+             ail_bl_append(&v_out, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); }));
+             ail_bl_append(&v_out, (ail_str){(const uint8_t *)("\x3A"), 1, 1});
+-            ail_bl_append(&v_out, ail_str_from_int(&v__sarena, ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_w.p, (v_t)->f_w.n, _index); })));
++            ail_bl_append(&v_out, ail_str_from_int(&v__sarena, (v_t)->f_w.p[v_i]));
+         }
+     }
+-    v_k = ({ (void)0; int64_t _index = ((v__t14 = v_n), (v__t15 = 1LL), ((v__t14) - (v__t15))); ail_list_span_get((v_t)->f_dep.p, (v_t)->f_dep.n, _index); });
++    v_k = (v_t)->f_dep.p[((v__t14 = v_n), (v__t15 = 1LL), ((v__t14) - (v__t15)))];
+     while ((((v__t16 = v_k), (v__t17 = 0LL), (v__t16 > v__t17)))) {
+         ail_bl_append(&v_out, (ail_str){(const uint8_t *)("\x5D"), 1, 1});
+         v_k = ((v__t18 = v_k), (v__t19 = 1LL), ((v__t18) - (v__t19)));
+@@ -8607,7 +8607,7 @@
+     ail_slist_free(&v_parts); v_parts = v__t4; v__t4 = (ail_slist){0};
+     while ((((v__t5 = v_i), (v__t6 = 0LL), (v__t5 >= v__t6)))) {
+         (void)(ail_slist_push(&v_parts, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); })));
+-        v_i = ({ (void)0; int64_t _index = v_i; ail_list_span_get((v_t)->f_par.p, (v_t)->f_par.n, _index); });
++        v_i = (v_t)->f_par.p[v_i];
+     }
+     (void)(ail_slist_reverse(&v_parts));
+     { ail_str _r2 = ail_str_return_owned(((v__t7 = ail_str_join(&v__sarena, (ail_str){(const uint8_t *)("\x2F"), 1, 1}, v_parts)), (v__t8 = (ail_str){(const uint8_t *)("\xA"), 1, 1}), ail_str_cat(&v__sarena, v__t7, v__t8))); ail_cleanup_top = v__cleanup_frame.previous; ail_slist_free(&v__t4); ail_slist_free(&v_parts); ail_sarena_free(&v__sarena); return _r2; }

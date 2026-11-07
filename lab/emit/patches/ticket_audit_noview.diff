@@ -1,0 +1,134 @@
+--- a/program.c
++++ b/program.c
+@@ -8594,17 +8594,17 @@
+         if ((((v__t3 = v_n), (v__t4 = 3LL), (v__t3 != v__t4)))) {
+             { int64_t _r1 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r1; }
+         }
+-        if ((((s_code(ail_blist_view(v_f, 0LL))) != 0 && (s_name(ail_blist_view(v_f, 1LL))) != 0 && ((v__t5 = ail_blist_view(v_f, 2LL), v__t6 = 1LL, v__t7 = 6LL, digits(v__t5, v__t6, v__t7))) != 0) == 0)) {
++        if ((((s_code(v_f->p[0])) != 0 && (s_name(v_f->p[1])) != 0 && ((v__t5 = v_f->p[2], v__t6 = 1LL, v__t7 = 6LL, digits(v__t5, v__t6, v__t7))) != 0) == 0)) {
+             { int64_t _r2 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r2; }
+         }
+-        if ((vnz(ail_blist_view(v_f, 2LL)) == 0)) {
++        if ((vnz(v_f->p[2]) == 0)) {
+             { int64_t _r3 = 4LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r3; }
+         }
+-        v_cap = ail_bytes_to_int(ail_blist_view(v_f, 2LL));
++        v_cap = ail_bytes_to_int(v_f->p[2]);
+         if ((((((v__t8 = v_cap), (v__t9 = 1LL), (v__t8 < v__t9)))) != 0 || ((((v__t10 = v_cap), (v__t11 = 100000LL), (v__t10 > v__t11)))) != 0)) {
+             { int64_t _r4 = 4LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r4; }
+         }
+-        v_code = ail_bytes_decode_utf8(&v__sarena, ail_blist_view(v_f, 0LL));
++        v_code = ail_bytes_decode_utf8(&v__sarena, v_f->p[0]);
+         if ((({ ail_str _key = v_code; const ail_sdict *_source = ((void)0, &(v_st)->f_vidx); ail_sdict_has(_source, _key); }))) {
+             { int64_t _r5 = 6LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r5; }
+         }
+@@ -8622,24 +8622,24 @@
+         if ((((v__t18 = v_n), (v__t19 = 5LL), (v__t18 != v__t19)))) {
+             { int64_t _r7 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r7; }
+         }
+-        if (((((v__t20 = ail_blist_view(v_f, 0LL), v__t21 = 6LL, v__t22 = 6LL, digits(v__t20, v__t21, v__t22))) != 0 && (s_code(ail_blist_view(v_f, 1LL))) != 0 && (s_date(ail_blist_view(v_f, 2LL))) != 0 && (s_time(ail_blist_view(v_f, 3LL))) != 0 && (s_price(ail_blist_view(v_f, 4LL))) != 0) == 0)) {
++        if (((((v__t20 = v_f->p[0], v__t21 = 6LL, v__t22 = 6LL, digits(v__t20, v__t21, v__t22))) != 0 && (s_code(v_f->p[1])) != 0 && (s_date(v_f->p[2])) != 0 && (s_time(v_f->p[3])) != 0 && (s_price(v_f->p[4])) != 0) == 0)) {
+             { int64_t _r8 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r8; }
+         }
+-        if ((((v_event(ail_blist_view(v_f, 0LL))) != 0 && (v_date(ail_blist_view(v_f, 2LL))) != 0 && (v_time(ail_blist_view(v_f, 3LL))) != 0 && (v_price(ail_blist_view(v_f, 4LL))) != 0) == 0)) {
++        if ((((v_event(v_f->p[0])) != 0 && (v_date(v_f->p[2])) != 0 && (v_time(v_f->p[3])) != 0 && (v_price(v_f->p[4])) != 0) == 0)) {
+             { int64_t _r9 = 4LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r9; }
+         }
+-        v_code = ail_bytes_decode_utf8(&v__sarena, ail_blist_view(v_f, 1LL));
++        v_code = ail_bytes_decode_utf8(&v__sarena, v_f->p[1]);
+         if ((({ ail_str _key = v_code; const ail_sdict *_source = ((void)0, &(v_st)->f_vidx); !ail_sdict_has(_source, _key); }))) {
+             { int64_t _r10 = 5LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r10; }
+         }
+-        v_num = ail_bytes_to_int(ail_blist_view(v_f, 0LL));
++        v_num = ail_bytes_to_int(v_f->p[0]);
+         if ((({ int64_t _key = v_num; const ail_idict *_source = ((void)0, &(v_st)->f_evidx); ail_idict_has(_source, _key); }))) {
+             { int64_t _r11 = 6LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r11; }
+         }
+         { int64_t _value = ({ (void)0; ail_list_span_len((v_st)->f_evnum.p, (v_st)->f_evnum.n); }); (void)0; int64_t _key = v_num; ail_idict_put(&(v_st)->f_evidx, _key, _value); }
+         ({ (void)0; int64_t _argument = v_num; ail_numfield_list_append(&(v_st)->f_evnum, _argument); });
+         ({ (void)0; int64_t _argument = ({ const ail_sdict *_source = ((void)0, &(v_st)->f_vidx); ail_str _key = v_code; ail_sdict_need(_source, _key); }); ail_numfield_list_append(&(v_st)->f_evven, _argument); });
+-        ({ (void)0; int64_t _argument = price_cents(ail_blist_view(v_f, 4LL)); ail_numfield_list_append(&(v_st)->f_evprice, _argument); });
++        ({ (void)0; int64_t _argument = price_cents(v_f->p[4]); ail_numfield_list_append(&(v_st)->f_evprice, _argument); });
+         ({ (void)0; int64_t _argument = 0LL; ail_numfield_list_append(&(v_st)->f_evsold, _argument); });
+         { int64_t _value = ((v__t23 = ({ (void)0; int64_t _index = ({ const ail_sdict *_source = ((void)0, &(v_st)->f_vidx); ail_str _key = v_code; ail_sdict_need(_source, _key); }); ail_list_span_get((v_st)->f_vnev.p, (v_st)->f_vnev.n, _index); })), (v__t24 = 1LL), ck_add(v__t23, v__t24)); (void)0; int64_t _index = ({ const ail_sdict *_source = ((void)0, &(v_st)->f_vidx); ail_str _key = v_code; ail_sdict_need(_source, _key); }); ail_numfield_list_set(&(v_st)->f_vnev, _index, _value); }
+         v__t27 = ((v__t25 = (v_st)->f_nrec), (v__t26 = 1LL), ck_add(v__t25, v__t26));
+@@ -8650,17 +8650,17 @@
+         if ((((v__t30 = v_n), (v__t31 = 3LL), (v__t30 != v__t31)))) {
+             { int64_t _r13 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r13; }
+         }
+-        if (((((v__t32 = ail_blist_view(v_f, 0LL), v__t33 = 6LL, v__t34 = 6LL, digits(v__t32, v__t33, v__t34))) != 0 && (s_seat(ail_blist_view(v_f, 1LL))) != 0 && (s_buyer(ail_blist_view(v_f, 2LL))) != 0) == 0)) {
++        if (((((v__t32 = v_f->p[0], v__t33 = 6LL, v__t34 = 6LL, digits(v__t32, v__t33, v__t34))) != 0 && (s_seat(v_f->p[1])) != 0 && (s_buyer(v_f->p[2])) != 0) == 0)) {
+             { int64_t _r14 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r14; }
+         }
+-        if ((((v_event(ail_blist_view(v_f, 0LL))) != 0 && (v_seat(ail_blist_view(v_f, 1LL))) != 0) == 0)) {
++        if ((((v_event(v_f->p[0])) != 0 && (v_seat(v_f->p[1])) != 0) == 0)) {
+             { int64_t _r15 = 4LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r15; }
+         }
+-        v_num = ail_bytes_to_int(ail_blist_view(v_f, 0LL));
++        v_num = ail_bytes_to_int(v_f->p[0]);
+         if ((({ int64_t _key = v_num; const ail_idict *_source = ((void)0, &(v_st)->f_evidx); !ail_idict_has(_source, _key); }))) {
+             { int64_t _r16 = 5LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r16; }
+         }
+-        v_key = ((v__t35 = ail_bytes_decode_utf8(&v__sarena, ail_blist_view(v_f, 0LL))), (v__t36 = (ail_str){(const uint8_t *)("\x3A"), 1, 1}), (v__t37 = ail_bytes_decode_utf8(&v__sarena, ail_blist_view(v_f, 1LL))), ail_str_catn(&v__sarena, (ail_str[]){v__t35, v__t36, v__t37}, 3));
++        v_key = ((v__t35 = ail_bytes_decode_utf8(&v__sarena, v_f->p[0])), (v__t36 = (ail_str){(const uint8_t *)("\x3A"), 1, 1}), (v__t37 = ail_bytes_decode_utf8(&v__sarena, v_f->p[1])), ail_str_catn(&v__sarena, (ail_str[]){v__t35, v__t36, v__t37}, 3));
+         if ((({ ail_str _key = v_key; const ail_sset *_source = ((void)0, &(v_st)->f_seats); ail_sset_has(_source, _key); }))) {
+             { int64_t _r17 = 6LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r17; }
+         }
+@@ -8685,17 +8685,17 @@
+         if ((((v__t57 = v_n), (v__t58 = 2LL), (v__t57 != v__t58)))) {
+             { int64_t _r20 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r20; }
+         }
+-        if (((((v__t59 = ail_blist_view(v_f, 0LL), v__t60 = 6LL, v__t61 = 6LL, digits(v__t59, v__t60, v__t61))) != 0 && (s_seat(ail_blist_view(v_f, 1LL))) != 0) == 0)) {
++        if (((((v__t59 = v_f->p[0], v__t60 = 6LL, v__t61 = 6LL, digits(v__t59, v__t60, v__t61))) != 0 && (s_seat(v_f->p[1])) != 0) == 0)) {
+             { int64_t _r21 = 3LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r21; }
+         }
+-        if ((((v_event(ail_blist_view(v_f, 0LL))) != 0 && (v_seat(ail_blist_view(v_f, 1LL))) != 0) == 0)) {
++        if ((((v_event(v_f->p[0])) != 0 && (v_seat(v_f->p[1])) != 0) == 0)) {
+             { int64_t _r22 = 4LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r22; }
+         }
+-        v_num = ail_bytes_to_int(ail_blist_view(v_f, 0LL));
++        v_num = ail_bytes_to_int(v_f->p[0]);
+         if ((({ int64_t _key = v_num; const ail_idict *_source = ((void)0, &(v_st)->f_evidx); !ail_idict_has(_source, _key); }))) {
+             { int64_t _r23 = 5LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r23; }
+         }
+-        v_key = ((v__t62 = ail_bytes_decode_utf8(&v__sarena, ail_blist_view(v_f, 0LL))), (v__t63 = (ail_str){(const uint8_t *)("\x3A"), 1, 1}), (v__t64 = ail_bytes_decode_utf8(&v__sarena, ail_blist_view(v_f, 1LL))), ail_str_catn(&v__sarena, (ail_str[]){v__t62, v__t63, v__t64}, 3));
++        v_key = ((v__t62 = ail_bytes_decode_utf8(&v__sarena, v_f->p[0])), (v__t63 = (ail_str){(const uint8_t *)("\x3A"), 1, 1}), (v__t64 = ail_bytes_decode_utf8(&v__sarena, v_f->p[1])), ail_str_catn(&v__sarena, (ail_str[]){v__t62, v__t63, v__t64}, 3));
+         if ((({ ail_str _key = v_key; const ail_sset *_source = ((void)0, &(v_st)->f_seats); !ail_sset_has(_source, _key); }))) {
+             { int64_t _r24 = 5LL; ail_cleanup_top = v__cleanup_frame.previous; ail_sarena_free(&v__sarena); return _r24; }
+         }
+@@ -9039,7 +9039,7 @@
+             }
+         }
+         (void)({  ail_blist_push(v_fields, ((v__t57 = v_ln), (v__t58 = v_s), (v__t59 = v_ln.n), ail_bytes_slice(v__t57, v__t58, v__t59))); });
+-        v_t = ail_blist_view(v_fields, 0LL);
++        v_t = v_fields->p[0];
+         ail_blist_store(&v_rest, ({ ail_blist_store(&v__t60, ail_blist_new(), 1); v__t60; }), 0);
+         {
+             int64_t _fmark2 = (*v__sarena).n;
+@@ -9074,7 +9074,7 @@
+ }
+ ail_cleanup_top = v__cleanup_frame.previous; ail_sdict_free(&v__t4); ail_sdict_free(&v__t5); ail_slist_free(&v__t6); ail_slist_free(&v__t7); ail_list_free(&v__t8); ail_list_free(&v__t9); ail_list_free(&v__t10); ail_list_free(&v__t11); ail_idict_free(&v__t12); ail_idict_free(&v__t13); ail_list_free(&v__t14); ail_list_free(&v__t15); ail_list_free(&v__t16); ail_list_free(&v__t17); ail_sset_free(&v__t18); ail_sset_free(&v__t19); ail_slist_free(&v__t93); ail_slist_free(&v__t94); ail_slist_free(&v__t95); ail_slist_free(&v_names); ail_list_free(&v_vi); ail_list_free(&v__t118); ail_slist_free(&v__t121); ail_slist_free(&v_codes); ail_slist_free(&v__t122); ail_slist_free(&v__ail_sk1_c0); ail_list_free(&v__t124); ail_list_free(&v__ail_sk1_p); ail_list_free(&v_ei); ail_list_free(&v__t132); ail_list_free(&v__t135); ail_list_free(&v_sold); ail_list_free(&v__t136); ail_list_free(&v_nums); ail_list_free(&v__ail_sk2_c0); ail_list_free(&v__t137); ail_list_free(&v__ail_sk2_c1); ail_list_free(&v__t139); ail_list_free(&v__t141); ail_list_free(&v__ail_sk2_p); ail_exception_release(v__t3); ail_obj_release(v__t24); ail_obj_release(v_st); ail_blist_release(v__t48); ail_blist_release(v_fields); ail_blist_release(v__t60); ail_blist_release(v_rest); ail_blist_release(v__t90); ail_sarena_free(v__sarena); ail_barena_free(v__barena); free(_ail_frame_cells); ail_exc_top = v__exc_base; ail_handled_leave(&v__handled_entry); return _r5; }
+             }
+-            if (((((v__t70 = ail_blist_view(v_rest, 0LL), v__t71 = 1LL, v__t72 = 9LL, digits(v__t70, v__t71, v__t72))) != 0 && ((v__t73 = ail_blist_view(v_rest, 1LL), v__t74 = 1LL, v__t75 = 12LL, digits(v__t73, v__t74, v__t75))) != 0) == 0)) {
++            if (((((v__t70 = v_rest->p[0], v__t71 = 1LL, v__t72 = 9LL, digits(v__t70, v__t71, v__t72))) != 0 && ((v__t73 = v_rest->p[1], v__t74 = 1LL, v__t75 = 12LL, digits(v__t73, v__t74, v__t75))) != 0) == 0)) {
+                 v__t76 = (ail_str){(const uint8_t *)("\x6C""\x69""\x6E""\x65""\x20"), 5, 1};
+                 v__t77 = ail_str_from_int_buf((uint8_t[24]){0}, v_lineno);
+                 v__t78 = (ail_str){(const uint8_t *)("\x3A""\x20""\x73""\x79""\x6E""\x74""\x61""\x78"), 8, 1};
+@@ -9095,7 +9095,7 @@
+ }
+ ail_cleanup_top = v__cleanup_frame.previous; ail_sdict_free(&v__t4); ail_sdict_free(&v__t5); ail_slist_free(&v__t6); ail_slist_free(&v__t7); ail_list_free(&v__t8); ail_list_free(&v__t9); ail_list_free(&v__t10); ail_list_free(&v__t11); ail_idict_free(&v__t12); ail_idict_free(&v__t13); ail_list_free(&v__t14); ail_list_free(&v__t15); ail_list_free(&v__t16); ail_list_free(&v__t17); ail_sset_free(&v__t18); ail_sset_free(&v__t19); ail_slist_free(&v__t93); ail_slist_free(&v__t94); ail_slist_free(&v__t95); ail_slist_free(&v_names); ail_list_free(&v_vi); ail_list_free(&v__t118); ail_slist_free(&v__t121); ail_slist_free(&v_codes); ail_slist_free(&v__t122); ail_slist_free(&v__ail_sk1_c0); ail_list_free(&v__t124); ail_list_free(&v__ail_sk1_p); ail_list_free(&v_ei); ail_list_free(&v__t132); ail_list_free(&v__t135); ail_list_free(&v_sold); ail_list_free(&v__t136); ail_list_free(&v_nums); ail_list_free(&v__ail_sk2_c0); ail_list_free(&v__t137); ail_list_free(&v__ail_sk2_c1); ail_list_free(&v__t139); ail_list_free(&v__t141); ail_list_free(&v__ail_sk2_p); ail_exception_release(v__t3); ail_obj_release(v__t24); ail_obj_release(v_st); ail_blist_release(v__t48); ail_blist_release(v_fields); ail_blist_release(v__t60); ail_blist_release(v_rest); ail_blist_release(v__t90); ail_sarena_free(v__sarena); ail_barena_free(v__barena); free(_ail_frame_cells); ail_exc_top = v__exc_base; ail_handled_leave(&v__handled_entry); return _r6; }
+             }
+-            if ((((vnz(ail_blist_view(v_rest, 0LL))) != 0 && (vnz(ail_blist_view(v_rest, 1LL))) != 0) == 0)) {
++            if ((((vnz(v_rest->p[0])) != 0 && (vnz(v_rest->p[1])) != 0) == 0)) {
+                 v__t79 = (ail_str){(const uint8_t *)("\x6C""\x69""\x6E""\x65""\x20"), 5, 1};
+                 v__t80 = ail_str_from_int_buf((uint8_t[24]){0}, v_lineno);
+                 v__t81 = (ail_str){(const uint8_t *)("\x3A""\x20""\x76""\x61""\x6C""\x75""\x65"), 7, 1};
+@@ -9116,7 +9116,7 @@
+ }
+ ail_cleanup_top = v__cleanup_frame.previous; ail_sdict_free(&v__t4); ail_sdict_free(&v__t5); ail_slist_free(&v__t6); ail_slist_free(&v__t7); ail_list_free(&v__t8); ail_list_free(&v__t9); ail_list_free(&v__t10); ail_list_free(&v__t11); ail_idict_free(&v__t12); ail_idict_free(&v__t13); ail_list_free(&v__t14); ail_list_free(&v__t15); ail_list_free(&v__t16); ail_list_free(&v__t17); ail_sset_free(&v__t18); ail_sset_free(&v__t19); ail_slist_free(&v__t93); ail_slist_free(&v__t94); ail_slist_free(&v__t95); ail_slist_free(&v_names); ail_list_free(&v_vi); ail_list_free(&v__t118); ail_slist_free(&v__t121); ail_slist_free(&v_codes); ail_slist_free(&v__t122); ail_slist_free(&v__ail_sk1_c0); ail_list_free(&v__t124); ail_list_free(&v__ail_sk1_p); ail_list_free(&v_ei); ail_list_free(&v__t132); ail_list_free(&v__t135); ail_list_free(&v_sold); ail_list_free(&v__t136); ail_list_free(&v_nums); ail_list_free(&v__ail_sk2_c0); ail_list_free(&v__t137); ail_list_free(&v__ail_sk2_c1); ail_list_free(&v__t139); ail_list_free(&v__t141); ail_list_free(&v__ail_sk2_p); ail_exception_release(v__t3); ail_obj_release(v__t24); ail_obj_release(v_st); ail_blist_release(v__t48); ail_blist_release(v_fields); ail_blist_release(v__t60); ail_blist_release(v_rest); ail_blist_release(v__t90); ail_sarena_free(v__sarena); ail_barena_free(v__barena); free(_ail_frame_cells); ail_exc_top = v__exc_base; ail_handled_leave(&v__handled_entry); return _r7; }
+             }
+-            if ((((((v__t82 = ail_bytes_to_int(ail_blist_view(v_rest, 0LL))), (v__t83 = (v_st)->f_nrec), (v__t82 != v__t83)))) != 0 || ((((v__t84 = ail_bytes_to_int(ail_blist_view(v_rest, 1LL))), (v__t85 = (v_st)->f_rev), (v__t84 != v__t85)))) != 0)) {
++            if ((((((v__t82 = ail_bytes_to_int(v_rest->p[0])), (v__t83 = (v_st)->f_nrec), (v__t82 != v__t83)))) != 0 || ((((v__t84 = ail_bytes_to_int(v_rest->p[1])), (v__t85 = (v_st)->f_rev), (v__t84 != v__t85)))) != 0)) {
+                 v__t86 = (ail_str){(const uint8_t *)("\x6C""\x69""\x6E""\x65""\x20"), 5, 1};
+                 v__t87 = ail_str_from_int_buf((uint8_t[24]){0}, v_lineno);
+                 v__t88 = (ail_str){(const uint8_t *)("\x3A""\x20""\x73""\x75""\x6D""\x6D""\x61""\x72""\x79"), 9, 1};

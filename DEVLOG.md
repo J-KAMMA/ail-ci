@@ -52,6 +52,103 @@ mixed-container 15, value-kind-lost 14.  41 of the 97
 non-typed lists are `strict_incomplete`; that is recorded per program.  `docs/design/
 PYREACH_NEXT.md` turns the top five into queued steps.
 
+## 2026-11-07 -- emit1 re-applied: lean-emission design and its measurement (job-rbemit1-11071906)
+
+Re-applied the accepted `job-emit1-11071640` change, fetched anonymously, on this tree: `docs/design/EMIT_LEAN.md`, the
+`lab/emit/` measurement (`analyze.py`, `classify.py`, `bounds.py`, `data/*.json`, `patches/*.diff`, `RESULTS.md`,
+`results.json`) and the one `DIFFERENCES.md` row. The change is docs and data only; no compiler or runtime file moved, so
+the `lab/emit/data/bounds.json` claim (every hand-edited variant prints byte-identical stdout) still rests on this tree's
+unchanged emitter. `.github/workflows/agent-worker.yml` was already identical here and the three `DEVLOG.md` entries
+conflicted only at the top (both sides added entries): theirs are kept above this one, then this tree's `rundiff1` and
+`arena1 S3` entries. `tools/diff_ids.py` is not present on this tree, so only `tools/update_manifest.py` ran; nothing it
+pins changed and `--check` passes. Modules run on the final tree: `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` all OK via `tools/par_check.py -j 2` (3 modules, 0 failed). The change touches no test module.
+Probes: `/tmp/probes/emit_data.py` (15 bounds, 15 patches, six tasks, design-doc paths, `causes.json` reproduced from
+`lines.json`), `emit_behaviour.py` and `emit_behaviour2.py` (dict fast path, int parsing, shifts, recursion, non-ASCII
+bytes, list reserves; both builds match CPython), and `emit_refused.py` / `emit_overflow.py` (the >18-digit constant and
+the int64 constant `+ 1` are refused by name).
+
+## 2026-11-07 -- emit1 review 2 fix: fast-dict escape, stale ranks (job-emit1-11071640)
+
+Review fix; docs/data only, no compiler or runtime change. The previous commit's three fixes were
+confirmed against the code; three defects remained in the design/measurement text.
+
+- **Design 1's fast mark still allowed escape.** The mark now also requires that the dict is never
+  returned and never stored into another container, attribute or global, so a caller cannot iterate
+  a fast dict after the function returns. Control added: `def f(): d={1:'a',2:'b'}; d[3]='c';
+  return d`, then `print(list(f()))` must print `[1, 2, 3]` (general table), not hash order. The
+  correctness section, step 1.2 test and the ready-to-queue task text say the same.
+- **Stale rank:** `docs/design/EMIT_LEAN.md` called ASCII/UTF-8 "rank 7"; it is rank 6 (490M).
+- **Stale rank:** `lab/emit/RESULTS.md` called the accessor bound "cause 6"; it is cause/rank 5
+  (952M). Also fixed the two pre-existing stale references: "rank 4/5" container/list helpers is
+  now "rank 2/4", and "causes 1, 4, 5" is now "causes 1, 3, 6" (dict probe, overflow, ASCII/parse).
+
+Probes re-run on the final tree (`bash ~/tools/cmp.sh <p> $PWD`, both builds):
+`/tmp/probes/emit_dict_order.py` and `/tmp/probes/emit_shift_negative.py` are CPython-identical;
+`/tmp/probes/emit_shift_overflow.py` (`-2**62 << 2`) is refused by name; and
+`/tmp/probes/emit_shift_negative_arg.py` stops with `OverflowError` on both builds. The source is
+unchanged since the previous commit, so these results are unchanged. Required modules on the final
+commit: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (3/3 pass); manifest
+`--check` clean.
+
+## 2026-11-07 -- emit1 review fix: recursion-edge net, strict fast-dict mark, signed shift bound (job-emit1-11071640)
+
+Review fix; no compiler or runtime change. All three defects were still present in the tree (the
+`tally_lang_edge` patch existed but no result row did).
+
+- **Rank 3 was the wrong number.** Re-ran
+  `bounds.py --tasks tally_lang --only tally_lang_edge,tally_lang_norec`: the entry-guard deletion
+  is 19,585,727,653 -> 18,401,358,764 (saved 1,184,368,889), but the correct replacement (guard at
+  the 5 self-calls plus the wrapper) is 19,585,727,653 -> 19,396,094,852, a net **189,632,801**
+  (190M). Added the `tally_lang_edge` row to `lab/emit/data/bounds.json` and `RESULTS.md`,
+  retitled design 2 to the net, moved the recursion cause to rank 7 (below overflow, list helpers,
+  accessors and ASCII), and restated the three queueable bounds as ~3.1e9 (about 10% of 31.1e9),
+  not 4.1e9/13%. Also noted that `echo_pack_dict2`'s 1,927M is an upper bound for the whole edit
+  (it also removes growth, the order list and cleanup), not the probe alone.
+- **Design 1's fast mark was too weak.** The fast dict has no order list, so the mark now excludes
+  every order-observing operation: iteration, `list`/`tuple`/`dict` conversion, `repr`/`str`/
+  print/format, equality/ordering comparison, and `keys`/`values`/`items`/`copy`/`popitem`. The
+  control `d={1:'a',2:'b'}; d[3]='c'; print(list(d))` must keep the general table and print
+  `[1, 2, 3]`.
+- **Design 3's shift rule was unsound for a negative left operand.** It now requires a constant
+  `0 <= k < 63` and proves both `lo(x) >= -(2^(63-k))` and `hi(x) < 2^(63-k)`, with the bound
+  computed in a wider integer; `x = -2**62; x << 2` therefore stays checked (its value `-2^64` is
+  outside int64), instead of being proved wrap by the old upper-bound-only rule.
+- Old entry's check share corrected to 9.8% (5,607/57,185 in `RESULTS.md`, not 11%).
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, both builds): `/tmp/probes/emit_dict_order.py` (list,
+items, repr and `dict(d)` order after inserts) and `/tmp/probes/emit_shift_negative.py` (safe
+negative shifts `-100<<2`, `-1<<63`, `-(2**61)<<1`, `-2**62<<0`, `0<<62`, `1<<62`) are
+CPython-identical on the default and forced-general builds. `/tmp/probes/emit_shift_overflow.py`
+(`-2**62 << 2`) is refused by name at compile time (`int64 constant expression out of range`), and
+`/tmp/probes/emit_shift_negative_arg.py` (same value through an argument) stops loudly with
+`OverflowError: integer overflow in << ...` on both builds, never a silent wrap. The source was not
+changed, so the two CPython-identical probes also pass on the base tree. Tests on the final commit:
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (3/3 pass); manifest
+`--check` clean.
+
+## 2026-11-07 -- emit1: where the typed C's extra instructions go, and a lean-emission design (job-emit1-11071326)
+
+Measurement and design only; no compiler change. `lab/emit/analyze.py` rebuilds both sides of six
+`lab/compare` programs (`ticket_audit`, `echo_pack`, `tree_fold`, `ledger_bin`, `tally_lang`,
+`berth_sim`) and reads Ir per emitted C line from valgrind callgrind (3.22, Ir only), checking
+stdout byte-identical. `lab/emit/classify.py` sub-classifies the `other` class by cause;
+`lab/emit/bounds.py` and `lab/emit/patches/*.diff` hand-edit a throwaway copy of the generated C,
+rebuild it with the same flags and measure the real saving.
+
+Headline: `temporaries/one-statement` is 30.7% of the emitted lines' Ir, container/dict/string
+helper bodies another 31%, and the checks (bounds + overflow + refcount + copies) 9.8%
+(5,607/57,185). Measured bounds, largest first: specialised int-dict probe 1.93e9 (`echo_pack`),
+the `ail_blist_meta` invariant test 1.37e9 (`ticket_audit`, a safety check reported but not
+queueable as a removal), overflow-checked arithmetic 1.01e9 (`ledger_bin` + `ticket_audit`),
+list/sequence helpers 1.00e9, ASCII scan 0.49e9, recursion guard moved to the recursive edge
+0.19e9 net (`tally_lang`; 1.18e9 only if the entry guard is deleted with nothing put back), and
+one-loop shape rewrite 0.18e9; `always_inline` on the append helper saves 4.7M (negative).
+`docs/design/EMIT_LEAN.md` ranks these and splits the three queueable ones (dict probe, recursion
+guard at the recursive edge, overflow checks only where provable) into eight <=2h steps with
+files, tests and ready-to-queue task text.
+Reproduce with `python3 lab/emit/analyze.py && python3 lab/emit/classify.py && python3
+lab/emit/bounds.py` (about 12 minutes of callgrind).
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched

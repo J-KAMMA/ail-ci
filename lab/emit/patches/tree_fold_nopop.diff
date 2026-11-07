@@ -1,0 +1,20 @@
+--- a/program.c
++++ b/program.c
+@@ -7621,7 +7621,7 @@
+                         if ((((v__t64 = v_stack.n), (v__t65 = 0LL), (v__t64 == v__t65)))) {
+                             { int64_t _r7 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r7; }
+                         }
+-                        (void)(ail_list_pop(&v_stack, v_stack.n - 1));
++                        ((void)(--(&v_stack)->n));
+                         v_pos = ((v__t66 = v_pos), (v__t67 = 1LL), ((v__t66) + (v__t67)));
+                     } else {
+                         if ((((v__t68 = v_c), (v__t69 = 32LL), (v__t68 == v__t69)))) {
+@@ -7856,7 +7856,7 @@
+         ail_str *_wroots1[] = {};
+         while ((((v__t3 = v_stack.n), (v__t4 = 0LL), (v__t3 > v__t4)))) {
+             ail_sarena_keep_roots(&v__sarena, _wmark1, _wroots1, 0);
+-            v_v = ail_list_pop(&v_stack, v_stack.n - 1);
++            v_v = ((&v_stack)->p[--(&v_stack)->n]);
+             (void)(ail_list_push(&v_ord, v_v));
+             v_k = ((v__t7 = ail_list_get(&(ail_list){(int64_t *)v_cs, v_cs_len, v_cs_len}, ((v__t5 = v_v), (v__t6 = 1LL), ck_add(v__t5, v__t6)))), (v__t8 = 1LL), ck_sub(v__t7, v__t8));
+             {

@@ -1,0 +1,14 @@
+--- a/program.c
++++ b/program.c
+@@ -5194,9 +5194,8 @@
+     ail_list *ir14 = &v___ir_comp1;
+     ail_list_free(ir14);
+     ail_list_reserve(ir14, ir1);
+-    for (int64_t ir15 = 0LL; ir15 < ir1; ir15 += 1) {
+-        ail_list_push(ir14, -1LL);
+-    }
++    for (int64_t ir15 = 0LL; ir15 < ir1; ir15 += 1) ir14->p[ir15] = -1LL;
++    ir14->n = ir1;
+     ail_list *ir16 = &v_prev;
+     { ail_list ir17 = *(ir14); *(ir14) = (ail_list){0}; ail_list_free(ir16); *(ir16) = ir17; }
+     { ail_idict_free(&v_head); ail_idict_init(&v_head); }

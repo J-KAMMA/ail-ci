@@ -1,0 +1,19 @@
+--- a/program.c
++++ b/program.c
+@@ -5870,12 +5870,12 @@
+         int64_t ir13 = (v_r)->f_pos;
+         int64_t ir14 = ((ir13) + (1LL));
+         (v_r)->f_pos = ir14;
+-        int64_t ir15 = ck_add(ir4, 1LL);
++        int64_t ir15 = ((ir4) + (1LL));
+         int64_t ir16 = (ir12 & 127LL);
+         int64_t ir17 = ((ir15) - (1LL));
+-        int64_t ir18 = ck_mul(7LL, ir17);
+-        int64_t ir19 = ck_shl(ir16, ir18);
+-        int64_t ir20 = ck_add(ir5, ir19);
++        int64_t ir18 = ((7LL) * (ir17));
++        int64_t ir19 = ((int64_t)((uint64_t)(ir16) << (uint64_t)(ir18)));
++        int64_t ir20 = ((ir5) + (ir19));
+         int64_t ir21 = (ir12 & 128LL);
+         int64_t ir22 = (ir21 == 0LL);
+         if (ir22) {
