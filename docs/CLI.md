@@ -16,6 +16,42 @@ Everything after the source file of `ail run` goes to the program; options befor
 compiler. `ail build --debug`, `ail build --lib`, `ail run --strict` and the pass-through commands are
 described in [QUICKSTART.md](QUICKSTART.md) and in `ail --help`.
 
+## `compile --json`: machine-readable compiler diagnostics
+
+`python3 ail_chatgpt.py compile prog.py -o prog --json` (also `ail build prog.py --json`: the `ail`
+wrapper passes the option through to `compile`) still prints the `ail.build/1` report. When the typed
+path refused a construct (an `error`) or built the program on the general path (a `note`), that
+report also carries `agent_diagnostics`, one object per diagnostic an agent can act on. A failed
+build carries the field too, so `severity` is `error` for a refusal and `note` for a fallback;
+`--strict --json` adds the same field to its `ail.strict/1` blocker list:
+
+```json
+{"code":"AIL0107","severity":"note","file":"main.py","line":1,"col":1,
+ "cause":"this dict literal puts an int (`'line': 3`) and a bool (`'has_else': False`) in the same dict; ...",
+ "message":"main.py:1:1: built on the general path (about 20x slower) because ...",
+ "fix":{"replace_range":[1,2],"with":"class Node:\n    ..."}}
+```
+
+- `code` is stable per family, `AIL0101` through `AIL0116`. A refusal whose construct has no
+  catalogued family uses `AIL0000` and still carries `severity:"error"` and a position.
+- `file`, `line` and `col` are the construct in the file the user wrote, read from that source; a
+  note that came from a standard-library prelude is moved to the user's call site.
+- `cause` is one sentence in the user's own names; compiler temporaries such as `_ail_*` never
+  appear.
+- `message` is exactly the human text, byte for byte.
+- `fix.replace_range` is the whole-line range to replace, 1-based and inclusive; `fix.with` replaces
+  those lines. Applying the pair keeps the program's output and, except for `AIL0102` (a
+  compiler-side temporary that needs the separate row-arity fix), removes the diagnostic. An agent
+  can apply the edit without parsing the message. `fix` is absent when the design has no literal
+  edit for that family, or when the user's shape has no edit that would build and keep the output.
+  For the four families whose edit asserts something about the user's values (`AIL0101`, `AIL0103`,
+  `AIL0104`, `AIL0111`) the edit is published only when the source proves it: a `str` whose value is
+  unknown (`input()`) gets the position and the cause and no edit, and so does a `.get(k)` whose key
+  is not provably in a literal nothing else writes. `AIL0103` writes the number as a string when the
+  str provably differs from that text and otherwise replaces the always-`False`/always-`True`
+  comparison with the constant itself.
+- A refusal whose construct the compiler cannot place (an empty file) still gets `line:1,col:1`.
+
 ## `ail run --diff`: run the program twice and compare
 
 AIL is Python syntax, so CPython is a free oracle for a program's behaviour. `ail run --diff` builds
