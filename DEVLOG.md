@@ -33,6 +33,12 @@ the same scan (the `-o`/`-I`/... value options are now one module constant it re
 The census over `lab/compare/src/*/main.py` and the corpus is in `lab/rundiff/RESULTS.md`; the
 "differ" list there is a compiler bug list, not fixed by this job.
 
+Review fix: `_split_diff` kept a two-word compiler option (`-I`, `--syntax`, `--debug-dir`, `-o`, ...)
+but dropped its value, so `ail run --diff -I . prog.py` reached the build with a dangling option and no
+source (usage, exit 2). It now copies the option and its value, and detects `--diff` in a single scan
+of the option words rather than by membership, so a value is never mistaken for `--diff`. `docs/CLI.md`
+says so; a regression test covers `-I .`, `--syntax python` and `--debug-dir DIR`.
+
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for

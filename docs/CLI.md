@@ -42,8 +42,10 @@ The native program's stdout and stderr are shown live, exactly as in `ail run`. 
 captured and not shown, except where the report line quotes it.
 
 `--diff`, `--python`, `--timeout` and `--json` are read only from the words *before* the source file
-(`--timeout=5` and `--python=/path/to/python3` are accepted too). `ail run prog.py --diff` still
-passes `--diff` to the program, and `ail run` without `--diff` behaves exactly as before.
+(`--timeout=5` and `--python=/path/to/python3` are accepted too). Every other word before the source is
+passed to the build exactly as `ail run` passes it, a two-word compiler option together with its value
+(`-I .`, `--syntax python`, `--debug-dir DIR`). `ail run prog.py --diff` still passes `--diff` to the
+program, and `ail run` without `--diff` behaves exactly as before.
 
 If the build itself stops, there is no native run to compare. A *recognised* refusal (the last three
 rows of the table) is `loud stop by design` whatever CPython does with the same input, because no

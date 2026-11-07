@@ -357,15 +357,13 @@ def _split_diff(argv):
     Only the options before the source are examined, so `ail run prog.py --diff` still hands --diff to
     the program, and `ail run` without --diff is left byte-for-byte alone."""
     options_end = _source_index(argv, _VALUE_OPTIONS | set(DIFF_VALUE_OPTIONS))
-    if "--diff" not in argv[:options_end]:
-        return None, argv
-    before_source = argv[:options_end]
     settings = {"python": sys.executable or "python3", "timeout": 60.0, "json": False}
-    kept, index = [], 0
-    while index < len(before_source):
-        word = before_source[index]
+    seen, kept, index = False, [], 0
+    while index < options_end:
+        word = argv[index]
         name, equal, inline = word.partition("=")
         if word == "--diff":
+            seen = True
             index += 1
         elif word == "--json":
             settings["json"] = True
@@ -373,8 +371,8 @@ def _split_diff(argv):
         elif name in DIFF_VALUE_OPTIONS:
             if equal:
                 value, step = inline, 1
-            elif index + 1 < len(before_source):
-                value, step = before_source[index + 1], 2
+            elif index + 1 < options_end:
+                value, step = argv[index + 1], 2
             else:
                 raise ValueError("%s needs a value" % name)
             if name == "--python":
@@ -387,9 +385,16 @@ def _split_diff(argv):
                 if not settings["timeout"] > 0:
                     raise ValueError("--timeout needs a positive number of seconds")
             index += step
+        elif word in _VALUE_OPTIONS and index + 1 < options_end:
+            # A compiler option and its value both go to the build, or `-I .` would leave the build
+            # with a dangling option and no source.
+            kept.extend((word, argv[index + 1]))
+            index += 2
         else:
             kept.append(word)
-            index += 2 if word in _VALUE_OPTIONS else 1
+            index += 1
+    if not seen:
+        return None, argv
     return settings, kept + argv[options_end:]
 
 

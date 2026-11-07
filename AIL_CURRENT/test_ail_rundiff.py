@@ -244,6 +244,17 @@ main()
         self.assertEqual(done.stdout, b"read 3\narg --diff\n")
         self.assertNotIn(b"ail diff:", done.stderr)
 
+    def test_value_taking_compiler_options_keep_their_value(self):
+        # `-I .`, `--syntax python` and `--debug-dir DIR` must reach the build with their value: a
+        # dropped value leaves the build with a dangling option and no source file (usage, exit 2).
+        program = self.write("agree.py", AGREE)
+        for options in (["-I", "."], ["--syntax", "python"], ["--debug-dir", str(self.dir / "debug")]):
+            with self.subTest(options=options):
+                done = self.ail("run", "--diff", *options, program, stdin=b"ab\n")
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertIn(b"ail diff: agree", done.stderr)
+                self.assertEqual(done.stdout, b"read 3\n")
+
     def test_bad_options_are_refused(self):
         program = self.write("agree.py", AGREE)
         missing = self.ail("run", "--diff", "--python", self.dir / "does-not-exist", program)
