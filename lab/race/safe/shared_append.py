@@ -1,5 +1,6 @@
-"""Racy: every worker appends to one shared list. CPython's GIL keeps each append whole, so it
-prints the length below; on a lock-free build the same statement is a data race."""
+"""Safe since D3 (2026-11-06): every worker appends to one shared list. The typed parallel build
+gives each block its own buffer and joins them in iteration order, so the length equals the
+sequential loop's; the general path's lock gives the same length."""
 import threading
 
 

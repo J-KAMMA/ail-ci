@@ -7,8 +7,8 @@
 | count | value |
 |---|---|
 | silent races | **0** |
-| safe matched | **16** of 17 |
-| safe GIL-free | **16** of 17 |
+| safe matched | **17** of 18 |
+| safe GIL-free | **17** of 18 |
 
 Baseline when this job started (races1): silent races 0, safe matched 11 of 12, safe GIL-free 11 of 12. The five new safe probes (`map_range`, `map_range_start`, `map_enumerate`, `futures_after_with`, `submit_after_with`) all build on the typed parallel path. The one unmatched safe probe is `int_beyond_int64`, which stops loudly at the int64 boundary (its own note says that is allowed) and is the expected failure in `test_ail_race_probes`.
 
@@ -27,7 +27,6 @@ No racy probe was a silent race: every one was refused by name or built on the g
 | racy/nested_writes_outer.py | racy | general | yes | general (forced) | yes | - | - |
 | racy/resize_while_index.py | racy | general | yes | general (forced) | yes | - | - |
 | racy/same_list_twice.py | racy | general | yes | general (forced) | yes | - | - |
-| racy/shared_append.py | racy | general | yes | general (forced) | yes | - | - |
 | racy/shared_dict.py | racy | general | yes | general (forced) | yes | - | - |
 | racy/submit_shared.py | racy | general | yes | general (forced) | yes | - | - |
 | racy/two_names.py | racy | general | yes | general (forced) | yes | - | - |
@@ -45,6 +44,7 @@ No racy probe was a silent race: every one was refused by name or built on the g
 | safe/one_worker.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
 | safe/partial_sums.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
 | safe/pool_map.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
+| safe/shared_append.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
 | safe/sixteen_on_three.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
 | safe/submit_after_with.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
 | safe/thread_blocks.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
@@ -67,7 +67,7 @@ No racy probe was a silent race: every one was refused by name or built on the g
 - `hybrid/hybrid_bytearray.py` (default): `lab/race/hybrid/hybrid_bytearray_run.py:3:1: not in the subset: threading, queue and concurrent.futures are built on the general path only (one interpreter lock, CPython's GIL semantics); this program is compiled there (the general path could not build this program either); general path: join() called with too many positional arguments`
 - `hybrid/hybrid_bytearray.py` (force): `not in the subset: join() called with too many positional arguments`
 
-Elapsed: 282 s. 34 rows (14 racy, 17 safe, 3 hybrid).
+Elapsed: 210 s. 34 rows (13 racy, 18 safe, 3 hybrid).
 
 ## Owner decisions (2026-11-05)
 
