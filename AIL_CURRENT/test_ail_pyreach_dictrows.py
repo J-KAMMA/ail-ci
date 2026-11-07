@@ -7,7 +7,7 @@ R2  `d.values()` keeps insertion order, so `sum(a[1] for a in d.values() if a[2]
 R3  `sorted(d.items(), key=lambda kv: (-kv[1][1], kv[0]))` and
     `for k, (a, b, s) in d.items()` read the record rows.
 R4  `d.setdefault(k, set()).add(v)` lowers to a set box per slot; duplicates collapse,
-    `len(d[k])` / `v in d[k]` / iteration over `d[k]` match CPython.
+    `len(d[k])` / `v in d[k]` / `sorted(d[k])` iteration match CPython.
 R5  `setdefault(k, [0, 0, 0])` counters and `get(k, [0, 0, 0])` missing rows keep CPython's
     value and insertion-order semantics.
 R6  a balance beyond int64 read from input is loud on the default build (OverflowError), and
@@ -77,11 +77,11 @@ SETS = '''def main():
     groups.setdefault("a", set()).add(4)
     groups.setdefault("b", set()).add(2)
     print(len(groups["a"]), 1 in groups["a"], 3 in groups["a"])
-    for v in groups["a"]:
+    for v in sorted(groups["a"]):
         print("v", v)
     total = 0
     for key in groups:
-        for v in groups[key]:
+        for v in sorted(groups[key]):
             total += v
     print(total)
     print(len(groups), "a" in groups, "z" in groups)

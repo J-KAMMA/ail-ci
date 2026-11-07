@@ -1,3 +1,36 @@
+## 2026-11-07 -- setord1 suite fix 2: empty sets are order-free, difflib's deletion loops and two order-free programs
+
+The full suite after the setord1 refusal also broke `test_ail_bigint` (b2_keyargs), `test_ail_examples_algos`
+(life.py), `test_ail_fuzz81`, `test_ail_pyreach_dictrows`, `test_ail_std_difflib` and `test_ail_std_pprint`
+(`test_ail_re_value` is not a module on this tree; it does not exist under `AIL_CURRENT/`). Two code
+refinements and three program rewrites:
+
+- An EMPTY set has no order to reveal. `pyboxed2.ail2_refuse_set_order` now lets a zero-length set through
+  (walk, `print`, `str`/`repr`, f-string), and `cruntime.ail_meth_set_pop` raises CPython's
+  `KeyError('pop from an empty set')` for an empty set instead of the order refusal; a non-empty `pop()`
+  and a non-empty walk are still refused by name. The general path also lets an immediately-constructed
+  `set()` / `frozenset()` (no arguments, so statically empty) be walked (`pyboxed2._refuse_set_walk`).
+  This fixes `pprint`'s `pformat(set())`/`frozenset()`, `pprint.saferepr`, and the empty-pop probes.
+- `prelude_genlib._safe_repr` had no set branch, so `pprint`'s `_repr` fell through to `repr(set)`, which is
+  refused for a non-empty set; it now formats a set/frozenset the way CPython does, in sorted order
+  (`sorted(object, key=_ail_safe_key)`), so `pformat({3, 1, 2})` matches CPython too.
+- `stdlib/difflib.py` built its `junk`/`popular` sets and then walked them to delete `b2j` keys. That
+  deletion is order-free, so both loops now walk `list(b2j.keys())` and delete the members (`elt in junk` /
+  `elt in popular`), which keeps arbitrary hashable elements working (no `sorted` on user elements).
+- `examples/algos/life.py` and the `SETS` program in `test_ail_pyreach_dictrows.py` walked a non-empty set
+  for an order-free sum/checksum; both now walk `sorted(...)`, so their output is unchanged and no longer
+  depends on the walk order.
+
+Tests on the final commit, `-j 2`: `test_ail_bigint`, `test_ail_examples_algos`, `test_ail_fuzz81`,
+`test_ail_pyreach_dictrows`, `test_ail_std_difflib`, `test_ail_std_pprint`, `test_ail_setorder`,
+`test_ail_sets_general` (8/8, 418 s); `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_int_dict_set`, `test_ail_collections`, `test_ail_refusal_messages` (6/6, 297 s).
+`tools/update_manifest.py --check` passes. Probes in `/tmp/probes/`: p1 empty set through a literal, an
+argument, a list item, an attribute and a dict value (walk/print/repr/str/list/tuple/f-string, empty pop)
+matches CPython on both builds; p2 non-empty walk/print/pop is refused by name on both; p3 difflib with
+`isjunk` and autojunk matches CPython; p4 pprint of empty and non-empty sets matches; p5 an order-free
+life-style checksum matches.
+
 ## 2026-11-07 -- setord1 suite fix: order-free aggregates over a set build, and the set-order census reaches the old tests
 
 The full suite after the setord1 refusal found 16 modules walking, printing or popping a set

@@ -20836,6 +20836,12 @@ static inline ail_st ail_meth_set_remove(ail_ctx *cx, ail_obj s, ail_obj x) {
 }
 static inline ail_st ail_meth_set_pop(ail_ctx *cx, ail_obj *out, ail_obj s) {
     ail_st st = ail_setm_need_mut(cx, s, "pop"); if (st != AIL_OK) return st;
+    /* An EMPTY set's pop shows no order: CPython raises KeyError('pop from an empty set'), so
+       answer that (the order-free case), exactly as CPython does. */
+    if (AIL_SETOBJ(s)->used == 0) {
+        ail_obj msg = ail_str_from_cstr(cx, "pop from an empty set");
+        return ail_raise_key_arg(cx, msg);
+    }
     /* pop returns the FIRST element in iteration order, so its answer shows the order. CPython's
        order is its hash table's (per-run random for a set of str), which AIL does not reproduce:
        refuse rather than return a different element (the typed path refuses this at compile time). */

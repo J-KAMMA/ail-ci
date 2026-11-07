@@ -947,9 +947,10 @@ static inline int ail2_print_scalar(ail_obj x) {
 /* A set/frozenset does not walk in CPython's order here: AIL keeps insertion order, and CPython
    follows its hash table (per-run random for a set of str). Any user-visible walk, print, str()
    or repr() of one is refused by name with the rewrite; `in`, len, sorted, min, max and sum never
-   pass through these helpers, so they stay order-free. */
+   pass through these helpers, so they stay order-free. An EMPTY set has no order to show, so a
+   walk, print or repr of one is order-free too (`set()` prints `set()`, a loop does nothing). */
 static inline ail_st ail2_refuse_set_order(ail_ctx *cx, ail_obj x) {
-    if (x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET)
+    if ((x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET) && ail_set_len(x) != 0)
         return ail_raise_c(cx, AIL_B_TYPEERROR,
             "walking a set or frozenset shows an order that differs from CPython; write `sorted(s)` "
             "for a fixed order (`in`, len, sorted, min, max and sum stay order-free)");
@@ -8626,8 +8627,13 @@ class Compiler(boxclosure.ClosureMixin):
     def _refuse_set_walk(self, node, ctx):
         """Refuse a user-visible walk of a statically known set or frozenset (see
         `ail2_refuse_set_order` for the run-time half of the same rule). An iterable that a
-        `sorted`/`sum`/`min`/`max` consumes is order-free, so its walk may build."""
+        `sorted`/`sum`/`min`/`max` consumes is order-free, so its walk may build; so does an
+        immediately-constructed `set()` / `frozenset()`, which is empty and has no order."""
         if getattr(ctx, 'order_free', 0):
+            return
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ('set', 'frozenset')
+                and not node.args and not node.keywords):
             return
         kind = self.infer_kind(node, ctx)
         if kind in ('set', 'frozenset'):

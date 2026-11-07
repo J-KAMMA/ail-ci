@@ -23,7 +23,7 @@ for x in range(SIZE):
 
 def step(cells, size):
     neighbours = {}
-    for x, y in cells:
+    for x, y in sorted(cells):
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
                 if dx == 0 and dy == 0:
@@ -42,7 +42,7 @@ for _ in range(GENERATIONS):
     live = step(live, SIZE)
 
 checksum = 0
-for x, y in live:
+for x, y in sorted(live):
     checksum += (x + 1) * (y + 1)
 
 print("size", SIZE)
