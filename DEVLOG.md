@@ -1,3 +1,31 @@
+## 2026-11-07 -- setord2 fix: rehash probing from the original slot, fold tuple displays, walk builds (job-setord2-11080819)
+
+Three defects from the setord2 review, all fixed and probed.
+
+- Both `insert_clean` emulations (boxed `ail_setx_ct_insert_clean`, typed `ail_iset_cp_insert_clean`)
+  advanced the slot index `i` through the nine linear probes and then computed the perturb step from
+  the advanced index. CPython keeps `i` at the original slot and only moves the inner probe pointer,
+  so dense runs that need the perturb step diverged after a rehash (`p_coll2`, 40 keys 128 apart:
+  a 19-key set matched, 40 did not). The inner loop now probes `i+1..i+LINEAR` in a local index and
+  the perturb step uses the unchanged `i`.
+- `_folded_set_elt` (both `pyboxed2` and `pyfunc`) excluded `ast.Tuple`. CPython's AST optimizer
+  folds a tuple display of constants into a Constant (`fold_tuple`), so the whole set display then
+  folds to a frozenset constant. Tuples are now judged by the same compile-and-inspect-`LOAD_CONST`
+  test as every other element, which is exactly `are_all_items_const` after optimization.
+  Tuple displays of ints, floats, nested tuples and an empty tuple now match CPython's order.
+- `test_ail_sets_general.test_s3` still asserted the removed refusal. It now compares the walk with
+  CPython. `test_ail_setorder.INT_ORDER` gains the 40 x 128 growth-after-rehash case and the
+  six-tuple constant display (its old growth case never made a ten-slot run).
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, general and default): `p_coll2` (40 x 128 list/repr/len),
+`p_coll2b` (deletions then list/repr), `p_coll2c` (pop then list), `p_typed_dense` (typed
+`set[int]` growth/discard/walk), `p_tuple`, `p_tuple2`, `p_nested` (nested/empty/float/bool/None
+tuples), `p_frozen_tuple`, `p_tuple_rt` (tuple sets built at runtime, through an argument, a dict
+value and a list item), `p_walk` -- all match CPython on both builds. Tests on the final commit:
+`test_ail_sets_general` + `test_ail_setorder` (12 tests, 68 s), `test_ail_int_dict_set` (5, 12 s),
+`test_ail_collections` (13, 357 s), `test_ail_files` (18, 111 s), `test_ail_corpus_findings3`
+(2, 255 s), `test_ail_safetynet` (5, 134 s) -- all pass. `tools/update_manifest.py --check` passes.
+
 ## 2026-11-07 -- setord2: emulate CPython's fixed set order; keep a deterministic order for str/bytes sets (job-setord2-11080440)
 
 setord1 refused every order-revealing use of a set. That was too broad: for elements whose CPython hash

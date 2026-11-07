@@ -6484,10 +6484,10 @@ class Compiler(boxclosure.ClosureMixin):
     def _folded_set_elt(node):
         """True when CPython's compiler leaves this set-display element as a plain constant, so the
         whole display folds into a frozenset constant. CPython's AST optimizer folds literal
-        arithmetic and unary signs first (`1 << 60`, `-1`), so ask this interpreter itself: a
-        single-constant expression is exactly what `are_all_items_const` will see. A tuple literal
-        is not a Constant node (it compiles to BUILD_SET elements), so it never folds."""
-        if isinstance(node, (ast.Tuple, ast.Starred)):
+        arithmetic and unary signs first (`1 << 60`, `-1`), and folds a tuple display of constants
+        into a Constant (`fold_tuple`); ask this interpreter itself, since a single-constant
+        expression is exactly what `are_all_items_const` will see after optimization."""
+        if isinstance(node, ast.Starred):
             return False
         try:
             code = compile(ast.Expression(node), '<set-elt>', 'eval')

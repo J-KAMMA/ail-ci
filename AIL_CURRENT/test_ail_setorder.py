@@ -109,7 +109,13 @@ INT_ORDER = '''def main():
     print(list(d), d)
     print(list({1.5, 0.0, -0.0, 2.25, 7.5}), len({1.5, 0.0, -0.0, 2.25, 7.5}))
     print(list({(1, 2), (3, 4), (0, 0)}), {(1, 2), (3, 4), (0, 0)})
+    print(list({(1, 2), (2, 1), (0, 0), (1, 1), (2, 2), (3, 0)}),
+          {(1, 2), (2, 1), (0, 0), (1, 1), (2, 2), (3, 0)})
     print(list({True, False, 2}), list({None}))
+    e = set()
+    for i in range(40):
+        e.add(i * 128)
+    print(list(e), e)
 main()
 '''
 

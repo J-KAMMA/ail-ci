@@ -13903,9 +13903,9 @@ def _is_set_literal(node):
 def _folded_set_elt(node):
     """True when CPython's compiler leaves this set-display element as a plain constant, so the
     display folds into a frozenset constant (and is then merged into a fresh set). The AST
-    optimizer folds literal arithmetic and unary signs first (`1 << 60`, `-1`), so ask this
-    interpreter itself; a tuple literal is not a Constant node and never folds."""
-    if isinstance(node, (ast.Tuple, ast.Starred)):
+    optimizer folds literal arithmetic and unary signs first (`1 << 60`, `-1`) and a tuple display
+    of constants into a Constant (`fold_tuple`), so ask this interpreter itself."""
+    if isinstance(node, ast.Starred):
         return False
     try:
         code = compile(ast.Expression(node), '<set-elt>', 'eval')

@@ -16641,8 +16641,8 @@ static inline void ail_setx_ct_insert_clean(int64_t *tab, int64_t mask, int64_t 
         if (tab[i] == AIL_CS_EMPTY) { tab[i] = idx; return; }
         if (i + AIL_CS_LINEAR <= mask) {
             for (int j = 0; j < AIL_CS_LINEAR; j++) {
-                i++;
-                if (tab[i] == AIL_CS_EMPTY) { tab[i] = idx; return; }
+                int64_t k = i + 1 + j;
+                if (tab[k] == AIL_CS_EMPTY) { tab[k] = idx; return; }
             }
         }
         perturb >>= AIL_CS_PERTURB;
@@ -26591,7 +26591,7 @@ static void ail_iset_cp_insert_clean(ail_iset *T, int64_t key, int64_t hash) {
     for (;;) {
         if (T->ckind[i] == AIL_IS_EMPTY) goto place;
         if (i + AIL_IS_LINEAR <= mask) {
-            for (int j = 0; j < AIL_IS_LINEAR; j++) { i++; if (T->ckind[i] == AIL_IS_EMPTY) goto place; }
+            for (int j = 0; j < AIL_IS_LINEAR; j++) { int64_t k = i + 1 + j; if (T->ckind[k] == AIL_IS_EMPTY) { i = k; goto place; } }
         }
         perturb >>= AIL_IS_PERTURB;
         i = (int64_t)(((uint64_t)i * 5 + 1 + perturb) & (uint64_t)mask);
