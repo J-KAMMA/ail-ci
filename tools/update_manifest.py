@@ -23,6 +23,10 @@ import ail_manifest  # noqa: E402
 
 LEGACY_KEYS = ("sha256", "files", "sdk_files")
 COMPILER_SUFFIXES = (".py", ".h", ".c")
+# Root-level compiler modules the wheel and an exported SDK must carry.  Their `s` flag is not
+# derivable from a directory, so a merge that keeps the other side of a shard conflict can drop the
+# line; the compiler still imports the module, so this list restores the pin and the flag.
+SDK_MODULES = ("ail_agent_errors.py",)
 
 
 def sha(name):
@@ -31,6 +35,8 @@ def sha(name):
 
 def sdk_source(name):
     """A compiler source that the wheel and an exported SDK must carry."""
+    if name in SDK_MODULES:
+        return name.endswith(COMPILER_SUFFIXES)
     return (name.startswith(("python/pkg-v12/", "stdlib/")) and name.endswith((".py", ".h", ".c"))
             and "__pycache__" not in name.split("/"))
 
@@ -104,8 +110,10 @@ def main():
     for name, digest in stale.items():
         print(("stale " if check else "updated ") + name)
         pins[name] = (digest, pins[name][1])
-    # Every compiler source must be in sdk_files (the packaging test checks the same set).
-    unselected = sorted(n for n in compiler if "s" not in pins.get(n, ("", ""))[1])
+    # Every compiler source must be in sdk_files (the packaging test checks the same set), and so
+    # must a root-level module in SDK_MODULES whose pin survived a merge without its `s` flag.
+    unselected = sorted(n for n in (compiler | {n for n in names if sdk_source(n)})
+                        if "s" not in pins.get(n, ("", ""))[1])
     for name in unselected:
         print(("unselected " if check else "selected ") + name)
         pins[name] = (pins[name][0], "".join(sorted(set(pins[name][1]) | {"s"})))

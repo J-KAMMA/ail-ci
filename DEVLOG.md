@@ -1,3 +1,16 @@
+## 2026-11-07 -- err2b: land err2 (agent error format) after the packaging fix (job-err2b-11080441)
+
+Brought err2's accepted work across from `job-err2-11080418` (the `--json` `agent_diagnostics` field,
+`ail_agent_errors.py`, the AIL0101/AIL0111 span fix, `lab/err/triggers/`, `test_ail_agent_errors.py`)
+and fixed only what broke at the gate. Packaging: `ail_agent_errors.py` is pinned with the `s` flag and
+the wheel now ships `ail_lang/sdk/ail_agent_errors.py`; `tools/update_manifest.py` gained `SDK_MODULES`
+so a merge resolution that keeps the other side of a shard conflict restores the pin and the flag for a
+root-level module the compiler imports. The import is now lazy: `ail_chatgpt.py` loads the module inside
+`_agent_diagnostics`/`_strict_json` and only computes the records when `args.json`, so a plain build
+does not need the module at all (`--json` still reports the build, with an empty `agent_diagnostics`,
+when the module is absent). `update_manifest.py --check` passes and a freshly built wheel imports.
+Shard 2's cap: `test_ail_re_value` measured ... (see report).
+
 ## 2026-11-07 -- err2 fix-up 4: a published edit replaces the whole span of the node it rewrites (job-err2-11072315)
 
 Review 3 found that `AIL0101`'s edit was keyed to `statement.lineno` while the columns belonged to
