@@ -1,3 +1,26 @@
+## 2026-11-07 -- emit1 review 2 fix: fast-dict escape, stale ranks (job-emit1-11071640)
+
+Review fix; docs/data only, no compiler or runtime change. The previous commit's three fixes were
+confirmed against the code; three defects remained in the design/measurement text.
+
+- **Design 1's fast mark still allowed escape.** The mark now also requires that the dict is never
+  returned and never stored into another container, attribute or global, so a caller cannot iterate
+  a fast dict after the function returns. Control added: `def f(): d={1:'a',2:'b'}; d[3]='c';
+  return d`, then `print(list(f()))` must print `[1, 2, 3]` (general table), not hash order. The
+  correctness section, step 1.2 test and the ready-to-queue task text say the same.
+- **Stale rank:** `docs/design/EMIT_LEAN.md` called ASCII/UTF-8 "rank 7"; it is rank 6 (490M).
+- **Stale rank:** `lab/emit/RESULTS.md` called the accessor bound "cause 6"; it is cause/rank 5
+  (952M). Also fixed the two pre-existing stale references: "rank 4/5" container/list helpers is
+  now "rank 2/4", and "causes 1, 4, 5" is now "causes 1, 3, 6" (dict probe, overflow, ASCII/parse).
+
+Probes re-run on the final tree (`bash ~/tools/cmp.sh <p> $PWD`, both builds):
+`/tmp/probes/emit_dict_order.py` and `/tmp/probes/emit_shift_negative.py` are CPython-identical;
+`/tmp/probes/emit_shift_overflow.py` (`-2**62 << 2`) is refused by name; and
+`/tmp/probes/emit_shift_negative_arg.py` stops with `OverflowError` on both builds. The source is
+unchanged since the previous commit, so these results are unchanged. Required modules on the final
+commit: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (3/3 pass); manifest
+`--check` clean.
+
 ## 2026-11-07 -- emit1 review fix: recursion-edge net, strict fast-dict mark, signed shift bound (job-emit1-11071640)
 
 Review fix; no compiler or runtime change. All three defects were still present in the tree (the

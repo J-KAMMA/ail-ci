@@ -108,11 +108,13 @@ Two parts, both invisible to the language:
    checks unchanged.
 
 2. **IR + emitter (`ir/lower.py`, `ir/emit_c.py:dict_op`).** Mark a dict `fast` when, in the whole
-   function, it is a local created by `{}`/`dict()`, never passed to a call, never `del`'d, and
-   **never observed in an order-sensitive way**: no iteration (`for k in d`, `list(d)`, `tuple(d)`,
-   `sum(d)`, comprehensions), no `repr`/`str`/print/format of the dict, no equality or ordering
-   comparison, and no view/copy method whose result can be iterated or printed (`keys`, `values`,
-   `items`, `copy`, `popitem`, `dict(d)`). Key membership (`k in d`) and `len(d)` stay allowed.
+   function, it is a local created by `{}`/`dict()`, never passed to a call, never `del`'d, **never
+   escapes** (not returned; not stored into another local's container, an attribute, a global or
+   any other object where a later operation could reach it), and **never observed in an
+   order-sensitive way**: no iteration (`for k in d`, `list(d)`, `tuple(d)`, `sum(d)`,
+   comprehensions), no `repr`/`str`/print/format of the dict, no equality or ordering comparison,
+   and no view/copy method whose result can be iterated or printed (`keys`, `values`, `items`,
+   `copy`, `popitem`, `dict(d)`). Key membership (`k in d`) and `len(d)` stay allowed.
    Every access must be `has/need/get/put` with an int key. The fast dict keeps no order list, so
    these exclusions are what make hash order unobservable. `dict_op` then emits the `_fast` names;
    when the marker is absent it emits exactly today's names. The mark is a new attribute on the
@@ -125,8 +127,10 @@ The representation of a `fast` dict is an open-addressed key array plus a parall
 occupancy array. Empty is `used[i] == 0`, never a reserved key value, so key `0`, negative keys and
 `INT64_MIN`/`INT64_MAX` are stored and found exactly as CPython stores them. A `fast` dict keeps no
 `ail_tab` order list, so insertion order is not represented; the mark above excludes every operation
-that could expose that order (iteration, conversion to a sequence, `repr`/print, comparison, and the
-view/copy methods). A dict that is iterated or printed after inserts therefore gets the general
+that could expose that order (iteration, conversion to a sequence, `repr`/print, comparison, the
+view/copy methods) and every escape by which another function could perform one of those operations
+on it (return, storing it in a container/attribute/global). A dict that is iterated or printed
+after inserts, or that is returned or stored so a caller can iterate it, therefore gets the general
 table, whose order list still gives CPython's `[1, 2, 3]`. No operation deletes from a `fast` dict,
 so there are no tombstones. Proof obligations:
 
@@ -137,9 +141,11 @@ so there are no tombstones. Proof obligations:
   `d.get(0)`), `None`/`False`-valued entries, a full table (growth), `get(k, default)` on a
   missing and a present key, a key whose hash collides with another, negative keys,
   `INT64_MIN`/`INT64_MAX` keys, a dict read after a resize, a dict inside a loop, and a dict that
-  must *not* be marked fast (passed to a function, `del`'d, iterated, `list(d)`'d, `repr`'d or
-  printed, compared, or copied with `d.copy()`/`dict(d)` after inserts; the concrete control is
-  `d = {1: 'a', 2: 'b'}; d[3] = 'c'; print(list(d))`, expected `[1, 2, 3]`) — these last cases
+  must *not* be marked fast (passed to a function, returned or stored where it can escape, `del`'d,
+  iterated, `list(d)`'d, `repr`'d or printed, compared, or copied with `d.copy()`/`dict(d)` after
+  inserts; the concrete controls are `d = {1: 'a', 2: 'b'}; d[3] = 'c'; print(list(d))`, expected
+  `[1, 2, 3]`, and `def f(): d = {1: 'a', 2: 'b'}; d[3] = 'c'; return d`,
+  `print(list(f()))`, also expected `[1, 2, 3]`) — these last cases
   are the control: their emitted C must be byte-identical to the base build.
 * **icount no loss on any compare program** — build all ten `lab/compare/src/<task>` typed sources
   before and after and compare Ir with `lab/roof/measure.py` (or `tools/icount.c` on a
@@ -160,7 +166,7 @@ call sites use shorter helper names but the *runtime selection* grows by one sma
 | # | step | files | test |
 |---:|---|---|---|
 | 1.1 | Add `ail_fdict`, `ail_hprobe(used, keys, mask, k)` (occupancy in a separate `used[]`; key `0` is an ordinary key) and the four `_fast` idict helpers, not yet selected by the emitter. | `AIL_CURRENT/python/pkg-v12/cruntime.py` (next to `ail_tab_hslot`, line 5350) | `AIL_CURRENT/test_ail_idict_fast.py` (unit: emitted C contains the helper; a probe program builds and runs; key `0`, `INT64_MIN`/`MAX` round-trip) |
-| 1.2 | Compute the `fast` marker in the local-container pass; add it to `dict.alloc`. | `AIL_CURRENT/python/pkg-v12/ir/lower.py` | same module: a program with a passed/iterated/deleted/printed/compared/copied dict must not carry the marker |
+| 1.2 | Compute the `fast` marker in the local-container pass; add it to `dict.alloc`. | `AIL_CURRENT/python/pkg-v12/ir/lower.py` | same module: a program with a passed/iterated/deleted/printed/compared/copied/returned/stored-elsewhere dict must not carry the marker |
 | 1.3 | Emit `_fast` names in `dict_op` when the marker is set; keep the old path otherwise. | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`dict_op`, line 1693) | `AIL_CURRENT/test_ail_idict_fast.py` + `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
 | 1.4 | Measure and record: re-run `lab/emit/analyze.py --tasks echo_pack,ledger_bin` and `lab/emit/bounds.py --only echo_pack_dict2`. | `lab/emit/` | report Ir before/after; no other compare program may lose |
 
@@ -323,13 +329,13 @@ program, not per call). Programs that still need the checks emit exactly today's
 
 ## Not in this split, and why
 
-* **Container invariant / list helpers (rank 4/5, ≈2.3e9 combined).** The measured edit is a
+* **Container invariant / list helpers (rank 2/4, ≈2.3e9 combined).** The measured edit is a
   *semantic* question: `ail_blist_meta` checks memory-safety invariants on data that comes from
   outside. Dropping it needs an escape/ownership proof that the payload is a trusted local, which
   is a larger analysis than this step. The safe sub-step — hoist the check to list creation and
   resize and keep it out of read-only views — is worth about 0.54e9 (`ticket_audit_noview`) and is
   a natural follow-up once design 1's "local, non-escaping" marker exists (it is the same proof).
-* **ASCII/UTF-8 classification (rank 7, 490M).** `ail_stdin_readline` scans every line to choose
+* **ASCII/UTF-8 classification (rank 6, 490M).** `ail_stdin_readline` scans every line to choose
   the ASCII fast path. The C does not because it assumes ASCII. AIL must not assume it; the
   correct change is one classification pass per buffer, not per line, which is a runtime change
   with no measured bound yet.
@@ -350,15 +356,18 @@ Add a no-tombstone int-key probe and select it for dicts the IR marks fast.
    negative keys and INT64_MIN/INT64_MAX all round-trip. Keep every existing ail_idict_* function
    unchanged. Test: new AIL_CURRENT/test_ail_idict_fast.py, including {0: 'a'}[0], 0 in d,
    d.get(0), {0: 'a', 1: 'b'} and a key-0 entry that survives a resize.
-2. ir/lower.py: mark a local dict fast ONLY when it is never passed to a call, never del'd, and
+2. ir/lower.py: mark a local dict fast ONLY when it is never passed to a call, never del'd, never
+   returned and never stored where it can escape (another container, an attribute, a global), and
    never observed in an order-sensitive way: no iteration (for k in d, list(d), tuple(d), sum(d),
    comprehensions), no repr/str/print/format, no equality or ordering comparison, and no
    keys/values/items/copy/popitem/dict(d) whose result can be iterated or printed. Key membership
    and len stay allowed. All access is has/need/get/put with int keys; store the mark on
    dict.alloc. The fast dict has no order list, so a dict iterated or printed after inserts must
    keep the general table. Test: the same module's control cases (passed/iterated/deleted/printed/
-   compared/copied dicts keep the old C, byte-identical to base; d={1:'a',2:'b'}; d[3]='c';
-   print(list(d)) prints [1, 2, 3]).
+   compared/copied/returned/stored dicts keep the old C, byte-identical to base;
+   d={1:'a',2:'b'}; d[3]='c'; print(list(d)) prints [1, 2, 3]; and
+   def f(): d={1:'a',2:'b'}; d[3]='c'; return d, followed by print(list(f())), also prints
+   [1, 2, 3]).
 3. ir/emit_c.py:dict_op (line 1693): emit the _fast names when marked, the current names otherwise.
 4. Prove: bash .agent/cmp.sh on every corpus program (both builds); test_ail_idict_fast,
    test_ail_safetynet, test_ail_files, test_ail_corpus_findings3; icount of all ten typed compare
