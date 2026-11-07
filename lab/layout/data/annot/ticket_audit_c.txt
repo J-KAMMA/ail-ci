@@ -1,0 +1,314 @@
+--------------------------------------------------------------------------------
+-- Metadata
+--------------------------------------------------------------------------------
+Invocation:       /tmp/energy-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/ticket_audit_c.cg
+I1 cache:         32768 B, 64 B, 8-way associative
+D1 cache:         32768 B, 64 B, 8-way associative
+LL cache:         33554432 B, 64 B, 16-way associative
+Command:          /tmp/layout-2xf4jn7z/ticket_audit_c /tmp/layout-2xf4jn7z/ticket_audit.bin
+Events recorded:  Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Events shown:     Ir Dr Dw D1mr D1mw DLmr DLmw
+Event sort order: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Threshold:        0.1%
+Annotation:       on
+
+--------------------------------------------------------------------------------
+-- Summary
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____ 
+
+2,405,987,102 345,577,894 269,686,018 20,203,592 3,184,401 4,135,613 3,151,056  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+-- File:function summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____  file:function
+
+< 2,195,421,990 342,572,310  72,919,442 20,180,936   120,619 4,132,806    91,581  /home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/main.c:
+  1,868,322,360 276,545,506  52,899,442 20,180,935   120,618 4,132,806    91,581    main
+    183,040,000  45,760,000  20,020,000          1         1         0         0    val_event.isra.0
+    143,026,030  20,023,604           0          0         0         0         0    alldig
+
+<   210,554,596   3,003,976 196,763,359     21,500 3,063,780     2,236 3,059,473  ???:
+    206,242,949   2,092,295 196,330,779     13,484 3,063,334     2,171 3,059,452    ???
+      4,260,275     900,080     420,035      6,983         0         5         0    calloc
+
+--------------------------------------------------------------------------------
+-- Function:file summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____  function:file
+
+> 1,868,332,876 276,547,114  52,902,659 20,182,091   120,620 4,133,377    91,583  main:
+  1,868,322,360 276,545,506  52,899,442 20,180,935   120,618 4,132,806    91,581    /home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/main.c
+
+>   206,242,949   2,092,295 196,330,779     13,484 3,063,334     2,171 3,059,452  ???:???
+
+>   183,040,000  45,760,000  20,020,000          1         1         0         0  val_event.isra.0:/home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/main.c
+
+>   143,026,030  20,023,604           0          0         0         0         0  alldig:/home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/main.c
+
+>     4,260,275     900,080     420,035      6,983         0         5         0  calloc:???
+
+--------------------------------------------------------------------------------
+-- Annotated source file: /home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/main.c
+--------------------------------------------------------------------------------
+Ir_________ Dr________ Dw________ D1mr_____ D1mw__ DLmr_____ DLmw__ 
+
+-- line 6 ----------------------------------------
+          .          .          .         .      .         .      .  
+          .          .          .         .      .         .      .  static void fail(long line, const char *cat, int code) {
+          .          .          .         .      .         .      .      printf("line %ld: %s\n", line, cat);
+          .          .          .         .      .         .      .      exit(code);
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  #define SYN(l) fail(l, "syntax", 3)
+          .          .          .         .      .         .      .  #define VAL(l) fail(l, "value", 4)
+          .          .          .         .      .         .      .  
+ 67,403,306 25,466,956          0         0      0         0      0  static int isdig(char c) { return c >= '0' && c <= '9'; }
+  3,164,800    182,400          0         0      0         0      0  static int isup(char c) { return c >= 'A' && c <= 'Z'; }
+          .          .          .         .      .         .      .  static int alldig(F f, size_t lo, size_t hi) {
+ 11,443,208          0          0         0      0         0      0      if (f.n < lo || f.n > hi) return 0;
+ 91,535,614          0          0         0      0         0      0      for (size_t i = 0; i < f.n; i++) if (!isdig(f.p[i])) return 0;
+  5,721,604  2,860,802          0         0      0         0      0      return 1;
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  
+    668,800     60,800          0         0      0         0      0  static int syn_code(F f) { return f.n == 3 && isup(f.p[0]) && isup(f.p[1]) && isup(f.p[2]); }
+          .          .          .         .      .         .      .  static int syn_name(F f) {
+      5,600        800          0         0      0         0      0      if (f.n < 1 || f.n > 40) return 0;
+     33,600          0          0         0      0         0      0      for (size_t i = 0; i < f.n; i++) {
+     11,200     11,200          0         0      0         0      0          unsigned char c = f.p[i];
+     56,000          0          0         0      0         0      0          if (c < 0x20 || c > 0x7e || c == '|') return 0;
+          .          .          .         .      .         .      .      }
+      3,200      1,600          0         0      0         0      0      return f.p[0] != ' ' && f.p[f.n - 1] != ' ';
+          .          .          .         .      .         .      .  }
+ 14,300,000  5,720,000  2,860,000         0      0         0      0  static int syn_event(F f) { return alldig(f, 6, 6); }
+          .          .          .         .      .         .      .  static int syn_date(F f) {
+    240,000    120,000          0         0      0         0      0      if (f.n != 10) return 0;
+  1,800,000          0          0         0      0         0      0      for (int i = 0; i < 10; i++) {
+  2,160,000  1,200,000    600,000         0      1         0      0          if (i == 4 || i == 7) { if (f.p[i] != '-') return 0; }
+    960,000          0          0         0      0         0      0          else if (!isdig(f.p[i])) return 0;
+          .          .          .         .      .         .      .      }
+          .          .          .         .      .         .      .      return 1;
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  static int syn_time(F f) {
+  1,320,000    480,000    240,000         0      1         0      0      return f.n == 5 && isdig(f.p[0]) && isdig(f.p[1]) && f.p[2] == ':' && isdig(f.p[3]) && isdig(f.p[4]);
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  static int syn_price(F f) {
+    240,000     60,000          0         0      0         0      0      if (f.n < 4 || f.n > 7) return 0;
+     60,000          0          0         0      0         0      0      size_t d = f.n - 3;
+    120,000     60,000          0         0      0         0      0      if (f.p[d] != '.') return 0;
+  1,096,610          0          0         0      0         0      0      for (size_t i = 0; i < d; i++) if (!isdig(f.p[i])) return 0;
+    660,000    120,000    300,000         0      0         0      0      return isdig(f.p[d + 1]) && isdig(f.p[d + 2]);
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  static int syn_seat(F f) {
+ 22,400,000  5,600,000  2,800,000         0      0         0      0      if (f.n < 2 || f.n > 4 || !isup(f.p[0])) return 0;
+ 43,284,160          0          0         0      0         0      0      for (size_t i = 1; i < f.n; i++) if (!isdig(f.p[i])) return 0;
+          .          .          .         .      .         .      .      return 1;
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  static int syn_buyer(F f) {
+ 10,419,596  2,604,899          0         0      0         0      0      if (f.n < 4 || f.n > 12) return 0;
+ 10,419,596  2,604,899          0         0      0         0      0      if (!(f.p[0] >= 'a' && f.p[0] <= 'z')) return 0;
+ 49,493,081          0          0         0      0         0      0      for (size_t i = 1; i < f.n; i++) {
+          .          .          .         .      .         .      .          char c = f.p[i];
+ 93,776,364 15,629,394          0         0      0         0      0          if (!((c >= 'a' && c <= 'z') || isdig(c))) return 0;
+          .          .          .         .      .         .      .      }
+          .          .          .         .      .         .      .      return 1;
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  
+          .          .          .         .      .         .      .  static long long num(F f) {
+  8,521,604          0          0         0      0         0      0      long long v = 0;
+215,115,051 25,466,956          0         0      0         0      0      for (size_t i = 0; i < f.n; i++) v = v * 10 + (f.p[i] - '0');
+          .          .          .         .      .         .      .      return v;
+          .          .          .         .      .         .      .  }
+ 11,440,000  2,860,000  2,860,000         1      0         0      0  static int val_event(F f) {
+          .          .          .         .      .         .      .      int d[6];
+108,680,000 17,160,000 17,160,000         0      1         0      0      for (int i = 0; i < 6; i++) d[i] = f.p[i] - '0';
+ 48,620,000 17,160,000          0         0      0         0      0      return (3 * d[0] + d[1] + 3 * d[2] + d[3] + 3 * d[4] + d[5]) % 10 == 0;
+ 14,300,000  8,580,000          0         0      0         0      0  }
+          .          .          .         .      .         .      .  static int val_date(F f) {
+    780,000    240,000          0         0      0         0      0      int y = (f.p[0] - '0') * 1000 + (f.p[1] - '0') * 100 + (f.p[2] - '0') * 10 + (f.p[3] - '0');
+    300,000    120,000          0         0      0         0      0      int m = (f.p[5] - '0') * 10 + (f.p[6] - '0');
+    300,000    120,000          0         0      0         0      0      int d = (f.p[8] - '0') * 10 + (f.p[9] - '0');
+    480,000          0          0         0      0         0      0      if (y < 2000 || y > 2099 || m < 1 || m > 12 || d < 1) return 0;
+          .          .          .         .      .         .      .      static const int dm[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    180,000     60,000          0         1      0         1      0      int ld = dm[m - 1];
+    135,009          0          0         0      0         0      0      if (m == 2 && y % 4 == 0) ld = 29;
+          .          .          .         .      .         .      .      return d <= ld;
+          .          .          .         .      .         .      .  }
+          .          .          .         .      .         .      .  static int val_time(F f) {
+    300,000    120,000          0         0      0         0      0      int h = (f.p[0] - '0') * 10 + (f.p[1] - '0');
+    300,000    120,000          0         0      0         0      0      int m = (f.p[3] - '0') * 10 + (f.p[4] - '0');
+          .          .          .         .      .         .      .      return h <= 23 && m <= 59;
+          .          .          .         .      .         .      .  }
+      5,608        802          0         0      0         0      0  static int val_nolead0(F f) { return !(f.n > 1 && f.p[0] == '0'); } /* zero allowed */
+          .          .          .         .      .         .      .  
+    547,200    182,400          0         0      0         0      0  static int vidx(F f) { return (f.p[0] - 'A') * 676 + (f.p[1] - 'A') * 26 + (f.p[2] - 'A'); }
+          .          .          .         .      .         .      .  
+          .          .          .         .      .         .      .  #define NV 17576
+          .          .          .         .      .         .      .  #define NE 1000000
+          .          .          .         .      .         .      .  static int venue_def[NV];
+          .          .          .         .      .         .      .  static int venue_cap[NV];
+          .          .          .         .      .         .      .  static int venue_events[NV];
+          .          .          .         .      .         .      .  static int venue_sold[NV];
+          .          .          .         .      .         .      .  static long long venue_rev[NV];
+          .          .          .         .      .         .      .  
+          .          .          .         .      .         .      .  static char *ev_def; /* NE */
+          .          .          .         .      .         .      .  static int *ev_venue;
+          .          .          .         .      .         .      .  static int *ev_price;
+          .          .          .         .      .         .      .  static int *ev_sold;
+          .          .          .         .      .         .      .  static unsigned char **ev_bits;
+          .          .          .         .      .         .      .  
+         11          1          7         0      0         0      0  int main(int argc, char **argv) {
+          2          0          0         0      0         0      0      if (argc != 2) return 1;
+          4          1          1         0      1         0      0      FILE *fp = fopen(argv[1], "rb");
+          2          0          0         0      0         0      0      if (!fp) return 1;
+          2          0          0         0      0         0      0      size_t cap = 1 << 16, len = 0;
+          3          0          1         0      0         0      0      char *buf = malloc(cap);
+          .          .          .         .      .         .      .      for (;;) {
+         83          0         10         0      0         0      0          if (len == cap) { cap *= 2; buf = realloc(buf, cap); }
+         36          0          0         0      0         0      0          size_t r = fread(buf + len, 1, cap - len, fp);
+         24          0          0         0      0         0      0          if (r == 0) break;
+         11          0          0         0      0         0      0          len += r;
+          .          .          .         .      .         .      .      }
+          3          0          2         0      1         0      0      fclose(fp);
+          .          .          .         .      .         .      .  
+          4          0          2         0      0         0      0      ev_def = calloc(NE, 1);
+          4          0          2         0      0         0      0      ev_venue = calloc(NE, sizeof(int));
+          4          0          2         0      0         0      0      ev_price = calloc(NE, sizeof(int));
+          5          0          2         0      1         0      1      ev_sold = calloc(NE, sizeof(int));
+          4          0          2         0      0         0      0      ev_bits = calloc(NE, sizeof(unsigned char *));
+          .          .          .         .      .         .      .  
+          1          0          0         0      0         0      0      size_t pos = 0;
+          3          0          1         0      0         0      0      long line = 0;
+          1          0          0         0      0         0      0      int ended = 0;
+          7          0          5         0      0         0      0      long records = 0, nv = 0, ne = 0, ns = 0, nr = 0;
+          .          .          .         .      .         .      .      long long revenue = 0;
+          .          .          .         .      .         .      .  
+  5,721,607          1          0         0      0         0      0      while (pos < len) {
+  2,860,802          0          0         0      0         0      0          size_t e = pos;
+436,887,122 62,003,760          0   968,807      0   967,784      0          while (e < len && buf[e] != '\n') e++;
+  2,860,802          0          0         0      0         0      0          const char *lp = buf + pos;
+  5,721,604          0          0         0      0         0      0          size_t ln = e - pos;
+  2,860,802          0          0         0      0         0      0          pos = e + 1;
+  2,860,802          0          0         0      0         0      0          line++;
+  5,721,604          0          0         0      0         0      0          if (line == 1) {
+          7          2          0         0      0         0      0              if (!(ln == 5 && memcmp(lp, "TKT/1", 5) == 0)) fail(1, "header", 2);
+          .          .          .         .      .         .      .              continue;
+          .          .          .         .      .         .      .          }
+  5,721,602          0          0         0      0         0      0          if (ended) fail(line, "summary", 8);
+          .          .          .         .      .         .      .  
+          .          .          .         .      .         .      .          F f[8];
+  5,721,602          0          0         0      0         0      0          int nf = 0;
+  2,860,801          0          0         0      0         0      0          size_t st = 0;
+126,868,309          0          0         0      0         0      0          for (size_t i = 0; i <= ln; i++) {
+304,297,168 59,142,953          0         0      0         0      0              if (i == ln || lp[i] == '|') {
+ 90,944,816          0 22,736,204         0      2         0      0                  if (nf < 8) { f[nf].p = lp + st; f[nf].n = i - st; }
+ 11,368,102          0          0         0      0         0      0                  nf++;
+ 73,371,856          0          0         0      0         0      0                  st = i + 1;
+          .          .          .         .      .         .      .              }
+          .          .          .         .      .         .      .          }
+  5,721,602          0          0         0      0         0      0          if (nf > 7) SYN(line);
+  5,721,602  5,721,602          0         0      0         0      0          F t = f[0];
+          .          .          .         .      .         .      .          #define IS(s) (t.n == strlen(s) && memcmp(t.p, s, t.n) == 0)
+ 14,304,802  2,860,800          0         0      0         0      0          if (IS("V")) {
+      1,600          0          0         0      0         0      0              if (nf != 4) SYN(line);
+     10,400      4,000      1,600         0      0         0      0              if (!syn_code(f[1]) || !syn_name(f[2]) || !alldig(f[3], 1, 6)) SYN(line);
+          .          .          .         .      .         .      .              if (!val_nolead0(f[3]) || f[3].p[0] == '0') VAL(line);
+          .          .          .         .      .         .      .              long long c = num(f[3]);
+      2,400          0          0         0      0         0      0              if (c < 1 || c > 100000) VAL(line);
+        800        800          0         0      0         0      0              int v = vidx(f[1]);
+      4,000        800          0       673      0       570      0              if (venue_def[v]) fail(line, "duplicate", 6);
+        800          0        800         0      0         0      0              venue_def[v] = 1;
+      1,600          0        800         0    689         0    590              venue_cap[v] = (int)c;
+      1,600        800          0         0      0         0      0              nv++; records++;
+  8,384,899  2,604,899          0         0      0         0      0          } else if (IS("E")) {
+    120,000          0          0         0      0         0      0              if (nf != 6) SYN(line);
+    420,000    120,000     60,000         0      0         0      0              if (!syn_event(f[1]) || !syn_code(f[2]) || !syn_date(f[3]) || !syn_time(f[4]) || !syn_price(f[5])) SYN(line);
+    960,000    300,000    120,000         0      0         0      0              if (!val_event(f[1]) || !val_date(f[3]) || !val_time(f[4])) VAL(line);
+          .          .          .         .      .         .      .              size_t d = f[5].n - 3;
+    479,245     60,000          0         0      0         0      0              if (d > 1 && f[5].p[0] == '0') VAL(line);
+    420,000    120,000          0         0      0         0      0              int cents = (int)(num((F){f[5].p, d}) * 100 + (f[5].p[d + 1] - '0') * 10 + (f[5].p[d + 2] - '0'));
+    420,000          0          0         0      0         0      0              if (cents % 5 != 0) VAL(line);
+     60,000     60,000          0         0      0         0      0              int v = vidx(f[2]);
+    240,000     60,000          0    49,584      0         0      0              if (!venue_def[v]) fail(line, "reference", 5);
+     60,000     60,000          0         0      0         0      0              int ev = (int)num(f[1]);
+    300,000    120,000          0    59,701      0    15,573      0              if (ev_def[ev]) fail(line, "duplicate", 6);
+     60,000          0     60,000         0      0         0      0              ev_def[ev] = 1;
+    120,000     60,000     60,000         0 59,961         0 45,495              ev_venue[ev] = v;
+    120,000     60,000     60,000         0 59,961         0 45,495              ev_price[ev] = cents;
+    120,000     60,000          0    49,628      0       570      0              venue_events[v]++;
+    120,000     60,000          0         0      0         0      0              ne++; records++;
+  8,790,202          0          0         0      0         0      0          } else if (IS("S") || IS("R")) {
+          .          .          .         .      .         .      .              int isS = t.p[0] == 'S';
+ 11,004,899          0          0         0      0         0      0              if (nf != (isS ? 4 : 3)) SYN(line);
+ 22,400,000  5,600,000  5,600,000         0      0         0      0              if (!syn_event(f[1]) || !syn_seat(f[2]) || (isS && !syn_buyer(f[3]))) SYN(line);
+ 39,200,000 16,800,000 11,200,000         0      0         0      0              if (!val_event(f[1]) || f[2].p[1] == '0') VAL(line);
+  5,600,000  2,800,000          0         0      0         0      0              int ev = (int)num(f[1]);
+ 16,800,000  2,800,000          0         0      0         0      0              int seat = (f[2].p[0] - 'A') * 1000 + (int)num((F){f[2].p + 1, f[2].n - 1});
+  8,400,000  5,600,000          0 2,786,131      0    34,487      0              if (!ev_def[ev]) fail(line, "reference", 5);
+  5,600,000          0          0         0      0         0      0              if (isS) {
+ 33,968,990 10,689,798  2,544,899 5,341,180      0 2,531,242      0                  int sold = ev_bits[ev] && (ev_bits[ev][seat >> 3] >> (seat & 7) & 1);
+          .          .          .         .      .         .      .                  if (sold) fail(line, "duplicate", 6);
+ 23,444,091 13,024,495          0 7,487,602      0   289,157      0                  if (ev_sold[ev] >= venue_cap[ev_venue[ev]]) fail(line, "capacity", 7);
+  1,020,000    360,000    480,000         0      0         0      0                  if (!ev_bits[ev]) ev_bits[ev] = calloc(26000 / 8 + 1, 1);
+ 18,234,293  2,604,899          0        29      0        29      0                  ev_bits[ev][seat >> 3] |= 1 << (seat & 7);
+  5,209,798          0  2,604,899         0      0         0      0                  ev_sold[ev]++;
+ 10,419,596  7,814,697          0 2,601,420      0   134,166      0                  revenue += ev_price[ev];
+  2,604,899  2,604,899          0         0      0         0      0                  ns++;
+          .          .          .         .      .         .      .              } else {
+  2,146,111    390,202    195,101   195,083      0   140,115      0                  int sold = ev_bits[ev] && (ev_bits[ev][seat >> 3] >> (seat & 7) & 1);
+          .          .          .         .      .         .      .                  if (!sold) fail(line, "reference", 5);
+    975,505          0    195,101         0      0         0      0                  ev_bits[ev][seat >> 3] &= ~(1 << (seat & 7));
+    390,202    390,202          0   194,803      0     6,870      0                  ev_sold[ev]--;
+    585,303    585,303          0   194,803      0     6,926      0                  revenue -= ev_price[ev];
+    195,101    195,101          0         0      0         0      0                  nr++;
+          .          .          .         .      .         .      .              }
+  2,800,000          0          0         0      0         0      0              records++;
+          6          2          0         0      0         0      0          } else if (IS("END")) {
+          2          0          0         0      0         0      0              if (nf != 3) SYN(line);
+         16          4          2         0      0         0      0              if (!alldig(f[1], 1, 9) || !alldig(f[2], 1, 12)) SYN(line);
+          .          .          .         .      .         .      .              if (!val_nolead0(f[1]) || !val_nolead0(f[2])) VAL(line);
+          5          1          0         0      0         0      0              if (num(f[1]) != records || num(f[2]) != revenue) fail(line, "summary", 8);
+          2          0          0         0      0         0      0              ended = 1;
+          .          .          .         .      .         .      .          } else {
+          .          .          .         .      .         .      .              SYN(line);
+          .          .          .         .      .         .      .          }
+          .          .          .         .      .         .      .      }
+          .          .          .         .      .         .      .      if (line == 0) fail(1, "header", 2);
+          2          0          0         0      0         0      0      if (!ended) fail(line + 1, "summary", 8);
+          .          .          .         .      .         .      .  
+          3          0          2         0      0         0      0      int top[3] = {-1, -1, -1};
+  3,000,000          0          0         0      0         0      0      for (int ev = 0; ev < NE; ev++) {
+  2,000,000  1,000,000          0    15,626      0        68      0          if (!ev_def[ev]) continue;
+          .          .          .         .      .         .      .          int v = ev_venue[ev];
+    240,001    180,000          0   138,810      0     2,621      0          venue_sold[v] += ev_sold[ev];
+    180,006    120,003          0    95,284      0     1,524      0          venue_rev[v] += (long long)ev_sold[ev] * ev_price[ev];
+          .          .          .         .      .         .      .          int k = ev;
+  1,019,970          0    179,994         0      0         0      0          for (int i = 0; i < 3; i++) {
+    540,000    179,997          3         0      0         0      0              if (top[i] < 0) { top[i] = k; break; }
+    900,102    359,988          0         0      0         0      0              if (ev_sold[k] > ev_sold[top[i]]) { int tmp = top[i]; top[i] = k; k = tmp; }
+          .          .          .         .      .         .      .          }
+          .          .          .         .      .         .      .      }
+          .          .          .         .      .         .      .      printf("venues %ld events %ld sold %ld refunds %ld\n", nv, ne, ns, nr);
+          5          1          0         0      0         0      0      printf("revenue %lld.%02lld\n", revenue / 100, revenue % 100);
+     52,729          0          0         0      0         0      0      for (int v = 0; v < NV; v++) {
+     52,728     17,576          0     1,099      0     1,099      0          if (!venue_def[v]) continue;
+     20,802          0          0         0      0         0      0          printf("%c%c%c events=%d tickets=%d revenue=%lld.%02lld\n", 'A' + v / 676, 'A' + v / 26 % 26, 'A' + v % 26,
+        801        800          0       667      0         0      0                 venue_events[v], venue_sold[v], venue_rev[v] / 100, venue_rev[v] % 100);
+          .          .          .         .      .         .      .      }
+          9          0          0         0      0         0      0      for (int i = 0; i < 3; i++)
+         15          6          0         2      0         2      0          if (top[i] >= 0) printf("top %06d %d\n", top[i], ev_sold[top[i]]);
+          2          0          0         0      0         0      0      return 0;
+         11          9          0         2      0         2      0  }
+
+--------------------------------------------------------------------------------
+-- Annotation summary
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____ 
+
+2,195,421,990 342,572,310  72,919,442 20,180,936   120,619 4,132,806    91,581    annotated: files known & above threshold & readable, line numbers known
+            0           0           0          0         0         0         0    annotated: files known & above threshold & readable, line numbers unknown
+            0           0           0          0         0         0         0  unannotated: files known & above threshold & two or more non-identical
+            0           0           0          0         0         0         0  unannotated: files known & above threshold & unreadable 
+       10,516       1,608       3,217      1,156         2       571         2  unannotated: files known & below threshold
+  210,554,596   3,003,976 196,763,359     21,500 3,063,780     2,236 3,059,473  unannotated: files unknown
+
