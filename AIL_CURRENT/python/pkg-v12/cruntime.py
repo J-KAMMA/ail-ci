@@ -20836,18 +20836,19 @@ static inline ail_st ail_meth_set_remove(ail_ctx *cx, ail_obj s, ail_obj x) {
 }
 static inline ail_st ail_meth_set_pop(ail_ctx *cx, ail_obj *out, ail_obj s) {
     ail_st st = ail_setm_need_mut(cx, s, "pop"); if (st != AIL_OK) return st;
-    ail_setobj *so = AIL_SETOBJ(s);
-    if (so->used == 0) {
+    /* An EMPTY set's pop shows no order: CPython raises KeyError('pop from an empty set'), so
+       answer that (the order-free case), exactly as CPython does. */
+    if (AIL_SETOBJ(s)->used == 0) {
         ail_obj msg = ail_str_from_cstr(cx, "pop from an empty set");
         return ail_raise_key_arg(cx, msg);
     }
-    int64_t k = so->fin;                      /* the first element in iteration order (insertion order), as CPython's {1, 2}.pop() */
-    while (!ail_setx_live(&so->ent[k])) k++;
-    so->fin = k + 1;
-    ail_obj key = so->ent[k].key;
-    memset(&so->ent[k].key, 0, sizeof so->ent[k].key);
-    so->used--;
-    *out = key; return AIL_OK;
+    /* pop returns the FIRST element in iteration order, so its answer shows the order. CPython's
+       order is its hash table's (per-run random for a set of str), which AIL does not reproduce:
+       refuse rather than return a different element (the typed path refuses this at compile time). */
+    (void)out;
+    return ail_raise_c(cx, AIL_B_TYPEERROR,
+        "set.pop() returns the first element in iteration order, where CPython walks its hash table "
+        "and a set of str in a per-run random order; write `sorted(s)[0]` (then `s.discard(...)`)");
 }
 static inline ail_st ail_meth_set_clear(ail_ctx *cx, ail_obj s) {
     ail_st st = ail_setm_need_mut(cx, s, "clear"); if (st != AIL_OK) return st;

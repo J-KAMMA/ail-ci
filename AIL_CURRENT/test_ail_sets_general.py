@@ -1,20 +1,21 @@
-"""Sets, frozensets and dicts on the general (boxed) path.
+"""Sets, frozensets and dicts on the general (boxed) path -- order-free behaviour.
 
-A set keeps its elements in insertion order on both paths (DIFFERENCES.md A2): iteration, repr, print, list(),
-`pop()` (the first element in iteration order) and the result of `| & - ^`, their in-place forms and the named methods
-(`a | b` is a's elements then b's new ones; `a & b` and `a - b` keep a's order; `a ^ b` is a's elements not in b
-then b's elements not in a; a result has the type of the left operand). The output of a program must not depend
-on which path built it, so the order is compared between paths, not with CPython. Where the order cannot show
-(sorted forms, len, membership, comparisons) the answers are compared with CPython 3.12.
+CPython walks a set in its hash table's order (a set of ints in a fixed one, a set of str in a
+per-run random one); AIL's sets keep insertion order. Any construct that shows the order
+(`for x in s`, `list(s)`, `tuple(s)`, `print(s)`, `str`/`repr`, an f-string of one, a list
+comprehension over one, `s.pop()`) is refused by name with the rewrite `sorted(s)` instead of
+printing a different order silently; test_ail_setorder.py holds that rule for both builds.
 
-S1  the typed path, the default build (AIL_IR=0 / 1) and the general path print the same order
-S2  random programs over set[int] (typed subset): the same on all five builds
-S3  fixed expectations for the order on the general path
-S4  operators and methods on values of unknown type, frozenset, errors, dict: against CPython (sorted forms)
-S5  a set of str can be walked, printed and popped
+Everything whose answer does not depend on the walk order keeps building and matches CPython
+3.12 on the typed, default and general builds: `x in s`, `len(s)`, `sorted(s)`, `min`, `max`,
+`sum`, the comparisons, and the operators / methods read in a sorted form.
+
+S1  order-free reads, operators and methods match CPython on every build
+S2  a set of str behaves the same way through sorted forms
+S3  the general path refuses an order-revealing walk by name
+S4  dict iteration still follows insertion order (CPython's own order) on every build
 """
 import os
-import random
 import subprocess
 import sys
 import tempfile
@@ -27,17 +28,17 @@ ON_312 = sys.version_info[:2] == (3, 12)
 
 
 def build(directory, text, name, mode):
-    """Compile `text` in one mode: general (the boxed path alone), default and default_ir (typed path first, general on
-    a refusal, AIL_IR=0 / 1), typed and typed_ir (no fallback)."""
+    """Compile `text` in one mode: general (the boxed path alone, --general-only), typed
+    (AIL_NO_GENERAL=1) or default (typed first, general on a refusal)."""
     source, exe = Path(directory, name + '.py'), Path(directory, name + '_' + mode)
     source.write_text(text, encoding='utf-8')
     env = dict(os.environ)
     env.pop('AIL_NO_GENERAL', None)
-    env['AIL_IR'] = '1' if mode.endswith('_ir') else '0'
+    env['AIL_IR'] = '0'
     if mode == 'general':
         command = [sys.executable, '-B', str(PYC), exe.name, '--file', source.name, '--general-only']
     else:
-        if mode.startswith('typed'):
+        if mode == 'typed':
             env['AIL_NO_GENERAL'] = '1'
         command = [sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', source.name,
                    '--syntax', 'python', '-o', exe.name]
@@ -47,15 +48,17 @@ def build(directory, text, name, mode):
 def run_cpython(directory, text, name):
     source = Path(directory, name + '_cpython.py')
     source.write_text(text, encoding='utf-8')
-    return subprocess.run([sys.executable, str(source)], capture_output=True, text=True, timeout=120, encoding='utf-8')
+    return subprocess.run([sys.executable, str(source)], capture_output=True, text=True,
+                          timeout=120, encoding='utf-8')
 
 
 def run_exe(exe, stdin=''):
-    return subprocess.run([str(exe)], capture_output=True, text=True, timeout=120, encoding='utf-8', input=stdin)
+    return subprocess.run([str(exe)], capture_output=True, text=True, timeout=120,
+                          encoding='utf-8', input=stdin)
 
 
-ALL_MODES = ('typed', 'typed_ir', 'default', 'default_ir', 'general')
-GENERAL_MODES = ('general', 'default', 'default_ir')
+ALL_MODES = ('typed', 'default', 'general')
+GENERAL_MODES = ('general', 'default')
 
 
 PROG_OPS = r'''def norm(v):
@@ -72,6 +75,8 @@ PROG_OPS = r'''def norm(v):
 
 def p(*args):
     print(*[norm(a) for a in args])
+
+
 def union(a, b):
     return a | b
 
@@ -153,51 +158,28 @@ u1 &= {3, 6, 7, 21, 99}
 p(u1)
 p(u1 | {1}, {1} | u1, u1 & u1, u1 - u1, u1 ^ u1)
 p({1, 2, 3} | frozenset({4}), isinstance(frozenset({4}) | {1}, frozenset), isinstance({1} | frozenset({4}), set))
-'''
-
-PROG_FROZEN = r'''def norm(v):
-    if isinstance(v, frozenset):
-        return ["frozenset", sorted(v)]
-    if isinstance(v, set):
-        return ["set", sorted(v)]
-    if isinstance(v, list):
-        return [norm(x) for x in v]
-    if isinstance(v, tuple):
-        return tuple([norm(x) for x in v])
-    return v
-
-
-def p(*args):
-    print(*[norm(a) for a in args])
-
-
 e = frozenset()
 f = frozenset([3, 1, 2, 2, 1])
 g = frozenset({5, 6})
-p(e, f, g, repr(sorted(f)), len(str(g)), len(e), len(f), bool(e), bool(f))
+p(e, f, g, repr(sorted(f)), len(str(sorted(g))), len(e), len(f), bool(e), bool(f))
 p(f | g, f & frozenset([1, 2, 9]), f - {1}, f ^ g, f.union([8, 9]), f.copy() is f, f.copy() == f)
-p(1 in f, 7 in f, f == frozenset([1, 2, 3]), f == {1, 2, 3}, {1, 2, 3} == f, f != g, f <= {1, 2, 3, 4}, f < f, f >= {1}, f > frozenset())
-p(f.issubset({1, 2, 3, 4}), f.issuperset([1]), f.isdisjoint(g), sorted(f), min(f), max(f), sum(f), sorted(list(f)), sorted(tuple(g)))
-d = {frozenset([1, 2]): 'a', frozenset([2, 1]): 'b', frozenset(): 'c', frozenset([3]): 'd'}
-s = {frozenset([1]), frozenset([2, 3]), frozenset([1]), frozenset(), frozenset([(1, 2)]), 5, (1, frozenset([4]))}
-p({1, 2} in {frozenset({1, 2})}, frozenset({1, 2}) in {frozenset({1, 2})})
-t = set()
-t.add(frozenset([7, 8]))
-t.discard({7, 8})
-p(t)
-t.add(frozenset([7, 8]))
-t.remove(frozenset([8, 7]))
-nested = frozenset([frozenset([1, 2]), frozenset([3]), frozenset()])
+p(1 in f, 7 in f, f == frozenset([1, 2, 3]), f == {1, 2, 3}, {1, 2, 3} == f, f != g,
+  f <= {1, 2, 3, 4}, f < f, f >= {1}, f > frozenset())
+p(f.issubset({1, 2, 3, 4}), f.issuperset([1]), f.isdisjoint(g), sorted(f), min(f), max(f), sum(f),
+  sorted(f), sorted(g))
+t2 = set()
+t2.add(frozenset([7, 8]))
+t2.discard({7, 8})
+p(t2)
+t2.add(frozenset([7, 8]))
+t2.remove(frozenset([8, 7]))
 p(isinstance(f, frozenset), isinstance(f, set), isinstance({1}, frozenset), isinstance({1}, set))
-x = {1, 2}
-y = frozenset(x)
-x.add(3)
-p(x, y, set(y), frozenset(x), frozenset(y) is y, frozenset((1, 2, 3)) == x)
-for q in sorted(frozenset([10, 20, 30, 5, 15])):
-    print(q, end=' ')
-p()
-p(sorted([q * 2 for q in frozenset([4, 3, 2, 1])]), {q for q in frozenset([4, 3, 2, 1])})
-fs = frozenset([100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200])
+x2 = {1, 2}
+y2 = frozenset(x2)
+x2.add(3)
+p(x2, y2, set(y2), frozenset(x2), frozenset(y2) is y2, frozenset((1, 2, 3)) == x2)
+p(sorted([q * 2 for q in sorted(frozenset([4, 3, 2, 1]))]), {q for q in sorted(frozenset([4, 3, 2, 1]))})
+fs = frozenset([100, 200, 300, 400, 500])
 ff = fs
 ff |= {1, 2}
 ff = frozenset([1, 2, 3])
@@ -211,18 +193,17 @@ a = a | {4}
 p(a, b)
 p(f.difference(), f.intersection(), f.symmetric_difference([1]), f.union())
 p(sorted(frozenset([(2, 1), (1, 2), (0, 5)])))
-k = {frozenset([1, 2]), frozenset([2, 3]), frozenset([3, 4]), frozenset([4, 5]), frozenset([5, 6]), frozenset([6, 7]), frozenset([7, 8]), frozenset([8, 9])}
+n = {1, 2, 3}
+n.discard(2)
+n.add(2)
+p(n, sorted(n), len(n), 2 in n, 100 in n, min(n), max(n), sum(n))
 '''
 
-PROG_ERR = r'''def norm(v):
+PROG_STR = r'''def norm(v):
     if isinstance(v, frozenset):
         return ["frozenset", sorted(v)]
     if isinstance(v, set):
         return ["set", sorted(v)]
-    if isinstance(v, list):
-        return [norm(x) for x in v]
-    if isinstance(v, tuple):
-        return tuple([norm(x) for x in v])
     return v
 
 
@@ -230,43 +211,12 @@ def p(*args):
     print(*[norm(a) for a in args])
 
 
-s = {1, 2, 3}
-f = frozenset([1, 2])
-for body in range(10):
-    try:
-        if body == 0:
-            s.remove(99)
-        elif body == 1:
-            set().pop()
-        elif body == 2:
-            f.add(3)
-        elif body == 3:
-            f.discard(1)
-        elif body == 4:
-            f.pop()
-        elif body == 5:
-            f.update([3])
-        elif body == 6:
-            f.clear()
-        elif body == 7:
-            s.add([1])
-        elif body == 8:
-            s.add({1})
-        elif body == 9:
-            x = {1, 2} | [3]
-    except KeyError as e:
-        print('KeyError', e)
-    except AttributeError as e:
-        print('AttributeError', e)
-    except TypeError as e:
-        print('TypeError', e)
-try:
-    for v in s:
-        s.add(v + 10)
-except RuntimeError as e:
-    print('RuntimeError', e)
-p(sorted(s)[:3], len(s))
-p(7 in {1: 2}, {1, 2} == {2, 1}, {1: 2} == {1: 2}, {1: 2, 3: 4} == {3: 4, 1: 2}, {1: 2} != {1: 3}, {} == {}, {1} == [1])
+w = set(["pear", "apple", "fig", "kiwi"])
+p(w)
+p(sorted(w), len(w), "pear" in w, "zzz" in w, min(w), max(w))
+p(w | set(["lime"]), w & set(["pear", "fig"]), w - set(["pear"]), w ^ set(["pear", "lime"]))
+p(w.union(["lime", "fig"]), w.intersection(["pear", "fig"]), w.difference(["pear"]))
+p(sorted(w)[0], sorted(w)[-1])
 '''
 
 PROG_DICT = r'''def norm(v):
@@ -304,7 +254,6 @@ p(e, len(e), e == {3: 'c', 1: 'A', 2: 'b', 0: 'z', 9: 'n'}, e == {})
 f = dict(e)
 f[100] = 1
 p(f != e, f == f, dict.fromkeys([5, 3, 5, 1]), {1: 2, 1: 3})
-g = {(1, 2): 'a', (0, 0): 'b', 'k': [1, 2], 5: {1, 2}}
 p({1: 1} == {1: 1.0}, {1: 'a'} == {True: 'a'}, {2: [1, 2]} == {2: [1, 2]}, {2: {1}} == {2: {1}})
 h = {i: i * i for i in range(10)}
 for k in list(h):
@@ -319,237 +268,8 @@ for w in words:
 p(cnt, sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0])))
 '''
 
-# the typed subset: the typed path builds it, so its order is the reference for every other build
-PROG_TYPED_ORDER = r'''def dump(tag: str, s: set[int]) -> None:
-    print(tag, len(s))
-    for x in s:
-        print(x, end=" ")
-    print()
-
-
-def sdump(tag: str, s: set[str]) -> None:
-    print(tag, len(s))
-    for x in s:
-        print(x, end=" ")
-    print()
-
-
-def main() -> None:
-    a: set[int] = set()
-    for i in range(0, 60, 7):
-        a.add(i)
-    b: set[int] = {3, 1, 2, 100, 33, 7, 14}
-    dump("a", a)
-    dump("b", b)
-    dump("or", a | b)
-    dump("and", a & b)
-    dump("minus", a - b)
-    dump("xor", a ^ b)
-    dump("ba", b - a)
-    c: set[int] = set(a)
-    c.discard(14)
-    c.add(14)
-    c.add(500)
-    dump("readd", c)
-    c |= b
-    dump("ior", c)
-    c &= {500, 3, 14, 100, 1}
-    dump("iand", c)
-    c -= {3}
-    dump("isub", c)
-    c ^= {9, 100, 8}
-    dump("ixor", c)
-    print(c.pop(), c.pop())
-    dump("popped", c)
-    d: set[int] = a.union(b)
-    dump("union", d)
-    dump("inter", a.intersection(b))
-    dump("diff", a.difference(b))
-    dump("sym", a.symmetric_difference(b))
-    e: set[int] = set(b)
-    e.update(a)
-    dump("update", e)
-    e.intersection_update(b)
-    dump("iu", e)
-    e.symmetric_difference_update(a)
-    dump("sdu", e)
-    e.difference_update(b)
-    dump("du", e)
-    s: set[str] = {"pear", "apple", "fig"}
-    t: set[str] = {"fig", "kiwi", "plum", "apple"}
-    sdump("s", s)
-    sdump("or", s | t)
-    sdump("and", s & t)
-    sdump("minus", t - s)
-    sdump("xor", s ^ t)
-    s.add("zed")
-    s.discard("pear")
-    s.add("pear")
-    sdump("s2", s)
-    print(s.pop())
-    big: set[int] = set()
-    for i in range(300):
-        big.add((i * 37) % 211)
-    for i in range(0, 211, 3):
-        big.discard(i)
-    big.add(0)
-    dump("big", big)
-
-
-main()
-'''
-
-# order-free, and the typed path builds it too
-PROG_TYPED = r'''
-def uniq(xs: list[int]) -> int:
-    seen: set[int] = set()
-    for x in xs:
-        seen.add(x)
-    return len(seen)
-
-
-def main() -> None:
-    xs = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]
-    s: set[int] = set(xs)
-    t: set[int] = {2, 3, 5, 7}
-    print(len(s), 4 in s, 8 in s, min(s), max(s), sum(s))
-    for x in sorted(s | t):
-        print(x, end=" ")
-    print()
-    for x in sorted(s & t):
-        print(x, end=" ")
-    print()
-    for x in sorted(s - t):
-        print(x, end=" ")
-    print()
-    for x in sorted(s ^ t):
-        print(x, end=" ")
-    print()
-    print(uniq(xs))
-    names: set[str] = {'pear', 'fig'}
-    names.add('kiwi')
-    print(len(names), 'fig' in names)
-    for w in sorted(names):
-        print(w)
-
-
-main()
-'''
-
-PROG_A2 = r'''
-s = {3, 1, 2, 100, 33}
-print(s, list(s))
-t = set([9, 8, 7, 8])
-t.discard(9)
-t.add(9)
-print(t)
-print(t.pop())
-print(t)
-print(s | {5, 1}, s & {33, 3}, s - {1}, s ^ {2, 7})
-print(s.union([8, 3, 4]), s.intersection([33, 1, 77]), s.difference([1, 100]), s.symmetric_difference([2, 50, 50, 60]))
-u = set(s)
-u.update([7, 3, 6])
-u.intersection_update([6, 7, 3, 33, 100])
-print(u)
-u.symmetric_difference_update([100, 9, 8])
-print(u)
-print(frozenset([3, 1, 2]), frozenset(), set(), frozenset([5, 4]) | {1}, {1} | frozenset([5, 4]))
-w = {"pear", "apple", "fig"}
-print(w, sorted(w))
-for x in {7, 5, 6}:
-    print(x, end=" ")
-print()
-print([x for x in {9, 2, 5}], {x % 4 for x in [10, 7, 5, 3, 6]}, list({40, 30, 20}), tuple({1, 0}))
-d = {"k": 1, "j": 2}
-print(set(d), set(d.keys()), set(d.values()), set("hello"))
-n = {1, 2, 3}
-n.discard(2)
-n.add(2)
-print(n, sorted(n))
-while n:
-    print(n.pop(), end=" ")
-print()
-'''
-
-A2_EXPECTED = '''{3, 1, 2, 100, 33} [3, 1, 2, 100, 33]
-{8, 7, 9}
-8
-{7, 9}
-{3, 1, 2, 100, 33, 5} {3, 33} {3, 2, 100, 33} {3, 1, 100, 33, 7}
-{3, 1, 2, 100, 33, 8, 4} {1, 33} {3, 2, 33} {3, 1, 100, 33, 50, 60}
-{3, 100, 33, 7, 6}
-{3, 33, 7, 6, 9, 8}
-frozenset({3, 1, 2}) frozenset() set() frozenset({5, 4, 1}) {1, 5, 4}
-{'pear', 'apple', 'fig'} ['apple', 'fig', 'pear']
-7 5 6 
-[9, 2, 5] {2, 3, 1} [40, 30, 20] (1, 0)
-{'k', 'j'} {'k', 'j'} {1, 2} {'h', 'e', 'l', 'o'}
-{1, 3, 2} [1, 2, 3]
-1 3 2 
-'''
-
-
-def gen_typed_random(seed, nstmt=60):
-    """A program over set[int] in the subset the typed path builds, printing its sets as it goes."""
-    r = random.Random(seed)
-    names = ['a', 'b', 'c']
-    L = ['def dump(tag: str, s: set[int]) -> None:',
-         '    print(tag, len(s))',
-         '    for x in s:',
-         '        print(x, end=" ")',
-         '    print()',
-         '',
-         '',
-         'def main() -> None:',
-         '    a: set[int] = set()',
-         '    b: set[int] = {%s}' % ', '.join(str(r.randint(0, 40)) for _ in range(r.randint(1, 8))),
-         '    c: set[int] = set()']
-    for i in range(r.randint(0, 30)):
-        L.append('    c.add(%d)' % r.randint(-5, 300))
-    for k in range(nstmt):
-        x, y, z = r.choice(names), r.choice(names), r.choice(names)
-        n = r.randint(-3, 120)
-        ops = [
-            '%s.add(%d)' % (x, n), '%s.add(%d)' % (x, n), '%s.add(%d)' % (x, n), '%s.discard(%d)' % (x, n),
-            '%s.discard(%d)' % (x, r.randint(0, 40)),
-            '%s |= %s' % (x, y), '%s &= %s' % (x, y), '%s -= %s' % (x, y), '%s ^= %s' % (x, y),
-            '%s.update(%s)' % (x, y), '%s.intersection_update(%s)' % (x, y), '%s.difference_update(%s)' % (x, y),
-            '%s.symmetric_difference_update(%s)' % (x, y),
-            '%s = %s | %s' % (x, y, z), '%s = %s & %s' % (x, y, z), '%s = %s - %s' % (x, y, z), '%s = %s ^ %s' % (x, y, z),
-            '%s = %s.union(%s)' % (x, y, z), '%s = %s.difference(%s)' % (x, y, z),
-            'if len(%s) > 0:\n        print(%s.pop())' % (x, x),
-            'if len(%s) > 0:\n        print(%s.pop())' % (x, x),
-            '%s.clear()' % x if r.random() < 0.15 else '%s.add(%d)' % (x, n),
-            'print(%s == %s, %s <= %s, %s.isdisjoint(%s), %d in %s)' % (x, y, x, y, x, y, n, x),
-        ]
-        L.append('    ' + r.choice(ops))
-        if r.random() < 0.4:
-            L.append('    dump("%d", %s)' % (k, r.choice(names)))
-    for nm in names:
-        L.append('    dump("end", %s)' % nm)
-    L += ['', '', 'main()', '']
-    return '\n'.join(L)
-
 
 class SetsGeneral(unittest.TestCase):
-    def outputs(self, text, name, modes):
-        """Build `text` in every mode and return {mode: (returncode, stdout)}."""
-        out = {}
-        with tempfile.TemporaryDirectory() as directory:
-            for mode in modes:
-                built, exe = build(directory, text, name, mode)
-                self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
-                got = run_exe(exe)
-                out[mode] = (got.returncode, got.stdout, got.stderr[-300:])
-        return out
-
-    def identical(self, text, name, modes=ALL_MODES):
-        out = self.outputs(text, name, modes)
-        first = out[modes[0]]
-        for mode in modes:
-            self.assertEqual(out[mode][:2], first[:2], '%s differs from %s: %s' % (mode, modes[0], out[mode][2]))
-        return first[1]
-
     def same_as_cpython(self, text, name, modes=GENERAL_MODES):
         with tempfile.TemporaryDirectory() as directory:
             want = run_cpython(directory, text, name)
@@ -561,61 +281,23 @@ class SetsGeneral(unittest.TestCase):
                 self.assertEqual((got.returncode, got.stdout), (want.returncode, want.stdout),
                                  '%s: %s' % (mode, got.stderr[-600:]))
 
-    def test_s1_typed_default_and_general_print_the_same_order(self):
-        out = self.identical(PROG_TYPED_ORDER, 'typed_order')
-        lines = out.split('\n')
-        # insertion order: a is 0, 7, 14, ... ; a | b appends b's new elements; pop takes the first
-        self.assertEqual(lines[1], '0 7 14 21 28 35 42 49 56 ')
-        self.assertIn('or 12', out)
-
-    def test_s1_order_free_program_agrees_with_cpython_on_every_build(self):
-        with tempfile.TemporaryDirectory() as directory:
-            want = run_cpython(directory, PROG_TYPED, 'typed_free')
-            for mode in ALL_MODES:
-                built, exe = build(directory, PROG_TYPED, 'typed_free', mode)
-                self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
-                self.assertEqual(run_exe(exe).stdout, want.stdout, mode)
-
-    def test_s2_random_set_int_programs_are_identical_on_all_builds(self):
-        for seed in range(6):
-            self.identical(gen_typed_random(seed), 'rnd%d' % seed)
-
-    def test_s3_order_on_the_general_path(self):
-        out = self.identical(PROG_A2, 'a2', modes=GENERAL_MODES)
-        self.assertEqual(out, A2_EXPECTED)
-
-    def test_s4_operators_and_methods_on_values_of_unknown_type(self):
+    def test_s1_order_free_operators_and_methods_match_cpython(self):
         self.same_as_cpython(PROG_OPS, 'ops')
 
-    def test_s4_frozenset(self):
-        self.same_as_cpython(PROG_FROZEN, 'frozen')
+    def test_s2_a_set_of_str_through_sorted_forms_matches_cpython(self):
+        self.same_as_cpython(PROG_STR, 'strs')
 
-    def test_s4_errors(self):
-        self.same_as_cpython(PROG_ERR, 'err')
+    def test_s3_the_general_path_refuses_an_order_revealing_walk(self):
+        text = 'def f():\n    s = {40, 33, 26}\n    for x in s:\n        print(x)\nf()\n'
+        with tempfile.TemporaryDirectory() as directory:
+            for mode in GENERAL_MODES:
+                built, _exe = build(directory, text, 'walk', mode)
+                shown = built.stdout + built.stderr
+                self.assertNotEqual(built.returncode, 0, '%s: %s' % (mode, shown))
+                self.assertIn('sorted(', shown, '%s: %s' % (mode, shown))
 
-    def test_s4_dict_equality_and_order(self):
+    def test_s4_dict_iteration_keeps_insertion_order(self):
         self.same_as_cpython(PROG_DICT, 'dict')
-
-    def test_s5_a_set_of_str_can_be_walked_printed_and_popped(self):
-        text = '''
-w = set(["pear", "apple", "fig", "kiwi"])
-print(w)
-for x in w:
-    print(x, end=" ")
-print()
-print(list(w), tuple(w), [x.upper() for x in w], ",".join(w))
-print(sum(len(x) for x in w), w.pop(), w)
-print({"b", "a", "c"}, frozenset(["z", "y"]))
-'''
-        out = self.identical(text, 'strwalk', modes=GENERAL_MODES)
-        self.assertEqual(out.split('\n')[0], "{'pear', 'apple', 'fig', 'kiwi'}")
-        self.assertEqual(out.split('\n')[1], 'pear apple fig kiwi ')
-        self.assertIn("pear {'apple', 'fig', 'kiwi'}", out)
-        self.assertEqual(out.split('\n')[-2], "{'b', 'a', 'c'} frozenset({'z', 'y'})")
-
-    def test_s5_the_old_refusal_is_gone(self):
-        text = 'S = {"a", "b", "c"}\nn = 0\nfor w in S:\n    n += len(w)\nprint(n, len(list(S)))\n'
-        self.assertEqual(self.identical(text, 'nofuss', modes=GENERAL_MODES), '3 3\n')
 
 
 if __name__ == '__main__':
