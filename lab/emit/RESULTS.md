@@ -426,6 +426,23 @@ saved 4,735,684 Ir (0.09%). The helper is already inlined or its call overhead i
 cost in `echo_pack` is the probe (`dict-table-helper`) and the emitted statement shape, not the
 call instruction. This is why the design below does not start with "inline more".
 
+## The ticket's named sub-causes: measured, or not separable
+
+The list in the task is broader than the causes with a hand-edit bound. This is what could and
+could not be isolated; "attributed" is `data/causes.json`, "bound" is a hand edit that removes the
+construct and keeps stdout identical.
+
+| named sub-cause | where it is | Ir | isolated bound |
+|---|---|---:|---|
+| struct/string passed by value | `ail_bytes`/`ail_str` are 16-byte structs passed and returned by value; the cost sits in `byte-string-helper` | 3,222M attributed | not measured: replacing the ABI with pointers changes every message and every call site, so the hand edit would not be local |
+| temporaries that block register allocation (address taken) | `v__tN` slots are declared at function scope (`int64_t v__t27 = 0;`) and assigned by each statement; `temporaries/one-statement` | 17,571M attributed | only 182M by rewriting one loop (`echo_pack_cmpmatch`); no whole-shape bound |
+| repeated loads through a pointer gcc cannot prove unaliased | `(*v_data).p[...]` and `v_x->f_...` chains in `py_main`/`pack`/`ev__d`; inside `other-user-lines` | 2,470M attributed | not separated: the loads are the operands of the one-statement expressions, and removing them means rewriting the expression, not deleting a construct |
+| helper calls not inlined | `ail_blist_meta` is `static inline` yet kept an out-of-line copy (1,276M); `ail_bytearray_append` forced `always_inline` | 1,276M in `ail_blist_meta` | inlining the append: **4.7M saved (negative)**, so the lever is the helper body, not the attribute |
+| generic helpers where a specialised loop exists | dict probe (`echo_pack_dict2`), `ail_bytes_to_int` per digit, `ail_str_to_int`/`ail__str_split_sep_raw` | 1,927M bound; 164M bound; 490M bound | measured, causes 1, 4, 5 |
+| redundant length/cap reloads | `ail_blist_meta`/`ail_tab_hslot` re-read `n`, `cap`, `used`; `ail_ir_view_get` re-reads `p,n` | inside `container-invariant` 2,389M | not separated: the reload is the expression operand; the view/accessor bound (cause 6, 952M) includes it |
+| int<->float or width conversions | `width/int-float conversion` lines, mostly `(int64_t)`/`(uint32_t)` around `%`, shifts and byte loads | 545M attributed | not measured; no hand edit removes only the cast |
+| exceptions/unwind state checks after calls | `ail_ir_try`, `ail_cleanup_top`, pending checks; and the outlined try body `py_run__try1` | 26M overhead lines + 1,993M in the outlined body | not measured: the body is user code (it is a `try` around the parser), not unwind overhead; the 26M is too small to isolate reliably |
+
 ## Ranking by measured Ir saved across the six programs
 
 Isolated hand-edit bounds, largest first. `programs` counts the tasks the cause is above 1% of.

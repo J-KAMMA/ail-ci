@@ -20,7 +20,7 @@ instructions. `% extra` is the saved Ir as a share of that program's real AIL−
 | 3 | Recursion-depth guard checked at every function entry | **1,184M** | tally_lang | `tally_lang_norec` | 6.1% | 15.4% |
 | 4 | Overflow-checked arithmetic per Python operation | **1,012M** | ledger_bin + ticket_audit | `ledger_bin_noovf` 849M + `ticket_audit_noovf_int` 164M | 16.2% / 1.3% | 33.9% / 1.5% |
 | 5 | Generic list/sequence helpers where a direct write exists | **1,001M** | ticket_audit, tree_fold, echo_pack | `noview` 544M + `nopop` 228M + `nospan` 152M + `pushloop` 76M | | |
-| 6 | Bounds-checked accessors (`ail_bytes_get`, `ail_list_span_get`…) | **952M** (overlaps #5/#6) | 4 programs | `tree_fold_nobget` 167M + `echo_pack_nobounds` 89M + the same calls inside `noview` | | |
+| 6 | Bounds-checked accessors (`ail_bytes_get`, `ail_list_span_get`…) | **952M** (overlaps #5) | 4 programs | `tree_fold_nobget` 167M + `echo_pack_nobounds` 89M + the same calls inside `noview` | | |
 | 7 | ASCII/UTF-8 classification, generic split and int parse | **490M** | berth_sim | `berth_sim_noascii` | 5.9% | 20.6% |
 | 8 | One-statement-per-op shape, local rewrite of one loop | **182M** | echo_pack | `echo_pack_cmpmatch` | 3.3% | 5.1% |
 | — | `always_inline` a helper | **4.7M (negative)** | echo_pack | `echo_pack_ai_append` | 0.09% | 0.13% |
@@ -160,7 +160,7 @@ part of this step.
 
 ### The change
 
-Depth only grows on a self-call, and `ir/emit_c.py:_depth_call` (line 675) already knows which
+Depth only grows on a self-call, and `ir/emit_c.py:_depth_call` (line 677) already knows which
 calls those are — it rewrites a self-call of a depth function to `f__d(args, ail_d + 1)`. Move the
 test there:
 
@@ -204,7 +204,7 @@ becomes smaller.
 
 | # | step | files | test |
 |---:|---|---|---|
-| 2.1 | Emit the guard in `_depth_call` around the self-call, keeping the entry guard for now (both checks, a safe intermediate). | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`_depth_call`, line 675) | `AIL_CURRENT/test_ail_recdepth_edge.py` |
+| 2.1 | Emit the guard in `_depth_call` around the self-call, keeping the entry guard for now (both checks, a safe intermediate). | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`_depth_call`, line 677) | `AIL_CURRENT/test_ail_recdepth_edge.py` |
 | 2.2 | Drop the entry guard only for depth functions whose every non-self caller passes the literal 0; keep it otherwise. Record the caller classification on the function. | `AIL_CURRENT/python/pkg-v12/ir/emit_c.py` (`emit`, line 763), `AIL_CURRENT/python/pkg-v12/ir/lower.py` (depth-call marking) | same module + `test_ail_recursion_stop.py` |
 | 2.3 | Measure `lab/emit/analyze.py --tasks tally_lang` and record the drop; run the three required modules. | `lab/emit/` | `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` |
 
@@ -303,7 +303,7 @@ Exe bytes may change. Do not change any message or refusal.
 Lane: compiler. Measured bound: 1,184M Ir on tally_lang (lab/emit/RESULTS.md, cause 2).
 
 Move the depth guard from every function entry to the self-call sites that can grow depth.
-1. ir/emit_c.py:_depth_call (line 675): wrap the self-call with
+1. ir/emit_c.py:_depth_call (line 677): wrap the self-call with
    (ail_d + 1 > AIL_MAX_RECURSION_DEPTH ? (ail_die("maximum recursion depth exceeded"), 0) : ...).
    Keep the entry guard at this step (both checks).
 2. ir/emit_c.py:emit (line 763) + ir/lower.py: drop the entry guard only when every non-self
