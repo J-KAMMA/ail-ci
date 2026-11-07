@@ -1,3 +1,15 @@
+## 2026-11-07 -- rundiff1: `ail run --diff` (job-rundiff1_rr1-11070956)
+
+Adds the diff mode described in `docs/CLI.md`: build as `ail run` does, feed the same stdin to the
+native program and to CPython, and compare stdout bytes, the exit code and the exception type. The
+report is one `ail diff:` line (or one JSON object under `--json`); exit 3 means a difference, 4 one
+of AIL's documented loud stops, 124 a timeout. `LOUD_STOPS` in `packaging/ail_lang/cli.py` and the
+table in `docs/CLI.md` list the recognised messages. A build stop is a loud stop only when it matches
+that table: a broken link, a bad `-I` directory or another toolchain failure is a `DIFFER` (exit 3),
+even when CPython runs the program fine, because it is not an AIL limit. Tests are
+`test_ail_rundiff.py` (registered in `tests.d/`); the census of `lab/compare` and 50 corpus programs
+is `lab/rundiff/RESULTS.md`.
+
 ## 2026-11-06 -- fbnarrow1: int-list census and int32 scratch patch re-applied (job-rbfbnarrow1_rr1-11061236)
 
 Re-applied the accepted `fbnarrow1_rr1` change (`4b0b7123`..`job-fbnarrow1_rr1-11060751`). It adds

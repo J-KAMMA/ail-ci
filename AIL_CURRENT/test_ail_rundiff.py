@@ -186,6 +186,18 @@ main()
         if done.returncode == 4:
             self.assertIn(b"ail diff: loud stop by design:", done.stderr)
 
+    def test_differ_not_loud_stop_when_an_unrecognised_build_stop_cpython_runs(self):
+        # a broken link or a bad module path is a toolchain failure, not one of AIL's documented
+        # limits: it must be a difference (exit 3), never "loud stop by design" (exit 4)
+        program = self.write("agree.py", AGREE)
+        for options in (["--link", str(self.dir / "libnope.so")],
+                        ["-I", str(self.dir / "no-such-dir")]):
+            with self.subTest(options=options):
+                done = self.ail("run", "--diff", *options, program, stdin=b"ab\n")
+                self.assertEqual(done.returncode, 3, done.stderr)
+                self.assertIn(b"ail diff: DIFFER: no native program, the build stopped", done.stderr)
+                self.assertNotIn(b"loud stop by design", done.stderr)
+
     def test_differ_when_the_build_stops_and_cpython_fails_too(self):
         program = self.write("fails_both_ways.py", """\
 import sys

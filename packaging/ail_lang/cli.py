@@ -629,20 +629,17 @@ def _cmd_run_diff(argv, settings):
 
 
 def _diff_build_failed(settings, built, cpython_command, cwd, run_env, stdin_path, timeout):
-    """No native program exists because the build stopped. When CPython still runs the program, that
-    is AIL's own loud stop by design (a refusal or a compile-time int64 refusal). When CPython fails
-    too, there is nothing to compare but the build's own stop, which is reported as such (a bare
-    "exit code A vs B" would suggest a native program ran and exited A, which is not true)."""
+    """No native program exists because the build stopped. Only a recognised AIL refusal (the
+    `LOUD_STOPS` build rows) is a loud stop by design: it means no native program can exist for any
+    input, whether or not CPython happens to fail on this particular case too. Any other build stop
+    (a broken link, a bad option, a compiler defect) is a difference that quotes the build's first
+    message, because there is no native exit code to compare against."""
     code, out, err, timed_out, seconds = _diff_run(cpython_command, cwd, run_env, stdin_path, timeout, live=False)
     first = (built.stderr.strip().splitlines() or ["the build stopped"])[0].strip()
     if timed_out:
         return _diff_report(settings, "timeout: cpython", "timeout: cpython", None, None, "timeout",
                             (built.returncode, DIFF_EXIT_TIMEOUT), (0.0, seconds))
-    # A recognised refusal means no native program can exist for any input: it is AIL's own limit,
-    # whether or not CPython happens to fail on this particular case too.
     reason = _loud_stop(built.stderr.encode("utf-8", "replace"), "build")
-    if reason is None and code == 0:
-        reason = _diff_text(first)
     if reason is not None:
         return _diff_report(settings, "loud stop by design", "loud stop by design: %s" % reason, None,
                             reason, None, (built.returncode, code), (0.0, seconds))

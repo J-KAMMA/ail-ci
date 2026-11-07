@@ -49,9 +49,10 @@ program, and `ail run` without `--diff` behaves exactly as before.
 
 If the build itself stops, there is no native run to compare. A *recognised* refusal (the last three
 rows of the table) is `loud stop by design` whatever CPython does with the same input, because no
-native program exists for any input. Any other build stop is `loud stop by design` when CPython runs
-the program fine, and otherwise a `DIFFER` that quotes the build's first message, since there is no
-native exit code to compare against.
+native program exists for any input. Any other build stop — a broken link, a bad compiler option, a
+toolchain defect — is a `DIFFER` that quotes the build's first message, whether or not CPython runs
+the program, since there is no native exit code to compare against and the failure is not one of
+AIL's documented limits.
 
 ### Outcomes and exit codes
 
@@ -61,7 +62,7 @@ native exit code to compare against.
 | `ail diff: DIFFER: stdout line N: native '...', cpython '...'` | the first line that differs, each side truncated to 200 characters | `3` |
 | `ail diff: DIFFER: exit code A vs B` | both runs finished, but with different exit codes | `3` |
 | `ail diff: DIFFER: exception A vs B` | both raised an uncaught exception, of different types | `3` |
-| `ail diff: DIFFER: no native program, the build stopped (exit A) where CPython exited B: <message>` | the build stopped for a reason that is not one of the recognised loud stops, and CPython failed too | `3` |
+| `ail diff: DIFFER: no native program, the build stopped (exit A) where CPython exited B: <message>` | the build stopped for a reason that is not one of the recognised loud stops | `3` |
 | `ail diff: loud stop by design: <reason>` | the native run stopped with one of AIL's documented loud errors where CPython continued | `4` |
 | `ail diff: timeout: native` | the native run hit `--timeout` | `124` |
 | `ail diff: timeout: cpython` | the CPython run hit `--timeout` | `124` |
