@@ -8,7 +8,7 @@ Sample: the ten `lab/compare/src/<task>/main.py`, their ten `typed.py`, and the 
 * Every build is cold: a fresh `AIL_CACHE`, a fresh `TMPDIR`, `AIL_NO_CACHE=1`, `AIL_SERVER=0`.
 * Wall time is the median of `--reps` runs (see `reps` in the JSON; 3 here).
 * The phase split comes from `timed_outer.py` / `timed_inner.py`, thin wrappers that start `ail_chatgpt.py` and `pyc.py` unchanged and add `perf_counter` around the driver's own top-level pass functions. Their `exclusive` time is non-overlapping; `other` is the remainder, and §1 shows that on the general path it is mostly the second `check` the driver runs to position its fallback note.
-* `typed_emit` / `general_emit` are each reported whole: both emitters interleave type analysis with writing the C string (source line markers, temporaries, declarations), so splitting "analysis" from "C emission" would need a compiler change. The task's "C emission" row is therefore the emitter's exclusive time; "parse" is `ast.parse` from the cProfile runs.
+* `typed_emit` / `general_emit` are each reported whole: both emitters interleave type analysis with writing the C string (source line markers, temporaries, declarations), so splitting "analysis" from "C emission" would need a compiler change. The task's "C emission" row is therefore the emitter's exclusive time. `parse` is `ast.parse` timed in both processes by the wrappers; because it is called inside `load`, `pre` and the emitters it is a component of those rows, not an additional one.
 * `cProfile` (a `sitecustomize.py` in both Python processes) is used for the pass-cumulative and top-20 tables. It inflates times 2–3x; the columns that matter for the Amdahl bounds in `docs/design/FRONTEND_SPEED.md` come from the low-overhead timed wrappers, not cProfile.
 * `python3 -X importtime` is measured on each entry point; `/usr/bin/time -v` gives peak RSS.
 * Peak RSS is the whole child tree (`ail_chatgpt.py` plus the `pyc.py` it starts), as reported by `/usr/bin/time -v` for the outer process.
@@ -121,10 +121,11 @@ Across all programs `other` is 46.67 s of 363.97 s (12.8%); on the five programs
 | `typed_emit` | 73.855 | 37.3% |
 | `general_emit` | 109.667 | 55.4% |
 | `cc` | 118.761 | 32.6% |
+| `parse` (timed, nested) | 3.890 | 2.0% |
 
-`cc` is the C compile+link subprocess and is not part of the Python front end; it is listed for comparison. The cheap refusal passes cost about a second in total across 30 programs.
+`cc` is the C compile+link subprocess and is not part of the Python front end; it is listed for comparison. The cheap refusal passes cost about a second in total across 30 programs. `parse` is a component of the rows above, so it is not additive with them.
 
-`parse`: `ast.parse` is called several times per build (the driver merge, the refusal passes, `_to_c`, `_rewrite_script`). cProfile attributes 5.92 s cumulative (1.6% of wall, inflated like every cProfile number) to it; it has no single timed-wrapper boundary, which is why it is reported here rather than in the table above.
+`parse`: `ast.parse` is called several times per build (the driver merge, the refusal passes, `_to_c`, `_rewrite_script`); it is timed in both processes at 3.89 s = 1.1% of the timed cold wall. That time is already inside `load`, `pre`, `typed` and `general`, so the row is a component, not additive. cProfile charges the same call sites 5.92 s cumulative (0.6% of the profiled wall, inflated like every cProfile number).
 
 ## 2. Top 20 functions by self time (cProfile, all programs)
 
@@ -153,7 +154,7 @@ Summed over every profiled cold build. cProfile overhead inflates these numbers;
 | 19 | `stype` | `AIL_CURRENT/python/pkg-v12/unified_lists.py:496` | 2.664 | 2731684 |
 | 20 | `_is_slist_expr` | `AIL_CURRENT/python/pkg-v12/pyfunc.py:7896` | 2.643 | 897062 |
 
-Summed top-20 self time is 289.27 s, 30.7% of the profiled wall (942.66 s) and 46.6% of the profiled emitter cumulative (`typed_emit_cum` + `general_emit_cum` = 620.76 s). The emitters are 50.4% of the timed cold wall, so the top-20 functions cover 46.6% x 50.4% = 23.5% of the timed wall. The 30.7% figure overstates it because cProfile charges call-heavy functions the most, so it is not used as an Amdahl share.
+Summed top-20 self time is 289.27 s, 30.7% of the profiled wall (942.66 s) and 46.6% of the profiled emitter cumulative (`typed_emit_cum` + `general_emit_cum` = 620.76 s). Applying that cProfile proportion to the timed emitter share (50.4% of the timed cold wall) gives an estimated 46.6% x 50.4% = 23.5% of the timed wall. This is a derived estimate, not a timed measurement. The 30.7% figure overstates it because cProfile charges call-heavy functions the most, so neither number is used as a pure measured Amdahl share.
 
 Within the top 20, the AST-walk family (`walk`, `iter_child_nodes`, `iter_fields`, `_walk_uncached`) is 145.80 s = 15.5% of the profiled wall, and the memoised type queries (`_etype` twice, `_is_str_expr`, `_is_slist_expr`) 50.31 s = 5.3%.
 
@@ -238,5 +239,5 @@ Median peak RSS 82.3 MiB, maximum 526.7 MiB (ticket_audit).
 ## Caveats
 
 * The runner is shared. Absolute times move with load; ratios and shares are the stable part.
-* `ast.parse` is called several times per build (driver merge, refusal passes, `_to_c`, `_rewrite_script`); cProfile attributes them all to `ast.parse`, which is why it appears in the top-20 rather than a single driver function.
+* `ast.parse` is called several times per build (driver merge, refusal passes, `_to_c`, `_rewrite_script`); the timed wrappers report its total as a nested component and cProfile attributes the same calls to `ast.parse`, which is why it appears in the top-20 rather than a single driver function.
 * The emitter times include both analysis and C emission, as explained under Method.

@@ -9,6 +9,7 @@ compiler's input, output or decisions changes.
 Writes `$FE_TIME_OUT_OUTER` as JSON: import time, main wall, and total /
 exclusive time plus calls for each wrapped outer function.
 """
+import ast
 import json
 import os
 import sys
@@ -41,6 +42,12 @@ def timed(label, function):
     return wrapper
 
 
+def wrap(module, name, label):
+    function = getattr(module, name, None)
+    if function is not None:
+        setattr(module, name, timed(label, function))
+
+
 def main():
     started = time.perf_counter()
     import ail_chatgpt
@@ -52,6 +59,7 @@ def main():
         function = getattr(ail_chatgpt, name, None)
         if function is not None:
             setattr(ail_chatgpt, name, timed(label, function))
+    wrap(ast, 'parse', 'parse')
 
     inner = os.path.join(HERE, 'timed_inner.py')
 

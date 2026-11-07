@@ -399,7 +399,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0454
     },
     {
       "name": "berth_sim-typed",
@@ -779,7 +780,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0474
     },
     {
       "name": "chain_relax",
@@ -1154,7 +1156,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0324
     },
     {
       "name": "chain_relax-typed",
@@ -1534,7 +1537,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0273
     },
     {
       "name": "echo_pack",
@@ -1914,7 +1918,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.043
     },
     {
       "name": "echo_pack-typed",
@@ -2294,7 +2299,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0402
     },
     {
       "name": "ledger_bin",
@@ -2679,7 +2685,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.1485
     },
     {
       "name": "ledger_bin-typed",
@@ -3059,7 +3066,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0552
     },
     {
       "name": "rail_transfer",
@@ -3434,7 +3442,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0723
     },
     {
       "name": "rail_transfer-typed",
@@ -3814,7 +3823,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0736
     },
     {
       "name": "scar_life",
@@ -4199,7 +4209,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.8623
     },
     {
       "name": "scar_life-typed",
@@ -4579,7 +4590,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0416
     },
     {
       "name": "tally_lang",
@@ -4971,7 +4983,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.1424
     },
     {
       "name": "term_rank",
@@ -5341,7 +5354,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.4515
     },
     {
       "name": "term_rank-typed",
@@ -5721,7 +5735,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0571
     },
     {
       "name": "ticket_audit",
@@ -6106,7 +6121,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.9849
     },
     {
       "name": "ticket_audit-typed",
@@ -6486,7 +6502,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.1007
     },
     {
       "name": "tree_fold",
@@ -6878,7 +6895,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.1134
     },
     {
       "name": "g17_004",
@@ -7263,7 +7281,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0068
     },
     {
       "name": "g05_030",
@@ -7648,7 +7667,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0321
     },
     {
       "name": "g14_014",
@@ -8033,7 +8053,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0151
     },
     {
       "name": "g00_034",
@@ -8413,7 +8434,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.2965
     },
     {
       "name": "g18_008",
@@ -8793,7 +8815,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.005
     },
     {
       "name": "g00_036",
@@ -9173,7 +9196,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0052
     },
     {
       "name": "g04_006",
@@ -9558,7 +9582,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0187
     },
     {
       "name": "g14_004",
@@ -9943,7 +9968,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0076
     },
     {
       "name": "g19_028",
@@ -10323,7 +10349,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0752
     },
     {
       "name": "g02_014",
@@ -10708,7 +10735,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0201
     },
     {
       "name": "g23_036",
@@ -11093,7 +11121,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0345
     },
     {
       "name": "g10_010",
@@ -11478,7 +11507,8 @@
           "typed_attempt": 0.0,
           "general_attempt": 0.0
         }
-      }
+      },
+      "parse_timed": 0.0341
     }
   ],
   "importtime_outer": 0.0387,

@@ -1,3 +1,21 @@
+## 2026-11-07 -- fe1 review 1 fix: correct the remaining measurement and ranking defects (job-fe1-11071637)
+
+Fixed the six defects from review 1; no compiler, runtime or corpus file changed, so generated C
+cannot differ. (1) `FE-SPEED-A0` now uses the warm `other` for the warm target: `ticket_audit`
+warm 25.5 s -> ≤2.2 s (25.505 - 23.329 = 2.18 s), and `scar_life` cold 97.4 s -> ≤86.5 s
+(97.381 - 10.938 = 86.44 s), not ≤86 s. (2) The per-function cache is no longer ranked by a cold
+share: a cold build has an empty cache, so its cold Amdahl bound is 0; 50.4% is only the edit
+ceiling, `E/W x (N-1)/N`. The table, option section and one-line ranking now say so. (3) The
+top-20/hot-function 23.5% is labelled a derived estimate: 46.6% is a cProfile proportion applied to
+the measured emitter share, not a timed share. (4) `parse` is now a timed phase: `timed_outer.py`
+and `timed_inner.py` wrap `ast.parse`, `prof.py --parse-only` re-measured it into `results.json`,
+and `RESULTS.md` reports 3.890 s = 1.1% of the timed cold wall (nested in load/pre/emitters, not
+additive); the cProfile figure is corrected to 5.92 s = 0.6% of the profiled wall, not 1.6% of
+wall. (5) The server option uses the consistent fast-27 medians: 0.0263 + 0.1758 + 0.0549 = 0.257 s
+of a 0.468 s hit, 55% (2.2x), not the all-30 load divided by the fast wall (58%, 2.4x). (6) The
+commit message no longer carries a Claude trailer for a non-Claude worker. `report.py` re-renders
+`RESULTS.md` byte-identically; `python3 tools/update_manifest.py --check` passes.
+
 ## 2026-11-07 -- fe1 review fix: correct the front-end measurement claims and ranking (job-fe1-11071326)
 
 Fixed the six review defects; no compiler, runtime or corpus file changed, so generated C cannot

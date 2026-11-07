@@ -11,6 +11,7 @@ imports to process exit, and total/exclusive time plus call count for each
 wrapped function.  Exclusive subtracts nested wrapped calls, so the labels can
 be summed without double counting.
 """
+import ast
 import builtins
 import json
 import os
@@ -76,6 +77,7 @@ def main():
             ('_cc', 'cc'),
     ):
         wrap(pyc, name, label)
+    wrap(ast, 'parse', 'parse')
     builtins.__import__ = _import_hook
 
     main_started = time.perf_counter()

@@ -71,8 +71,9 @@ def main(argv=None):
     add('* `typed_emit` / `general_emit` are each reported whole: both emitters interleave type'
         ' analysis with writing the C string (source line markers, temporaries, declarations), so'
         ' splitting "analysis" from "C emission" would need a compiler change. The task\'s "C'
-        ' emission" row is therefore the emitter\'s exclusive time; "parse" is `ast.parse` from the'
-        ' cProfile runs.')
+        ' emission" row is therefore the emitter\'s exclusive time. `parse` is `ast.parse` timed in'
+        ' both processes by the wrappers; because it is called inside `load`, `pre` and the emitters'
+        ' it is a component of those rows, not an additional one.')
     add('* `cProfile` (a `sitecustomize.py` in both Python processes) is used for the pass-cumulative'
         ' and top-20 tables. It inflates times 2–3x; the columns that matter for the Amdahl bounds in'
         ' `docs/design/FRONTEND_SPEED.md` come from the low-overhead timed wrappers, not cProfile.')
@@ -208,6 +209,9 @@ def main(argv=None):
     add('| pass | seconds | share of front end |')
     add('|---|---:|---:|')
     front_total = _total(built, _frontend)
+    parse = _total(built, lambda p: p.get('parse_timed') or p['phases'].get('parse_timed') or 0.0)
+    parse_cp = _total(built, lambda p: (p['passes'] or {}).get('ast_parse_cum') or 0.0)
+    profiled = _total(built, lambda p: p.get('profile_wall') or 0.0)
     for label in ('fold_int_constants', 'refuse_static_big_calls',
                   'python_defs_only_runs_nothing', 'refuse_big_capable', 'refuse_typed_big_store',
                   'typed_emit', 'general_emit', 'cc'):
@@ -215,16 +219,19 @@ def main(argv=None):
                        timer((p['timed']['inner'] or {}).get('timers'), label) or 0.0)
         share = pct(value, _total(built, lambda p: p['cold_median'])) if label == 'cc' else pct(value, front_total)
         add('| `%s` | %s | %s |' % (label, f(value), share))
+    add('| `parse` (timed, nested) | %s | %s |' % (f(parse), pct(parse, front_total)))
     add('')
     add('`cc` is the C compile+link subprocess and is not part of the Python front end; it is listed'
-        ' for comparison. The cheap refusal passes cost about a second in total across 30 programs.')
+        ' for comparison. The cheap refusal passes cost about a second in total across 30 programs.'
+        ' `parse` is a component of the rows above, so it is not additive with them.')
     add('')
-    parse = _total(built, lambda p: (p['passes'] or {}).get('ast_parse_cum') or 0.0)
     add('`parse`: `ast.parse` is called several times per build (the driver merge, the refusal'
-        ' passes, `_to_c`, `_rewrite_script`). cProfile attributes %s s cumulative (%s of wall,'
-        ' inflated like every cProfile number) to it; it has no single timed-wrapper boundary, which'
-        ' is why it is reported here rather than in the table above.'
-        % (f(parse, 2), pct(parse, _total(built, lambda p: p['cold_median']))))
+        ' passes, `_to_c`, `_rewrite_script`); it is timed in both processes at %s s = %s of the'
+        ' timed cold wall. That time is already inside `load`, `pre`, `typed` and `general`, so the'
+        ' row is a component, not additive. cProfile charges the same call sites %s s cumulative'
+        ' (%s of the profiled wall, inflated like every cProfile number).'
+        % (f(parse, 2), pct(parse, _total(built, lambda p: p['phases']['total'])),
+           f(parse_cp, 2), pct(parse_cp, profiled)))
     add('')
 
     add('## 2. Top 20 functions by self time (cProfile, all programs)')
@@ -252,10 +259,11 @@ def main(argv=None):
         queries = sum(row['self'] for row in data['top20_self']
                       if row['function'] in ('_etype', '_is_str_expr', '_is_slist_expr'))
         add('Summed top-20 self time is %s s, %s of the profiled wall (%s s) and %s of the profiled'
-            ' emitter cumulative (`typed_emit_cum` + `general_emit_cum` = %s s). The emitters are %s'
-            ' of the timed cold wall, so the top-20 functions cover %s x %s = %s of the timed wall.'
-            ' The %s figure overstates it because cProfile charges call-heavy functions the most, so'
-            ' it is not used as an Amdahl share.'
+            ' emitter cumulative (`typed_emit_cum` + `general_emit_cum` = %s s). Applying that'
+            ' cProfile proportion to the timed emitter share (%s of the timed cold wall) gives an'
+            ' estimated %s x %s = %s of the timed wall. This is a derived estimate, not a timed'
+            ' measurement. The %s figure overstates it because cProfile charges call-heavy functions'
+            ' the most, so neither number is used as a pure measured Amdahl share.'
             % (f(top20, 2), pct(top20, profiled), f(profiled, 2), pct(top20, emitter_cum),
                f(emitter_cum, 2), pct(emitter_timed, timed_wall),
                pct(top20, emitter_cum), pct(emitter_timed, timed_wall), pct(hot_share, 1.0),
@@ -334,8 +342,9 @@ def main(argv=None):
     add('')
     add('* The runner is shared. Absolute times move with load; ratios and shares are the stable part.')
     add('* `ast.parse` is called several times per build (driver merge, refusal passes, `_to_c`,'
-        ' `_rewrite_script`); cProfile attributes them all to `ast.parse`, which is why it appears in'
-        ' the top-20 rather than a single driver function.')
+        ' `_rewrite_script`); the timed wrappers report its total as a nested component and cProfile'
+        ' attributes the same calls to `ast.parse`, which is why it appears in the top-20 rather than'
+        ' a single driver function.')
     add('* The emitter times include both analysis and C emission, as explained under Method.')
     add('')
     args.out.write_text('\n'.join(lines), encoding='utf8')

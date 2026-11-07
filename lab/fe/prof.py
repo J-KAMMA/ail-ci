@@ -323,6 +323,7 @@ def phases(source, timed):
     typed = exclusive(itimers, 'typed_emit')
     general = exclusive(itimers, 'general_emit')
     cc = exclusive(itimers, 'cc')
+    parse = total(otimers, 'parse') + total(itimers, 'parse')
     other = max(0.0, timed['wall'] - startup - load - passes - typed - general - cc)
     return dict(startup_imports=round(startup, 4),
                 outer_load=round(load, 4),
@@ -330,6 +331,7 @@ def phases(source, timed):
                 typed_emit=round(typed, 4),
                 general_emit=round(general, 4),
                 c_compile_link=round(cc, 4),
+                parse_timed=round(parse, 4),
                 other=round(other, 4),
                 total=round(timed['wall'], 4),
                 typed_attempt=round(total(itimers, 'typed_emit'), 4),
@@ -379,6 +381,35 @@ def warm_run(source, work, pycache, reps=3, exact=False):
                 timed=timed, phases=phases(source, timed))
 
 
+def parse_overlay(args, rows):
+    """Add the timed `ast.parse` component to an existing results file.
+
+    The normal run records the phase split once; this mode re-runs one cold
+    timed build per program with `ast.parse` wrapped in both processes and
+    stores `parse_timed` (the call time, which is nested inside the phase that
+    made the call, so it is a component and not an extra additive phase).
+    """
+    data = json.loads(args.out.read_text(encoding='utf8'))
+    sources = {row['name']: row for row in rows}
+    root = args.work or pathlib.Path(tempfile.mkdtemp(prefix='ail-fe-parse-'))
+    root.mkdir(parents=True, exist_ok=True)
+    pycache = root / 'pycache'
+    for entry in data['programs']:
+        if not entry.get('phases') or entry['name'] not in sources:
+            continue
+        row = sources[entry['name']]
+        work = root / ('p-%s' % re.sub(r'[^A-Za-z0-9_.-]', '_', entry['name']))
+        timed = timed_build(row['source'], work, pycache, exact=row.get('exact', False))
+        phases_ = phases(row['source'], timed)
+        entry['parse_timed'] = phases_.get('parse_timed')
+        print('%-24s parse %.3fs' % (entry['name'], entry['parse_timed'] or 0.0), flush=True)
+    args.out.write_text(json.dumps(data, indent=2, sort_keys=False), encoding='utf8')
+    print('wrote', args.out)
+    if not args.work:
+        print('work dir', root)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', type=pathlib.Path, default=HERE / 'results.json')
@@ -388,9 +419,14 @@ def main(argv=None):
     ap.add_argument('--skip-memory', action='store_true')
     ap.add_argument('--skip-warm', action='store_true')
     ap.add_argument('--work', type=pathlib.Path, help='keep everything here instead of /tmp')
+    ap.add_argument('--parse-only', action='store_true',
+                    help='re-measure timed ast.parse only into an existing --out file')
     args = ap.parse_args(argv)
 
     rows = programs()
+    if args.parse_only:
+        return parse_overlay(args, rows)
+
     if args.only:
         rows = [row for row in rows if any(part in row['name'] for part in args.only)]
     root = args.work or pathlib.Path(tempfile.mkdtemp(prefix='ail-fe-'))

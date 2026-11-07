@@ -25,6 +25,7 @@ as follows. Times are medians of 3 cold runs with a fresh `AIL_CACHE` and `TMPDI
 | interpreter start + imports (outer + inner) | 3.05 | 0.8% |
 | source load / merge (`_load_sources`) | 10.82 | 3.0% |
 | cheap refusal passes | 0.74 | 0.2% |
+| parse (`ast.parse`, timed; a component of the rows above) | 3.89 | 1.1% |
 | typed emitter (`pyfunc.to_c`: analysis + C text) | 73.71 | 20.3% |
 | general emitter (`pyboxed2.build`: analysis + C text) | 109.67 | 30.1% |
 | **Python front end, total** | **197.98** | **54.4%** |
@@ -34,7 +35,9 @@ as follows. Times are medians of 3 cold runs with a fresh `AIL_CACHE` and `TMPDI
 
 `typed`/`general` are each reported whole because both emitters interleave type analysis with
 writing the C string. Splitting "analysis" from "C emission" would need a compiler change, which
-this job forbids.
+this job forbids. Parse is timed by wrapping `ast.parse` in both processes; it is called inside
+`load`, the refusal passes and the emitters, so it is a component of those rows, not an additional
+one, and the table's columns do not sum to 100%.
 
 The share that matters for every option below is **the front end's share of the wall** (the
 `Amdahl` baseline) and, within it, the emitter share and the top-20 function share:
@@ -48,7 +51,7 @@ The share that matters for every option below is **the front end's share of the 
 | failed typed attempt on general-path programs | 26.55 s = 7.3% of all wall (9.2% of the general-path wall) | `RESULTS.md` §1 |
 | second `check` for the fallback note (`other` bucket) | 46.67 s = 12.8% (25.2% of `ticket_audit`, 11.2% of `scar_life`) | `RESULTS.md` §1 |
 | top-20 functions' self time, share of the profiled wall (cProfile) | 30.7% | `RESULTS.md` §2 |
-| top-20 functions, share of the timed cold wall (46.6% of the profiled emitter × `E/W`) | 23.5% | `RESULTS.md` §2 |
+| top-20 functions, estimated share of the timed cold wall (46.6% of the profiled emitter × `E/W`) | 23.5% (derived) | `RESULTS.md` §2 |
 | … of which AST walking (`fastwalk.walk`, `ast.iter_*`, `_walk_uncached`), profiled self-time share | 15.5% | `RESULTS.md` §2 |
 | … of which type queries (`_etype`, `_is_str_expr`, `_is_slist_expr`, …), profiled self-time share | 5.3% | `RESULTS.md` §2 |
 | warm (whole-build cache hit) wall, fast programs | 0.47 s median (cold 3.63 s, 7.8x) | `RESULTS.md` §3 |
@@ -68,8 +71,9 @@ Key facts for the design:
   `rail_transfer`, `term_rank`, `g17_004`; ≤0.01 s each) are refused by a cheap pre-pass before the
   emitter. A "decide fallback from a pre-scan" option is therefore worth a real but bounded 7.3%,
   and 19.4% on the program that resembles a real app.
-* **The top-20 functions are a large, addressable slice** (23.5% of the timed cold wall; 30.7% of
-  the profiled wall) of the front end, and two families dominate: repeated AST walks
+* **The top-20 functions are a large, addressable slice** (an estimated 23.5% of the timed cold
+  wall, derived from their 30.7% cProfile share; measured directly they are 30.7% of the profiled
+  wall) of the front end, and two families dominate: repeated AST walks
   (`fastwalk.walk` alone is 9.9% of the profiled wall, 81.8 M calls; the walk family 15.5% of the
   profiled wall including `ast.iter_child_nodes`/`iter_fields`/`_walk_uncached`) and the
   memoised type queries (`_etype` and friends, 5.3% of the profiled wall, plus the `_query_memo`
@@ -81,38 +85,42 @@ Key facts for the design:
   which is 12.8% of cold wall and leaves `scar_life` at 12.3 s and `ticket_audit` at 25.5 s **warm**.
   That is the single cheapest measured win in this report.
 
-## Options, ranked by measured Amdahl bound
+## Options and their measured Amdahl bounds
 
 The bound is the largest wall reduction the option can give on the measured workload if its
-component went to zero (cold build, cache miss), computed from `RESULTS.md`, not guessed. "Edit
-bound" is the same number, because an edit misses the whole-source key and therefore pays a cold
-front end. `x` is the wall speedup implied by that share, `1/(1-share)`.
+component went to zero (cold build, cache miss), computed from `RESULTS.md`, not guessed. `x` is
+the wall speedup implied by that share, `1/(1-share)`. On a cold build every option pays a cold
+front end except the per-function cache, which is empty on a cold build (its cold bound is 0); its
+50.4% is an edit-only ceiling, not a cold share.
 
 | # | option | measured share | Amdahl bound (cold / edit) | wall speedup | risk | files |
 |---:|---|---:|---:|---:|---|---|
-| 1 | Per-function analysis cache across edits | emitter share `E/W` = 50.4% | 50.4% | 2.02x | high | `pyc.py`, `pyfunc.py`, `pyboxed2.py`, `buildcache.py`, `fecache.py` |
+| 1 | Per-function analysis cache across edits | edit only: `E/W` = 50.4% (cold 0%) | 0% cold / ≤50.4% edit (`E/W` × (N−1)/N) | 1.00x cold / ≤2.02x edit | high | `pyc.py`, `pyfunc.py`, `pyboxed2.py`, `buildcache.py`, `fecache.py` |
 | 2 | Compile the front end (mypyc / Cython) | `F/W` = 54.4%; k=2.5 | 32.6% | 1.48x | medium-high | `pyproject.toml`, `packaging/`, new build target |
-| 3 | Algorithmic fixes in the top-20 hot functions | 23.5% (46.6% of the profiled emitter × `E/W`; walk 11.8%, queries 4.1% of timed wall) | 23.5% | 1.31x | low | `fastwalk.py`, `pyfunc.py`, `pyboxed2.py`, `optlib.py`, `unified*.py` |
+| 3 | Algorithmic fixes in the top-20 hot functions | 23.5% (derived: 46.6% of the profiled emitter × `E/W`; walk 11.8%, queries 4.1% of timed wall, also derived) | ≤23.5% (estimate) | 1.31x | low | `fastwalk.py`, `pyfunc.py`, `pyboxed2.py`, `optlib.py`, `unified*.py` |
 | 4 | Drop the second `check` that positions the fallback note | `other` = 12.8% | 12.8% | 1.15x | low | `ail_chatgpt.py` |
 | 5 | Skip the doomed typed attempt from a pre-scan | 7.3% | 7.3% | 1.08x | low | `pyc._refuse_big_capable`, `pyc.build` |
-| 6 | Long-lived compile server (`ail run`) | 0.8% cold; 58% of the 0.47 s warm residual | 0.8% cold / 58% warm | 1.008x cold, 2.4x warm | medium | `ail_server.py`, `ail_chatgpt.py`, `pyc.py` |
+| 6 | Long-lived compile server (`ail run`) | 0.8% cold; 55% of the 0.47 s warm residual (fast-27 medians) | 0.8% cold / 55% warm | 1.008x cold, 2.2x warm | medium | `ail_server.py`, `ail_chatgpt.py`, `pyc.py` |
 | 7 | Lazy imports | 0.8% cold; 5.5% of a warm hit | 0.8% cold | 1.008x cold | low | `ail_chatgpt.py`, `pyc.py`, `pyfront.py` |
 
-All shares in the table are fractions of the 363.97 s timed cold wall. Option 3 has no timed
-wrapper of its own, so its share is derived on that wall: the top-20 self time is 46.6% of the
-profiled emitter cumulative and the emitters are `E/W` = 50.4% of the timed wall, giving 23.5%
-(`RESULTS.md` §2). The raw cProfile share of the profiled wall (30.7%) is an upper bound that
-cProfile inflates and is not used as an Amdahl share. Options 2 and 3 overlap (a compiled front end
-speeds up the same hot functions but does not make the repeated walks disappear); their bounds are
-alternatives, not additive. Option 4 is outside the brief's six; it fell out of the measurement of
-the `other` bucket and is ranked because it is the cheapest real win.
+All shares in the table are fractions of the 363.97 s timed cold wall, except row 1: its 50.4% is
+an edit-only ceiling (the emitter share) and its cold bound is zero. Option 3 has no timed wrapper
+of its own, so its 23.5% is a derived estimate, not a timed share: the top-20 self time is 46.6% of
+the profiled emitter cumulative (cProfile) and the emitters are `E/W` = 50.4% of the timed wall.
+The 46.6% is a cProfile proportion, so 23.5% is an upper-bound estimate. The raw cProfile share of
+the profiled wall (30.7%) is not used as an Amdahl share. Options 2 and 3 overlap (a compiled front
+end speeds up the same hot functions but does not make the repeated walks disappear); their bounds
+are alternatives, not additive. Option 4 is outside the brief's six; it fell out of the measurement
+of the `other` bucket and is ranked because it is the cheapest real win.
 
-### 1. Per-function analysis cache across edits — the largest measured share
+### 1. Per-function analysis cache across edits — large on an edit, zero on a cold build
 
-Measured share: the emitter, `E/W` = 50.4% of cold wall (73.71 s typed + 109.67 s general of 363.97 s).
-If only the function whose source changed is re-analysed, the bound is the whole emitter share
-(2.02x wall); on a typical edit one of N functions changes, so the realistic bound is
-`E/W x (N-1)/N`.
+Measured share: the emitter, `E/W` = 50.4% of cold wall (73.71 s typed + 109.67 s general of
+363.97 s). A cold build starts with an empty cache, so the cold Amdahl bound is 0: every function
+is still analysed. On an edit the cache can reuse the unchanged functions; the ceiling is the whole
+emitter share (2.02x on the edited build), and with N functions where one changed the realistic
+edit bound is `E/W x (N-1)/N`. Neither edit figure is measured (the cache does not exist); 50.4% is
+the measured emitter share used as an upper bound.
 
 Risk: **high**. Both emitters do whole-program, interprocedural inference (`pyfunc.to_c` infers
 across functions and modules; `pyboxed2.build` builds module tables and reachability). A function's
@@ -151,10 +159,12 @@ the wheel produces.
 
 ### 3. Algorithmic fixes in the top-20 hot functions — the safest large share
 
-Measured share: the top-20 functions' self time is 46.6% of the profiled emitter cumulative, and the
-emitters are 50.4% of the timed cold wall, so their timed share is 23.5% (`RESULTS.md` §2). Within
-the top 20, AST walking is 15.5% of the profiled wall (11.8% of timed wall) and the type queries
-5.3% (4.1% of timed wall). Removing (or memoising per analysis epoch) the repeated walks in the
+Estimated share: the top-20 functions' self time is 46.6% of the profiled emitter cumulative
+(cProfile), and the emitters are 50.4% of the timed cold wall, so applying that proportion gives an
+estimated 23.5% of the timed wall (`RESULTS.md` §2). The 46.6% is not timed and cProfile inflates
+call-heavy functions, so 23.5% is a derived upper-bound estimate, not a timed measurement. Within
+the top 20, AST walking is 15.5% of the profiled wall (an estimated 11.8% of timed wall) and the
+type queries 5.3% (an estimated 4.1% of timed wall). Removing (or memoising per analysis epoch) the repeated walks in the
 fixed-point and per-function rounds attacks the single largest call count (`fastwalk.walk` is
 81.8 M calls across the sample; `pyfunc.py` alone has 394 `ast.walk(` call sites). A 50% cut of the
 walk family is a 5.9% wall win on its own (1.06x).
@@ -215,10 +225,12 @@ Equality proof: byte-identical C and the same stderr on the corpus; the refusal 
 
 ### 6. Long-lived compile server — removes the fixed per-invocation cost
 
-Measured share: on a cold build only the interpreter+import share, `I/W` = 0.8%. On a fast warm hit
-(0.47 s) the outer import is 0.026 s (5.5%), `_load_sources` 0.193 s (41%) and the key hash 0.055 s
-(12%): a server that already holds the source and the key could remove about 58% of that residual,
-though the absolute saving is ~0.27 s per invocation. The server also keeps the parsed AST and
+Measured share: on a cold build only the interpreter+import share, `I/W` = 0.8%. On the 27 fast warm
+hits (median 0.468 s) the consistent medians are outer import 0.0263 s (5.6%), `_load_sources`
+0.1758 s (37.6%) and key hash 0.0549 s (11.7%), so a server that already holds the source and the
+key could remove about 55% of that residual (speedup 2.2x), though the absolute saving is ~0.26 s
+per invocation. (The all-30 median load, 0.193 s, is not used here because it mixes the three slow
+note-check outliers with the fast hits.) The server also keeps the parsed AST and
 analysis warm across requests, which overlaps option 1. A server already exists (`AIL_SERVER`,
 `ail_server.py`); `docs/design/FE_CACHE.md` measured a hit path of 0.72 s for berth_sim with the
 server and the `cc` cache on. The remaining win is on the **edit** path: today a one-function edit
@@ -250,22 +262,25 @@ must not regress.
 
 ### Ranking, in one line
 
-Per-function cache (50.4%) > front-end mypyc (32.6%) > hot-function fixes (23.5%) > drop the note
-check (12.8%) > typed pre-scan (7.3%) > server (0.8% cold, 58% of the 0.47 s warm residual) > lazy
-imports (0.8%).
+Cold-build bound: front-end mypyc (32.6%) > hot-function fixes (≤23.5%, a cProfile-derived estimate)
+> drop the note check (12.8%) > typed pre-scan (7.3%) > server (0.8% cold, 55% of the 0.47 s warm
+residual) > lazy imports (0.8%). The per-function cache has a 0% cold bound and an edit-only ceiling
+of ≤50.4%; it is not ranked first by cold measured share.
 
 ## Chosen top three and the task split
 
-Ranked strictly by measured share, the board is per-function cache, mypyc, hot-function fixes. The
+On a cold build the board is mypyc, hot-function fixes and the note check; the per-function cache is
+the largest edit-loop ceiling, but its cold bound is zero and its edit bound is unmeasured. The
 note check (12.8%) is queued first anyway: it is nearly free, it also fixes the warm path for
 fallback programs, and every later measurement gets cleaner once it is gone.
 
 1. **Drop the second `check` for the fallback note** (option 4) — 12.8% for near-zero risk.
-2. **Hot-function algorithmic fixes** (option 3) — 23.5%, lowest risk of the big levers.
+2. **Hot-function algorithmic fixes** (option 3) — ≤23.5% (derived estimate), lowest risk of the big levers.
 3. **Front-end compilation with mypyc** (option 2) — 32.6%, independent of option 3 and multiplies
    whatever option 3 leaves.
-4. **Per-function analysis cache** (option 1) — 50.4%, the largest bound, but it needs the
-   dependency key right; split into small, independently shippable steps.
+4. **Per-function analysis cache** (option 1) — 50.4% edit-only ceiling (0% cold, edit bound not
+   measured), the largest edit bound but it needs the dependency key right; split into small,
+   independently shippable steps.
 
 Each step is at most two hours and is written to be queued as a task.
 
@@ -277,8 +292,9 @@ a position, or carry the position the compiler already knows in the cached stder
 the old behaviour behind `AIL_FALLBACK_LOCATE=1`.
 Test: `test_ail_fallback_note`; build `ticket_audit`, `scar_life`, `ledger_bin` and diff the
 generated C byte for byte; diff stderr (only the note's position may be missing).
-Number: `ticket_audit` cold 94.4 s → ≤71 s (its 23.8 s `other`) and warm 25.5 s → ≤1.7 s;
-`scar_life` cold 97.4 s → ≤86 s; no other program changes.
+Number: `ticket_audit` cold 94.4 s → ≤70.7 s (its 23.8 s cold `other`) and warm 25.5 s → ≤2.2 s
+(its 23.3 s warm `other`); `scar_life` cold 97.4 s → ≤86.5 s (its 10.9 s cold `other`); no other
+program changes.
 
 ### Task FE-SPEED-A1 — memoise repeated AST walks per analysis epoch
 
