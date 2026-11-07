@@ -12,6 +12,9 @@ V2  `match = NODE.match` bound once in a function body and only called after it;
 V3  still refused by name: a pattern passed to a function, a pattern bound twice, a pattern a function reads
     before its binding runs (CPython: NameError), an alias called before it is bound
 V4  loud stops: an int beyond int64 parsed from matched text, match() with endpos before pos
+V5  long subjects (pos more than 1024 from the end): the match runs on a window around pos that grows until the
+    scan ends inside it, so a greedy run, a far search hit, \\b / \\Z at the window edge, empty matches, groups that
+    did not take part, bytes and non-ASCII text all give CPython's answers in linear total time
 """
 import os
 import subprocess
@@ -135,6 +138,94 @@ print(NODE.match('xab:1', 1).span(), NODE.search('..ab:5', 1, 6).span())
 sys.exit(3)
 '''
 
+LONG = r'''import re
+
+TOK = re.compile(r"[ \t]*(?:(\d+)|([a-z_][a-z0-9_]*)|(==|<|>|\+|-|\(|\)))")
+RUN = re.compile(r'(a*b|a)')
+WB = re.compile(r'\b(\w+)\b')
+EOL = re.compile(r'x+\Z')
+OPTG = re.compile(r'(\d)(z)?')
+EMPTYOK = re.compile(r'q*')
+BYT = re.compile(rb'([a-z]+):(\d+)')
+
+
+def lcg(seed):
+    x = seed
+    while True:
+        x = (x * 1103515245 + 12345) % 2147483648
+        yield x
+
+
+g = lcg(7)
+parts = []
+for i in range(3000):
+    k = next(g) % 6
+    if k == 0:
+        parts.append(str(next(g) % 100000))
+    elif k == 1:
+        parts.append('v' + str(next(g) % 50))
+    elif k == 2:
+        parts.append(' == ')
+    elif k == 3:
+        parts.append('(')
+    elif k == 4:
+        parts.append(')')
+    else:
+        parts.append('  -')
+text = ' '.join(parts)
+i = 0
+n = len(text)
+toks = 0
+acc = 0
+while i < n:
+    m = TOK.match(text, i)
+    if m is None or m.end() == i:
+        break
+    i = m.end()
+    toks += 1
+    if m.group(1) is not None:
+        acc = (acc * 31 + int(m.group(1))) % 1000000007
+    elif m.group(2) is not None:
+        acc = (acc + len(m.group(2))) % 1000000007
+print(toks, acc, i)
+long_a = 'c' * 10 + 'a' * 5000 + 'b' + 'a' * 3000
+for p in (5, 10, 11, 300, 4999, 5009, 5010, 5011, 6000, 8005):
+    m = RUN.match(long_a, p)
+    s = RUN.search(long_a, p)
+    print(p, None if m is None else (m.start(), m.end(), m.group(1)[:3]), None if s is None else (s.start(), s.end()))
+words = ('alpha beta  gamma_1 ' * 400) + '!!'
+pos = 0
+cnt = 0
+last = ''
+while True:
+    m = WB.search(words, pos)
+    if m is None:
+        break
+    cnt += 1
+    last = m.group(1)
+    pos = m.end()
+print(cnt, last, pos)
+far = ' ' * 5000 + 'zz9' + ' ' * 3000
+print(WB.search(far, 1).span(), WB.search(far, 5001) is None, WB.search(far, 5003) is None, WB.match(far, 5000).group(0))
+xs = 'y' * 3000 + 'x' * 3000
+print(EOL.search(xs, 10).span(), EOL.match(xs, 2999), EOL.match(xs, 3000).end(), EOL.search(xs + 'y', 10))
+digits = ('1z2' * 2000)
+pos = 1
+out = []
+while pos < len(digits):
+    m = OPTG.search(digits, pos)
+    if m is None:
+        break
+    out.append(m.group(2) is None)
+    pos = m.end()
+print(len(out), sum(out))
+print(EMPTYOK.search('a' * 3000, 5).span(), EMPTYOK.match('a' * 3000 + 'qq', 2999).span(), EMPTYOK.match('b' * 3000, 1500).span())
+bt = b'pad ' * 600 + b'abc:12 de:3'
+print(BYT.search(bt, 10).group(1).decode(), BYT.match(bt, 2400).group(2).decode(), BYT.search(bt, 2403).span())
+uni = 'x' * 2000 + 'é' + ' 42 zz' + 'q' * 2000
+print(TOK.match(uni, 2001).group(1), WB.search(uni, 3).span(), WB.search(uni, 2002).group(0))
+'''
+
 
 class ReValueTest(unittest.TestCase):
     def setUp(self):
@@ -206,6 +297,9 @@ class ReValueTest(unittest.TestCase):
         self.loud("import re\n\nT = re.compile(r' *(\\d+)')\nprint(int(T.match('x 99999999999999999999', 1).group(1)))\n",
                   "OverflowError")
         self.loud("import re\n\nE = re.compile(r'')\nprint(E.match('abc', 2, 1) is None)\n", "endpos before pos")
+
+    def test_v5_long_subjects(self):
+        self.same_as_cpython(LONG)
 
 
 if __name__ == "__main__":

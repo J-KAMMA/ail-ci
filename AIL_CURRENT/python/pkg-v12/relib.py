@@ -1551,6 +1551,58 @@ def _ail_re_dop(p: list[int], s: str, mode: int, pos: int, endpos: int, hasend: 
 def _ail_re_dos(p: list[int], s: str, mode: int, pos: int) -> _ail_re_Match | None:
     if pos == 0:
         return _ail_re_do(p, s, mode)
+    _ail_ln = len(s)
+    if mode == 1 or p[14] == 0 or p[15] != 0 or _ail_ln - pos <= 1024:
+        return _ail_re_dosf(p, s, mode, pos)
+    _ail_st = pos
+    _ail_w = 256
+    while True:
+        _ail_a = _ail_st - 1
+        _ail_b = _ail_st + _ail_w
+        if _ail_b >= _ail_ln:
+            return _ail_re_dosf(p, s, mode, _ail_st)
+        t = s[_ail_a:_ail_b]
+        @WIN@
+        nn = _ail_b - _ail_a
+        wk = _ail_re_Wk([0, 0, 0, 0])
+        j = 1
+        while j < nn:
+            if mode == 2 and p[11] == 0:
+                c = sb[j]
+                if c < 128:
+                    if p[p[13] + c] == 0:
+                        j += 1
+                        continue
+                elif p[12] == 0:
+                    j += 1
+                    continue
+            e = _ail_re_dp(p, sb, nn, j, wk)
+            if wk.v[3] >= nn - j:
+                break
+            if e >= 0:
+                return _ail_re_win(p, t, sb, nn, j, e, _ail_a)
+            if mode == 0:
+                return None
+            j += 1
+        _ail_st = _ail_a + j
+        _ail_w = _ail_w * 4
+
+
+def _ail_re_win(p: list[int], s: str, sb: bytes, nn: int, j: int, e: int, off: int) -> _ail_re_Match:
+    if p[0] == 2:
+        return _ail_re_Match(s[j:e], [off + j, off + e], p[2])
+    vm = _ail_re_new(p)
+    _ail_re_runY(vm, p, sb, nn, j, 0, 0, 0, e)
+    g = [0] * p[0]
+    for k in range(p[0]):
+        v = vm.res[k]
+        if v >= 0:
+            v += off
+        g[k] = v
+    return _ail_re_Match(s[j:e], g, p[2])
+
+
+def _ail_re_dosf(p: list[int], s: str, mode: int, pos: int) -> _ail_re_Match | None:
     @PREP@
     if mode == 2 and p[16] != 0:  #P
         if _ail_re_pre(p[2], s, pos) < 0:  #P
@@ -1867,8 +1919,14 @@ def _dual_cut(text):
     return '\n'.join(lines)
 
 
+_WIN_STR = ('        sb = t.encode()\n'
+            '        if len(sb) != len(t):\n'
+            '            return _ail_re_dosf(p, s, mode, _ail_st)\n')
+_WIN_BYTES = '        sb = t\n'
+
+
 def _str_api(api):
-    return (api.replace('    @PREP@\n', _PREP_STR.replace('@P@', 'p')).replace('    @TEXT@\n', _TEXT_STR.replace('@P@', 'p'))
+    return (api.replace('        @WIN@\n', _WIN_STR).replace('    @PREP@\n', _PREP_STR.replace('@P@', 'p')).replace('    @TEXT@\n', _TEXT_STR.replace('@P@', 'p'))
             .replace('    @WK@\n', _WK.replace('@P@', 'p')))
 
 
@@ -1878,10 +1936,10 @@ def _bytes_api(api):
     sep = '\n' * 3
     api = sep.join(b for b in api.split(sep)
                    if not b.startswith('def _ail_re_escape') and not b.startswith('def _ail_re_cps'))
-    api = (api.replace('    @PREP@\n', _PREP_BYTES).replace('    @TEXT@\n', _TEXT_BYTES)
+    api = (api.replace('        @WIN@\n', _WIN_BYTES).replace('    @PREP@\n', _PREP_BYTES).replace('    @TEXT@\n', _TEXT_BYTES)
            .replace('    @WK@\n', _WK.replace('@P@', 'p')))
     api = _drop_marked(_drop_marked(_drop_l(api, False), '  #P', False), '  #S', False)
-    api = regex.sub(r'\b(_ail_re_(?:Match|do|dop|dos|test|findall|finditer|split|plain|sublit))\b', r'\1B', api)
+    api = regex.sub(r'\b(_ail_re_(?:Match|do|dop|dos|dosf|win|test|findall|finditer|split|plain|sublit))\b', r'\1B', api)
     api = api.replace('s: str', 's: bytes').replace('repl: str', 'repl: bytes').replace('list[str]', 'list[bytes]')
     api = api.replace('def groupn(self, name: str) -> str', 'def groupn(self, name: str) -> bytes')
     api = api.replace('count: int) -> str:', 'count: int) -> bytes:')
@@ -2106,7 +2164,8 @@ def %(name)s(s: %(kind)s, repl, count: int) -> %(kind)s:
         shared, flavor, api = _blocks()
         if not self.uses_pos:
             api = '\n\n\n'.join(block for block in api.split('\n\n\n')
-                                if not block.startswith(('def _ail_re_dop(', 'def _ail_re_dos(')))
+                                if not block.startswith(('def _ail_re_dop(', 'def _ail_re_dos(', 'def _ail_re_dosf(',
+                                                         'def _ail_re_win(')))
         api = api.replace('@NAMED@', '\n'.join(named))
         have_l = self.uses_escape or any(not p.is_bytes for p in self.programs)
         prefixes = [(index, program.literal_prefix()) for index, program in enumerate(self.programs)
