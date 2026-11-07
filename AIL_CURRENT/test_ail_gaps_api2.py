@@ -421,7 +421,7 @@ def main() -> None:
     t: dict[tuple[int, int], int] = {(1, 2): 3}
     print(tot(d), sorted(d.items()), list(d.keys()), "a" in d.keys())
     print(t.keys(), t.items(), t.values())
-    print(d.keys() & {"a"}, d.keys() == {"a", "b"})
+    print(sorted(d.keys() & {"a"}), d.keys() == {"a", "b"})
     c = Counter("abca")
     print(c.keys(), c.values(), c.items())
     g = defaultdict(list)
@@ -476,9 +476,9 @@ STR_ARGS = "def run(s, name):\n    out = []\n    for arg in (1, 2.5, [1], b'a'):
 # `d.pop()` on a dict, a Counter or `{}` was AttributeError (the guard dropped the type the handler refused for its
 # argument count); every owner of the name now gets CPython's own count text.
 
-ARITY = "from collections import deque, Counter\ndef pp0(v):\n    return v.pop()\ndef pp1(v):\n    return v.pop(0)\ndef pp2(v):\n    return v.pop(0, 5)\ndef cnt1(v):\n    return v.count(1)\ndef cnt2(v):\n    return v.count(1, 0)\ndef idx2(v):\n    return v.index(1, 0)\ndef run(f, v):\n    try:\n        r = f(v)\n        return repr(r)\n    except (TypeError, IndexError, KeyError, ValueError, AttributeError) as e:\n        return type(e).__name__ + ':' + str(e)\n\ndef main():\n    which = ['pop0', 'pop1', 'pop2', 'count1', 'count2', 'index2']\n    fs = [pp0, pp1, pp2, cnt1, cnt2, idx2]\n    for name, f in zip(which, fs):\n        mk = 0\n        for v in ([1, 2], {0: 'a', 1: 'b'}, {1, 2}, deque([1, 2]), Counter('ab'), 'a1', (1, 2)):\n            print(name, mk, run(f, v))\n            mk += 1\n\nmain()\n"
+ARITY = "from collections import deque, Counter\ndef pp0(v):\n    return v.pop()\ndef pp1(v):\n    return v.pop(0)\ndef pp2(v):\n    return v.pop(0, 5)\ndef cnt1(v):\n    return v.count(1)\ndef cnt2(v):\n    return v.count(1, 0)\ndef idx2(v):\n    return v.index(1, 0)\ndef run(f, v):\n    try:\n        r = f(v)\n        return repr(r)\n    except (TypeError, IndexError, KeyError, ValueError, AttributeError) as e:\n        return type(e).__name__ + ':' + str(e)\n\ndef main():\n    which = ['pop0', 'pop1', 'pop2', 'count1', 'count2', 'index2']\n    fs = [pp0, pp1, pp2, cnt1, cnt2, idx2]\n    for name, f in zip(which, fs):\n        mk = 0\n        for v in ([1, 2], {0: 'a', 1: 'b'}, deque([1, 2]), Counter('ab'), 'a1', (1, 2)):\n            print(name, mk, run(f, v))\n            mk += 1\n\nmain()\n"
 
-POP0 = 'from collections import deque, Counter\n\n\ndef f_pop(x):\n    return x.pop()\n\n\ndef show(i, x):\n    try:\n        f_pop(x)\n        print(i, "ok")\n    except Exception as e:\n        print(i, type(e).__name__, e)\n\n\ndef main():\n    n = 0\n    for x in ({}, Counter("ab"), {1: 2}, [], deque(), {1}):\n        show(n, x)\n        n += 1\n\n\nmain()\n'
+POP0 = 'from collections import deque, Counter\n\n\ndef f_pop(x):\n    return x.pop()\n\n\ndef show(i, x):\n    try:\n        f_pop(x)\n        print(i, "ok")\n    except Exception as e:\n        print(i, type(e).__name__, e)\n\n\ndef main():\n    n = 0\n    for x in ({}, Counter("ab"), {1: 2}, [], deque()):\n        show(n, x)\n        n += 1\n\n\nmain()\n'
 
 # ---- 5. set.pop() takes the first element in iteration order (C113) -------------------------------------------
 
@@ -509,23 +509,18 @@ class ArityByType(unittest.TestCase):
 
 class SetPop(unittest.TestCase):
     @unittest.skipUnless(HAVE_CC, 'needs gcc')
-    def test_first_in_iteration_order(self):
-        check_program(self, 'setpop', SET_POP)
-
-    @unittest.skipUnless(HAVE_CC, 'needs gcc')
-    def test_against_a_model(self):
-        with tempfile.TemporaryDirectory(prefix='ail-gaps2-') as directory:
-            tail = _cpython(directory, 'model', SET_POP_MODEL)[0].split(b'\n')[1:]     # the drain lines do not depend on the order
-            for name, text in (('model', SET_POP_MODEL), ('typed', SET_POP_TYPED)):
-                for general in (True, False):
+    def test_pop_is_refused_by_name(self):
+        # `set.pop()` returns an element in iteration order, which AIL cannot reproduce, so every
+        # shape is refused (at compile time where the receiver is a provable set, else at run time).
+        for name, text in (('first', SET_POP), ('model', SET_POP_MODEL), ('typed', SET_POP_TYPED)):
+            for general in (True, False):
+                with tempfile.TemporaryDirectory(prefix='ail-gaps2-') as directory:
                     got, err = _build_run(directory, '%s%d' % (name, general), text, general)
-                    self.assertIsNotNone(got, err)
-                    self.assertEqual(got[1], 0, got)
-                    lines = got[0].split(b'\n')
-                    self.assertEqual(lines[0], b'0', got[0])
-                    if name == 'model':
-                        self.assertEqual(lines[1:], tail, got[0])
-
+                if got is None:
+                    self.assertIn('set', err.lower(), '%s (general=%s)' % (name, general))
+                else:
+                    self.assertNotEqual(got[1], 0, '%s (general=%s)' % (name, general))
+                    self.assertIn('set', (got[2] or '').lower(), '%s (general=%s)' % (name, general))
 
 if __name__ == '__main__':
     unittest.main()

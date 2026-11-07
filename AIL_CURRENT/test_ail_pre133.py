@@ -34,7 +34,7 @@ class A__C:
 def main():
     print(A__B.n, A__B.m, len(A__B.n), len(A__B.m))
     a = A__C()
-    print(a.n, a.m, a.s, a.t)
+    print(a.n, a.m, sorted(a.s), a.t)
     print(a.m is A__C.m, A__C.n is a.n)
     a.n = {3: 4}
     print(a.n, A__C.n)

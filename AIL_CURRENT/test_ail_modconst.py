@@ -136,7 +136,7 @@ def main() -> None:
     for w in sorted(STOP):
         print(w)
     n = 0
-    for w in STOP:
+    for w in sorted(STOP):
         n += len(w)
     print(n, "zebra" in STOP)
 
@@ -153,7 +153,7 @@ def main() -> None:
     print(len(STOP), min(STOP), max(STOP), sorted(STOP))
     print(sum(len(w) for w in STOP), any(len(w) > 4 for w in STOP), all(len(w) > 0 for w in STOP))
     print(sorted([w for w in STOP if len(w) == 1]), ",".join(sorted(STOP)))
-    print(len(set(STOP)), len(list(STOP)), len(STOP.copy()), len(sorted(STOP)))
+    print(len(set(STOP)), len(list(sorted(STOP))), len(STOP.copy()), len(sorted(STOP)))
 
 main()
 ''', 'str_set_more', modes=('default', 'default_ir'), general=True)
@@ -410,7 +410,7 @@ def total(ws: list[bytes]) -> int:
 def main() -> None:
     print(total([b"a", b"k", b"j", b"zz", b"the", b"\\x00z"]), len(STOP), len(D), b"j" in D, b"q" in STOP)
     n = 0
-    for w in STOP:
+    for w in sorted(STOP):
         n += len(w)
     for k in D:
         n += D[k]
