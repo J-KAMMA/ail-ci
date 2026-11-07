@@ -20842,6 +20842,16 @@ static inline ail_st ail_meth_set_pop(ail_ctx *cx, ail_obj *out, ail_obj s) {
         ail_obj msg = ail_str_from_cstr(cx, "pop from an empty set");
         return ail_raise_key_arg(cx, msg);
     }
+    /* A set of ONE element has only one possible order: pop returns that element, as CPython. */
+    if (AIL_SETOBJ(s)->used == 1) {
+        int64_t pos = 0;
+        ail_setentry *e;
+        if (ail_setx_next(AIL_SETOBJ(s), &pos, &e)) {
+            *out = e->key;
+            ail_setx_discard_entry(AIL_SETOBJ(s), e->key, e->hash);
+            return AIL_OK;
+        }
+    }
     /* pop returns the FIRST element in iteration order, so its answer shows the order. CPython's
        order is its hash table's (per-run random for a set of str), which AIL does not reproduce:
        refuse rather than return a different element (the typed path refuses this at compile time). */

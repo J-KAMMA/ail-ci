@@ -947,10 +947,11 @@ static inline int ail2_print_scalar(ail_obj x) {
 /* A set/frozenset does not walk in CPython's order here: AIL keeps insertion order, and CPython
    follows its hash table (per-run random for a set of str). Any user-visible walk, print, str()
    or repr() of one is refused by name with the rewrite; `in`, len, sorted, min, max and sum never
-   pass through these helpers, so they stay order-free. An EMPTY set has no order to show, so a
-   walk, print or repr of one is order-free too (`set()` prints `set()`, a loop does nothing). */
+   pass through these helpers, so they stay order-free. A set of 0 or 1 elements has only one
+   possible order, so a walk, print or repr of one is order-free too (`set()` prints `set()`, a
+   loop over `{7}` yields 7). */
 static inline ail_st ail2_refuse_set_order(ail_ctx *cx, ail_obj x) {
-    if ((x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET) && ail_set_len(x) != 0)
+    if ((x.tag == AIL_T_SET || x.tag == AIL_T_FROZENSET) && ail_set_len(x) > 1)
         return ail_raise_c(cx, AIL_B_TYPEERROR,
             "walking a set or frozenset shows an order that differs from CPython; write `sorted(s)` "
             "for a fixed order (`in`, len, sorted, min, max and sum stay order-free)");
@@ -8624,12 +8625,82 @@ class Compiler(boxclosure.ClosureMixin):
         return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in ('set', 'frozenset'))
 
+    def _small_set_names(self, ctx):
+        """Names in the current body that can only hold a set or frozenset of at most one
+        element: every binding is a one-element (or empty) set display/constructor and nothing
+        adds an element. A value of 0 or 1 elements has only one possible iteration order, so a
+        walk, print or pop of it cannot differ from CPython. Any other value reaching the name is
+        still caught by the run-time guard (`ail2_refuse_set_order`)."""
+        cached = getattr(ctx, 'small_sets', None)
+        if cached is not None:
+            return cached
+        small, bad = set(), set()
+
+        def note(name, is_small):
+            (small if is_small else bad).add(name)
+
+        def is_small_set(value):
+            if isinstance(value, ast.Set):
+                return (len(value.elts) <= 1
+                        and not any(isinstance(e, ast.Starred) for e in value.elts))
+            return (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                    and value.func.id in ('set', 'frozenset')
+                    and not value.args and not value.keywords)
+
+        def target_names(target):
+            if isinstance(target, ast.Name):
+                yield target.id
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                for e in target.elts:
+                    for n in target_names(e):
+                        yield n
+            elif isinstance(target, ast.Starred):
+                for n in target_names(target.value):
+                    yield n
+
+        def walk(node):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(child, ast.Assign):
+                    is_small = is_small_set(child.value)
+                    for t in child.targets:
+                        for n in target_names(t):
+                            note(n, is_small)
+                elif isinstance(child, ast.AnnAssign) and child.value is not None:
+                    for n in target_names(child.target):
+                        note(n, is_small_set(child.value))
+                elif isinstance(child, ast.AugAssign):
+                    for n in target_names(child.target):
+                        note(n, False)
+                elif isinstance(child, ast.For):
+                    for n in target_names(child.target):
+                        note(n, False)
+                elif isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+                    if (child.func.attr in ('add', 'update', 'intersection_update',
+                                            'symmetric_difference_update')
+                            and isinstance(child.func.value, ast.Name)):
+                        note(child.func.value.id, False)
+                walk(child)
+
+        root = getattr(ctx, 'fn_node', None)
+        if root is not None:
+            walk(root)
+        ctx.small_sets = frozenset(small - bad)
+        return ctx.small_sets
+
     def _refuse_set_walk(self, node, ctx):
         """Refuse a user-visible walk of a statically known set or frozenset (see
         `ail2_refuse_set_order` for the run-time half of the same rule). An iterable that a
         `sorted`/`sum`/`min`/`max` consumes is order-free, so its walk may build; so does an
-        immediately-constructed `set()` / `frozenset()`, which is empty and has no order."""
+        immediately-constructed `set()` / `frozenset()`, and a display or name that can hold at
+        most one element, which have no order to show."""
         if getattr(ctx, 'order_free', 0):
+            return
+        if (isinstance(node, ast.Set) and len(node.elts) <= 1
+                and not any(isinstance(e, ast.Starred) for e in node.elts)):
+            return
+        if isinstance(node, ast.Name) and node.id in self._small_set_names(ctx):
             return
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in ('set', 'frozenset')

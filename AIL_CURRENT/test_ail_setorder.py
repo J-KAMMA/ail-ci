@@ -91,6 +91,18 @@ main()
 '''
 
 
+ORDER_FREE_ONE = '''def main():
+    s = {7}
+    print(s, len(s), 7 in s, sorted(s))
+    print(s.pop(), s)
+    e = set()
+    for x in e:
+        print("never", x)
+    print(e, list(e), tuple(e), f"{e}")
+    print(list({9}), tuple({9}))
+main()
+'''
+
 ORDERED_METHODS = '''def main():
     x = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 40, 41, 42}
     y = {5, 6, 7, 200, 300, 400, 3, 41}
@@ -160,6 +172,17 @@ class SetOrderTests(unittest.TestCase):
                     got = run_exe(exe)
                     self.assertEqual(got.stdout, want.stdout, '%s: %s' % (mode, got.stderr[-600:]))
                     self.assertEqual(got.returncode, 0, mode)
+
+    def test_s6_a_set_of_at_most_one_element_is_order_free(self):
+        with tempfile.TemporaryDirectory() as directory:
+            want = run_cpython(directory, ORDER_FREE_ONE, 'one')
+            self.assertEqual(want.returncode, 0, want.stderr)
+            for mode in ('general', 'default'):
+                built, exe = build(directory, ORDER_FREE_ONE, 'one', mode)
+                self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
+                got = run_exe(exe)
+                self.assertEqual(got.stdout, want.stdout, '%s: %s' % (mode, got.stderr[-600:]))
+                self.assertEqual(got.returncode, 0, mode)
 
     def test_s2_every_order_revealing_construct_is_refused_by_name(self):
         with tempfile.TemporaryDirectory() as directory:

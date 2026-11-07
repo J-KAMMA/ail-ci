@@ -1,3 +1,32 @@
+## 2026-11-07 -- setord1 suite fix 3: a set of 0 or 1 elements is order-free (singleton print/walk/pop)
+
+The integration branch's new `test_ail_re_value` (its ALIAS program) does `s = {7}`, `sp = s.pop`,
+then prints `s` after the pop; both builds refused the print (and the typed path the pop), although a
+set of 0 or 1 elements has only one possible order. Fix, general path only:
+`pyboxed2._small_set_names` scans the current body (nested defs/classes/lambdas excluded) for names
+whose every binding is an empty `set()`/`frozenset()` or a one-element display and that nothing grows
+with `add`/`update`/`intersection_update`/`symmetric_difference_update`; `_refuse_set_walk` now lets
+those names and one-element displays through (any larger value reaching the name is still refused by
+the run-time guard). `ail2_refuse_set_order` refuses only `len > 1`, and `ail_meth_set_pop` returns
+the only element of a one-element set (empty stays CPython's `KeyError('pop from an empty set')`; two
+or more elements are still refused). The typed path is unchanged and still refuses a set print/pop,
+so the default build falls back to the general path. `test_ail_setorder.py` gains `s6` (singleton
+print, print after pop, singleton walk and an empty name walk match CPython on the general and
+default builds). No other source change.
+
+`test_ail_re_value` does not exist on this older base; it was fetched from `origin/integ` (which has
+the `re` pos/endpos feature this base lacks) and the whole job diff plus this fix applied there:
+5/5 pass, and the ALIAS program matches CPython (`exit 3`) on both builds.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`), both builds, on this tree: `p01`-`p14`, `e1`-`e4`, `s3`-`s5`,
+`t1` and `t2` match CPython (empty and singleton set print/str/repr/list/tuple/f-string/iteration,
+len/sorted/sum, singleton `pop`, order-free operators, keyed sort, unhashable display, alias);
+`p03`-`p07` (non-empty literal, argument, list item, attribute and dict-value walk) and `p13`
+(non-empty `pop`) are refused by name; `s4` (two elements) is refused at build; `s2`'s
+`frozenset([9])` (a one-element set built from a list argument, not a proven-small display) stays
+refused; `s1`'s `s.pop` bound-method alias is unsupported on this base (AttributeError) though it
+matches on the integ worktree.
+
 ## 2026-11-07 -- setord1 review fix: drop the non-empty pprint set branch
 
 The reviewer found that `prelude_genlib._safe_repr`'s new non-empty set/frozenset branch printed a
