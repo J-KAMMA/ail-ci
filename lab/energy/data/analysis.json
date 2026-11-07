@@ -1,0 +1,183 @@
+{
+ "avoidable": {
+  "berth_sim": {
+   "instr_delta": 2551312726,
+   "instr_j": 0.0002551312726,
+   "dram_j": 0.58069252096,
+   "total_j": 0.5809476522326,
+   "attributed": true,
+   "categories": {
+    "overflow": 8.937316706612244e-06,
+    "bounds": 3.856337548456084e-05,
+    "refcount": 4.7879604841271e-07,
+    "alloc/free": 7.2588912890261514e-06,
+    "copies": 5.427238662007387e-06,
+    "boxing": 0.0,
+    "other": 0.00019446565440938066
+   }
+  },
+  "chain_relax": {
+   "instr_delta": -296710349,
+   "instr_j": -2.9671034900000002e-05,
+   "dram_j": -9.0112e-07,
+   "total_j": -3.0572154900000004e-05,
+   "attributed": true,
+   "categories": {
+    "overflow": -0.0,
+    "bounds": -1.0097211723322345e-10,
+    "refcount": -1.3311753736801918e-11,
+    "alloc/free": -1.1566434913532334e-10,
+    "copies": -1.9918327813585092e-11,
+    "boxing": -0.0,
+    "other": -2.9670785033452082e-05
+   }
+  },
+  "echo_pack": {
+   "instr_delta": 3619067411,
+   "instr_j": 0.0003619067411,
+   "dram_j": 0.08009231359999999,
+   "total_j": 0.08045422034109999,
+   "attributed": true,
+   "categories": {
+    "overflow": 9.405660112103277e-07,
+    "bounds": 1.719282005027708e-05,
+    "refcount": 1.010865869405433e-12,
+    "alloc/free": 1.027386450309126e-07,
+    "copies": 1.2130390432865197e-12,
+    "boxing": 0.0,
+    "other": 0.00034367061416957676
+   }
+  },
+  "ledger_bin": {
+   "instr_delta": 2501977699,
+   "instr_j": 0.0002501977699,
+   "dram_j": 0.0882893312,
+   "total_j": 0.0885395289699,
+   "attributed": true,
+   "categories": {
+    "overflow": 7.339977665501202e-05,
+    "bounds": 2.0453786606869016e-05,
+    "refcount": 1.7225711433355482e-07,
+    "alloc/free": 1.4215395265604716e-06,
+    "copies": 4.738160365810542e-07,
+    "boxing": 0.0,
+    "other": 0.00015427659396064386
+   }
+  },
+  "rail_transfer": {
+   "instr_delta": 82503559,
+   "instr_j": 8.2503559e-06,
+   "dram_j": 0.000603136,
+   "total_j": 0.0006113863559,
+   "attributed": true,
+   "categories": {
+    "overflow": 4.255716584415903e-07,
+    "bounds": 1.5878143159414172e-06,
+    "refcount": 1.8948576514874484e-07,
+    "alloc/free": 1.2705245492918731e-06,
+    "copies": 3.362719280984909e-07,
+    "boxing": 0.0,
+    "other": 4.440687683077883e-06
+   }
+  },
+  "tally_lang": {
+   "instr_delta": 8383733954,
+   "instr_j": 0.0008383733954000001,
+   "dram_j": 1.98656e-06,
+   "total_j": 0.0008403599554,
+   "attributed": true,
+   "categories": {
+    "overflow": 2.8773039127803876e-05,
+    "bounds": 2.0700538513050216e-09,
+    "refcount": 4.691891432350007e-11,
+    "alloc/free": 7.688647895592915e-10,
+    "copies": 8.432431606527662e-11,
+    "boxing": 0.0,
+    "other": 0.0008095973861103249
+   }
+  },
+  "term_rank": {
+   "instr_delta": -3283747414,
+   "instr_j": -0.0003283747414,
+   "dram_j": 0.009205739519999999,
+   "total_j": 0.0088773647786,
+   "attributed": true,
+   "categories": {
+    "overflow": -8.62979176473527e-06,
+    "bounds": -4.881115830072149e-05,
+    "refcount": -8.376528951670832e-06,
+    "alloc/free": -4.8892560434510965e-05,
+    "copies": -1.1395150226013942e-05,
+    "boxing": -0.0,
+    "other": -0.00020226955172234753
+   }
+  },
+  "ticket_audit": {
+   "instr_delta": 10596459625,
+   "instr_j": 0.0010596459625,
+   "dram_j": 0.0348495872,
+   "total_j": 0.0359092331625,
+   "attributed": true,
+   "categories": {
+    "overflow": 3.066935384902767e-05,
+    "bounds": 5.877472489057907e-05,
+    "refcount": 4.121702595182081e-05,
+    "alloc/free": 4.5077694407732435e-05,
+    "copies": 2.82158320881757e-05,
+    "boxing": 0.0,
+    "other": 0.0008556913313126643
+   }
+  },
+  "tree_fold": {
+   "instr_delta": 4606981373,
+   "instr_j": 0.00046069813730000004,
+   "dram_j": 0.88245292032,
+   "total_j": 0.8829136184573,
+   "attributed": true,
+   "categories": {
+    "overflow": 2.5683346847009716e-05,
+    "bounds": 0.0001268251061351018,
+    "refcount": 4.738659157972369e-07,
+    "alloc/free": 2.1421809561467167e-05,
+    "copies": 1.2566132654966364e-05,
+    "boxing": 0.0,
+    "other": 0.00027372787618565775
+   }
+  }
+ },
+ "category_sum": {
+  "overflow": 0.0001601991790903822,
+  "bounds": 0.0002145884382643418,
+  "refcount": 3.415493646186868e-05,
+  "alloc/free": 2.7661290745038466e-05,
+  "copies": 3.5624206762842345e-05,
+  "boxing": 0.0,
+  "other": 0.002403929807075526
+ },
+ "main_py": [
+  {
+   "task": "berth_sim",
+   "instr_j": 0.0027563276439,
+   "dram_j": 2.34416677888,
+   "total_j": 2.3469231065239002
+  },
+  {
+   "task": "echo_pack",
+   "instr_j": 0.0016307844236,
+   "dram_j": 0.33807821824,
+   "total_j": 0.3397090026636
+  },
+  {
+   "task": "rail_transfer",
+   "instr_j": 0.00033958196500000003,
+   "dram_j": 0.23447514111999998,
+   "total_j": 0.23481472308499998
+  },
+  {
+   "task": "term_rank",
+   "instr_j": 0.009263874059100001,
+   "dram_j": null,
+   "total_j": null
+  }
+ ]
+}
