@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-11-07 -- spec1: first draft of the language specification (job-spec1-11071506)
+
+Wrote `docs/SPEC/`: `README.md` (purpose, rule ids, status vocabulary, versioning),
+`INVENTORY.md` (the numbered rules with their sources), eight chapters (values, arithmetic,
+evaluation order, memory, concurrency, modules/FFI, diagnostics, compatibility) and `OPEN.md`
+(the owner decisions, with options, cost and recommendation). The chapters state the rule, an
+example, the CPython difference, the status and the proof; they cite `docs/spec/DIFFERENCES.md`,
+the design notes and the test modules rather than inventing a second source. Also added two
+sentences to the "What AIL is for" section of `docs/ROADMAP.md` saying that the semantics are
+AIL's own and CPython output is a compatibility mode. Docs only: no compiler change. The general
+rule the draft fixes is "a program has the specified meaning or is refused by name; it never
+silently has a different meaning".
+
 ## 2026-10-22 -- C169 review fix: self-referential receivers no longer recurse
 
 Passing the same `seen` set through `value_class`/`attribute_class` into `name_class` makes a
