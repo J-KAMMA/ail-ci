@@ -7,40 +7,36 @@
 --- LAST REVIEW ---
 ## review 1
 [model commandcode/deepseek-v4.1-flash]
-I've finished the review. Summary of what I ran: diff read, 12 probes in `/tmp/rprobes/`, `cmp.sh` output checks, `--debug-dir` C comparison against `/tmp/base`, and `python3 ../tools/par_check.py -j 2 test_ail_agent_errors test_ail_safetynet` (both `ok`: 458s / 137s).
+## Review report
 
-**What the change really does:** adds a new 785-line `ail_agent_errors.py` that pattern-matches the 15 human messages, re-parses the user's source with `ast` to re-derive `line/col/cause` and a `fix.replace_range`/`with`, and attaches `agent_diagnostics` to `compile --json`, `compile --strict --json` and failed `compile` builds; `pyc.fallback_note` now delegates to the same table. The worker report itself is empty ("no final text"), so I checked the DEVLOG/DIFFERENCES claims.
+**What the change really does:** makes the four value-claiming locators conservative — `AIL0101`/`AIL0111` ranges now start at the saved-method/import line and reproduce every user line they do not deliberately drop; `AIL0103` edits every offending comparison right-to-left and falls back to `True`/`False` when the str provably equals the literal; `AIL0104` publishes only when the key is provably in an untouched dict literal; a locator's "no safe edit" also blocks the table's literal fallback; empty-file refusals get `line:1,col:1`. No codegen/runtime change.
 
-**Probes (all HEAD):**
-| probe | result |
-|---|---|
-| p4 no feature, `--debug-dir` | `program.c` byte-identical to base; notes identical on trigger 12 |
-| p5 two fallbacks, refusal p13, empty p12 | no crash; `message` byte-for-byte vs stderr (note and `AIL0000` error) |
-| p6 Fraction with a line between import and print | fix **changes output** |
-| p7 stdin with a line between save and call | fix **changes output** |
-| p1/p2 str `==`/`!=` where the str equals the literal | fix **changes output**; `!=` cause says "always False" |
-| p3/p9 `d.get(k)` key absent | fix **changes output** (`None` → `-1`) |
+**Verified claims:** all five review-1 defects fixed — p6 `side\n0.5`, p7 `mid\nhello`, p1 `not one`, p2 `taken`, p3/p9 absent key → no `fix` (`None` kept), empty file `AIL0000` at 1:1. Also verified: multi-line `Fraction(...)` assignment, `2 / float(x)` → `4.0`, two comparisons/one line → `False False`, `AIL0101` two saved names, no edit for nested/compound/still-used/`input()`/absent-key/unprovable shapes, `no_fallback` blocking the trigger-block edit, `--strict` error severity, manifest `--check`, and non-feature `p4` `--debug-dir` `program.c` byte-identical to base (also p1). Both required modules pass: `test_ail_agent_errors` 581s, `test_ail_safetynet` 150s.
 
-**Defects**
-1. `AIL0111` fix deletes user lines. p6: `from fractions import Fraction` / `x = Fraction(1, 2)` / `print("side")` / `print(float(x))` → `replace_range [1,4]`, `with "print(1 / 2)"`; expected `side\n0.5\n`, actual `0.5\n`. `_loc_fraction` builds `with_text` only over the statement but spans from the import line.
-2. `AIL0101` fix deletes user lines. p7 (`stdin="hello\n"`): `import sys` / `read = ...readline` / `print("mid")` / `print(read()...)` → `[2,4]`, `with "print(sys.stdin.readline().strip())"`; expected `mid\nhello\n`, actual `hello\n`. Same range/text mismatch in `_loc_stdin_buffer`.
-3. `AIL0103` fix changes the branch. p1: `s = "1"; if s == 1: …` expected `not one\n`, actual `one\n`; p2 `if s != 1` expected `taken\n`, actual `not\n`. The cause for `!=` says "this comparison is always False" although it is always True.
-4. `AIL0104` fix changes the answer. p3: `d={"a":1}; k="b"; print(d.get(k))` expected `None\n`, actual `-1\n` (also p9, bool dict). A fix is published for every `.get(k)` even when the key may be missing, contradicting "With must … keep the program's output" (design rule 3) and `docs/CLI.md`.
-5. Minor: the empty file gets `AIL0000` with `line:null,col:null`; `docs/CLI.md` says an uncatalogued refusal "still carries … a position".
+**False claim:** DEVLOG/DIFFERENCES "every published edit builds, keeps CPython's stdout and removes the note" is false for multi-line prints (below).
 
-**Claims checked:** stable codes/families, 14/15 edits remove the message (AIL0102 remains), `message` byte-for-byte, failed-build and strict JSON fields, `pyc.fallback_fields` reachable, `ail build … --json` pass-through, tests.d/manifest check: **verified**. "Applying the pair keeps the program's output": **false** (1–4). No program-output or C change for non-feature programs: verified.
+### Defect (introduced by this change)
 
-**Pre-existing:** none of the above; empty-file refusal text itself is pre-existing.
+1. `AIL0101` publishes a corrupt fix when the saved method is on a line other than the `print(` line, or spans lines. Base published a working whole-block edit for both.
+   Probe `m1`: `import sys / read = sys.stdin.buffer.readline / print( /     read().decode().strip())` with stdin `hello\n`.
+   - `fix.replace_range [2,4]`, `with` = `"prinsys.stdin.readline().strip()\n    read().decode().strip()"`.
+   - Expected: builds and prints `hello`; actual: build fails `m1_fixed.py:3:4: unexpected indent`.
+   Probe `m2`: `print(read() /       .decode().strip())` → `with` = `"print(sys.stdin.readline().strip()\n      .decode().strip())"`; actual build fails `not in the subset: the method .decode() (on a str)`. Base's edit for both builds and prints `hello` (`out=hello`).
 
-**Unverified:** no speed/icount run (change touches only compile-time Python, not generated code); wider suite and the fix-rate harness not rerun; the 243-line locator claim not re-probed.
+Cause: `edits` are keyed by `statement.lineno` but the columns belong to `statement.value.args[0]`, which need not start on that line; the call's multi-line span is never rejected.
+
+### Pre-existing (identical on base, not blocking)
+
+- `d = {"a": True}; print(d.get("a"))` publishes `d.get("a", -1)`; default build prints `1`, CPython `True`; base publishes the same edit.
+- Unprovable stdin saved-method shapes still end in the runtime `AttributeError`, as on base.
+- `AIL_QUIET_FALLBACK=1` suppresses `agent_diagnostics` on both base and HEAD.
+
+### Unverified
+Wider suite (not run per instructions), fix-rate harness, worker's `/tmp/probes/check.py` (not in repo), icount: skipped — generated C is byte-identical and the diff runs only at diagnostic time.
 
 VERDICT: FIX
-1. `AIL0111` edit range spans lines its `with` does not reproduce (p6: expected `side\n0.5\n`, actual `0.5\n`).
-2. `AIL0101` edit range spans lines its `with` does not reproduce (p7: expected `mid\nhello\n`, actual `hello\n`).
-3. `AIL0103` edit changes output and its cause is wrong for `!=` (p1 expected `not one\n`, actual `one\n`; p2 expected `taken\n`, actual `not\n`).
-4. `AIL0104` edit changes output when the key is missing (p3 expected `None\n`, actual `-1\n`).
-5. Minor: `AIL0000` on an empty file has `line/col` null despite `docs/CLI.md`.
-[commandcode stop=end_turn turns=43 out_tokens=34851]
+1. `AIL0101` multi-line print: `m1_stdin_multiline_print.py` / `m2_stdin_split_call.py` — published `fix` does not compile (`unexpected indent`; `.decode() on a str`); expected a build whose stdout matches CPython (`hello\n`), as the base's edit produces. Refuse the edit (or key it to `args[0].lineno`) when the call is not contained on the print's first line.
+[commandcode stop=end_turn turns=48 out_tokens=34488]
 
 
 --- ORIGINAL TASK ---
