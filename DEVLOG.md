@@ -10,7 +10,7 @@ root-level module the compiler imports. The import is now lazy: `ail_chatgpt.py`
 does not need the module at all (`--json` still reports the build, with an empty `agent_diagnostics`,
 when the module is absent); `pyc.fallback_note` is the plain `_fallback_message` string again, so a
 general-path build does not import it either. `update_manifest.py --check` passes and a freshly built
-wheel imports. Shard 2's cap: `test_ail_re_value` (its critical module) ran 327.7 s on integ and
+wheel imports; the legacy discovery list in `ail_sdk.export_sdk` names it beside the other CLI modules, so a copy from a MANIFEST without `sdk_files` carries it too. Shard 2's cap: `test_ail_re_value` (its critical module) ran 327.7 s on integ and
 324.8 s here under the same `ulimit`, so err2 does not slow builds; its recorded weight is 825.4 s,
 and the new `test_ail_agent_errors` (unassigned in `tools/ci_shards.json`) is spread to shard 0, so
 the shard map was not edited.
