@@ -1528,6 +1528,66 @@ def _ail_re_test(p: list[int], s: str, mode: int) -> bool:
     return ok
 
 
+def _ail_re_dop(p: list[int], s: str, mode: int, pos: int, endpos: int, hasend: int) -> _ail_re_Match | None:
+    m = len(s)
+    if pos < 0:
+        pos = 0
+    if pos > m:
+        pos = m
+    if hasend == 1:
+        if endpos < 0:
+            endpos = 0
+        if endpos < pos:
+            if mode != 0:
+                return None
+            raise ValueError("re: match() with endpos before pos is not built")
+        if endpos < m:
+            return _ail_re_dos(p, s[:endpos], mode, pos)
+    return _ail_re_dos(p, s, mode, pos)
+
+
+def _ail_re_dos(p: list[int], s: str, mode: int, pos: int) -> _ail_re_Match | None:
+    if pos == 0:
+        return _ail_re_do(p, s, mode)
+    @PREP@
+    if mode == 2 and p[16] != 0:  #P
+        if _ail_re_pre(p[2], s, pos) < 0:  #P
+            return None  #P
+    if mode != 1 and asc == 1 and _ail_re_dok(p, sb, n):
+        wk = _ail_re_Wk([0, 0, 4 * n + 2048, 0])
+        r = pos
+        if mode == 0:
+            e = _ail_re_dp(p, sb, n, pos, wk)
+            if e < 0:
+                return None
+            wk.v[1] = e
+        else:
+            r = _ail_re_ds(p, sb, n, pos, wk)
+            if r == -1:
+                return None
+        if r >= 0:
+            if p[0] == 2:
+                return _ail_re_Match(s[r:wk.v[1]], [r, wk.v[1]], p[2])
+            vm = _ail_re_new(p)
+            _ail_re_runY(vm, p, sb, n, r, 0, 0, 0, wk.v[1])
+            g = [0] * p[0]
+            for k in range(p[0]):
+                g[k] = vm.res[k]
+            return _ail_re_Match(s[g[0]:g[1]], g, p[2])
+    vm = _ail_re_new(p)
+    ok = False
+    if asc == 1:
+        ok = _ail_re_execY(vm, p, sb, n, pos, mode, 0)
+    if asc == 0:  #L
+        ok = _ail_re_exec(vm, p, cps, n, pos, mode, 0)  #L
+    if ok:
+        g = [0] * p[0]
+        for k in range(p[0]):
+            g[k] = vm.res[k]
+        return _ail_re_Match(s[g[0]:g[1]], g, p[2])
+    return None
+
+
 def _ail_re_findall(p: list[int], s: str) -> list[str]:
     @PREP@
     @TEXT@
@@ -1819,7 +1879,7 @@ def _bytes_api(api):
     api = (api.replace('    @PREP@\n', _PREP_BYTES).replace('    @TEXT@\n', _TEXT_BYTES)
            .replace('    @WK@\n', _WK.replace('@P@', 'p')))
     api = _drop_marked(_drop_marked(_drop_l(api, False), '  #P', False), '  #S', False)
-    api = regex.sub(r'\b(_ail_re_(?:Match|do|test|findall|finditer|split|plain|sublit))\b', r'\1B', api)
+    api = regex.sub(r'\b(_ail_re_(?:Match|do|dop|dos|test|findall|finditer|split|plain|sublit))\b', r'\1B', api)
     api = api.replace('s: str', 's: bytes').replace('repl: str', 'repl: bytes').replace('list[str]', 'list[bytes]')
     api = api.replace('def groupn(self, name: str) -> str', 'def groupn(self, name: str) -> bytes')
     api = api.replace('count: int) -> str:', 'count: int) -> bytes:')

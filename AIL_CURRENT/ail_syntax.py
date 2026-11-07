@@ -2110,6 +2110,7 @@ class _Surface:
         self.match_patterns = {}       # NAME -> {library index} for NAME = PATTERN.match(...) / re.match(P, ...)
         self.match_targets = {}        # (line, column) of the call -> NAME the assignment binds
         self.re_nodes = set()          # those assignment statements
+        self.re_aliases = {}           # NAME -> (PATTERN, method) for `NAME = PATTERN.match` called only as NAME(...)
         self.def_names = {node.name for node in ast.walk(self.tree)
                           if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
         # names that stand for a function (a def outside a class, the name bound nowhere else): the replacement
@@ -2122,6 +2123,7 @@ class _Surface:
         plain_defs = {node.name for node in ast.walk(self.tree)
                       if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) not in methods}
         self.callable_names = plain_defs - rebound
+        self.rebound_names = rebound
         self.ambiguous_names = plain_defs & rebound    # a def and a variable of one name: which one is not told
         self.re_consts = {}            # NAME -> str for a name bound once to a string literal
         self.re_lib = None
@@ -2598,9 +2600,104 @@ class _Surface:
                     and self.path(bound[1].func) == 're.compile'):
                 call = bound[1]
                 index = self.re_pattern(call, 'compile', call.args, call.keywords, ('flags',))
-                if index is not None:
+                if index is not None and not self.re_bound_first(node, bound[0]):
+                    self.keep.add('re')
+                    self.note(node, f'the compiled pattern {bound[0]} may be used before `{bound[0]} = re.compile(...)` '
+                              'runs (code above it calls a function that uses it); CPython raises NameError there and '
+                              'the built pattern would not: bind the pattern above that code')
+                elif index is not None:
                     self.re_patterns[bound[0]] = index
                     self.re_nodes.add(node)
+        if self.re_patterns:
+            self.collect_re_aliases(stored)
+
+    def re_bound_first(self, node, name):
+        """False when a module-level `NAME = re.compile(...)` may be read before it runs: the built pattern is a
+        table that exists from the start, so such a read would not raise CPython's NameError. Code above the
+        binding that reads NAME, or reads (calls, passes) a function that reads it directly or through other
+        functions, is that case; so is a call above it that could reach a method using NAME, or a function
+        held in a variable, while some function reads NAME. A binding inside a function is not checked here."""
+        top = node
+        while self.parents.get(top) is not None and not isinstance(self.parents[top], ast.Module):
+            top = self.parents[top]
+        if self.parents.get(top) is None or top not in self.tree.body:
+            return True
+        functions = [each for each in ast.walk(self.tree) if isinstance(each, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        reads = {id(each): {item.id for item in ast.walk(each) if isinstance(item, ast.Name)
+                            and isinstance(item.ctx, ast.Load)} for each in functions}
+        methods = {id(item) for each in ast.walk(self.tree) if isinstance(each, ast.ClassDef) for item in each.body}
+        users, grew = {name}, True
+        while grew:
+            grew = False
+            for each in functions:
+                if each.name not in users and reads[id(each)] & users:
+                    users.add(each.name)
+                    grew = True
+        method_use = any(id(each) in methods and reads[id(each)] & users for each in functions)
+        used_by_function = len(users) > 1
+        modules = set(self.modules)
+        imported = {(alias.asname or alias.name).split('.')[0] for each in ast.walk(self.tree)
+                    if isinstance(each, (ast.Import, ast.ImportFrom)) for alias in each.names}
+        modules |= {each for each in imported if each not in self.def_names}
+
+        def executed(statement):
+            """The nodes a statement runs when it executes (not the bodies of the defs and lambdas it makes)."""
+            stack = [statement]
+            while stack:
+                item = stack.pop()
+                yield item
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    stack.extend(item.decorator_list)
+                    stack.extend(item.args.defaults)
+                    stack.extend(each for each in item.args.kw_defaults if each is not None)
+                elif isinstance(item, ast.Lambda):
+                    stack.extend(item.args.defaults)
+                else:
+                    stack.extend(ast.iter_child_nodes(item))
+
+        for statement in self.tree.body[:self.tree.body.index(top)]:
+            for item in executed(statement):
+                if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load) and item.id in users:
+                    return False
+                if isinstance(item, ast.Call) and used_by_function:
+                    func = item.func
+                    if isinstance(func, ast.Name):
+                        if method_use and func.id in self.classes:
+                            return False        # an instance whose methods may read NAME
+                        if (func.id not in self.def_names and func.id in self.rebound_names
+                                and func.id not in imported):
+                            return False        # a variable that may hold a function reading NAME
+                    elif not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                              and func.value.id in modules) and (method_use or not isinstance(func, ast.Attribute)):
+                        return False
+        return True
+
+    def collect_re_aliases(self, stored):
+        """`NAME = PATTERN.match` (a bound method of a compiled pattern): NAME(...) is PATTERN.match(...) when NAME is
+        bound once, by a statement directly in a function (or module) body, and every later use of NAME in that body
+        is a call NAME(...) after the statement. Any other use keeps the loud note on PATTERN."""
+        called = {id(node.func) for node in ast.walk(self.tree) if isinstance(node, ast.Call)}
+        uses = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                uses.setdefault(node.id, []).append(node)
+        for scope in ast.walk(self.tree):
+            if not isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for statement in scope.body:
+                bound = self.re_bind(statement)
+                if (bound is None or not isinstance(statement, ast.Assign) or stored.get(bound[0]) != 1
+                        or not isinstance(bound[1], ast.Attribute) or not isinstance(bound[1].value, ast.Name)
+                        or bound[1].value.id not in self.re_patterns or bound[1].attr not in _RE_MODES):
+                    continue
+                name = bound[0]
+                inside = {id(node) for node in ast.walk(scope)}
+                loads = uses.get(name, [])
+                if all(id(node) in called and id(node) in inside
+                       and (node.lineno, node.col_offset) > (statement.end_lineno, statement.end_col_offset)
+                       for node in loads):
+                    self.re_aliases[name] = (bound[1].value.id, bound[1].attr)
+                    self.re_nodes.add(statement)
 
     def re_str(self, node):
         if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
@@ -2696,6 +2793,14 @@ class _Surface:
             return None
         subject = given['string']
         sfx = 'B' if program.is_bytes else ''
+        if name in _RE_MODES and ('pos' in given or 'endpos' in given):
+            # PATTERN.match(s, pos, endpos): `^` / `\A` / lookbehind see the text before pos, endpos cuts the text
+            found = call('_ail_re_dop' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]),
+                         given.get('pos', ast.Constant(value=0)), given.get('endpos', ast.Constant(value=0)),
+                         ast.Constant(value=1 if 'endpos' in given else 0))
+            if node in self.testing:
+                return ast.Compare(left=found, ops=[ast.IsNot()], comparators=[ast.Constant(value=None)])
+            return found
         if name in _RE_MODES:
             if node in self.testing:
                 return call('_ail_re_test' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]))
@@ -2791,10 +2896,11 @@ class _Surface:
             self.re_refuse(node, name, f'the compiled pattern method {name} is not built')
             return None
         params = _RE_PARAMS[name]
-        params = tuple(p for p in params if p != 'flags')
+        params = tuple(p for p in params if p != 'flags') + (('pos', 'endpos') if name in _RE_MODES else ())
         given = self.re_args(node, params, node.args, node.keywords)
         if given is None:
-            self.re_refuse(node, name, 'these arguments are not built (pos / endpos are not)')
+            self.re_refuse(node, name, 'these arguments are not built (pos / endpos are built for match / '
+                           'fullmatch / search only)')
             return None
         return self.re_emit(node, name, self.re_patterns[receiver], given)
 
@@ -2941,6 +3047,8 @@ class _Surface:
             if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
                     and func.value.id in self.re_patterns):
                 return self.re_method(node, func.value.id, func.attr)
+            if isinstance(func, ast.Name) and func.id in self.re_aliases:
+                return self.re_method(node, *self.re_aliases[func.id])
             if (path is None and isinstance(func, ast.Attribute) and func.attr in _RE_MATCH_METHODS
                     and func.attr not in self.user_methods):
                 return self.match_method(node)

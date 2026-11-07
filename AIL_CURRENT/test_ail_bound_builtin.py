@@ -151,7 +151,7 @@ class BoundBuiltin(unittest.TestCase):
                                  "a = set().add\nprint(a)\n"}, "write instead", ".add")
 
     def test_b4_unsupported_method_is_refused(self):
-        self.refused({"main.py": "pop = {1: 2}.pop\nprint(pop(1))\n"}, "write instead", ".pop")
+        self.refused({"main.py": "pop = {1: 2}.popitem\nprint(pop())\n"}, "write instead", ".popitem")
 
     def test_b5_module_init_failure_is_loud(self):
         self.write({"main.py": "print('start')\nimport m\nprint('never')\n",
