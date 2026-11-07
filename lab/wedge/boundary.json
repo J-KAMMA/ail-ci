@@ -1,0 +1,949 @@
+[
+ {
+  "module": "ast_lint",
+  "functions": {
+   "count_ints": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: node",
+    "annotations": {
+     "node": "tuple"
+    },
+    "returns": "int"
+   },
+   "count_tag": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc",
+    "annotations": {
+     "node": "tuple",
+     "tag": "str"
+    },
+    "returns": "int"
+   },
+   "has_tag": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc",
+    "annotations": {
+     "node": "tuple",
+     "tag": "str"
+    },
+    "returns": "bool"
+   },
+   "leaves": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: node",
+    "annotations": {
+     "node": "tuple"
+    },
+    "returns": "int"
+   },
+   "max_depth": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: node",
+    "annotations": {
+     "node": "tuple"
+    },
+    "returns": "int"
+   },
+   "node_count": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: node",
+    "annotations": {
+     "node": "tuple"
+    },
+    "returns": "int"
+   },
+   "sum_ints": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: node",
+    "annotations": {
+     "node": "tuple"
+    },
+    "returns": "int"
+   }
+  },
+  "native": [],
+  "no_unit": []
+ },
+ {
+  "module": "bitset_bloom",
+  "functions": {
+   "bloom_probe": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   },
+   "bloom_set": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "keys": "list[int]",
+     "bits": "int"
+    },
+    "returns": "list[int]"
+   },
+   "make_hashes": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "n": "int",
+     "seed": "int",
+     "mod": "int"
+    },
+    "returns": "list[int]"
+   },
+   "multiples": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "division or power can raise"
+   },
+   "popcount": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "rotate_xor": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "set_intersect": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   }
+  },
+  "native": [
+   "popcount",
+   "rotate_xor"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "csv_parse",
+  "functions": {
+   "count_fields": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
+    "annotations": {
+     "line": "str"
+    },
+    "returns": "int"
+   },
+   "field_chars": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
+    "annotations": {
+     "line": "str"
+    },
+    "returns": "int"
+   },
+   "max_field_len": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
+    "annotations": {
+     "text": "str"
+    },
+    "returns": "int"
+   },
+   "quote_count": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "split_lines": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "text": "str"
+    },
+    "returns": "list[str]"
+   },
+   "sum_column": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "to_c-refused: 'COMMA' is read before it is assigned",
+    "annotations": {
+     "text": "str",
+     "col": "int"
+    },
+    "returns": "int"
+   }
+  },
+  "native": [
+   "quote_count"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "dataframe_group",
+  "functions": {
+   "filter_sum": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "group_count": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "key": "list[int]",
+     "ngroups": "int"
+    },
+    "returns": "list[int]"
+   },
+   "group_sum": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "key": "list[int]",
+     "vals": "list[int]",
+     "ngroups": "int"
+    },
+    "returns": "list[int]"
+   },
+   "max_group_count": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "scaled_total": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "division or power can raise"
+   },
+   "total_of": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "weighted_sum": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   }
+  },
+  "native": [
+   "filter_sum",
+   "max_group_count",
+   "total_of"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "edit_dist",
+  "functions": {
+   "best_match": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: cands",
+    "annotations": {
+     "word": "str",
+     "cands": "list"
+    },
+    "returns": "int"
+   },
+   "bigram_overlap": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   },
+   "common_prefix": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   },
+   "hamming": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   },
+   "levenshtein": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   },
+   "total_length": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: words",
+    "annotations": {
+     "words": "list"
+    },
+    "returns": "int"
+   }
+  },
+  "native": [],
+  "no_unit": []
+ },
+ {
+  "module": "field_valid",
+  "functions": {
+   "field_weight": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "is_simple_email": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "addr": "str"
+    },
+    "returns": "bool"
+   },
+   "is_upper_name": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "looks_like_version": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "normalise_name": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "score_ok": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "score": "int"
+    },
+    "returns": "bool"
+   },
+   "valid_len": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "name": "str"
+    },
+    "returns": "bool"
+   }
+  },
+  "native": [
+   "field_weight",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "float_loops",
+  "functions": {
+   "blend": {
+    "unit": false,
+    "native": false,
+    "gate": "abi-mismatch",
+    "emitted": "double blend(ail_flist v_a, ail_flist v_b, double v_w)",
+    "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b, double v_w'",
+    "annotations": {
+     "a": "list[float]",
+     "b": "list[float]",
+     "w": "float"
+    }
+   },
+   "dot": {
+    "unit": false,
+    "native": false,
+    "gate": "abi-mismatch",
+    "emitted": "double dot(ail_flist v_a, ail_flist v_b)",
+    "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b'",
+    "annotations": {
+     "a": "list[float]",
+     "b": "list[float]"
+    }
+   },
+   "max_abs": {
+    "unit": false,
+    "native": false,
+    "gate": "abi-mismatch",
+    "emitted": "double max_abs(ail_flist v_xs)",
+    "reason": "the emitted prototype is 'ail_flist v_xs'",
+    "annotations": {
+     "xs": "list[float]"
+    }
+   },
+   "mean": {
+    "unit": false,
+    "native": false,
+    "gate": "abi-mismatch",
+    "emitted": "double mean(ail_flist v_xs)",
+    "reason": "the emitted prototype is 'ail_flist v_xs'",
+    "annotations": {
+     "xs": "list[float]"
+    }
+   },
+   "norm": {
+    "unit": false,
+    "native": false,
+    "gate": "abi-mismatch",
+    "emitted": "double norm(ail_flist v_xs)",
+    "reason": "the emitted prototype is 'ail_flist v_xs'",
+    "annotations": {
+     "xs": "list[float]"
+    }
+   },
+   "scale_into": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "xs": "list[float]",
+     "k": "float"
+    },
+    "returns": "list[float]"
+   },
+   "sq_sum": {
+    "unit": false,
+    "native": false,
+    "gate": "abi-mismatch",
+    "emitted": "double sq_sum(ail_flist v_xs)",
+    "reason": "the emitted prototype is 'ail_flist v_xs'",
+    "annotations": {
+     "xs": "list[float]"
+    }
+   },
+   "variance": {
+    "unit": false,
+    "native": false,
+    "gate": "abi-mismatch",
+    "emitted": "double variance(ail_flist v_xs)",
+    "reason": "the emitted prototype is 'ail_flist v_xs'",
+    "annotations": {
+     "xs": "list[float]"
+    }
+   }
+  },
+  "native": [],
+  "no_unit": [
+   "blend",
+   "dot",
+   "max_abs",
+   "mean",
+   "norm",
+   "sq_sum",
+   "variance"
+  ]
+ },
+ {
+  "module": "graph_search",
+  "functions": {
+   "bfs_reach": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: adj",
+    "annotations": {
+     "adj": "list[list[int]]",
+     "start": "int"
+    },
+    "returns": "int"
+   },
+   "build_graph": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "n": "int",
+     "fanout": "int"
+    },
+    "returns": "list[list[int]]"
+   },
+   "degree_sum": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: adj",
+    "annotations": {
+     "adj": "list[list[int]]"
+    },
+    "returns": "int"
+   },
+   "dfs_count": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: adj",
+    "annotations": {
+     "adj": "list[list[int]]",
+     "start": "int"
+    },
+    "returns": "int"
+   },
+   "edges_above": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: adj",
+    "annotations": {
+     "adj": "list[list[int]]",
+     "lo": "int"
+    },
+    "returns": "int"
+   },
+   "max_degree": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: adj",
+    "annotations": {
+     "adj": "list[list[int]]"
+    },
+    "returns": "int"
+   }
+  },
+  "native": [],
+  "no_unit": []
+ },
+ {
+  "module": "hashing",
+  "functions": {
+   "adler32_simple": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: data",
+    "annotations": {
+     "data": "bytes"
+    },
+    "returns": "int"
+   },
+   "crc32_table_free": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: data",
+    "annotations": {
+     "data": "bytes"
+    },
+    "returns": "int"
+   },
+   "djb2": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "a call can raise or have side effects"
+   },
+   "fnv1a": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: data",
+    "annotations": {
+     "data": "bytes"
+    },
+    "returns": "int"
+   },
+   "fnv1a_64": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: data",
+    "annotations": {
+     "data": "bytes"
+    },
+    "returns": "int"
+   },
+   "sum_bytes": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: data",
+    "annotations": {
+     "data": "bytes"
+    },
+    "returns": "int"
+   },
+   "xor_fold": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: data",
+    "annotations": {
+     "data": "bytes"
+    },
+    "returns": "int"
+   }
+  },
+  "native": [],
+  "no_unit": []
+ },
+ {
+  "module": "json_parse",
+  "functions": {
+   "count_tokens": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "depth_of": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "digits_in": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "a call can raise or have side effects"
+   },
+   "document_bytes": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   }
+  },
+  "native": [
+   "count_tokens",
+   "depth_of",
+   "document_bytes"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "matrix",
+  "functions": {
+   "apply_threshold": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "count_negative": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "identity": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "n": "int"
+    },
+    "returns": "list[int]"
+   },
+   "mat_mul": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "a": "list[int]",
+     "b": "list[int]",
+     "n": "int"
+    },
+    "returns": "list[int]"
+   },
+   "max_element": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "row_sums": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "m": "list[int]",
+     "n": "int"
+    },
+    "returns": "list[int]"
+   },
+   "scale_vec": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "trace": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   }
+  },
+  "native": [
+   "apply_threshold",
+   "count_negative",
+   "max_element",
+   "scale_vec"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "rolling_stats",
+  "functions": {
+   "count_over": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "longest_run": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "make_samples": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "n": "int",
+     "seed": "int"
+    },
+    "returns": "list[int]"
+   },
+   "mean_scaled": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "division or power can raise"
+   },
+   "rising_streak": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   },
+   "second_moment": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "total": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "window_sums": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "xs": "list[int]",
+     "w": "int"
+    },
+    "returns": "list[int]"
+   }
+  },
+  "native": [
+   "count_over",
+   "longest_run",
+   "second_moment",
+   "total"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "sort_rank",
+  "functions": {
+   "count_above": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "count_terms": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: words",
+    "annotations": {
+     "words": "list[str]",
+     "vocab_size": "int"
+    },
+    "returns": "list[int]"
+   },
+   "hash_spread": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: words",
+    "annotations": {
+     "words": "list[str]",
+     "vocab_size": "int",
+     "buckets": "int"
+    },
+    "returns": "int"
+   },
+   "max_count": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   },
+   "top_indices": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "counts": "list[int]",
+     "k": "int"
+    },
+    "returns": "list[int]"
+   },
+   "top_score": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "to_c-refused: returning Subscript as a list",
+    "annotations": {
+     "counts": "list[int]",
+     "k": "int"
+    },
+    "returns": "int"
+   },
+   "total_count": {
+    "unit": true,
+    "native": true,
+    "reason": null
+   }
+  },
+  "native": [
+   "count_above",
+   "max_count",
+   "total_count"
+  ],
+  "no_unit": []
+ },
+ {
+  "module": "tokenizer",
+  "functions": {
+   "count_idents": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "a call can raise or have side effects"
+   },
+   "count_keywords": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "indexing can raise"
+   },
+   "digit_count": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "a call can raise or have side effects"
+   },
+   "is_ident_char": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "ch": "str"
+    },
+    "returns": "bool"
+   },
+   "is_ident_start": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "ch": "str"
+    },
+    "returns": "bool"
+   },
+   "longest_ident": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "a call can raise or have side effects"
+   },
+   "token_weight": {
+    "unit": true,
+    "native": false,
+    "gate": "select",
+    "reason": "a call can raise or have side effects"
+   }
+  },
+  "native": [],
+  "no_unit": []
+ },
+ {
+  "module": "tree_build",
+  "functions": {
+   "build_tree": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-return: no return, or contradictory returns",
+    "annotations": {
+     "keys": "list[int]"
+    },
+    "returns": "Tree"
+   },
+   "count_nodes": {
+    "unit": false,
+    "native": false,
+    "gate": "pymix",
+    "reason": "unresolved-param: t",
+    "annotations": {
+     "t": "Tree"
+    },
+    "returns": "int"
+   }
+  },
+  "native": [],
+  "no_unit": []
+ }
+]

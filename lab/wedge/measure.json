@@ -1,0 +1,931 @@
+[
+ {
+  "module": "ast_lint",
+  "cpython_s": 1.7385081070001434,
+  "cpython_rc": 0,
+  "profile": {
+   "count_tag": {
+    "tottime": 1.034215,
+    "cumtime": 1.635553,
+    "ncalls": 955710
+   },
+   "count_ints": {
+    "tottime": 1.033673,
+    "cumtime": 1.625658,
+    "ncalls": 955710
+   },
+   "sum_ints": {
+    "tottime": 1.036528,
+    "cumtime": 1.627474,
+    "ncalls": 955710
+   },
+   "max_depth": {
+    "tottime": 0.859664,
+    "cumtime": 1.320924,
+    "ncalls": 955710
+   },
+   "leaves": {
+    "tottime": 0.860928,
+    "cumtime": 1.322965,
+    "ncalls": 955710
+   },
+   "node_count": {
+    "tottime": 0.84537,
+    "cumtime": 1.313625,
+    "ncalls": 955710
+   },
+   "has_tag": {
+    "tottime": 0.000549,
+    "cumtime": 0.00073,
+    "ncalls": 525
+   },
+   "<module>": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [],
+  "hybrid_rejected": {},
+  "hybrid_s": 1.8420698410000114,
+  "hybrid_rc": 0,
+  "standalone_s": 0.7055398289999175,
+  "standalone_rc": 0
+ },
+ {
+  "module": "bitset_bloom",
+  "cpython_s": 1.8085448639999413,
+  "cpython_rc": 0,
+  "profile": {
+   "<module>": {
+    "tottime": 4e-06,
+    "cumtime": 4e-06,
+    "ncalls": 1
+   },
+   "make_hashes": {
+    "tottime": 0.503442,
+    "cumtime": 0.638718,
+    "ncalls": 2
+   },
+   "popcount": {
+    "tottime": 0.005667,
+    "cumtime": 0.005667,
+    "ncalls": 1
+   },
+   "multiples": {
+    "tottime": 0.021512,
+    "cumtime": 0.021512,
+    "ncalls": 1
+   },
+   "rotate_xor": {
+    "tottime": 0.090632,
+    "cumtime": 0.090632,
+    "ncalls": 1
+   },
+   "bloom_probe": {
+    "tottime": 1.043681,
+    "cumtime": 1.043681,
+    "ncalls": 6
+   },
+   "bloom_set": {
+    "tottime": 0.277576,
+    "cumtime": 0.277576,
+    "ncalls": 2
+   },
+   "set_intersect": {
+    "tottime": 0.029243,
+    "cumtime": 0.042915,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [
+   "popcount",
+   "rotate_xor"
+  ],
+  "hybrid_rejected": {
+   "bloom_probe": "indexing can raise",
+   "multiples": "division or power can raise",
+   "set_intersect": "indexing can raise"
+  },
+  "hybrid_s": 1.8063854170000013,
+  "hybrid_rc": 0,
+  "standalone_s": null,
+  "standalone_rc": 1
+ },
+ {
+  "module": "csv_parse",
+  "cpython_s": 2.0396082830002342,
+  "cpython_rc": 0,
+  "profile": {
+   "sum_column": {
+    "tottime": 0.693372,
+    "cumtime": 0.693372,
+    "ncalls": 1
+   },
+   "field_chars": {
+    "tottime": 0.314898,
+    "cumtime": 0.314898,
+    "ncalls": 350000
+   },
+   "max_field_len": {
+    "tottime": 0.311237,
+    "cumtime": 0.311237,
+    "ncalls": 1
+   },
+   "quote_count": {
+    "tottime": 0.174879,
+    "cumtime": 0.174879,
+    "ncalls": 1
+   },
+   "count_fields": {
+    "tottime": 0.30654,
+    "cumtime": 0.30654,
+    "ncalls": 350000
+   },
+   "split_lines": {
+    "tottime": 0.353054,
+    "cumtime": 0.37936,
+    "ncalls": 1
+   },
+   "<module>": {
+    "tottime": 3e-06,
+    "cumtime": 3e-06,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [
+   "quote_count"
+  ],
+  "hybrid_rejected": {},
+  "hybrid_s": 1.8835684340001535,
+  "hybrid_rc": 0,
+  "standalone_s": 0.14020399899982294,
+  "standalone_rc": 0
+ },
+ {
+  "module": "dataframe_group",
+  "cpython_s": 0.9721957089996067,
+  "cpython_rc": 0,
+  "profile": {
+   "Frame": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "weighted_sum": {
+    "tottime": 0.20651,
+    "cumtime": 0.206511,
+    "ncalls": 1
+   },
+   "total_of": {
+    "tottime": 5e-06,
+    "cumtime": 5e-06,
+    "ncalls": 1
+   },
+   "max_group_count": {
+    "tottime": 5e-06,
+    "cumtime": 5e-06,
+    "ncalls": 1
+   },
+   "scaled_total": {
+    "tottime": 0.104078,
+    "cumtime": 0.104078,
+    "ncalls": 1
+   },
+   "<module>": {
+    "tottime": 5e-06,
+    "cumtime": 1.7e-05,
+    "ncalls": 1
+   },
+   "__init__": {
+    "tottime": 3e-06,
+    "cumtime": 3e-06,
+    "ncalls": 1
+   },
+   "rows": {
+    "tottime": 2e-06,
+    "cumtime": 3e-06,
+    "ncalls": 1
+   },
+   "filter_sum": {
+    "tottime": 0.080066,
+    "cumtime": 0.080066,
+    "ncalls": 1
+   },
+   "group_count": {
+    "tottime": 0.085317,
+    "cumtime": 0.085317,
+    "ncalls": 1
+   },
+   "group_sum": {
+    "tottime": 0.158008,
+    "cumtime": 0.158009,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [
+   "filter_sum",
+   "max_group_count",
+   "total_of"
+  ],
+  "hybrid_rejected": {
+   "scaled_total": "division or power can raise",
+   "weighted_sum": "indexing can raise"
+  },
+  "hybrid_s": 0.8985112489999665,
+  "hybrid_rc": 0,
+  "standalone_s": 0.023008300000128656,
+  "standalone_rc": 0
+ },
+ {
+  "module": "edit_dist",
+  "cpython_s": 2.2315139669999553,
+  "cpython_rc": 0,
+  "profile": {
+   "levenshtein": {
+    "tottime": 3.572535,
+    "cumtime": 5.029634,
+    "ncalls": 24000
+   },
+   "common_prefix": {
+    "tottime": 0.005147,
+    "cumtime": 0.005626,
+    "ncalls": 4000
+   },
+   "hamming": {
+    "tottime": 0.006331,
+    "cumtime": 0.006776,
+    "ncalls": 4000
+   },
+   "bigram_overlap": {
+    "tottime": 0.084331,
+    "cumtime": 0.084773,
+    "ncalls": 4000
+   },
+   "best_match": {
+    "tottime": 0.005761,
+    "cumtime": 4.196374,
+    "ncalls": 4000
+   },
+   "total_length": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "<module>": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [],
+  "hybrid_rejected": {
+   "bigram_overlap": "indexing can raise",
+   "common_prefix": "indexing can raise",
+   "hamming": "indexing can raise",
+   "levenshtein": "indexing can raise"
+  },
+  "hybrid_s": 2.2320012649997807,
+  "hybrid_rc": 0,
+  "standalone_s": 1.945266007999635,
+  "standalone_rc": 0
+ },
+ {
+  "module": "field_valid",
+  "cpython_s": 2.109911047999958,
+  "cpython_rc": 0,
+  "profile": {
+   "is_upper_name": {
+    "tottime": 0.102112,
+    "cumtime": 0.102112,
+    "ncalls": 700000
+   },
+   "score_ok": {
+    "tottime": 0.055373,
+    "cumtime": 0.055373,
+    "ncalls": 700000
+   },
+   "is_simple_email": {
+    "tottime": 0.824323,
+    "cumtime": 0.824323,
+    "ncalls": 1400000
+   },
+   "normalise_name": {
+    "tottime": 0.549497,
+    "cumtime": 0.549497,
+    "ncalls": 700000
+   },
+   "field_weight": {
+    "tottime": 0.462459,
+    "cumtime": 0.462459,
+    "ncalls": 700000
+   },
+   "looks_like_version": {
+    "tottime": 0.134503,
+    "cumtime": 0.134503,
+    "ncalls": 700000
+   },
+   "valid_len": {
+    "tottime": 0.219272,
+    "cumtime": 0.219272,
+    "ncalls": 700000
+   },
+   "<module>": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [
+   "field_weight",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name"
+  ],
+  "hybrid_rejected": {},
+  "hybrid_s": 2.1834537980003006,
+  "hybrid_rc": 0,
+  "standalone_s": 0.11000788000001194,
+  "standalone_rc": 0
+ },
+ {
+  "module": "float_loops",
+  "cpython_s": 2.1983618880003633,
+  "cpython_rc": 0,
+  "profile": {
+   "sq_sum": {
+    "tottime": 0.106686,
+    "cumtime": 0.106686,
+    "ncalls": 1
+   },
+   "<module>": {
+    "tottime": 4e-06,
+    "cumtime": 4e-06,
+    "ncalls": 1
+   },
+   "norm": {
+    "tottime": 0.102897,
+    "cumtime": 0.102897,
+    "ncalls": 1
+   },
+   "dot": {
+    "tottime": 0.268631,
+    "cumtime": 0.268632,
+    "ncalls": 1
+   },
+   "variance": {
+    "tottime": 0.168016,
+    "cumtime": 0.248657,
+    "ncalls": 1
+   },
+   "mean": {
+    "tottime": 0.160594,
+    "cumtime": 0.160596,
+    "ncalls": 2
+   },
+   "scale_into": {
+    "tottime": 0.537542,
+    "cumtime": 0.905127,
+    "ncalls": 1
+   },
+   "max_abs": {
+    "tottime": 0.103081,
+    "cumtime": 0.103081,
+    "ncalls": 1
+   },
+   "blend": {
+    "tottime": 0.346714,
+    "cumtime": 0.346714,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [],
+  "hybrid_rejected": {},
+  "hybrid_s": 2.205730100999972,
+  "hybrid_rc": 0,
+  "standalone_s": 0.1525172910000947,
+  "standalone_rc": 0
+ },
+ {
+  "module": "graph_search",
+  "cpython_s": 2.07618774499997,
+  "cpython_rc": 0,
+  "profile": {
+   "max_degree": {
+    "tottime": 0.003781,
+    "cumtime": 0.006646,
+    "ncalls": 1
+   },
+   "build_graph": {
+    "tottime": 0.098173,
+    "cumtime": 0.142008,
+    "ncalls": 1
+   },
+   "<module>": {
+    "tottime": 4e-06,
+    "cumtime": 4e-06,
+    "ncalls": 1
+   },
+   "degree_sum": {
+    "tottime": 0.00442,
+    "cumtime": 0.00731,
+    "ncalls": 1
+   },
+   "edges_above": {
+    "tottime": 0.011251,
+    "cumtime": 0.011251,
+    "ncalls": 1
+   },
+   "dfs_count": {
+    "tottime": 1.98918,
+    "cumtime": 2.939355,
+    "ncalls": 22
+   },
+   "bfs_reach": {
+    "tottime": 1.807944,
+    "cumtime": 2.564932,
+    "ncalls": 22
+   }
+  },
+  "hybrid_native": [],
+  "hybrid_rejected": {},
+  "hybrid_s": 2.0226505529999486,
+  "hybrid_rc": 0,
+  "standalone_s": 1.962978404000296,
+  "standalone_rc": 0
+ },
+ {
+  "module": "hashing",
+  "cpython_s": 1.6646090220001497,
+  "cpython_rc": 0,
+  "profile": {
+   "adler32_simple": {
+    "tottime": 0.339365,
+    "cumtime": 0.339365,
+    "ncalls": 24
+   },
+   "sum_bytes": {
+    "tottime": 0.230294,
+    "cumtime": 0.230294,
+    "ncalls": 48
+   },
+   "xor_fold": {
+    "tottime": 0.101998,
+    "cumtime": 0.101998,
+    "ncalls": 24
+   },
+   "fnv1a": {
+    "tottime": 0.381764,
+    "cumtime": 0.381764,
+    "ncalls": 24
+   },
+   "fnv1a_64": {
+    "tottime": 0.416252,
+    "cumtime": 0.416252,
+    "ncalls": 24
+   },
+   "djb2": {
+    "tottime": 0.310155,
+    "cumtime": 0.436482,
+    "ncalls": 24
+   },
+   "<module>": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "crc32_table_free": {
+    "tottime": 0.013557,
+    "cumtime": 0.013557,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [],
+  "hybrid_rejected": {
+   "djb2": "a call can raise or have side effects"
+  },
+  "hybrid_s": 1.6663708259998202,
+  "hybrid_rc": 0,
+  "standalone_s": null,
+  "standalone_rc": 1
+ },
+ {
+  "module": "json_parse",
+  "cpython_s": 1.414601957999821,
+  "cpython_rc": 0,
+  "profile": {
+   "parse_string": {
+    "tottime": 0.480095,
+    "cumtime": 0.539461,
+    "ncalls": 1080000
+   },
+   "parse_object": {
+    "tottime": 0.504222,
+    "cumtime": 2.919282,
+    "ncalls": 120000
+   },
+   "parse_number": {
+    "tottime": 0.302354,
+    "cumtime": 0.396244,
+    "ncalls": 240000
+   },
+   "parse_array": {
+    "tottime": 0.258085,
+    "cumtime": 3.105816,
+    "ncalls": 120003
+   },
+   "parse_value": {
+    "tottime": 0.428688,
+    "cumtime": 3.105824,
+    "ncalls": 1080003
+   },
+   "digits_in": {
+    "tottime": 0.265212,
+    "cumtime": 0.482879,
+    "ncalls": 1
+   },
+   "depth_of": {
+    "tottime": 0.141773,
+    "cumtime": 0.141773,
+    "ncalls": 1
+   },
+   "count_tokens": {
+    "tottime": 0.05244,
+    "cumtime": 0.05244,
+    "ncalls": 1
+   },
+   "document_bytes": {
+    "tottime": 1e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "__init__": {
+    "tottime": 3e-06,
+    "cumtime": 3e-06,
+    "ncalls": 3
+   },
+   "<module>": {
+    "tottime": 3e-06,
+    "cumtime": 1.6e-05,
+    "ncalls": 1
+   },
+   "Parser": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "skip_ws": {
+    "tottime": 0.757384,
+    "cumtime": 0.979125,
+    "ncalls": 4080006
+   }
+  },
+  "hybrid_native": [
+   "count_tokens",
+   "depth_of",
+   "document_bytes"
+  ],
+  "hybrid_rejected": {
+   "digits_in": "a call can raise or have side effects"
+  },
+  "hybrid_s": 1.2745991829997365,
+  "hybrid_rc": 0,
+  "standalone_s": 1.4232889640002213,
+  "standalone_rc": 0
+ },
+ {
+  "module": "matrix",
+  "cpython_s": 2.893604699000207,
+  "cpython_rc": 0,
+  "profile": {
+   "trace": {
+    "tottime": 0.000111,
+    "cumtime": 0.000111,
+    "ncalls": 3
+   },
+   "row_sums": {
+    "tottime": 0.006001,
+    "cumtime": 0.006031,
+    "ncalls": 1
+   },
+   "<module>": {
+    "tottime": 4e-06,
+    "cumtime": 4e-06,
+    "ncalls": 1
+   },
+   "count_negative": {
+    "tottime": 0.001903,
+    "cumtime": 0.001903,
+    "ncalls": 1
+   },
+   "mat_mul": {
+    "tottime": 2.998505,
+    "cumtime": 2.998505,
+    "ncalls": 1
+   },
+   "apply_threshold": {
+    "tottime": 0.002547,
+    "cumtime": 0.002547,
+    "ncalls": 1
+   },
+   "scale_vec": {
+    "tottime": 0.002751,
+    "cumtime": 0.002751,
+    "ncalls": 1
+   },
+   "identity": {
+    "tottime": 0.000292,
+    "cumtime": 0.000292,
+    "ncalls": 1
+   },
+   "max_element": {
+    "tottime": 0.001671,
+    "cumtime": 0.001671,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [
+   "apply_threshold",
+   "count_negative",
+   "max_element",
+   "scale_vec"
+  ],
+  "hybrid_rejected": {
+   "trace": "indexing can raise"
+  },
+  "hybrid_s": 2.905433420999998,
+  "hybrid_rc": 0,
+  "standalone_s": 0.023357353999927,
+  "standalone_rc": 0
+ },
+ {
+  "module": "rolling_stats",
+  "cpython_s": 2.6640110379998987,
+  "cpython_rc": 0,
+  "profile": {
+   "longest_run": {
+    "tottime": 0.106023,
+    "cumtime": 0.106023,
+    "ncalls": 2
+   },
+   "make_samples": {
+    "tottime": 0.689579,
+    "cumtime": 0.907464,
+    "ncalls": 1
+   },
+   "rising_streak": {
+    "tottime": 0.408853,
+    "cumtime": 0.408856,
+    "ncalls": 2
+   },
+   "total": {
+    "tottime": 0.069515,
+    "cumtime": 0.069515,
+    "ncalls": 1
+   },
+   "<module>": {
+    "tottime": 1.7e-05,
+    "cumtime": 1.7e-05,
+    "ncalls": 1
+   },
+   "window_sums": {
+    "tottime": 1.721365,
+    "cumtime": 2.370891,
+    "ncalls": 3
+   },
+   "count_over": {
+    "tottime": 0.099598,
+    "cumtime": 0.099598,
+    "ncalls": 2
+   },
+   "second_moment": {
+    "tottime": 0.115938,
+    "cumtime": 0.115938,
+    "ncalls": 1
+   },
+   "mean_scaled": {
+    "tottime": 0.11232,
+    "cumtime": 0.112322,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [
+   "count_over",
+   "longest_run",
+   "second_moment",
+   "total"
+  ],
+  "hybrid_rejected": {
+   "mean_scaled": "division or power can raise",
+   "rising_streak": "indexing can raise"
+  },
+  "hybrid_s": 2.4239380149997487,
+  "hybrid_rc": 0,
+  "standalone_s": 0.12018489699994461,
+  "standalone_rc": 0
+ },
+ {
+  "module": "sort_rank",
+  "cpython_s": 1.5039198479998959,
+  "cpython_rc": 0,
+  "profile": {
+   "top_indices": {
+    "tottime": 3.8e-05,
+    "cumtime": 5.2e-05,
+    "ncalls": 2
+   },
+   "<module>": {
+    "tottime": 4e-06,
+    "cumtime": 4e-06,
+    "ncalls": 1
+   },
+   "max_count": {
+    "tottime": 1e-06,
+    "cumtime": 1e-06,
+    "ncalls": 1
+   },
+   "hash_spread": {
+    "tottime": 1.060806,
+    "cumtime": 1.554518,
+    "ncalls": 1
+   },
+   "count_above": {
+    "tottime": 1e-06,
+    "cumtime": 1e-06,
+    "ncalls": 1
+   },
+   "total_count": {
+    "tottime": 1e-06,
+    "cumtime": 1e-06,
+    "ncalls": 1
+   },
+   "top_score": {
+    "tottime": 2e-06,
+    "cumtime": 2.1e-05,
+    "ncalls": 1
+   },
+   "count_terms": {
+    "tottime": 1.064552,
+    "cumtime": 1.552818,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [
+   "count_above",
+   "max_count",
+   "total_count"
+  ],
+  "hybrid_rejected": {},
+  "hybrid_s": 1.5306433149999066,
+  "hybrid_rc": 0,
+  "standalone_s": 1.6090502189999825,
+  "standalone_rc": 0
+ },
+ {
+  "module": "tokenizer",
+  "cpython_s": 0.8847033270003521,
+  "cpython_rc": 0,
+  "profile": {
+   "digit_count": {
+    "tottime": 0.23823,
+    "cumtime": 0.436645,
+    "ncalls": 1
+   },
+   "token_weight": {
+    "tottime": 0.502536,
+    "cumtime": 0.86465,
+    "ncalls": 1
+   },
+   "is_ident_char": {
+    "tottime": 0.506252,
+    "cumtime": 0.813518,
+    "ncalls": 3760000
+   },
+   "count_idents": {
+    "tottime": 0.447494,
+    "cumtime": 1.147463,
+    "ncalls": 1
+   },
+   "longest_ident": {
+    "tottime": 0.441804,
+    "cumtime": 1.137262,
+    "ncalls": 1
+   },
+   "is_ident_start": {
+    "tottime": 0.408052,
+    "cumtime": 0.621702,
+    "ncalls": 2840000
+   },
+   "<module>": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "count_keywords": {
+    "tottime": 0.22248,
+    "cumtime": 0.222481,
+    "ncalls": 1
+   }
+  },
+  "hybrid_native": [],
+  "hybrid_rejected": {
+   "count_idents": "a call can raise or have side effects",
+   "count_keywords": "indexing can raise",
+   "digit_count": "a call can raise or have side effects",
+   "longest_ident": "a call can raise or have side effects",
+   "token_weight": "a call can raise or have side effects"
+  },
+  "hybrid_s": 0.8827719010000692,
+  "hybrid_rc": 0,
+  "standalone_s": 0.09320988000035868,
+  "standalone_rc": 0
+ },
+ {
+  "module": "tree_build",
+  "cpython_s": 1.9696876339999108,
+  "cpython_rc": 0,
+  "profile": {
+   "insert": {
+    "tottime": 0.107829,
+    "cumtime": 0.121433,
+    "ncalls": 60000
+   },
+   "build_tree": {
+    "tottime": 0.006536,
+    "cumtime": 0.12797,
+    "ncalls": 1
+   },
+   "_inorder": {
+    "tottime": 2.153489,
+    "cumtime": 2.153489,
+    "ncalls": 9720081
+   },
+   "_depth": {
+    "tottime": 1.806173,
+    "cumtime": 1.806173,
+    "ncalls": 9720081
+   },
+   "Tree": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "inorder_sum": {
+    "tottime": 6.9e-05,
+    "cumtime": 2.153558,
+    "ncalls": 81
+   },
+   "depth_sum": {
+    "tottime": 6.9e-05,
+    "cumtime": 1.806242,
+    "ncalls": 81
+   },
+   "Node": {
+    "tottime": 1e-06,
+    "cumtime": 1e-06,
+    "ncalls": 1
+   },
+   "count_nodes": {
+    "tottime": 1e-06,
+    "cumtime": 1e-06,
+    "ncalls": 1
+   },
+   "_height": {
+    "tottime": 1.727395,
+    "cumtime": 1.727395,
+    "ncalls": 9720081
+   },
+   "height": {
+    "tottime": 5.6e-05,
+    "cumtime": 1.727451,
+    "ncalls": 81
+   },
+   "<module>": {
+    "tottime": 3e-06,
+    "cumtime": 2.5e-05,
+    "ncalls": 1
+   },
+   "__init__": {
+    "tottime": 2e-06,
+    "cumtime": 2e-06,
+    "ncalls": 1
+   },
+   "min_key": {
+    "tottime": 3.2e-05,
+    "cumtime": 3.2e-05,
+    "ncalls": 81
+   },
+   "max_key": {
+    "tottime": 4.6e-05,
+    "cumtime": 4.6e-05,
+    "ncalls": 81
+   }
+  },
+  "hybrid_native": [],
+  "hybrid_rejected": {},
+  "hybrid_s": 1.9872414390001722,
+  "hybrid_rc": 0,
+  "standalone_s": 0.1771014959999775,
+  "standalone_rc": 0
+ }
+]
