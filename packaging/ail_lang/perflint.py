@@ -42,7 +42,7 @@ MESSAGES = {
     "P2-del": "del L[0] shifts every remaining item inside a loop (O(n) per call)",
     "P3": "string concatenation on %s inside a loop copies the whole string (O(n^2))",
     "P4-sort": "sorting the unchanged list %r on every iteration (O(n log n) per iteration)",
-    "P4-call": "%s(%r) rebuilds/reduces the unchanged list on every iteration",
+    "P4-call": "%s(%s) rebuilds/reduces the unchanged list on every iteration",
     "P5": "nested loops compare every pair to match by key (O(n*m)); outer loop at line %d",
     "P6": "rebuilding the list %r with a concatenation on every iteration (O(n^2))",
 }
@@ -464,8 +464,20 @@ def _loop_parts(loop):
     return parts
 
 
+def _loop_target_names(node):
+    names = set()
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        names |= _target_names(node.target)
+    elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        for generator in node.generators:
+            names |= _target_names(generator.target)
+    return names
+
+
 def _loop_touches(loop, name, ignore=None):
     """Whether this loop rebinds or mutates `name` in its own iteration (nested scopes excluded)."""
+    if name in _loop_target_names(loop.node):
+        return True
     for node in _walk_no_scopes(_loop_parts(loop)):
         if node is ignore:
             continue
@@ -477,6 +489,10 @@ def _loop_touches(loop, name, ignore=None):
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             if _contains_name(node.target, name):
                 return True
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for generator in node.generators:
+                if _contains_name(generator.target, name):
+                    return True
         elif isinstance(node, ast.Delete):
             for target in node.targets:
                 if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
