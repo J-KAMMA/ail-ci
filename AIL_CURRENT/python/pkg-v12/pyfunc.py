@@ -28234,6 +28234,8 @@ def _par_for(node, ctx, ind):
         ctx.parts.add('PARRED')                 # cruntime.py: the exact shared-int reduction
     if info.get('cap'):
         ctx.parts.add('PARN')                   # typedpar.py: at most `workers` threads
+    if info.get('appends'):
+        ctx.parts.add('PARBUF')                 # cruntime.py: one appended list, per-block buffers
     first_local = len(ctx.locals)
     ctx.par_depth += 1
     try:
@@ -28244,6 +28246,7 @@ def _par_for(node, ctx, ind):
                                   'writes': ['v_' + n for n in info['writes']],
                                   'fresh': ['v_' + n for n in ctx.locals[first_local:]],
                                   'reductions': info.get('reductions') or [],
+                                  'appends': info.get('appends') or [],
                                   'line': getattr(node, 'lineno', None)}
     if info.get('cap'):
         ctx.par_regions[info['k']]['cap'] = 'v_' + info['cap']
@@ -28299,7 +28302,24 @@ def _par_outline(generated, sig, decls, ctx, cname):
         if facts is None:
             raise Unsupported('parallel for: internal error, region %d was not recorded' % k)
         where = ' (line %d)' % facts['line'] if facts['line'] else ''
+        pb = None
+        if facts.get('appends'):
+            # D3: `out.append(v)` was compiled to `ail_list_push(&v_out, ...)` (or flist/slist);
+            # each block pushes into its own buffer instead, joined in block order after the run.
+            aname = 'v_' + facts['appends'][0]
+            hit = re.search(r'ail_(list|flist|slist)_push\(&' + re.escape(aname) + r',', text)
+            if hit is None:
+                raise Unsupported('parallel for%s: the body appends to %r, but the generated code '
+                                  'does not push into it' % (where, facts['appends'][0]))
+            pb = {'name': aname, 'kind': {'list': '0', 'flist': '1', 'slist': '2'}[hit.group(1)]}
+            text = re.sub(r'ail_(?:list|flist|slist)_push\(&' + re.escape(aname) + r',',
+                          'ail_par_buf_push_%s(_pb%d, ' % (
+                              {'list': 'i', 'flist': 'f', 'slist': 's'}[hit.group(1)], k), text)
         bad = sorted({h for h in re.findall(r'\b(?:ail|ck)_\w+', text) if h not in _PAR_HELPERS})
+        bad = [h for h in bad if h not in ('ail_par_buf_push_i', 'ail_par_buf_push_f',
+                                           'ail_par_buf_push_s')]
+        if pb is not None:
+            bad = [h for h in bad if h != 'ail_str']   # the type name of a str literal element
         if facts.get('cap') and 'ail_raise_msg' in bad:
             bad.remove('ail_raise_msg')     # PARN makes it trap on a worker (cruntime._piece), like ail_die
         if bad and set(bad) <= {'ail_list', 'ail_flist'}:
@@ -28339,6 +28359,8 @@ def _par_outline(generated, sig, decls, ctx, cname):
             captured.append((name, kind))
         worker = '%s__par%d' % (cname, k)
         head = ['    int64_t %s = _lo, %s = _hi;\n' % (facts['lo'], facts['hi'])]
+        if pb is not None:
+            head += ['    ail_par_buf *_pb%d = ail_par_buf_for(_lo);\n' % k]
         head += ['    %s %s = *(%s *)_a[%d];\n' % (kind, name, kind, i)
                  for i, (name, kind) in enumerate(captured)]
         priv = ['    %s\n' % local[name][1] for name in private]
@@ -28381,6 +28403,11 @@ def _par_outline(generated, sig, decls, ctx, cname):
                        facts['cap'] if facts.get('cap') else '0', len(reds), k, worker, back))
         lines = ['static void %s(void **_a, int64_t _lo, int64_t _hi) {\n' % worker] + head + priv + [text, '}\n']
         workers.append(''.join(lines))
+        if pb is not None:
+            return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n%s'
+                    '        ail_par_buf_run(%s, _pa%d, %s, %s, &_ps%d, &%s, %s, %s);\n    }\n'
+                    % (k, k, array, guards, worker, k, facts['lo'], facts['hi'], k, pb['name'], pb['kind'],
+                       facts['cap'] if facts.get('cap') else '0'))
         if facts.get('cap'):
             return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n%s'
                     '        ail_par_run_n(%s, _pa%d, %s, %s, &_ps%d, %s);\n    }\n'

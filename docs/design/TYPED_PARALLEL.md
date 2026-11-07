@@ -16,9 +16,10 @@ refuses one inside a struct method or a class (`parallel.py:455-466`).
 The body may write only names it assigns itself and elements `xs[i]`, `xs[i*K + j]` (with
 `j` from an inner `for j in range(0, K)`) or `xs[i*K + c]`; every read and write of the same list
 must use one provably distinct shape (`parallel.py:54-72`, `parallel.py:142-162`). `check_owned`
-enforces that uniqueness (`parallel.py:264-271`). An expression statement (a call, `print`,
-`append`) is refused (`parallel.py:131-139`), as are `try`, `return`, a nested parallel loop and a
-runtime step (`parallel.py:82-140`, `parallel.py:405-413`, `parallel.py:447`). A called function
+enforces that uniqueness (`parallel.py:264-271`). An expression statement (a call, `print`, `append`)
+is refused (`parallel.py:131-139`) -- except the one buffered `out.append(v)` shape of D3 (below) --
+as are `try`, `return`, a nested parallel loop and a runtime step (`parallel.py:82-140`,
+`parallel.py:405-413`, `parallel.py:447`). A called function
 must be a top-level int/float-only function with no `@extern` and no recursion
 (`parallel.py:283-303`).
 
@@ -91,6 +92,36 @@ The `sum(ex.map(f, xs))` / `sum(pool.map(f, xs))` shapes already lower through `
 map exception after the overflow index wins, as in the sequential map); fbred3 changes nothing
 there. `sum(parallel_map)` inside a parallel body stays refused by the container-returning-call
 rule. See `lab/race/reduce/RESULTS.md`.
+
+## Appends: `out.append(v)` in a parallel body (fbpmap3, owner decision D3)
+
+A map-like body (the `par_range` loop, including the loop `typedpar` inlines a scoped
+`Thread` list into; not a free-running thread list) may append to **one** list `out` defined
+before the loop, when its only use in the body is `out.append(v)` -- any number of times per
+iteration, conditional or not, with `v` an int, float or str value.
+`parallel._Body._append` accepts that expression statement, refuses any other use of `out`, a
+second appended list, a list of objects and a body that also reduces, and records the name in the
+loop's `.par` facts (`appends`). The receiver names are collected from the whole body before the
+walk, so a read, an element write or `len(out)` that textually precedes the first append is refused
+too (the walk order does not matter). `pyfunc._par_for` then asks for the `PARBUF` part.
+Scope in v1: the Python surface only (`AIL_SURFACE=python`); the AIL surface's `parallel for`
+keeps the old refusal.
+
+`_par_outline` rewrites the emitted `ail_list_push(&v_out, ...)` (or `ail_flist_push` /
+`ail_slist_push`) into `ail_par_buf_push_i/f/s(_pbK, ...)` and declares
+`ail_par_buf *_pbK = ail_par_buf_for(_lo)` in the worker. `cruntime.PARBUF` keeps one buffer per
+block start (the worker's `_lo`), grows it with `realloc` (thread-safe, never shared), and after the
+region appends the buffers to `out` in block-start order with `ail_list_push` /
+`ail_flist_push` / `ail_slist_push`. Blocks are contiguous, so that is the sequential order. A str
+buffer holds `ail_str` views and the join copies the structs, so there is no extra retain.
+
+`ail_par_buf_run` is the `ail_par_run` gating (the timed probe prefix, the guided block size) with
+the final re-raise moved **after** the join: a block that traps keeps its partial buffer, and the
+join stops after the failing block's start, so `out` holds exactly what the sequential loop leaves
+before its exception. It takes the region's worker cap and sets `ail_par_cap` /
+`ail_par_cap_inside` exactly as `ail_par_run_n` does, so a capped append region keeps its bound. The run then raises the recorded exception on the calling thread. Raw-element
+buffers mean the whole output is held twice at the join, which is the owner's 2x RSS allowance.
+Probes and numbers: `lab/race/append/RESULTS.md`; test: `AIL_CURRENT/test_ail_par_append.py`.
 
 ## Which path a program gets
 

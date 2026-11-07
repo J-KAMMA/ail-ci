@@ -6,7 +6,8 @@ time, with Python's own APIs. Built so far:
 * `ThreadPoolExecutor(max_workers=k).map(f, xs[, ys])` and `multiprocessing.Pool(k).map(f, xs)` over a
   module-level function of int / float that only computes; results in order.
 * `Thread(target=w, args=(k, ...))` for k in range(n), started and joined in the same block (scoped
-  threads): `w` may read lists and scalars and write `out[k]` only.
+  threads): `w` may read lists and scalars, write `out[k]`, or append into one list (D3: per-block
+  buffers joined in iteration order).
 
 Every program is built with the typed path alone (AIL_NO_GENERAL=1), run at several worker counts (the
 program reads it from argv), and must print what CPython prints, with the same exit status.
@@ -317,6 +318,42 @@ def main():
 main()
 '''
 
+THREAD_APPEND = r'''
+import sys
+import threading
+
+
+def grow(k: int, out: list[int]) -> None:
+    out.append(k * k)
+
+
+def grow_twice(k: int, out: list[int]) -> None:
+    out.append(k)
+    if k % 2 == 0:
+        out.append(-k)
+
+
+def main():
+    T = int(sys.argv[1])
+    out = []
+    ts = [threading.Thread(target=grow, args=(k, out)) for k in range(T)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    print(len(out), sum(out))
+    out2 = []
+    ts2 = [threading.Thread(target=grow_twice, args=(k, out2)) for k in range(T)]
+    for t2 in ts2:
+        t2.start()
+    for t2 in ts2:
+        t2.join()
+    print(len(out2), sum(out2))
+
+
+main()
+'''
+
 STRESS_MAP = r'''
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -453,6 +490,9 @@ class Differential(Base):
     def test_threads(self):
         self.compare("threads", THREADS, argvs=(("1",), ("2",), ("7",), ("16",)))
 
+    def test_thread_appends(self):
+        self.compare("thread_append", THREAD_APPEND, argvs=(("1",), ("3",), ("16",)))
+
 
 class Stress(Base):
     def test_many_maps(self):
@@ -562,20 +602,6 @@ def main():
         print(f.done())
 main()
 ''', ("the future 'f' is used other than as",)),
-    (r'''
-import threading
-def grow(k: int, out: list[int]) -> None:
-    out.append(k)
-def main():
-    out: list[int] = []
-    ts = [threading.Thread(target=grow, args=(k, out)) for k in range(4)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    print(len(out))
-main()
-''', ("not run in parallel", "is not allowed")),
     (r'''
 import threading
 def put(k: int, out: list[int]) -> None:
