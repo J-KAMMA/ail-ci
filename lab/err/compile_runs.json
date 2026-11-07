@@ -1,0 +1,1303 @@
+[
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/berth_sim/ail-0.py",
+  "rc": 0,
+  "seconds": 9.49,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because '_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another; a captured row has one arity, the same rule an ordinary list of records already follows; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because '_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another; a captured row has one arity, the same rule an ordinary list of records already follows; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-wkyeqdg8/exe\", \"bytes\": 192800, \"sha256\": \"b5c437670aeaa43c823626d5a9878f19763401fbf8bedadefd41c36ea94f9519\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/csv_rollup/ail-0.py",
+  "rc": 0,
+  "seconds": 19.93,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because comparing a str with a number; str and bytes are separate types here and a str is never a number -- this is refused by name rather than answered. write instead: compare like with like: a byte from bytes/sys.stdin.buffer is an int (`b == 97`, or `b == ord(\"a\")`), a character of a str is a str (`c == \"a\"`); convert with `chr(b)` or `ord(c)`; run w"
+   ]
+  ],
+  "stderr": "note: lab/vibe/programs/csv_rollup/ail-0.py:8:9: built on the general path (about 20x slower) because comparing a str with a number; str and bytes are separate types here and a str is never a number -- this is refused by name rather than answered. write instead: compare like with like: a byte from bytes/sys.stdin.buffer is an int (`b == 97`, or `b == ord(\"a\")`), a character of a str is a str (`c == \"a\"`); convert with `chr(b)` or `ord(c)`; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-l_zvbbv2/exe\", \"bytes\": 432096, \"sha256\": \"00db11c63167bfec15df9f51ec29be59f173fe86e230a766f25ba372f70e9ff2\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/echo_pack/ail-0.py",
+  "rc": 0,
+  "seconds": 20.59,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because `positions.get(key)` with one argument needs Optional values (s8): prove `key in positions` and read `positions[key]`, or pass the missing row as a second argument. Original refusal: d.get(k) with one argument gives None for a missing key, and AIL has no None for an int, float, str or bytes value. write instead: give the default, `d.get(k, -1)` "
+   ]
+  ],
+  "stderr": "note: lab/vibe/programs/echo_pack/ail-0.py:20:13: built on the general path (about 20x slower) because `positions.get(key)` with one argument needs Optional values (s8): prove `key in positions` and read `positions[key]`, or pass the missing row as a second argument. Original refusal: d.get(k) with one argument gives None for a missing key, and AIL has no None for an int, float, str or bytes value. write instead: give the default, `d.get(k, -1)` (or \"\" / 0.0), or test `k in d` first; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-oi4dstx5/exe\", \"bytes\": 442704, \"sha256\": \"f8f2c15317aaf182a1dc47fcee612d9fcbaa621cabe49bd9509f970210cf3674\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/ledger_bin/ail-0.py",
+  "rc": 0,
+  "seconds": 23.37,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because `accounts[rid] = [name, initial, True]` uses `accounts` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused. Rewrite: keep the groups in a list of class instances and map each key to its index with a `dict[str, int]`: `@datac"
+   ]
+  ],
+  "stderr": "note: lab/vibe/programs/ledger_bin/ail-0.py:141:17: built on the general path (about 20x slower) because `accounts[rid] = [name, initial, True]` uses `accounts` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused. Rewrite: keep the groups in a list of class instances and map each key to its index with a `dict[str, int]`: `@dataclass class G: items: list[str]` `idx: dict[str, int] = {}` `groups: list[G] = []` then `if k not in idx: idx[k] = len(groups); groups.append(G([])) groups[idx[k]].items.append(w)` (or keep parallel lists indexed through the int dict). Original refusal: `[name, initial, True]` mixes bools and numbers; Python keeps each value's own type and a number would print as 1 / 0. write instead: make every operand a bool (or `int(...)` every operand); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-j4kq_ej7/exe\", \"bytes\": 489928, \"sha256\": \"7d7781c23a0f88c359c6483868a4f9388abb0a3ca1c4e658e3878dfa7f81bb14\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/scar_life/ail-0.py",
+  "rc": 0,
+  "seconds": 20.77,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because class list comprehensions are unsupported; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because class list comprehensions are unsupported; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-8gjdz3xi/exe\", \"bytes\": 462160, \"sha256\": \"15a49ddcc2418447b7e643112e1041dd916e1ea08edbd2332e0f11d5508e6063\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/tally_lang/ail-0.py",
+  "rc": 0,
+  "seconds": 30.18,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because `{'type': 'when', 'line': lineno, 'bod...` mixes bools and numbers; Python keeps each value's own type and a number would print as 1 / 0. write instead: make every operand a bool (or `int(...)` every operand); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: lab/vibe/programs/tally_lang/ail-0.py:220:9: built on the general path (about 20x slower) because `{'type': 'when', 'line': lineno, 'bod...` mixes bools and numbers; Python keeps each value's own type and a number would print as 1 / 0. write instead: make every operand a bool (or `int(...)` every operand); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-l9n59bh6/exe\", \"bytes\": 597928, \"sha256\": \"df0e93be66f22f16078f0b5c4facd6856547c3aeb224ef4d3c1e86b8b2e8b8c9\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/term_rank/ail-0.py",
+  "rc": 0,
+  "seconds": 23.27,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because make_term returns bytes on one path and a number on another; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because make_term returns bytes on one path and a number on another; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-rjc0di7j/exe\", \"bytes\": 475656, \"sha256\": \"a284306cc8d2f9bea8ed558545fffc1e29a055a106c92149d6783cf38944cccc\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/w2/lab/vibe/programs/ticket_audit/ail-0.py",
+  "rc": 0,
+  "seconds": 47.29,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because while-else is unsupported. write instead: a flag set before the loop, `done = True` when the loop ends normally, and `if done:` after it; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: lab/vibe/programs/ticket_audit/ail-0.py:242:5: built on the general path (about 20x slower) because while-else is unsupported. write instead: a flag set before the loop, `done = True` when the loop ends normally, and `if done:` after it; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-fmomrjxr/exe\", \"bytes\": 571672, \"sha256\": \"bc7bc610630b242d8dfe27c79a0db7eeb20c8ea3b837dbf871e95629fa120bd6\"}\n",
+  "set": "vibe"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_000.py",
+  "rc": 0,
+  "seconds": 0.77,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-rlocs30j/exe\", \"bytes\": 21944, \"sha256\": \"0336359b0141c592b4df7fe2597188c6631ace5d25b1c2cf3f8272cbfd8a652c\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_002.py",
+  "rc": 0,
+  "seconds": 1.14,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-ewgqvmzp/exe\", \"bytes\": 79680, \"sha256\": \"a2d71f55d4cbb8f901f4d95a1d53de281bebbe0b786f5062726e9ea6ee53bf9c\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_004.py",
+  "rc": 0,
+  "seconds": 4.79,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because 'titles' is annotated tuple[str, ...], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, int], set[int], set[str], or a class name (no generics such as list[T], no Optional/Union); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g00_004.py:14:15: built on the general path (about 20x slower) because 'titles' is annotated tuple[str, ...], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, int], set[int], set[str], or a class name (no generics such as list[T], no Optional/Union); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-vfgblyja/exe\", \"bytes\": 124752, \"sha256\": \"cfa8004a618798e333d98e7ceb250abe0f053bdec5cf661ea3540f9001d7cc2d\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_006.py",
+  "rc": 0,
+  "seconds": 1.04,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-e47c09xa/exe\", \"bytes\": 34408, \"sha256\": \"f958201a4996241cd06bcb4b33d18b58884384c19d2bed288b9cd96dcbb3d0b8\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_008.py",
+  "rc": 0,
+  "seconds": 5.69,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because tuple assignment to something other than names or class fields; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g00_008.py:44:5: built on the general path (about 20x slower) because tuple assignment to something other than names or class fields; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-m6qo665f/exe\", \"bytes\": 180600, \"sha256\": \"ab7c386648d3417e4ce385144e56327255b8ba119d31ccde582917618ed3c26e\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_010.py",
+  "rc": 0,
+  "seconds": 19.68,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-xydlpawf/exe\", \"bytes\": 224336, \"sha256\": \"db14a5a15fb98eb67e07863b98c1fc425ff48a12f0799cb4698f509fd0873a34\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_012.py",
+  "rc": 0,
+  "seconds": 3.95,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because .isascii() on a str is not built. write instead: a str method that is built -- strip/lstrip/rstrip, find/rfind/index/rindex/count, startswith/endswith, split/rsplit/splitlines, lower/upper, join, the is*() predicates -- or a loop over the characters; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g00_012.py:12:5: built on the general path (about 20x slower) because .isascii() on a str is not built. write instead: a str method that is built -- strip/lstrip/rstrip, find/rfind/index/rindex/count, startswith/endswith, split/rsplit/splitlines, lower/upper, join, the is*() predicates -- or a loop over the characters; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-6s3jw_qz/exe\", \"bytes\": 148696, \"sha256\": \"bbe83b6b851bd5e7b66cc39da7e00fe3a699b6b3aaaff57cf016854b92ed6e94\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_014.py",
+  "rc": 0,
+  "seconds": 1.02,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-gcqa1yv8/exe\", \"bytes\": 30496, \"sha256\": \"fb26a46bdad96f74ff660b18921189dbda021f5f05b80f22fa6ecd03de0d1295\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_016.py",
+  "rc": 0,
+  "seconds": 10.43,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a generator expression saved as a value (the general path builds it lazily); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because a generator expression saved as a value (the general path builds it lazily); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-1230y1wu/exe\", \"bytes\": 259936, \"sha256\": \"6a0277e01b58cba4b3d96d077687e6a07ae5da49cd4538524878f78421b13482\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_018.py",
+  "rc": 0,
+  "seconds": 4.38,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because this use of a str as an iterable is not built (plain `for c in s` is); for an index keep a counter: `i = 0; for c in s: ...; i += 1`; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g00_018.py:22:5: built on the general path (about 20x slower) because this use of a str as an iterable is not built (plain `for c in s` is); for an index keep a counter: `i = 0; for c in s: ...; i += 1`; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-gc9xvljw/exe\", \"bytes\": 149368, \"sha256\": \"c7a5bfee06c220c83029fb2d5aad30babdf93d333f38c0e578028fc3f05c80ca\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_020.py",
+  "rc": 0,
+  "seconds": 61.81,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because extract_hashtags() class list return type disagrees with its annotation; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g00_020.py:16:1: built on the general path (about 20x slower) because extract_hashtags() class list return type disagrees with its annotation; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-6dv7h31j/exe\", \"bytes\": 672992, \"sha256\": \"808a4b41fcf1b2f05543804b395e1cc7ad26a0d06eb50411d1e70838c3fd9817\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_022.py",
+  "rc": 0,
+  "seconds": 1.48,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-ed88iufa/exe\", \"bytes\": 43640, \"sha256\": \"0896562cc552e70aecdc0e99a3e81ed1238544f32af64e19a7bda982cc802334\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_024.py",
+  "rc": 0,
+  "seconds": 1.89,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-nnczafnd/exe\", \"bytes\": 47968, \"sha256\": \"509834699e884f8cea0cb1c3c8b598e4140d07fd99baeaf8eda025d8a3c42443\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_026.py",
+  "rc": 0,
+  "seconds": 1.77,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-m9409m9z/exe\", \"bytes\": 68136, \"sha256\": \"4aa23b9580b9c0dc6276c2a738989b720697c3cab5e61f0cf3b1b497b3f5225b\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_028.py",
+  "rc": 0,
+  "seconds": 17.79,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-l8zwp9hj/exe\", \"bytes\": 174264, \"sha256\": \"f0104216b8a021f8ac082fe22a82d5b4ade2275947a7d3da038109d98d1f0a77\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_030.py",
+  "rc": 0,
+  "seconds": 1.08,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-1f9zkvf7/exe\", \"bytes\": 26648, \"sha256\": \"85f3dcef3d28f3b5e549b0ea0d7a7cb21dd736e2a573fe69be8126606ad8b533\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_032.py",
+  "rc": 0,
+  "seconds": 3.12,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because returning Call where this function returns a str; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g00_032.py:12:5: built on the general path (about 20x slower) because returning Call where this function returns a str; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-gmvyt1kr/exe\", \"bytes\": 89936, \"sha256\": \"95697cdf636a6e00c9d4ceae41c3bf8450243261b512a83710398a7321e9c6c8\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_034.py",
+  "rc": 0,
+  "seconds": 18.53,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-7i8loopn/exe\", \"bytes\": 199360, \"sha256\": \"9fedf08995e430f9d13eeac3b9d8d961b3e427799bdf8dd0902814a0742d2eb3\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_036.py",
+  "rc": 0,
+  "seconds": 0.75,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-oqfaef88/exe\", \"bytes\": 21768, \"sha256\": \"61bfc1450b63f8f8f4c165e1bbf825f005fd9096cdda3a7d0ae7e26e998ea689\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g00_038.py",
+  "rc": 0,
+  "seconds": 1.02,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-jl30hpem/exe\", \"bytes\": 34464, \"sha256\": \"83b1666f1f3208cb9c826c9c027a3ac4e8010bc5777ad1fe866f66044b3211e8\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_000.py",
+  "rc": 0,
+  "seconds": 73.38,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a format spec on a Decimal in an f-string (__format__ is not built); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_000.py:1970:5: built on the general path (about 20x slower) because a format spec on a Decimal in an f-string (__format__ is not built); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-u0zb4ec3/exe\", \"bytes\": 1097200, \"sha256\": \"3d1194c64dd9e4183f597d8747b9272dce595c04a931f9bbb30458d770766b8e\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_002.py",
+  "rc": 0,
+  "seconds": 60.94,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because import of 'collections' with a use that is not built: Counter, defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and deque are built for str / int / tuple keys and int / float / str / tuple elements; the rest of the module is not (namedtuple and ChainMap are built by the library pass) -- the notes below name the use; run with "
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_002.py:3:1: built on the general path (about 20x slower) because import of 'collections' with a use that is not built: Counter, defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and deque are built for str / int / tuple keys and int / float / str / tuple elements; the rest of the module is not (namedtuple and ChainMap are built by the library pass) -- the notes below name the use; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-rktd_iwy/exe\", \"bytes\": 771688, \"sha256\": \"f00db099c262987291b2202244dcb2a15601b86bb5bed9f9482e7613aba9d878\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_004.py",
+  "rc": 0,
+  "seconds": 65.85,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because IPv4Address instance as the argument of .add(): a set element or dict key that compares with __eq__ / __hash__ is not built on the typed path (its tables key an instance by identity); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_004.py:171:13: built on the general path (about 20x slower) because IPv4Address instance as the argument of .add(): a set element or dict key that compares with __eq__ / __hash__ is not built on the typed path (its tables key an instance by identity); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-bitpsir2/exe\", \"bytes\": 836808, \"sha256\": \"cbd8a1a58cf41c714119e19361b068db96a3df4653dcaf9839624e94443341b8\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_006.py",
+  "rc": 0,
+  "seconds": 7.18,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because 'pairs' is an int; only an array, a list, a list of floats, a set, a dict, bytes and a list of str are walked as flat sequences here. write instead: loop over the rows, then the row (`for row in pairs: for x in row: ...`), or index `pairs[i][j]`; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_006.py:88:5: built on the general path (about 20x slower) because 'pairs' is an int; only an array, a list, a list of floats, a set, a dict, bytes and a list of str are walked as flat sequences here. write instead: loop over the rows, then the row (`for row in pairs: for x in row: ...`), or index `pairs[i][j]`; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-6zc6zpa3/exe\", \"bytes\": 164928, \"sha256\": \"0f98e146807a45344b661aac55c1a8cbf5dc4e831d2352bfcd635aed1bfc7dc3\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_008.py",
+  "rc": 0,
+  "seconds": 102.67,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because 's' is annotated str in the source, but the caller also supplies int; refusing rather than silently choosing one. write instead: indexing or iterating bytes gives an int, not a str: annotate the parameter `int` (`def shift(b: int, k: int)`), or decode first (`text = data.decode()`); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because 's' is annotated str in the source, but the caller also supplies int; refusing rather than silently choosing one. write instead: indexing or iterating bytes gives an int, not a str: annotate the parameter `int` (`def shift(b: int, k: int)`), or decode first (`text = data.decode()`); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-yxadyhri/exe\", \"bytes\": 893208, \"sha256\": \"155b87580e2c4c67949350cca59f5795786cd6878cef2536a991bd1bea58e2e0\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_010.py",
+  "rc": 0,
+  "seconds": 4.09,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because 'f0' is annotated dict[str, list[int]], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, int], set[int], set[str], or a class name (no generics such as list[T], no Optional/Union); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_010.py:70:5: built on the general path (about 20x slower) because 'f0' is annotated dict[str, list[int]], which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, int], set[int], set[str], or a class name (no generics such as list[T], no Optional/Union); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-3c_apxt8/exe\", \"bytes\": 100464, \"sha256\": \"c191821efd6a9f304bd47d46332f35a353e1ad9348c6a7890f8b9732a096fedc\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_012.py",
+  "rc": 0,
+  "seconds": 96.72,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a format spec on a Decimal in an f-string (__format__ is not built); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_012.py:1922:9: built on the general path (about 20x slower) because a format spec on a Decimal in an f-string (__format__ is not built); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-1dc46s_1/exe\", \"bytes\": 1091720, \"sha256\": \"5f38bd84d80310baf49743bd52eca951907bad8c396f515a816fb869f557bc29\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_014.py",
+  "rc": 0,
+  "seconds": 10.96,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because next() of a _AilCsvReader instance (the iterator protocol is not built); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_014.py:381:13: built on the general path (about 20x slower) because next() of a _AilCsvReader instance (the iterator protocol is not built); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-w58m8b4f/exe\", \"bytes\": 233856, \"sha256\": \"0f2f936f3e6883e1e7129f19f7de3124cb75999a45890b7535c10d9b0cb63cde\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_016.py",
+  "rc": 0,
+  "seconds": 6.6,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-3n50d6fq/exe\", \"bytes\": 143168, \"sha256\": \"40f8699a2d50619de0223b9c2858c92cfaff6a8f0cc0d0b043c4ca3db52454a3\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_018.py",
+  "rc": 0,
+  "seconds": 11.89,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-ps9fbi9b/exe\", \"bytes\": 182680, \"sha256\": \"018f334a91ea716d8d0a032440e49e9ea28b86090da309e75f7b81276da32107\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_020.py",
+  "rc": 3,
+  "seconds": 0.62,
+  "messages": [
+   [
+    "error",
+    "not in the subset: urllib.parse.parse_qs is not built. Built: urllib.request.urlopen(url or Request, data=None, timeout=) and urllib.request.Request(url, data=None, headers={}, method=None), the response (read status reason url getcode geturl headers.get getheader close with), urllib.error.HTTPError / URLError in except, urllib.parse.urlencode quote quote_plus unquote unquote_plus urljoin (the gen"
+   ]
+  ],
+  "stderr": "corpus/gdev/g01_020.py:14:5: not in the subset: urllib.parse.parse_qs is not built. Built: urllib.request.urlopen(url or Request, data=None, timeout=) and urllib.request.Request(url, data=None, headers={}, method=None), the response (read status reason url getcode geturl headers.get getheader close with), urllib.error.HTTPError / URLError in except, urllib.parse.urlencode quote quote_plus unquote unquote_plus urljoin (the general path could not build this program either); general path: urllib is built on the typed path only (bytes and the exception records are not on the general path).\n  write instead: split the query on \"&\" and \"=\" and unquote() each part\n",
+  "stdout": "",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_022.py",
+  "rc": 0,
+  "seconds": 7.5,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because 'FIELDS' is a module-level list of non-numbers; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted as a module constant. write instead: build it in main() (`fields: list[str] = [...]`) and pass it to the functions that read it as a parameter, or build it inside the one function that reads it; run with --strict to see wh"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_022.py:122:1: built on the general path (about 20x slower) because 'FIELDS' is a module-level list of non-numbers; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted as a module constant. write instead: build it in main() (`fields: list[str] = [...]`) and pass it to the functions that read it as a parameter, or build it inside the one function that reads it; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-od_lgklv/exe\", \"bytes\": 160448, \"sha256\": \"e1ba8e6898d68c743db6882002c0959170c2ad1b72c3db58f2be57f485edcdfe\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_024.py",
+  "rc": 0,
+  "seconds": 6.95,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because json.dumps of tree: the type of this value is not known here -- bind it to a variable with a type annotation (`xs: list[int] = ...`) or use a literal; built: int, float, str, bool, None, list[T], list[list[T]], dict[str, T] and dict[int, T] (T int / float / str) and literal dicts / lists of those; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_024.py:64:5: built on the general path (about 20x slower) because json.dumps of tree: the type of this value is not known here -- bind it to a variable with a type annotation (`xs: list[int] = ...`) or use a literal; built: int, float, str, bool, None, list[T], list[list[T]], dict[str, T] and dict[int, T] (T int / float / str) and literal dicts / lists of those; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-snl3ny_2/exe\", \"bytes\": 165016, \"sha256\": \"b9a2fa9f2406e37363dc1717c5bf9b2ec410bb9563f2fcb8de7dac3195575f74\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_026.py",
+  "rc": 0,
+  "seconds": 12.66,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-u07jy5_e/exe\", \"bytes\": 240088, \"sha256\": \"9848bb7e59b394b3dd4644b86c93ebfce5ab5f48c0710c0c69755dccffb51235\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_028.py",
+  "rc": 0,
+  "seconds": 124.79,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a class-list comprehension must produce int, float or str elements; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_028.py:87:5: built on the general path (about 20x slower) because a class-list comprehension must produce int, float or str elements; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-aa_j1_o4/exe\", \"bytes\": 764216, \"sha256\": \"cd6ff3947587426a9e4ed94abab8f6b3f8546f2888a61e6b4ace163a00e1e33a\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_030.py",
+  "rc": 0,
+  "seconds": 78.87,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because dunder method _AilNT.__repr__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_030.py:19:5: built on the general path (about 20x slower) because dunder method _AilNT.__repr__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-ugznbh5g/exe\", \"bytes\": 837832, \"sha256\": \"9cb5f298b02507bc1d42d7ec2915d2f443c93ef7240b009d38d4ca0a4e327011\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_032.py",
+  "rc": 3,
+  "seconds": 26.55,
+  "messages": [
+   [
+    "error",
+    "not in the subset: next() of a _AilCsvReader instance (the iterator protocol is not built) (the general path could not build this program either); general path: the method .search() (on a value of unknown static kind)"
+   ],
+   [
+    "note",
+    "the compiled pattern compiled is used as a value; only compiled.match / fullmatch / search / findall / finditer / split / sub / subn (...) calls are built"
+   ]
+  ],
+  "stderr": "corpus/gdev/g01_032.py:277:9: not in the subset: next() of a _AilCsvReader instance (the iterator protocol is not built) (the general path could not build this program either); general path: the method .search() (on a value of unknown static kind)\nnote: corpus/gdev/g01_032.py:316: the compiled pattern compiled is used as a value; only compiled.match / fullmatch / search / findall / finditer / split / sub / subn (...) calls are built\n",
+  "stdout": "",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_034.py",
+  "rc": 0,
+  "seconds": 73.78,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because d.get(k) with one argument gives None for a missing key, and AIL has no None for an int, float, str or bytes value. write instead: give the default, `d.get(k, -1)` (or \"\" / 0.0), or test `k in d` first; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_034.py:26:9: built on the general path (about 20x slower) because d.get(k) with one argument gives None for a missing key, and AIL has no None for an int, float, str or bytes value. write instead: give the default, `d.get(k, -1)` (or \"\" / 0.0), or test `k in d` first; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-w4g17haq/exe\", \"bytes\": 763288, \"sha256\": \"acfe706275178de61154d9f71adaa232c2f5a1bf188dbe7f5aeb3d3a0cc9e26a\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_036.py",
+  "rc": 0,
+  "seconds": 6.33,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because only a class type can be None: write `Node | None`; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g01_036.py:44:1: built on the general path (about 20x slower) because only a class type can be None: write `Node | None`; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-z96mscgb/exe\", \"bytes\": 170368, \"sha256\": \"a5a3849f7afed9c8412b94acafa7516153000647de0ba0fbbd32167d3ae8447d\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g01_038.py",
+  "rc": 0,
+  "seconds": 18.41,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-mnh83y1j/exe\", \"bytes\": 182944, \"sha256\": \"e7910579f94b2ef8f99540e2ee583fb601750b24f1e55af3a1d46a0cd0584f46\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_000.py",
+  "rc": 0,
+  "seconds": 1.13,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-6t16imzd/exe\", \"bytes\": 27032, \"sha256\": \"a14a1aad2597a3ce8c693c4ff485f7defd2630277113148533a292c04da7d145\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_002.py",
+  "rc": 0,
+  "seconds": 5.57,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because yield: this language has no generators. write instead: build a list with `out.append(x)` and `return out`; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g02_002.py:25:13: built on the general path (about 20x slower) because yield: this language has no generators. write instead: build a list with `out.append(x)` and `return out`; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-1g7h6g35/exe\", \"bytes\": 142944, \"sha256\": \"57557f037aa96bddc3518f9e155893f0286a0ef611e9973d41a588b7ca85dd52\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_004.py",
+  "rc": 0,
+  "seconds": 1.09,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-pbxz18pf/exe\", \"bytes\": 17368, \"sha256\": \"e151383b1c9fc32b9ba3ab558ade23d22452720fb77af6dcbc0b2ffafc3961d7\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_006.py",
+  "rc": 0,
+  "seconds": 2.46,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g02_006.py:7:5: built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-wj4soutf/exe\", \"bytes\": 68904, \"sha256\": \"c530486193e433e0ef1ada7fa8f45debb19e356ef073edb684f7d4476d4440fc\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_008.py",
+  "rc": 0,
+  "seconds": 37.85,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g02_008.py:235:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-w6nf394q/exe\", \"bytes\": 372280, \"sha256\": \"eca5262a66f6afeb0d89702c4057aa9dd815d77551a2408c604f28ce41509a72\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_010.py",
+  "rc": 3,
+  "seconds": 0.68,
+  "messages": [
+   [
+    "error",
+    "not in the subset: math.factorial() of constants makes a value beyond int64, and AIL ints are 64-bit by default (the program needs a big int here)."
+   ]
+  ],
+  "stderr": "corpus/gdev/g02_010.py:10:5: not in the subset: math.factorial() of constants makes a value beyond int64, and AIL ints are 64-bit by default (the program needs a big int here).\n  write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower\n",
+  "stdout": "",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_012.py",
+  "rc": 0,
+  "seconds": 1.2,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-u6iyegfd/exe\", \"bytes\": 26640, \"sha256\": \"4b05dbf5012004ede0075e1f972adeb1492148c0059910b7780e1d84a3af6554\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_014.py",
+  "rc": 0,
+  "seconds": 8.93,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because unsupported local annotation set[tuple[int, int, int]]. write instead: a plain int, float, str, bytes, list[int], list[str], dict[str, int], set[int] or a class name; keep other values in parallel lists; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because unsupported local annotation set[tuple[int, int, int]]. write instead: a plain int, float, str, bytes, list[int], list[str], dict[str, int], set[int] or a class name; keep other values in parallel lists; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-irf520ug/exe\", \"bytes\": 146232, \"sha256\": \"bd50d08b02960e0a75226286da714f68a6b554132906f71512cc29d5dc619bcf\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_016.py",
+  "rc": 0,
+  "seconds": 1.67,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-h1jtemaf/exe\", \"bytes\": 64536, \"sha256\": \"da017af42a1fec3ff998ef34523a9a94e715100882e5bed846e90f61697e1b82\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_018.py",
+  "rc": 0,
+  "seconds": 4.84,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because yield: this language has no generators. write instead: build a list with `out.append(x)` and `return out`; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g02_018.py:16:13: built on the general path (about 20x slower) because yield: this language has no generators. write instead: build a list with `out.append(x)` and `return out`; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-gvvpadld/exe\", \"bytes\": 142496, \"sha256\": \"52235e38ce0d8cbbff27e5c956b2e9ba9ea9795e8a6f1242158309f5a824838d\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_020.py",
+  "rc": 0,
+  "seconds": 1.3,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-ay2kt7hl/exe\", \"bytes\": 35432, \"sha256\": \"350cbf60fc9d6d056405ac14d9d749df9a956d35b55f68a3b022c25dccbad814\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_022.py",
+  "rc": 0,
+  "seconds": 1.1,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-i4htg0b3/exe\", \"bytes\": 21896, \"sha256\": \"975c6f5046dfde9897ec89ad4c2e2a5c5a531799f4bfe5bd19e76b4f1f1363ae\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_024.py",
+  "rc": 0,
+  "seconds": 0.83,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-kne5dk2g/exe\", \"bytes\": 21648, \"sha256\": \"33d916f9bbae80c6b33ec57a82694e350de6b93d5032aa7519c05613a87add62\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_026.py",
+  "rc": 0,
+  "seconds": 1.21,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-_5y977za/exe\", \"bytes\": 27048, \"sha256\": \"61e32f2f3b33eaf4325b1fa48491461a3a80c5d2746dba87b57b63ee579b89dc\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_028.py",
+  "rc": 0,
+  "seconds": 1.19,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-wsqetcyd/exe\", \"bytes\": 26808, \"sha256\": \"6e9e55d41c9c823bed5bad05478ab349689780a20447789beadb78164d0da421\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_030.py",
+  "rc": 0,
+  "seconds": 6.43,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because returning Subscript as a list; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g02_030.py:30:5: built on the general path (about 20x slower) because returning Subscript as a list; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-hg8adhp3/exe\", \"bytes\": 142280, \"sha256\": \"394fdcf0467319db3e09e375910fe55f8728ea991893e6e9ee104e9b5b4cfb66\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_032.py",
+  "rc": 0,
+  "seconds": 0.52,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-3zaud3oc/exe\", \"bytes\": 16840, \"sha256\": \"1a7e98c2710a0ce5858de4d74aa30d2605cdb6adb82083f08281fbc39f6672c4\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_034.py",
+  "rc": 0,
+  "seconds": 1.12,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-aio15noq/exe\", \"bytes\": 26216, \"sha256\": \"7ef9883cd8598be67e70fdee32f3e80f8bda12ef5f6901735c98e64e047169fc\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_036.py",
+  "rc": 0,
+  "seconds": 1.11,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-yydi7y91/exe\", \"bytes\": 26152, \"sha256\": \"fc695ec2b4c105273c9cb846e2dfc5de4eadfac3e4d1a039a78852729a035733\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g02_038.py",
+  "rc": 0,
+  "seconds": 2.46,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-ij_qwdh6/exe\", \"bytes\": 21848, \"sha256\": \"50d6a70cce97466b04844fe882e5ff55461fb3ca094d21a01e72c49d1c642b01\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_000.py",
+  "rc": 0,
+  "seconds": 6.55,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because statistics.mean of floats needs CPython's exact fractions over floats, which is not built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs); median, median_low, median_high, mode and multimode of floats are built; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_000.py:8:5: built on the general path (about 20x slower) because statistics.mean of floats needs CPython's exact fractions over floats, which is not built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs); median, median_low, median_high, mode and multimode of floats are built; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-a09liqg_/exe\", \"bytes\": 185128, \"sha256\": \"33043a22e2517fcfff164614c400cba6c33ce49dcbb9473500708ee227a792bf\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_002.py",
+  "rc": 0,
+  "seconds": 37.74,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_002.py:235:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-1ozd4o8q/exe\", \"bytes\": 395176, \"sha256\": \"3e9797daa5bff63da30a31f1c553ade72ed1e47c827a76d5a847e4183c774147\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_004.py",
+  "rc": 0,
+  "seconds": 8.87,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because Random.randrange must take plain positional arguments, no defaults, *args or **kwargs; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_004.py:136:5: built on the general path (about 20x slower) because Random.randrange must take plain positional arguments, no defaults, *args or **kwargs; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-gbdtrlfr/exe\", \"bytes\": 132976, \"sha256\": \"9f6971b207c5cfffc2e4771b9a875ccf64857422f33ee9a97f7c35dc4f3f5f36\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_006.py",
+  "rc": 0,
+  "seconds": 0.88,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-m6lzdz57/exe\", \"bytes\": 26560, \"sha256\": \"d5468a0c9ca1d6f5b44fcea1dcb367769647bb3bc45861f3f61d8dab12d751f4\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_008.py",
+  "rc": 0,
+  "seconds": 4.72,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because call to f(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. write instead: define `f` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_008.py:8:5: built on the general path (about 20x slower) because call to f(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. write instead: define `f` yourself with a `def` and call that, or use the builtin that does the job (len, sum, min, max, sorted, abs, range, int, float, str); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-7s9e0nop/exe\", \"bytes\": 129088, \"sha256\": \"91f8665198d0bf8484b610c979e7919df8bb3ae0ac66f52dcfbe711afe0de2e3\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_010.py",
+  "rc": 0,
+  "seconds": 1.55,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-q1rykw2x/exe\", \"bytes\": 21936, \"sha256\": \"7584a4327cce4a10b4bafc98a89ad05bb4110b683a9c932d9eaead51c4548178\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_012.py",
+  "rc": 0,
+  "seconds": 8.25,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because statistics.geometric_mean of float is not built on the typed path (list[int] is); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_012.py:36:5: built on the general path (about 20x slower) because statistics.geometric_mean of float is not built on the typed path (list[int] is); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-i0j6xovw/exe\", \"bytes\": 197552, \"sha256\": \"8b8e6b4720633ffbc5e9d4104f2602d271f69efac27fc72ef14120f7a848a1c4\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_014.py",
+  "rc": 0,
+  "seconds": 1.73,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-z88pw3my/exe\", \"bytes\": 40200, \"sha256\": \"e834e0d497295f95c9962439c732ac41c3282f4379513c20463e8742959907cc\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_016.py",
+  "rc": 0,
+  "seconds": 6.59,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because 'ordered' is declared flist; assigning list is unsupported. write instead: make the value match the declared type, or convert it (`int(x)`, `float(x)`, `str(x)`); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_016.py:23:5: built on the general path (about 20x slower) because 'ordered' is declared flist; assigning list is unsupported. write instead: make the value match the declared type, or convert it (`int(x)`, `float(x)`, `str(x)`); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-a7rqu6xm/exe\", \"bytes\": 139928, \"sha256\": \"74c57101aea303e438e7fdd0bcc5ab7e12e6537a6b90be73b9e2e9178ad6503e\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_018.py",
+  "rc": 0,
+  "seconds": 6.51,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because statistics.pstdev of floats needs CPython's exact fractions over floats, which is not built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs); median, median_low, median_high, mode and multimode of floats are built; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_018.py:14:5: built on the general path (about 20x slower) because statistics.pstdev of floats needs CPython's exact fractions over floats, which is not built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs); median, median_low, median_high, mode and multimode of floats are built; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-b_9kbag0/exe\", \"bytes\": 173376, \"sha256\": \"205e5e08dde335219bbdb056b9791895b86f35395eb1c8aa396c7f99a5025c03\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_020.py",
+  "rc": 0,
+  "seconds": 1.1,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-2e78vob1/exe\", \"bytes\": 26616, \"sha256\": \"47c48ed823a08aca8681c919e7f0ce320e0dc68e863583428eaaf834670557a8\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_022.py",
+  "rc": 0,
+  "seconds": 7.19,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because enumerate() without an (i, v) target; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_022.py:21:5: built on the general path (about 20x slower) because enumerate() without an (i, v) target; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-jugkuoxv/exe\", \"bytes\": 156440, \"sha256\": \"d6a86cc75adc1194d4dffc503793f68002f8ae61d62b62ccdb5f64ca4c43fb0a\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_024.py",
+  "rc": 124,
+  "seconds": 180.02,
+  "messages": [],
+  "stderr": "(timeout)",
+  "stdout": "",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_026.py",
+  "rc": 0,
+  "seconds": 1.6,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-60o4tl8z/exe\", \"bytes\": 26568, \"sha256\": \"f0c353f7d7bcf77be4c5c0bbc58cf31f516c56191e36f0004eabe6aad00b2ef1\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_028.py",
+  "rc": 0,
+  "seconds": 37.98,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_028.py:237:5: built on the general path (about 20x slower) because dunder method Fraction.__float__; only __init__ is supported here, no other dunder (__eq__, __repr__, __len__, __add__, ...); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-6j0c90zo/exe\", \"bytes\": 373520, \"sha256\": \"ec49560201eb56dacf7da041178355ac7812ef02e8e7abf154f5939384fc0873\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_030.py",
+  "rc": 0,
+  "seconds": 4.23,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because 'observed' requires only float elements; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_030.py:27:5: built on the general path (about 20x slower) because 'observed' requires only float elements; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-8ckgw83c/exe\", \"bytes\": 108456, \"sha256\": \"2501fa141a48b4a36fe2fb19b2589fad26b9892317b385f90c67ea5a3e5c6d1a\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_032.py",
+  "rc": 0,
+  "seconds": 12.92,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because statistics.stdev of floats needs CPython's exact fractions over floats, which is not built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs); median, median_low, median_high, mode and multimode of floats are built; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_032.py:321:5: built on the general path (about 20x slower) because statistics.stdev of floats needs CPython's exact fractions over floats, which is not built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs); median, median_low, median_high, mode and multimode of floats are built; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-15b6m5oq/exe\", \"bytes\": 218920, \"sha256\": \"a0884f77b4fe1811d2cd25edd00782315888402e95c52ea878dbc60cf024f961\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_034.py",
+  "rc": 0,
+  "seconds": 4.66,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because dividing by sum() over a list of floats is unsupported: that sum can be the int 0 when the list is empty and a float otherwise; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_034.py:27:5: built on the general path (about 20x slower) because dividing by sum() over a list of floats is unsupported: that sum can be the int 0 when the list is empty and a float otherwise; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-v8_7uyev/exe\", \"bytes\": 121912, \"sha256\": \"5f871c334b4bf00a670820ac66e77effb85232590c90af1a701d7bbfb434e55e\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_036.py",
+  "rc": 0,
+  "seconds": 6.99,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because numeric binding requires a number; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_036.py:28:9: built on the general path (about 20x slower) because numeric binding requires a number; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-k7ocogzj/exe\", \"bytes\": 171648, \"sha256\": \"4a2ec8582eb4158047b1dbe8cfd34c3b974101c3dab7afd9b26de1dc84f4bef8\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g03_038.py",
+  "rc": 0,
+  "seconds": 11.29,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because statistics.pvariance of ints is an int when the answer is whole and a float otherwise, and this use needs one type: print it, format it with a float spec ({m:.2f}), or use statistics.fmean() (always a float) / sum(xs) / len(xs); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g03_038.py:322:5: built on the general path (about 20x slower) because statistics.pvariance of ints is an int when the answer is whole and a float otherwise, and this use needs one type: print it, format it with a float spec ({m:.2f}), or use statistics.fmean() (always a float) / sum(xs) / len(xs); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-ws6hmb13/exe\", \"bytes\": 190128, \"sha256\": \"c9da5788923dc7cb67f545e07dd4847a427872c4ce9586ca2952da49ca062c65\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_000.py",
+  "rc": 0,
+  "seconds": 4.52,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because 'final_list' is declared list; assigning int is unsupported. write instead: make the value match the declared type, or convert it (`int(x)`, `float(x)`, `str(x)`); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g04_000.py:39:5: built on the general path (about 20x slower) because 'final_list' is declared list; assigning int is unsupported. write instead: make the value match the declared type, or convert it (`int(x)`, `float(x)`, `str(x)`); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-sn_o731i/exe\", \"bytes\": 111736, \"sha256\": \"64d55fe5f8c5be8c5c1e5c27c513f26dfcde939f7dfe4ca5f6a2f76942529c40\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_002.py",
+  "rc": 0,
+  "seconds": 3.74,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because list[float] parameters are read-only; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because list[float] parameters are read-only; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-96i18zt9/exe\", \"bytes\": 107128, \"sha256\": \"cfe577c909ffa85994e46970152688439c945975cc234ebc595067109432cbe3\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_004.py",
+  "rc": 0,
+  "seconds": 4.5,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because 'arr' is a list parameter, which is read-only; to change it in a helper, keep the list in a class field and pass the class (`s.xs[i] = v` and `s.xs.append(v)` work), or build and return a new list; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g04_004.py:12:13: built on the general path (about 20x slower) because 'arr' is a list parameter, which is read-only; to change it in a helper, keep the list in a class field and pass the class (`s.xs[i] = v` and `s.xs.append(v)` work), or build and return a new list; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-esmuvqsb/exe\", \"bytes\": 120104, \"sha256\": \"93de0f5c6fe722ab4be45291df1ddea4f9d3a38443b7a2ef2d3e3283b0615b54\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_006.py",
+  "rc": 0,
+  "seconds": 5.43,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a comprehension with 2 for-clauses; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g04_006.py:50:5: built on the general path (about 20x slower) because a comprehension with 2 for-clauses; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-6duh260c/exe\", \"bytes\": 132456, \"sha256\": \"211a158ca822ec5b3cc4d7e7f02e8e826ac4e0d7cc911d7e367ca4ba964dbbf9\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_008.py",
+  "rc": 0,
+  "seconds": 1.18,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-4y2rrbmc/exe\", \"bytes\": 26120, \"sha256\": \"a3c7e6a84b41c640d083c0fed0ef6e37a550fd51307cef4ac129cbe80029aeaa\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_010.py",
+  "rc": 0,
+  "seconds": 5.91,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because 'items' is a list parameter, which is read-only; to change it in a helper, keep the list in a class field and pass the class (`s.xs[i] = v` and `s.xs.append(v)` work), or build and return a new list; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g04_010.py:22:13: built on the general path (about 20x slower) because 'items' is a list parameter, which is read-only; to change it in a helper, keep the list in a class field and pass the class (`s.xs[i] = v` and `s.xs.append(v)` work), or build and return a new list; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-efw4yyys/exe\", \"bytes\": 163136, \"sha256\": \"22934cc7d995d53183d01bbc3a477aa27230bcaf662550125827b04d7d3c6d0f\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_012.py",
+  "rc": 0,
+  "seconds": 1.11,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-g75yhvc3/exe\", \"bytes\": 21872, \"sha256\": \"d5075ed50e55a79c6a53d161eabfae38e3f75f1eeda451d90a0e8b2c4eaae2d0\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_014.py",
+  "rc": 0,
+  "seconds": 0.91,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-9tgfldd8/exe\", \"bytes\": 22264, \"sha256\": \"14e47b64f6bcdc39d211f50c08eff440aecd7a3395c10bd7e8d1222ec2e0f814\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_016.py",
+  "rc": 0,
+  "seconds": 0.85,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-1qqfwomj/exe\", \"bytes\": 21312, \"sha256\": \"f0f4b7a1c18adc6a20e8004617d94d0c396c4a2e9f56b9777d80d910ca45b867\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_018.py",
+  "rc": 0,
+  "seconds": 5.94,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because preview.index(): list.index is built when the list is known to be a list (annotate it as list[...]) and the call is evaluated unconditionally -- not in the right operand of and/or, an if-else arm or a comprehension; bind its result to a name first; run with --strict to see why"
+   ]
+  ],
+  "stderr": "corpus/gdev/g04_018.py:22: slow: `preview.index()` scans the list each pass; keep a dict (value -> index/count) or a [False] * n table\nnote: corpus/gdev/g04_018.py:22:9: built on the general path (about 20x slower) because preview.index(): list.index is built when the list is known to be a list (annotate it as list[...]) and the call is evaluated unconditionally -- not in the right operand of and/or, an if-else arm or a comprehension; bind its result to a name first; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-wt80u8wk/exe\", \"bytes\": 134072, \"sha256\": \"7ef79e4ecd67e6ed811b32243d99e1dc9af0a96266a8606e3f352edb55d093db\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_020.py",
+  "rc": 0,
+  "seconds": 1.79,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-msf33inv/exe\", \"bytes\": 29968, \"sha256\": \"eb7268aa97a3aa8a05f5618f385bc0aedf47d10efda19eb0ab44bb9a2c1eba53\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_022.py",
+  "rc": 0,
+  "seconds": 1.56,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-z3e3n09y/exe\", \"bytes\": 22472, \"sha256\": \"89cca8d0a0700bae4e0004a4d32e1154d09b7e8d69f00a79d5eed8acb944033c\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_024.py",
+  "rc": 0,
+  "seconds": 1.03,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-5qxtnxpv/exe\", \"bytes\": 21640, \"sha256\": \"b8fe172262d68033a8ea1a27cc963e2c57bd541862083954a7d24fd80b4cd2d7\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_026.py",
+  "rc": 0,
+  "seconds": 6.92,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because passing Subscript where sort_and_count() wants a sequence; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g04_026.py:27:5: built on the general path (about 20x slower) because passing Subscript where sort_and_count() wants a sequence; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-d1ve4hrz/exe\", \"bytes\": 141344, \"sha256\": \"8c2aae522abfaa2f86507f5d7d836275dc13623d5dcc4adcfa4648f13be2ebb2\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_028.py",
+  "rc": 0,
+  "seconds": 7.77,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g04_028.py:16:9: built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-z_g3hjby/exe\", \"bytes\": 171968, \"sha256\": \"92b9517d25e646c2bda41236f58b11749f99991baec03de432320d635746ac0f\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_030.py",
+  "rc": 0,
+  "seconds": 1.78,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-050_fahm/exe\", \"bytes\": 35392, \"sha256\": \"3a544f224b0b9e2b6a806de6a188e58f19c6fcaaf2f844f6605b0574c04a4a80\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_032.py",
+  "rc": 0,
+  "seconds": 4.01,
+  "messages": [
+   [
+    "error",
+    "built on the general path (about 20x slower) because class list comprehensions are unsupported; run with --strict to see why"
+   ]
+  ],
+  "stderr": "note: built on the general path (about 20x slower) because class list comprehensions are unsupported; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-cyu51dko/exe\", \"bytes\": 107544, \"sha256\": \"be6b7e2db458b60f7b3fe3188fc03ad3d899554491ddf844be0b854429be3c12\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_034.py",
+  "rc": 0,
+  "seconds": 1.82,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-2hwfl6xr/exe\", \"bytes\": 26528, \"sha256\": \"b3d35a83fa6af0790fa86cd5cb5952d360b19e2ae67f12dfba7a7dce82b1c0b6\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_036.py",
+  "rc": 0,
+  "seconds": 5.44,
+  "messages": [
+   [
+    "note",
+    "built on the general path (about 20x slower) because T | None: only a class type can be None here (a scalar Optional is built as a parameter, a return type or a local of a plain function; a note below names the use that is not). write instead: return a sentinel (`-1` or `\"\"`) and compare with it, or raise an exception when there is no value; `Node | None` is fine for a class; run with --strict to "
+   ]
+  ],
+  "stderr": "note: corpus/gdev/g04_036.py:8:50: built on the general path (about 20x slower) because T | None: only a class type can be None here (a scalar Optional is built as a parameter, a return type or a local of a plain function; a note below names the use that is not). write instead: return a sentinel (`-1` or `\"\"`) and compare with it, or raise an exception when there is no value; `Node | None` is fine for a class; run with --strict to see why\n",
+  "stdout": "{\"output\": \"/tmp/err-wimmfg0e/exe\", \"bytes\": 120632, \"sha256\": \"d1992f9b9f47960e6cec99ef4d34934a24e3896c9972a914676d584b06ba0672\"}\n",
+  "set": "gdev"
+ },
+ {
+  "src": "/home/runner/work/_temp/home2/corpus/gdev/g04_038.py",
+  "rc": 0,
+  "seconds": 1.62,
+  "messages": [],
+  "stderr": "",
+  "stdout": "{\"output\": \"/tmp/err-5nzyccw0/exe\", \"bytes\": 21712, \"sha256\": \"64a3a6b5e7cbbfd09f6b7c7b45a734fc950710942f288d709af1c9069b63f0f2\"}\n",
+  "set": "gdev"
+ }
+]
