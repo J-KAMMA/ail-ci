@@ -88,15 +88,16 @@ Key facts for the design:
 ## Options and their measured Amdahl bounds
 
 The bound is the largest wall reduction the option can give on the measured workload if its
-component went to zero (cold build, cache miss), computed from `RESULTS.md`, not guessed. `x` is
-the wall speedup implied by that share, `1/(1-share)`. On a cold build every option pays a cold
+component went to zero (cold build, cache miss), computed from `RESULTS.md`; the only assumed
+factor is the compiled-front-end multiplier `k`, stated in its row. `x` is the wall speedup implied
+by that share, `1/(1-share)`. On a cold build every option pays a cold
 front end except the per-function cache, which is empty on a cold build (its cold bound is 0); its
 50.4% is an edit-only ceiling, not a cold share.
 
 | # | option | measured share | Amdahl bound (cold / edit) | wall speedup | risk | files |
 |---:|---|---:|---:|---:|---|---|
 | 1 | Per-function analysis cache across edits | edit only: `E/W` = 50.4% (cold 0%) | 0% cold / ≤50.4% edit (`E/W` × (N−1)/N) | 1.00x cold / ≤2.02x edit | high | `pyc.py`, `pyfunc.py`, `pyboxed2.py`, `buildcache.py`, `fecache.py` |
-| 2 | Compile the front end (mypyc / Cython) | `F/W` = 54.4%; k=2.5 | 32.6% | 1.48x | medium-high | `pyproject.toml`, `packaging/`, new build target |
+| 2 | Compile the front end (mypyc / Cython) | `F/W` = 54.4% measured; k=2.5 assumed | 32.6% at k=2.5 | 1.48x at k=2.5 | medium-high | `pyproject.toml`, `packaging/`, new build target |
 | 3 | Algorithmic fixes in the top-20 hot functions | 23.5% (derived: 46.6% of the profiled emitter × `E/W`; walk 11.8%, queries 4.1% of timed wall, also derived) | ≤23.5% (estimate) | 1.31x | low | `fastwalk.py`, `pyfunc.py`, `pyboxed2.py`, `optlib.py`, `unified*.py` |
 | 4 | Drop the second `check` that positions the fallback note | `other` = 12.8% | 12.8% | 1.15x | low | `ail_chatgpt.py` |
 | 5 | Skip the doomed typed attempt from a pre-scan | 7.3% | 7.3% | 1.08x | low | `pyc._refuse_big_capable`, `pyc.build` |
@@ -138,9 +139,9 @@ exact C the compiler was handed; reuse it and add the edit case.
 
 ### 2. Compile the front end itself (mypyc / Cython) — the biggest absolute share
 
-Measured share: the front end is `F/W` = 54.4% of cold wall; with a conservative 2.5x on the
-pure-Python front end the bound is `(F/W)(1-1/2.5)` = 32.6% (1.48x wall; 1.57x at k=3, 1.37x at
-k=2). On `berth_sim` that is 9.89 s → ~5.3 s even before the C compile.
+Measured share: the front end is `F/W` = 54.4% of cold wall (measured). The multiplier is an
+assumption, not a measurement: with an assumed conservative 2.5x on the pure-Python front end the
+bound is `(F/W)(1-1/2.5)` = 32.6% (1.48x wall; 1.57x at k=3, 1.37x at k=2). On `berth_sim` that is 9.89 s → ~5.3 s even before the C compile.
 
 Risk: **medium-high**. The front end is ~60k lines (`pyfunc.py` 43.7k, `pyboxed2.py` 13.9k) of
 CPython-dependent code: big integers in the constant folder, `ast` mutation, `copy.deepcopy`,
