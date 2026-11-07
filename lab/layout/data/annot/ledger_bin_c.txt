@@ -1,0 +1,294 @@
+--------------------------------------------------------------------------------
+-- Metadata
+--------------------------------------------------------------------------------
+Invocation:       /tmp/energy-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/ledger_bin_c.cg
+I1 cache:         32768 B, 64 B, 8-way associative
+D1 cache:         32768 B, 64 B, 8-way associative
+LL cache:         33554432 B, 64 B, 16-way associative
+Command:          /tmp/layout-2xf4jn7z/ledger_bin_c /tmp/layout-2xf4jn7z/ledger_bin.bin
+Events recorded:  Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Events shown:     Ir Dr Dw D1mr D1mw DLmr DLmw
+Event sort order: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Threshold:        0.1%
+Annotation:       on
+
+--------------------------------------------------------------------------------
+-- Summary
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____ 
+
+2,732,941,653 480,039,932 255,469,467 23,905,240 5,917,966 3,445,365 2,378,385  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+-- File:function summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____  file:function
+
+< 2,357,539,758 329,169,138 126,142,125 20,177,389 2,197,398 3,443,077 2,185,897  /home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c:
+  1,186,139,962 123,516,645  49,728,430  2,935,024 2,197,397 2,405,046 2,185,897    main
+    881,209,657 101,419,403  68,311,745    722,868         0   722,508         0    rdvar
+    137,302,697  49,440,688           0 16,119,011         0   143,492         0    hfind
+     90,584,959  34,897,882   7,054,343          1         0         1         0    lookup
+     58,112,037  19,370,679           0    138,646         0         0         0    cmp_id
+      4,190,446     523,841   1,047,607    261,839         1   172,030         0    hgrow
+
+<   363,401,758 150,870,779 121,327,301  3,727,845 3,720,566     2,287   192,486  ???:
+    355,539,183 149,372,743 119,830,336  3,727,489 3,720,476     2,210   192,463    ???
+      7,850,556   1,495,344   1,495,344          0         0         0         0    __umodti3
+
+<    12,000,000           0   8,000,000          0         0         0         0  /usr/include/x86_64-linux-gnu/bits/string_fortified.h:main
+
+--------------------------------------------------------------------------------
+-- Function:file summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____  function:file
+
+> 1,198,140,099 123,516,660  57,728,471  2,935,030 2,197,399 2,405,047 2,185,899  main:
+  1,186,139,962 123,516,645  49,728,430  2,935,024 2,197,397 2,405,046 2,185,897    /home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c
+     12,000,000           0   8,000,000          0         0         0         0    /usr/include/x86_64-linux-gnu/bits/string_fortified.h
+
+>   881,209,657 101,419,403  68,311,745    722,868         0   722,508         0  rdvar:/home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c
+
+>   355,539,183 149,372,743 119,830,336  3,727,489 3,720,476     2,210   192,463  ???:???
+
+>   137,302,697  49,440,688           0 16,119,011         0   143,492         0  hfind:/home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c
+
+>    90,584,959  34,897,882   7,054,343          1         0         1         0  lookup:/home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c
+
+>    58,112,037  19,370,679           0    138,646         0         0         0  cmp_id:/home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c
+
+>     7,850,556   1,495,344   1,495,344          0         0         0         0  __umodti3:???
+
+>     4,190,446     523,841   1,047,607    261,839         1   172,030         0  hgrow:/home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c
+
+--------------------------------------------------------------------------------
+-- Annotated source file: /home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.c
+--------------------------------------------------------------------------------
+Ir_________ Dr________ Dw________ D1mr______ D1mw_____ DLmr_____ DLmw_____ 
+
+-- line 6 ----------------------------------------
+          .          .          .          .         .         .         .  typedef struct { uint32_t id; int shut; int64_t bal; size_t name_off; int name_len; } Acct;
+          .          .          .          .         .         .         .  typedef struct { int op; size_t off; uint32_t a, b, c; } Rec;
+          .          .          .          .         .         .         .  
+          .          .          .          .         .         .         .  static unsigned char *buf; static size_t n;
+          .          .          .          .         .         .         .  
+          .          .          .          .         .         .         .  static void sterr(size_t x, const char *k) { printf("error at offset %zu: %s\n", x, k); exit(2); }
+          .          .          .          .         .         .         .  
+          .          .          .          .         .         .         .  /* read var at *p; returns 0 ok */
+ 11,035,886          0 11,035,886          0         0         0         0  static const char *rdvar(size_t *p, uint32_t *out) {
+ 22,071,772          0          0          0         0         0         0      uint64_t v = 0; int cnt = 0; unsigned char last = 0;
+          .          .          .          .         .         .         .      for (;;) {
+125,587,604 22,071,772          0          1         0         0         0          if (*p >= n) return "truncated";
+149,755,805 57,275,859 46,239,973    722,867         0   722,508         0          unsigned char b = buf[(*p)++];
+184,959,892          0          0          0         0         0         0          v |= (uint64_t)(b & 0x7f) << (7 * cnt);
+ 46,239,973          0          0          0         0         0         0          cnt++; last = b;
+198,092,207          0          0          0         0         0         0          if (b & 0x80) { if (cnt == 5) return "varint"; continue; }
+          .          .          .          .         .         .         .          break;
+          .          .          .          .         .         .         .      }
+ 44,143,544          0          0          0         0         0         0      if (cnt >= 2 && last == 0) return "varint";
+ 55,179,430          0          0          0         0         0         0      if (v > 4294967295ULL) return "varint";
+ 11,035,886          0 11,035,886          0         0         0         0      *out = (uint32_t)v;
+ 11,035,886          0          0          0         0         0         0      return NULL;
+ 22,071,772 22,071,772          0          0         0         0         0  }
+          .          .          .          .         .         .         .  
+          .          .          .          .         .         .         .  static Acct *accs; static size_t na, capa;
+          .          .          .          .         .         .         .  static size_t *ht; static size_t hcap;
+          .          .          .          .         .         .         .  
+          .          .          .          .         .         .         .  static size_t hfind(uint32_t id) {
+ 47,711,730  7,951,955          0          0         0         0         0      size_t h = ((uint64_t)id * 2654435761ULL) & (hcap - 1);
+ 81,639,012 33,536,778          0 16,119,011         0   143,492         0      while (ht[h] && accs[ht[h] - 1].id != id) h = (h + 1) & (hcap - 1);
+          .          .          .          .         .         .         .      return h;
+  7,951,955  7,951,955          0          0         0         0         0  }
+         11          0         11          0         0         0         0  static void hgrow(void) {
+         55         11          0          0         0         0         0      size_t nc = hcap ? hcap * 2 : 1024;
+         77         11         44          0         1         0         0      free(ht); ht = calloc(nc, sizeof(size_t)); hcap = nc;
+  4,190,281    523,797  1,047,552    261,829         0   172,029         0      for (size_t i = 0; i < na; i++) ht[hfind(accs[i].id)] = i + 1;
+         22         22          0         10         0         1         0  }
+          .          .          .          .         .         .         .  static Acct *lookup(uint32_t id) {
+ 21,163,032  7,054,344          0          1         0         1         0      if (!hcap) return NULL;
+  7,054,343          0  7,054,343          0         0         0         0      size_t h = hfind(id);
+ 48,258,896 20,789,194          0          0         0         0         0      return ht[h] ? &accs[ht[h] - 1] : NULL;
+ 14,108,688  7,054,344          0          0         0         0         0  }
+  6,456,893          0          0          0         0         0         0  static int cmp_id(const void *a, const void *b) {
+ 45,198,251 12,913,786          0    138,646         0         0         0      const Acct *x = a, *y = b; return (x->id > y->id) - (x->id < y->id);
+  6,456,893  6,456,893          0          0         0         0         0  }
+          .          .          .          .         .         .         .  static int cmp_top(const void *a, const void *b) {
+    356,069    356,069          0         14         0         0         0      const Acct *x = *(Acct *const *)a, *y = *(Acct *const *)b;
+  1,780,205    712,138          0         41         0         0         0      if (x->bal != y->bal) return x->bal < y->bal ? 1 : -1;
+          .          .          .          .         .         .         .      return (x->id > y->id) - (x->id < y->id);
+          .          .          .          .         .         .         .  }
+          .          .          .          .         .         .         .  
+         11          1          7          0         0         0         0  int main(int argc, char **argv) {
+          2          0          0          0         0         0         0      if (argc != 2) return 1;
+          4          1          1          0         1         0         0      FILE *f = fopen(argv[1], "rb");
+          2          0          0          0         0         0         0      if (!f) return 1;
+          5          0          2          0         0         0         0      size_t cap = 1 << 16; buf = malloc(cap);
+          .          .          .          .         .         .         .      for (;;) {
+         85         11         20          1         1         1         0          if (n == cap) { cap *= 2; buf = realloc(buf, cap); }
+         48         12          0          0         0         0         0          size_t r = fread(buf + n, 1, cap - n, f);
+         36         12         12          0         0         0         0          n += r;
+         24          0          0          0         0         0         0          if (r == 0) break;
+          .          .          .          .         .         .         .      }
+          5          0          2          0         0         0         0      if (ferror(f)) return 1;
+          2          0          1          0         0         0         0      fclose(f);
+          .          .          .          .         .         .         .  
+         18          8          1          0         0         0         0      if (n < 6 || buf[0] != 0xC7 || buf[1] != 'L' || buf[2] != 'X' || buf[3] != 'F' || buf[4] != 2 || buf[5] > 1)
+          .          .          .          .         .         .         .          sterr(0, "header");
+          .          .          .          .         .         .         .      int strict = buf[5] & 1;
+          .          .          .          .         .         .         .  
+          5          0          2          0         0         0         0      Rec *recs = NULL; size_t nr = 0, capr = 0;
+          1          0          1          0         1         0         0      size_t p = 6;
+ 16,000,001          0          0          0         0         0         0      while (p < n) {
+          .          .          .          .         .         .         .          size_t x = p;
+ 16,000,000  4,000,000  4,000,000     62,370         0    62,322         0          int op = buf[p++];
+ 12,000,000          0          0          0         0         0         0          if (op < 1 || op > 5) sterr(x, "opcode");
+  8,000,000          0  8,000,000          0         0         0         0          Rec r; memset(&r, 0, sizeof r); r.op = op; r.off = x;
+          .          .          .          .         .         .         .          const char *e;
+  8,000,000          0          0          0         0         0         0          if (op == 1) {
+  1,869,220          0    373,844          0         0         0         0              if ((e = rdvar(&p, &r.a))) sterr(x, e);
+  1,121,532    373,844          0          0         0         0         0              if (p >= n) sterr(x, "truncated");
+    373,844          0          0          0         0         0         0              int nl = buf[p++];
+  1,495,376    373,844          0      5,837         0     5,791         0              if (nl < 1 || nl > 32) sterr(x, "name");
+    373,844          0    373,844          0         0         0         0              r.b = (uint32_t)p; r.c = 0;
+  7,896,330          0          0          0         0         0         0              for (int i = 0; i < nl; i++) {
+  7,148,642          0          0          0         0         0         0                  if (p >= n) sterr(x, "truncated");
+  3,574,321          0          0          0         0         0         0                  unsigned char ch = buf[p++];
+ 14,297,284  3,574,321          0     55,654         0    55,137         0                  if (ch < 0x21 || ch > 0x7e) sterr(x, "name");
+          .          .          .          .         .         .         .              }
+          .          .          .          .         .         .         .              uint32_t init;
+  1,869,220          0    747,688          0         0         0         0              if ((e = rdvar(&p, &init))) sterr(x, e);
+  1,121,532    373,844    373,844          0         0         0         0              r.c = init;
+          .          .          .          .         .         .         .              /* name_len stored in op-specific way: recover from buf[r.b-1] */
+  7,252,312          0          0          0         0         0         0          } else if (op == 2) {
+ 15,731,850          0  3,146,370          0         0         0         0              if ((e = rdvar(&p, &r.a))) sterr(x, e);
+ 12,585,480          0  3,146,370          0         0         0         0              if ((e = rdvar(&p, &r.b))) sterr(x, e);
+ 12,585,480          0  3,146,370          0         0         0         0              if ((e = rdvar(&p, &r.c))) sterr(x, e);
+    959,572          0          0          0         0         0         0          } else if (op == 3) {
+     92,290          0     18,458          0         0         0         0              if ((e = rdvar(&p, &r.a))) sterr(x, e);
+    922,656          0          0          0         0         0         0          } else if (op == 4) {
+  1,846,510          0    369,302          0         0         0         0              if ((e = rdvar(&p, &r.a))) sterr(x, e);
+  1,477,208          0    369,302          0         0         0         0              if ((e = rdvar(&p, &r.b))) sterr(x, e);
+          .          .          .          .         .         .         .          } else {
+          .          .          .          .         .         .         .              uint32_t len;
+    460,130          0     92,026          0         0         0         0              if ((e = rdvar(&p, &len))) sterr(x, e);
+    552,156    184,052          0          0         0         0         0              if ((uint64_t)(n - p) < len) sterr(x, "truncated");
+     92,026          0          0          0         0         0         0              p += len;
+          .          .          .          .         .         .         .          }
+ 15,442,104  3,907,974          0          0         0         0         0          if (p >= n) sterr(x, "truncated");
+  4,000,000          0          0          0         0         0         0          unsigned c = 0;
+787,373,346 55,098,096          0     14,178         0    14,178         0          for (size_t i = x; i < p; i++) c = (c * 31 + buf[i]) % 251;
+ 12,000,000  4,000,000          0     62,502         0    62,448         0          if (buf[p] != c) sterr(x, "check");
+  8,000,000          0  4,000,000          0         0         0         0          p++;
+ 12,000,129  4,000,013         39          0         0         0         0          if (nr == capr) { capr = capr ? capr * 2 : 1024; recs = realloc(recs, capr * sizeof(Rec)); }
+ 36,000,000 12,000,000  8,000,000          1 1,999,997         0 1,998,974          recs[nr++] = r;
+          .          .          .          .         .         .         .      }
+          .          .          .          .         .         .         .  
+         14          0         10          0         1         0         1      long long rej[5] = {0}; /* dup unknown shut self funds */
+          .          .          .          .         .         .         .      static const char *rn[5] = {"dup", "unknown", "shut", "self", "funds"};
+ 20,000,004          1          0          0         0         0         0      for (size_t i = 0; i < nr; i++) {
+          .          .          .          .         .         .         .          Rec *r = &recs[i];
+          .          .          .          .         .         .         .          int rs = -1;
+ 12,000,000  4,000,000          0     46,016         0    46,016         0          if (r->op == 1) {
+  2,243,064    373,844    373,844    186,705         0   186,705         0              if (lookup(r->a)) rs = 0;
+          .          .          .          .         .         .         .              else {
+  1,495,454    747,682    373,866          0         2         0         1                  if (na == capa) { capa = capa ? capa * 2 : 1024; accs = realloc(accs, capa * sizeof(Acct)); }
+  2,616,852    747,672    747,672          2         0         0         0                  if ((na + 1) * 2 > hcap) { /* grow before insert */
+          .          .          .          .         .         .         .                      hgrow();
+         55         22         11          0         0         0         0                      while ((na + 1) * 2 > hcap) hgrow();
+          .          .          .          .         .         .         .                  }
+  1,869,180  1,121,508    373,836          0         0         0         0                  Acct *a = &accs[na++];
+  1,869,180    373,836  1,121,508         10    11,488         0     1,026                  a->id = r->a; a->shut = 0; a->bal = r->c;
+  2,243,016    747,672    747,672    173,639   185,894   173,632   185,894                  a->name_off = r->b; a->name_len = buf[r->b - 1];
+  1,869,180    373,836    747,672          0         0         0         0                  ht[hfind(a->id)] = na;
+          .          .          .          .         .         .         .              }
+  7,252,312          0          0          0         0         0         0          } else if (r->op == 2) {
+ 18,878,220  6,292,740  6,292,740  1,573,144         0 1,573,144         0              Acct *fa = lookup(r->a), *ta = lookup(r->b);
+ 12,585,480          0          0          0         0         0         0              if (!fa) rs = 1; else if (!ta) rs = 1;
+ 12,418,784  6,197,964          0          0         0         0         0              else if (fa->shut) rs = 2; else if (ta->shut) rs = 2;
+  5,920,956          0          0          0         0         0         0              else if (r->a == r->b) rs = 3;
+ 13,737,720  5,920,900          0          0         0         0         0              else if ((int64_t)r->c > fa->bal) rs = 4;
+  6,037,470  2,012,490  2,012,490          0         0         0         0              else { fa->bal -= r->c; ta->bal += r->c; }
+    959,572          0          0          0         0         0         0          } else if (r->op == 3) {
+     36,916     18,458     18,458      9,121         0     9,121         0              Acct *a = lookup(r->a);
+     91,739     18,458     17,907          0         0         0         0              if (!a) rs = 1; else if (a->shut) rs = 2; else a->shut = 1;
+    922,656          0          0          0         0         0         0          } else if (r->op == 4) {
+    738,604    369,302    369,302    185,015         0   185,015         0              Acct *a = lookup(r->a);
+  2,194,058  1,086,152          0          0         0         0         0              if (!a) rs = 1; else if (a->shut) rs = 2; else a->bal += r->b;
+          .          .          .          .         .         .         .          }
+  2,762,658          0          0          0         0         0         0          if (rs >= 0) {
+  3,435,948  1,145,316          0          0         0         0         0              if (strict) { printf("rejected at offset %zu: %s\n", r->off, rn[rs]); return 3; }
+  2,290,632  1,145,316          0          9         0         5         0              rej[rs]++;
+          .          .          .          .         .         .         .          }
+          .          .          .          .         .         .         .      }
+          .          .          .          .         .         .         .  
+          5          0          0          0         0         0         0      long long open = 0, shut = 0; int64_t total = 0;
+  3,346,622    747,674          0    186,918         0    31,529         0      for (size_t i = 0; i < na; i++) { if (accs[i].shut) shut++; else open++; total += accs[i].bal; }
+          .          .          .          .         .         .         .      printf("records: %zu\n", nr);
+          .          .          .          .         .         .         .      printf("accounts: %lld open, %lld shut\n", open, shut);
+          .          .          .          .         .         .         .      printf("rejected: dup=%lld unknown=%lld shut=%lld self=%lld funds=%lld\n", rej[0], rej[1], rej[2], rej[3], rej[4]);
+          .          .          .          .         .         .         .      printf("total: %lld\n", (long long)total);
+          .          .          .          .         .         .         .  
+        299          0          0          0         0         0         0      Acct *top[5]; int nt = 0;
+  1,121,515          4          0          1         0         1         0      for (size_t i = 0; i < na; i++) {
+  1,121,508    373,836          0    186,918         0         0         0          if (accs[i].shut) continue;
+          .          .          .          .         .         .         .          Acct *a = &accs[i];
+  1,779,645          0          0          0         0         0         0          int pos = nt < 5 ? nt : 5;
+          .          .          .          .         .         .         .          /* insertion into sorted top list */
+          .          .          .          .         .         .         .          int j = pos;
+    712,454          0          0          0         0         0         0          while (j > 0 && cmp_top(&top[j - 1], &a) > 0) j--;
+    711,858          0          0          0         0         0         0          if (j >= 5) continue;
+        150          0          0          0         0         0         0          int end = nt < 5 ? nt : 4;
+        571          0         39          0        11         0         0          for (int k = end; k > j; k--) top[k] = top[k - 1];
+        100          0         50          0         1         0         1          top[j] = a;
+        110          0          0          0         0         0         0          if (nt < 5) nt++;
+          .          .          .          .         .         .         .      }
+         24          7          5          1         0         0         0      for (int i = 0; i < nt; i++) {
+         10         10          0          1         0         0         0          printf("top: %u ", top[i]->id);
+         30         20          5          4         0         0         0          fwrite(buf + top[i]->name_off, 1, top[i]->name_len, stdout);
+          .          .          .          .         .         .         .          printf(" %lld\n", (long long)top[i]->bal);
+          .          .          .          .         .         .         .      }
+          4          1          1          0         0         0         0      qsort(accs, na, sizeof(Acct), cmp_id);
+          2          0          0          0         0         0         0      unsigned __int128 g = 0;
+  1,121,513          2          0          2         0         0         0      for (size_t i = 0; i < na; i++)
+  7,102,888    747,672    373,836    186,918         0         0         0          g = (g * 1000003u + (unsigned __int128)accs[i].id * 7 + (unsigned __int128)(uint64_t)accs[i].bal) % 1000000007u;
+          .          .          .          .         .         .         .      printf("digest: %llu\n", (unsigned long long)g);
+          1          0          0          0         0         0         0      return 0;
+         12         10          0          2         0         1         0  }
+
+--------------------------------------------------------------------------------
+-- Annotated source file: /usr/include/x86_64-linux-gnu/bits/string_fortified.h
+--------------------------------------------------------------------------------
+Ir________ Dr Dw_______ D1mr D1mw DLmr DLmw 
+
+-- line 51 ----------------------------------------
+         .  .         .    .    .    .    .  /* The first two tests here help to catch a somewhat common problem
+         .  .         .    .    .    .    .     where the second and third parameter are transposed.  This is
+         .  .         .    .    .    .    .     especially problematic if the intended fill value is zero.  In this
+         .  .         .    .    .    .    .     case no work is done at all.  We detect these problems by referring
+         .  .         .    .    .    .    .     non-existing functions.  */
+         .  .         .    .    .    .    .  __fortify_function void *
+         .  .         .    .    .    .    .  __NTH (memset (void *__dest, int __ch, size_t __len))
+         .  .         .    .    .    .    .  {
+12,000,000  0 8,000,000    0    0    0    0    return __builtin___memset_chk (__dest, __ch, __len,
+         .  .         .    .    .    .    .  				 __glibc_objsize0 (__dest));
+         .  .         .    .    .    .    .  }
+         .  .         .    .    .    .    .  
+         .  .         .    .    .    .    .  #ifdef __USE_MISC
+         .  .         .    .    .    .    .  # include <bits/strings_fortified.h>
+         .  .         .    .    .    .    .  
+         .  .         .    .    .    .    .  void __explicit_bzero_chk (void *__dest, size_t __len, size_t __destlen)
+         .  .         .    .    .    .    .    __THROW __nonnull ((1)) __fortified_attr_access (__write_only__, 1, 2);
+-- line 67 ----------------------------------------
+
+--------------------------------------------------------------------------------
+-- Annotation summary
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____ 
+
+2,369,539,758 329,169,138 134,142,125 20,177,389 2,197,398 3,443,077 2,185,897    annotated: files known & above threshold & readable, line numbers known
+            0           0           0          0         0         0         0    annotated: files known & above threshold & readable, line numbers unknown
+            0           0           0          0         0         0         0  unannotated: files known & above threshold & two or more non-identical
+            0           0           0          0         0         0         0  unannotated: files known & above threshold & unreadable 
+          137          15          41          6         2         1         2  unannotated: files known & below threshold
+  363,401,758 150,870,779 121,327,301  3,727,845 3,720,566     2,287   192,486  unannotated: files unknown
+

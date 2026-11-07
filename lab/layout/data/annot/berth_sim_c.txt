@@ -1,0 +1,229 @@
+--------------------------------------------------------------------------------
+-- Metadata
+--------------------------------------------------------------------------------
+Invocation:       /tmp/energy-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/berth_sim_c.cg
+I1 cache:         32768 B, 64 B, 8-way associative
+D1 cache:         32768 B, 64 B, 8-way associative
+LL cache:         33554432 B, 64 B, 16-way associative
+Command:          /tmp/layout-iur_r085/berth_sim_c
+Events recorded:  Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Events shown:     Ir Dr Dw D1mr D1mw DLmr DLmw
+Event sort order: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Threshold:        0.1%
+Annotation:       on
+
+--------------------------------------------------------------------------------
+-- Summary
+--------------------------------------------------------------------------------
+Ir___________ Dr___________ Dw_________ D1mr______ D1mw______ DLmr______ DLmw_____ 
+
+5,912,493,375 1,736,583,540 860,732,265 43,765,028 24,264,002 14,426,729 7,294,318  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+-- File:function summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw______ DLmr______ DLmw_____  file:function
+
+< 3,424,839,503 862,508,894 166,268,599 35,473,823  7,852,501 13,675,398 5,949,558  /home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.c:
+  1,035,846,082 364,930,230           0  8,708,426          0  1,237,877         0    cmpu
+    924,991,968 238,466,920  89,690,619 25,439,939  7,744,359 11,172,859 5,949,534    main
+    890,440,220 152,938,192  18,000,130  1,264,651          0  1,264,651         0    rd
+    375,336,399  59,996,978  28,829,578     35,572          0          0         0    upop
+    198,224,834  46,176,574  29,748,272     25,235    108,142         11        24    upush
+
+< 2,487,653,384 874,074,506 694,463,591  8,291,186 16,411,499    751,312 1,344,758  ???:
+  2,487,643,976 874,072,391 694,462,004  8,291,039 16,411,467    751,207 1,344,726    ???
+
+--------------------------------------------------------------------------------
+-- Function:file summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw______ DLmr______ DLmw_____  function:file
+
+> 2,487,643,976 874,072,391 694,462,004  8,291,039 16,411,467    751,207 1,344,726  ???:???
+
+> 1,035,846,082 364,930,230           0  8,708,426          0  1,237,877         0  cmpu:/home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.c
+
+>   924,992,456 238,467,060  89,690,694 25,439,958  7,744,361 11,172,878 5,949,536  main:
+    924,991,968 238,466,920  89,690,619 25,439,939  7,744,359 11,172,859 5,949,534    /home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.c
+
+>   890,440,220 152,938,192  18,000,130  1,264,651          0  1,264,651         0  rd:/home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.c
+
+>   375,336,399  59,996,978  28,829,578     35,572          0          0         0  upop:/home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.c
+
+>   198,224,834  46,176,574  29,748,272     25,235    108,142         11        24  upush:/home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.c
+
+--------------------------------------------------------------------------------
+-- Annotated source file: /home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.c
+--------------------------------------------------------------------------------
+Ir_________ Dr_________ Dw________ D1mr_____ D1mw_____ DLmr_____ DLmw_____ 
+
+-- line 5 ----------------------------------------
+          .           .          .         .         .         .         .  
+          .           .          .         .         .         .         .  typedef uint64_t u64;
+          .           .          .         .         .         .         .  typedef int64_t i64;
+          .           .          .         .         .         .         .  
+          .           .          .         .         .         .         .  typedef struct { u64 key; uint32_t idx; } WE;
+          .           .          .         .         .         .         .  typedef struct { WE *a; size_t n, cap; } WH;
+          .           .          .         .         .         .         .  
+          .           .          .         .         .         .         .  static void wpush(WH *h, u64 key, uint32_t idx) {
+ 18,000,072   9,000,021         27 2,996,293         0   496,332         0      if (h->n == h->cap) { h->cap = h->cap ? h->cap * 2 : 1024; h->a = realloc(h->a, h->cap * sizeof(WE)); }
+ 12,000,000           0  3,000,000         0         0         0         0      size_t i = h->n++;
+  6,487,824           0          0         0         0         0         0      while (i > 0) {
+  1,478,001           0          0         0         0         0         0          size_t p = (i - 1) / 2;
+  3,423,615     972,807          0       187         0         0         0          if (h->a[p].key <= key) break;
+  1,473,158     243,912    243,912         0    31,294         0        21          h->a[i] = h->a[p];
+          .           .          .         .         .         .         .          i = p;
+          .           .          .         .         .         .         .      }
+ 11,039,720   2,519,860  6,000,000         0   120,333         0         7      h->a[i].key = key; h->a[i].idx = idx;
+          .           .          .         .         .         .         .  }
+          .           .          .         .         .         .         .  static void wpop(WH *h) {
+ 24,000,000   9,000,000  3,000,000        45         0         0         0      WE last = h->a[--h->n];
+    210,264           0     70,088         0         0         0         0      size_t i = 0, n = h->n;
+          .           .          .         .         .         .         .      for (;;) {
+    179,374           0          0         0         0         0         0          size_t c = 2 * i + 1;
+  6,085,750           0          0         0         0         0         0          if (c >= n) break;
+    726,924      96,602          0         1         0         0         0          if (c + 1 < n && h->a[c + 1].key < h->a[c].key) c++;
+    190,398      37,074          0         0         0         0         0          if (h->a[c].key >= last.key) break;
+    118,764      39,588     39,588         0         0         0         0          h->a[i] = h->a[c];
+          .           .          .         .         .         .         .          i = c;
+          .           .          .         .         .         .         .      }
+  8,756,308           0    960,280         0         0         0         0      if (n) h->a[i] = last;
+          .           .          .         .         .         .         .  }
+          .           .          .         .         .         .         .  
+          .           .          .         .         .         .         .  typedef struct { u64 *a; size_t n, cap; } UH;
+ 30,000,320           0 12,000,128         0        82         0         9  static void upush(UH *h, u64 v) {
+ 25,572,174  18,000,192         12        16         0        11         0      if (h->n == h->cap) { h->cap = h->cap ? h->cap * 2 : 1024; h->a = realloc(h->a, h->cap * sizeof(u64)); }
+ 12,000,132           4  6,000,064         0         0         0         0      size_t i = h->n++;
+ 23,670,582           0          0         0         0         0         0      while (i > 0) {
+ 30,528,558           0          0         0         0         0         0          size_t p = (i - 1) / 2;
+ 30,528,558  10,176,186          0    25,219         0         0         0          if (h->a[p] <= v) break;
+ 15,924,190           0  5,748,004         0    66,068         0         3          h->a[i] = h->a[p];
+          .           .          .         .         .         .         .          i = p;
+          .           .          .         .         .         .         .      }
+  6,000,064           0  6,000,064         0    41,992         0        12      h->a[i] = v;
+ 24,000,256  18,000,192          0         0         0         0         0  }
+          .           .          .         .         .         .         .  static void upop(UH *h) {
+ 30,000,000  18,000,000  6,000,000    29,551         0         0         0      u64 last = h->a[--h->n];
+ 11,278,994           0          0         0         0         0         0      size_t i = 0, n = h->n;
+          .           .          .         .         .         .         .      for (;;) {
+ 33,441,735           0          0         0         0         0         0          size_t c = 2 * i + 1;
+ 63,012,063           0          0         0         0         0         0          if (c >= n) break;
+170,435,299  35,996,978          0     6,021         0         0         0          if (c + 1 < n && h->a[c + 1] < h->a[c]) c++;
+ 37,245,604           0          0         0         0         0         0          if (h->a[c] >= last) break;
+ 17,004,021           0 17,004,021         0         0         0         0          h->a[i] = h->a[c];
+          .           .          .         .         .         .         .          i = c;
+          .           .          .         .         .         .         .      }
+  6,546,563           0  5,825,557         0         0         0         0      if (n) h->a[i] = last;
+  6,372,120   6,000,000          0         0         0         0         0  }
+          .           .          .         .         .         .         .  
+121,643,410           0          0         0         0         0         0  static int cmpu(const void *x, const void *y) {
+243,286,820 243,286,820          0 8,708,426         0 1,237,877         0      u64 a = *(const u64 *)x, b = *(const u64 *)y;
+549,272,442           0          0         0         0         0         0      return a < b ? -1 : a > b;
+121,643,410 121,643,410          0         0         0         0         0  }
+          .           .          .         .         .         .         .  
+          .           .          .         .         .         .         .  static char *buf; static size_t bp;
+          .           .          .         .         .         .         .  static u64 rd(void) {
+234,001,683  72,000,519          0   281,450         0   281,450         0      while (buf[bp] < '0') bp++;
+ 36,000,260           0          0         0         0         0         0      u64 v = 0;
+584,438,017  62,937,543 18,000,130   983,201         0   983,201         0      while (buf[bp] >= '0') v = v * 10 + (buf[bp++] - '0');
+          .           .          .         .         .         .         .      return v;
+ 36,000,260  18,000,130          0         0         0         0         0  }
+          .           .          .         .         .         .         .  
+         11           1          7         0         1         0         0  int main(void) {
+          2           0          0         0         0         0         0      size_t cap = 1 << 20, len = 0;
+         11           0          9         0         1         0         0      buf = malloc(cap + 1);
+          .           .          .         .         .         .         .      for (;;) {
+         24           0          0         0         0         0         0          size_t r = fread(buf + len, 1, cap - len, stdin);
+          8           0          0         0         0         0         0          len += r;
+         16           0          0         0         0         0         0          if (len < cap) break;
+         28           7          7         0         0         0         0          cap *= 2; buf = realloc(buf, cap + 1);
+          .           .          .         .         .         .         .      }
+          2           1          1         0         1         0         1      buf[len] = 0;
+          6           0          4         0         2         0         0      int B = (int)rd(); uint32_t S = (uint32_t)rd();
+          9           0          4         0         2         0         1      int *cls = malloc(B * sizeof(int)), *rate = malloc(B * sizeof(int));
+        517           2        256         0         7         0         7      for (int i = 0; i < B; i++) { cls[i] = (int)rd(); rate[i] = (int)rd(); }
+         15           0          7         0         0         0         0      uint32_t *id = malloc((S + 1) * 4), *arr = malloc((S + 1) * 4), *cargo = malloc((S + 1) * 4), *op = malloc((S + 1) * 4);
+          7           0          4         0         0         0         0      uint8_t *sz = malloc(S + 1), *pr = malloc(S + 1);
+  9,000,008           3          1         0         0         0         0      for (uint32_t i = 0; i < S; i++) {
+ 24,000,000   6,000,000 18,000,000         0   421,875         0   421,875          id[i] = (uint32_t)rd(); arr[i] = (uint32_t)rd(); sz[i] = (uint8_t)rd();
+ 21,000,000   3,000,000 18,000,000         0   421,875         0   421,875          cargo[i] = (uint32_t)rd(); pr[i] = (uint8_t)rd(); op[i] = (uint32_t)rd();
+          .           .          .         .         .         .         .      }
+          7           1          2         0         0         0         0      u64 *ord = malloc((S + 1) * 8);
+ 24,000,000   3,000,000  3,000,000   187,501   375,000   187,501   375,000      for (uint32_t i = 0; i < S; i++) ord[i] = ((u64)arr[i] << 22) | i;
+          5           2          1         2         1         2         1      qsort(ord, S, 8, cmpu);
+          .           .          .         .         .         .         .  
+          3           0          2         0         1         0         1      i64 *start = malloc((S + 1) * 8);
+          3           0          2         0         0         0         0      int *bert = malloc((S + 1) * 4);
+          8           0          3         0         0         0         0      i64 *bn = calloc(B, 8), *bu = calloc(B, 8);
+          5           1          2         1         0         1         0      i64 *lastop = malloc(B * 8);
+          7           0          1         0         0         0         0      for (int i = 0; i < B; i++) lastop[i] = -1;
+          .           .          .         .         .         .         .  
+         22           1         15         1         2         1         2      UH fr[4] = {{0}}; UH dep = {0};
+    820,744         128         64         5         0         5         0      for (int i = 0; i < B; i++) upush(&fr[cls[i]], (u64)i);
+         17           0         13         0         1         0         1      WH wh[4] = {{0}};
+          1           0          0         0         0         0         0      i64 makespan = 0;
+          1           0          0         0         0         0         0      uint32_t ai = 0;
+          7           0          7         0         1         0         1      i64 wtot = 0, wmax = -1; i64 wid = -1;
+          .           .          .         .         .         .         .  
+  7,782,313   2,594,078          0         0         0         0         0      while (ai < S || dep.n) {
+          .           .          .         .         .         .         .          u64 t = (u64)-1;
+ 15,564,234   5,188,078  2,594,039       532         0         1         0          if (ai < S) t = ord[ai] >> 22;
+ 25,940,612  10,376,306          0    10,055         0         0         0          if (dep.n && (dep.a[0] >> 11) < t) t = dep.a[0] >> 11;
+ 57,317,021  18,970,379  2,594,076       364         0         0         0          while (dep.n && (dep.a[0] >> 11) == t) {
+          .           .          .         .         .         .         .              int b = (int)(dep.a[0] & 2047);
+  6,000,002           0  3,000,001         0         0         0         0              upop(&dep);
+ 18,000,000   3,000,000  3,000,000    32,698         0         0         0              upush(&fr[cls[b]], (u64)b);
+  6,000,000           0          0         0         0         0         0              if ((i64)t > makespan) makespan = (i64)t;
+          .           .          .         .         .         .         .          }
+ 91,445,345  26,752,386  5,188,153   375,001         0   375,000         0          while (ai < S && (ord[ai] >> 22) == t) {
+  3,000,000           0          0         0         0         0         0              uint32_t i = (uint32_t)(ord[ai] & ((1u << 22) - 1));
+  3,000,000           0          0         0         0         0         0              ai++;
+ 24,000,000   9,000,000          0 8,994,840         0 4,366,606         0              wpush(&wh[sz[i]], ((u64)pr[i] << 60) | ((u64)arr[i] << 30) | id[i], i);
+          .           .          .         .         .         .         .          }
+ 31,128,924           0          0         0         0         0         0          for (int c = 1; c <= 3; c++) {
+ 21,564,462  10,782,231          0         2         0         2         0              while (fr[c].n) {
+ 20,777,084           0          0         0         0         0         0                  int bs = 0; u64 bk = (u64)-1;
+104,068,752  10,388,542          0         0         0         0         0                  for (int s = 1; s <= c; s++)
+ 59,785,490  26,877,545          0     1,213         0        11         0                      if (wh[s].n && wh[s].a[0].key < bk) { bk = wh[s].a[0].key; bs = s; }
+ 20,777,084           0          0         0         0         0         0                  if (!bs) break;
+ 15,000,000   6,000,000  3,000,000         0         0         0         0                  uint32_t i = wh[bs].a[0].idx;
+          .           .          .         .         .         .         .                  wpop(&wh[bs]);
+  6,000,000   6,000,000          0    30,652         0         0         0                  int b = (int)fr[c].a[0];
+  6,000,000           0  3,000,000         0         0         0         0                  upop(&fr[c]);
+ 57,000,000  24,000,000          0 6,096,680         0 3,868,661         0                  i64 svc = (cargo[i] + rate[b] - 1) / rate[b] + (lastop[b] == (i64)op[i] ? 1 : 4);
+  3,000,000           0  3,000,000         0         0         0         0                  lastop[b] = op[i];
+ 12,000,000   6,000,000  6,000,000         0 5,998,960         0 4,355,739                  start[i] = (i64)t; bert[i] = b;
+  9,000,000   9,000,000          0   134,648         0         0         0                  bn[b]++; bu[b] += svc;
+ 15,000,000   3,000,000  3,000,000         0         0         0         0                  upush(&dep, ((t + (u64)svc) << 11) | (u64)b);
+ 12,000,000   6,000,000          0    21,995         0         0         0                  i64 w = (i64)t - (i64)arr[i];
+  3,000,000   3,000,000          0         0         0         0         0                  wtot += w;
+ 19,848,682   5,627,343         42        13         0         0         0                  if (w > wmax || (w == wmax && (i64)id[i] < wid)) { wmax = w; wid = id[i]; }
+          .           .          .         .         .         .         .              }
+          .           .          .         .         .         .         .          }
+          .           .          .         .         .         .         .      }
+          9           6          0         0         0         0         0      if (S == 0) { wmax = 0; wid = -1; }
+ 21,000,000   3,000,000  3,000,000   187,501   375,001   152,338   375,001      for (uint32_t i = 0; i < S; i++) ord[i] = ((u64)id[i] << 22) | i;
+          6           1          1         1         1         1         1      qsort(ord, S, 8, cmpu);
+          1           0          0         0         0         0         0      u64 g = 0;
+  9,000,001           0          0         0         0         0         0      for (uint32_t k = 0; k < S; k++) {
+          .           .          .         .         .         .         .          uint32_t i = (uint32_t)(ord[k] & ((1u << 22) - 1));
+ 48,000,005   9,000,002          0 6,369,705         0 1,726,394         0          g = (g * 1000003ULL + (u64)start[i] * 31 + (u64)bert[i]) % 1000000007ULL;
+          .           .          .         .         .         .         .      }
+          .           .          .         .         .         .         .      printf("ships %u\nmakespan %lld\nwait total %lld max %lld ship %lld\n", S, (long long)makespan, (long long)wtot, (long long)wmax, (long long)wid);
+        263           3          0         1         0         1         0      for (int b = 0; b < B; b++) printf("berth %d ships %lld busy %lld\n", b, (long long)bn[b], (long long)bu[b]);
+          .           .          .         .         .         .         .      printf("digest %llu\n", (unsigned long long)g);
+          .           .          .         .         .         .         .      return 0;
+         12           9          0         2         0         2         0  }
+
+--------------------------------------------------------------------------------
+-- Annotation summary
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw_________ D1mr______ D1mw______ DLmr______ DLmw_____ 
+
+3,424,839,503 862,508,894 166,268,599 35,473,823  7,852,501 13,675,398 5,949,558    annotated: files known & above threshold & readable, line numbers known
+            0           0           0          0          0          0         0    annotated: files known & above threshold & readable, line numbers unknown
+            0           0           0          0          0          0         0  unannotated: files known & above threshold & two or more non-identical
+            0           0           0          0          0          0         0  unannotated: files known & above threshold & unreadable 
+          488         140          75         19          2         19         2  unannotated: files known & below threshold
+2,487,653,384 874,074,506 694,463,591  8,291,186 16,411,499    751,312 1,344,758  unannotated: files unknown
+

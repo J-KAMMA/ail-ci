@@ -1,0 +1,1608 @@
+--------------------------------------------------------------------------------
+-- Metadata
+--------------------------------------------------------------------------------
+Invocation:       /tmp/energy-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/echo_pack_prev32.cg
+I1 cache:         32768 B, 64 B, 8-way associative
+D1 cache:         32768 B, 64 B, 8-way associative
+LL cache:         33554432 B, 64 B, 16-way associative
+Command:          /tmp/layout-iur_r085/echo_pack_prev32 pack
+Events recorded:  Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Events shown:     Ir Dr Dw D1mr D1mw DLmr DLmw
+Event sort order: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Threshold:        0.1%
+Annotation:       on
+
+--------------------------------------------------------------------------------
+-- Summary
+--------------------------------------------------------------------------------
+Ir___________ Dr___________ Dw_________ D1mr_______ D1mw_____ DLmr_____ DLmw_____ 
+
+5,011,882,359 1,076,119,737 316,162,768 104,950,840 6,089,333 1,495,117 5,537,074  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+-- File:function summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr___________ Dw_________ D1mr_______ D1mw_____ DLmr_____ DLmw_____  file:function
+
+< 4,863,237,659 1,072,934,445 181,448,255 104,873,317 3,943,598 1,491,663 3,405,633  /tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c:
+  4,486,144,544   972,084,161 135,371,313 103,722,467 2,204,510 1,182,508 2,202,710    pack
+     84,200,374    18,806,373           0      65,445         0     8,426         0    ail_tab_hfree_slot
+     79,183,081    24,735,023  16,445,951     543,023 1,488,086   206,579 1,087,523    ail_tab_hput
+     53,135,667    10,555,754   5,092,569          23    47,457         4    11,334    flush
+     43,739,025    10,273,524   5,820,088           0         0         0         0    ail_bytearray_extend
+     37,571,230    10,154,327   8,123,528      44,611     2,795         3         1    ail_tab_put_slow
+     23,057,694     6,288,494          55     497,670         0    94,124         0    ail_tab_hash_rearray
+     19,643,446     5,820,187   1,455,099           0    31,191         0         0    ail_bytearray_reserve
+     19,293,360     6,092,640   4,061,760          33     3,243         4         1    ail_idict_put_slow
+     17,262,713     8,123,538   5,077,254          16   166,291         2   104,056    ail_tab_order_append
+
+<   146,462,123     3,185,292 133,986,991      77,523 2,145,735     3,454 2,131,441  ???:
+    146,447,060     3,181,940 133,985,548      77,067 2,145,666     3,336 2,131,427    ???
+
+--------------------------------------------------------------------------------
+-- Function:file summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr_______ D1mw_____ DLmr_____ DLmw_____  function:file
+
+> 4,486,144,544 972,084,161 135,371,313 103,722,467 2,204,510 1,182,508 2,202,710  pack:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>   146,447,060   3,181,940 133,985,548      77,067 2,145,666     3,336 2,131,427  ???:???
+
+>    84,200,374  18,806,373           0      65,445         0     8,426         0  ail_tab_hfree_slot:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    79,183,081  24,735,023  16,445,951     543,023 1,488,086   206,579 1,087,523  ail_tab_hput:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    53,135,667  10,555,754   5,092,569          23    47,457         4    11,334  flush:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    45,921,558  10,273,524   6,547,599           0         0         0         0  ail_bytearray_extend:
+     43,739,025  10,273,524   5,820,088           0         0         0         0    /tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    37,571,230  10,154,327   8,123,528      44,611     2,795         3         1  ail_tab_put_slow:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    23,057,694   6,288,494          55     497,670         0    94,124         0  ail_tab_hash_rearray:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    19,643,446   5,820,187   1,455,099           0    31,191         0         0  ail_bytearray_reserve:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    19,293,360   6,092,640   4,061,760          33     3,243         4         1  ail_idict_put_slow:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+>    17,262,713   8,123,538   5,077,254          16   166,291         2   104,056  ail_tab_order_append:/tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+
+--------------------------------------------------------------------------------
+-- Annotated source file: /tmp/layout-iur_r085/echo_pack_echo_pack_prev32/program.c
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw________ D1mr______ D1mw_____ DLmr___ DLmw_____ 
+
+-- line 360 ----------------------------------------
+            .           .          .          .         .       .         .     Linux with THP in "madvise" mode (the common default) asking for huge pages makes that one fault
+            .           .          .          .         .       .         .     per 2 MiB. The hint covers only whole 2 MiB pages inside the block and changes no contents. */
+            .           .          .          .         .       .         .  #if defined(__linux__)
+            .           .          .          .         .       .         .  /* Declared here rather than via <sys/mman.h>, which hides madvise under strict -std=c11;
+            .           .          .          .         .       .         .     MADV_HUGEPAGE is 14 in the Linux ABI. */
+            .           .          .          .         .       .         .  extern int madvise(void *addr, size_t length, int advice);
+            .           .          .          .         .       .         .  static void ail__huge_hint(void *p, size_t n) {
+            .           .          .          .         .       .         .      const uintptr_t huge = (uintptr_t)2 << 20;
+           86           0          0          0         0       0         0      if (!p || n < ((size_t)4 << 20)) return;
+           16           0          0          0         0       0         0      uintptr_t first = ((uintptr_t)p + huge - 1) & ~(huge - 1), last = ((uintptr_t)p + n) & ~(huge - 1);
+           24           0          4          0         0       0         0      if (last > first) (void)madvise((void *)first, last - first, 14 /* MADV_HUGEPAGE */);
+            2           2          0          0         0       0         0  }
+            .           .          .          .         .       .         .  #else
+            .           .          .          .         .       .         .  static void ail__huge_hint(void *p, size_t n) { (void)p; (void)n; }
+            .           .          .          .         .       .         .  #endif
+          546         117        117         10        12       0         2  static void *ail_alloc(size_t n) { void *p = calloc(n, 1); if (!p) ail_die("out of memory"); ail__huge_hint(p, n); return p; }
+            .           .          .          .         .       .         .  /* For a buffer the caller writes completely before anything reads it (a copied or concatenated
+            .           .          .          .         .       .         .     str): glibc's calloc bypasses the per-thread cache and zeroes, and those were 7% of an
+            .           .          .          .         .       .         .     LLM-written ticket validator's instructions, one per copied key or built str. */
+            8           0          2          0         0       0         0  static void *ail_alloc_raw(size_t n) { void *p = malloc(n); if (!p) ail_die("out of memory"); ail__huge_hint(p, n); return p; }
+            .           .          .          .         .       .         .  /* A program's own `raise <Name>()`, and where a converted runtime trap goes once nothing is left
+            .           .          .          .         .       .         .     to catch it: the same two destinations ail_die already has -- longjmp to an active handler, or
+            .           .          .          .         .       .         .     the original fatal stop -- naming the exception directly since there is no trap message to
+            .           .          .          .         .       .         .     reuse here.
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .     `fflush(stdout)` before the fatal stop is the SAME F3 correctness fix `ail_die` just above
+            .           .          .          .         .       .         .     already has, and was MISSING here until scope item 4 of AIL_TASK_stdio_20260915.md needed it:
+            .           .          .          .         .       .         .     `int(<str>)` on bad input raises ValueError through exactly this uncaught path, and a `print()`
+-- line 387 ----------------------------------------
+-- line 446 ----------------------------------------
+            .           .          .          .         .       .         .      if (ail_handled_value) ail_raise_value(ail_handled_value);
+            .           .          .          .         .       .         .      ail_raise_named(ail_handled_code ? ail_handled_code : AIL_EXC_RUNTIME);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  #define AIL_ELEM_LIMIT(T) ((uintmax_t)SIZE_MAX / (uintmax_t)sizeof(T))
+            .           .          .          .         .       .         .  /* A str is one object of UTF-8 bytes, so its length is bounded by PTRDIFF_MAX, not SIZE_MAX. */
+            .           .          .          .         .       .         .  #define AIL_STR_LIMIT ((uintmax_t)PTRDIFF_MAX)
+            .           .          .          .         .       .         .  static void ail__need_elems(int64_t n, uintmax_t limit) {
+            3           0          0          0         0       0         0      if (n < 0 || (uintmax_t)n >= limit) ail_die("allocation too large");
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* stdout-dirty flag: set by every path that can leave bytes in stdout's buffer
+            .           .          .          .         .       .         .     (ail_str_write when f==stdout, ail_print_float/ail_write_float, and the
+            .           .          .          .         .       .         .     ail_stdout_putc/ail_fputs_stdout helpers the emitted print code calls).
+            .           .          .          .         .       .         .     `ail_stdin_flush_stdout` (in STR) consults it before an actual OS read,
+            .           .          .          .         .       .         .     instead of paying for a locked libc fflush call on every buffered line.
+            .           .          .          .         .       .         .     Prompt-before-read ordering still holds when input blocks for a reply.
+            .           .          .          .         .       .         .     `ail_die`/assert paths keep their own unconditional fflush(stdout) before
+-- line 462 ----------------------------------------
+-- line 797 ----------------------------------------
+            .           .          .          .         .       .         .      int c = n ? memcmp(a.p, b.p, (size_t)n) : 0;
+            .           .          .          .         .       .         .      if (c) return c < 0 ? -1 : 1;
+            .           .          .          .         .       .         .      return a.n == b.n ? 0 : (a.n < b.n ? -1 : 1);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* Always inlined so that a literal side (`k == "code"`) has a constant length: the memcmp then
+            .           .          .          .         .       .         .     becomes a few loads and a chain of literal compares a jump on the length. */
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_str_eq(ail_str a, ail_str b) {
+            .           .          .          .         .       .         .      if (__builtin_constant_p(b.n) && b.n <= 16)
+            4           1          0          0         0       0         0          return a.n == b.n && (b.n == 0 || memcmp(a.p, b.p, (size_t)b.n) == 0);
+            .           .          .          .         .       .         .      if (__builtin_constant_p(a.n) && a.n <= 16)
+            .           .          .          .         .       .         .          return a.n == b.n && (a.n == 0 || memcmp(a.p, b.p, (size_t)a.n) == 0);
+            .           .          .          .         .       .         .      return a.n == b.n && (a.n == 0 || memcmp(a.p, b.p, (size_t)a.n) == 0);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* A slot whose block pointer is 0 has the rest 0 as well (every writer sets or clears the four
+            .           .          .          .         .       .         .     together), so only slots in use are written. */
+            .           .          .          .         .       .         .  static inline void ail__tops_clear(ail_sarena *A) {
+           12           0          0          0         0       0         0      for (int i = 0; i < AIL_SARENA_TOPS; i++)
+            8           4          0          1         0       1         0          if (A->top[i]) { A->top[i] = 0; A->tlen[i] = A->tcap[i] = A->trun[i] = 0; }
+            1           0          1          0         1       0         1      A->tnext = 0;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* Sized arena blocks recycle through a small process-wide cache: the per-line malloc/
+            .           .          .          .         .       .         .     free pair was the dominant remaining cost of the stdin path (measured by a
+            .           .          .          .         .       .         .     scratch-buffer probe at ~1.5x of wall time). A block enters only where it would
+            .           .          .          .         .       .         .     have been freed, so lifetimes are unchanged; unsized pushes (cap 0) still free.
+            .           .          .          .         .       .         .     The cache is bounded so outsized blocks (a 70MB line) never linger. */
+            .           .          .          .         .       .         .  #define AIL_BLK_CACHE_MAX 16
+            .           .          .          .         .       .         .  #define AIL_BLK_CACHE_BYTES (4u << 20)
+            .           .          .          .         .       .         .  AIL_LINK_STATE(struct { uint8_t *p; int64_t cap; }, ail__blk_cache[AIL_BLK_CACHE_MAX], );
+            .           .          .          .         .       .         .  AIL_LINK_STATE(int64_t, ail__blk_cache_n, = 0);
+            .           .          .          .         .       .         .  AIL_LINK_STATE(size_t, ail__blk_cache_bytes, = 0);
+            .           .          .          .         .       .         .  static void ail__blk_cache_put(uint8_t *p, int64_t cap) {
+            .           .          .          .         .       .         .      size_t bytes = (size_t)cap * sizeof(uint8_t);
+            5           1          0          1         0       1         0      if (ail__blk_cache_n >= AIL_BLK_CACHE_MAX ||
+            2           1          0          0         0       0         0          ail__blk_cache_bytes + bytes > AIL_BLK_CACHE_BYTES) { free(p); return; }
+            6           0          1          0         0       0         0      ail__blk_cache[ail__blk_cache_n].p = p;
+            1           0          1          0         0       0         0      ail__blk_cache[ail__blk_cache_n].cap = cap;
+            3           0          2          0         0       0         0      ail__blk_cache_n++; ail__blk_cache_bytes += bytes;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* First fit from the most recently released block, and only a block no more than twice (plus 32)
+            .           .          .          .         .       .         .     the size asked for: the previous best-fit scan walked the whole cache -- up to 32 entries, about
+            .           .          .          .         .       .         .     300 instructions -- on every miss, and a loop reading lines of 17..21 bytes missed every time
+            .           .          .          .         .       .         .     once the cache held undersized blocks (14% of an LLM-written integer counter). `*cap` receives
+            .           .          .          .         .       .         .     the block's real capacity; a fresh block is rounded up to 16 so one size class serves them all. */
+            .           .          .          .         .       .         .  static uint8_t *ail__blk_take(int64_t need, int64_t *cap) {
+            4           1          0          0         0       0         0      for (int64_t i = ail__blk_cache_n; i-- > 0;) {
+            .           .          .          .         .       .         .          int64_t c = ail__blk_cache[i].cap;
+            .           .          .          .         .       .         .          if (c >= need && c <= 2 * need + 32) {
+            .           .          .          .         .       .         .              uint8_t *p = ail__blk_cache[i].p;
+            .           .          .          .         .       .         .              ail__blk_cache_bytes -= (size_t)c * sizeof(uint8_t);
+            .           .          .          .         .       .         .              ail__blk_cache[i] = ail__blk_cache[--ail__blk_cache_n];
+            .           .          .          .         .       .         .              *cap = c;
+            .           .          .          .         .       .         .              return p;
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .      }
+            3           0          1          0         0       0         0      int64_t c = (need + 15) & ~(int64_t)15;
+            3           0          1          0         0       0         0      uint8_t *p = (uint8_t *)malloc((size_t)c * sizeof(uint8_t));
+            3           1          0          0         0       0         0      if (!p) ail_die("out of memory");
+            5           1          2          0         0       0         0      ail__huge_hint(p, (size_t)c);
+            .           .          .          .         .       .         .      *cap = c;
+            .           .          .          .         .       .         .      return p;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail__blk_release(uint8_t *p, int64_t cap) {
+            2           0          0          0         0       0         0      if (cap > 0) ail__blk_cache_put(p, cap); else free(p);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail__sarena_arrays_free(ail_sarena *A) {
+            6           0          0          0         0       0         0      if (A->blk && A->blk != A->blk0) free(A->blk);
+            6           1          0          0         0       0         0      if (A->bcap && A->bcap != A->bcap0) free(A->bcap);
+            6           0          4          0         0       0         0      A->blk = 0; A->bcap = 0; A->n = A->cap = 0;
+            .           .          .          .         .       .         .  }
+            4           0          3          0         0       0         0  static void ail_sarena_free(ail_sarena *A) {
+            .           .          .          .         .       .         .      /* An arena that never held a block (a helper whose loops only declare a checkpoint) has
+            .           .          .          .         .       .         .         nothing to release and no append target: return before clearing the four target slots,
+            .           .          .          .         .       .         .         which was 9% of an LLM-written JSON parser calling such helpers per token. */
+            3           2          0          1         0       1         0      if (!A->n && !A->blk && !A->top[0] && !A->top[1] && !A->top[2] && !A->top[3]) return;
+            5           1          0          0         0       0         0      for (int64_t i = 0; i < A->n; i++)
+            5           3          0          1         0       1         0          ail__blk_release(A->blk[i], A->bcap ? A->bcap[i] : 0);
+            .           .          .          .         .       .         .      ail__sarena_arrays_free(A);
+            .           .          .          .         .       .         .      ail__tops_clear(A);
+            4           4          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* For a proven nonescaping stdin loop, retain its current readline allocation
+            .           .          .          .         .       .         .     and everything preceding the loop. The final target remains valid after EOF/break. */
+            .           .          .          .         .       .         .  static void ail_sarena_keep_line(ail_sarena *A, int64_t mark, const uint8_t *keep) {
+            .           .          .          .         .       .         .      if (mark < 0 || mark > A->n) ail_die("invalid stdin arena checkpoint");
+            .           .          .          .         .       .         .      int64_t end = A->n, write = mark;
+            .           .          .          .         .       .         .      for (int64_t i = mark; i < end; i++) {
+            .           .          .          .         .       .         .          if (A->blk[i] == keep) {
+            .           .          .          .         .       .         .              A->blk[write] = A->blk[i];
+-- line 883 ----------------------------------------
+-- line 904 ----------------------------------------
+            .           .          .          .         .       .         .     already wrapped before the allocator received it -- an outside review demonstrated exactly that
+            .           .          .          .         .       .         .     here: a synthetic n == 2**62 - 1 gave want == 2**62 and an allocation byte count of ZERO, with
+            .           .          .          .         .       .         .     nothing reporting it, since `-fsanitize=undefined` does not include unsigned wraparound. */
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* The arena's block bookkeeping counts string units, and a unit is now one byte. */
+            .           .          .          .         .       .         .  static inline int64_t ail_bytes_elems(int64_t nb) { return nb; }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  static void ail_sarena_pushn(ail_sarena *A, uint8_t *q, int64_t cap) {
+            3           2          0          0         0       0         0      if (A->n == A->cap) {
+            2           0          0          0         0       0         0          if (!A->cap) {
+            .           .          .          .         .       .         .              /* First pushes use the inline slots -- a compiled function whose arena
+            .           .          .          .         .       .         .                 never exceeds them pays no array allocation at all (the stdin line
+            .           .          .          .         .       .         .                 reader is exactly that case). */
+            6           0          3          0         0       0         0              A->blk = A->blk0; A->bcap = A->bcap0; A->cap = AIL_SARENA_INLINE;
+            .           .          .          .         .       .         .          } else {
+            .           .          .          .         .       .         .              /* `A->cap * 2` can overflow int64 before it is ever converted, and the byte count needs
+            .           .          .          .         .       .         .                 its own check against `sizeof *nb` rather than sizeof(uint8_t). */
+            .           .          .          .         .       .         .              if (A->cap > INT64_MAX / 2) ail_die("allocation too large");
+            .           .          .          .         .       .         .              int64_t c = A->cap * 2;
+            .           .          .          .         .       .         .              ail__need_elems(c, AIL_ELEM_LIMIT(uint8_t *));
+            .           .          .          .         .       .         .              uint8_t **nb = (uint8_t **)ail_alloc((size_t)c * sizeof *nb);
+            .           .          .          .         .       .         .              memcpy(nb, A->blk, (size_t)A->n * sizeof *nb);
+-- line 925 ----------------------------------------
+-- line 926 ----------------------------------------
+            .           .          .          .         .       .         .              int64_t *ncb = (int64_t *)ail_alloc((size_t)c * sizeof *ncb);
+            .           .          .          .         .       .         .              memcpy(ncb, A->bcap, (size_t)A->n * sizeof *ncb);
+            .           .          .          .         .       .         .              /* Free only heap arrays -- the inline slots are struct storage. */
+            .           .          .          .         .       .         .              if (A->blk != A->blk0) free(A->blk);
+            .           .          .          .         .       .         .              if (A->bcap != A->bcap0) free(A->bcap);
+            .           .          .          .         .       .         .              A->blk = nb; A->bcap = ncb; A->cap = c;
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .      }
+            6           4          2          0         0       0         0      A->blk[A->n] = q; A->bcap[A->n] = cap; A->n++;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_sarena_push(ail_sarena *A, uint8_t *q) {
+            .           .          .          .         .       .         .      ail_sarena_pushn(A, q, 0);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* AIL_TASK_strcontainers_20260916.md: a plain, general-purpose "give me N owned code-point slots"
+            .           .          .          .         .       .         .     allocator on top of `ail_sarena_push` just above -- exactly the primitive calling another
+            .           .          .          .         .       .         .     compiled function that returns str needs for its own out-buffer (see `ail_str_return`'s
+            .           .          .          .         .       .         .     calling convention, used at every C-to-C call site now, not only by the top-level entry
+-- line 942 ----------------------------------------
+-- line 1980 ----------------------------------------
+            .           .          .          .         .       .         .  /* Zero has not read; one is text, two is binary. Shared across linked modules. */
+            .           .          .          .         .       .         .  AIL_LINK_STATE(int, ail_stdin_kind, = 0);
+            .           .          .          .         .       .         .  #ifdef _WIN32
+            .           .          .          .         .       .         .  /* Keep the OS fd binary (including Ctrl-Z); normalize text newlines here so a CRLF split across
+            .           .          .          .         .       .         .     read() blocks is still one LF, as in the existing v2 stdin path. */
+            .           .          .          .         .       .         .  AIL_LINK_STATE(unsigned char, ail_stdin_raw[65536], );
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .  static inline void ail_stdin_flush_stdout(void) {
+            3           1          0          1         0       1         0      if (ail_stdout_dirty) {
+            .           .          .          .         .       .         .          if (fflush(stdout) != 0) ail_die("stdout flush before stdin read failed");
+            .           .          .          .         .       .         .          ail_stdout_dirty = 0;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static int64_t ail_stdin_fill(void) {
+            .           .          .          .         .       .         .      /* read(2), not fread: fread waits for a FULL block or EOF, so a program answering line by
+            .           .          .          .         .       .         .         line said nothing until its writer closed the pipe (found 2026-09-16 by an outside
+            .           .          .          .         .       .         .         review's probe, reproduced through a pty, judged by test_stdin_interactive.py). read()
+-- line 1996 ----------------------------------------
+-- line 2212 ----------------------------------------
+            .           .          .          .         .       .         .      int64_t bcap;
+            .           .          .          .         .       .         .      uint8_t *q = ail__blk_take(nb + 1, &bcap);
+            .           .          .          .         .       .         .      /* Copy and classify in the same pass. The common stdin line is ASCII, and the old order
+            .           .          .          .         .       .         .         walked it twice -- `ail__utf8_validate`'s word loop, then `memcpy` -- so the load and the
+            .           .          .          .         .       .         .         store now happen once per word. A non-ASCII line falls back to the full validator after
+            .           .          .          .         .       .         .         the copy; it is rare and the bytes are already where the str will keep them. */
+            .           .          .          .         .       .         .      _Bool ascii = 1;
+            .           .          .          .         .       .         .      int64_t i = 0;
+            2           0          0          0         0       0         0      for (; i + 8 <= nb; i += 8) {
+            .           .          .          .         .       .         .          uint64_t w;
+            .           .          .          .         .       .         .          memcpy(&w, b + i, 8);
+            .           .          .          .         .       .         .          if (w & 0x8080808080808080ull) ascii = 0;
+            .           .          .          .         .       .         .          memcpy(q + i, &w, 8);
+            .           .          .          .         .       .         .      }
+            4           0          0          0         0       0         0      if (i < nb) {
+            .           .          .          .         .       .         .          /* The last 8 bytes as one overlapping word: a line is not a multiple of 8, and the byte
+            .           .          .          .         .       .         .             that the word repeats is the byte the loop already stored. Only a line shorter than a
+            .           .          .          .         .       .         .             word falls back to the per-byte loop. */
+            .           .          .          .         .       .         .          if (nb >= 8) {
+            .           .          .          .         .       .         .              uint64_t w;
+            .           .          .          .         .       .         .              memcpy(&w, b + nb - 8, 8);
+            .           .          .          .         .       .         .              if (w & 0x8080808080808080ull) ascii = 0;
+            .           .          .          .         .       .         .              memcpy(q + nb - 8, &w, 8);
+            .           .          .          .         .       .         .          } else {
+           13           0          0          0         0       0         0              for (; i < nb; i++) {
+            4           4          0          0         0       0         0                  uint8_t c = b[i];
+            9           0          0          0         0       0         0                  if (c >= 0x80) ascii = 0;
+            4           0          4          0         0       0         0                  q[i] = c;
+            .           .          .          .         .       .         .              }
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .      }
+            2           0          1          0         0       0         0      q[nb] = 0;
+            2           0          0          0         0       0         0      if (!ascii) {
+            .           .          .          .         .       .         .          _Bool again;
+            .           .          .          .         .       .         .          if (!ail__utf8_validate(b, nb, &again)) ail_stdin_utf8_fail(b, nb);
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      ail_sarena_pushn(A, q, bcap);
+            .           .          .          .         .       .         .      ail_str r; r.bytes = ascii; r.p = q;  r.n = nb; return r;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static ail_str ail_stdin_read(ail_sarena *A) {
+            .           .          .          .         .       .         .      /* Read the octets first and ask afterwards whether they are ASCII. If they
+-- line 2252 ----------------------------------------
+-- line 2798 ----------------------------------------
+            .           .          .          .         .       .         .  static void ail_argv_set(int argc, char **argv) {
+            .           .          .          .         .       .         .      (void)argc; (void)argv;
+            .           .          .          .         .       .         .      ail_wargv_g = CommandLineToArgvW(GetCommandLineW(), &ail_argc_g);
+            .           .          .          .         .       .         .      if (!ail_wargv_g) ail_die("command line conversion failed");
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  #else
+            .           .          .          .         .       .         .  AIL_LINK_STATE(int, ail_argc_g, = 0);
+            .           .          .          .         .       .         .  AIL_LINK_STATE(char **, ail_argv_g, = 0);
+            2           0          2          0         1       0         1  static void ail_argv_set(int argc, char **argv) { ail_argc_g = argc; ail_argv_g = argv; }
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .  #define AIL_ARGV_SET ail_argv_set(argc, argv);
+            .           .          .          .         .       .         .  static int64_t ail_argv_len(void) { return (int64_t)ail_argc_g; }
+            .           .          .          .         .       .         .  static ail_str ail_argv_get(ail_sarena *A, int64_t i) {
+            .           .          .          .         .       .         .      if (i < 0) i += (int64_t)ail_argc_g;            /* Python indexes from the end */
+            .           .          .          .         .       .         .      if (i < 0 || i >= (int64_t)ail_argc_g) ail_raise_named(AIL_EXC_INDEX);
+            .           .          .          .         .       .         .  #ifdef _WIN32
+            .           .          .          .         .       .         .      int nb = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, ail_wargv_g[i], -1,
+-- line 2814 ----------------------------------------
+-- line 2819 ----------------------------------------
+            .           .          .          .         .       .         .                              (char *)b, nb, NULL, NULL) != nb) {
+            .           .          .          .         .       .         .          free(b);
+            .           .          .          .         .       .         .          ail_die("command line conversion failed");
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      ail_str value = ail_utf8_decode(A, b, nb - 1);
+            .           .          .          .         .       .         .      free(b);
+            .           .          .          .         .       .         .      return value;
+            .           .          .          .         .       .         .  #else
+            2           2          0          1         0       0         0      const unsigned char *b = (const unsigned char *)ail_argv_g[i];
+            2           0          0          0         0       0         0      int64_t nb = 0;
+           18           5          0          0         0       0         0      while (b[nb]) nb++;
+            .           .          .          .         .       .         .      return ail_utf8_decode(A, b, nb);
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* SEMANTICS section 3 says list/set/dict hold int64, and section 8 records why: a float pushed
+            .           .          .          .         .       .         .     into that same `int64_t *p` array was silently truncated, and the repair chosen there was
+            .           .          .          .         .       .         .     refusal by name rather than a wider slot -- because one `int64_t *p` cannot tell an int from a
+            .           .          .          .         .       .         .     float it was never told about. `ail_flist` is a SEPARATE struct with its own `double *p`, not a
+-- line 2837 ----------------------------------------
+-- line 2963 ----------------------------------------
+            .           .          .          .         .       .         .  static void ail_list_reverse(ail_list *L) {
+            .           .          .          .         .       .         .      if (!L || L->n < 0 || L->cap < L->n || (L->cap && !L->p)) ail_die("invalid list");
+            .           .          .          .         .       .         .      ail__need_elems(L->cap, AIL_ELEM_LIMIT(int64_t));
+            .           .          .          .         .       .         .      for (int64_t i = 0, j = L->n - 1; i < j; ++i, --j) {
+            .           .          .          .         .       .         .          int64_t value = L->p[i]; L->p[i] = L->p[j]; L->p[j] = value;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_list_clear(ail_list *L) { L->n = 0; }
+            2           1          1          0         0       0         0  static void ail_list_free(ail_list *L) { free(L->p); L->p = 0; L->n = L->cap = 0; }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* `d = s[lo:hi:st]` -- a copy of the slice, with CPython's own clamping (slice.indices).
+            .           .          .          .         .       .         .     Omitted bounds are resolved by the caller, which knows the step's sign at compile time:
+            .           .          .          .         .       .         .     st > 0 -> lo = 0, hi = n;  st < 0 -> lo = n - 1, hi = -(n + 1) (clamps to -1, meaning
+            .           .          .          .         .       .         .     "down to and including index 0"). st == 0 is refused at compile time and never reaches
+            .           .          .          .         .       .         .     here. */
+            .           .          .          .         .       .         .  static void ail_list_slice_into(ail_list *d, const ail_list *s,
+            .           .          .          .         .       .         .                                  int64_t lo, int64_t hi, int64_t st) {
+-- line 2979 ----------------------------------------
+-- line 3240 ----------------------------------------
+            .           .          .          .         .       .         .     the run-time representation choice of section 21 proceed exactly as it did before. */
+            .           .          .          .         .       .         .  #define AIL_TAB_BITS_MAX_SPAN ((int64_t)1 << 23)
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* ---- HASH mode: the original open-addressed table, operating only on key/val/used/fill/cap.
+            .           .          .          .         .       .         .     `order`/`n` are never touched here -- every caller below does that itself, exactly once, only
+            .           .          .          .         .       .         .     for a key that was genuinely new (ail_tab_hput/ail_tab_hdel report that back rather than assume
+            .           .          .          .         .       .         .     it), the same division of labour the pre-array-mode version already had. */
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_hash(int64_t k) {
+   88,254,340           0          0          0         0       0         0      uint64_t x = (uint64_t)k * 0x9E3779B97F4A7C15ull;
+  132,381,510           0          0          0         0       0         0      return (int64_t)(x ^ (x >> 31));
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* used[i]: 0 empty, 1 live, 2 a tombstone. Linear probing cannot stop at a deleted slot, so a
+            .           .          .          .         .       .         .     deletion leaves a tombstone the probe walks past; only `used == 1` counts as present. */
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_tab_hslot(const ail_tab *T, int64_t k) {
+  163,925,935   6,733,066          0          0         0       0         0      int64_t m = T->cap - 1, i = ail_hash(k) & m;
+1,234,728,087 249,671,257 13,466,132 63,244,833         0 179,401         0      while (T->used[i] && !(T->used[i] == 1 && T->ent[i].key == k)) i = (i + 1) & m;
+            .           .          .          .         .       .         .      return i;
+            .           .          .          .         .       .         .  }
+    2,588,292           0          0          0         0       0         0  static int64_t ail_tab_hfree_slot(const ail_tab *T, int64_t k) {
+    9,434,582   2,588,292          0          0         0       0         0      int64_t m = T->cap - 1, i = ail_hash(k) & m, first = -1;
+   18,806,373   7,994,319          0     65,437         0   8,425         0      while (T->used[i]) {
+    5,635,470           0          0          0         0       0         0          if (T->used[i] == 2 && first < 0) first = i;
+   22,312,437   5,635,470          0          8         0       1         0          if (T->used[i] == 1 && T->ent[i].key == k) return i;
+    5,635,470           0          0          0         0       0         0          i = (i + 1) & m;
+            .           .          .          .         .       .         .      }
+    1,669,706           0          0          0         0       0         0      return first >= 0 ? first : i;
+    5,176,584   2,588,292          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* Rehashing drops every tombstone, so a table that is mostly tombstones is rebuilt at the same
+            .           .          .          .         .       .         .     capacity rather than doubled -- otherwise a churning set grows without ever holding more. This
+            .           .          .          .         .       .         .     never touches `order`/`n`: it walks the OLD used/key/val arrays directly (not `order`), because
+            .           .          .          .         .       .         .     those are unaffected by which keys happen to still be live in the hash's own storage. */
+            .           .          .          .         .       .         .  static void ail_tab_hgrow(ail_tab *T) {
+            .           .          .          .         .       .         .      int64_t old_cap = T->cap;
+           17          17          0          0         0       0         0      ail_hent *old_ent = T->ent;
+           17          17          0          0         0       0         0      unsigned char *old_used = T->used;
+           17           0         17          0         0       0         0      T->cap = (T->fill + 1) * 4 > T->cap * 3 ? T->cap * 2 : T->cap;
+           85           0         51          0         0       0         0      T->ent = (ail_hent *)ail_alloc((size_t)T->cap * sizeof *T->ent);
+          102          34         34          3         7       0         2      T->used = (unsigned char *)ail_alloc((size_t)T->cap);
+           17           0         17          0         0       0         0      T->fill = 0;
+    8,388,612           0          0          0         0       0         0      for (int64_t i = 0; i < old_cap; i++) {
+    4,194,272   2,097,136          0     32,760         0   4,669         0          if (old_used[i] != 1) continue;
+    4,718,556   1,572,852  1,572,852    510,248         0 201,909         0          int64_t slot = ail_tab_hfree_slot(T, old_ent[i].key);
+   12,582,816   6,291,408  4,718,556          0   835,467       0   832,756          T->used[slot] = 1; T->ent[slot].key = old_ent[i].key; T->ent[slot].val = old_ent[i].val;
+    1,572,852   1,572,852          0          0         0       0         0          T->fill++;
+            .           .          .          .         .       .         .      }
+           68           0         34          0         0       0         0      free(old_ent); free(old_used);
+           17           0          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* Returns 1 if `k` was not already present (a genuinely new key: the caller appends it to `order`
+            .           .          .          .         .       .         .     and bumps `n`), 0 if this only updated an existing key's value. */
+   10,154,390           0  6,092,634          0    44,378       0         1  static int ail_tab_hput(ail_tab *T, int64_t k, int64_t v) {
+    3,046,317   1,015,439          0          0         0       0         0      if (!T->cap) {
+            .           .          .          .         .       .         .          T->cap = 16; T->fill = 0;
+            .           .          .          .         .       .         .          T->ent = (ail_hent *)ail_alloc((size_t)T->cap * sizeof *T->ent);
+            .           .          .          .         .       .         .          T->used = (unsigned char *)ail_alloc((size_t)T->cap);
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      /* the check counts tombstones: they occupy slots a probe must walk past, and a table full of
+            .           .          .          .         .       .         .         them has no empty slot for a probe to stop at */
+    6,092,634   1,015,439          0          0         0       0         0      if ((T->fill + 1) * 4 > T->cap * 3) ail_tab_hgrow(T);
+    3,046,317           0  1,015,439          0         0       0         0      int64_t i = ail_tab_hfree_slot(T, k);
+    6,092,634   2,030,878          0          0         0       0         0      int is_new = T->used[i] != 1;
+    1,015,439           0          0          0         0       0         0      if (is_new) {
+    4,061,756   1,015,439          0          0         0       0         0          if (!T->used[i]) T->fill++;               /* an empty slot; a tombstone was already counted */
+    4,061,756   1,015,439  2,030,878          0   608,234       0   254,764          T->used[i] = 1; T->ent[i].key = k;
+            .           .          .          .         .       .         .      }
+    1,015,439           0  1,015,439          0         0       0         0      T->ent[i].val = v;
+            .           .          .          .         .       .         .      return is_new;
+    9,138,951   7,108,073          0         12         0       1         0  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_tab_hhas(const ail_tab *T, int64_t k) {
+  118,948,931  40,674,389          0          0         0       0         0      if (!T->cap) return 0;
+   39,137,271  39,137,271          0          0         0       0         0      return T->used[ail_tab_hslot(T, k)] == 1 ? 1 : 0;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_tab_hget(const ail_tab *T, int64_t k, int64_t dflt) {
+            .           .          .          .         .       .         .      if (!T->cap) return dflt;
+            .           .          .          .         .       .         .      int64_t i = ail_tab_hslot(T, k);
+            .           .          .          .         .       .         .      return T->used[i] == 1 ? T->ent[i].val : dflt;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_tab_hneed(const ail_tab *T, int64_t k) {
+            .           .          .          .         .       .         .      if (!T->cap) ail_die("key error");
+            .           .          .          .         .       .         .      int64_t i = ail_tab_hslot(T, k);
+            .           .          .          .         .       .         .      if (T->used[i] != 1) ail_die("key error");
+    7,809,905   7,809,905          0          0         0       0         0      return T->ent[i].val;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* Returns 1 if `k` was present (the caller compacts `order` and decrements `n`), 0 if this was a
+            .           .          .          .         .       .         .     no-op (Python's `discard` of an absent value; `remove` checks presence itself, beforehand). */
+            .           .          .          .         .       .         .  static int ail_tab_hdel(ail_tab *T, int64_t k) {
+            .           .          .          .         .       .         .      if (!T->cap) return 0;
+            .           .          .          .         .       .         .      int64_t i = ail_tab_hslot(T, k);
+            .           .          .          .         .       .         .      if (T->used[i] != 1) return 0;
+            .           .          .          .         .       .         .      T->used[i] = 2;                               /* `fill` still counts it: it blocks a probe */
+-- line 3328 ----------------------------------------
+-- line 3375 ----------------------------------------
+            .           .          .          .         .       .         .      if (top - w != live) ail_die("invalid table order");
+            .           .          .          .         .       .         .      if (w) memmove(T->order, T->order + w, (size_t)live * sizeof *T->order);
+            .           .          .          .         .       .         .      T->otop = live; T->holes = 0;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* `order` with the stale entries removed: every read of order[0 .. n) goes through this. A table
+            .           .          .          .         .       .         .     that was never deleted from pays one comparison. Closing holes through a const pointer is
+            .           .          .          .         .       .         .     allowed -- they are not part of the table's value, and no table object is itself const. */
+            .           .          .          .         .       .         .  static inline int64_t *ail_tab_order(const ail_tab *T) {
+            2           1          0          0         0       0         0      if (T->holes) ail__tab_compact((ail_tab *)T, T->n);
+            .           .          .          .         .       .         .      return T->order;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_tab_order_grow(ail_tab *T) {
+           55           0          0          0         0       0         0      int64_t c = T->order_cap ? T->order_cap * 2 : 8;
+    1,015,510   1,015,440         18          0         0       0         0      int64_t *q = (int64_t *)realloc(T->order, (size_t)c * sizeof *q);
+           36           0          0          0         0       0         0      if (!q) ail_die("out of memory");
+           36           0         36          0         4       0         0      T->order = q; T->order_cap = c;
+           18           0          0          0         0       0         0  }
+    5,077,200           0  3,046,320          0         0       0         0  static void ail_tab_order_append(ail_tab *T, int64_t k) {
+    3,046,320   2,030,880          0         12         0       2         0      if (T->otop == T->order_cap) ail_tab_order_grow(T);
+    3,046,338          18  2,030,880          2   166,287       0   104,056      T->order[T->otop++] = k;
+    1,015,440   1,015,440          0          0         0       0         0      T->n++;
+    4,061,760   4,061,760          0          2         0       0         0  }
+            .           .          .          .         .       .         .  /* `k` has just been deleted (the caller has already made it absent); the caller decrements `n`
+            .           .          .          .         .       .         .     itself right after, as before. The newest key leaves no stale entry, and an emptied table none. */
+            .           .          .          .         .       .         .  static void ail_tab_order_remove(ail_tab *T, int64_t k) {
+            .           .          .          .         .       .         .      if (T->n == 1) { T->otop = T->holes = 0; return; }
+            .           .          .          .         .       .         .      if (T->otop && T->order[T->otop - 1] == k) {
+            .           .          .          .         .       .         .          T->otop--;
+            .           .          .          .         .       .         .          if (T->holes && T->hfirst > T->otop) T->hfirst = T->otop;   /* the next append comes after */
+            .           .          .          .         .       .         .          return;
+-- line 3404 ----------------------------------------
+-- line 3412 ----------------------------------------
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* ---- ARRAY mode. */
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* The `T->n == 0` case: no live data exists to preserve (whatever arr_occ/arr_val already hold,
+            .           .          .          .         .       .         .     if anything, is entirely stale -- see the block comment above), so this unconditionally starts a
+            .           .          .          .         .       .         .     fresh, minimal, one-key span rather than trying to fit `k` into the old buffer's coordinates. */
+            .           .          .          .         .       .         .  static void ail_tab_arr_fresh(ail_tab *T, int64_t k) {
+            3           1          2          0         1       0         1      free(T->arr_occ); free(T->arr_val);
+            3           0          2          0         0       0         0      T->arr_occ = (unsigned char *)ail_alloc(1);
+            3           0          2          0         0       0         0      T->arr_val = (int64_t *)ail_alloc(sizeof *T->arr_val);
+            2           0          2          0         0       0         0      T->lo = T->hi = k;
+            1           0          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* Widening: `T->n > 0`, so [T->lo, T->hi] holds live data that must survive, copied into a freshly
+            .           .          .          .         .       .         .     allocated, larger span at its new offset. */
+            .           .          .          .         .       .         .  static void ail_tab_arr_widen(ail_tab *T, int64_t new_lo, int64_t new_hi) {
+            .           .          .          .         .       .         .      int64_t new_span = new_hi - new_lo + 1;
+            .           .          .          .         .       .         .      unsigned char *occ = (unsigned char *)ail_alloc((size_t)new_span);
+            .           .          .          .         .       .         .      int64_t *val = (int64_t *)ail_alloc((size_t)new_span * sizeof *val);
+            .           .          .          .         .       .         .      int64_t old_span = T->hi - T->lo + 1, off = T->lo - new_lo;
+            .           .          .          .         .       .         .      memcpy(occ + off, T->arr_occ, (size_t)old_span);
+-- line 3432 ----------------------------------------
+-- line 3433 ----------------------------------------
+            .           .          .          .         .       .         .      memcpy(val + off, T->arr_val, (size_t)old_span * sizeof *val);
+            .           .          .          .         .       .         .      free(T->arr_occ); free(T->arr_val);
+            .           .          .          .         .       .         .      T->arr_occ = occ; T->arr_val = val; T->lo = new_lo; T->hi = new_hi;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* Migrates every live key (via `order`, so `order`/`n` themselves need no change at all) into the
+            .           .          .          .         .       .         .     hash table and switches modes; ail_tab_hash_rearray below is the only way back. There is no
+            .           .          .          .         .       .         .     observable difference either way -- every operation behaves identically under both
+            .           .          .          .         .       .         .     representations -- so this is purely an internal cost decision, not a semantic one. */
+            2           0          1          0         0       0         0  static void ail_tab_arr_spill(ail_tab *T) {
+            9           1          0          0         0       0         0      int64_t want = (T->n + 1) * 4 / 3 + 1, cap = 16;
+            3           0          0          0         0       0         0      while (cap < want) cap *= 2;
+            2           0          2          0         0       0         0      T->cap = cap; T->fill = 0;
+            2           0          2          0         0       0         0      T->ent = (ail_hent *)ail_alloc((size_t)T->cap * sizeof *T->ent);
+            3           1          2          0         0       0         0      T->used = (unsigned char *)ail_alloc((size_t)T->cap);
+            .           .          .          .         .       .         .      (void)ail_tab_order(T);
+            7           2          0          0         0       0         0      for (int64_t i = 0; i < T->n; i++) {
+            6           5          0          0         0       0         0          int64_t k = T->order[i], v = T->arr_val[k - T->lo];
+            2           0          1          0         0       0         0          int64_t slot = ail_tab_hfree_slot(T, k);
+            6           2          3          0         0       0         0          T->used[slot] = 1; T->ent[slot].key = k; T->ent[slot].val = v;
+            1           1          0          0         0       0         0          T->fill++;
+            .           .          .          .         .       .         .      }
+            6           2          4          0         0       0         0      free(T->arr_occ); free(T->arr_val); T->arr_occ = 0; T->arr_val = 0;
+            1           0          1          0         0       0         0      T->mode = AIL_TAB_HASH;
+            2           2          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* The way back (see THE DENSITY RULE): a hash table whose live keys now fill their exact span
+            .           .          .          .         .       .         .     densely returns to the array. It reads the hash table's own slots, not `order`: walking `order`
+            .           .          .          .         .       .         .     would first compact the stale entries deletions left there, which for a set that is added to and
+            .           .          .          .         .       .         .     discarded from (ticket_audit's sold seats) built a temporary hash of every key at each power of
+            .           .          .          .         .       .         .     two -- +20% instructions and +84 MB peak RSS. `order`/`n` are untouched, and no operation can
+            .           .          .          .         .       .         .     observe which representation is live. Called only when `n` reaches a power of two, so its scan
+            .           .          .          .         .       .         .     of the capacity (under 4n slots) costs O(1) per insert amortised; a table from a bits plan with
+            .           .          .          .         .       .         .     `noorder` never comes here. */
+           66           0         55          0         0       0         0  static __attribute__((noinline, cold)) void ail_tab_hash_rearray(ail_tab *T) {
+           22           0          0          0         0       0         0      int64_t lo = INT64_MAX, hi = INT64_MIN;
+    8,384,556          11          0          0         0       0         0      for (int64_t i = 0; i < T->cap; i++) {
+    6,288,384   4,192,256          0     32,644         0       0         0          if (T->used[i] != 1) continue;
+    6,288,384   2,096,128          0    465,005         0  94,122         0          if (T->ent[i].key < lo) lo = T->ent[i].key;
+    2,096,128           0          0          0         0       0         0          if (T->ent[i].key > hi) hi = T->ent[i].key;
+            .           .          .          .         .       .         .      }
+           44          11          0         11         0       2         0      double span = (double)hi - (double)lo + 1.0;
+           44          22          0          0         0       0         0      if (span > (double)AIL_TAB_ARR_DENSE_RATIO * (double)T->n || span > (double)AIL_TAB_ARR_MAX_SPAN)
+            .           .          .          .         .       .         .          return;
+            .           .          .          .         .       .         .      unsigned char *occ = (unsigned char *)ail_alloc((size_t)(hi - lo + 1));
+            .           .          .          .         .       .         .      int64_t *val = (int64_t *)ail_alloc((size_t)(hi - lo + 1) * sizeof *val);
+            .           .          .          .         .       .         .      for (int64_t i = 0; i < T->cap; i++) {
+            .           .          .          .         .       .         .          if (T->used[i] != 1) continue;
+            .           .          .          .         .       .         .          occ[T->ent[i].key - lo] = 1;
+            .           .          .          .         .       .         .          val[T->ent[i].key - lo] = T->ent[i].val;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      free(T->ent); free(T->used);
+            .           .          .          .         .       .         .      T->ent = 0; T->used = 0; T->cap = T->fill = 0;
+            .           .          .          .         .       .         .      T->arr_occ = occ; T->arr_val = val; T->lo = lo; T->hi = hi;
+            .           .          .          .         .       .         .      T->mode = AIL_TAB_ARRAY;
+           66          66          0         10         0       0         0  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* A note on the line above, and on comments in this file generally: it used to quote the offending
+            .           .          .          .         .       .         .     C call verbatim, names and all. Every judge that decides "was a bitset planned?" by searching the
+            .           .          .          .         .       .         .     EMITTED C for that call then matched this comment instead of any real plan -- and since this
+            .           .          .          .         .       .         .     comment ships whenever the table runtime is included at all, ten negative cases in test_range.py
+            .           .          .          .         .       .         .     reported a plan where the compiler had correctly refused to make one. Documentation became test
+            .           .          .          .         .       .         .     data. Describe the emitted shape in prose here; do not spell it out. */
+-- line 3494 ----------------------------------------
+-- line 3625 ----------------------------------------
+            .           .          .          .         .       .         .              int64_t k = T->order[i], slot = ail_tab_hfree_slot(T, k);
+            .           .          .          .         .       .         .              T->used[slot] = 1; T->ent[slot].key = k; T->ent[slot].val = 0; T->fill++;
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      free(T->bits); T->bits = 0;
+            .           .          .          .         .       .         .      T->mode = AIL_TAB_HASH;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_tab_bits_put(ail_tab *T, int64_t k) {
+            1           1          0          0         0       0         0      if (k < T->lo || k > T->hi) {
+            .           .          .          .         .       .         .          ail_tab_bits_spill(T);
+            .           .          .          .         .       .         .          if (ail_tab_hput(T, k, 0)) { if (T->noorder) T->n++; else ail_tab_order_append(T, k); }
+            .           .          .          .         .       .         .          return;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      int64_t i = k - T->lo, w = i >> 6;
+            .           .          .          .         .       .         .      uint64_t m = 1ull << (i & 63);
+            .           .          .          .         .       .         .      if (T->bits[w] & m) return;
+            .           .          .          .         .       .         .      T->bits[w] |= m;
+-- line 3641 ----------------------------------------
+-- line 3643 ----------------------------------------
+            .           .          .          .         .       .         .      if (w > T->bwhi) T->bwhi = w;
+            .           .          .          .         .       .         .      /* Written out rather than called -- see ail_tab_order_grow above. Same
+            .           .          .          .         .       .         .         behaviour, same order, same n; the only call left on this path is the
+            .           .          .          .         .       .         .         amortised growth. */
+            .           .          .          .         .       .         .      if (T->noorder) T->n++;
+            .           .          .          .         .       .         .      else { if (T->otop == T->order_cap) ail_tab_order_grow(T); T->order[T->otop++] = k; T->n++; }
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+    9,138,960           0  6,092,640          0         0       0         0  static __attribute__((noinline)) void ail_tab_put_slow(ail_tab *T, int64_t k, int64_t v) {
+    4,061,760   1,015,440          0          0         0       0         0      if (T->mode == AIL_TAB_BITS) { ail_tab_bits_put(T, k); return; }
+    2,030,880           0          0          0         0       0         0      if (T->mode == AIL_TAB_HASH) {
+            .           .          .          .         .       .         .          /* `noorder` is 0 for every table that did not come from a compile-time bits plan, so this
+            .           .          .          .         .       .         .             is the same single call it always was for them. */
+    3,046,314           0  1,015,438          0     2,794       0         0          if (ail_tab_hput(T, k, v)) {
+    2,030,876   1,015,438          0     44,597         0       1         0              if (T->noorder) T->n++;
+            .           .          .          .         .       .         .              else {
+    3,046,314           0  1,015,438          0         0       0         0                  ail_tab_order_append(T, k);
+    6,092,639   1,015,438          0          0         0       0         0                  if (!(T->n & (T->n - 1)) && T->n >= AIL_TAB_ARR_SPARSE_MIN / AIL_TAB_ARR_DENSE_RATIO)
+           22           0          0          0         0       0         0                      ail_tab_hash_rearray(T);
+            .           .          .          .         .       .         .              }
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .          return;
+            .           .          .          .         .       .         .      }
+            6           2          0          0         0       0         0      if (T->n == 0) {
+            3           1          0          0         0       0         0          if (!(T->arr_occ && k >= T->lo && k <= T->hi)) ail_tab_arr_fresh(T, k);
+            .           .          .          .         .       .         .          int64_t idx = k - T->lo;
+            4           2          2          0         0       0         0          T->arr_occ[idx] = 1; T->arr_val[idx] = v;
+            6           0          0          0         0       0         0          ail_tab_order_append(T, k);   /* bumps n from 0 to 1 itself */
+            .           .          .          .         .       .         .          return;
+            .           .          .          .         .       .         .      }
+            5           1          0          0         0       0         0      if (k < T->lo || k > T->hi) {
+            4           0          0          0         0       0         0          double need_lo = (double)(k < T->lo ? k : T->lo), need_hi = (double)(k > T->hi ? k : T->hi);
+            7           2          0          1         0       1         0          if (need_hi - need_lo + 1.0 > (double)AIL_TAB_ARR_MAX_SPAN) {
+            2           0          1          0         0       0         0              ail_tab_arr_spill(T);
+            7           0          1          0         0       0         0              if (ail_tab_hput(T, k, v)) ail_tab_order_append(T, k);
+            .           .          .          .         .       .         .              return;
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .          /* GEOMETRIC growth, not exact-fit -- measured, not assumed: a widen that grows the span
+            .           .          .          .         .       .         .             by exactly what one new key needs, every time, made a traversal that visits cells in
+            .           .          .          .         .       .         .             something other than strict numeric order (a flood fill's DFS, task 36's `seen` set)
+            .           .          .          .         .       .         .             pay for a full reallocate-and-copy on almost every insert -- 2,654 widen calls copying
+            .           .          .          .         .       .         .             ~281 MB for a single 150x150 grid, instrumented and counted before this fix, which is
+            .           .          .          .         .       .         .             where task 36's regression (11.90s vs the pre-array-mode 4.38s -- 2.72x SLOWER, paired
+-- line 3685 ----------------------------------------
+-- line 3716 ----------------------------------------
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .          ail_tab_arr_widen(T, pad_lo, pad_hi);
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      int64_t idx = k - T->lo;
+            .           .          .          .         .       .         .      /* ail_tab_order_append itself bumps `n` (see its definition above) -- it must not be bumped
+            .           .          .          .         .       .         .         again here, the exact double-count bug an earlier version of this file had. */
+            .           .          .          .         .       .         .      if (!T->arr_occ[idx]) { T->arr_occ[idx] = 1; ail_tab_order_append(T, k); }
+            .           .          .          .         .       .         .      T->arr_val[idx] = v;
+    8,123,507   7,108,067          0         13         0       1         0  }
+            .           .          .          .         .       .         .  /* Overwriting the value of a key a HASH table already holds -- a counter, a `last seen` position -- is
+            .           .          .          .         .       .         .     one hash and one probe with no order or epoch bookkeeping, so it is inlined at the call site;
+            .           .          .          .         .       .         .     anything else (a new key, the other representations, a growth) is the out-of-line function. */
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int ail_tab_put_hit(ail_tab *T, int64_t k, int64_t v) {
+    9,222,708   3,074,236          0          0         0       0         0      if (T->mode != AIL_TAB_HASH || !T->cap) return 0;
+            .           .          .          .         .       .         .      int64_t i = ail_tab_hslot(T, k);
+            .           .          .          .         .       .         .      if (T->used[i] != 1) return 0;
+   30,984,557           0 30,984,557          0         0       0         0      T->ent[i].val = v;
+            .           .          .          .         .       .         .      return 1;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) void ail_tab_put(ail_tab *T, int64_t k, int64_t v) {
+            .           .          .          .         .       .         .      if (ail_tab_put_hit(T, k, v)) return;
+            .           .          .          .         .       .         .      ail_tab_put_slow(T, k, v);
+            .           .          .          .         .       .         .  }
+            4           0          0          0         0       0         0  static __attribute__((noinline)) int64_t ail_tab_has_slow(const ail_tab *T, int64_t k) {
+           12           4          0          0         0       0         0      if (T->mode == AIL_TAB_BITS) {
+            2           0          0          0         0       0         0          if (k < T->lo || k > T->hi) return 0;
+            .           .          .          .         .       .         .          int64_t i = k - T->lo;
+            .           .          .          .         .       .         .          return (int64_t)((T->bits[i >> 6] >> (i & 63)) & 1u);
+            .           .          .          .         .       .         .      }
+            8           0          0          0         0       0         0      if (T->mode == AIL_TAB_HASH) return ail_tab_hhas(T, k);
+           22           8          0          0         0       0         0      if (T->n == 0 || k < T->lo || k > T->hi) return 0;
+            .           .          .          .         .       .         .      return T->arr_occ[k - T->lo];
+            4           4          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* Lookups inline only the HASH-mode probe (an LLM-written match finder spends most of its time in it); the
+            .           .          .          .         .       .         .     ARRAY and BITS representations stay one call, as before - inlining all three cost 6 KB of text in a
+            .           .          .          .         .       .         .     program with one int dict. */
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_tab_has(const ail_tab *T, int64_t k) {
+   78,274,550  39,137,275          0          2         0       0         0      if (T->mode == AIL_TAB_HASH) return ail_tab_hhas(T, k);
+           16           4          8          0         0       0         0      return ail_tab_has_slow(T, k);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static __attribute__((noinline)) int64_t ail_tab_get_slow(const ail_tab *T, int64_t k, int64_t dflt) {
+            .           .          .          .         .       .         .      /* BITS mode is only ever chosen for a SET, whose every value is 0 (see ail_tab_put's
+            .           .          .          .         .       .         .         call sites in pyfunc.py) -- so a present key's value is 0 and an absent one is `dflt`,
+            .           .          .          .         .       .         .         which is what both representations beside it already answer for a set. */
+            .           .          .          .         .       .         .      if (T->mode == AIL_TAB_BITS) return ail_tab_has_slow(T, k) ? 0 : dflt;
+            .           .          .          .         .       .         .      if (T->mode == AIL_TAB_HASH) return ail_tab_hget(T, k, dflt);
+            .           .          .          .         .       .         .      if (T->n == 0 || k < T->lo || k > T->hi || !T->arr_occ[k - T->lo]) return dflt;
+-- line 3762 ----------------------------------------
+-- line 3771 ----------------------------------------
+            .           .          .          .         .       .         .          if (!ail_tab_has_slow(T, k)) ail_die("key error");
+            .           .          .          .         .       .         .          return 0;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      if (T->mode == AIL_TAB_HASH) return ail_tab_hneed(T, k);
+            .           .          .          .         .       .         .      if (T->n == 0 || k < T->lo || k > T->hi || !T->arr_occ[k - T->lo]) ail_die("key error");
+            .           .          .          .         .       .         .      return T->arr_val[k - T->lo];
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_tab_need(const ail_tab *T, int64_t k) {
+    7,809,905           0          0          0         0       0         0      if (T->mode == AIL_TAB_HASH) return ail_tab_hneed(T, k);
+            .           .          .          .         .       .         .      return ail_tab_need_slow(T, k);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_tab_del(ail_tab *T, int64_t k) {
+            .           .          .          .         .       .         .      if (T->mode == AIL_TAB_BITS) {
+            .           .          .          .         .       .         .          if (k < T->lo || k > T->hi) return;
+            .           .          .          .         .       .         .          int64_t i = k - T->lo;
+            .           .          .          .         .       .         .          if (!((T->bits[i >> 6] >> (i & 63)) & 1u)) return;
+            .           .          .          .         .       .         .          T->bits[i >> 6] &= ~(1ull << (i & 63));
+-- line 3787 ----------------------------------------
+-- line 3845 ----------------------------------------
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      const int64_t *order = ail_tab_order(src);
+            .           .          .          .         .       .         .      for (int64_t i = 0; i < src->n; i++) {
+            .           .          .          .         .       .         .          int64_t k = order[i];
+            .           .          .          .         .       .         .          ail_tab_put_slow(dst, k, ail_tab_get_slow(src, k, 0));
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_tab_free(ail_tab *T) {
+           12           6          6          0         0       0         0      free(T->ent); free(T->used); free(T->order);
+           12           6          6          2         0       1         0      free(T->arr_occ); free(T->arr_val); free(T->bits);
+           12           0         12          0         0       0         0      T->ent = 0; T->order = 0; T->used = 0; T->arr_occ = 0; T->arr_val = 0; T->bits = 0;
+           14           0         14          0         0       0         0      T->n = T->fill = T->cap = T->order_cap = T->lo = T->hi = T->noorder = 0;
+           10           0         10          0         2       0         2      T->bwlo = T->bwhi = 0; T->otop = T->holes = T->hfirst = 0;
+            2           0          2          0         0       0         0      T->mode = AIL_TAB_ARRAY;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  typedef struct { ail_tab table; uint64_t epoch; } ail_idict;
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) void ail_idict_check(const ail_idict *T) {
+   82,336,320  40,152,717          0          4         0       2         0      if (!T || T->table.n < 0) ail_die("invalid int dictionary");
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static uint64_t ail_idict_next_epoch(const ail_idict *T) {
+    3,046,320   1,015,440          0         10         0       1         0      if (T->epoch == UINT64_MAX) ail_die("dictionary epoch overflow");
+    2,030,880           0  1,015,440          0         0       0         0      return T->epoch + 1;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_idict_init(ail_idict *T) {
+            .           .          .          .         .       .         .      if (!T) ail_die("invalid int dictionary");
+           24           0         20          0         0       0         0      *T = (ail_idict){0};
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static ail_idict ail_idict_copy(const ail_idict *source) {
+            .           .          .          .         .       .         .      ail_idict_check(source);
+            .           .          .          .         .       .         .      ail_idict result = {0};
+            .           .          .          .         .       .         .      ail_tab_copy(&result.table, &source->table);
+            .           .          .          .         .       .         .      return result;
+            .           .          .          .         .       .         .  }
+            2           0          2          0         0       0         0  static void ail_idict_free(ail_idict *T) {
+            .           .          .          .         .       .         .      ail_idict_check(T);
+            .           .          .          .         .       .         .      ail_tab_free(&T->table);
+            2           0          2          0         0       0         0      T->epoch = 0;
+            4           4          0          0         0       0         0  }
+            .           .          .          .         .       .         .  static void ail_idict_replace(ail_idict *destination, ail_idict owned) {
+            .           .          .          .         .       .         .      ail_idict_check(destination);
+            .           .          .          .         .       .         .      ail_idict_check(&owned);
+            .           .          .          .         .       .         .      uint64_t epoch = ail_idict_next_epoch(destination);
+            .           .          .          .         .       .         .      if (owned.table.order && owned.table.order == destination->table.order) owned = ail_idict_copy(&owned);
+            .           .          .          .         .       .         .      ail_tab_free(&destination->table);
+            .           .          .          .         .       .         .      *destination = owned;
+            .           .          .          .         .       .         .      destination->epoch = epoch;
+-- line 3891 ----------------------------------------
+-- line 3904 ----------------------------------------
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_idict_get(const ail_idict *T, int64_t key, int64_t fallback) {
+            .           .          .          .         .       .         .      ail_idict_check(T); return ail_tab_get(&T->table, key, fallback);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) int64_t ail_idict_need(const ail_idict *T, int64_t key) {
+            .           .          .          .         .       .         .      ail_idict_check(T); return ail_tab_need(&T->table, key);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* One probe: the table counts a new key, and only a new key moves the epoch. */
+    3,046,320           0  2,030,880          0         0       0         0  static __attribute__((noinline)) void ail_idict_put_slow(ail_idict *T, int64_t key, int64_t value) {
+            .           .          .          .         .       .         .      ail_idict_check(T);
+            .           .          .          .         .       .         .      int64_t n = T->table.n;
+    1,015,440           0  1,015,440          0     3,243       0         1      ail_tab_put_slow(&T->table, key, value);
+    2,030,880   1,015,440          0          0         0       0         0      if (T->table.n != n) T->epoch = ail_idict_next_epoch(T);
+    4,061,760   3,046,320          0         23         0       3         0  }
+            .           .          .          .         .       .         .  /* An existing key keeps the count and so the epoch: only the value changes (see ail_tab_put_hit). */
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) void ail_idict_put(ail_idict *T, int64_t key, int64_t value) {
+            .           .          .          .         .       .         .      ail_idict_check(T);
+   30,984,557           0          0          0         0       0         0      if (ail_tab_put_hit(&T->table, key, value)) return;
+    6,806,182   1,879,931  1,879,931          0         0       0         0      ail_idict_put_slow(T, key, value);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_idict_clear(ail_idict *T) {
+            .           .          .          .         .       .         .      ail_idict_check(T);
+            .           .          .          .         .       .         .      uint64_t epoch = T->table.n ? ail_idict_next_epoch(T) : T->epoch;
+            .           .          .          .         .       .         .      ail_tab_clear(&T->table);
+            .           .          .          .         .       .         .      T->epoch = epoch;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static int64_t ail_idict_pop(ail_idict *T, int64_t key) {
+-- line 3930 ----------------------------------------
+-- line 4042 ----------------------------------------
+            .           .          .          .         .       .         .      if (__builtin_expect((uint64_t)i >= (uint64_t)b.n, 0)) {      /* the in-range case is one compare */
+            .           .          .          .         .       .         .          if (i < 0) i += b.n;                       /* Python indexes from the end */
+            .           .          .          .         .       .         .          if (i < 0 || i >= b.n) ail_die("bytes index out of range");
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      return (int64_t)b.p[i];
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static ail_bytes ail_bytes_slice(ail_bytes b, int64_t lo, int64_t hi) {
+            .           .          .          .         .       .         .      /* Python clamps a slice and never raises, however far out the bounds are. */
+    3,637,550           0          0          0         0       0         0      if (lo < 0) { lo += b.n; if (lo < 0) lo = 0; } else if (lo > b.n) lo = b.n;
+    3,637,550           0          0          0         0       0         0      if (hi < 0) { hi += b.n; if (hi < 0) hi = 0; } else if (hi > b.n) hi = b.n;
+    1,455,020           0          0          0         0       0         0      if (hi < lo) hi = lo;
+    1,455,020           0          0          0         0       0         0      ail_bytes r; r.p = b.p + lo; r.n = hi - lo; return r;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static int64_t ail_bytes_cmp(ail_bytes a, ail_bytes b) {
+            .           .          .          .         .       .         .      /* Lexicographic on unsigned byte values, then on length -- Python's rule. memcmp compares
+            .           .          .          .         .       .         .         unsigned, which is why it is the right primitive and signed `char` comparison would not be. */
+            .           .          .          .         .       .         .      int64_t n = a.n < b.n ? a.n : b.n;
+            .           .          .          .         .       .         .      int c = n ? memcmp(a.p, b.p, (size_t)n) : 0;
+            .           .          .          .         .       .         .      if (c) return c < 0 ? -1 : 1;
+            .           .          .          .         .       .         .      return a.n == b.n ? 0 : (a.n < b.n ? -1 : 1);
+-- line 4061 ----------------------------------------
+-- line 4441 ----------------------------------------
+            .           .          .          .         .       .         .          ail_die("invalid bytes span");
+            .           .          .          .         .       .         .      if (start < 0) { start += h.n; if (start < 0) start = 0; }
+            .           .          .          .         .       .         .      if (end < 0) { end += h.n; if (end < 0) end = 0; } else if (end > h.n) end = h.n;
+            .           .          .          .         .       .         .      if (start > h.n || end < start) return 0;
+            .           .          .          .         .       .         .      if (!nd.n) return 1;
+            .           .          .          .         .       .         .      if (nd.n > end - start) return 0;
+            .           .          .          .         .       .         .      return memcmp(h.p + (end - nd.n), nd.p, (size_t)nd.n) == 0;
+            .           .          .          .         .       .         .  }
+            4           0          2          0         0       0         0  static void ail_barena_free(ail_barena *A) {
+           10           4          1          1         0       1         0      for (int64_t i = 0; i < A->n; i++) free(A->blk[i]);
+            5           1          4          0         0       0         0      free(A->blk); A->blk = 0; A->n = A->cap = 0;
+            4           3          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* Both allocators below hand a fresh block to the arena the same way -- grow-by-doubling, then
+            .           .          .          .         .       .         .     record the pointer so `ail_barena_free` reaches it -- so that bookkeeping is written once. */
+            .           .          .          .         .       .         .  static void ail_barena_push(ail_barena *A, unsigned char *q) {
+            4           3          0          2         0       0         0      if (A->n == A->cap) {
+            4           0          0          0         0       0         0          int64_t c = A->cap ? A->cap * 2 : 8;
+            .           .          .          .         .       .         .          /* Entries past n are never read, so the table needs no zeroing (one per call of a
+            .           .          .          .         .       .         .             function that builds bytes: calloc was 5% of an LLM-written term ranker). */
+            1           0          0          0         0       0         0          unsigned char **nb = (unsigned char **)ail_alloc_raw((size_t)c * sizeof *nb);
+            4           2          0          0         0       0         0          if (A->n) memcpy(nb, A->blk, (size_t)A->n * sizeof *nb);
+            6           2          3          0         0       0         0          free(A->blk); A->blk = nb; A->cap = c;
+            .           .          .          .         .       .         .      }
+            6           3          2          0         1       0         0      A->blk[A->n++] = q;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* Free the block a bytes local owns outright, once the compiler has proved nothing can
+            .           .          .          .         .       .         .     still see it (see `_last_use_frees`). Only an exact block start is released, so a view or a
+            .           .          .          .         .       .         .     literal is left alone; the slot becomes NULL rather than being removed, so checkpoint indexes
+            .           .          .          .         .       .         .     taken by an enclosing loop stay valid. */
+            .           .          .          .         .       .         .  static void ail_barena_release(ail_barena *A, const unsigned char *p) {
+            .           .          .          .         .       .         .      if (!A || !p) return;
+            .           .          .          .         .       .         .      for (int64_t i = A->n - 1; i >= 0; --i)
+-- line 4472 ----------------------------------------
+-- line 4732 ----------------------------------------
+            .           .          .          .         .       .         .      for (int64_t i = 0; i < n; ++i) q[i] = (unsigned char)p[i];
+            .           .          .          .         .       .         .      ail_barena_push(A, q);
+            .           .          .          .         .       .         .      return (ail_bytes){q, n};
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  /* Mutable octets have their own shared identity, independent of object headers. */
+            .           .          .          .         .       .         .  typedef struct { size_t refs; int64_t n, cap; unsigned char *p; } ail_bytearray;
+            .           .          .          .         .       .         .  static inline void ail_bytearray_width(int64_t n) {
+    2,910,064           0          0          0         0       0         0      if (n < 0 || (uintmax_t)n > (uintmax_t)SIZE_MAX ||
+            .           .          .          .         .       .         .              (uintmax_t)n > (uintmax_t)PTRDIFF_MAX) ail_die("bytearray too long");
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static __attribute__((noinline, cold)) void ail__bytearray_meta_slow(const ail_bytearray *B) {
+            .           .          .          .         .       .         .      if (!B || !B->refs || B->n < 0 || B->cap < B->n || (B->cap && !B->p))
+            .           .          .          .         .       .         .          ail_die("invalid bytearray");
+            .           .          .          .         .       .         .      ail_bytearray_width(B->cap);
+            .           .          .          .         .       .         .      if ((uintmax_t)B->cap > UINTPTR_MAX - (uintptr_t)B->p)
+            .           .          .          .         .       .         .          ail_die("invalid bytearray span");
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* Four compares on a live bytearray; the width and span checks only matter once these fail, since
+            .           .          .          .         .       .         .     the allocator already refused a capacity past PTRDIFF_MAX. Per-byte loops paid ~40% for the full
+            .           .          .          .         .       .         .     validation (reverse_complement). */
+            .           .          .          .         .       .         .  static inline void ail_bytearray_meta(const ail_bytearray *B) {
+   20,370,618   5,820,176          0          0         0       0         0      if (__builtin_expect(B && B->refs && B->n >= 0 && B->cap >= B->n && (B->p || !B->cap), 1)) return;
+            .           .          .          .         .       .         .      ail__bytearray_meta_slow(B);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_bytearray_bytes(ail_bytes value) {
+            .           .          .          .         .       .         .      ail_bytearray_width(value.n);
+    4,365,066           0          0          0         0       0         0      if ((value.n && !value.p) || (uintmax_t)value.n > UINTPTR_MAX - (uintptr_t)value.p)
+            .           .          .          .         .       .         .          ail_die("invalid bytearray source");
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  /* Freed small bytearrays (struct plus buffer up to 4 KiB, at most 8) are reused by the next
+            .           .          .          .         .       .         .     bytearray(): a decoder that makes a scratch bytearray per JSON string spent 16% in
+            .           .          .          .         .       .         .     calloc/realloc/free. Bounded at 32 KiB; contents are cleared by n = 0 and never read. */
+            .           .          .          .         .       .         .  #define AIL_BA_CACHE_MAX 8
+            .           .          .          .         .       .         .  AIL_LINK_STATE(ail_bytearray *, ail__ba_cache[AIL_BA_CACHE_MAX], );
+            .           .          .          .         .       .         .  AIL_LINK_STATE(int, ail__ba_cache_n, = 0);
+            .           .          .          .         .       .         .  static ail_bytearray *ail_bytearray_new(int64_t size) {
+            .           .          .          .         .       .         .      if (size < 0) ail_raise_named(AIL_EXC_VALUE);
+            .           .          .          .         .       .         .      ail_bytearray_width(size);
+            3           1          0          1         0       0         0      if (size == 0 && ail__ba_cache_n > 0) {
+            .           .          .          .         .       .         .          ail_bytearray *R = ail__ba_cache[--ail__ba_cache_n];
+            .           .          .          .         .       .         .          R->refs = 1; R->n = 0;
+            .           .          .          .         .       .         .          return R;
+            .           .          .          .         .       .         .      }
+            3           0          1          0         1       0         0      ail_bytearray *B = (ail_bytearray *)ail_alloc(sizeof *B);
+            4           0          4          0         0       0         0      *B = (ail_bytearray){1, size, size, NULL};
+            .           .          .          .         .       .         .      if (size) {
+            .           .          .          .         .       .         .          B->p = (unsigned char *)ail_alloc((size_t)size);
+            .           .          .          .         .       .         .          memset(B->p, 0, (size_t)size);
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      return B;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static ail_bytearray *ail_bytearray_from_bytes(ail_bytes value) {
+            .           .          .          .         .       .         .      ail_bytearray_bytes(value);
+-- line 4785 ----------------------------------------
+-- line 4820 ----------------------------------------
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) ail_bytearray *ail_bytearray_retain(ail_bytearray *B) {
+            .           .          .          .         .       .         .      if (__builtin_expect(B != NULL, 1)) { size_t r = B->refs; if (__builtin_expect(r - 1 < SIZE_MAX - 1, 1)) { B->refs = r + 1; return B; } }
+            .           .          .          .         .       .         .      if (!B) __builtin_unreachable();
+            .           .          .          .         .       .         .      return ail_bytearray_retain_slow(B);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static inline __attribute__((always_inline)) void ail_bytearray_live(const ail_bytearray *B) {
+            .           .          .          .         .       .         .      if (!B->refs) __builtin_unreachable();
+            .           .          .          .         .       .         .  }
+            1           0          1          0         0       0         0  static __attribute__((noinline)) void ail_bytearray_release(ail_bytearray *B) {
+            4           0          0          0         0       0         0      if (!B) return;
+            4           1          0          0         0       0         0      if (__builtin_expect(B->refs > 1, 1)) { --B->refs; return; }
+            .           .          .          .         .       .         .      ail_bytearray_meta(B);
+            1           0          1          0         0       0         0      if (--B->refs) return;
+            2           0          0          0         0       0         0      if (B->cap <= 4096 && ail__ba_cache_n < AIL_BA_CACHE_MAX) { ail__ba_cache[ail__ba_cache_n++] = B; return; }
+            4           1          1          0         0       0         0      free(B->p); free(B);
+            2           2          0          0         0       0         0  }
+            .           .          .          .         .       .         .  static inline void ail_bytearray_store(ail_bytearray * volatile *slot, ail_bytearray *value, int adopt) {
+            .           .          .          .         .       .         .      if (!slot || (adopt != 0 && adopt != 1)) ail_die("invalid bytearray store");
+            .           .          .          .         .       .         .      if (value) {
+            .           .          .          .         .       .         .          if (adopt) ail_bytearray_meta(value);
+            .           .          .          .         .       .         .          else ail_bytearray_retain(value);
+            .           .          .          .         .       .         .      }
+            2           1          1          0         0       0         0      ail_bytearray_release(*slot);
+            1           0          1          0         0       0         0      *slot = value;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_bytearray_cleanup(void *slot) {
+            .           .          .          .         .       .         .      if (!slot) ail_die("invalid bytearray slot");
+            .           .          .          .         .       .         .      ail_bytearray * volatile *B = (ail_bytearray * volatile *)slot;
+            .           .          .          .         .       .         .      ail_bytearray_release(*B); *B = NULL;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static int64_t ail_bytearray_len(const ail_bytearray *B) {
+            .           .          .          .         .       .         .      ail_bytearray_meta(B); return B->n;
+-- line 4851 ----------------------------------------
+-- line 4877 ----------------------------------------
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      ail__bytearray_set_slow(B, index, value);
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_bytearray_delete(ail_bytearray *B, int64_t index) {
+            .           .          .          .         .       .         .      index = ail_bytearray_index(B, index);
+            .           .          .          .         .       .         .      memmove(B->p + index, B->p + index + 1, (size_t)(B->n - index - 1));
+            .           .          .          .         .       .         .      --B->n;
+            .           .          .          .         .       .         .  }
+    2,910,084           0  1,455,042          0    31,189       0         0  static void ail_bytearray_reserve(ail_bytearray *B, int64_t need) {
+            .           .          .          .         .       .         .      ail_bytearray_meta(B); ail_bytearray_width(need);
+    2,182,563     727,521          0          0         0       0         0      if (need <= B->cap) return;
+            .           .          .          .         .       .         .      uintmax_t maximum = (uintmax_t)INT64_MAX;
+            .           .          .          .         .       .         .      if (maximum > (uintmax_t)SIZE_MAX) maximum = (uintmax_t)SIZE_MAX;
+            .           .          .          .         .       .         .      if (maximum > (uintmax_t)PTRDIFF_MAX) maximum = (uintmax_t)PTRDIFF_MAX;
+           57           0          0          0         0       0         0      uintmax_t cap = B->cap ? (uintmax_t)B->cap : (maximum < 8 ? maximum : 8);
+          189           0          0          0         0       0         0      while (cap < (uintmax_t)need) cap = cap > maximum / 2 ? maximum : cap * 2;
+           57          19         19          0         0       0         0      unsigned char *p = (unsigned char *)realloc(B->p, (size_t)cap);
+           38           0          0          0         0       0         0      if (!p) ail_die("out of memory");
+           38           0         38          0         2       0         0      B->p = p; B->cap = (int64_t)cap;
+    2,910,084   2,182,563          0          0         0       0         0  }
+            .           .          .          .         .       .         .  static void ail__bytearray_append_slow(ail_bytearray *B, int64_t value);
+            .           .          .          .         .       .         .  /* One byte into spare capacity is the common case of `out.append(c)` in a decoder loop; the full
+            .           .          .          .         .       .         .     metadata validation and reserve below were a third of an LLM-written JSON getter. */
+            .           .          .          .         .       .         .  static inline void ail_bytearray_append(ail_bytearray *B, int64_t value) {
+  124,939,359  44,803,575          0         28         0       5         0      if (B && B->refs && (uint64_t)B->n < (uint64_t)B->cap && (uint64_t)value <= 255) {
+   59,738,060  14,934,515 29,869,030          0   233,435       0   231,517          B->p[B->n++] = (unsigned char)value;
+   14,934,514           0          0          0         0       0         0          return;
+            .           .          .          .         .       .         .      }
+           14           0         10          0         0       0         0      ail__bytearray_append_slow(B, value);
+            .           .          .          .         .       .         .  }
+           50           0         20          0         0       0         0  static void ail__bytearray_append_slow(ail_bytearray *B, int64_t value) {
+            .           .          .          .         .       .         .      ail_bytearray_meta(B);
+           20           0          0          0         0       0         0      if (value < 0 || value > 255) ail_raise_named(AIL_EXC_VALUE);
+           40          10          0          0         0       0         0      if (B->n == INT64_MAX) ail_die("bytearray too long");
+           30           0         10          0         0       0         0      ail_bytearray_reserve(B, B->n + 1);
+           50          20         20          0         2       0         2      B->p[B->n++] = (unsigned char)value;
+           40          30          0          2         0       0         0  }
+    7,275,110           0  4,365,066          0         0       0         0  static void ail_bytearray_extend(ail_bytearray *B, ail_bytes value) {
+            .           .          .          .         .       .         .      ail_bytearray_meta(B); ail_bytearray_bytes(value);
+    3,637,555     727,511          0          0         0       0         0      if (value.n > INT64_MAX - B->n) ail_die("bytearray too long");
+            .           .          .          .         .       .         .      if (!value.n) return;
+            .           .          .          .         .       .         .      int64_t offset = -1;
+      727,511     727,511          0          0         0       0         0      uintptr_t base = (uintptr_t)B->p, source = (uintptr_t)value.p;
+            .           .          .          .         .       .         .      /* `< cap`, not `<= cap`: a separate allocation can start exactly where B's block ends (the
+            .           .          .          .         .       .         .         macOS allocator packs small blocks, so a received chunk often does) and is not an alias. */
+    3,263,522      88,370          0          0         0       0         0      if (B->p && source >= base && source - base < (uintmax_t)B->cap) {
+            .           .          .          .         .       .         .          uintmax_t delta = source - base;
+            .           .          .          .         .       .         .          if (delta > (uintmax_t)B->n || (uintmax_t)value.n > (uintmax_t)B->n - delta)
+            .           .          .          .         .       .         .              ail_die("invalid bytearray alias");
+            .           .          .          .         .       .         .          offset = (int64_t)delta;
+    1,917,420           0          0          0         0       0         0      } else if (value.n && source < base && (uintmax_t)value.n > base - source)
+            .           .          .          .         .       .         .          ail_die("invalid bytearray alias");
+            .           .          .          .         .       .         .      int64_t old = B->n;
+    2,910,044           0    727,511          0         0       0         0      ail_bytearray_reserve(B, old + value.n);
+            .           .          .          .         .       .         .      const unsigned char *data = offset >= 0 ? B->p + offset : value.p;
+    1,455,022     727,511          0          0         0       0         0      memmove(B->p + old, data, (size_t)value.n);
+      727,511           0    727,511          0         0       0         0      B->n = old + value.n;
+    5,820,088   5,092,577          0          0         0       0         0  }
+            .           .          .          .         .       .         .  static void ail_bytearray_clear(ail_bytearray *B) { ail_bytearray_meta(B); B->n = 0; }
+            .           .          .          .         .       .         .  static int64_t ail_bytearray_pop(ail_bytearray *B, int64_t index) {
+            .           .          .          .         .       .         .      index = ail_bytearray_index(B, index);
+            .           .          .          .         .       .         .      int64_t value = B->p[index];
+            .           .          .          .         .       .         .      ail_bytearray_delete(B, index);
+            .           .          .          .         .       .         .      return value;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_bytearray_reverse(ail_bytearray *B) {
+-- line 4942 ----------------------------------------
+-- line 4992 ----------------------------------------
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  #include <unistd.h>
+            .           .          .          .         .       .         .  #include <errno.h>
+            .           .          .          .         .       .         .  #ifdef _WIN32
+            .           .          .          .         .       .         .  #include <io.h>
+            .           .          .          .         .       .         .  #include <fcntl.h>
+            .           .          .          .         .       .         .  #endif
+            5           0          5          0         0       0         0  static void ail_stdout_write_bytes_raw(ail_bytes data) {
+            4           0          0          0         0       0         0      if (data.n < 0 || (uint64_t)data.n > SIZE_MAX) ail_raise_named(AIL_EXC_VALUE);
+            2           0          0          0         0       0         0      if (!data.n) return;
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  #ifdef _WIN32
+            .           .          .          .         .       .         .      int previous_mode = _setmode(1, _O_BINARY);
+            .           .          .          .         .       .         .      if (previous_mode == -1) ail_raise_named(AIL_EXC_OS);
+            .           .          .          .         .       .         .      if (ail_stdout_original_mode == -1) ail_stdout_original_mode = previous_mode;
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .      ail_stdout_kind = 2;
+            1           0          0          0         0       0         0      int64_t offset = 0;
+          530           0          0          0         0       0         0      while (offset < data.n) {
+          530           0          0          0         0       0         0          int64_t remaining = data.n - offset;
+            .           .          .          .         .       .         .          ssize_t got;
+        2,385           0        265          0         0       0         0          do { got = write(1, data.p + offset, (size_t)(remaining < 65536 ? remaining : 65536)); }
+          530           0          0          0         0       0         0          while (got < 0 && errno == EINTR);
+          265           0          0          0         0       0         0          if (got <= 0) ail_raise_named(AIL_EXC_OS);
+          265           0          0          0         0       0         0          offset += (int64_t)got;
+            .           .          .          .         .       .         .      }
+            6           6          0          0         0       0         0  }
+            .           .          .          .         .       .         .  static void ail_stdout_bytes_cleanup(void **resources) { free(resources[0]); }
+            6           1          3          1         1       1         0  static void ail_stdout_write_bytes(ail_bytes data) {
+            2           0          0          0         0       0         0      if (data.n < 0 || (uintmax_t)data.n > SIZE_MAX ||
+            .           .          .          .         .       .         .          (uintmax_t)data.n > PTRDIFF_MAX) ail_raise_named(AIL_EXC_VALUE);
+            2           0          0          0         0       0         0      if (!data.n) return;
+            6           0          0          0         0       0         0      if (!data.p || (uintptr_t)data.p > UINTPTR_MAX - (size_t)data.n)
+            .           .          .          .         .       .         .          ail_raise_named(AIL_EXC_VALUE);
+            7           3          0          1         0       1         0      if (!ail_stdout_dirty) { ail_stdout_write_bytes_raw(data); return; }
+            .           .          .          .         .       .         .      void *resources[] = {NULL};
+            .           .          .          .         .       .         .      ail_cleanup_frame frame = {ail_cleanup_top, ail_stdout_bytes_cleanup, resources};
+            .           .          .          .         .       .         .      ail_cleanup_top = &frame;
+            .           .          .          .         .       .         .      resources[0] = ail_alloc((size_t)data.n);
+            .           .          .          .         .       .         .      memcpy(resources[0], data.p, (size_t)data.n);
+            .           .          .          .         .       .         .      ail_bytes snapshot = {(const unsigned char *)resources[0], data.n};
+            .           .          .          .         .       .         .      ail_stdout_flush();
+            .           .          .          .         .       .         .      ail_stdout_write_bytes_raw(snapshot);
+            .           .          .          .         .       .         .      ail_stdout_bytes_cleanup(resources);
+            .           .          .          .         .       .         .      ail_cleanup_top = frame.previous;
+            3           2          0          0         0       0         0  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  #ifdef _WIN32
+            .           .          .          .         .       .         .  #include <io.h>
+            .           .          .          .         .       .         .  #include <fcntl.h>
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .  /* Reads until `size` bytes have arrived or fd 0 reaches EOF (like Python's
+            .           .          .          .         .       .         .     sys.stdin.buffer.read(size)): one read(2) per loop turn, EINTR retried, a short read from a
+            .           .          .          .         .       .         .     pipe is not the end. The buffer starts at min(size, 64 KiB) and doubles up to `size`, so a huge
+            .           .          .          .         .       .         .     `size` costs only what actually arrives. Returns the (possibly reallocated) buffer. */
+            .           .          .          .         .       .         .  static unsigned char *ail_stdin_fill_bytes(unsigned char *buf, size_t *capp, int64_t size, int64_t *gotp) {
+            .           .          .          .         .       .         .      size_t cap = *capp, n = 0;
+            .           .          .          .         .       .         .      for (;;) {
+           22           0          0          0         0       0         0          if (n == cap) {
+           29           0          0          0         0       0         0              size_t next = cap ? cap * 2 : 65536;
+           27           0          0          0         0       0         0              if (next > (size_t)size) next = (size_t)size;
+           30           0         10          0         0       0         0              unsigned char *bigger = (unsigned char *)realloc(buf, next);
+           20           0          0          0         0       0         0              if (!bigger) { free(buf); ail_die("out of memory"); }
+           22           0          0          0         0       0         0              buf = bigger; cap = next;
+            .           .          .          .         .       .         .          }
+           33           0          0          0         0       0         0          size_t want = cap - n;
+            .           .          .          .         .       .         .          ssize_t got;
+           33           0          0          0         0       0         0          do { got = read(0, buf + n, want); } while (got < 0 && errno == EINTR);
+            .           .          .          .         .       .         .          if (got < 0) ail_raise_named(AIL_EXC_OS); /* buf is not freed: it may be the shared scratch */
+           11           0          0          0         0       0         0          if (!got) break;
+           10           0          0          0         0       0         0          n += (size_t)got;
+           22           0          0          0         0       0         0          if (n == (size_t)size) break;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      *capp = cap; *gotp = (int64_t)n;
+            .           .          .          .         .       .         .      return buf;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static void ail_stdin_begin_binary(int64_t size) {
+            .           .          .          .         .       .         .      if (size < 0) ail_raise_named(AIL_EXC_VALUE);
+            2           1          0          0         0       0         0      if (ail_stdin_kind == 1) ail_raise_named(AIL_EXC_VALUE);
+            1           0          1          0         0       0         0      ail_stdin_kind = 2;
+            .           .          .          .         .       .         .  #ifdef _WIN32
+            .           .          .          .         .       .         .      if (_setmode(0, _O_BINARY) == -1) ail_raise_named(AIL_EXC_OS);
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .      ail_stdin_flush_stdout();
+            .           .          .          .         .       .         .  }
+           11           0          7          0         0       0         0  static ail_bytes ail_stdin_read_bytes(ail_barena *A, int64_t size) {
+            .           .          .          .         .       .         .      if (size < 0) ail_raise_named(AIL_EXC_VALUE);
+            4           0          1          0         0       0         0      if (!size) return (ail_bytes){NULL, 0};
+            .           .          .          .         .       .         .      ail_stdin_begin_binary(size);
+            .           .          .          .         .       .         .      size_t cap = 0;
+            .           .          .          .         .       .         .      int64_t got = 0;
+            .           .          .          .         .       .         .      unsigned char *buf = ail_stdin_fill_bytes(NULL, &cap, size, &got);
+            2           0          0          0         0       0         0      if (!got) { free(buf); return (ail_bytes){NULL, 0}; }
+            .           .          .          .         .       .         .      ail_barena_push(A, buf);
+            .           .          .          .         .       .         .      return (ail_bytes){buf, got};
+           10           7          0          0         0       0         0  }
+            .           .          .          .         .       .         .  /* Only compiler-certified, nonescaping loop reads may borrow this scratch span; it is reused by
+            .           .          .          .         .       .         .     the next call. */
+            .           .          .          .         .       .         .  static ail_bytes ail_stdin_read_bytes_borrowed(int64_t size) {
+            .           .          .          .         .       .         .      static unsigned char *scratch;
+            .           .          .          .         .       .         .      static size_t scratch_cap;
+            .           .          .          .         .       .         .      if (size < 0) ail_raise_named(AIL_EXC_VALUE);
+            .           .          .          .         .       .         .      if (!size) return (ail_bytes){NULL, 0};
+            .           .          .          .         .       .         .      ail_stdin_begin_binary(size);
+            .           .          .          .         .       .         .      int64_t got = 0;
+            .           .          .          .         .       .         .      scratch = ail_stdin_fill_bytes(scratch, &scratch_cap, size, &got);
+            .           .          .          .         .       .         .      return got ? (ail_bytes){scratch, got} : (ail_bytes){NULL, 0};
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static int64_t ck_add(int64_t a, int64_t b) {
+    6,258,238           0          0          0         0       0         0      int64_t r; if (__builtin_add_overflow(a, b, &r)) ail_die("OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)");
+            .           .          .          .         .       .         .      return r;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static int64_t ck_sub(int64_t a, int64_t b) {
+            .           .          .          .         .       .         .      int64_t r; if (__builtin_sub_overflow(a, b, &r)) ail_die("OverflowError: integer overflow in - (ints are 64-bit; --exact-int gives exact ints)");
+            .           .          .          .         .       .         .      return r;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  static int64_t ck_mul(int64_t a, int64_t b) {
+            .           .          .          .         .       .         .      int64_t r; if (__builtin_mul_overflow(a, b, &r)) ail_die("OverflowError: integer overflow in * (ints are 64-bit; --exact-int gives exact ints)");
+-- line 5110 ----------------------------------------
+-- line 5118 ----------------------------------------
+            .           .          .          .         .       .         .  int64_t pack(ail_bytes v_d);
+            .           .          .          .         .       .         .  int64_t unpack(ail_bytes v_d);
+            .           .          .          .         .       .         .  __attribute__((always_inline)) static inline
+            .           .          .          .         .       .         .  int64_t py_main(void);
+            .           .          .          .         .       .         .  int64_t run(void);
+            .           .          .          .         .       .         .  __attribute__((always_inline)) static inline
+            .           .          .          .         .       .         .  int64_t hash_of(ail_bytes v_d) {
+            .           .          .          .         .       .         .      int64_t ir1 = (v_d).n;
+            2           0          0          0         0       0         0      int64_t ir2 = 0LL;
+   96,000,001           0          0          0         0       0         0      for (int64_t ir3 = 0LL; ir3 < ir1; ir3 += 1) {
+   32,000,000  32,000,000          0    500,001         0 498,326         0          int64_t ir4 = ((int64_t)(v_d).p[ir3]);
+   96,000,000           0          0          0         0       0         0          int64_t ir5 = ((ir2) * (257LL));
+            .           .          .          .         .       .         .          int64_t ir6 = ((ir5) + (ir4));
+   32,000,000           0          0          0         0       0         0          int64_t ir7 = ((ir6) + (1LL));
+   32,000,000           0          0          0         0       0         0          int64_t ir8 = ((ir7) & 4294967295LL);
+            .           .          .          .         .       .         .          ir2 = ir8;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      return ir2;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  __attribute__((always_inline)) static inline
+            .           .          .          .         .       .         .  int64_t hash_ba(ail_bytearray *v_d) {
+            .           .          .          .         .       .         .      ail_bytearray_meta(v_d); unsigned char *ir1_p = (v_d)->p; int64_t ir1_n = (v_d)->n;
+-- line 5140 ----------------------------------------
+-- line 5146 ----------------------------------------
+            .           .          .          .         .       .         .          int64_t ir7 = ((ir6) + (ir5));
+            .           .          .          .         .       .         .          int64_t ir8 = ((ir7) + (1LL));
+            .           .          .          .         .       .         .          int64_t ir9 = ((ir8) & 4294967295LL);
+            .           .          .          .         .       .         .          ir3 = ir9;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      return ir3;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+   12,010,775           0  3,637,550          0    35,998       0         0  void flush(ail_bytearray *v_out, ail_bytes v_d, int64_t v_start, int64_t v_cnt) {
+            .           .          .          .         .       .         .      int64_t ir1 = (v_cnt > 0LL);
+   13,479,515   4,008,165          0          0         0       0         0      if (ir1) {
+      727,510           0          0          0         0       0         0          int64_t ir2 = ((v_cnt) - (1LL));
+            .           .          .          .         .       .         .          ail_bytearray_append(v_out, ir2);
+            .           .          .          .         .       .         .          int64_t ir3 = ck_add(v_start, v_cnt);
+            .           .          .          .         .       .         .          ail_bytes ir4 = ail_bytes_slice(v_d, v_start, ir3);
+    1,455,020           0          0          0         0       0         0          ail_bytearray_extend(v_out, ir4);
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      return;
+    3,637,550   3,637,550          0          0         0       0         0  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  static void ail_unwind_pack(void **p) { ail_idict_free((ail_idict *)p[0]); ail_bytearray_release(*(ail_bytearray **)p[1]); free(*(void **)p[2]); ail_list_free((ail_list *)p[3]); }
+           13           1          7          0         0       0         0  int64_t pack(ail_bytes v_d) {
+           23           0         20          0         0       0         0      ail_idict v_head = {0};
+            1           0          1          0         0       0         0      ail_bytearray * v_out = 0;
+            1           0          1          0         0       0         0      int32_t *v_prev = 0; (void)v_prev;
+            3           0          2          0         0       0         0      ail_list v___ir_comp1 = {0};
+            8           0          4          0         0       0         0      void *v__cargs[] = {(void *)(&v_head), (void *)(&v_out), (void *)(&v_prev), (void *)(&v___ir_comp1)};
+            6           1          3          1         0       0         0      ail_cleanup_frame v__cf = {ail_cleanup_top, ail_unwind_pack, v__cargs};
+            2           0          1          0         0       0         0      ail_cleanup_top = &v__cf;
+            .           .          .          .         .       .         .      int64_t ir1 = (v_d).n;
+            .           .          .          .         .       .         .      ail_bytearray_store(&v_out, ail_bytearray_new(0LL), 1);
+            .           .          .          .         .       .         .      ail_bytearray *ir2 = v_out;
+            4           0          1          0         0       0         0      ail_bytearray_extend(ir2, (ail_bytes){(const unsigned char *)("\x45""\x50""\x31"), 3});
+            1           1          0          0         0       0         0      ail_bytearray *ir3 = v_out;
+            1           0          0          0         0       0         0      int64_t ir4 = ((ir1) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir3, ir4);
+            1           1          0          0         0       0         0      ail_bytearray *ir5 = v_out;
+            2           0          0          0         0       0         0      int64_t ir6 = ((ir1) >> 8);
+            1           0          0          0         0       0         0      int64_t ir7 = ((ir6) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir5, ir7);
+            1           1          0          0         0       0         0      ail_bytearray *ir8 = v_out;
+            2           0          0          0         0       0         0      int64_t ir9 = ((ir1) >> 16);
+            1           0          0          0         0       0         0      int64_t ir10 = ((ir9) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir8, ir10);
+            1           1          0          0         0       0         0      ail_bytearray *ir11 = v_out;
+            2           0          0          0         0       0         0      int64_t ir12 = ((ir1) >> 24);
+            1           0          0          0         0       0         0      int64_t ir13 = ((ir12) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir11, ir13);
+            .           .          .          .         .       .         .      int32_t *ir16 = v_prev;
+            2           0          0          0         0       0         0      if (ir1 > INT32_MAX) ail_die("list too long for the int32 chain");
+            6           0          2          0         0       0         0      ir16 = (int32_t *)malloc((size_t)(ir1 > 0 ? ir1 : 1) * sizeof *ir16);
+            2           0          0          0         0       0         0      if (!ir16) ail_die("out of memory");
+            1           0          1          0         0       0         0      v_prev = ir16;
+            4           0          1          0         0       0         0      for (int64_t ir15 = 0LL; ir15 < ir1; ir15 += 1) ir16[ir15] = -1;
+            2           0          1          0         0       0         0      { ail_idict_free(&v_head); ail_idict_init(&v_head); }
+            .           .          .          .         .       .         .      int64_t ir18 = 0;
+            .           .          .          .         .       .         .      int64_t ir19 = 0;
+            1           0          0          0         0       0         0      int64_t ir20 = 0LL;
+            4           0          1          0         0       0         0      int64_t ir21 = 0LL;
+            .           .          .          .         .       .         .      int64_t ir22 = 0LL;
+            .           .          .          .         .       .         .      for (;;) {
+            .           .          .          .         .       .         .          int64_t ir23 = (ir20 < ir1);
+   14,274,556           0          0          0         0       0         0          if (!(ir23)) {
+            .           .          .          .         .       .         .              ir18 = ir21;
+            .           .          .          .         .       .         .              ir19 = ir22;
+            .           .          .          .         .       .         .              break;
+            .           .          .          .         .       .         .          }
+    7,137,278           0          0          0         0       0         0          int64_t ir24 = ((ir20) + (4LL));
+            .           .          .          .         .       .         .          int64_t ir25 = (ir24 <= ir1);
+            .           .          .          .         .       .         .          int64_t ir26 = 0;
+            .           .          .          .         .       .         .          int64_t ir27 = 0;
+   14,274,556           0          0          0         0       0         0          if (ir25) {
+   21,411,834   7,137,278          0          0         0       0         0              int64_t ir28 = ((int64_t)(v_d).p[ir20]);
+    7,137,278           0          0          0         0       0         0              int64_t ir29 = ((ir28) * (16777216LL));
+    2,401,609           0          0          0         0       0         0              int64_t ir30 = ((ir20) + (1LL));
+    7,137,278   7,137,278          0         18         0       2         0              int64_t ir31 = ((int64_t)(v_d).p[ir30]);
+    7,137,278           0          0          0         0       0         0              int64_t ir32 = ((ir31) * (65536LL));
+    7,137,278           0          0          0         0       0         0              int64_t ir33 = ((ir29) + (ir32));
+            .           .          .          .         .       .         .              int64_t ir34 = ((ir20) + (2LL));
+    7,137,278   7,137,278          0          0         0       0         0              int64_t ir35 = ((int64_t)(v_d).p[ir34]);
+    7,137,278           0          0          0         0       0         0              int64_t ir36 = ((ir35) * (256LL));
+    7,137,278           0          0          0         0       0         0              int64_t ir37 = ((ir33) + (ir36));
+            .           .          .          .         .       .         .              int64_t ir38 = ((ir20) + (3LL));
+    7,137,278   7,137,278          0    111,506         0 111,506         0              int64_t ir39 = ((int64_t)(v_d).p[ir38]);
+    7,137,278           0          0          0         0       0         0              int64_t ir40 = ((ir37) + (ir39));
+            .           .          .          .         .       .         .              int64_t ir41 = (ail_idict_has(&v_head, ir40) != 0);
+            .           .          .          .         .       .         .              int64_t ir42 = 0;
+            4           0          0          0         0       0         0              if (ir41) {
+            .           .          .          .         .       .         .                  int64_t ir43 = ail_idict_need(&v_head, ir40);
+            .           .          .          .         .       .         .                  ir42 = ir43;
+            .           .          .          .         .       .         .              } else {
+            .           .          .          .         .       .         .                  ir42 = -1LL;
+            .           .          .          .         .       .         .              }
+   12,545,574           0          0          0         0       0         0              int64_t ir44 = ((ir1) - (ir20));
+            .           .          .          .         .       .         .              int64_t ir45 = (ir44 > 131LL);
+            .           .          .          .         .       .         .              int64_t ir46 = 0;
+   18,818,361           0          0          0         0       0         0              if (ir45) {
+            .           .          .          .         .       .         .                  ir46 = 131LL;
+            .           .          .          .         .       .         .              } else {
+            .           .          .          .         .       .         .                  ir46 = ir44;
+            .           .          .          .         .       .         .              }
+            .           .          .          .         .       .         .              const int32_t *ir47_p = ir16; int64_t ir47_n = ir1;
+            .           .          .          .         .       .         .              int64_t ir48 = 0;
+            .           .          .          .         .       .         .              int64_t ir49 = 0;
+    4,735,669           0  4,735,669          0         0       0         0              int64_t ir50 = 0LL;
+    9,471,338           0  4,735,669          0         0       0         0              int64_t ir51 = -1LL;
+            .           .          .          .         .       .         .              int64_t ir52 = ir42;
+    4,735,669           0          0          0         0       0         0              int64_t ir53 = 0LL;
+            .           .          .          .         .       .         .              for (;;) {
+            .           .          .          .         .       .         .                  int64_t ir54 = (ir52 >= 0LL);
+            .           .          .          .         .       .         .                  int64_t ir55 = 0;
+            .           .          .          .         .       .         .                  if (ir54) {
+            .           .          .          .         .       .         .                      int64_t ir56 = (ir53 < 8LL);
+            .           .          .          .         .       .         .                      ir55 = ir56;
+            .           .          .          .         .       .         .                  } else {
+            .           .          .          .         .       .         .                      ir55 = 0;
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  int64_t ir57 = 0;
+   95,305,686           0          0          0         0       0         0                  if (ir55) {
+   52,623,994           0          0          0         0       0         0                      int64_t ir58 = ((ir20) - (ir52));
+            .           .          .          .         .       .         .                      int64_t ir59 = (ir58 <= 65535LL);
+            .           .          .          .         .       .         .                      ir57 = ir59;
+            .           .          .          .         .       .         .                  } else {
+            .           .          .          .         .       .         .                      ir57 = 0;
+            .           .          .          .         .       .         .                  }
+   52,623,994           0          0          0         0       0         0                  if (!(ir57)) {
+            .           .          .          .         .       .         .                      ir48 = ir50;
+            .           .          .          .         .       .         .                      ir49 = ir51;
+            .           .          .          .         .       .         .                      break;
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  int64_t ir60 = (ir52 <= 1099511627776LL);
+            .           .          .          .         .       .         .                  int64_t ir61 = ((int64_t)((uint64_t)(ir46) + (uint64_t)(ir52)));
+   20,690,028           0          0          0         0       0         0                  int64_t ir62 = ((int64_t)((uint64_t)(ir61) + (uint64_t)(-1LL)));
+            .           .          .          .         .       .         .                  int64_t ir63 = (ir62 < ir1);
+            .           .          .          .         .       .         .                  int64_t ir64 = 0;
+            .           .          .          .         .       .         .                  if (ir54) {
+            .           .          .          .         .       .         .                      ir64 = ir63;
+            .           .          .          .         .       .         .                  } else {
+            .           .          .          .         .       .         .                      ir64 = 0;
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  int64_t ir65 = 0;
+            .           .          .          .         .       .         .                  if (ir60) {
+            .           .          .          .         .       .         .                      ir65 = ir64;
+            .           .          .          .         .       .         .                  } else {
+            .           .          .          .         .       .         .                      ir65 = 0;
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  int64_t ir66 = 0;
+  103,450,140           0          0          0         0       0         0                  if (ir65) {
+            .           .          .          .         .       .         .                      int64_t ir67 = 0;
+   20,690,028           0          0          0         0       0         0                      int64_t ir68 = 4LL;
+            .           .          .          .         .       .         .                      for (;;) {
+            .           .          .          .         .       .         .                          int64_t ir69 = (ir68 < ir46);
+            .           .          .          .         .       .         .                          int64_t ir70 = 0;
+  207,339,724           0          0          0         0       0         0                          if (ir69) {
+            .           .          .          .         .       .         .                              int64_t ir71 = ((ir52) + (ir68));
+            .           .          .          .         .       .         .                              int64_t ir72 = ((int64_t)(v_d).p[ir71]);
+            .           .          .          .         .       .         .                              int64_t ir73 = ((ir20) + (ir68));
+            .           .          .          .         .       .         .                              int64_t ir74 = ((int64_t)(v_d).p[ir73]);
+            .           .          .          .         .       .         .                              int64_t ir75 = (ir72 == ir74);
+            .           .          .          .         .       .         .                              ir70 = ir75;
+            .           .          .          .         .       .         .                          } else {
+            .           .          .          .         .       .         .                              ir70 = 0;
+            .           .          .          .         .       .         .                          }
+  201,493,890 134,329,260          0 19,587,335         0 241,534         0                          if (!(ir70)) {
+            .           .          .          .         .       .         .                              ir67 = ir68;
+            .           .          .          .         .       .         .                              break;
+            .           .          .          .         .       .         .                          }
+   62,289,808           0          0          0         0       0         0                          int64_t ir76 = ((ir68) + (1LL));
+            .           .          .          .         .       .         .                          ir68 = ir76;
+            .           .          .          .         .       .         .                      }
+            .           .          .          .         .       .         .                      ir66 = ir67;
+            .           .          .          .         .       .         .                  } else {
+            .           .          .          .         .       .         .                      int64_t ir77 = 0;
+            .           .          .          .         .       .         .                      int64_t ir78 = 4LL;
+            .           .          .          .         .       .         .                      for (;;) {
+            .           .          .          .         .       .         .                          int64_t ir79 = (ir78 < ir46);
+-- line 5321 ----------------------------------------
+-- line 5337 ----------------------------------------
+            .           .          .          .         .       .         .                          int64_t ir86 = ((ir78) + (1LL));
+            .           .          .          .         .       .         .                          ir78 = ir86;
+            .           .          .          .         .       .         .                      }
+            .           .          .          .         .       .         .                      ir66 = ir77;
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  int64_t ir87 = (ir66 > ir50);
+            .           .          .          .         .       .         .                  int64_t ir88 = 0;
+            .           .          .          .         .       .         .                  int64_t ir89 = 0;
+   62,070,084  20,690,028          0          0         0       0         0                  if (ir87) {
+    5,349,673           0  5,349,673          0         0       0         0                      ir88 = ir66;
+    5,349,673           0  5,349,673          0         0       0         0                      ir89 = ir52;
+            .           .          .          .         .       .         .                  } else {
+            .           .          .          .         .       .         .                      ir88 = ir50;
+            .           .          .          .         .       .         .                      ir89 = ir51;
+            .           .          .          .         .       .         .                  }
+   20,690,028           0          0          0         0       0         0                  int64_t ir90 = ((ir53) + (1LL));
+   82,760,112  41,380,056          0 20,130,773         0   3,778         0                  int64_t ir91 = ((uint64_t)(ir52) < (uint64_t)(ir47_n) ? (int64_t)ir47_p[ir52] : (ail_die("list index out of range"), (int64_t)0));
+            .           .          .          .         .       .         .                  int64_t ir92 = ir88;
+            .           .          .          .         .       .         .                  int64_t ir93 = ir89;
+            .           .          .          .         .       .         .                  int64_t ir94 = ir91;
+            .           .          .          .         .       .         .                  int64_t ir95 = ir90;
+            .           .          .          .         .       .         .                  ir50 = ir92;
+            .           .          .          .         .       .         .                  ir51 = ir93;
+            .           .          .          .         .       .         .                  ir52 = ir94;
+            .           .          .          .         .       .         .                  ir53 = ir95;
+-- line 5361 ----------------------------------------
+-- line 5365 ----------------------------------------
+            .           .          .          .         .       .         .          } else {
+            .           .          .          .         .       .         .              ir26 = 0LL;
+            .           .          .          .         .       .         .              ir27 = -1LL;
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .          int64_t ir96 = (ir27 >= 0LL);
+            .           .          .          .         .       .         .          int64_t ir97 = 0;
+            .           .          .          .         .       .         .          int64_t ir98 = 0;
+            .           .          .          .         .       .         .          int64_t ir99 = 0;
+    9,471,338   4,735,669          0          0         0       0         0          if (ir96) {
+            .           .          .          .         .       .         .              ail_bytearray *ir100 = v_out;
+   28,414,014   4,735,669  4,735,669         24         0       4         0              flush(ir100, v_d, ir22, ir21);
+    4,735,669   4,735,669          0          0         0       0         0              ail_bytearray *ir101 = v_out;
+            .           .          .          .         .       .         .              int64_t ir102 = ((128LL) + (ir26));
+    9,471,338   4,735,669          0          0         0       0         0              int64_t ir103 = ((ir102) - (4LL));
+            .           .          .          .         .       .         .              ail_bytearray_append(ir101, ir103);
+   14,207,007   4,735,669          0          0         0       0         0              int64_t ir104 = ((ir20) - (ir27));
+    4,735,669   4,735,669          0          1         0       0         0              ail_bytearray *ir105 = v_out;
+    9,471,338           0          0          0         0       0         0              int64_t ir106 = ((ir104) >> 8);
+            .           .          .          .         .       .         .              ail_bytearray_append(ir105, ir106);
+    4,735,669   4,735,669          0          0         0       0         0              ail_bytearray *ir107 = v_out;
+    4,735,669           0          0          0         0       0         0              int64_t ir108 = ((ir104) & 255LL);
+            .           .          .          .         .       .         .              ail_bytearray_append(ir107, ir108);
+   18,942,676   4,735,669  4,735,669          0         0       0         0              int64_t ir109 = ((ir20) + (ir26));
+            .           .          .          .         .       .         .              int32_t *ir110_p = ir16; int64_t ir110_n = ir1;
+            .           .          .          .         .       .         .              int64_t ir111 = 0;
+            .           .          .          .         .       .         .              int64_t ir112 = ir20;
+            .           .          .          .         .       .         .              for (;;) {
+            .           .          .          .         .       .         .                  int64_t ir113 = (ir112 < ir109);
+   63,932,451   4,735,669          0          0         0       0         0                  if (!(ir113)) {
+            .           .          .          .         .       .         .                      ir111 = ir112;
+            .           .          .          .         .       .         .                      break;
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  int64_t ir114 = ((ir112) + (4LL));
+            .           .          .          .         .       .         .                  int64_t ir115 = (ir114 <= ir1);
+  118,393,564           0          0          0         0       0         0                  if (ir115) {
+   59,196,776  29,598,388          0          8         0       0         0                      int64_t ir116 = ((int64_t)(v_d).p[ir112]);
+   59,196,776           0          0          0         0       0         0                      int64_t ir117 = ((ir116) * (16777216LL));
+   29,598,391           0          0          0         0       0         0                      int64_t ir118 = ((ir112) + (1LL));
+   29,598,388  29,598,388          0          0         0       0         0                      int64_t ir119 = ((int64_t)(v_d).p[ir118]);
+   29,598,388           0          0          0         0       0         0                      int64_t ir120 = ((ir119) * (65536LL));
+   29,598,388           0          0          0         0       0         0                      int64_t ir121 = ((ir117) + (ir120));
+            .           .          .          .         .       .         .                      int64_t ir122 = ((ir112) + (2LL));
+   29,598,388  29,598,388          0          0         0       0         0                      int64_t ir123 = ((int64_t)(v_d).p[ir122]);
+   29,598,388           0          0          0         0       0         0                      int64_t ir124 = ((ir123) * (256LL));
+   29,598,388           0          0          0         0       0         0                      int64_t ir125 = ((ir121) + (ir124));
+            .           .          .          .         .       .         .                      int64_t ir126 = ((ir112) + (3LL));
+   29,598,388  29,598,388          0    147,952         0 147,952         0                      int64_t ir127 = ((int64_t)(v_d).p[ir126]);
+   29,598,388           0          0          0         0       0         0                      int64_t ir128 = ((ir125) + (ir127));
+            .           .          .          .         .       .         .                      int64_t ir129 = (ail_idict_has(&v_head, ir128) != 0);
+            .           .          .          .         .       .         .                      if (ir129) {
+            .           .          .          .         .       .         .                          int64_t ir130 = ail_idict_need(&v_head, ir128);
+   88,342,317  58,894,878 29,447,439          0 1,878,361       0 1,878,355                          ir110_p[ir112] = ir130;
+            .           .          .          .         .       .         .                      }
+            .           .          .          .         .       .         .                      ail_idict_put(&v_head, ir128, ir112);
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  int64_t ir131 = ((ir112) + (1LL));
+            .           .          .          .         .       .         .                  ir112 = ir131;
+            .           .          .          .         .       .         .              }
+            .           .          .          .         .       .         .              ir97 = ir111;
+    9,471,338           0          0          0         0       0         0              ir98 = 0LL;
+            .           .          .          .         .       .         .              ir99 = ir22;
+            .           .          .          .         .       .         .          } else {
+            .           .          .          .         .       .         .              int64_t ir132 = (ir21 == 0LL);
+            .           .          .          .         .       .         .              int64_t ir133 = 0;
+            .           .          .          .         .       .         .              if (ir132) {
+    4,803,218           0          0          0         0       0         0                  ir133 = ir20;
+            .           .          .          .         .       .         .              } else {
+            .           .          .          .         .       .         .                  ir133 = ir22;
+            .           .          .          .         .       .         .              }
+            .           .          .          .         .       .         .              int64_t ir134 = ck_add(ir21, 1LL);
+            .           .          .          .         .       .         .              int64_t ir135 = (ir134 == 128LL);
+            .           .          .          .         .       .         .              int64_t ir136 = 0;
+    4,803,218           0          0          0         0       0         0              if (ir135) {
+            .           .          .          .         .       .         .                  ail_bytearray *ir137 = v_out;
+           30           5          5          2         0       1         0                  flush(ir137, v_d, ir133, ir134);
+           10           0          0          0         0       0         0                  ir136 = 0LL;
+            .           .          .          .         .       .         .              } else {
+            .           .          .          .         .       .         .                  ir136 = ir134;
+            .           .          .          .         .       .         .              }
+    4,803,218           0          0          0         0       0         0              if (ir25) {
+    4,803,218   2,401,609          0          0         0       0         0                  int64_t ir138 = ((int64_t)(v_d).p[ir20]);
+    4,803,218           0          0          0         0       0         0                  int64_t ir139 = ((ir138) * (16777216LL));
+            .           .          .          .         .       .         .                  int64_t ir140 = ((ir20) + (1LL));
+    2,401,609   2,401,609          0          0         0       0         0                  int64_t ir141 = ((int64_t)(v_d).p[ir140]);
+    2,401,609           0          0          0         0       0         0                  int64_t ir142 = ((ir141) * (65536LL));
+    2,401,609           0          0          0         0       0         0                  int64_t ir143 = ((ir139) + (ir142));
+            .           .          .          .         .       .         .                  int64_t ir144 = ((ir20) + (2LL));
+    2,401,609   2,401,609          0          0         0       0         0                  int64_t ir145 = ((int64_t)(v_d).p[ir144]);
+    2,401,609           0          0          0         0       0         0                  int64_t ir146 = ((ir145) * (256LL));
+    2,401,609           0          0          0         0       0         0                  int64_t ir147 = ((ir143) + (ir146));
+            .           .          .          .         .       .         .                  int64_t ir148 = ((ir20) + (3LL));
+    2,401,609   2,401,609          0          0         0       0         0                  int64_t ir149 = ((int64_t)(v_d).p[ir148]);
+    2,401,609           0          0          0         0       0         0                  int64_t ir150 = ((ir147) + (ir149));
+            .           .          .          .         .       .         .                  int64_t ir151 = (ail_idict_has(&v_head, ir150) != 0);
+            6           2          0          0         0       0         0                  if (ir151) {
+            .           .          .          .         .       .         .                      int64_t ir152 = ail_idict_need(&v_head, ir150);
+    3,074,236   1,537,118  1,537,118          0   104,170       0   104,170                      v_prev[ir20] = (int32_t)ir152;
+            .           .          .          .         .       .         .                  }
+            .           .          .          .         .       .         .                  ail_idict_put(&v_head, ir150, ir20);
+            .           .          .          .         .       .         .              }
+            .           .          .          .         .       .         .              int64_t ir153 = ((ir20) + (1LL));
+    2,401,609           0          0          0         0       0         0              ir97 = ir153;
+            .           .          .          .         .       .         .              ir98 = ir136;
+            .           .          .          .         .       .         .              ir99 = ir133;
+            .           .          .          .         .       .         .          }
+            .           .          .          .         .       .         .          int64_t ir154 = ir97;
+            .           .          .          .         .       .         .          int64_t ir155 = ir98;
+            .           .          .          .         .       .         .          int64_t ir156 = ir99;
+            .           .          .          .         .       .         .          ir20 = ir154;
+            .           .          .          .         .       .         .          ir21 = ir155;
+            .           .          .          .         .       .         .          ir22 = ir156;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      /* v_prev is freed once, by the pointer it now is */
+            .           .          .          .         .       .         .      ail_bytearray *ir157 = v_out;
+            8           2          1          0         0       0         0      flush(ir157, v_d, ir19, ir18);
+            .           .          .          .         .       .         .      int64_t ir158 = hash_of(v_d);
+            1           1          0          1         0       1         0      ail_bytearray *ir159 = v_out;
+            1           0          0          0         0       0         0      int64_t ir160 = ((ir158) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir159, ir160);
+            1           1          0          0         0       0         0      ail_bytearray *ir161 = v_out;
+            2           0          0          0         0       0         0      int64_t ir162 = ((ir158) >> 8);
+            2           0          0          0         0       0         0      int64_t ir163 = ((ir162) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir161, ir163);
+            1           1          0          0         0       0         0      ail_bytearray *ir164 = v_out;
+            2           0          0          0         0       0         0      int64_t ir165 = ((ir158) >> 16);
+            1           0          0          0         0       0         0      int64_t ir166 = ((ir165) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir164, ir166);
+            1           1          0          0         0       0         0      ail_bytearray *ir167 = v_out;
+            2           0          0          0         0       0         0      int64_t ir168 = ((ir158) >> 24);
+            .           .          .          .         .       .         .      int64_t ir169 = ((ir168) & 255LL);
+            .           .          .          .         .       .         .      ail_bytearray_append(ir167, ir169);
+            1           1          0          0         0       0         0      ail_bytearray *ir170 = v_out;
+            1           0          1          0         1       0         1      ail_stdout_write_bytes(ail_bytearray_span(ir170));
+            2           1          1          0         1       0         1      ail_cleanup_top = v__cf.previous;
+            2           0          1          0         0       0         0      ail_idict_free(&v_head);
+            2           1          1          0         0       0         0      ail_bytearray_release(v_out);
+            2           1          1          0         0       0         0      free(v_prev); v_prev = 0;
+            .           .          .          .         .       .         .      ail_list_free(&v___ir_comp1);
+            .           .          .          .         .       .         .      return 0LL;
+           12           9          0          2         0       2         0  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  static void ail_unwind_unpack(void **p) { ail_bytearray_release(*(ail_bytearray **)p[0]); }
+            .           .          .          .         .       .         .  int64_t unpack(ail_bytes v_d) {
+            .           .          .          .         .       .         .      ail_bytearray * v_out = 0;
+            .           .          .          .         .       .         .      void *v__cargs[] = {(void *)(&v_out)};
+            .           .          .          .         .       .         .      ail_cleanup_frame v__cf = {ail_cleanup_top, ail_unwind_unpack, v__cargs};
+            .           .          .          .         .       .         .      ail_cleanup_top = &v__cf;
+            .           .          .          .         .       .         .      int64_t ir1 = (v_d).n;
+-- line 5512 ----------------------------------------
+-- line 5678 ----------------------------------------
+            .           .          .          .         .       .         .      ail_bytearray_release(v_out);
+            .           .          .          .         .       .         .      return 0LL;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  static void ail_unwind_py_main(void **p) { ail_sarena_free((ail_sarena *)p[0]); ail_barena_free((ail_barena *)p[1]); }
+            .           .          .          .         .       .         .  __attribute__((always_inline)) static inline
+            .           .          .          .         .       .         .  int64_t py_main(void) {
+            .           .          .          .         .       .         .      ail_str v_mode = {0};
+           42           0         39          0         5       0         0      ail_sarena v__sarena = {0};
+            3           0          2          0         0       0         0      ail_barena v__barena = {0};
+            4           0          2          0         0       0         0      void *v__cargs[] = {(void *)(&v__sarena), (void *)(&v__barena)};
+            6           1          3          1         0       1         0      ail_cleanup_frame v__cf = {ail_cleanup_top, ail_unwind_py_main, v__cargs};
+            2           0          1          0         0       0         0      ail_cleanup_top = &v__cf;
+            .           .          .          .         .       .         .      int64_t ir1 = ail_argv_len();
+            .           .          .          .         .       .         .      int64_t ir2 = (ir1 != 2LL);
+            2           1          0          0         0       0         0      if (ir2) {
+            .           .          .          .         .       .         .          ail_cleanup_top = v__cf.previous;
+            .           .          .          .         .       .         .          ail_sarena_free(&v__sarena);
+            .           .          .          .         .       .         .          ail_barena_free(&v__barena);
+            .           .          .          .         .       .         .          return 1LL;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      ail_str ir3 = ail_argv_get(&v__sarena, 1LL);
+            .           .          .          .         .       .         .      v_mode = ir3;
+            .           .          .          .         .       .         .      ail_str ir4 = v_mode;
+            .           .          .          .         .       .         .      ail_str ir5 = (ail_str){(const uint8_t *)("\x70""\x61""\x63""\x6B"), 4, 1};
+            .           .          .          .         .       .         .      int64_t ir6 = (ail_str_eq(ir4, ir5) != 0);
+            .           .          .          .         .       .         .      if (ir6) {
+            .           .          .          .         .       .         .          ail_bytes ir7 = ail_stdin_read_bytes(&v__barena, 1099511627776LL);
+            1           0          1          0         0       0         0          int64_t ir8 = pack(ir7);
+            .           .          .          .         .       .         .          ail_cleanup_top = v__cf.previous;
+            .           .          .          .         .       .         .          ail_sarena_free(&v__sarena);
+            .           .          .          .         .       .         .          ail_barena_free(&v__barena);
+            .           .          .          .         .       .         .          return ir8;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      ail_str ir9 = v_mode;
+            .           .          .          .         .       .         .      ail_str ir10 = (ail_str){(const uint8_t *)("\x75""\x6E""\x70""\x61""\x63""\x6B"), 6, 1};
+            .           .          .          .         .       .         .      int64_t ir11 = (ail_str_eq(ir9, ir10) != 0);
+            .           .          .          .         .       .         .      if (ir11) {
+            .           .          .          .         .       .         .          ail_bytes ir12 = ail_stdin_read_bytes(&v__barena, 1099511627776LL);
+            1           0          0          0         0       0         0          int64_t ir13 = unpack(ir12);
+            2           1          1          1         0       1         0          ail_cleanup_top = v__cf.previous;
+            2           0          1          0         0       0         0          ail_sarena_free(&v__sarena);
+            2           0          1          0         0       0         0          ail_barena_free(&v__barena);
+            1           0          0          0         0       0         0          return ir13;
+            .           .          .          .         .       .         .      }
+            .           .          .          .         .       .         .      ail_cleanup_top = v__cf.previous;
+            .           .          .          .         .       .         .      ail_sarena_free(&v__sarena);
+            .           .          .          .         .       .         .      ail_barena_free(&v__barena);
+            .           .          .          .         .       .         .      return 1LL;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  
+           11           1          7          0         0       0         0  int64_t run(void) {
+            .           .          .          .         .       .         .      int64_t ir1 = py_main();
+            2           0          1          0         0       0         0      exit((int)(ir1));
+            .           .          .          .         .       .         .      return 0LL;
+            .           .          .          .         .       .         .  }
+            .           .          .          .         .       .         .  #define AIL_ARGC_MIN 1
+            .           .          .          .         .       .         .  #define AIL_USAGE "usage: tool\n"
+            .           .          .          .         .       .         .  #define AIL_CALL run()
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  #include <stdio.h>
+            .           .          .          .         .       .         .  #include <stdlib.h>
+-- line 5739 ----------------------------------------
+-- line 5741 ----------------------------------------
+            .           .          .          .         .       .         .  #include <fcntl.h>
+            .           .          .          .         .       .         .  #include <io.h>
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  
+            .           .          .          .         .       .         .  #ifndef AIL_ARGV_SET
+            .           .          .          .         .       .         .  #define AIL_ARGV_SET
+            .           .          .          .         .       .         .  #endif
+            2           0          0          0         0       0         0  int main(int argc, char **argv) {
+            .           .          .          .         .       .         .  #ifdef _WIN32
+            .           .          .          .         .       .         .      _setmode(_fileno(stdin), _O_BINARY);
+            .           .          .          .         .       .         .      _setmode(_fileno(stdout), _O_TEXT);
+            .           .          .          .         .       .         .      _setmode(_fileno(stderr), _O_TEXT);
+            .           .          .          .         .       .         .  #endif
+            .           .          .          .         .       .         .      AIL_ARGV_SET
+            2           0          0          0         0       0         0      if (argc < AIL_ARGC_MIN) { fputs(AIL_USAGE, stderr); return 2; }
+            1           0          1          0         0       0         0      AIL_CALL;
+            .           .          .          .         .       .         .      return 0;
+            .           .          .          .         .       .         .  }
+
+--------------------------------------------------------------------------------
+-- Annotation summary
+--------------------------------------------------------------------------------
+Ir___________ Dr___________ Dw_________ D1mr_______ D1mw_____ DLmr_____ DLmw_____ 
+
+4,863,237,659 1,072,934,445 181,448,255 104,873,317 3,943,598 1,491,663 3,405,633    annotated: files known & above threshold & readable, line numbers known
+            0             0           0           0         0         0         0    annotated: files known & above threshold & readable, line numbers unknown
+            0             0           0           0         0         0         0  unannotated: files known & above threshold & two or more non-identical
+            0             0           0           0         0         0         0  unannotated: files known & above threshold & unreadable 
+    2,182,577             0     727,522           0         0         0         0  unannotated: files known & below threshold
+  146,462,123     3,185,292 133,986,991      77,523 2,145,735     3,454 2,131,441  unannotated: files unknown
+

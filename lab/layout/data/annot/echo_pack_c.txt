@@ -1,0 +1,185 @@
+--------------------------------------------------------------------------------
+-- Metadata
+--------------------------------------------------------------------------------
+Invocation:       /tmp/energy-valgrind/usr/bin/cg_annotate --show=Ir,Dr,Dw,D1mr,D1mw,DLmr,DLmw --auto=yes --show-percs=no --threshold=0.1 /home/runner/work/ail-ci/ail-ci/lab/layout/data/cg/echo_pack_c.cg
+I1 cache:         32768 B, 64 B, 8-way associative
+D1 cache:         32768 B, 64 B, 8-way associative
+LL cache:         33554432 B, 64 B, 16-way associative
+Command:          /tmp/layout-iur_r085/echo_pack_c pack
+Events recorded:  Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Events shown:     Ir Dr Dw D1mr D1mw DLmr DLmw
+Event sort order: Ir I1mr ILmr Dr D1mr DLmr Dw D1mw DLmw
+Threshold:        0.1%
+Annotation:       on
+
+--------------------------------------------------------------------------------
+-- Summary
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____ 
+
+1,923,639,210 381,691,219 149,803,364 71,777,390 2,338,568 1,024,391 2,337,847  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+-- File:function summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____  file:function
+
+< 1,905,241,238 378,999,536 143,677,802 71,759,989 2,233,934 1,022,164 2,233,236  /home/runner/work/ail-ci/ail-ci/lab/compare/src/echo_pack/main.c:
+  1,872,475,678 364,435,611 140,040,237 71,759,989 2,222,546 1,022,164 2,221,850    main
+     32,765,390  14,563,920   3,637,550          0    11,387         0    11,386    flush
+
+<    17,670,374   2,691,671   5,398,038     17,399   104,634     2,227   104,611  ???:
+     17,663,974   2,690,249   5,397,333     17,283   104,618     2,165   104,596    ???
+
+--------------------------------------------------------------------------------
+-- Function:file summary
+--------------------------------------------------------------------------------
+  Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____  function:file
+
+> 1,872,475,689 364,435,612 140,040,240 71,759,989 2,222,546 1,022,164 2,221,850  main:
+  1,872,475,678 364,435,611 140,040,237 71,759,989 2,222,546 1,022,164 2,221,850    /home/runner/work/ail-ci/ail-ci/lab/compare/src/echo_pack/main.c
+
+>    33,492,900  14,563,920   4,365,060          0    11,387         0    11,386  flush:
+     32,765,390  14,563,920   3,637,550          0    11,387         0    11,386    /home/runner/work/ail-ci/ail-ci/lab/compare/src/echo_pack/main.c
+
+>    17,663,974   2,690,249   5,397,333     17,283   104,618     2,165   104,596  ???:???
+
+--------------------------------------------------------------------------------
+-- Annotated source file: /home/runner/work/ail-ci/ail-ci/lab/compare/src/echo_pack/main.c
+--------------------------------------------------------------------------------
+Ir_________ Dr_________ Dw________ D1mr______ D1mw_____ DLmr___ DLmw_____ 
+
+          .           .          .          .         .       .         .  #include <stdio.h>
+          .           .          .          .         .       .         .  #include <stdlib.h>
+          .           .          .          .         .       .         .  #include <string.h>
+          .           .          .          .         .       .         .  #include <stdint.h>
+          .           .          .          .         .       .         .  
+          6           0          4          0         0       0         0  static unsigned char *rd(size_t *len) {
+          3           0          0          0         0       0         0      size_t cap = 1 << 16, n = 0;
+          2           0          1          0         0       0         0      unsigned char *b = malloc(cap);
+          3           0          0          0         0       0         0      if (!b) exit(2);
+          .           .          .          .         .       .         .      for (;;) {
+         83           0          9          0         0       0         0          if (n == cap) { cap *= 2; b = realloc(b, cap); if (!b) exit(2); }
+         33           0          0          0         0       0         0          size_t r = fread(b + n, 1, cap - n, stdin);
+         22           0          0          0         0       0         0          if (r == 0) break;
+         10           0          0          0         0       0         0          n += r;
+          .           .          .          .         .       .         .      }
+          1           0          1          0         1       0         0      *len = n;
+          .           .          .          .         .       .         .      return b;
+          7           5          0          0         0       0         0  }
+          .           .          .          .         .       .         .  
+          .           .          .          .         .       .         .  static uint32_t hsh(const unsigned char *d, size_t n) {
+          2           0          0          0         0       0         0      uint32_t h = 0;
+256,000,003  32,000,000          0    500,001         0 497,994         0      for (size_t i = 0; i < n; i++) h = h * 257u + d[i] + 1u;
+          .           .          .          .         .       .         .      return h;
+          .           .          .          .         .       .         .  }
+          .           .          .          .         .       .         .  
+          .           .          .          .         .       .         .  #define HB 20
+          .           .          .          .         .       .         .  static uint32_t key(const unsigned char *p) {
+          .           .          .          .         .       .         .      uint32_t v = p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
+ 85,411,826  39,137,274          0    259,459         0 258,861         0      return (v * 2654435761u) >> (32 - HB);
+          .           .          .          .         .       .         .  }
+          .           .          .          .         .       .         .  
+  4,365,060           0  1,455,020          0         0       0         0  static void flush(unsigned char *o, size_t *on, const unsigned char *L, int *ln) {
+ 18,215,190   8,743,840          0          0         0       0         0      if (!*ln) return;
+  3,637,550     727,510  1,455,020          0    11,387       0    11,386      o[(*on)++] = (unsigned char)(*ln - 1);
+  1,455,020   1,455,020          0          0         0       0         0      memcpy(o + *on, L, *ln);
+  1,455,020   1,455,020          0          0         0       0         0      *on += *ln;
+    727,510           0    727,510          0         0       0         0      *ln = 0;
+  2,910,040   2,182,530          0          0         0       0         0  }
+          .           .          .          .         .       .         .  
+          .           .          .          .         .       .         .  static int pack(void) {
+          .           .          .          .         .       .         .      size_t n;
+          3           0          1          0         0       0         0      unsigned char *D = rd(&n);
+          8           2          2          0         1       0         0      unsigned char *o = malloc(n + n / 128 + 64 + n / 4 * 0);
+          2           0          0          0         0       0         0      if (!o) return 1;
+          .           .          .          .         .       .         .      size_t on = 0;
+          .           .          .          .         .       .         .      memcpy(o, "EP1", 3);
+          2           0          2          0         0       0         0      o[3] = n; o[4] = n >> 8; o[5] = n >> 16; o[6] = n >> 24;
+          1           0          1          0         0       0         0      on = 7;
+          3           0          1          0         0       0         0      uint32_t *head = malloc(sizeof(uint32_t) * (1u << HB));
+          3           0          1          0         0       0         0      uint32_t *prev = malloc(sizeof(uint32_t) * (n + 1));
+          4           0          0          0         0       0         0      if (!head || !prev) return 1;
+          .           .          .          .         .       .         .      memset(head, 0xff, sizeof(uint32_t) * (1u << HB));
+          6           2          2          0         1       0         0      size_t ins = 0;
+          .           .          .          .         .       .         .      unsigned char L[128];
+          2           0          1          0         1       0         0      int ln = 0;
+          7           0          3          0         0       0         0      size_t i = 0;
+ 21,411,837   7,137,278          0          0         0       0         0      while (i < n) {
+  4,793,889           0          0          0         0       0         0          int found = 0;
+ 28,763,334   4,793,889  9,587,778          0         0       0         0          size_t bm = 0, bp = 0;
+ 21,411,834           0          0          0         0       0         0          if (i + 4 <= n) {
+ 99,686,380   7,137,278  7,137,277          0         0       0         0              while (ins < i) {
+ 95,999,988           0          0          0         0       0         0                  if (ins + 4 <= n) {
+          .           .          .          .         .       .         .                      uint32_t k = key(D + ins);
+ 95,999,988  31,999,996 31,999,996 24,494,111 2,000,000   3,223 1,999,999                      prev[ins] = head[k];
+ 31,999,996           0 31,999,996          0         0       0         0                      head[k] = (uint32_t)ins;
+          .           .          .          .         .       .         .                  }
+ 31,999,996           0          0          0         0       0         0                  ins++;
+          .           .          .          .         .       .         .              }
+ 14,274,556   7,137,278          0  7,045,517         0  21,966         0              uint32_t p = head[key(D + i)];
+  4,793,889           0          0          0         0       0         0              int cnt = 0;
+ 28,549,112           0          0          0         0       0         0              size_t lim = n - i < 131 ? n - i : 131;
+206,271,796           0          0          0         0       0         0              while (p != 0xffffffffu && cnt < 8 && i - p <= 65535) {
+ 63,093,252  21,031,084          0 18,115,072         0       0         0                  if (memcmp(D + p, D + i, 4) == 0) {
+ 20,690,028           0          0          0         0       0         0                      cnt++;
+ 20,690,028           0          0          0         0       0         0                      size_t m = 4;
+491,813,448 155,019,286 20,690,026  1,133,627         0 240,115         0                      while (m < lim && D[p + m] == D[i + m]) m++;
+104,158,804           0  5,349,673          0         0       0         0                      if (!found || m > bm) { bm = m; bp = p; found = 1; }
+          .           .          .          .         .       .         .                  }
+ 21,031,084  21,031,084          0 20,212,197         0       0         0                  p = prev[p];
+          .           .          .          .         .       .         .              }
+          .           .          .          .         .       .         .          }
+ 19,175,556   4,793,889  4,793,889          0         0       0         0          if (found) {
+ 23,678,345  14,207,007  4,735,669          0         0       0         0              flush(o, &on, L, &ln);
+ 14,207,007   4,735,669          0          0         0       0         0              size_t dist = i - bp;
+ 18,942,676   9,471,338  4,735,669          0    73,575       0    73,575              o[on++] = (unsigned char)(0x80 + (bm - 4));
+  4,735,669           0  4,735,669          0    74,145       0    74,145              o[on++] = dist >> 8;
+ 14,207,007           0  9,471,338          0    74,130       0    74,130              o[on++] = dist & 255;
+  9,471,338           0          0          0         0       0         0              i += bm;
+          .           .          .          .         .       .         .          } else {
+ 14,409,654   4,803,218  4,803,218          0       689       0         0              L[ln++] = D[i++];
+  4,803,258          20         10          0         0       0         0              if (ln == 128) flush(o, &on, L, &ln);
+          .           .          .          .         .       .         .          }
+          .           .          .          .         .       .         .      }
+          7           5          1          0         0       0         0      flush(o, &on, L, &ln);
+          .           .          .          .         .       .         .      uint32_t h = hsh(D, n);
+         11           2          5          2         1       2         0      o[on++] = h; o[on++] = h >> 8; o[on++] = h >> 16; o[on++] = h >> 24;
+          5           1          1          1         1       1         1      fwrite(o, 1, on, stdout);
+          .           .          .          .         .       .         .      return 0;
+          .           .          .          .         .       .         .  }
+          .           .          .          .         .       .         .  
+          .           .          .          .         .       .         .  static int unpack(void) {
+          .           .          .          .         .       .         .      size_t len;
+          .           .          .          .         .       .         .      unsigned char *s = rd(&len);
+          .           .          .          .         .       .         .      if (len < 7 || memcmp(s, "EP1", 3)) return 2;
+          .           .          .          .         .       .         .      uint64_t n = s[3] | (s[4] << 8) | (s[5] << 16) | ((uint64_t)s[6] << 24);
+-- line 105 ----------------------------------------
+-- line 133 ----------------------------------------
+          .           .          .          .         .       .         .      }
+          .           .          .          .         .       .         .      if (len - pos != 4) return 2;
+          .           .          .          .         .       .         .      uint32_t h = s[pos] | (s[pos + 1] << 8) | (s[pos + 2] << 16) | ((uint32_t)s[pos + 3] << 24);
+          .           .          .          .         .       .         .      if (h != hsh(o, on)) return 2;
+          .           .          .          .         .       .         .      fwrite(o, 1, on, stdout);
+          .           .          .          .         .       .         .      return 0;
+          .           .          .          .         .       .         .  }
+          .           .          .          .         .       .         .  
+         11           1          7          0         1       0         0  int main(int argc, char **argv) {
+          3           0          0          0         0       0         0      if (argc != 2) return 1;
+          8           1          1          0         1       0         0      if (!strcmp(argv[1], "pack")) return pack();
+          .           .          .          .         .       .         .      if (!strcmp(argv[1], "unpack")) return unpack();
+          .           .          .          .         .       .         .      return 1;
+         12           9          0          2         0       2         0  }
+
+--------------------------------------------------------------------------------
+-- Annotation summary
+--------------------------------------------------------------------------------
+Ir___________ Dr_________ Dw_________ D1mr______ D1mw_____ DLmr_____ DLmw_____ 
+
+1,905,241,238 378,999,536 143,677,802 71,759,989 2,233,934 1,022,164 2,233,236    annotated: files known & above threshold & readable, line numbers known
+            0           0           0          0         0         0         0    annotated: files known & above threshold & readable, line numbers unknown
+            0           0           0          0         0         0         0  unannotated: files known & above threshold & two or more non-identical
+            0           0           0          0         0         0         0  unannotated: files known & above threshold & unreadable 
+      727,598          12     727,524          2         0         0         0  unannotated: files known & below threshold
+   17,670,374   2,691,671   5,398,038     17,399   104,634     2,227   104,611  unannotated: files unknown
+
