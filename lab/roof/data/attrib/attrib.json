@@ -1,0 +1,767 @@
+{
+ "berth_sim": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 101,
+   "by_category": {
+    "overflow": 168000000,
+    "bounds": 897288354,
+    "refcount": 9000211,
+    "alloc/free": 180021992,
+    "copies": 102018998,
+    "boxing": 0
+   },
+   "other": 6864362574,
+   "total_line_ir": 8220692129,
+   "hot_functions": [
+    [
+     2302855342,
+     "py_main"
+    ],
+    [
+     1614424789,
+     "ail_keysort_perm.constprop.0"
+    ],
+    [
+     1378352094,
+     "ail__str_to_int_full.isra.0"
+    ],
+    [
+     1007695887,
+     "ail_str_split_sep.isra.0"
+    ],
+    [
+     575519474,
+     "ail_stdin_readline"
+    ],
+    [
+     441006533,
+     "ail__sarena_keep_roots_slow.constprop.0"
+    ],
+    [
+     277878293,
+     "fpop"
+    ],
+    [
+     187844570,
+     "fpush"
+    ]
+   ],
+   "hot_disasm": {
+    "py_main": [
+     5176,
+     74
+    ],
+    "ail_keysort_perm.constprop.0": [
+     453,
+     14
+    ],
+    "ail__str_to_int_full.isra.0": [
+     694,
+     0
+    ],
+    "ail_str_split_sep.isra.0": [
+     373,
+     6
+    ],
+    "ail_stdin_readline": [
+     110,
+     4
+    ],
+    "ail__sarena_keep_roots_slow.constprop.0": [
+     224,
+     0
+    ]
+   },
+   "hot_simd_insns": 98,
+   "hot_disasm_insns": 7030,
+   "hot_simd_share": 0.0139
+  },
+  "c": {
+   "vectorized_loops": 0,
+   "not_vectorized": 18,
+   "by_category": {
+    "overflow": 0,
+    "bounds": 172389898,
+    "refcount": 0,
+    "alloc/free": 43572342,
+    "copies": 0,
+    "boxing": 0
+   },
+   "other": 3208877263,
+   "total_line_ir": 3424839503,
+   "hot_functions": [
+    [
+     1857072665,
+     "msort_with_tmp.part.0'2"
+    ],
+    [
+     1035846082,
+     "cmpu"
+    ],
+    [
+     924991968,
+     "main"
+    ],
+    [
+     890440220,
+     "rd"
+    ],
+    [
+     375336399,
+     "upop"
+    ],
+    [
+     198224834,
+     "upush"
+    ],
+    [
+     78000085,
+     "msort_with_tmp.part.0"
+    ],
+    [
+     74647,
+     "__GI___tunables_init"
+    ]
+   ],
+   "hot_disasm": {
+    "cmpu": [
+     11,
+     0
+    ],
+    "main": [
+     615,
+     6
+    ],
+    "rd": [
+     28,
+     0
+    ],
+    "upop": [
+     39,
+     0
+    ],
+    "upush": [
+     52,
+     0
+    ]
+   },
+   "hot_simd_insns": 6,
+   "hot_disasm_insns": 745,
+   "hot_simd_share": 0.0081
+  },
+  "delta": {
+   "by_category": {
+    "overflow": 168000000,
+    "bounds": 724898456,
+    "refcount": 9000211,
+    "alloc/free": 136449650,
+    "copies": 102018998,
+    "boxing": 0
+   },
+   "other": 3655485311,
+   "total": 4795852626,
+   "real_extra": 2551312726
+  }
+ },
+ "chain_relax": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 53,
+   "by_category": {
+    "overflow": 0,
+    "bounds": 1024,
+    "refcount": 135,
+    "alloc/free": 1177,
+    "copies": 202,
+    "boxing": 0
+   },
+   "other": 1690206385,
+   "total_line_ir": 1690208923,
+   "hot_functions": [
+    [
+     1690202982,
+     "py_main"
+    ],
+    [
+     74647,
+     "__GI___tunables_init"
+    ],
+    [
+     28862,
+     "do_lookup_x"
+    ],
+    [
+     16561,
+     "_dl_relocate_object"
+    ],
+    [
+     11296,
+     "_dl_lookup_symbol_x"
+    ],
+    [
+     6909,
+     "check_match"
+    ],
+    [
+     5217,
+     "__printf_fp_buffer_1.isra.0"
+    ],
+    [
+     3990,
+     "_int_malloc"
+    ]
+   ],
+   "hot_disasm": {
+    "py_main": [
+     1396,
+     155
+    ]
+   },
+   "hot_simd_insns": 155,
+   "hot_disasm_insns": 1396,
+   "hot_simd_share": 0.111
+  },
+  "c": {
+   "vectorized_loops": 0,
+   "not_vectorized": 2,
+   "by_category": {
+    "overflow": 0,
+    "bounds": 0,
+    "refcount": 0,
+    "alloc/free": 4,
+    "copies": 0,
+    "boxing": 0
+   },
+   "other": 1389302683,
+   "total_line_ir": 1389302687,
+   "hot_functions": [
+    [
+     1389302120,
+     "main"
+    ],
+    [
+     300000000,
+     "sqrt"
+    ],
+    [
+     180000000,
+     "__sqrt_finite@GLIBC_2.15"
+    ],
+    [
+     74647,
+     "__GI___tunables_init"
+    ],
+    [
+     35213,
+     "do_lookup_x"
+    ],
+    [
+     17053,
+     "_dl_relocate_object"
+    ],
+    [
+     11669,
+     "_dl_lookup_symbol_x"
+    ],
+    [
+     6908,
+     "check_match"
+    ]
+   ],
+   "hot_disasm": {
+    "main": [
+     242,
+     97
+    ]
+   },
+   "hot_simd_insns": 97,
+   "hot_disasm_insns": 242,
+   "hot_simd_share": 0.4008
+  },
+  "delta": {
+   "by_category": {
+    "overflow": 0,
+    "bounds": 1024,
+    "refcount": 135,
+    "alloc/free": 1173,
+    "copies": 202,
+    "boxing": 0
+   },
+   "other": 300903702,
+   "total": 300906236,
+   "real_extra": -296710349
+  }
+ },
+ "echo_pack": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 47,
+   "by_category": {
+    "overflow": 9304558,
+    "bounds": 170080132,
+    "refcount": 10,
+    "alloc/free": 1016442,
+    "copies": 1455032,
+    "boxing": 0
+   },
+   "other": 5246617525,
+   "total_line_ir": 5428473699,
+   "hot_functions": [
+    [
+     5054866474,
+     "pack"
+    ],
+    [
+     84200374,
+     "ail_tab_hfree_slot"
+    ],
+    [
+     79183081,
+     "ail_tab_hput"
+    ],
+    [
+     53135665,
+     "flush"
+    ],
+    [
+     42284005,
+     "ail_bytearray_extend"
+    ],
+    [
+     35540390,
+     "ail_tab_put_slow"
+    ],
+    [
+     23057694,
+     "ail_tab_hash_rearray"
+    ],
+    [
+     19293360,
+     "ail_idict_put_slow"
+    ]
+   ],
+   "hot_disasm": {
+    "pack": [
+     935,
+     7
+    ],
+    "ail_tab_hfree_slot": [
+     46,
+     0
+    ],
+    "ail_tab_hput": [
+     107,
+     0
+    ],
+    "flush": [
+     71,
+     0
+    ],
+    "ail_bytearray_extend": [
+     90,
+     0
+    ],
+    "ail_tab_put_slow": [
+     381,
+     39
+    ]
+   },
+   "hot_simd_insns": 46,
+   "hot_disasm_insns": 1630,
+   "hot_simd_share": 0.0282
+  },
+  "c": {
+   "vectorized_loops": 0,
+   "not_vectorized": 8,
+   "by_category": {
+    "overflow": 0,
+    "bounds": 0,
+    "refcount": 0,
+    "alloc/free": 99,
+    "copies": 1455020,
+    "boxing": 0
+   },
+   "other": 1846852783,
+   "total_line_ir": 1848307902,
+   "hot_functions": [
+    [
+     1815542342,
+     "main"
+    ],
+    [
+     32765390,
+     "flush"
+    ],
+    [
+     74647,
+     "__GI___tunables_init"
+    ],
+    [
+     26979,
+     "do_lookup_x"
+    ],
+    [
+     16153,
+     "_dl_relocate_object"
+    ],
+    [
+     10520,
+     "_dl_lookup_symbol_x"
+    ],
+    [
+     6389,
+     "check_match"
+    ],
+    [
+     3171,
+     "_dl_check_map_versions"
+    ]
+   ],
+   "hot_disasm": {
+    "main": [
+     395,
+     0
+    ],
+    "flush": [
+     26,
+     0
+    ]
+   },
+   "hot_simd_insns": 0,
+   "hot_disasm_insns": 421,
+   "hot_simd_share": 0.0
+  },
+  "delta": {
+   "by_category": {
+    "overflow": 9304558,
+    "bounds": 170080132,
+    "refcount": 10,
+    "alloc/free": 1016343,
+    "copies": 12,
+    "boxing": 0
+   },
+   "other": 3399764742,
+   "total": 3580165797,
+   "real_extra": 3619067411
+  }
+ },
+ "ledger_bin": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 68,
+   "by_category": {
+    "overflow": 796489974,
+    "bounds": 221952119,
+    "refcount": 1869230,
+    "alloc/free": 28921437,
+    "copies": 5141565,
+    "boxing": 0
+   },
+   "other": 4018160278,
+   "total_line_ir": 5072534603,
+   "hot_functions": [
+    [
+     2897742067,
+     "py_main"
+    ],
+    [
+     1792541960,
+     "readvar"
+    ],
+    [
+     218918923,
+     "ail_keysort_perm.constprop.0"
+    ],
+    [
+     51917382,
+     "_int_malloc"
+    ],
+    [
+     28048737,
+     "_int_free"
+    ],
+    [
+     27978246,
+     "ail_tab_hfree_slot"
+    ],
+    [
+     25434685,
+     "ail_tab_hput"
+    ],
+    [
+     23320663,
+     "ail__utf8_validate"
+    ]
+   ],
+   "hot_disasm": {
+    "py_main": [
+     4495,
+     20
+    ],
+    "readvar": [
+     87,
+     0
+    ],
+    "ail_keysort_perm.constprop.0": [
+     889,
+     30
+    ],
+    "ail_tab_hfree_slot": [
+     46,
+     0
+    ]
+   },
+   "hot_simd_insns": 50,
+   "hot_disasm_insns": 5517,
+   "hot_simd_share": 0.0091
+  },
+  "c": {
+   "vectorized_loops": 0,
+   "not_vectorized": 12,
+   "by_category": {
+    "overflow": 0,
+    "bounds": 0,
+    "refcount": 0,
+    "alloc/free": 13495750,
+    "copies": 0,
+    "boxing": 0
+   },
+   "other": 2344044008,
+   "total_line_ir": 2357539758,
+   "hot_functions": [
+    [
+     1186139962,
+     "main"
+    ],
+    [
+     881209657,
+     "rdvar"
+    ],
+    [
+     137321000,
+     "msort_with_tmp.part.0'2"
+    ],
+    [
+     137302697,
+     "hfind"
+    ],
+    [
+     90584959,
+     "lookup"
+    ],
+    [
+     58112037,
+     "cmp_id"
+    ],
+    [
+     7102929,
+     "msort_with_tmp.part.0"
+    ],
+    [
+     4190446,
+     "hgrow"
+    ]
+   ],
+   "hot_disasm": {
+    "main": [
+     614,
+     7
+    ],
+    "rdvar": [
+     44,
+     0
+    ],
+    "hfind": [
+     24,
+     0
+    ],
+    "lookup": [
+     14,
+     0
+    ],
+    "cmp_id": [
+     10,
+     0
+    ]
+   },
+   "hot_simd_insns": 7,
+   "hot_disasm_insns": 706,
+   "hot_simd_share": 0.0099
+  },
+  "delta": {
+   "by_category": {
+    "overflow": 796489974,
+    "bounds": 221952119,
+    "refcount": 1869230,
+    "alloc/free": 15425687,
+    "copies": 5141565,
+    "boxing": 0
+   },
+   "other": 1674116270,
+   "total": 2714994845,
+   "real_extra": 2501977699
+  }
+ },
+ "rail_transfer": {
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 65,
+   "by_category": {
+    "overflow": 10617454,
+    "bounds": 39955304,
+    "refcount": 4727421,
+    "alloc/free": 32000081,
+    "copies": 8389544,
+    "boxing": 0
+   },
+   "other": 286094061,
+   "total_line_ir": 381783865,
+   "hot_functions": [
+    [
+     124794701,
+     "py_main"
+    ],
+    [
+     80842272,
+     "ail__str_split_ws_raw.isra.0"
+    ],
+    [
+     60688458,
+     "ail__str_to_int_full.isra.0"
+    ],
+    [
+     20145963,
+     "ail_utf8_decode"
+    ],
+    [
+     15155568,
+     "ail__sarena_keep_roots_slow.constprop.0"
+    ],
+    [
+     12752629,
+     "relax"
+    ],
+    [
+     10494274,
+     "ail_obj_release"
+    ],
+    [
+     10078025,
+     "solve"
+    ]
+   ],
+   "hot_disasm": {
+    "py_main": [
+     3150,
+     89
+    ],
+    "ail__str_split_ws_raw.isra.0": [
+     655,
+     0
+    ],
+    "ail__str_to_int_full.isra.0": [
+     703,
+     0
+    ],
+    "ail_utf8_decode": [
+     263,
+     8
+    ],
+    "ail__sarena_keep_roots_slow.constprop.0": [
+     99,
+     0
+    ],
+    "relax": [
+     469,
+     0
+    ]
+   },
+   "hot_simd_insns": 97,
+   "hot_disasm_insns": 5339,
+   "hot_simd_share": 0.0182
+  },
+  "c": {
+   "vectorized_loops": 0,
+   "not_vectorized": 32,
+   "by_category": {
+    "overflow": 0,
+    "bounds": 341422,
+    "refcount": 0,
+    "alloc/free": 302162,
+    "copies": 1,
+    "boxing": 0
+   },
+   "other": 175304735,
+   "total_line_ir": 175948320,
+   "hot_functions": [
+    [
+     90104183,
+     "msort_with_tmp.part.0'2"
+    ],
+    [
+     77355189,
+     "main"
+    ],
+    [
+     51579414,
+     "cmpll"
+    ],
+    [
+     43994342,
+     "rd"
+    ],
+    [
+     4423897,
+     "msort_with_tmp.part.0"
+    ],
+    [
+     3019365,
+     "push"
+    ],
+    [
+     74647,
+     "__GI___tunables_init"
+    ],
+    [
+     26539,
+     "do_lookup_x"
+    ]
+   ],
+   "hot_disasm": {
+    "main": [
+     1303,
+     25
+    ],
+    "cmpll": [
+     10,
+     0
+    ],
+    "rd": [
+     28,
+     0
+    ],
+    "push": [
+     52,
+     2
+    ]
+   },
+   "hot_simd_insns": 27,
+   "hot_disasm_insns": 1393,
+   "hot_simd_share": 0.0194
+  },
+  "delta": {
+   "by_category": {
+    "overflow": 10617454,
+    "bounds": 39613882,
+    "refcount": 4727421,
+    "alloc/free": 31697919,
+    "copies": 8389543,
+    "boxing": 0
+   },
+   "other": 110789326,
+   "total": 205835545,
+   "real_extra": 82503559
+  }
+ }
+}

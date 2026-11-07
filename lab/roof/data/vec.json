@@ -1,0 +1,174 @@
+{
+ "berth_sim": {
+  "ail-py": {
+   "vectorized_loops": 0,
+   "not_vectorized": 197,
+   "source": "main.py",
+   "binary_instructions": 11470,
+   "binary_simd_instructions": 256,
+   "binary_simd_share": 0.0223
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 101,
+   "source": "typed.py",
+   "binary_instructions": 10428,
+   "binary_simd_instructions": 114,
+   "binary_simd_share": 0.0109
+  }
+ },
+ "chain_relax": {
+  "ail-py": {
+   "vectorized_loops": 0,
+   "not_vectorized": 1125,
+   "source": "main.py",
+   "binary_instructions": 46913,
+   "binary_simd_instructions": 6495,
+   "binary_simd_share": 0.1384
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 53,
+   "source": "typed.py",
+   "binary_instructions": 4605,
+   "binary_simd_instructions": 168,
+   "binary_simd_share": 0.0365
+  }
+ },
+ "echo_pack": {
+  "ail-py": {
+   "vectorized_loops": 0,
+   "not_vectorized": 209,
+   "source": "main.py",
+   "binary_instructions": 6744,
+   "binary_simd_instructions": 51,
+   "binary_simd_share": 0.0076
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 47,
+   "source": "typed.py",
+   "binary_instructions": 4475,
+   "binary_simd_instructions": 58,
+   "binary_simd_share": 0.013
+  }
+ },
+ "ledger_bin": {
+  "ail-py": {
+   "vectorized_loops": 0,
+   "not_vectorized": 2878,
+   "source": "main.py",
+   "binary_instructions": 89261,
+   "binary_simd_instructions": 16712,
+   "binary_simd_share": 0.1872
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 68,
+   "source": "typed.py",
+   "binary_instructions": 9197,
+   "binary_simd_instructions": 109,
+   "binary_simd_share": 0.0119
+  }
+ },
+ "rail_transfer": {
+  "ail-py": {
+   "vectorized_loops": 0,
+   "not_vectorized": 3185,
+   "source": "main.py",
+   "binary_instructions": 90118,
+   "binary_simd_instructions": 18055,
+   "binary_simd_share": 0.2003
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 65,
+   "source": "typed.py",
+   "binary_instructions": 10384,
+   "binary_simd_instructions": 140,
+   "binary_simd_share": 0.0135
+  }
+ },
+ "scar_life": {
+  "ail-py": {
+   "vectorized_loops": 1,
+   "not_vectorized": 5260,
+   "source": "main.py",
+   "binary_instructions": 180887,
+   "binary_simd_instructions": 43330,
+   "binary_simd_share": 0.2395
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 35,
+   "source": "typed.py",
+   "binary_instructions": 5424,
+   "binary_simd_instructions": 34,
+   "binary_simd_share": 0.0063
+  }
+ },
+ "tally_lang": {
+  "ail-py": {
+   "source": "main.py",
+   "error": "build failed"
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 51,
+   "source": "typed.py",
+   "binary_instructions": 10758,
+   "binary_simd_instructions": 81,
+   "binary_simd_share": 0.0075
+  }
+ },
+ "term_rank": {
+  "ail-py": {
+   "vectorized_loops": 1,
+   "not_vectorized": 4618,
+   "source": "main.py",
+   "binary_instructions": 152927,
+   "binary_simd_instructions": 35502,
+   "binary_simd_share": 0.2321
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 84,
+   "source": "typed.py",
+   "binary_instructions": 12545,
+   "binary_simd_instructions": 221,
+   "binary_simd_share": 0.0176
+  }
+ },
+ "ticket_audit": {
+  "ail-py": {
+   "vectorized_loops": 0,
+   "not_vectorized": 4207,
+   "source": "main.py",
+   "binary_instructions": 228812,
+   "binary_simd_instructions": 57941,
+   "binary_simd_share": 0.2532
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 133,
+   "source": "typed.py",
+   "binary_instructions": 18008,
+   "binary_simd_instructions": 503,
+   "binary_simd_share": 0.0279
+  }
+ },
+ "tree_fold": {
+  "ail-py": {
+   "source": "main.py",
+   "error": "build failed"
+  },
+  "ail": {
+   "vectorized_loops": 0,
+   "not_vectorized": 139,
+   "source": "typed.py",
+   "binary_instructions": 14626,
+   "binary_simd_instructions": 461,
+   "binary_simd_share": 0.0315
+  }
+ }
+}

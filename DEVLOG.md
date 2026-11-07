@@ -174,6 +174,57 @@ indices, slice guards, unpack-target stores, a row named by a parameter, `d.get(
 float, bool, str and bytes values with keys from a list item, a call, an attribute and a dict
 value, `int | None` helpers, guard values, `global`/chained stores, an Optional loop variable)
 match CPython stdout and exit status on both builds.
+## 2026-11-06 -- roof fix1: measure the source the task names (`main.py`) (job-roof1-11070417)
+
+Review 1 found the first table built `lab/compare/src/*/typed.py`, not the task's `main.py`. Fixed:
+`measure.py` now reports both compare-lab columns, `ail` = `typed.py` (annotated) and `ail-py` =
+`main.py` (plain CPython source), and `--merge` keeps the other column when one is re-measured.
+`main.py` is built with `--exact-int` for `rail_transfer`/`chain_relax` (as compare-lab does) and
+for any source whose `# ail-build: --exact-int` directive asks for it -- `scar_life` otherwise
+builds and then exits with the compiler's named `OverflowError ... --exact-int` (0.12 s of wall,
+not a measurement; with the flag it is 30.9 s). `vec.py` surveys both sources too. `RESULTS.md` now
+has a `main.py` table with the source named in every row, and keeps the typed table for comparison.
+
+Measured (`main.py`): eight of ten builds compile, **six are on the boxed general path**;
+`tally_lang` and `tree_fold` are refused by name ("the compiled pattern TOK is used as a value";
+"cannot tell the type of element 0 of this tuple"). Wall vs C is **1.6x-143x (median 9.9x)**, not
+the 0.67x-1.98x of the annotated source; the same program is up to **122x** slower than its
+annotated build (`chain_relax` 153.8 s vs 1.263 s; `ledger_bin` 48.8 vs 0.884; `ticket_audit` 57.0
+vs 1.760; `term_rank` 28.8 vs 2.348; `rail_transfer` 0.962 vs 0.069). The general-path builds
+execute too much code for cachegrind within the 20-minute cap, so those rows give wall, the
+`boxed general path` verdict and `n/m` counters. `berth_sim` (33.476e9 Ir, 250.6M LLC),
+`echo_pack` (18.231e9, 36.4M LLC) and `rail_transfer` (3.704e9, 23.3M LLC) have cache-simulated
+counters; `term_rank` has `callgrind-ir` instructions only (111.51e9 Ir, 30% of the 4-IPC floor),
+so its LLC/GB/s are `n/m`. The typed column is unchanged
+and still shows 0.67x-1.98x C, 0 vectorised loops and only `tree_fold` near a memory roof.
+
+Corrected reporting errors from review 1: the typed column's instruction ratio range is
+**0.83x-5.40x** (not 0.85x; `term_rank` is the 0.83x minimum), and `other` is **54-100%** of the
+attributed AIL-C difference (`chain_relax` is 100%). The subtraction section now says it is the
+`typed.py` column; boxing is 0 there because those builds are typed, and it is where the
+uncounted `main.py` gap lives. No compiler, runtime or bench file changed.
+
+## 2026-11-06 -- roof: how close each compare program is to the hardware limit (job-roof1-11070209)
+
+Measurement only; no compiler change. `lab/roof/` adds the machine filter (STREAM triad at four
+sizes, random pointer chase at four working sets, dependent-chain clock and scalar/AVX2 width) and a
+harness that builds each of the ten `lab/compare` programs as compare-lab does (C with
+`gcc -O2 -std=c11`, AIL with `compile --syntax python`) and measures wall (median of 3),
+instructions and LLC misses. This runner exposes no hardware PMU, so counters fall back to valgrind
+cachegrind with the runner's cache geometry; every row records that.
+
+Measured here: 3.211 GHz, 2.67 scalar adds/cycle, 10.7 AVX2 doubles/cycle, STREAM triad 25.10 GB/s
+DRAM-resident (25.44 at 96 MB, 46.05 at 12 MB), random dependent load 116.5 ns (374 cycles) at DRAM.
+For the annotated `typed.py` source (compare-lab's `ail` column) all ten AIL builds took the typed
+path. That column is 0.67x-1.98x C's wall (median 1.31x; seven of ten between 1.0x and 1.6x, two
+faster) and 0.83x-5.40x its instruction count; no hot loop is vectorised (0 vectorised loops,
+35-139 "not vectorized" reports in `-fopt-info-vec-all`); only `tree_fold` reaches 19% of STREAM,
+and `berth_sim` is latency-bound (78M LLC misses at 2.1 GB/s). Cores used is measured from CPU
+time / wall (0.98-1.00). The subtraction attributes both builds' lines and subtracts: the
+emitted-code shape ("other") is 54-100% of the AIL-C difference, then overflow checks (up to 29.3%
+of `ledger_bin`'s extra), bounds (4.8-19.2%), allocation (15.4% of `rail_transfer`), copies (4.1%)
+and refcount (2.3%); boxing is 0 in that typed column. The task's `main.py` column, added in the
+fix above, is 1.6x-143x C. See `lab/roof/RESULTS.md`.
 
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
