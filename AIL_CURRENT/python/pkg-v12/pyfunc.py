@@ -12214,6 +12214,18 @@ SET_OPS = {ast.BitAnd: 'and', ast.BitOr: 'or', ast.Sub: 'minus', ast.BitXor: 'xo
 
 def _set_into_temp(arg, ctx):
     """`set(e)` as a value: one table, built once, freed with the rest."""
+    # The table here is the int table (ail_tab): a set of str or float elements built this way was
+    # handed to the C compiler as an int key and failed there (`len(set(suits))` with `suits` a
+    # list[str]). Refuse it by name instead, so the default build keeps the general path.
+    kind = None
+    if isinstance(arg, ast.Name):
+        try:
+            kind = ctx.type_of(arg.id)
+        except Unsupported:
+            kind = None
+    if kind in (SLIST, FLIST) or _is_str_expr(arg, ctx):
+        raise Unsupported('set() of a %s used inline (as in `len(set(xs))`); an inline set built from a '
+                          'sequence is built for int elements only' % ('str' if kind != FLIST else 'list of float'))
     ctx.parts.add('TAB')
     c, _ = ctx.temp(SET)
     lo, n, elem, pre = _iter_plan(arg, ctx)

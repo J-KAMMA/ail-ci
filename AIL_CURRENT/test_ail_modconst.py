@@ -582,6 +582,20 @@ main()
 ''', 'nested_def', ['nested def', "'STOP'"])
         self.refused('''
 STOP = {"a", "the"}
+
+def f(w: str) -> int:
+    return 1 if w in STOP else 0
+
+STOP.add("zz")
+
+def main() -> None:
+    print(f("zz"))
+
+main()
+''', 'module_level_change', ['changes at module level', "'STOP'"])
+        # a change right after the binding, from pure builtins, is folded into the literal (modfold.py)
+        self.same('''
+STOP = {"a", "the"}
 STOP.add("zz")
 
 def f(w: str) -> int:
@@ -591,12 +605,14 @@ def main() -> None:
     print(f("zz"))
 
 main()
-''', 'module_level_change', ['changes at module level', "'STOP'"])
+''', 'module_level_change_folded')
 
     def test_tables_that_are_not_literals_keep_their_refusal(self):
         for name, table in (('mixed', 'STOP = {"a", 1}'), ('empty', 'STOP = {}'),
                             ('bool', 'STOP = {"a": True}'), ('floats', 'STOP = {1.5, 2.5}'),
-                            ('computed', 'STOP = {w for w in ["a"]}')):
+                            # a comprehension of pure builtins is folded to its literal (modfold.py);
+                            # one that calls a user function is not
+                            ('computed', 'def g(w: str) -> str:\n    return w\n\nSTOP = {g(w) for w in ["a"]}')):
             text = '''
 %s
 
