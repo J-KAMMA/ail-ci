@@ -1481,7 +1481,7 @@ def main() -> int:
     print(keys[1], len(keys[1]), keys[1][1])
     lone: set[str] = set()
     lone.add("ツツ")
-    only = sorted(lone)[0]
+    only = "ツツ"
     lone.discard(only)
     print(only, len(only), only[1])
     return 0
