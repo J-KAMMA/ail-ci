@@ -29,6 +29,7 @@ import tempfile
 from ail_syntax import SyntaxErrorAIL, ail_array_surface, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
 import ail_modules
+import ail_agent_errors
 
 sys.path.append(str(Path(__file__).resolve().parent / 'python/pkg-v12'))
 import fastwalk
@@ -5530,6 +5531,29 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
     return notes
 
 
+def _agent_diagnostics(source, messages, severity=None, refusals=False):
+    """Machine-form records for the messages in `messages` (empty for families not in the table).
+
+    `refusals=True` is used on a failed build: a construct outside the catalogue still gets a
+    generic error record, so a refusal never carries an empty `agent_diagnostics`."""
+    try:
+        text = source.read_text(encoding='utf-8')
+    except (OSError, UnicodeError):
+        text = None
+    found = []
+    shown = _relpath(source)
+    where = source if shown.startswith('..') else shown
+    for message in messages:
+        if refusals:
+            item = ail_agent_errors.refusal(message, source_text=text, path=where)
+        else:
+            item = ail_agent_errors.diagnostic(message, source_text=text, path=where,
+                                               severity=severity)
+        if item is not None:
+            found.append(item)
+    return found
+
+
 def _strict_requested(args):
     """`--strict` or AIL_STRICT=1: build on the typed path or refuse (never the general path)."""
     return bool(getattr(args, 'strict', False)) or str(os.environ.get('AIL_STRICT', '')).strip().lower() not in (
@@ -5618,12 +5642,21 @@ def _strict_text(blockers, incomplete):
 
 
 def _strict_json(args, source, blockers, incomplete):
+    try:
+        text = source.read_text(encoding='utf-8')
+    except (OSError, UnicodeError):
+        text = None
+    diagnostics = [ail_agent_errors.refusal(blocker.get('message') or '', source_text=text,
+                                             path=blocker.get('path'), line=blocker.get('line'),
+                                             col=blocker.get('column'))
+                   for blocker in blockers]
     return json.dumps(dict(
         schema='ail.strict/1', status='refused', strict=True, command=args.command, source=str(source),
         exit_code=3, blocker_count=len(blockers), incomplete=incomplete,
         blockers=[{key: blocker.get(key) for key in (
             'rank', 'path', 'line', 'column', 'function', 'statement', 'construct', 'why', 'write_instead',
-            'blocks_lines', 'blocks_functions', 'message')} for blocker in blockers]), ensure_ascii=False)
+            'blocks_lines', 'blocks_functions', 'message')} for blocker in blockers],
+        agent_diagnostics=diagnostics), ensure_ascii=False)
 
 
 def _strict_refusal(args, source, objects, first_message):
@@ -6601,13 +6634,20 @@ def main(argv=None):
                     message = python_wording(message)
                 if str(source) in _MERGED_ENTRIES:
                     message = ail_modules.unmangle(message, _MERGED_ENTRIES[str(source)].names)
-                if result.returncode == 3 and not args.json and not objects and not separate:
+                human_message = message
+                if result.returncode == 3 and not objects and not separate:
                     located = _locate_refusal(args, source, message)
                     where = _marker_where(loading['source_map'], marked) if located == message else None
-                    message = '%s: %s' % (where, message) if where else located
+                    human_message = '%s: %s' % (where, message) if where else located
+                    if not args.json:
+                        message = human_message
                 if python and any(notes.values()):
                     message = _python_notes(message, notes, source)
-                return native_build.emit(args, {}, result.returncode, message=message)
+                    human_message = _python_notes(human_message, notes, source)
+                return native_build.emit(args, {}, result.returncode, message=message,
+                    agent_diagnostics=_agent_diagnostics(source, [human_message], severity='error',
+                                                         refusals=True)
+                    if args.command == 'compile' else None)
             built = target if target.is_file() else Path(str(target) + '.exe')
             if not built.is_file():
                 return native_build.emit(args, {}, 2, 'artifact', 'AIL ERROR: compiler returned success without an executable')
@@ -6625,9 +6665,10 @@ def main(argv=None):
                 raise
             for line in [] if args.json else _slow_patterns(source_text, loading['source_map']):
                 print(line, file=sys.stderr)
+            fallback_messages = _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
+                                                source_map=loading['source_map'])
             if not args.json:
-                for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
-                                             source_map=loading['source_map']):
+                for line in fallback_messages:
                     print(line, file=sys.stderr)
                 if gpu_sites:                                             # gpu.py: a marked loop that got no kernel
                     import gpu
@@ -6648,7 +6689,9 @@ def main(argv=None):
                             print('note: %s:%d: %s' % (_relpath(Path(path)) if Path(path) == source else path,
                                                        line, text), file=sys.stderr)
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
-                'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
+                'sha256': hashlib.sha256(output.read_bytes()).hexdigest()},
+                agent_diagnostics=_agent_diagnostics(source, fallback_messages)
+                if args.command == 'compile' else None)
     if args.command == 'build' and getattr(args, 'cpython', None):
         if not args.out:
             parser.error('build --cpython needs -o/--out DIRECTORY')

@@ -103,7 +103,7 @@ def _locations(args, native):
     return result
 
 
-def emit(args, output, status=0, stage=None, message=None):
+def emit(args, output, status=0, stage=None, message=None, agent_diagnostics=None):
     if not args.json:
         if status:
             print(message or '', file=sys.stderr, end='' if message and message.endswith('\n') else '\n')
@@ -125,6 +125,8 @@ def emit(args, output, status=0, stage=None, message=None):
                   exit_code=status, output=output if status == 0 else None,
                   link_verified=status == 0 and args.command == 'compile', runtime_verified=False,
                   diagnostics=_locations(args, native), native_build=native or None)
+    if agent_diagnostics is not None:
+        report['agent_diagnostics'] = agent_diagnostics
     if status:
         failure = native.get('failure', {})
         report['message'] = message or failure.get('message', 'build failed')
