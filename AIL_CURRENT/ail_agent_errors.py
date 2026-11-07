@@ -116,6 +116,24 @@ def _apply(lines, first, last, edits):
     return '\n'.join(block)
 
 
+def _span_rows(lines, first, last, node, text):
+    """The `(source line, text)` rows for `lines[first-1:last]` with `node`'s whole span replaced.
+
+    `node` may cover several lines (a call split after `print(` or before `.decode()`); its span is
+    replaced by `text` as one row, keeping the text before it on its first line and after it on its
+    last.  Returns None when the span is not inside the range.
+    """
+    rows = [(number, lines[number - 1]) for number in range(first, last + 1)]
+    start = node.lineno - first
+    end = node.end_lineno - first
+    if not 0 <= start <= end < len(rows):
+        return None
+    before = rows[start][1][:node.col_offset]
+    after = rows[end][1][node.end_col_offset:]
+    rows[start:end + 1] = [(rows[start][0], before + text + after)]
+    return rows
+
+
 def _fix(first, last, with_text, line=None, col=None, cause=None, force_position=False):
     first_line = with_text.split('\n')[0]
     return dict(fix={'replace_range': [first, last], 'with': with_text},
@@ -258,17 +276,20 @@ def _loc_stdin_buffer(text, lines, tree, item):
                        and id(inner) not in targets for inner in ast.walk(tree)):
                     return no_fix
                 extra.append(other.lineno)
-            edits = {statement.lineno: [(statement.value.args[0].col_offset,
-                                         statement.value.args[0].end_col_offset, replacement)]}
             first = min([assign.lineno] + extra)
             last = max([statement.end_lineno] + extra)
-            block = _apply(lines, first, last, edits)
+            # The replaced argument need not start on the statement's first line: `print(` on one
+            # line and `read().decode().strip())` on the next, or the call split before `.decode()`.
+            # Replace its whole span as one row, so the printed line keeps `print(`, `)` and the
+            # continuation lines of a call the edit does not cover.
+            rows = _span_rows(lines, first, last, statement.value.args[0], replacement)
+            if rows is None:
+                return no_fix
             # `with_text` must reproduce every line of the range: drop each saved-method line, which
             # the replacement text or the removed name covers, and keep the lines the user wrote
             # between them and the call byte for byte
             dropped = {assign.lineno} | set(extra)
-            with_text = '\n'.join(line for number, line in enumerate(block.split('\n'), first)
-                                  if number not in dropped)
+            with_text = '\n'.join(line for number, line in rows if number not in dropped)
             return _fix(first, last, with_text,
                         line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1)
     return None
@@ -724,14 +745,16 @@ def _loc_fraction(text, lines, tree, item):
     # the division is parenthesised so that a larger expression keeps CPython's precedence:
     # `2 / float(x)` must become `2 / (1 / 2)`, not `2 / 1 / 2`
     expression = ('(%s / %s)' % (texts[0], texts[1])) if len(texts) == 2 else 'float(%s)' % texts[0]
-    edits = {call.lineno: [(call.col_offset, call.end_col_offset, expression)]}
-    block = _apply(lines, import_line, statement.end_lineno, edits)
+    # The call may start and end on different lines of a multi-line `print(...)`: replace its whole
+    # span as one row, never columns from the last line against the first.
+    rows = _span_rows(lines, import_line, statement.end_lineno, call, expression)
+    if rows is None:
+        return fallback
     # `with` replaces the whole range, so every line the user wrote between the import and the call
     # must appear in it; the import and every line the `Fraction(...)` assignment occupies are what
     # the edit removes (a multi-line call leaves continuation lines otherwise).
     dropped = {import_line} | set(range(assignment.lineno, assignment.end_lineno + 1))
-    kept = [line for number, line in enumerate(block.split('\n'), import_line)
-            if number not in dropped]
+    kept = [line for number, line in rows if number not in dropped]
     cause = ('`float(...)` needs `Fraction.__float__`, which this compiler does not build; importing '
              '`fractions` prints this note, and the old position was inside the standard-library '
              'prelude rather than your file.')

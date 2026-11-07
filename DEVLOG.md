@@ -1,3 +1,19 @@
+## 2026-11-07 -- err2 fix-up 4: a published edit replaces the whole span of the node it rewrites (job-err2-11072315)
+
+Review 3 found that `AIL0101`'s edit was keyed to `statement.lineno` while the columns belonged to
+`statement.value.args[0]`, so a multi-line `print(` produced a corrupt `with`
+(`prinsys.stdin.readline()...`, `print(...strip()\n      .decode().strip())`) and the fixed program
+did not build.  The replacement now goes through a new `_span_rows` helper that replaces the whole
+source span of the node (`args[0]`, `float(...)`) as one row: the text before it on its first line
+and after it on its last line are kept.  `AIL0111` had the same defect for a `float(` split across
+lines (`print((1 / 2)float(\n    x))`, `unmatched ')'`); it uses the same helper.  Both now publish
+an edit that builds and prints CPython's output: `print(\n    read()...` -> `print(\n    sys.stdin.readline().strip())`,
+`print(read()\n      .decode()...)` -> `print(sys.stdin.readline().strip())`,
+`print(float(\n    x))` -> `print((1 / 2))`.  Five such shapes are regression tests in
+`test_split_call_shapes_keep_the_output`.  Probes: m1/m2 (the reviewer's), n1..n8, s1..s5, t1..t3,
+f1..f3 — 20 programs, each either an edit whose build matches CPython stdout byte for byte with the
+note gone, or no edit at all.
+
 ## 2026-11-07 -- err2 fix-up 3: every published edit removes its note and keeps the output (job-err2-11072002)
 
 Review 2 found three more published edits that did not hold.  `AIL0103` applied the constant
