@@ -31,7 +31,7 @@ Figures from compare-lab, commit 4f1245b, 10 tasks. Each row gives the result ag
 | Peak RSS | lower on 6/10 | 1.3× lower |
 | Compile time | slower on 10/10 | 27× slower |
 
-AIL programs written in Python syntax (`.py`) reached the typed path on 0/10 tasks at that commit; the P1 jobs below
+AIL programs written in Python syntax (`.py`) reached the typed path on 0/10 tasks at that commit, ran 50–200× slower, and the compiler refused 3 of them; the P1 jobs below
 change this, and the table is re-measured when they land. The rival Python compilers (Codon, Nuitka, mypyc, Cython)
 are being added to the comparison (job cmprival1).
 
