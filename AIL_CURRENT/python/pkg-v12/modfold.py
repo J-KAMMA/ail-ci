@@ -380,6 +380,10 @@ def _literal(v, seen, count):
         items = sorted(v, key=_sort_key)
         body = ', '.join(_literal(x, seen, count) for x in items)
         if isinstance(v, frozenset):
+            if items and all(type(x) is str for x in items):
+                # the list spelling: the one the typed path reads as a frozenset of str (pyfunc
+                # `_module_frozenset`), with its own refusals by name; `frozenset({...})` is not it
+                return 'frozenset([%s])' % body
             return 'frozenset({%s})' % body if items else 'frozenset()'
         return '{%s}' % body if items else 'set()'
     raise _Stop('kind')
@@ -561,6 +565,14 @@ def _fold(source):
             if _immutable(literal_value):
                 consts[name] = literal_value
             continue
+        if len(run) == 1 and 'frozenset' not in shadowed and _literal_frozenset(value_node):
+            # `frozenset("aeiou")` / `frozenset([...])` / `frozenset({...})` of literals: already a
+            # spelling the literal rules read; folding it would only change its route
+            try:
+                consts[name] = frozenset(ast.literal_eval(value_node.args[0]))
+            except Exception:
+                pass
+            continue
         try:
             folded = _try_fold(tree, source, run, name, ann, consts, counts, globals_, shadowed, loop_vars)
         except (_Stop, Exception):
@@ -579,6 +591,25 @@ def _fold(source):
         newline = '\n'
         lines[first - 1:last] = [text + newline] + [newline] * (last - first)
     return ''.join(lines)
+
+
+def _literal_frozenset(node):
+    """Whether `node` is `frozenset(<literal str / list / tuple / set>)` with no keywords."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'frozenset'
+            and len(node.args) == 1 and not node.keywords):
+        return False
+    arg = node.args[0]
+    if not (isinstance(arg, ast.Constant) and type(arg.value) is str
+            or isinstance(arg, (ast.List, ast.Tuple, ast.Set))):
+        return False
+    try:
+        value = ast.literal_eval(arg)
+    except Exception:
+        return False
+    try:
+        return _immutable(frozenset(value))
+    except TypeError:
+        return False
 
 
 def _try_fold(tree, source, run, name, ann, consts, counts, globals_, shadowed, loop_vars):

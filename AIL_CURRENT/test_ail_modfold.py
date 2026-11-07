@@ -48,6 +48,18 @@ class FoldText(unittest.TestCase):
         self.assertFolds('S = frozenset(b"b a".split())\ndef f(w):\n    return w in S or len(S) > 3\n',
                          "S = frozenset({b'a', b'b'})")
 
+    def test_frozenset_of_str_uses_the_list_spelling(self):
+        # the typed path reads a frozenset of str as `frozenset([...])` (pyfunc _module_frozenset),
+        # with its own refusals by name ("'V' is a module-level frozenset")
+        self.assertFolds('S = frozenset("b a".split())\ndef f(w):\n    return w in S\n',
+                         "S = frozenset(['a', 'b'])")
+
+    def test_literal_frozenset_left_alone(self):
+        for text in ('U = frozenset("aé☃")\n', 'D = frozenset(["0", "1"])\n',
+                     'V = frozenset("aeiou")\ndef f():\n    return len(V)\n'):
+            with self.subTest(text=text):
+                self.assertKept(text)
+
     def test_set_from_generator(self):
         self.assertFolds('S = set(w.encode() for w in "x y".split())\ndef f(w):\n    return w not in S\n',
                          "S = {b'x', b'y'}")
@@ -206,6 +218,20 @@ def main():
 
 main()
 ''', 'stop_lower', stdin='The cat SAT on THE mat of gold\nand A dog\n')
+
+    def test_range_length_of_a_folded_bound(self):
+        # `int("...")` folds to the literal; len(range(-n, n)) past int64 must still stop loudly,
+        # and an empty range is 0, never a negative difference
+        self.same('''
+def f(a: int, b: int) -> int:
+    return len(range(a, b)) + len(range(b))
+
+r = range(10, 3)
+print(f(5, 2), f(-3, 4), len(r), len(range(-4)))
+n = int("9223372036854775807")
+print(len(range(0, n)))
+print(len(range(-n, n)))
+''', 'range_len')
 
     def test_digit_table_from_module_loop(self):
         self.same('''
