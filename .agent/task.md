@@ -9,42 +9,49 @@
 [model commandcode/deepseek-v4.1-flash]
 ## What the change really does
 
-Adds `lab/vibe2/` (`STRICT_SPEC.md`, `NEW_SURFACE.md`, an AIL-N→AIL-Python translator `translate.py`, its tests, `RESULTS.md`, `results.json`) and extends `lab/vibe/run.py` with `ail-strict`/`ail-new` arms, reply-token accounting, `--programs`, per-model `Store` keys and surface-error feedback. No compiler/runtime/benchmark file is touched, so `cmp.sh`/`icount` probes do not apply. The report's one-line description matches the diff.
+It fixes the previous review's four defects in `lab/vibe2`: `div_ceil` now uses `-((-a)//b)`, the translator gains `def`/`:=`/comprehension/duplicate-and-non-exhaustive-`match` refusals plus a per-function scope stack, and `results.json`/`RESULTS.md` are regenerated (notes reclassified, surface row restored, meta 55/55, two dangling `program` fields cleared).
 
-## Claims
+## Probes (all in `/tmp/rprobes/`; base = `/tmp/base` at `work`)
 
-- Missing deliverables added, 55 rows, 1 model × 1 seed, cut stated — **verified** (`results.json`: 55 rows, 5 arms × 11; logs 10:24–11:55; summary/ail_errors per model).
-- Surface-error path fixed; `rail_transfer` recovered — **verified** (round 1 records `line 33: 'best' is a let binding…`, round 2 passes all 24 cases when rebuilt).
-- `Store` keyed by `(task, lang, seed, model)`, per-model summary — **verified** (two-model probe: 2 rows, both summaries).
-- Numbers in the main table — **verified** by recomputation (correct 9/7/8/6/5; 19 timeouts; tokens/correct 17365/12759/19056/22378/29452; paths 0/8/0, 2/5/0, 0/5/0; ticket_audit `random4` loud stop exit 6 vs 0 reproduced).
-- Tests: `test_ail_safetynet` ok, `test_translate.py` 13/13 ok, `update_manifest.py --check` pass — **verified**; `test_ail_files`, `test_ail_corpus_findings3` not re-run per review scope — **unverified**. `tests.d` would break preflight (`registry_problems` requires `AIL_CURRENT/test_translate.py`) — **verified** by reading `ail_check.py`.
-- Second model callable but not run; pre-fix crash; the `/tmp` probes — **unverified**.
-- Compiler-message table/counts — **false** (below).
-- Saved-program provenance — **false** for 2 rows.
+| probe | HEAD | base | CPython |
+|---|---|---|---|
+| `signs.py` div_ceil four sign combos | `-2 -2 3 3` (both builds same) | same | `-2 -2 3 3` |
+| `p1.py` div_ceil via arg/list/dict | `-2 -2 -2 -2` (both builds same) | same | same |
+| `fstr.py` rf/fr/Rf/f | refused `f-strings` | refused (f only; rf accepted) | – |
+| `nest.py`, `nex.py`, `dup.py`, `dup2.py`, `dup3.py`, `def.py`, `walrus.py`, `lc.py`, `ge.py` | refused by name, expected messages | accepted | – |
+| `errfirst.py`, `loopmatch.py`, `matchlit.py`, `ok.py`, `ok2/3.py` | correct output | – | – |
+| `nw_int64.py` / `nw_int64b.py` (translated) | **exit 1, OverflowError** | exit 0, matches CPython | `-4611686018427387904` / `-9223372036854775808` |
+| `global_assign.py` | **accepted, `2 1`** | refused `declare the binding first` | – |
+| `gl3.py` (`total = total + v` in fn) | **accepted, UnboundLocalError exit 1** | refused | – |
 
-## Defects
+Tests on HEAD: `test_translate.py` 15/15; `par_check.py -j 2 test_ail_safetynet test_ail_files test_ail_corpus_findings3` 3/3; `update_manifest.py --check` exit 0. All three retained `.nw` files translate. Diff touches no `AIL_CURRENT`/bench file, so compiler C output is unchanged (icount/cmp on the compiler not applicable).
 
-1. **`div_ceil` is wrong for a negative divisor.** `lab/vibe2/translate.py` emits `(a+b-1)//b`.
-   Probe `write(str(div_ceil(5, -2)))` → generated code runs and prints `-1`; ceiling division is `-2`. Any AI solution that uses this advertised builtin with a signed divisor gets wrong arithmetic.
-2. **The translator accepts constructs its own surface forbids**, so the `ail-new` arm is not the surface described in `NEW_SURFACE.md`:
-   - `let s: str = rf"x{1}"` is accepted (surface: "No f-strings"); the f-string test only matches `f"`/`f'`.
-   - A nested `fn` is accepted and emitted as a nested `def` (surface: "no nested function").
-   - `match 3: case 0: …` with no `_` is accepted as an `if` with no `else`, and duplicate `case 0` arms are accepted (surface: "exhaustive", "`_` last only").
-   Also, a top-level `let g` reassigned after an intervening `fn` is refused with `declare the binding first…` instead of the `let … cannot be reassigned` message (wrong diagnostic, still a refusal).
-3. **`RESULTS.md` misreports the compiler-message table.** It says "The general-path notes (10 of 13 messages) are not errors … the two typed-path errors it saw were fixed half the time." Observed: 14 occurrences over 10 distinct messages, *all* general-path notes; three rows (Tree.weights/`unsupported`, dict-of-containers, `format()`/`refuses`) are misclassified as `error` by `compiler_messages`' substring rule, and not one is a typed-path error. The `surface 1 / 1.0` row shown in RESULTS.md is absent from `results.json`'s `ail_errors` (table truncated by `rows[:10]`).
-4. **Two referenced programs do not exist.** `results.json` records `program: lab/vibe2/programs/berth_sim/ail-new-0.nw` and `…/echo_pack/ail-new-0.nw`, but neither file is in the tree, so those two "correct" `ail-new` rows cannot be checked. (The three present `.nw` files do reproduce 0 failures.)
-5. Minor: `meta.started`/`completed_attempts` reflect only the last invocation (says started 11:48, 2 completed) although the 55 rows span 10:24–11:55.
+## Claims in the worker report
 
-Pre-existing: none applicable (no compiler/runtime change; `cmp.sh` probes not relevant).
+- Compiler-message analysis: **verified** — `ail_errors` has 21 rows / 25 occurrences, 20 note rows (24 occurrences, all "built on the general path"), one `surface` row at 1 occurrence / 1.0; stale "10 of 13" text gone.
+- Dangling programs: **verified** — 0 dangling `program` paths; two `program_note` rows.
+- meta: **verified** — `started` 10:24:28Z (first completion in `run-flash.log`), `last_completed` 11:55:50Z (`run-flash3.log`), 55 rows / 55 / 55.
+- New refusals: **verified** by probes (`def`, `:=`, comprehensions, numeric-equal arms; rf/fr/Rf).
+- div_ceil signs `-2 -2 3 3`: **verified**.
+- Tests / clean tree: **verified**.
+- "all retained `.nw` reproduce 0 failures": **unverified** — I only confirmed they translate (task cases not re-run).
 
-Unverified: `test_ail_files`, `test_ail_corpus_findings3`; second-model callability; the report's `/tmp/probes/*`; the two missing `ail-new` programs; seed-to-seed spread (one seed).
+Minor, not blocking: `write("x")  # for each item` is now falsely refused (`comprehension…`) although base accepted it — a named refusal, so allowed by the rubric.
 
-VERDICT: FIX
-1. `lab/vibe2/translate.py` `__div_ceil` returns `-1` for `div_ceil(5, -2)`; expected `-2` (ceiling division).
-2. `translate.py` f-string check misses `rf"…"`/`fr"…"`; nested `fn` and non-exhaustive/duplicate `match` arms are accepted although `NEW_SURFACE.md` forbids them — the `ail-new` arm did not enforce its documented surface.
-3. `RESULTS.md` compiler-message analysis is false: 14 occurrences, all general-path notes, three rows mislabeled `error`; the reported `surface` row is missing from `results.json` because `ail_error_table` truncates to 10.
-4. `results.json` points at two nonexistent programs (`berth_sim/ail-new-0.nw`, `echo_pack/ail-new-0.nw`); commit them or clear the fields.
-[commandcode stop=end_turn turns=27 out_tokens=32520]
+## New defects caused by the change
+
+**VERDICT: FIX**
+
+1. **`div_ceil` now overflows for `a = INT64_MIN, b > 0`.**
+   Probe `/tmp/rprobes/nw_int64.nw` → `write(str(div_ceil(-9223372036854775808, 2)) + "\n")` (translated, `bash ~/tools/cmp.sh /tmp/rprobes/nw_int64.py $PWD`).
+   Expected (`python3` and the base build): `-4611686018427387904`, exit 0. Actual (HEAD, both general and default builds): empty stdout, exit 1, `OverflowError: integer overflow in unary - or abs()`. Same for divisor 1 (expected `-9223372036854775808`). The prelude's `-((-a) // b)` negates `a` first; the base `(a+b-1)//b` did not overflow here. `a // b + (a % b != 0)` avoids it.
+
+2. **The new scope stack lets a function assign a top-level binding, emitting a Python local.**
+   Probe `/tmp/rprobes/global_assign.py` (`var g: int = 1`; `fn f` does `g = 2`; `write(...)`).
+   Expected (base, and the surface has no `global`): `TranslateError: declare the binding first…`. Actual (HEAD): accepted, prints `2 1`, exit 0.
+   Probe `/tmp/rprobes/gl3.py` (`var total = 0`; `fn add` does `total = total + v`).
+   Expected: refusal. Actual: accepted, `UnboundLocalError: cannot access local variable 'total'`, exit 1 in both builds. Cause: `lookup()` searches every frame instead of the current one (`active[-1]`).
+[commandcode stop=end_turn turns=29 out_tokens=49728]
 
 
 --- ORIGINAL TASK ---
