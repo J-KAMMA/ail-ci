@@ -61,6 +61,7 @@ MUTATORS = frozenset({
 STR_BUILTINS = frozenset({"str", "chr", "repr", "ascii", "input"})
 LIST_BUILTINS = frozenset({"list", "sorted"})
 SCALAR_LIST_BUILTINS = frozenset({"sorted", "min", "max", "sum"})
+SCALAR_ANNOTATIONS = frozenset({"int", "float", "complex", "bool", "str", "bytes"})
 
 
 def _literal_zero(node):
@@ -83,6 +84,8 @@ def _annotation_kind(node):
     if isinstance(node, ast.Subscript):
         base, _ = _annotation_kind(node.value)
         if base == "list":
+            if isinstance(node.slice, ast.Name) and node.slice.id in SCALAR_ANNOTATIONS:
+                return "list", "str" if node.slice.id == "str" else "scalar"
             element, _ = _annotation_kind(node.slice)
             return "list", element
     return None, None
@@ -193,11 +196,18 @@ class Scope(object):
         """
         if not isinstance(value, ast.Subscript):
             return True
-        if isinstance(value.slice, ast.Slice):
-            return False
         base_kind, base_element = self._expr_kind(value.value)
+        if isinstance(value.slice, ast.Slice):
+            # A shallow slice copies the container but shares its mutable elements.
+            if base_kind == "list":
+                return base_element not in ("scalar", "str")
+            if base_kind == "str":
+                return False
+            return True
         if base_kind == "list":
-            return base_element == "list"
+            # A scalar element (an int, a str, ...) is the value itself; any other element,
+            # including an unproven one, may share a mutable object with the container.
+            return base_element not in ("scalar", "str")
         if base_kind == "str":
             return False
         return True
@@ -590,7 +600,7 @@ def _loop_touches(loop, name, ignore=None, accumulate=None, aliases=()):
     if _loop_touches_one(loop, name, ignore, accumulate):
         return True
     targets = _loop_target_names(loop.node)
-    return any(alias != name and alias not in targets and _loop_mutates_alias(loop, alias)
+    return any(alias != name and alias not in targets and _loop_mutates_alias(loop, alias, aliases)
                for alias in aliases)
 
 
@@ -614,16 +624,24 @@ def _is_mutation_of(node, name):
     return False
 
 
-def _rebinds_name(node, name):
-    """Whether this loop-body statement rebinds `name` to a different object."""
+def _rebinds_name(node, name, aliases):
+    """Whether this loop-body statement rebinds `name` to a different object.
+
+    `aliases` are the names that still refer to the same object at loop entry; assigning one of
+    them back to `name` (for example `view = items` when `view` already aliases `items`) keeps the
+    alias intact and must not hide a later mutation.
+    """
     if isinstance(node, ast.Assign):
         targets = node.targets
+        value = node.value
     elif isinstance(node, ast.AnnAssign):
         if node.value is None:
             return False
         targets = [node.target]
+        value = node.value
     elif isinstance(node, ast.NamedExpr):
         targets = [node.target]
+        value = node.value
     elif isinstance(node, (ast.For, ast.AsyncFor)):
         return name in _target_names(node.target)
     elif isinstance(node, ast.With):
@@ -631,20 +649,26 @@ def _rebinds_name(node, name):
                    for item in node.items)
     else:
         return False
-    return any(isinstance(child, ast.Name) and child.id == name
-               and isinstance(child.ctx, ast.Store)
-               for target in targets for child in ast.walk(target))
+    target_names = {child.id for target in targets for child in ast.walk(target)
+                    if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store)}
+    if name not in target_names:
+        return False
+    if isinstance(value, ast.Name) and value.id in aliases:
+        return False
+    return True
 
 
-def _loop_mutates_alias(loop, name):
+def _loop_mutates_alias(loop, name, aliases=()):
     """Whether a mutation through the alias `name` reaches the object it aliased at loop entry.
 
-    A top-level rebinding of the alias earlier in the same iteration replaces it before the
-    mutation, so the later mutation touches the new object, not the original.  A rebinding nested
-    in a branch does not dominate the mutation, so it stays conservative (no wrong advice).
+    A top-level rebinding of the alias to a different object earlier in the same iteration
+    replaces it before the mutation, so the later mutation touches the new object, not the
+    original.  Rebinding it back to another name in the same alias group (`view = items`) keeps
+    the alias.  A rebinding nested in a branch does not dominate the mutation, so it stays
+    conservative (no wrong advice).
     """
     rebinds = [_position(statement) for statement in loop.body
-               if _rebinds_name(statement, name)]
+               if _rebinds_name(statement, name, aliases)]
     for node in _walk_no_scopes(_loop_parts(loop)):
         if not _is_mutation_of(node, name):
             continue

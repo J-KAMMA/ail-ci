@@ -465,6 +465,59 @@ def rebuild(items: list[int]) -> list[int]:
 '''
 
 
+REBIND_SAME = '''\
+def total_of(items: list[int]) -> int:
+    view = items
+    total = 0
+    for i in range(3):
+        view = items
+        view.append(i)
+        total += sum(items)
+    return total
+
+
+def rebuild(items: list[int]) -> list[int]:
+    view = items
+    for i in range(3):
+        view = items
+        view.append(i)
+        items = items + [i]
+    return items
+'''
+
+DICT_ELEM_ALIAS = '''\
+def f(items: list[dict]) -> None:
+    view = items[0]
+    total = 0
+    for i in range(3):
+        view["a"] = i
+        if {"a": 2} in items:
+            total += 1
+'''
+
+LIST_ELEM_ALIAS = '''\
+def f(items: list) -> int:
+    items = []
+    items.append([1, 2])
+    view = items[0]
+    total = 0
+    for i in range(3):
+        total += len(sorted(items))
+        view.append(i)
+    return total
+'''
+
+SLICE_NESTED = '''\
+def f(items: list[list[int]]) -> int:
+    view = items[:]
+    total = 0
+    for i in range(3):
+        total += len(sorted(items))
+        view[0].append(i)
+    return total
+'''
+
+
 class RuleTests(Base):
     def test_p1_list_membership_index_count_inside_a_loop(self):
         program = self.write(P1)
@@ -522,6 +575,16 @@ class RuleTests(Base):
 
     def test_rebinding_an_alias_inside_the_loop_does_not_hide_a_p4_or_p6_hit(self):
         self.assertEqual(self.rules(REBIND_INSIDE), ["P4", "P6"])
+
+    def test_rebinding_an_alias_to_the_same_object_still_suppresses(self):
+        self.assertEqual(self.rules(REBIND_SAME), [])
+
+    def test_an_element_of_a_list_with_unproven_or_mutable_elements_is_an_alias(self):
+        self.assertEqual(self.rules(DICT_ELEM_ALIAS), [])
+        self.assertEqual(self.rules(LIST_ELEM_ALIAS), [])
+
+    def test_a_shallow_slice_of_mutable_elements_still_aliases_the_list(self):
+        self.assertEqual(self.rules(SLICE_NESTED), [])
 
     def test_p4_sort_and_reductions_inside_a_loop(self):
         self.assertEqual(self.rules(P4), ["P4", "P4", "P4", "P4", "P4"])

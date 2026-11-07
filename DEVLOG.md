@@ -1,3 +1,16 @@
+## 2026-11-07 -- algo1 review 5 fix: same-object rebinding, mutable elements and shallow slices
+
+Fixed the three blocking defects in `packaging/ail_lang/perflint.py`. Rebinding an alias back to the
+same object inside the loop (`view = items`) no longer detaches it, so the following `view.append`
+still suppresses P4/P6; rebinding to a different object (`view = []`) still restores the hit.
+`_value_is_alias` now treats an element of a list with an unproven or mutable element kind as an
+alias (a `dict` from `list[dict]`, an appended sublist), while only proven scalar elements (`int`,
+`str`, ...) are copies, and a shallow slice aliases when its elements may be mutable. Scalar element
+annotations are represented explicitly so `items[0]` of `list[int]` remains a copy. Regression tests
+`REBIND_SAME`, `DICT_ELEM_ALIAS`, `LIST_ELEM_ALIAS` and `SLICE_NESTED` cover the probes. Census is
+unchanged (`compare` 0, required corpus 50 0, all gdev still the single `g15_022.py` P1, lab/corpus
+0, lab/vibe 0); the manifest is regenerated.
+
 ## 2026-11-07 -- algo1 review 4 fix: copy/scalar subscript reads and in-loop alias rebinding
 
 Fixed the two blocking defects in `packaging/ail_lang/perflint.py`. A `Subscript` edge now aliases only
