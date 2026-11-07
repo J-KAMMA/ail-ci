@@ -1,3 +1,20 @@
+## 2026-11-07 -- fe1: where the Python front end spends compile time, and a design to cut it (job-fe1-11071326)
+
+Measurement and design only; the compiler, runtime and default build are unchanged. `lab/fe/prof.py`
+builds the ten `lab/compare/src/<task>/main.py`, their ten `typed.py` and the twelve `corpus/gdev`
+programs timed in tcc1 (32 programs) cold (fresh `AIL_CACHE`/`TMPDIR`, median of 3), times the
+driver's own pass boundaries through `timed_outer.py`/`timed_inner.py` wrappers, profiles both
+Python processes with `sitecustomize`+cProfile, measures a warm whole-build cache hit and the peak
+RSS with `/usr/bin/time -v`. `lab/fe/report.py` renders `lab/fe/results.json` as
+`lab/fe/RESULTS.md`. On the first 11 complete programs the Python front end is 57% of the cold wall
+and the C compile+link 39%; on the general-path programs the emitters are the whole front end and
+the AST walks (`fastwalk.walk`, `ast.iter_*`) plus the memoised type queries are the top self-time
+functions. `docs/design/FRONTEND_SPEED.md` ranks six options by the measured Amdahl bound
+(per-function cache > hot-function fixes > mypyc front end > server > lazy imports > typed
+pre-scan) and splits the chosen three into ready-to-queue tasks of at most two hours. No probes are
+needed: no behaviour changed. Tests on the final commit: `test_ail_frontend_speed`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
 
 Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a
