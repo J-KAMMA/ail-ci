@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AIL">
+  <rect width="512" height="512" fill="#fff"/>
+  <g fill="#000" fill-rule="evenodd">
+    <path d="M38 356 110 156H156L228 356H180L164.2 312H101.8L86 356ZM114.8 276H151.2L133 225.4Z"/>
+    <path d="M264 156H308V356H264Z"/>
+    <path d="M344 156H388V312H474V356H344Z"/>
+  </g>
+</svg>
