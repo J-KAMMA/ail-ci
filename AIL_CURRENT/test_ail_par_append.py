@@ -76,6 +76,11 @@ REFUSED = {
     "reduce and append": ("def main():\n    acc = 0\n    out = []\n    for i in par_range(0, 10):\n"
                           "        acc += i\n        out.append(i)\n    print(acc, len(out))\nmain()\n",
                           "reduces"),
+    "try around the loop": ("def main():\n    out = []\n    try:\n"
+                            "        for i in par_range(0, 10):\n            out.append(i)\n"
+                            "        x = 1 // 0\n    except ZeroDivisionError:\n        pass\n"
+                            "    print(len(out))\nmain()\n",
+                            "cannot be inside try"),
 }
 
 

@@ -20,10 +20,12 @@ line.
 | p07_sixteen.py | 1024 items, all four thread counts | match |
 | p08_guided.py | heavy Collatz body, `AIL_PAR_SCHED=guided` | match |
 | p09_float.py | `list[float]` appends (`ail_flist`) | match |
+| p11_try.py | `try` around the loop that prints `out` | refused by name; `range` twin matches CPython |
 
-All nine probes match at every thread count, three runs each, with and without the guided
+All nine matching probes match at every thread count, three runs each, with and without the guided
 schedule. The two extra shapes (`p09_float`, and `p08` at the guided block sizes) cover the other
-element kinds and variable block sizes.
+element kinds and variable block sizes. `p11_try` asserts the refusal (see below) and the state its
+`range` twin leaves.
 
 ## Exception semantics
 
@@ -34,9 +36,12 @@ buffers **before** re-raising: every block before the failing one, plus the fail
 to the raise, and nothing after -- the state the sequential loop leaves.
 
 A `try` cannot wrap the loop in the typed build (`parallel for cannot be inside try; write instead:
-put the loop in its own fn`, so that probe runs on the general path under the lock, exactly as
-before this job). `p04` therefore observes the state through the exception the runtime raises, not
-through a caught exception; the join-before-raise order is the same code path either way.
+put the loop in its own fn`, `parallel.py`). `p11_try.py` is that probe, and `run.py` asserts the
+refusal by that name while its `range` twin, which catches the `ZeroDivisionError`, prints the
+state the join leaves (`38 37 0`) and matches CPython at every thread count. So the partial-buffer
+join itself is not observable through a caught exception in the typed build; `p04` observes it
+through the exception the runtime raises after the join, and `p11` records the refusal that stands
+in front of the `try` shape.
 
 ## Speed and peak RSS (p10, the append variant of `par_collatz`)
 
@@ -72,5 +77,5 @@ the old refusal (`test_ail_parallel_for`).
 
 ## Files
 
-- `lab/race/append/p01..p10*.py`: the probes and the speed load.
+- `lab/race/append/p01..p11*.py`: the probes and the speed load.
 - `lab/race/append/run.py`: the runner behind this file.

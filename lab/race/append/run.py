@@ -29,6 +29,10 @@ RUNS = 3
 PROBES = ["p%02d_%s" % (i, n) for i, n in (
     (1, "conditional"), (2, "two_appends"), (3, "str"), (4, "exception"),
     (5, "empty"), (6, "more_workers"), (7, "sixteen"), (8, "guided"), (9, "float"))]
+# p11 wraps the loop in a `try` that prints `out`: the typed build refuses it by name (a parallel
+# loop cannot live in a function with try/except), so the probe asserts the refusal and checks the
+# state the join leaves against CPython through the `range` twin.
+REFUSED = [("p11_try", "parallel for cannot be inside try")]
 
 
 def env(extra=None, limit=True):
@@ -105,6 +109,34 @@ def main():
                 if not ok:
                     break
             rows.append((name, "match" if ok else "MISMATCH", "; ".join(detail[:2])))
+            if not ok:
+                bad.append(name)
+        for name, needle in REFUSED:
+            src = HERE / (name + ".py")
+            par, got = build(src, work / name, False)
+            seq, got2 = build(src, work / (name + "_seq"), True)
+            text = (got.stderr or b"").decode("utf-8", "replace")
+            if par is not None or needle not in text or seq is None:
+                rows.append((name, "REFUSAL MISSING", text[-300:]))
+                bad.append(name)
+                continue
+            ok, detail = True, []
+            for sched in (None, "guided"):
+                extra = {"AIL_PAR_SCHED": "guided"} if sched else None
+                for t in THREADS:
+                    for _ in range(RUNS):
+                        b = run([str(seq)], env(dict(extra or {}, AIL_THREADS=str(t))))
+                        c = run([sys.executable, str(work / (name + "_seq.seq.py"))], env())
+                        if b.returncode != c.returncode or b.stdout != c.stdout:
+                            ok = False
+                            detail.append("sched=%s t=%d rc=%d/%d out=%r/%r" % (
+                                sched, t, b.returncode, c.returncode, b.stdout[:80], c.stdout[:80]))
+                            break
+                    if not ok:
+                        break
+                if not ok:
+                    break
+            rows.append((name, "refused/seq match" if ok else "SEQ MISMATCH", "; ".join(detail[:2])))
             if not ok:
                 bad.append(name)
         speed = None

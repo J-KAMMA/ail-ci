@@ -31532,18 +31532,23 @@ static void ail_par_buf_reset(void) {
    the buffers of the blocks that ran can be appended to `dst` first (the state the sequential loop
    leaves after its exception). */
 static void ail_par_buf_run(ail_par_fn fn, void **args, int64_t lo, int64_t hi,
-                            ail_par_site *S, void *dst, int kind) {
+                            ail_par_site *S, void *dst, int kind, int64_t cap) {
     int64_t fail_at = INT64_MAX;
     int fcode = 0;
     char fmsg[192];
     fmsg[0] = 0;
     ail_par_buf_reset();
     if (hi <= lo) return;
+    /* The worker cap exactly as ail_par_run_n sets it (PARN): the calling thread is one of `cap`, so
+       at most cap - 1 pool workers may join this job, whatever the default thread count is. */
+    int keep = ail_par_cap;
+    ail_par_cap = cap <= 0 ? 0 : cap > 256 ? 256 : (int)cap;
+    __atomic_store_n(&ail_par_cap_inside, (int64_t)ail_par_threads_capped() - 1, __ATOMIC_RELAXED);
     int64_t n = hi - lo;
     ail_par_ctx c;
     ail_par_job J;
     J.fn = fn; J.args = args; J.lo = lo; J.hi = hi; J.fail_block = INT64_MAX;
-    int sequential = (lo < 0 || n < 0 || n < 2 || ail_par_threads() <= 1 || ail_par_cur);
+    int sequential = (lo < 0 || n < 0 || n < 2 || ail_par_threads_capped() <= 1 || ail_par_cur);
     int64_t i = lo;
     if (!sequential && n > 64) {
         if (n <= S->light_n) {
@@ -31594,7 +31599,7 @@ static void ail_par_buf_run(ail_par_fn fn, void **args, int64_t lo, int64_t hi,
         }
         ail_par_sched_min_block = mb;
         int64_t m = hi - i;
-        int nt = ail_par_threads();
+        int nt = ail_par_threads_capped();
         if (nt > m) nt = (int)m;
         while (ail_par_pool < nt - 1) {
             pthread_t t;
@@ -31640,6 +31645,8 @@ static void ail_par_buf_run(ail_par_fn fn, void **args, int64_t lo, int64_t hi,
     }
 done:
     ail_par_buf_join(dst, kind, fail_at);
+    ail_par_cap = keep;
+    __atomic_store_n(&ail_par_cap_inside, 255, __ATOMIC_RELAXED);
     if (fail_at != INT64_MAX) {
         if (fmsg[0] && fcode)
             ail_raise_value_adopt(ail_exception_new(fcode, (const uint8_t *)fmsg, (int64_t)strlen(fmsg), 1));
@@ -31650,7 +31657,7 @@ done:
 """
 ORDER.insert(max(ORDER.index(x) for x in ('LIST', 'FLIST', 'SLIST')) + 1, 'PARBUF')
 SOURCE['PARBUF'] = PARBUF
-REQUIRES['PARBUF'] = ['PAR', 'LIST', 'FLIST', 'SLIST']
+REQUIRES['PARBUF'] = ['PAR', 'PARN', 'LIST', 'FLIST', 'SLIST']
 
 
 # json.loads fast path (jsonlib.py lowers a typed json.loads to calls of these; the text is in jsonrt.py).

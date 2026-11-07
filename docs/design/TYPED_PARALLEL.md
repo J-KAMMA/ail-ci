@@ -118,7 +118,8 @@ buffer holds `ail_str` views and the join copies the structs, so there is no ext
 `ail_par_buf_run` is the `ail_par_run` gating (the timed probe prefix, the guided block size) with
 the final re-raise moved **after** the join: a block that traps keeps its partial buffer, and the
 join stops after the failing block's start, so `out` holds exactly what the sequential loop leaves
-before its exception. The run then raises the recorded exception on the calling thread. Raw-element
+before its exception. It takes the region's worker cap and sets `ail_par_cap` /
+`ail_par_cap_inside` exactly as `ail_par_run_n` does, so a capped append region keeps its bound. The run then raises the recorded exception on the calling thread. Raw-element
 buffers mean the whole output is held twice at the join, which is the owner's 2x RSS allowance.
 Probes and numbers: `lab/race/append/RESULTS.md`; test: `AIL_CURRENT/test_ail_par_append.py`.
 

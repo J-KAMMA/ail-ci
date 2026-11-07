@@ -27830,8 +27830,9 @@ def _par_outline(generated, sig, decls, ctx, cname):
         workers.append(''.join(lines))
         if pb is not None:
             return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n%s'
-                    '        ail_par_buf_run(%s, _pa%d, %s, %s, &_ps%d, &%s, %s);\n    }\n'
-                    % (k, k, array, guards, worker, k, facts['lo'], facts['hi'], k, pb['name'], pb['kind']))
+                    '        ail_par_buf_run(%s, _pa%d, %s, %s, &_ps%d, &%s, %s, %s);\n    }\n'
+                    % (k, k, array, guards, worker, k, facts['lo'], facts['hi'], k, pb['name'], pb['kind'],
+                       facts['cap'] if facts.get('cap') else '0'))
         if facts.get('cap'):
             return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n%s'
                     '        ail_par_run_n(%s, _pa%d, %s, %s, &_ps%d, %s);\n    }\n'
