@@ -2710,32 +2710,6 @@ class _ail_PrettyPrinter:
                     recursive = True
             del context[objid]
             return fmt % ', '.join(components), readable, recursive
-        if type(object) is set or type(object) is frozenset:
-            if not object:
-                return repr(object), True, False
-            if type(object) is set:
-                opening, closing = '{', '}'
-            else:
-                opening, closing = 'frozenset({', '})'
-            objid = _ail_pp_identity(object)
-            if maxlevels and level >= maxlevels:
-                return opening + '...' + closing, False, objid in context
-            if objid in context:
-                return _ail_pp_recursion(object), False, True
-            context[objid] = 1
-            readable = True
-            recursive = False
-            components = []
-            level += 1
-            for o in sorted(object, key=_ail_safe_key):
-                orepr, oreadable, orecur = self.format(o, context, maxlevels, level)
-                components.append(orepr)
-                if not oreadable:
-                    readable = False
-                if orecur:
-                    recursive = True
-            del context[objid]
-            return opening + ', '.join(components) + closing, readable, recursive
         rep = repr(object)
         return rep, (rep and not rep.startswith('<')), False
 

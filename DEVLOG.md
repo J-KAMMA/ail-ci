@@ -1,3 +1,22 @@
+## 2026-11-07 -- setord1 review fix: drop the non-empty pprint set branch
+
+The reviewer found that `prelude_genlib._safe_repr`'s new non-empty set/frozenset branch printed a
+sorted order and applied `depth` truncation, neither of which CPython's `_safe_repr` does (it has no
+set branch at all): `pformat({-1, 0, 1})` gave `{-1, 0, 1}` where CPython gives `{0, 1, -1}`, and
+`pformat({"k": {1, 2}}, depth=1)` gave `{'k': {...}}` where CPython gives `{'k': {1, 2}}` (on both
+builds). The branch is removed: an empty set/frozenset falls through to `repr`, which prints
+`set()`/`frozenset()` (order-free, matching CPython), and a non-empty set again reaches `repr(s)`,
+which is refused by name exactly as on the base tree. The pprint lab programs only use
+`pformat(set())`/`pformat(frozenset())`, so nothing that was passing regresses. The rest of the fix
+(empty-set walk/print/pop, difflib's deletion loops, the two order-free programs) is unchanged.
+
+Probes in `/tmp/probes/`, both builds: e1/e2 empty set via literal, argument, list item, attribute
+and dict value (print/str/repr/list/tuple/f-string/iteration/len/sorted/sum) match CPython; e3 empty
+`pop()` raises CPython's `KeyError('pop from an empty set')`; n1-n6 non-empty literal/arg/list
+item/attribute/dict-value walk, repr, f-string, tuple and `pop()` are refused by name; p1_pprint_empty
+matches; p2_pprint_nonempty and p3_pprint_depth are refused by name (base refused them too);
+p4_difflib (isjunk + autojunk) matches.
+
 ## 2026-11-07 -- setord1 suite fix 2: empty sets are order-free, difflib's deletion loops and two order-free programs
 
 The full suite after the setord1 refusal also broke `test_ail_bigint` (b2_keyargs), `test_ail_examples_algos`
