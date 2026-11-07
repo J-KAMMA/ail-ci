@@ -125,7 +125,7 @@ original message substring is still the check).
 | 15 | list parameter | 1.00 | 1.00 | 0 |
 | | **total** | **0.75** | **0.92** | **+0.17** |
 
-The rewrite moves exactly the four dead ends it targets: 07, 11 and 14 go from 0.00/0.00/0.40 to
+The rewrite moves three dead ends and two near misses: 07, 11 and 14 go from 0.00/0.00/0.40 to
 1.00, and 05/08 lose their one failure each. 01 loses one reply: that reply introduced a new
 `sys.stdin.buffer` use and the build refused it (a model error, not a wording one). 02 stays at
 zero: its cause is a compiler-internal temporary, so text alone cannot tell the user which
@@ -174,5 +174,8 @@ the note survives; it is reported as such, not as a working fix. 11's edit repla
   ranking; sampling noise on 5 replies is about ±0.2.
 - The prompt gives the previous file and one message; vibe1 gave the task spec too, so these
   rates are not comparable to vibe1's 0.00 column.
-- 02 and 11 were not fixed by any reply. The design treats them as compiler defects first and
-  message wording second.
+- 02 stays at zero after the rewrite (1/5 original, 0/5 rewritten): its cause is a
+  compiler-internal temporary, so text alone cannot tell the user which value to change; step
+  2 of the design changes the emitter. 11 is not a wording dead end: 0/5 original, 5/5
+  rewritten, because the new text points at the user's 3-line file instead of line 235 of the
+  prelude.

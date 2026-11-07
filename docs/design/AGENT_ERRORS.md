@@ -18,7 +18,7 @@ messages:
 | tuple used where a single value is needed | 0.40 | "unpack it or read `r[0]`" does not describe the structural change (a comprehension → a named annotated list) |
 
 The other 11 messages are actionable already: they carry a `write instead:` clause or a
-one-line substitution, and 48/55 replies fixed them. So the rewrite does not need to invent a
+one-line substitution, and 53/55 replies fixed them. So the rewrite does not need to invent a
 new voice for every message; it needs one schema, applied to the four dead ends and then to
 the rest for consistency.
 
@@ -116,9 +116,10 @@ The compiler is unchanged, so a reply is still checked against the real message 
 | 15 | list parameter | 1.00 | 1.00 |
 | | **total** | **0.75** | **0.92** |
 
-Raw records: `lab/err/fixrate_rewritten.json`. The three messages that could not be fixed by
-wording alone move from 0.00/0.00/0.40 to 1.00 because the cause now names the user's call site
-(11, 12) or the structure that must change (07, 14). The one regression, 01, is a reply that
+Raw records: `lab/err/fixrate_rewritten.json`. The three lowest-rate messages -- 07, 11 and 14
+-- move from 0.00/0.00/0.40 to 1.00 because the cause now names
+the user's call site (11) or the structure that must change (07, 14); 12 was already 1.00 and
+does not move. The one regression, 01, is a reply that
 introduced a new `sys.stdin.buffer` use and was refused (a model error). 02 stays at zero: its
 cause is a compiler-internal temporary, so no wording can tell the user which value to change;
 steps 1–2 below are required.
@@ -136,14 +137,17 @@ Test: new `AIL_CURRENT/test_ail_agent_errors.py` — compile one program per mes
 `--json`, assert the object parses, `fix.with` compiles, and applying `replace_range` removes
 the message. Moves: machine-readable coverage 0 → 15/15 messages; no fix-rate change yet.
 
-**Step 2 — the two dead ends (2 h).**
+**Step 2 — the compiler-side dead end (2 h).**
 Files: `AIL_CURRENT/python/pkg-v12/pyfunc.py` (the heapq/heap row capture; replace `_ail_l1l`
 in the cause with the user's names and point at the two pop sites),
 `AIL_CURRENT/ail_chatgpt.py` (`_fallback_notes`: when the refusing line is in a prelude, map
-the position to the user's call site, or say `this note comes from the standard library`).
-Test: extend `test_ail_pre133.py` and `test_ail_agent_errors.py`; the 02 and 11 triggers must
-either lose the message or point at the user's line.
-Moves: 02 0.20 → ≥0.60, 11 0.00 → ≥0.60 (target; re-run `lab/err/measure.py`).
+the position to the user's call site, so the already-measured 11 rewrite is what the compiler
+prints).
+Test: extend `test_ail_pre133.py` and `test_ail_agent_errors.py`; the 02 trigger must either
+lose the message or point at the user's line, and the 11 trigger must point at the user's line
+rather than the prelude.
+Moves: 02 0.20 → ≥0.60 (target; re-run `lab/err/measure.py`), and prints the 11 rewrite
+(0.00 → 1.00 on wording alone) instead of the prelude position.
 
 **Step 3 — apply the format to the other 13 messages (2 h).**
 Files: `AIL_CURRENT/python/pkg-v12/pyfunc.py` (`Yield`, `while-else`, `dict of containers`,
@@ -176,8 +180,10 @@ Moves: prevents a regression to `_ail_` names or prelude positions; no rate chan
 
 - It does not change a message that already works (01, 03, 04, 06, 09, 10, 12, 13, 15 keep
   their meaning; they gain the location/code/edit fields).
-- It does not promise that a local edit exists for every note. 02 and 11 are compiler defects:
-  the note is emitted from code the user cannot see. Their messages must say where the code
-  really is, and the typed path must learn the construct (a separate compiler job).
+- It does not promise that a local edit exists for every note. 02 is the one compiler-side
+  dead end: the note comes from a compiler temporary the user cannot see, so no wording can
+  name the value; the typed path must learn the construct (a separate compiler job). 11 is
+  fixed by wording alone (0.00 → 1.00): the rewritten note points at the user's call site
+  instead of line 235 of the `fractions` prelude.
 - It does not tune wording for the model. Every rewrite is checked by recompiling the reply
   and comparing CPython output.
