@@ -190,3 +190,29 @@ total = sum(partial)          # deterministic
 
 **Proof.** [`docs/design/PAR_REDUCE.md`](../design/PAR_REDUCE.md);
 [`docs/design/TYPED_PARALLEL.md`](../design/TYPED_PARALLEL.md).
+
+## EO10 — Recursion is bounded and stops loudly
+
+**Rule.** Call depth is bounded by a fixed 50,000-frame guard, not by CPython's 1,000-frame limit
+and not by the platform's C stack. A depth between 1,000 and 50,000 succeeds here where CPython
+raises `RecursionError` (a declared difference); deeper recursion stops loudly with CPython's class
+and text, `RecursionError: maximum recursion depth exceeded`, exit 1. `sys.setrecursionlimit` is
+ignored: it cannot raise or lower the AIL guard. The limit is a fixed number, not an open value, so
+the same program fails at the same depth on every host.
+
+```python
+def down(n):
+    if n == 0:
+        return 0
+    return down(n - 1) + 1
+
+print(down(2000))             # 2000 here; CPython raises RecursionError near 1000
+print(down(60000))            # RecursionError: maximum recursion depth exceeded in both
+```
+
+**CPython.** Raises `RecursionError` at about 1,000 frames; `sys.setrecursionlimit` changes it.
+
+**Status.** implemented (loud `RecursionError` at the fixed guard).
+
+**Proof.** [`docs/MIGRATING.md`](../MIGRATING.md) 3; [`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md)
+A3; `lab/migrating/RESULTS.md`.

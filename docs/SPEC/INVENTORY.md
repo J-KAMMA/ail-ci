@@ -59,6 +59,7 @@ Rule ids are stable. A chapter uses the same id as this table.
 | EO7 | A typed map returns its results in input order; an exception is raised at the input index where CPython would raise it, not in completion order. | [`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md) A66, A74, A75 |
 | EO8 | Addresses, object ids, thread ids and hash order are not part of the promise; a comparison that would expose them is refused or documented. | [`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md) A2, A39, A72, C?-job-std_pprint-11011616-2 |
 | EO9 | The parallel-region combine follows iteration order, so the value and the first exception are the sequential ones (see CO3-CO8). | [`docs/design/PAR_REDUCE.md`](../design/PAR_REDUCE.md), [`docs/design/TYPED_PARALLEL.md`](../design/TYPED_PARALLEL.md) |
+| EO10 | Recursion has a fixed 50,000-frame guard, not CPython's 1,000. A depth between 1,000 and 50,000 succeeds where CPython raises `RecursionError` (a declared difference); deeper recursion stops loudly with CPython's `RecursionError: maximum recursion depth exceeded`, exit 1; `sys.setrecursionlimit` is ignored. | [`docs/MIGRATING.md`](../MIGRATING.md) 3, [`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md) A3 |
 
 ## Memory and ownership (MO)
 

@@ -93,6 +93,12 @@ total = sum(out)              # sequential combine
 to the fixed chunking (a named annotation or call, per the design). The chunking is the same at
 every thread count, so the result is reproducible. D2 is not built on this tree.
 
+```python
+total = 0.0
+for k in par_range(n):        # refused today: a shared float accumulator without the D2 opt-in
+    total += xs[k]
+```
+
 **CPython.** Adds in scheduling order, so the result can differ between runs.
 
 **Status.** planned (not built).

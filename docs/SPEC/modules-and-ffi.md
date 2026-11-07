@@ -59,7 +59,7 @@ import xml.dom.minidom      # refused by name if it is not
 **Status.** implemented for the declared subset; the subset is the census, not the whole library.
 
 **Proof.** [`docs/LIMITATIONS.md`](../LIMITATIONS.md) 10-12; `lab/stdcensus/RESULTS.md`;
-`docs/STDLIB.md`.
+[`AIL_CURRENT/docs/design/STDLIB_REACH.md`](../../AIL_CURRENT/docs/design/STDLIB_REACH.md).
 
 ## MF4 — `@extern` declarations are checked
 

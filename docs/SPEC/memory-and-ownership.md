@@ -39,9 +39,12 @@ print(a)                      # [1, 3] in both languages
 
 **CPython.** The same.
 
-**Status.** implemented (`ail_op_iadd`).
+**Status.** partly. The general path implements the in-place operator (`ail_op_iadd`) and matches
+the example. The default/typed build does not compile this list-inside-a-list shape on this tree
+(`incompatible types when assigning to type 'int64_t'`), a pre-existing compiler bug rather than a
+language difference; do not read the rule as implemented on both paths until it builds.
 
-**Proof.** [`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md) C85.
+**Proof.** [`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md) C85; `test_ail_gcroots`.
 
 ## MO3 — Typed container fields may be snapshots
 
@@ -198,7 +201,7 @@ the lock around a shared write. The result is a safe program with a cost, never 
 undefined behaviour. A failed proof prints the ED4 line and keeps the check.
 
 ```text
-prog.py:12: could not prove index is in range: index may be negative; runtime check kept
+prog.py:12: could not prove bounds: index may be negative; runtime check kept
 ```
 
 **CPython.** Does not have these proofs; every operation is checked.

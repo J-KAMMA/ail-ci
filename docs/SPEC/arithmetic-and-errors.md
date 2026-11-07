@@ -146,18 +146,24 @@ so one NaN object can be found while another is not.
 ## AR8 — No complex type
 
 **Rule.** AIL has no complex value. A complex literal is refused; a constant expression with a
-complex result is refused with an explanation. A run-time negative base with a fractional
-exponent is a known bug on the current tree, not a language rule, and must not be relied on.
+complex result is refused with an explanation. A run-time negative base with a fractional exponent
+is a known bug on the default build: it prints `nan` today, as MIGRATING item 11 records. That is
+not a language rule and must not be relied on; the intended rule is the loud stop.
 
 ```python
-print((-4.0) ** 0.5)          # refused: a negative number raised to a fractional power
+z = 1j                        # refused by name: a constant of type complex
+print((-4.0) ** 0.5)          # constant result: refused by name before the program runs
 ```
 
 **CPython.** Returns a complex number.
 
-**Status.** refused.
+**Status.** partly. Both paths refuse the literal and the constant result. The default build does
+not yet stop on a run-time complex result (it prints `nan`), so the rule is not implemented there;
+the general path stops loudly, but the default path is the language's default.
 
-**Proof.** [`docs/MIGRATING.md`](../MIGRATING.md) 11-12; [`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md) C5.
+**Proof.** [`docs/MIGRATING.md`](../MIGRATING.md) 11-12 (the current run-time behaviour);
+[`docs/spec/DIFFERENCES.md`](../spec/DIFFERENCES.md) C5 (the intended loud stop; stale for the
+default build on this tree).
 
 ## AR9 — Sets are ordered deterministically
 
@@ -165,6 +171,12 @@ print((-4.0) ** 0.5)          # refused: a negative number raised to a fractiona
 and `pop()` removes the first element in that order (VT10). Set operators keep a deterministic
 order: the left operand's elements first, then the elements only in the right operand; symmetric
 difference is left-only then right-only.
+
+```python
+a = {1, 2}
+b = {2, 3}
+print(list(a | b))            # [1, 2, 3] here; CPython follows hash order
+```
 
 **CPython.** Hash order, which for `str` changes between runs.
 
@@ -225,6 +237,11 @@ no `TypeError` and raises `RuntimeError` or `ValueError` with CPython's text.
   (C228);
 * `range(0, 5, 0)` raises `ValueError: range() arg 3 must not be zero` (C229);
 * a `range` slice whose own start/stop/step leaves int64 stops by name (C224).
+
+```python
+print(abs(-0.0))              # 0.0, with the sign cleared
+print(1 << -1)                # ValueError: negative shift count
+```
 
 **CPython.** Does not have an int64 boundary for these.
 

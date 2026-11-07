@@ -1,5 +1,21 @@
 # Development log
 
+## 2026-11-07 -- spec1 review fixes: examples, recursion, stale claims (job-spec1-11071506)
+
+Fixed the eight review defects in `docs/SPEC/` and `docs/ROADMAP.md`. Added the missing examples
+for VT6, VT9, VT13, AR9, AR12 and CO4; added EO10 (the fixed 50,000-frame recursion guard and the
+loud `RecursionError`) to the INVENTORY and the evaluation-order chapter, and narrowed OPEN O8 to
+the limit value alone. Replaced the missing `docs/STDLIB.md` citation with
+`AIL_CURRENT/docs/design/STDLIB_REACH.md`, corrected the proof line to the closed property
+vocabulary (`could not prove bounds`), and rewrote the ROADMAP paragraph to state the
+future-standard goal in two sentences with the specification link. Corrected two false status
+claims found by probes: MO2 is now **partly** (general path matches; the default build does not
+compile the list-in-list example on this tree) and AR8 is now **partly** (literal and constant
+complex results are refused; a run-time result still prints `nan` on the default build, the known
+bug in MIGRATING item 11). No compiler or test change. Probes: `mo2.py`, `ar8_literal.py`,
+`ar8_const.py`, `ar8_runtime.py`, `recursion_2000.py`, `recursion_60000.py`, `vt6_bool.py`,
+`vt9_codecs.py` under `bash ~/tools/cmp.sh`; results as stated in those rules.
+
 ## 2026-11-07 -- spec1: first draft of the language specification (job-spec1-11071506)
 
 Wrote `docs/SPEC/`: `README.md` (purpose, rule ids, status vocabulary, versioning),

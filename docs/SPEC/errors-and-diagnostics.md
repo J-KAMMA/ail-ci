@@ -68,13 +68,14 @@ raised near prog.py:3
 file:line: could not prove <property>: <reason>; runtime check kept
 ```
 
-The `<reason>` vocabulary is closed and shared by the analyzer and the prose: `index may be
-negative`, `list length may change (length-changing op or unknown call)`, `no length value of
-this container`, `sum rule needs the offset at most -1`. `AIL_BCE_EXPLAIN=1` prints the
-explanation; `AIL_BCE_AUDIT=1` makes a failed proof exit 86 for an audit run.
+The `<property>` vocabulary is closed: `ownership`, `bounds` or `race-freedom`. The `<reason>`
+vocabulary is closed and shared by the analyzer and the prose: `index may be negative`, `list
+length may change (length-changing op or unknown call)`, `no length value of this container`,
+`sum rule needs the offset at most -1`. `AIL_BCE_EXPLAIN=1` prints the explanation;
+`AIL_BCE_AUDIT=1` makes a failed proof exit 86 for an audit run.
 
 ```text
-prog.py:12: could not prove index is in range: index may be negative; runtime check kept
+prog.py:12: could not prove bounds: index may be negative; runtime check kept
 ```
 
 **CPython.** Has no proof layer; every operation is checked.

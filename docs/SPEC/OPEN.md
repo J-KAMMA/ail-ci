@@ -112,10 +112,11 @@ contract. Options:
 `assert` for runtime facts; do not add decorators. Write the choice into a chapter before building
 it.
 
-### O8 — Recursion limit (owner decision)
+### O8 — The recursion limit value (owner decision)
 
-The default build has a fixed 50,000-frame guard (MIGRATING item 3), not CPython's 1,000. Is
-50,000 the language's limit?
+The loud `RecursionError` at a fixed guard is settled (EO10): deep recursion never overflows the
+C stack and never fails silently. The default build uses a fixed 50,000-frame guard (MIGRATING
+item 3), not CPython's 1,000. The open part is only whether 50,000 is the final number.
 
 * **fixed 50,000**: more headroom than CPython, same answer for programs under it; a program
   between 1,000 and 50,000 recursions that CPython rejects works here (a declared difference).

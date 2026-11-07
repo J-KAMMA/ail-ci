@@ -114,6 +114,10 @@ routines; AIL follows those routines only where a rule says so.
 identity: `True is 1` is `False`, as in CPython. `is` on numbers is governed by MO8, not by
 object identity.
 
+```python
+print(True is 1, True == 1, 1 is True, 0 is False)   # False True False False
+```
+
 **CPython.** `bool` is a subclass of `int`, so `True == 1`; AIL keeps that arithmetic equality and
 the distinct identity.
 
@@ -163,6 +167,11 @@ functions accept either.
 The built codecs are UTF-8, ASCII and Latin-1 and their aliases, with `strict`, `ignore` and
 `replace`. Another codec named by a literal is refused; one computed at run time raises
 `LookupError`.
+
+```python
+print(bytes([65]), bytearray(b"ab").decode("latin-1"), "é".encode("utf-8"))
+# b'A' ab b'\xc3\xa9'
+```
 
 **CPython.** Any registered codec; CPython has the full codec registry.
 
@@ -246,6 +255,10 @@ A45, A51, A52; `test_ail_class_reach`.
 The wall clock is an input: `AIL_CLOCK=<seconds>` pins every clock read and makes `sleep()`
 advance it without sleeping. `time`, `datetime` and the date/time formatting rules in A28-A30
 are part of the value model, not an accident of the host.
+
+```bash
+AIL_CLOCK=1700000000 ./prog one two   # time.time() is 1700000000.0; sys.argv[1:] is ['one', 'two']
+```
 
 **CPython.** Uses the locale encoding for text files (the same as UTF-8 under `PYTHONUTF8=1`) and
 has no clock pin.

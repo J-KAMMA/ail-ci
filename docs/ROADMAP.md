@@ -8,7 +8,10 @@ benchmark (below), and the test gate. It is not judged by the number of merged j
 **AIL is a language for vibe coding: programs that an AI writes and a person runs.** AIs write Python best, so AIL is
 Python syntax. The syntax is Python, but the semantics are AIL's own and are written down in the
 [language specification](SPEC/README.md); printing the same output as CPython is a compatibility mode, not the
-definition of the language, and every divergence is a named refusal or a documented difference. What AIL adds is what AI-written code most needs:
+definition of the language, and every divergence is a named refusal or a documented difference. AIL is not designed to
+fit today's world: it aims to be the future standard language for AI-written programs, with semantics chosen
+deliberately rather than inherited from an implementation. The [language specification](SPEC/README.md) is where that
+standard is written down rule by rule, and it is versioned so the language can change on purpose. What AIL adds is what AI-written code most needs:
 
 - **No silent wrong output.** Overflow, out-of-range access and other mistakes stop loudly with the source line,
   instead of printing a plausible wrong answer that nobody reads closely.
