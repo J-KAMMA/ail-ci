@@ -45,9 +45,10 @@ this job with the same cachegrind command and geometry. Per row the method is ke
 
 Coverage of the counters, and why a cell is empty:
 
-- **CPython**: cachegrind finished only for `rail_transfer` (3.26e9 instructions) and `scar_life`
-  (78.5e9). The other eight exceeded the 300 s cap (their native runs are 8-33 s; cachegrind is
-  30-100x slower). Those cells stay `n/a`.
+- **CPython**: cachegrind finished for `rail_transfer` (3.26e9 instructions), `chain_relax`
+  (1.20e11) and `scar_life` (78.5e9). The first pass used a 300 s cap; a second pass with 600 s
+  finished `chain_relax`. The remaining seven exceeded it (their native runs are 8-33 s; cachegrind
+  is 30-100x slower). Those cells stay `n/a`.
 - **AIL building `main.py`**: roof1 already timed out on `chain_relax`, `ledger_bin`, `ticket_audit`
   and `scar_life` (native 49-154 s); `term_rank` has instructions but its cache simulation timed out,
   so its two-term model is `n/a †` and only the instruction term (1.1e-2 J) is known.
@@ -71,7 +72,7 @@ Landauer section. `x C` and `x Rust` are ratios of `J model`.
 | chain_relax | ail-py | main.py | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | chain_relax | c | main.c | 1.990e+09 | 3.919e+04 | 6.002e-04 | n/a | 1.00 | 1.15 | 5.71e-12 | 1.05e+08 |
 | chain_relax | rust | main.rs | 1.152e+09 | 3.990e+04 | 5.238e-04 | n/a | 0.87 | 1.00 | 3.31e-12 | 1.58e+08 |
-| chain_relax | python | main.py | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| chain_relax | python | main.py | 1.196e+11 | 2.519e+05 | 1.454e-02 | n/a | 24.22 | 27.75 | 3.43e-10 | 4.23e+07 |
 | echo_pack | ail | typed.py | 5.543e+09 | 1.118e+07 | 1.151e-01 | n/a | 3.32 | 1.02 | 1.63e-11 | 7.06e+09 |
 | echo_pack | ail-py | main.py | 1.823e+10 | 3.638e+07 | 3.743e-01 | n/a | 10.81 | 3.31 | 5.27e-11 | 7.10e+09 |
 | echo_pack | c | main.c | 1.924e+09 | 3.362e+06 | 3.462e-02 | n/a | 1.00 | 0.31 | 5.92e-12 | 5.85e+09 |
@@ -130,8 +131,9 @@ not a measurement.
   `chain_relax` (0.87x) and `berth_sim` (0.88x), and above on the rest, mostly because its LLC
   misses are higher (`tree_fold` 80.9M vs C 20.0M, `term_rank` 22.5M vs 3.1M).
 - **CPython measured 25.0x C on `rail_transfer`** (3.26e9 instructions and 10.8M LLC misses against
-  C's 0.31e9 and 0.43M). On `scar_life` CPython has counters (78.5e9 instructions) but C/AIL/Rust
-  do not, so no ratio is available.
+  C's 0.31e9 and 0.43M) and **24.2x C on `chain_relax`** (1.20e11 instructions against C's 1.99e9,
+  with almost no memory traffic in either). On `scar_life` CPython has counters (78.5e9 instructions)
+  but C/AIL/Rust do not, so no ratio is available.
 - **In the model, memory traffic is the dominant term where it exists**: `tree_fold` AIL is
   1.088 J, of which 1.087 J is LLC misses; `berth_sim` AIL 0.804 J, of which 0.803 J is LLC misses.
   In `tally_lang` there is almost no memory traffic (1.8K LLC misses) and the instruction term is

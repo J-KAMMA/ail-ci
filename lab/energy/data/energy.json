@@ -55,13 +55,13 @@
    "wall_s": null,
    "icount_method": "callgrind-sim",
    "instructions": 1151934965,
-   "llc_misses": 39903,
-   "ll_misses": 41723,
-   "lld_misses": 39903,
+   "llc_misses": 39904,
+   "ll_misses": 41724,
+   "lld_misses": 39904,
    "j_measured": null,
-   "j_model": 0.0005238002165,
+   "j_model": 0.0005238104564999999,
    "landauer_floor": 3.3071839473169394e-12,
-   "j_per_floor": 158382546.85680547
+   "j_per_floor": 158385643.14662877
   },
   "python": {
    "task": "chain_relax",
@@ -71,14 +71,15 @@
    "build_ok": true,
    "build_error": null,
    "wall_s": null,
-   "icount_method": "timeout-sim",
-   "instructions": null,
-   "ll_misses": null,
-   "lld_misses": null,
+   "icount_method": "callgrind-sim",
+   "instructions": 119565779299,
+   "llc_misses": 251904,
+   "ll_misses": 265617,
+   "lld_misses": 251904,
    "j_measured": null,
-   "j_model": null,
-   "landauer_floor": null,
-   "j_per_floor": null
+   "j_model": 0.0145360748899,
+   "landauer_floor": 3.432708307312298e-10,
+   "j_per_floor": 42345791.103006035
   }
  },
  "berth_sim": {

@@ -105,6 +105,8 @@ def cachegrind(lang, binary, task, case, out_file, timeout):
                            stdin=stdin, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=timeout)
     except subprocess.TimeoutExpired:
         return dict(icount_method='timeout-sim', instructions=None, ll_misses=None, lld_misses=None)
+    except FileNotFoundError:
+        return dict(icount_method='no-valgrind', instructions=None, ll_misses=None, lld_misses=None)
     finally:
         if case['stdin']:
             stdin.close()
