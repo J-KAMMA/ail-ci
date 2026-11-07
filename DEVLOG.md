@@ -1,3 +1,35 @@
+## 2026-11-07 -- err1: compiler messages an AI can act on -- measurement and design (job-err1-11071330)
+
+Design-only job; the compiler is unchanged. Collected the messages that actually fire by
+compiling the 8 vibe programs that built and 100 gdev programs (108 runs), plus the 11 AIL
+attempts in `lab/vibe/results.json`. Selected the 15 messages (the 9 reproducible messages from
+vibe1's run plus the 6 highest-frequency gdev-only families), wrote one trigger each in
+`lab/err/triggers/`, and asked the model vibe1 used (`cmd`, `deepseek-v4.1-flash`, `--effort
+low`, one turn, no tools) to fix each program from the message alone, 5 replies per trigger.
+
+Per-message fix rate (builds, matches CPython, message gone): 56/75 = 0.75. The dead ends are
+`_ail_l1l` row arity (0.20), "mixes bools and numbers" (0.00; the suggested `int(...)` changes
+`False` to `0`), `Fraction.__float__` (0.00; the note points at line 235 of a 3-line file), and
+the tuple/single-value note (0.40). `docs/design/AGENT_ERRORS.md` specifies an agent format
+(`file:line:col: CODE: cause` plus a literal `Replace`/`With`, and a `--json` object with
+`fix.replace_range`/`with`), rewrites all 15, and re-runs the harness on the rewritten text:
+69/75 = 0.92 (07, 11 and 14 go to 5/5; 02 stays at 0/5 because the cause is compiler-internal).
+Implementation is split into six steps of at most 2 h with files, tests and the number each
+moves. vibe1's #1 message (tuple element type) no longer fires from a user program on the
+current compiler (it was a prelude note; `test_ail_pre133` records the fix) and is kept as
+AIL0116 without a fix-rate row.
+
+Probes: each published `Replace`/`With` block was applied literally (byte for byte, indentation
+included) to its trigger in `/tmp/probes/NN.py`; every `Replace` matched exactly once, all 15
+built and matched CPython on both builds (`bash ~/tools/cmp.sh`), and 14/15 lost the message.
+Only 02 does not: `_ail_l1l` row arity is a compiler-side defect. Review fix: AIL0110 now
+replaces the function and its caller together, AIL0106/AIL0114 `With` blocks carry the replaced
+line's 4-space indent, and AIL0102's `With` is code only (indented) instead of prose; the four
+changed messages were re-measured with the same harness (same rates: 02 0/5, 06/10/14 5/5).
+
+Tests on this commit: `test_ail_safetynet` 5 OK, `test_ail_files` 18 OK (1 skipped),
+`test_ail_corpus_findings3` 2 OK.
+
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched
