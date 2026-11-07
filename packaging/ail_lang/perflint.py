@@ -511,11 +511,34 @@ def _loop_touches(loop, name, ignore=None, accumulate=None, aliases=()):
 
     `ignore` skips the hit being checked.  `accumulate(node, name)` marks bindings that are the
     accumulation pattern itself (e.g. `s += x`): those grow the value, they do not reset it.
-    `aliases` are other names bound to the same object, so mutating one mutates all of them.
+    `aliases` are other names bound to the same object: only an actual mutation through one of
+    them (`append`, a subscript store, `del`) touches `name`; rebinding an alias name or making it
+    a loop target leaves the shared object in place.
     """
-    for current in (name, *(alias for alias in aliases if alias != name)):
-        if _loop_touches_one(loop, current, ignore, accumulate):
+    if _loop_touches_one(loop, name, ignore, accumulate):
+        return True
+    return any(_loop_mutates_one(loop, alias) for alias in aliases if alias != name)
+
+
+def _loop_mutates_one(loop, name):
+    """Whether this loop mutates the object `name` refers to, without rebinding the name."""
+    for node in _walk_no_scopes(_loop_parts(loop)):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+                    and func.value.id == name and func.attr in MUTATORS:
+                return True
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)) \
+                and isinstance(node.value, ast.Name) and node.value.id == name:
             return True
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) \
+                and node.target.id == name:
+            return True
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
+                        and target.value.id == name:
+                    return True
     return False
 
 
@@ -746,7 +769,8 @@ class Linter(object):
                 if isinstance(target, ast.Name):
                     if (_list_plus(node.value, target.id) or _starred_list(node.value, target.id)) \
                             and not _loop_touches(loop, target.id, ignore=node,
-                                                  accumulate=_is_p6_accumulation):
+                                                  accumulate=_is_p6_accumulation,
+                                                  aliases=scope.aliases(target.id)):
                         self._add("P6", node, MESSAGES["P6"] % target.id, loop_line)
 
     def _maybe_pairwise(self, outer, inner, body):

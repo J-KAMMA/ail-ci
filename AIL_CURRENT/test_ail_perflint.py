@@ -328,6 +328,45 @@ def find():
             print(probe)
 '''
 
+ALIAS_REBIND = '''\
+def find():
+    xs = [1, 2, 3]
+    other = xs
+    for i in range(3):
+        if i in xs:
+            print(i)
+        other = [i]
+
+
+def total_of():
+    xs = [1, 2, 3]
+    other = xs
+    for i in range(3):
+        print(sum(xs))
+        other = [i]
+
+
+def loop_target():
+    xs = [1, 2, 3]
+    other = xs
+    for other in range(3):
+        if other in xs:
+            print(other)
+'''
+
+P6_ALIAS = '''\
+def main() -> None:
+    values = [1]
+    view = values
+    for x in [2, 3]:
+        view.append(x)
+        values = values + [x]
+    print(values, view)
+
+
+main()
+'''
+
 
 class RuleTests(Base):
     def test_p1_list_membership_index_count_inside_a_loop(self):
@@ -364,6 +403,12 @@ class RuleTests(Base):
 
     def test_p1_and_p4_do_not_report_a_list_mutated_through_an_alias(self):
         self.assertEqual(self.rules(ALIAS_MUTATION), [])
+
+    def test_rebinding_an_alias_does_not_hide_a_p1_or_p4_hit(self):
+        self.assertEqual(self.rules(ALIAS_REBIND), ["P1", "P1", "P4"])
+
+    def test_p6_does_not_report_a_list_mutated_through_an_alias(self):
+        self.assertEqual(self.rules(P6_ALIAS), [])
 
     def test_p4_sort_and_reductions_inside_a_loop(self):
         self.assertEqual(self.rules(P4), ["P4", "P4", "P4", "P4", "P4"])

@@ -1,3 +1,16 @@
+## 2026-11-07 -- algo1 review 2 fix: aliases only suppress on real mutation, P6 alias (job-algo1-11071611)
+
+Fixed the two review defects in `packaging/ail_lang/perflint.py`. Alias propagation now counts only an
+actual mutation of the shared object (`append`/other mutators, a subscript store or `del`); rebinding
+an alias name or using it as the loop target no longer hides a P1/P4 hit, restoring the former
+`xs = [1,2,3]; other = xs; ...; other = [i]` and `for other in ...` reports. P6 now passes the alias
+set too, so `view.append(x)` suppresses `L = L + [x]` when `view`/`L` alias the same list, and
+`docs/CLI.md` narrows the alias sentence to P1/P4/P6 (P3 stays as before). New regression cases cover
+alias rebinding/loop-target and the P6 alias. Probes `r_alias_rebind_p1`, `r_alias_rebind_p4`,
+`r_alias_looptarget` report again, `r_p6_alias` is silent, and census counts are unchanged (`compare`
+0, required corpus 50 0, all gdev the single `g15_022.py` P1, lab/corpus 0, lab/vibe 0). Manifest
+regenerated with `tools/update_manifest.py`, `--check` passes.
+
 ## 2026-11-07 -- algo1 fix: `ail check --perf` typing and alias boundaries (job-algo1-11071611)
 
 Fixed the three review defects in `packaging/ail_lang/perflint.py`. `split`/`rsplit`/`splitlines`
