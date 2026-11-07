@@ -95,32 +95,54 @@ async def main() -> int:
 print(asyncio.run(main()))
 """
 
-# The shapes where the first version published an edit that changed the program: an edit range that
+# The shapes where an earlier version published an edit that changed the program: an edit range that
 # spanned lines its `with` did not reproduce (AIL0111/AIL0101), a branch that the edit flipped
-# (AIL0103), and a `.get` default that replaced a real `None` (AIL0104).
+# (AIL0103), and a `.get` default that replaced a real `None` (AIL0104).  The last field is the
+# number of source lines inside the range that the replacement deliberately drops.
 UNSAFE = {
     'fraction_line_between': ("""from fractions import Fraction
 x = Fraction(1, 2)
 print("side")
 print(float(x))
-""", 'AIL0111', 'side\n0.5\n'),
+""", 'AIL0111', 'side\n0.5\n', 2),
+    'fraction_multiline_call': ("""from fractions import Fraction
+x = Fraction(
+    1, 2)
+print(float(x))
+""", 'AIL0111', '0.5\n', 3),
+    'fraction_in_larger_expression': ("""from fractions import Fraction
+x = Fraction(1, 2)
+print(2 / float(x))
+""", 'AIL0111', '4.0\n', 2),
     'stdin_line_between': ("""import sys
 read = sys.stdin.buffer.readline
 print("mid")
 print(read().decode().strip())
-""", 'AIL0101', 'mid\nhello\n'),
+""", 'AIL0101', 'mid\nhello\n', 1),
+    'stdin_saved_twice': ("""import sys
+r1 = sys.stdin.buffer.readline
+r2 = sys.stdin.buffer.readline
+print(r1().decode().strip())
+""", 'AIL0101', 'hello\n', 2),
     'str_equals_literal': ("""s = "1"
 if s == 1:
     print("one")
 else:
     print("not one")
-""", 'AIL0103', 'not one\n'),
+""", 'AIL0103', 'not one\n', 0),
     'str_not_equals_literal': ("""s = "1"
 if s != 1:
     print("taken")
 else:
     print("not")
-""", 'AIL0103', 'taken\n'),
+""", 'AIL0103', 'taken\n', 0),
+    'str_two_comparisons_on_one_line': ("""s = "1"
+print(s == 1, s == 1)
+""", 'AIL0103', 'False False\n', 0),
+    'str_two_names_on_one_line': ("""s = "1"
+t = "2"
+print(s == 1, t == 1)
+""", 'AIL0103', 'False False\n', 0),
 }
 
 
@@ -241,7 +263,7 @@ class AgentErrors(unittest.TestCase):
                 self.check_fix(source, item, code, name)
 
     def test_unsafe_shapes_keep_the_output(self):
-        for name, (text, code, expected) in UNSAFE.items():
+        for name, (text, code, expected, dropped) in UNSAFE.items():
             with self.subTest(name=name):
                 source = self.tmp / (name + '.py')
                 source.write_text(text, encoding='utf-8')
@@ -256,11 +278,10 @@ class AgentErrors(unittest.TestCase):
                 lines = text.split('\n')
                 self.assertTrue(1 <= first <= last <= len(lines), item['fix'])
                 # The range may drop only the lines the replacement text itself covers: the
-                # `fractions` import and the `Fraction(...)` assignment (AIL0111), the saved
-                # `readline` line (AIL0101).  Every other line of the range must be reproduced.
-                kept = {'AIL0111': 2, 'AIL0101': 1}.get(code, 0)
+                # `fractions` import and every line of the `Fraction(...)` assignment (AIL0111), the
+                # saved `readline` lines (AIL0101).  Every other line of the range is reproduced.
                 self.assertEqual(len(item['fix']['with'].split('\n')),
-                                 (last - first + 1) - kept, item['fix'])
+                                 (last - first + 1) - dropped, item['fix'])
                 fixed_path = self.apply(source, item, name)
                 rebuilt = self.compile(fixed_path, name + '_fixed')
                 self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)

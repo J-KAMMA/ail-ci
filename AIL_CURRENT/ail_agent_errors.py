@@ -175,9 +175,29 @@ def _stdin_replacement(text, call, parent):
     return cursor, text_out
 
 
+def _own_lines(text, lines, node):
+    """True when the source lines `node` spans contain nothing but `node` (indentation included)."""
+    segment = _segment(text, node)
+    if not segment:
+        return False
+    wanted = segment.split('\n')
+    span = lines[node.lineno - 1:node.end_lineno]
+    if len(span) != len(wanted):
+        return False
+    if span[0].strip() != wanted[0].strip() or _indent(span[0]) != node.col_offset:
+        return False
+    return all(current == expected for current, expected in zip(span[1:], wanted[1:]))
+
+
+def _own_line(text, lines, node):
+    """True when `node` is the whole of its single source line (indentation included)."""
+    return node.lineno == node.end_lineno and _own_lines(text, lines, node)
+
+
 def _loc_stdin_buffer(text, lines, tree, item):
     if tree is None:
         return None
+    top_level = {id(node) for node in tree.body}
     saved = {}
     for node in ast.walk(tree):
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -188,11 +208,15 @@ def _loc_stdin_buffer(text, lines, tree, item):
                 chain.append(cursor.attr)
                 cursor = cursor.value
             chain.reverse()
-            if chain[-2:] == ['buffer', 'readline']:
+            # the family is about stdin's saved method: another object's `.buffer.readline` must
+            # never be rewritten into `sys.stdin.readline()`
+            if (chain == ['stdin', 'buffer', 'readline']
+                    and isinstance(cursor, ast.Name) and cursor.id == 'sys'):
                 saved[node.targets[0].id] = node
     parent = _parents(tree)
     for name, assign in saved.items():
-        if assign.end_lineno != assign.lineno:
+        # a nested or compound line cannot be dropped without deleting code the edit does not cover
+        if id(assign) not in top_level or not _own_line(text, lines, assign):
             continue
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
@@ -201,17 +225,17 @@ def _loc_stdin_buffer(text, lines, tree, item):
             statement = _statement(node, parent)
             if statement is None or statement.lineno <= assign.lineno:
                 continue
+            no_fix = dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
+                          fix=None, cause=None, force_position=True, no_fallback=True)
             # the design's edit prints the line; a call used as a value would change what runs
             if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
                     and isinstance(statement.value.func, ast.Name)
                     and statement.value.func.id == 'print' and len(statement.value.args) == 1
                     and not statement.value.keywords):
-                return dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
-                            fix=None, cause=None, force_position=True, no_fallback=True)
+                return no_fix
             replaced = _stdin_replacement(text, node, parent)
             if replaced is None or replaced[0] is not statement.value.args[0]:
-                return dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
-                            fix=None, cause=None, force_position=True, no_fallback=True)
+                return no_fix
             _outer, replacement = replaced
             # the edit removes the saved name: every other use of it would stop building
             allowed = {id(node.func)}
@@ -220,16 +244,32 @@ def _loc_stdin_buffer(text, lines, tree, item):
             others = [inner for inner in ast.walk(tree)
                       if isinstance(inner, ast.Name) and inner.id == name and id(inner) not in allowed]
             if others:
-                return dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
-                            fix=None, cause=None, force_position=True, no_fallback=True)
+                return no_fix
+            # Another name holding the same saved method also triggers the note; it can be dropped
+            # too, but only when it is written on its own top-level line and used nowhere else.
+            extra = []
+            for other_name, other in saved.items():
+                if other is assign:
+                    continue
+                if id(other) not in top_level or not _own_line(text, lines, other):
+                    return no_fix
+                targets = {id(target) for target in other.targets}
+                if any(isinstance(inner, ast.Name) and inner.id == other_name
+                       and id(inner) not in targets for inner in ast.walk(tree)):
+                    return no_fix
+                extra.append(other.lineno)
             edits = {statement.lineno: [(statement.value.args[0].col_offset,
                                          statement.value.args[0].end_col_offset, replacement)]}
-            block = _apply(lines, assign.lineno, statement.end_lineno, edits)
-            # `with_text` must reproduce every line of the range: drop the saved-method line, which
-            # the replacement text already covers, and keep the lines the user wrote between it and
-            # the call byte for byte
-            with_text = '\n'.join(block.split('\n')[1:])
-            return _fix(assign.lineno, statement.end_lineno, with_text,
+            first = min([assign.lineno] + extra)
+            last = max([statement.end_lineno] + extra)
+            block = _apply(lines, first, last, edits)
+            # `with_text` must reproduce every line of the range: drop each saved-method line, which
+            # the replacement text or the removed name covers, and keep the lines the user wrote
+            # between them and the call byte for byte
+            dropped = {assign.lineno} | set(extra)
+            with_text = '\n'.join(line for number, line in enumerate(block.split('\n'), first)
+                                  if number not in dropped)
+            return _fix(first, last, with_text,
                         line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1)
     return None
 
@@ -298,22 +338,20 @@ def _loc_str_number(text, lines, tree, item):
     if tree is None:
         return None
     bindings = _bindings(tree)
-    strings = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-                for target in targets:
-                    if isinstance(target, ast.Name):
-                        strings.add(target.id)
 
     def is_number(node):
         return (isinstance(node, ast.Constant) and isinstance(node.value, (int, float, complex))
                 and not isinstance(node.value, bool))
 
     def is_string(node):
-        return ((isinstance(node, ast.Constant) and isinstance(node.value, str))
-                or (isinstance(node, ast.Name) and node.id in strings))
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, str)
+        if isinstance(node, ast.Name):
+            # a name bound more than once is not provably a str: the comparison may be well typed
+            found = bindings.get(node.id)
+            return (bool(found) and len(found) == 1 and isinstance(found[0], ast.Constant)
+                    and isinstance(found[0].value, str))
+        return False
 
     offending = []
     for node in ast.walk(tree):
@@ -343,8 +381,9 @@ def _loc_str_number(text, lines, tree, item):
     # the comparison with the constant itself.  A chained or multi-line comparison gets no edit.
     safe = True
     edits = {}
-    constant = []
-    for node, literal, string_side, operator in chosen:
+    # every offending comparison gets its exact edit: the diagnostic is emitted once per source
+    # shape, so editing only the first operand's shape would leave a second note behind
+    for node, literal, string_side, operator in offending:
         value = _constant_of(string_side, bindings)
         if node.lineno != node.end_lineno or len(node.ops) != 1:
             safe = False
@@ -353,22 +392,17 @@ def _loc_str_number(text, lines, tree, item):
             edits.setdefault(literal.lineno, []).append(
                 (literal.col_offset, literal.end_col_offset, json.dumps(str(literal.value))))
         else:
-            constant.append(node)
+            # both edit kinds go through `_apply`, which sorts right-to-left: two edited
+            # comparisons on one line must not read stale columns after the first replacement
+            answer = 'False' if isinstance(operator, ast.Eq) else 'True'
+            edits.setdefault(node.lineno, []).append(
+                (node.col_offset, node.end_col_offset, answer))
     if not safe:
         return dict(line=chosen[0][0].lineno, col=chosen[0][0].col_offset + 1, fix=None,
                     cause=cause, force_position=True, no_fallback=True)
-    first = min(node.lineno for node, _number, _other, _op in chosen)
-    last = max(node.end_lineno for node, _number, _other, _op in chosen)
-    lines_out = _apply(lines, first, last, edits).split('\n')
-    for node in constant:
-        answer = 'False' if isinstance(node.ops[0], ast.Eq) else 'True'
-        index = node.lineno - first
-        if not 0 <= index < len(lines_out):
-            return dict(line=chosen[0][0].lineno, col=chosen[0][0].col_offset + 1, fix=None,
-                        cause=cause, force_position=True, no_fallback=True)
-        line = lines_out[index]
-        lines_out[index] = line[:node.col_offset] + answer + line[node.end_col_offset:]
-    return _fix(first, last, '\n'.join(lines_out), cause=cause)
+    first = min(node.lineno for node, _number, _other, _op in offending)
+    last = max(node.end_lineno for node, _number, _other, _op in offending)
+    return _fix(first, last, _apply(lines, first, last, edits), cause=cause)
 
 
 def _dict_literals(tree, bindings):
@@ -648,7 +682,7 @@ def _loc_fraction(text, lines, tree, item):
     # The edit removes the `fractions` import and the `Fraction(...)` assignment, so both must be
     # plain top-level lines and nothing else may use them.
     if (len(imports) != 1 or imports[0].end_lineno != imports[0].lineno
-            or imports[0].col_offset != 0):
+            or imports[0].col_offset != 0 or not _own_lines(text, lines, imports[0])):
         return fallback
     assignment = None
     for node in tree.body:
@@ -659,7 +693,8 @@ def _loc_fraction(text, lines, tree, item):
                         for target in node.targets)):
             assignment = node
             break
-    if assignment is None or assignment.lineno <= import_line:
+    if assignment is None or assignment.lineno <= import_line \
+            or not _own_lines(text, lines, assignment):
         return fallback
     statement = _statement(call, _parents(tree))
     if (statement is None or statement not in tree.body or tree.body[-1] is not statement
@@ -686,12 +721,15 @@ def _loc_fraction(text, lines, tree, item):
     texts = [_segment(text, value) for value in arguments]
     if not all(texts):
         return fallback
-    expression = '%s / %s' % (texts[0], texts[1]) if len(texts) == 2 else 'float(%s)' % texts[0]
+    # the division is parenthesised so that a larger expression keeps CPython's precedence:
+    # `2 / float(x)` must become `2 / (1 / 2)`, not `2 / 1 / 2`
+    expression = ('(%s / %s)' % (texts[0], texts[1])) if len(texts) == 2 else 'float(%s)' % texts[0]
     edits = {call.lineno: [(call.col_offset, call.end_col_offset, expression)]}
     block = _apply(lines, import_line, statement.end_lineno, edits)
     # `with` replaces the whole range, so every line the user wrote between the import and the call
-    # must appear in it; the import and the assignment are the two lines the edit removes.
-    dropped = {import_line, assignment.lineno}
+    # must appear in it; the import and every line the `Fraction(...)` assignment occupies are what
+    # the edit removes (a multi-line call leaves continuation lines otherwise).
+    dropped = {import_line} | set(range(assignment.lineno, assignment.end_lineno + 1))
     kept = [line for number, line in enumerate(block.split('\n'), import_line)
             if number not in dropped]
     cause = ('`float(...)` needs `Fraction.__float__`, which this compiler does not build; importing '
