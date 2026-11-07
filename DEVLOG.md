@@ -1,3 +1,63 @@
+## 2026-11-07 -- fe1 re-applied: front-end speed measurement and design (job-rbfe1-11071854)
+
+Re-applied the accepted `job-fe1-11071637` change (`4cfea811`..`86f25ae1`), fetched anonymously, on
+this tree. `docs/design/FRONTEND_SPEED.md` and `lab/fe/` applied unchanged. The
+`.github/workflows/agent-worker.yml` hunk was already present here, so it was left as it is. `DEVLOG.md` conflicted only at the top:
+the accepted entries are kept below this one, then the existing tree's entries. No compiler,
+runtime or corpus file changed, so generated C cannot differ and no behaviour probes apply.
+
+## 2026-11-07 -- fe1 review 1 fix: correct the remaining measurement and ranking defects (job-fe1-11071637)
+
+Fixed the six defects from review 1; no compiler, runtime or corpus file changed, so generated C
+cannot differ. (1) `FE-SPEED-A0` now uses the warm `other` for the warm target: `ticket_audit`
+warm 25.5 s -> ≤2.2 s (25.505 - 23.329 = 2.18 s), and `scar_life` cold 97.4 s -> ≤86.5 s
+(97.381 - 10.938 = 86.44 s), not ≤86 s. (2) The per-function cache is no longer ranked by a cold
+share: a cold build has an empty cache, so its cold Amdahl bound is 0; 50.4% is only the edit
+ceiling, `E/W x (N-1)/N`. The table, option section and one-line ranking now say so. (3) The
+top-20/hot-function 23.5% is labelled a derived estimate: 46.6% is a cProfile proportion applied to
+the measured emitter share, not a timed share. (4) `parse` is now a timed phase: `timed_outer.py`
+and `timed_inner.py` wrap `ast.parse`, `prof.py --parse-only` re-measured it into `results.json`,
+and `RESULTS.md` reports 3.890 s = 1.1% of the timed cold wall (nested in load/pre/emitters, not
+additive); the cProfile figure is corrected to 5.92 s = 0.6% of the profiled wall, not 1.6% of
+wall. (5) The server option uses the consistent fast-27 medians: 0.0263 + 0.1758 + 0.0549 = 0.257 s
+of a 0.468 s hit, 55% (2.2x), not the all-30 load divided by the fast wall (58%, 2.4x). (6) The
+commit message no longer carries a Claude trailer for a non-Claude worker. `report.py` re-renders
+`RESULTS.md` byte-identically; `python3 tools/update_manifest.py --check` passes.
+
+## 2026-11-07 -- fe1 review fix: correct the front-end measurement claims and ranking (job-fe1-11071326)
+
+Fixed the six review defects; no compiler, runtime or corpus file changed, so generated C cannot
+differ and no behaviour probes apply. (1) `docs/design/FRONTEND_SPEED.md` option sections now match
+the ranked table row for row (2 = mypyc, 3 = hot functions, 5 = typed pre-scan, 6 = server,
+7 = lazy imports). (2) The DEVLOG entry above now states the full-sample split (front end 54.4% /
+C 32.6%) and the corrected ranking. (3) The gcc shares on `g17_004`/`g04_006`/`g10_010` are
+64.7%/63.9%/70.5% (its own §1), not the 40–47% copied from tcc1. (4) `lab/fe/report.py` now counts
+10 of the 14 general-path programs with a typed attempt ≥0.01 s (`g14_014` 0.061 s, `g14_004`
+0.068 s included) and names the four refused before the emitter; `RESULTS.md` was regenerated.
+(5) The warm-outlier label is "three" (`scar_life`, `ticket_audit`, `term_rank`) and names them.
+(6) The top-20 Amdahl share is no longer the cProfile share: `RESULTS.md` §2 now derives it on the
+timed wall (46.6% of the profiled emitter cumulative x `E/W` 50.4% = 23.5%), so mypyc (32.6%) is
+decided above hot fixes (23.5%); the 30.7% figure is labelled a profiled-wall upper bound and is no
+longer used in the ranking. `report.py` re-renders `RESULTS.md` byte-identically; the three required
+modules pass on this commit.
+
+## 2026-11-07 -- fe1: where the Python front end spends compile time, and a design to cut it (job-fe1-11071326)
+
+Measurement and design only; the compiler, runtime and default build are unchanged. `lab/fe/prof.py`
+builds the ten `lab/compare/src/<task>/main.py`, their ten `typed.py` and the twelve `corpus/gdev`
+programs timed in tcc1 (32 programs) cold (fresh `AIL_CACHE`/`TMPDIR`, median of 3), times the
+driver's own pass boundaries through `timed_outer.py`/`timed_inner.py` wrappers, profiles both
+Python processes with `sitecustomize`+cProfile, measures a warm whole-build cache hit and the peak
+RSS with `/usr/bin/time -v`. `lab/fe/report.py` renders `lab/fe/results.json` as
+`lab/fe/RESULTS.md`. Across the 30 programs that build, the Python front end is 54.4% of the cold
+wall (197.98 s of 363.97 s) and the C compile+link 32.6% (118.62 s); on the general-path programs
+the emitters are the whole front end and the AST walks (`fastwalk.walk`, `ast.iter_*`) plus the
+memoised type queries are the top self-time functions. `docs/design/FRONTEND_SPEED.md` ranks six
+options by the measured Amdahl bound (per-function cache 50.4% > mypyc front end 32.6% >
+hot-function fixes 23.5% > drop the note check 12.8% > typed pre-scan 7.3% > server > lazy
+imports) and splits the chosen three into ready-to-queue tasks of at most two hours. No probes are
+needed: no behaviour changed. Tests on the final commit: `test_ail_frontend_speed`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched
