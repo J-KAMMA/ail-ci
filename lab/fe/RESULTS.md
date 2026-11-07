@@ -124,6 +124,8 @@ Across all programs `other` is 46.67 s of 363.97 s (12.8%); on the five programs
 
 `cc` is the C compile+link subprocess and is not part of the Python front end; it is listed for comparison. The cheap refusal passes cost about a second in total across 30 programs.
 
+`parse`: `ast.parse` is called several times per build (the driver merge, the refusal passes, `_to_c`, `_rewrite_script`). cProfile attributes 5.92 s cumulative (1.6% of wall, inflated like every cProfile number) to it; it has no single timed-wrapper boundary, which is why it is reported here rather than in the table above.
+
 ## 2. Top 20 functions by self time (cProfile, all programs)
 
 Summed over every profiled cold build. cProfile overhead inflates these numbers; the ranking is what matters.
