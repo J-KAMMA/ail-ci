@@ -43,8 +43,14 @@ build carries the field too, so `severity` is `error` for a refusal and `note` f
   those lines. Applying the pair keeps the program's output and, except for `AIL0102` (a
   compiler-side temporary that needs the separate row-arity fix), removes the diagnostic. An agent
   can apply the edit without parsing the message. `fix` is absent when the design has no literal
-  edit for that family, or when the user's shape has no edit that would build and keep the output
-  (for example a `Fraction` value that arrives through a function argument).
+  edit for that family, or when the user's shape has no edit that would build and keep the output.
+  For the four families whose edit asserts something about the user's values (`AIL0101`, `AIL0103`,
+  `AIL0104`, `AIL0111`) the edit is published only when the source proves it: a `str` whose value is
+  unknown (`input()`) gets the position and the cause and no edit, and so does a `.get(k)` whose key
+  is not provably in a literal nothing else writes. `AIL0103` writes the number as a string when the
+  str provably differs from that text and otherwise replaces the always-`False`/always-`True`
+  comparison with the constant itself.
+- A refusal whose construct the compiler cannot place (an empty file) still gets `line:1,col:1`.
 
 ## `ail run --diff`: run the program twice and compare
 

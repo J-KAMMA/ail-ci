@@ -147,12 +147,41 @@ def _find(source, block):
 # ------------------------------------------------------------------------------ family locators
 
 
+def _stdin_replacement(text, call, parent):
+    """The text that replaces `read()` and its `.decode()` / `.strip()` calls, or None.
+
+    Only the shape the design describes is accepted: the saved method is called with no arguments
+    and then, directly on the result, `.decode()` and optionally `.strip()`.  The decode is
+    required, because `buffer.readline` gives bytes and the replacement gives a str."""
+    if call.args or call.keywords:
+        return None
+    applied = []
+    cursor = call
+    while True:
+        attribute = parent.get(cursor)
+        if not isinstance(attribute, ast.Attribute) or attribute.value is not cursor:
+            break
+        caller = parent.get(attribute)
+        if not (isinstance(caller, ast.Call) and caller.func is attribute
+                and not caller.args and not caller.keywords):
+            return None
+        applied.append(attribute.attr)
+        cursor = caller
+    if applied not in (['decode'], ['decode', 'strip']):
+        return None
+    text_out = 'sys.stdin.readline()'
+    if 'strip' in applied:
+        text_out += '.strip()'
+    return cursor, text_out
+
+
 def _loc_stdin_buffer(text, lines, tree, item):
     if tree is None:
         return None
     saved = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Attribute):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Attribute)):
             chain = []
             cursor = node.value
             while isinstance(cursor, ast.Attribute):
@@ -160,30 +189,115 @@ def _loc_stdin_buffer(text, lines, tree, item):
                 cursor = cursor.value
             chain.reverse()
             if chain[-2:] == ['buffer', 'readline']:
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        saved[target.id] = node
+                saved[node.targets[0].id] = node
     parent = _parents(tree)
     for name, assign in saved.items():
+        if assign.end_lineno != assign.lineno:
+            continue
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name:
-                statement = _statement(node, parent)
-                if statement is None or statement.lineno <= assign.lineno:
-                    continue
-                # the design's edit prints the line; a call used as a value would change what runs
-                if not lines[statement.lineno - 1].lstrip().startswith('print('):
-                    return dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
-                                fix=None, cause=None, force_position=True)
-                indent = ' ' * _indent(lines[statement.lineno - 1])
-                return _fix(assign.lineno, statement.end_lineno,
-                            indent + 'print(sys.stdin.readline().strip())',
-                            line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1)
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == name):
+                continue
+            statement = _statement(node, parent)
+            if statement is None or statement.lineno <= assign.lineno:
+                continue
+            # the design's edit prints the line; a call used as a value would change what runs
+            if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+                    and isinstance(statement.value.func, ast.Name)
+                    and statement.value.func.id == 'print' and len(statement.value.args) == 1
+                    and not statement.value.keywords):
+                return dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
+                            fix=None, cause=None, force_position=True, no_fallback=True)
+            replaced = _stdin_replacement(text, node, parent)
+            if replaced is None or replaced[0] is not statement.value.args[0]:
+                return dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
+                            fix=None, cause=None, force_position=True, no_fallback=True)
+            _outer, replacement = replaced
+            # the edit removes the saved name: every other use of it would stop building
+            allowed = {id(node.func)}
+            for target in assign.targets:
+                allowed.add(id(target))
+            others = [inner for inner in ast.walk(tree)
+                      if isinstance(inner, ast.Name) and inner.id == name and id(inner) not in allowed]
+            if others:
+                return dict(line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1,
+                            fix=None, cause=None, force_position=True, no_fallback=True)
+            edits = {statement.lineno: [(statement.value.args[0].col_offset,
+                                         statement.value.args[0].end_col_offset, replacement)]}
+            block = _apply(lines, assign.lineno, statement.end_lineno, edits)
+            # `with_text` must reproduce every line of the range: drop the saved-method line, which
+            # the replacement text already covers, and keep the lines the user wrote between it and
+            # the call byte for byte
+            with_text = '\n'.join(block.split('\n')[1:])
+            return _fix(assign.lineno, statement.end_lineno, with_text,
+                        line=statement.lineno, col=_indent(lines[statement.lineno - 1]) + 1)
     return None
+
+
+def _bindings(tree):
+    """name -> the values bound to it (None for a binding that is not a simple value).
+
+    A name with exactly one entry, bound to a constant or a literal, can be read statically; a name
+    bound more than once (or by a loop, a parameter, a `with`, an item store) cannot."""
+    values = {}
+
+    def add(name, value):
+        values.setdefault(name, []).append(value)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name in ast.walk(target):
+                    if isinstance(name, ast.Name):
+                        add(name.id, node.value if isinstance(target, ast.Name) else None)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if isinstance(node.target, ast.Name):
+                add(node.target.id, node.value)
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            add(node.target.id, None)
+        elif isinstance(node, ast.For):
+            for name in ast.walk(node.target):
+                if isinstance(name, ast.Name):
+                    add(name.id, None)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            arguments = (list(node.args.args) + list(node.args.posonlyargs)
+                         + list(node.args.kwonlyargs))
+            if node.args.kwarg is not None:
+                arguments.append(node.args.kwarg)
+            if node.args.vararg is not None:
+                arguments.append(node.args.vararg)
+            for argument in arguments:
+                add(argument.arg, None)
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            for name in ast.walk(node.optional_vars):
+                if isinstance(name, ast.Name):
+                    add(name.id, None)
+    return values
+
+
+_MISSING = object()
+
+
+def _constant_of(node, bindings):
+    """The Python value of a constant expression, or `_MISSING` when it cannot be read statically."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        operand = _constant_of(node.operand, bindings)
+        if isinstance(operand, (int, float, complex)) and not isinstance(operand, bool):
+            return -operand if isinstance(node.op, ast.USub) else operand
+        return _MISSING
+    if isinstance(node, ast.Name):
+        found = bindings.get(node.id)
+        if found and len(found) == 1 and isinstance(found[0], ast.Constant):
+            return found[0].value
+    return _MISSING
 
 
 def _loc_str_number(text, lines, tree, item):
     if tree is None:
         return None
+    bindings = _bindings(tree)
     strings = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -209,34 +323,130 @@ def _loc_str_number(text, lines, tree, item):
         for operator, right in zip(node.ops, node.comparators):
             if isinstance(operator, (ast.Eq, ast.NotEq)):
                 if is_number(right) and is_string(left):
-                    offending.append((node, right, left))
+                    offending.append((node, right, left, operator))
                 elif is_number(left) and is_string(right):
-                    offending.append((node, left, right))
+                    offending.append((node, left, right, operator))
             left = right
     if not offending:
         return None
-    key = _segment(text, offending[0][2]) or ''
-    chosen = [entry for entry in offending if (_segment(text, entry[2]) or '') == key]
-    edits = {}
-    for node, number, _other in chosen:
-        if node.lineno != node.end_lineno:
-            continue
-        edits.setdefault(number.lineno, []).append(
-            (number.col_offset, number.end_col_offset, json.dumps(str(number.value))))
-    if not edits:
-        return None
-    first = min(node.lineno for node, _number, _other in chosen)
-    last = max(node.end_lineno for node, _number, _other in chosen)
+    key = (_segment(text, offending[0][2]) or '', type(offending[0][3]).__name__)
+    chosen = [entry for entry in offending
+              if (_segment(text, entry[2]) or '', type(entry[3]).__name__) == key]
     other = _segment(text, chosen[0][2]) or 'this value'
     number = _segment(text, chosen[0][1]) or '1'
+    always = 'True' if isinstance(chosen[0][3], ast.NotEq) else 'False'
     cause = ('`%s` is a str and `%s` is a number; a str is never equal to a number, so this '
-             'comparison is always False.' % (other, number))
-    return _fix(first, last, _apply(lines, first, last, edits), cause=cause)
+             'comparison is always %s.' % (other, number, always))
+    # A str is never equal to a number, so the comparison's value is the constant `False` (`Eq`) or
+    # `True` (`NotEq`) whatever the str holds.  Two edits keep that exactly: write the number as a
+    # string when the str provably differs from that text (the design's edit), and otherwise replace
+    # the comparison with the constant itself.  A chained or multi-line comparison gets no edit.
+    safe = True
+    edits = {}
+    constant = []
+    for node, literal, string_side, operator in chosen:
+        value = _constant_of(string_side, bindings)
+        if node.lineno != node.end_lineno or len(node.ops) != 1:
+            safe = False
+            continue
+        if isinstance(value, str) and value != str(literal.value):
+            edits.setdefault(literal.lineno, []).append(
+                (literal.col_offset, literal.end_col_offset, json.dumps(str(literal.value))))
+        else:
+            constant.append(node)
+    if not safe:
+        return dict(line=chosen[0][0].lineno, col=chosen[0][0].col_offset + 1, fix=None,
+                    cause=cause, force_position=True, no_fallback=True)
+    first = min(node.lineno for node, _number, _other, _op in chosen)
+    last = max(node.end_lineno for node, _number, _other, _op in chosen)
+    lines_out = _apply(lines, first, last, edits).split('\n')
+    for node in constant:
+        answer = 'False' if isinstance(node.ops[0], ast.Eq) else 'True'
+        index = node.lineno - first
+        if not 0 <= index < len(lines_out):
+            return dict(line=chosen[0][0].lineno, col=chosen[0][0].col_offset + 1, fix=None,
+                        cause=cause, force_position=True, no_fallback=True)
+        line = lines_out[index]
+        lines_out[index] = line[:node.col_offset] + answer + line[node.end_col_offset:]
+    return _fix(first, last, '\n'.join(lines_out), cause=cause)
+
+
+def _dict_literals(tree, bindings):
+    """name -> the Constant keys of the dict literal bound once to it, or None when unknown.
+
+    `None` also when the name is written through an item store: the literal is no longer the whole
+    truth about which keys are present."""
+    literals = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and len(bindings.get(target.id) or ()) == 1:
+                    keys = []
+                    for key in node.value.keys:
+                        if isinstance(key, ast.Constant):
+                            keys.append(key.value)
+                        else:
+                            keys = None
+                            break
+                    literals[target.id] = keys
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                    literals[target.value.id] = None
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                    literals[target.value.id] = None
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr in ('pop', 'popitem', 'clear', 'setdefault', 'update') \
+                and isinstance(node.func.value, ast.Name):
+            literals[node.func.value.id] = None
+    return literals
 
 
 def _loc_dict_get(text, lines, tree, item):
     if tree is None:
         return None
+    bindings = _bindings(tree)
+    literals = _dict_literals(tree, bindings)
+    calls = [node for node in ast.walk(tree)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and node.func.attr == 'get' and len(node.args) == 1 and not node.keywords]
+    if not calls:
+        return None
+    calls.sort(key=lambda node: (node.lineno, node.col_offset))
+    # `d.get(k, -1)` prints `-1` where CPython prints `None`, so an edit is published only when the
+    # key is provably in the dict the receiver names, read straight from a literal that nothing else
+    # touches; otherwise the position and cause alone
+    safe = True
+    literal_targets = set()
+    receivers = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
+            literal_targets.update(id(target) for target in node.targets)
+    for node in calls:
+        receiver = node.func.value
+        if not isinstance(receiver, ast.Name):
+            safe = False
+            continue
+        keys = literals.get(receiver.id)
+        if keys is None:
+            safe = False
+            continue
+        key = _constant_of(node.args[0], bindings)
+        if key is _MISSING or key not in set(keys):
+            safe = False
+            continue
+        if node.lineno != node.end_lineno:
+            safe = False
+        receivers.setdefault(receiver.id, set()).add(id(receiver))
+    for name, allowed in receivers.items():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Name) or node.id != name or id(node) in allowed:
+                continue
+            if id(node) not in literal_targets:
+                safe = False
     defaults = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
@@ -249,21 +459,18 @@ def _loc_dict_get(text, lines, tree, item):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     defaults[target.id] = kind
-    calls = [node for node in ast.walk(tree)
-             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-             and node.func.attr == 'get' and len(node.args) == 1 and not node.keywords]
-    if not calls:
-        return None
-    calls.sort(key=lambda node: (node.lineno, node.col_offset))
+    call = _segment(text, calls[0]) or 'd.get(k)'
+    cause = '`%s` gives None for a missing key, and this compiler has no None for an int value.' % call
+    if not safe:
+        return dict(line=calls[0].lineno, col=calls[0].col_offset + 1, fix=None, cause=cause,
+                    force_position=True, no_fallback=True)
     edits = {}
     for node in calls:
-        name = node.func.value.id if isinstance(node.func.value, ast.Name) else ''
+        name = node.func.value.id
         edits.setdefault(node.end_lineno, []).append(
             (node.end_col_offset - 1, node.end_col_offset - 1, ', ' + defaults.get(name, '-1')))
     first = calls[0].lineno
     last = max(node.end_lineno for node in calls)
-    call = _segment(text, calls[0]) or 'd.get(k)'
-    cause = '`%s` gives None for a missing key, and this compiler has no None for an int value.' % call
     return _fix(first, last, _apply(lines, first, last, edits), line=calls[0].lineno,
                 col=calls[0].col_offset + 1, cause=cause)
 
@@ -425,42 +632,72 @@ def _loc_fraction(text, lines, tree, item):
                if isinstance(node, ast.ImportFrom) and node.module == 'fractions']
     if not imports:
         return None
+    import_line = imports[0].lineno
     calls = sorted((node for node in ast.walk(tree)
                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                    and node.func.id == 'float' and node.args),
+                    and node.func.id == 'float' and len(node.args) == 1),
                    key=lambda node: (node.lineno, node.col_offset))
-    import_line = imports[0].lineno
     if not calls:
         return dict(line=import_line, col=1, fix=None, cause=None, force_position=True)
     call = calls[0]
+    fallback = dict(line=call.lineno, col=call.col_offset + 1, fix=None, cause=None,
+                    force_position=True, no_fallback=True)
     argument = call.args[0]
-    expression = None
-    if isinstance(argument, ast.Name):
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
-                    and isinstance(node.value.func, ast.Name) and node.value.func.id == 'Fraction'):
-                if any(isinstance(target, ast.Name) and target.id == argument.id
-                       for target in node.targets):
-                    arguments = [_segment(text, value) for value in node.value.args]
-                    if len(arguments) == 2 and all(arguments):
-                        expression = '%s / %s' % (arguments[0], arguments[1])
-                    elif arguments and arguments[0]:
-                        expression = arguments[0]
-                    break
+    if not isinstance(argument, ast.Name):
+        return fallback
+    # The edit removes the `fractions` import and the `Fraction(...)` assignment, so both must be
+    # plain top-level lines and nothing else may use them.
+    if (len(imports) != 1 or imports[0].end_lineno != imports[0].lineno
+            or imports[0].col_offset != 0):
+        return fallback
+    assignment = None
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and node.col_offset == 0
+                and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == 'Fraction'
+                and any(isinstance(target, ast.Name) and target.id == argument.id
+                        for target in node.targets)):
+            assignment = node
+            break
+    if assignment is None or assignment.lineno <= import_line:
+        return fallback
     statement = _statement(call, _parents(tree))
-    if (expression is None or statement is None or call.lineno != statement.lineno
-            or statement not in tree.body or tree.body[-1] is not statement):
+    if (statement is None or statement not in tree.body or tree.body[-1] is not statement
+            or statement.col_offset != 0 or call.lineno != statement.lineno
+            or call.end_lineno != statement.end_lineno):
         # the value came through an argument, or code after the call still needs `Fraction`:
         # name the call site but publish no edit that could break the build or change output
-        return dict(line=call.lineno if call is not None else import_line,
-                    col=call.col_offset + 1 if call is not None else 1,
-                    fix=None, cause=None, force_position=True)
+        return fallback
+    names = {alias.asname or alias.name for alias in imports[0].names}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == argument.id and node is not argument:
+            if not (isinstance(node.ctx, ast.Store) and node.lineno == assignment.lineno):
+                return fallback
+        elif isinstance(node, ast.Name) and node.id in names:
+            if not (node is assignment.value.func):
+                return fallback
+    arguments = list(assignment.value.args)
+    if not arguments or len(arguments) > 2:
+        return fallback
+    for value in arguments:
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, int)
+                and not isinstance(value.value, bool)):
+            return fallback
+    texts = [_segment(text, value) for value in arguments]
+    if not all(texts):
+        return fallback
+    expression = '%s / %s' % (texts[0], texts[1]) if len(texts) == 2 else 'float(%s)' % texts[0]
     edits = {call.lineno: [(call.col_offset, call.end_col_offset, expression)]}
-    with_text = _apply(lines, statement.lineno, statement.end_lineno, edits)
+    block = _apply(lines, import_line, statement.end_lineno, edits)
+    # `with` replaces the whole range, so every line the user wrote between the import and the call
+    # must appear in it; the import and the assignment are the two lines the edit removes.
+    dropped = {import_line, assignment.lineno}
+    kept = [line for number, line in enumerate(block.split('\n'), import_line)
+            if number not in dropped]
     cause = ('`float(...)` needs `Fraction.__float__`, which this compiler does not build; importing '
              '`fractions` prints this note, and the old position was inside the standard-library '
              'prelude rather than your file.')
-    return _fix(import_line, statement.end_lineno, with_text, line=call.lineno,
+    return _fix(import_line, statement.end_lineno, '\n'.join(kept), line=call.lineno,
                 col=call.col_offset + 1, cause=cause, force_position=True)
 
 
@@ -662,13 +899,24 @@ _LOCATORS = {
 }
 
 
+#: Families whose edit is a claim about the user's values, not just about the construct: the table's
+#: literal block is safe only for the trigger program it was copied from, so a source that parses and
+#: that the locator cannot vouch for gets the position and the cause and no edit at all.
+_AUTHORITATIVE = frozenset(('AIL0101', 'AIL0103', 'AIL0104', 'AIL0111'))
+
+
 def _locate(item, source_text, lines):
+    """(record or None, whether the source parsed as Python)."""
     if not source_text:
-        return None
+        return None, False
     locate = _LOCATORS.get(item['code'])
+    tree = _parse(source_text)
     if locate is None:
-        return None
-    return locate(source_text, lines, _parse(source_text), item)
+        return None, tree is not None
+    found = locate(source_text, lines, tree, item)
+    if found is None and tree is not None and item['code'] in _AUTHORITATIVE:
+        found = dict(fix=None, no_fallback=True)
+    return found, tree is not None
 
 
 # ------------------------------------------------------------------------------ public objects
@@ -692,7 +940,8 @@ def diagnostic(message, source_text=None, path=None, line=None, col=None, severi
         line = parsed_line if line is None else line
         col = parsed_col if col is None else col
 
-    located = _locate(item, source_text, lines) or {}
+    located, parsed = _locate(item, source_text, lines)
+    located = located or {}
     cause = located.get('cause') or item['cause']
     if located.get('line') is not None and (located.get('force_position')
                                             or line is None
@@ -700,7 +949,10 @@ def diagnostic(message, source_text=None, path=None, line=None, col=None, severi
         line, col = located['line'], located.get('col', 1)
 
     fix = located.get('fix')
-    if fix is None and source_text is not None:
+    # The table's literal `replace`/`with` pair is used only when the whole block occurs in the
+    # user's source exactly as the design publishes it; a locator that decided no edit is safe sets
+    # `no_fallback`, since a range it computed itself could span lines its `with` does not contain.
+    if fix is None and source_text is not None and not located.get('no_fallback'):
         where = _find(source_text, item['replace'])
         if where is not None:
             start, end, column = where
@@ -773,6 +1025,11 @@ def refusal(message, source_text=None, path=None, line=None, col=None):
         found_line, found_col = _refusal_position(text, source_text)
         line = found_line if line is None else line
         col = found_col if col is None else col
+    if (line is None or col is None) and source_text is not None \
+            and not str(source_text).strip():
+        # an empty file has no construct to name, but the docs promise a position: the file start
+        line = 1 if line is None else line
+        col = 1 if col is None else col
     head = text.split('\n', 1)[0]
     head = re.sub(r'^[^:]{0,400}:\d+:\d+:\s*', '', head)
     head = re.sub(r'^(?:note|error):\s*', '', head)
