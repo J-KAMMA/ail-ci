@@ -1,3 +1,22 @@
+## 2026-11-07 -- setord1: set/frozenset iteration order is refused by name, never silently reordered
+
+AIL's sets keep insertion order; CPython walks its hash table (fixed for ints, per-run random
+for str). `for x in frozenset(range(40, 0, -7))` printed a different order on both builds, a
+silent wrong result found by pyreach11. Exact order cannot be reproduced for a str set, so the
+order-revealing constructs are now refused by name with the rewrite `sorted(s)`: `for` / a
+comprehension / generator over a set, `list(s)`, `tuple(s)`, `print(s)`, `str(s)`, `repr(s)`, an
+f-string of one, and `s.pop()`. The typed path refuses at compile time (`pyfunc._walk_set_refusal`,
+`_set_pop`); the general path refuses at compile time when it can prove the value is a set
+(`pyboxed2._refuse_set_walk`) and raises the same named error at run time for a set that arrives
+through an argument, a list item, an attribute or a dict value (`ail2_refuse_set_order` /
+`ail2_iter_visible`, `ail_meth_set_pop`). Order-free uses -- `in`, `len`, `sorted(s)` (with or
+without `key`/`reverse` on the general path), `min`, `max`, `sum`, the comparisons, the operators
+and the mutators -- keep building and match CPython 3.12 on the typed, default and general
+builds. `test_ail_setorder.py` (new, registered in `tests.d/`) holds the rule; the old order
+tests in `test_ail_sets_general.py`, `test_ail_int_dict_set.py` and `test_ail_collections.py`
+now read sets in sorted form. Census over `lab/` and `corpus/`: 22 files match a set bound to a
+name and then walked/printed/converted/popped; they now refuse rather than reorder.
+
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched

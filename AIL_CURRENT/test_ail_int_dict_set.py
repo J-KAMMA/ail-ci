@@ -125,10 +125,10 @@ fn main() {
     let either = s ^ u;
     print(len(s), len(u), len(both), len(common), len(only), len(either));
     let acc = 0;
-    for x in both { acc = acc * 7 + x; }
-    for x in common { acc = acc * 7 + x; }
-    for x in only { acc = acc * 7 + x; }
-    for x in either { acc = acc * 7 + x; }
+    for x in sorted(both) { acc = acc * 7 + x; }
+    for x in sorted(common) { acc = acc * 7 + x; }
+    for x in sorted(only) { acc = acc * 7 + x; }
+    for x in sorted(either) { acc = acc * 7 + x; }
     print(acc, has_all(u, [0, 1, 2, 3, 4]));
     print(sum(u), max(u));
     print(sorted(s)[0]);
@@ -142,8 +142,8 @@ fn main() {
     let t2: set[str] = {"c", "d"};
     let tu = t | t2;
     let tw = "";
-    for w in tu { tw = tw + w; }
-    for w in t & t2 { tw = tw + w.upper(); }
+    for w in sorted(tu) { tw = tw + w; }
+    for w in sorted(t & t2) { tw = tw + w.upper(); }
     for w in sorted(t - t2) { tw = tw + "-" + w; }
     print(tw, len(t ^ t2), "a" in t, "z" in t);
     t.remove("a");
@@ -301,13 +301,13 @@ def main():
     either = s ^ u
     print(len(s), len(u), len(both), len(common), len(only), len(either))
     acc = 0
-    for x in both:
+    for x in sorted(both):
         acc = acc * 7 + x
-    for x in common:
+    for x in sorted(common):
         acc = acc * 7 + x
-    for x in only:
+    for x in sorted(only):
         acc = acc * 7 + x
-    for x in either:
+    for x in sorted(either):
         acc = acc * 7 + x
     print(acc, has_all(u, [0, 1, 2, 3, 4]))
     print(sum(u), max(u))
@@ -322,9 +322,9 @@ def main():
     t2 = OSet(["c", "d"])
     tu = t | t2
     tw = ""
-    for w in tu:
+    for w in sorted(tu):
         tw = tw + w
-    for w in t & t2:
+    for w in sorted(t & t2):
         tw = tw + w.upper()
     for w in sorted(t - t2):
         tw = tw + "-" + w
@@ -449,7 +449,7 @@ fn main() {
     }
     print(acc, len(seen));
     let sx = 0;
-    for v in seen { sx = (sx * 7 + v) % 1000000007; }
+    for v in sorted(seen) { sx = (sx * 7 + v) % 1000000007; }
     print(sx);
     let grow: dict[int, int] = {5: 1, 900000: 2};
     for i in range(20000) { grow[i * 37 % 50000] = i; }
@@ -487,7 +487,7 @@ def main():
         cur.clear()
     print(acc, len(seen))
     sx = 0
-    for v in seen:
+    for v in sorted(seen):
         sx = (sx * 7 + v) % 1000000007
     print(sx)
     grow = {5: 1, 900000: 2}

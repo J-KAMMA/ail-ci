@@ -12223,6 +12223,18 @@ def _set_into_temp(arg, ctx):
     return c
 
 
+def _walk_set_refusal(spelling):
+    """The named refusal for any construct that exposes the iteration order of a set.
+    CPython walks its hash table (per-run random for a set of str), AIL keeps insertion
+    order, so the two can differ; `sorted`, `in`, `len`, `min`, `max` and `sum` stay
+    order-free and keep building."""
+    return ('walking a set shows the order its elements were inserted, where CPython walks its '
+            'hash table (and a set of str in a per-run random order); the two can differ, so this '
+            'is refused rather than printed wrong.\n'
+            '  write instead: `sorted(%s)` for a fixed order; `x in s`, `len(s)`, `sorted(s)`, '
+            '`min(s)`, `max(s)` and `sum(s)` are order-free and still build' % spelling)
+
+
 def _is_set_valued(node, ctx):
     if isinstance(node, ast.Name):
         try:
@@ -12336,13 +12348,15 @@ def _set_disjoint(receiver, other, ctx):
 
 
 def _set_pop(kind, pointer, ctx):
-    """`s.pop()`: removes and returns the NEWEST element (AIL sets keep insertion order)."""
-    ctx.parts.add(kind.upper() + 'OPS')
-    ctx.has_try = True
-    if kind == SSET:
-        ctx.parts.add('STR')
-        return 'ail_sset_pop(%s, &%s)' % (pointer, ctx.sarena())
-    return 'ail_iset_pop(%s)' % pointer
+    """`s.pop()` returns the FIRST element in iteration order, so its result shows the order.
+    CPython's order is its hash table's (random for a str set), which AIL does not reproduce:
+    refuse rather than return a different element."""
+    raise Unsupported(
+        '%s.pop() returns the first element in iteration order, where CPython walks its hash '
+        'table (and a set of str in a per-run random order); the two can differ, so this is '
+        'refused rather than answer wrong.\n'
+        '  write instead: `sorted(s)[0]` (then `s.discard(...)` it if it should be removed)'
+        % _diagnostic_type(kind))
 
 
 def _set_value(node, ctx):
@@ -20683,9 +20697,11 @@ def _method(node, ctx, *, as_stmt=False):
     if m == 'get' and t == DICT and len(a) == 1:
         raise Unsupported(_ONE_ARG_GET)
     if m == 'pop' and t == SET and not a:
-        ctx.parts.add('SETOPS')
-        ctx.has_try = True
-        return 'ail_tabset_pop(&%s)' % _untyped_set_table(node.func.value, ctx, 'set.pop()')
+        raise Unsupported(
+            'set.pop() returns the first element in iteration order, where CPython walks its hash '
+            'table (and a set of str in a per-run random order); the two can differ, so this is '
+            'refused rather than answer wrong.\n'
+            '  write instead: `sorted(s)[0]` (then `s.discard(...)` it if it should be removed)')
     if m == 'isdisjoint' and t == SET and len(a) == 1:
         return _set_disjoint(node.func.value, a[0], ctx)
     if m == 'get' and t == DICT and name in ctx.bkeys and len(a) in (1, 2):
@@ -21236,6 +21252,8 @@ def _listcomp_into_temp(node, ctx):
         return _listcomp_pair_into_temp(node, ctx)
     if not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
+    if _is_set_valued(g.iter, ctx):
+        raise Unsupported(_walk_set_refusal(ast.unparse(g.iter)))
     kind = _listcomp_kind(node, ctx)
     ctx.parts.add(kind.upper())
     c, _ = ctx.temp(kind)
@@ -29384,6 +29402,15 @@ def _for_inner_impl(node, ctx, ind):
     source = it.func.value if items else it
     if _is_map_expr(source, ctx):
         kind = _map_kind(source, ctx)
+        if kind in SETS:
+            spelling = ast.unparse(source)
+            raise Unsupported(
+                'walking a %s shows the order its elements were inserted, where CPython walks its '
+                'hash table (and a set of str in a per-run random order); the two can differ, so '
+                'this is refused rather than printed wrong.\n'
+                '  write instead: `sorted(%s)` for a fixed order; `x in s`, `len(s)`, `sorted(s)`, '
+                '`min(s)`, `max(s)` and `sum(s)` are order-free and still build'
+                % (_diagnostic_type(kind), spelling))
         if items:
             if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
                     and all(isinstance(e, ast.Name) for e in node.target.elts)):
@@ -30258,6 +30285,8 @@ def _for_inner_impl(node, ctx, ind):
         # `for k in s:` (a str-keyed SET) or `for k in d:` (a str-keyed DICT -- Python iterates
         # its keys, the bare-name counterpart of `.keys()` above) -- mechanisms 4/5. `.order`
         # already holds the actual str VALUES, the STAB counterpart of the BTAB branch just below.
+        if it.id in getattr(ctx, 'untyped_str_sets', ()):
+            raise Unsupported(_walk_set_refusal(it.id))
         ctx.parts.add('STAB')
         c = ctx.cname(it.id)
         v = ctx.declare(node.target.id, STR)
@@ -30272,6 +30301,8 @@ def _for_inner_impl(node, ctx, ind):
         # iterates its keys, the bare-name counterpart of `.keys()` above). `.order` already
         # holds the actual bytes VALUES, so this needs no bpool lookup, unlike the `blist` case
         # immediately below.
+        if it.id in getattr(ctx, 'untyped_byte_sets', ()):
+            raise Unsupported(_walk_set_refusal(it.id))
         ctx.parts.update(('BTAB', 'BYTES'))
         c = ctx.cname(it.id)
         v = ctx.declare(node.target.id, BYTES)
@@ -30442,6 +30473,8 @@ def _for_inner_impl(node, ctx, ind):
         value, local = _list_call_value(it, ctx)
         ctx.pre.append('(void)%s;' % value)
         it = ast.Name(id=local, ctx=ast.Load())
+    if _is_set_valued(it, ctx):
+        raise Unsupported(_walk_set_refusal(ast.unparse(it)))
     p, n = _seq(it, ctx)
     if isinstance(it, ast.Name) and it.id in ctx.nlist:
         # `for r in g:` where `g` is a list of lists -- `r` is bound to a HANDLE on every
