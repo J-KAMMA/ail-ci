@@ -32,13 +32,15 @@ RULES = [
                       r'integer literal out of signed 64-bit|shifts beyond int64'),
     ('generated-prelude', r'\b_ail_|_AIL_|_AilArray|_AilDeque|_AilNT|_AilT_|_AilCSV|_AilIntEnum|'
                           r'AIL_ARRAY_PRELUDE|\bAilArray\b'),
-    ('none-optional', r'\bNone\b|\bOptional\b|d\.get\(k\) with one argument|is None|'
-                      r'only a class type can be None|the constant None|\.get\([^)]*\)$'),
+    ('none-optional', r'the constant None|d\.get\(k\) with one argument|'
+                      r'with one argument needs Optional|only a class type can be None|'
+                      r'\bOptional\b|None for a missing key|\| None|None\]|'
+                      r'returns? None|is None\b|\bNone\b.*(sentinel|null|holds one)'),
     ('generator-yield', r'^yield$|\byield\b|this language has no generators'),
     ('nested-def-in-loop', r'nested def inside a loop'),
-    ('dict-of-containers', r'dict of containers|field `v` is a list or dict|nested annotation|'
-                           r'list\[list\[|dict\[int, list\[int\]\]|a tuple inside a tuple|'
-                           r"'graph' is annotated dict|is a list\[list\["),
+    ('dict-of-containers', r'dict of containers|field `v` is a list or dict|a nested annotation|'
+                           r'a tuple inside a tuple|is annotated dict\[|'
+                           r'is a list\[list\[|nested list holds rows'),
     ('class-dunders', r'dunder method|print\(\) given a .* object|__init__ must|'
                       r'arithmetic on a class|has no __init__|must take plain positional|'
                       r'only __init__ is supported'),
@@ -54,7 +56,8 @@ RULES = [
                            r'is not available|module the typed path|'
                            r're module is built|'
                            r'itertools\.[a-z]+ (is )?not built|'
-                           r'functools\.|json\.[A-Za-z.]+ (is )?not built|'
+                           r'functools\.|json\.(loads|dumps|dump|JSONEncoder)|'
+                           r'statistics\.|tempfile\.|with .* as |'
                            r'reduce, lru_cache|'
                            r'Counter|OrderedDict|defaultdict'),
     ('unsupported-builtin', r'call to (set|min|max|dict|next|isinstance|enumerate|sorted|sum|len|'
