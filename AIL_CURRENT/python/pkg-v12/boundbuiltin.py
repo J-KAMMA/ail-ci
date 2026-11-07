@@ -34,6 +34,8 @@ TABLE = {
     'extend': ('_bma', '_bmr.extend(_bma)'),
     'insert': ('_bma, _bmb', '_bmr.insert(_bma, _bmb)'),
     'reverse': ('', '_bmr.reverse()'),
+    # list.pop() / pop(i), dict.pop(k), set.pop() (dict.pop(k, d) through the value: a TypeError, loud)
+    'pop': ('_bma=_ail_bm_unset', '_bmr.pop() if _bma is _ail_bm_unset else _bmr.pop(_bma)'),
     'sort': ('', '_bmr.sort()'),
     # list / set / dict / str / tuple shared
     'remove': ('_bma', '_bmr.remove(_bma)'),
@@ -85,7 +87,7 @@ TABLE = {
 }
 
 # builtin method names that exist but are not in TABLE (variadic, keyword or type-dependent forms)
-_OTHER = frozenset({'pop', 'popitem', 'fromkeys', 'format', 'format_map', 'encode', 'decode', 'partition',
+_OTHER = frozenset({'popitem', 'fromkeys', 'format', 'format_map', 'encode', 'decode', 'partition',
                     'rpartition', 'rsplit', 'center', 'ljust', 'rjust', 'expandtabs', 'translate',
                     'maketrans', 'isdecimal', 'isnumeric', 'isidentifier', 'isprintable', 'istitle',
                     'removeprefix', 'removesuffix', 'symmetric_difference', 'intersection_update',
@@ -147,6 +149,7 @@ class _Rewrite(ast.NodeTransformer):
         self.called = set()
         self.args_of_call = set()
         self.consumer_args = set()
+        self.sentinel = False
 
     def prepare(self, tree):
         for n in ast.walk(tree):
@@ -183,6 +186,7 @@ class _Rewrite(ast.NodeTransformer):
                 self.refuse(node, attr)
             return self.generic_visit(node)
         params, body = TABLE[attr]
+        self.sentinel = self.sentinel or '_ail_bm_unset' in params
         unbound = (isinstance(recv, ast.Name) and recv.id in _TYPES and recv.id not in self.bound)
         if unbound:
             if id(node) in self.args_of_call:
@@ -224,4 +228,12 @@ def rewrite_tree(tree, Unsupported):
     rw = _Rewrite(attrs, bound, imported, classes, refuse)
     rw.prepare(tree)
     rw.visit(tree)
+    if rw.sentinel:
+        # the default of an optional argument that was not passed: a private object no caller can hand in
+        at = 0
+        while at < len(tree.body) and (
+                (isinstance(tree.body[at], ast.ImportFrom) and tree.body[at].module == '__future__')
+                or (at == 0 and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant))):
+            at += 1
+        tree.body.insert(at, ast.parse('_ail_bm_unset = [0]').body[0])
     ast.fix_missing_locations(tree)
