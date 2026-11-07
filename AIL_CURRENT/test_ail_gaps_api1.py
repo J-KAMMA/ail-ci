@@ -531,7 +531,7 @@ _STAR_BUILTIN_CALLS = ['w.%s.%s(*xs)' % (r, m) for r, ms in (
     ('l', 'append pop index count insert remove extend clear get'),
     ('t', 'index count get append'),
     ('d', 'pop get setdefault clear popitem append'),
-    ('st', 'add remove discard pop clear get'),
+    ('st', 'add remove discard clear get'),
     ('s', 'zfill lower upper isdigit append')) for m in ms.split()]
 
 

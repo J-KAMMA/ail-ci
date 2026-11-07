@@ -24,7 +24,7 @@ CLASS_READ = r'''class C:
 
 
 def main():
-    print(C.ys, C.zs, C.ws)
+    print(C.ys, C.zs, sorted(C.ws))
 
 
 main()

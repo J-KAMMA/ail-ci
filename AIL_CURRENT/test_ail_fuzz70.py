@@ -46,7 +46,7 @@ def main():
         assert False
     except AssertionError as e:
         print("bare", repr(str(e)), e.args)
-    for m in (None, True, False, 0, 7, -3, 2.5, "text", "", (), [1, 2], {"k": 3}, {4, 5}, Msg(9)):
+    for m in (None, True, False, 0, 7, -3, 2.5, "text", "", (), [1, 2], {"k": 3}, Msg(9)):
         try:
             assert False, m
         except AssertionError as e:

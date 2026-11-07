@@ -292,6 +292,31 @@ per model, so one results file holds several models. Run: 5 arms x 11 tasks x 1 
 cut, stated in `RESULTS.md`). No compiler change.
 
 
+
+## 2026-11-07 -- setord1 suite fix: order-free aggregates over a set build, and the set-order census reaches the old tests
+
+The full suite after the setord1 refusal found 16 modules walking, printing or popping a set
+where AIL's insertion order happened to equal CPython's for their small ints, or where the walk
+was order-free. Two were real over-refusals in the general path, now fixed in `pyboxed2.py`:
+`sorted`/`sum`/`min`/`max` (and `any`/`all`) of a generator/iterable over a set are order-free,
+so a compile-time `order_free` flag lets their walk lower to `ail_iter` instead of
+`ail2_iter_visible` (`sorted`/`min`/`max` only without `key=`); and `print({[1, 2]})` now
+evaluates the display before the set-order guard, so the unhashable element raises CPython's
+own error instead of the named refusal. `print(<a set name>)` still refuses at compile time,
+and the run-time `ail2_do_print` guard covers display arguments.
+
+The other modules exercised `set.pop()` or a direct set walk on purpose; that behaviour is
+gone, so their programs now use `sorted(s)`, `min`/`discard`, or assert the named refusal:
+test_ail_corpus_findings, test_ail_dict_delete (both the AIL program and its `OSet` model),
+test_ail_exc_str, test_ail_fuzz27 (contents after a body swap), test_ail_fuzz28, test_ail_fuzz36,
+test_ail_fuzz70 (a set is no longer an assert-message case), test_ail_fuzz_findings (the dict
+size-change cases remain), test_ail_gaps_api1/api2 (the set receiver is out of the pop-arity
+matrix; `set.pop()` is asserted refused), test_ail_lang_gaps, test_ail_modconst, test_ail_pre133,
+test_ail_pre245, test_ail_pre341 and test_ail_silent5 (a `sorted(genexpr)` walk, fixed in code).
+`test_ail_setorder.py` is unchanged and still refuses every order-revealing shape. All 16 modules,
+plus test_ail_setorder, test_ail_sets_general, test_ail_int_dict_set, test_ail_collections and
+test_ail_safetynet, pass; `tools/update_manifest.py --check` is clean.
+
 ## 2026-11-07 -- setord1: set/frozenset iteration order is refused by name, never silently reordered
 
 AIL's sets keep insertion order; CPython walks its hash table (fixed for ints, per-run random

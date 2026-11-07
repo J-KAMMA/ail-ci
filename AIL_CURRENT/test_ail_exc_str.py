@@ -330,14 +330,6 @@ def t_heap() -> None:
         print("heappop", e)
 
 
-def t_setpop() -> None:
-    s: set[int] = set()
-    try:
-        s.pop()
-    except KeyError as e:
-        print("setpop", e)
-
-
 def t_intfloat(x: float) -> None:
     try:
         print(int(x))
@@ -387,7 +379,6 @@ t_split("abc")
 t_math(-1.0)
 t_math(0.0)
 t_heap()
-t_setpop()
 t_intfloat(float("inf"))
 t_intfloat(float("nan"))
 t_del(5)
