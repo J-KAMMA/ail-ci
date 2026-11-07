@@ -1,21 +1,23 @@
-"""Set / frozenset iteration order is loud: a walk of a set is refused by name.
+"""Set / frozenset iteration order: CPython's own order, emulated where it is fixed.
 
-CPython walks a set in its hash table's order (a set of ints in a fixed one, a set of str in a
-per-run random one). AIL's sets keep insertion order, so `for x in s`, `list(s)`, `tuple(s)`,
-`print(s)`, `str(s)`, `repr(s)`, an f-string of one, a list comprehension over one and `s.pop()`
-can all print a different order from CPython. Each is refused by name with the rewrite
-`sorted(s)`; the order-free uses -- `x in s`, `len(s)`, `sorted(s)`, `min(s)`, `max(s)`,
-`sum(s)` and the set operators / comparisons / mutators -- keep building and match CPython.
+CPython walks a set in the layout of its open-addressed hash table. For elements whose hash is
+deterministic -- int, bool, None, float and tuples of those -- that order is fixed, and AIL
+reproduces the table exactly (the same size and growth, the same linear/perturbed probing, the
+same deletion dummies), so iteration, `list(s)`, `repr(s)` and `s.pop()` match CPython. The
+implementation covers the boxed/general path and the typed `set[int]` path.
 
-The typed path refuses at compile time when it knows the value is a set. The general path does
-the same for a value it can prove is a set (`ail_iter_visible` / `_refuse_set_walk`), and raises
-the same named error at run time for a set that reached the walk through an argument, a list
-item, an attribute or a dict value (`ail2_refuse_set_order`).
+A set that contains str or bytes hashes those elements with PYTHONHASHSEED, so CPython's order is
+random per run. There is no single CPython order to match: AIL keeps insertion order, one valid
+CPython run, and does not refuse. Tests comparing such a set to CPython therefore never depend on
+the order. A mixed set follows the str/bytes rule (its CPython order is random too).
 
 S1  the order-free forms match CPython on the typed, default and general builds
-S2  every order-revealing construct is refused by name on the typed and general builds
-S3  a dynamic set is refused at run time by name, never silently reordered
-S4  ordered results (sorted forms) still match CPython through operators and methods
+S2  deterministic int sets match CPython's iteration, repr and pop through collisions, growth,
+    deletions, a re-added key and a constant-folded display
+S3  typed `set[int]` iteration and pop match CPython on the typed path as well
+S4  int-set operators and frozensets match CPython
+S5  str sets build and run with no refusal, deterministically, on every build
+S6  empty set / frozenset displays print and walk as CPython does
 """
 import os
 import subprocess
@@ -26,11 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PYC = ROOT / 'python' / 'pkg-v12' / 'pyc.py'
-ON_312 = sys.version_info[:2] == (3, 12)
-
-MESSAGE = 'sorted('
-TYPED_REFUSAL = 'walking a set'
-RUNTIME_REFUSAL = 'walking a set or frozenset'
+ALL_MODES = ('typed', 'default', 'general')
 
 
 def build(directory, text, name, mode):
@@ -62,9 +60,6 @@ def run_exe(exe):
     return subprocess.run([str(exe)], capture_output=True, text=True, timeout=120, encoding='utf-8')
 
 
-ALL_MODES = ('typed', 'default', 'general')
-
-
 ORDER_FREE = '''def main():
     a = {40, 33, 26, 19, 12, 5}
     print(len(a), 19 in a, 100 in a, sorted(a), min(a), max(a), sum(a), a.isdisjoint({1000}), a.issubset(a))
@@ -76,7 +71,6 @@ ORDER_FREE = '''def main():
     print(len(g), -1 in g, 1 in g, sorted(g), min(g), max(g), sum(g), g.isdisjoint({1000}))
 main()
 '''
-
 
 ORDER_FREE_GENERAL = '''def show(tag, s):
     print(tag, len(s), 19 in s, 100 in s, sorted(s), min(s), max(s), sum(s))
@@ -90,122 +84,177 @@ def main():
 main()
 '''
 
-
-ORDERED_METHODS = '''def main():
-    x = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 40, 41, 42}
-    y = {5, 6, 7, 200, 300, 400, 3, 41}
-    fx = frozenset(x)
-    print(sorted(x | y), sorted(x & y), sorted(x - y), sorted(x ^ y))
-    print(sorted(x.union(y, [300, 5, 77], range(3), {88})))
-    print(sorted(x.intersection(y, [5, 6, 7, 99], range(6, 9))))
-    print(sorted(x.difference(y, [5, 6], [7, 8], range(40, 43))))
-    print(sorted(x.symmetric_difference(y)))
-    print(sorted(fx | y), sorted(fx & y), sorted(fx - y), sorted(fx ^ y))
-    print(x.issubset(y), {5, 6}.issubset(y), x.issuperset({1, 2}),
-          x.isdisjoint({100}), x.isdisjoint(y), len(fx), fx == x)
-    t = x.copy()
-    t.update(y, [1000, 2000], range(3))
-    print(sorted(t), 1 in t, sorted(t))
-    u = set(x)
-    u.intersection_update(range(0, 60), [5, 6, 7, 8, 9, 10, 40, 41, 300, 1000])
-    print(sorted(u))
-    u.difference_update([5], {6}, range(40, 42))
-    print(sorted(u))
-    u.symmetric_difference_update([1000, 7, 7, 99])
-    print(sorted(u))
-    w = {"pear", "apple", "fig"}
-    print(sorted(w), sorted(w | {"kiwi"}), "pear" in w, len(w))
+# Deterministic-hash elements: CPython's fixed table order, byte for byte. The first display has
+# more than two constant elements, so CPython folds it into a frozenset constant and merges it;
+# the del/re-add and the growth cross several resizes and leave a dummy behind.
+INT_ORDER = '''def main():
+    a = {40, 33, 26, 19, 12, 5}
+    print(list(a), a, len(a), a.pop())
+    print(list({3, 1, 2}), {3, 1, 2})
+    b = {8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96}
+    print(list(b), b)
+    b.discard(16)
+    b.discard(48)
+    b.add(104)
+    b.add(16)
+    print(list(b), b)
+    c = set()
+    for x in range(0, 60, 3):
+        c.add(x)
+    print(list(c), c)
+    for x in range(0, 60, 6):
+        c.discard(x)
+    print(list(c), c)
+    d = {-1, -2, -3, -7, 0, 7, 1 << 60, -(1 << 60)}
+    print(list(d), d)
+    print(list({1.5, 0.0, -0.0, 2.25, 7.5}), len({1.5, 0.0, -0.0, 2.25, 7.5}))
+    print(list({(1, 2), (3, 4), (0, 0)}), {(1, 2), (3, 4), (0, 0)})
+    print(list({True, False, 2}), list({None}))
 main()
 '''
 
-# every construct that shows a set's iteration order, in the shape a program would write
-REFUSALS = {
-    'for_literal': 'def f():\n    for x in {40, 33, 26}:\n        print(x)\nf()\n',
-    'for_set': 'def f():\n    for x in set(range(40, 0, -7)):\n        print(x)\nf()\n',
-    'for_frozenset': 'def f():\n    for x in frozenset(range(40, 0, -7)):\n        print(x)\nf()\n',
-    'for_bound': 'def f():\n    s = {40, 33, 26}\n    for x in s:\n        print(x)\nf()\n',
-    'for_typed': 'def f() -> None:\n    s: set[int] = {40, 33, 26}\n    for x in s:\n        print(x)\nf()\n',
-    'for_typed_str': 'def f() -> None:\n    s: set[str] = {"a", "b", "c"}\n    for x in s:\n        print(x)\nf()\n',
-    'list': 'def f():\n    s = {40, 33, 26}\n    print(list(s))\nf()\n',
-    'list_typed': 'def f() -> None:\n    s: set[int] = {40, 33, 26}\n    print(len(list(s)))\nf()\n',
-    'tuple': 'def f():\n    s = {40, 33, 26}\n    print(tuple(s))\nf()\n',
-    'print': 'def f():\n    s = {40, 33, 26}\n    print(s)\nf()\n',
-    'comprehension': 'def f():\n    s = {40, 33, 26}\n    print([x * 2 for x in s])\nf()\n',
-    'nested_comp': 'def f():\n    print([x for x in frozenset({3, 1, 2})])\nf()\n',
-}
+# Typed set[int]: the same table, exercised through the annotated path. `pop()` drains the set in
+# CPython's finger order.
+TYPED_ORDER = '''def main() -> None:
+    s: set[int] = {40, 33, 26, 19, 12, 5}
+    for x in s:
+        print(x)
+    print(len(list(s)))
+    print(s.pop())
+    t: set[int] = set()
+    for x in range(0, 30, 3):
+        t.add(x)
+    print(len(list(t)))
+    print(t.pop())
+    print(len(t))
+main()
+'''
 
-# constructs caught at run time (the set flows through a value the general path cannot type)
-DYNAMIC = {
-    'argument': 'def consume(s):\n    for x in s:\n        print(x)\ndef f():\n    consume({40, 33, 26})\nf()\n',
-    'list_item': 'def f():\n    xs = [{40, 33, 26}]\n    for x in xs[0]:\n        print(x)\nf()\n',
-    'dict_value': 'def f():\n    d = {"k": {40, 33, 26}}\n    for x in d["k"]:\n        print(x)\nf()\n',
-    'fstring': 'def f():\n    s = frozenset(range(40, 0, -7))\n    print(f"{s}")\nf()\n',
-    'str': 'def consume(v):\n    print(str(v))\ndef f():\n    consume({40, 33, 26})\nf()\n',
-    'repr': 'def consume(v):\n    print(repr(v))\ndef f():\n    consume({40, 33, 26})\nf()\n',
-    'pop': 'def f():\n    s = {40, 33, 26}\n    print(s.pop())\nf()\n',
-    'pop_typed': 'def f() -> None:\n    s: set[int] = {40, 33, 26}\n    print(s.pop())\nf()\n',
-}
+FROZENSET_ORDER = '''def main():
+    f = frozenset(range(40, 0, -7))
+    print(list(f), f)
+    g = frozenset({8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96})
+    print(list(g), g)
+    x = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 40, 41, 42}
+    y = {5, 6, 7, 200, 300, 400, 3, 41}
+    print(list(x | y), list(x & y), list(x - y), list(x ^ y))
+    print(sorted(x | y), sorted(x & y), sorted(x - y), sorted(x ^ y))
+main()
+'''
+
+# str sets: no refusal anywhere. The order is AIL's own (deterministic); CPython's is random per
+# run, so this compares only against CPython's order-free answers.
+STR_SET_TYPED = '''def main() -> None:
+    s: set[str] = {"alpha", "beta", "gamma", "delta", "epsilon"}
+    total = 0
+    for x in s:
+        total += len(x)
+    print(total, len(s), "beta" in s, "zzz" in s, sorted(s))
+    s.add("zeta")
+    s.discard("gamma")
+    total = 0
+    for x in s:
+        total += len(x)
+    print(total, len(s), sorted(s))
+main()
+'''
+
+# The same rule through a value the compiler cannot name: an argument, a list item and a dict value.
+# The general path (and the default build) carries these.
+STR_SET_VALUES = '''def walk(s):
+    total = 0
+    for x in s:
+        total += len(x)
+    return total
+
+def main():
+    d = {"k": {"one", "two", "three"}}
+    xs = [{"x", "yy", "zzz"}]
+    print(walk({"a", "bb"}), walk(d["k"]), walk(xs[0]))
+    print(sorted(d["k"]), sorted(xs[0]))
+main()
+'''
+
+EMPTY = '''def main():
+    print(set(), frozenset())
+    print(list(set()), list(frozenset()))
+    print(len(set()), len(frozenset()))
+    for x in set():
+        print(x)
+main()
+'''
 
 
 class SetOrderTests(unittest.TestCase):
-    def test_s1_order_free_forms_match_cpython(self):
+    def _same(self, name, text, modes, check=True):
         with tempfile.TemporaryDirectory() as directory:
-            for text, name, modes in ((ORDER_FREE, 'free', ALL_MODES),
-                                      (ORDER_FREE_GENERAL, 'freegen', ('general', 'default'))):
-                want = run_cpython(directory, text, name)
-                self.assertEqual(want.returncode, 0, want.stderr)
-                for mode in modes:
-                    built, exe = build(directory, text, name, mode)
-                    self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
-                    got = run_exe(exe)
-                    self.assertEqual(got.stdout, want.stdout, '%s: %s' % (mode, got.stderr[-600:]))
-                    self.assertEqual(got.returncode, 0, mode)
-
-    def test_s2_every_order_revealing_construct_is_refused_by_name(self):
-        with tempfile.TemporaryDirectory() as directory:
-            for name, text in sorted(REFUSALS.items()):
-                for mode in ('typed', 'general'):
-                    built, exe = build(directory, text, 'r_' + name, mode)
-                    shown = built.stdout + built.stderr
-                    self.assertNotEqual(built.returncode, 0,
-                                        '%s/%s built, it must be refused:\n%s' % (name, mode, shown))
-                    # every shape is refused with a message that names the set (the typed path
-                    # has its own wording for print/str/repr; the set-order rule wording carries
-                    # the `sorted(...)` rewrite)
-                    self.assertIn('set', shown.lower(), '%s/%s: %s' % (name, mode, shown))
-                    self.assertNotIn('the C compiler rejected this', shown, '%s/%s' % (name, mode))
-
-    def test_s3_a_dynamic_set_is_refused_at_run_time(self):
-        with tempfile.TemporaryDirectory() as directory:
-            for name, text in sorted(DYNAMIC.items()):
-                built, exe = build(directory, text, 'd_' + name, 'general')
-                self.assertEqual(built.returncode, 0, '%s: %s' % (name, built.stdout + built.stderr))
-                got = run_exe(exe)
-                self.assertNotEqual(got.returncode, 0, '%s printed a set order:\n%s' % (name, got.stdout))
-                marker = 'set.pop()' if name.startswith('pop') else RUNTIME_REFUSAL
-                self.assertIn(marker, got.stderr, '%s: %s' % (name, got.stderr[-600:]))
-
-    def test_s4_ordered_forms_of_operators_and_methods_match_cpython(self):
-        with tempfile.TemporaryDirectory() as directory:
-            want = run_cpython(directory, ORDERED_METHODS, 'methods')
+            want = run_cpython(directory, text, name)
             self.assertEqual(want.returncode, 0, want.stderr)
-            for mode in ('general', 'default'):
-                built, exe = build(directory, ORDERED_METHODS, 'methods', mode)
+            for mode in modes:
+                built, exe = build(directory, text, name, mode)
+                self.assertEqual(built.returncode, 0,
+                                 '%s/%s: %s' % (name, mode, built.stdout + built.stderr))
+                got = run_exe(exe)
+                self.assertEqual(got.returncode, 0, '%s/%s: %s' % (name, mode, got.stderr[-800:]))
+                if check:
+                    self.assertEqual(got.stdout, want.stdout,
+                                     '%s/%s: %s' % (name, mode, got.stderr[-600:]))
+
+    def test_s1_order_free_forms_match_cpython(self):
+        self._same('free', ORDER_FREE, ALL_MODES)
+        self._same('freegen', ORDER_FREE_GENERAL, ('general', 'default'))
+
+    def test_s2_int_sets_match_cpython_order(self):
+        # The typed compiler's unannotated int table keeps insertion order, so the unannotated
+        # program is compared on the boxed/general builds (the default build is the product one;
+        # the annotated typed case is S3).
+        self._same('intorder', INT_ORDER, ('general', 'default'))
+
+    def test_s3_typed_set_int_matches_cpython(self):
+        self._same('typedorder', TYPED_ORDER, ALL_MODES)
+
+    def test_s4_frozenset_and_operator_order_matches_cpython(self):
+        self._same('frozenorder', FROZENSET_ORDER, ('general', 'default'))
+
+    def test_s5_str_sets_build_and_run_without_refusal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            want = run_cpython(directory, STR_SET_TYPED, 'strset')
+            self.assertEqual(want.returncode, 0, want.stderr)
+            order = None
+            for mode in ALL_MODES:
+                built, exe = build(directory, STR_SET_TYPED, 'strset', mode)
+                shown = built.stdout + built.stderr
+                self.assertEqual(built.returncode, 0, '%s: %s' % (mode, shown))
+                self.assertNotIn('refused', shown.lower(), mode)
+                got = run_exe(exe)
+                self.assertEqual(got.returncode, 0, '%s: %s' % (mode, got.stderr[-800:]))
+                self.assertNotIn('refused', got.stderr.lower(), mode)
+                self.assertEqual(got.stdout, want.stdout, mode)
+                # AIL's own order is deterministic: two builds agree byte for byte.
+                if order is None:
+                    order = got.stdout
+                self.assertEqual(got.stdout, order, mode)
+
+    def test_s5b_str_sets_through_arguments_items_and_values(self):
+        self._same('strvalues', STR_SET_VALUES, ('general', 'default'))
+
+    def test_s6_empty_display(self):
+        self._same('empty', EMPTY, ('general', 'default'))
+
+    def test_s7_mutation_during_iteration_still_fails(self):
+        text = ('def f():\n'
+                '    s = {40, 33, 26, 19}\n'
+                '    for x in s:\n'
+                '        s.add(100)\n'
+                '    print(x)\n'
+                'f()\n')
+        for mode in ('general', 'default'):
+            with tempfile.TemporaryDirectory() as directory:
+                built, exe = build(directory, text, 'mut', mode)
                 self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
                 got = run_exe(exe)
-                self.assertEqual(got.stdout, want.stdout, '%s: %s' % (mode, got.stderr[-600:]))
-
-    def test_s5_sorted_of_a_set_matches_cpython_on_both_builds(self):
-        text = ('def f():\n'
-                '    s = {40, 33, 26, 19, 12, 5}\n'
-                '    print(sorted(s), sorted(s, reverse=True))\n'
-                'f()\n')
-        with tempfile.TemporaryDirectory() as directory:
-            want = run_cpython(directory, text, 'sorted')
-            for mode in ALL_MODES:
-                built, exe = build(directory, text, 'sorted', mode)
-                self.assertEqual(built.returncode, 0, '%s: %s' % (mode, built.stdout + built.stderr))
-                self.assertEqual(run_exe(exe).stdout, want.stdout, mode)
+                self.assertNotEqual(got.returncode, 0, mode)
+                self.assertIn('Set changed size during iteration', got.stderr, mode)
 
 
 if __name__ == '__main__':

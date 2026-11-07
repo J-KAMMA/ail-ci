@@ -1,3 +1,29 @@
+## 2026-11-07 -- setord2: emulate CPython's fixed set order; keep a deterministic order for str/bytes sets (job-setord2-11080440)
+
+setord1 refused every order-revealing use of a set. That was too broad: for elements whose CPython hash
+is fixed, the order is reproducible, and refusing it broke difflib, pprint, `set.pop()` in the fuzz tests
+and several gates. This replaces the refusal with CPython's own table.
+
+- Boxed/general set and frozenset (`ail_setobj`): a `ctab` mirrors CPython's table -- 8 slots, growth on
+  a 3/5 fill, `set_add_entry`'s 9 linear probes and perturb-5 steps, deletion dummies and `set_pop`'s
+  finger (`fin`). Iteration, `list`, `repr`, operators, updates and `pop` use it. Only deterministic-hash
+  elements (int, bool, None, float, tuples of those) are placed there; the first str/bytes element turns
+  the shadow off and the set keeps insertion order (CPython randomises those per run). A display of more
+  than two constants reproduces CPython's compiler folding: a frozenset built by adds, rebuilt once from
+  its own iteration order, then merged into a fresh set (`set_merge`'s pointer copy included).
+- Typed `set[int]` (`ail_iset`, still `ail_idict`): the same shadow table on the int table (keys are the
+  slots), so `for x in s`, `list(s)` and `pop()` match CPython. `set[str]` keeps insertion order.
+- Removed setord1's refusals from both compilers (`pyboxed2`, `pyfunc`): for/comprehension/list/tuple/
+  print/str/repr/f-string/`pop` build again, and `sorted(s, key=...)` is unaffected. The typed compiler's
+  *unannotated* int set is the internal insertion-ordered `SET` table, not `set[int]`; a walk of it is
+  still refused by name (the default build falls back to the general path, which emulates exactly), so no
+  build prints a silently different order.
+- `test_ail_setorder.py` rewritten: int-set iteration/repr/pop through collisions, growth, deletions, a
+  re-added key and a folded display compared with CPython; typed `set[int]`; frozensets and operators;
+  str sets build, run and are deterministic on every build; empty displays. It passes in 63s.
+- DIFFERENCES: `C?-job-setord2-11080440-1`; docs/spec A2 now states that str/bytes set order is
+  unspecified (CPython varies it per run) and AIL's order is deterministic.
+
 ## 2026-11-07 -- pyreach9 re-applied: typed-path census and next steps (job-rbpyreach9-11071805)
 
 Re-applied the accepted `job-pyreach9-11071621` change, fetched anonymously, on this tree.
