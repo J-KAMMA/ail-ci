@@ -16,6 +16,31 @@ Everything after the source file of `ail run` goes to the program; options befor
 compiler. `ail build --debug`, `ail build --lib`, `ail run --strict` and the pass-through commands are
 described in [QUICKSTART.md](QUICKSTART.md) and in `ail --help`.
 
+## `compile --json`: machine-readable compiler diagnostics
+
+`python3 ail_chatgpt.py compile prog.py -o prog --json` (also `ail build --json`, which passes the
+option through) still prints the `ail.build/1` report. When the typed path refused a construct (an
+`error`) or built the program on the general path (a `note`), that report also carries
+`agent_diagnostics`, one object per diagnostic an agent can act on:
+
+```json
+{"code":"AIL0107","severity":"note","file":"main.py","line":1,"col":1,
+ "cause":"this dict literal puts an int (`'line': 3`) and a bool (`'has_else': False`) in the same dict; ...",
+ "message":"main.py:1:1: built on the general path (about 20x slower) because ...",
+ "fix":{"replace_range":[1,2],"with":"class Node:\n    ..."}}
+```
+
+- `code` is stable per family, `AIL0101` through `AIL0116`.
+- `file`, `line` and `col` are a position in the file the user wrote; a note that came from a
+  standard-library prelude is moved to the user's call site when the literal edit is found.
+- `cause` is one sentence in the user's own names; compiler temporaries such as `_ail_*` never
+  appear.
+- `message` is exactly the human text, byte for byte.
+- `fix.replace_range` is the whole-line range to replace, 1-based and inclusive; `fix.with` replaces
+  those lines. Applying the pair keeps the program's output and, except for `AIL0102` (a
+  compiler-side temporary that needs the separate row-arity fix), removes the diagnostic. An agent
+  can apply the edit without parsing the message.
+
 ## `ail run --diff`: run the program twice and compare
 
 AIL is Python syntax, so CPython is a free oracle for a program's behaviour. `ail run --diff` builds

@@ -1,0 +1,92 @@
+[
+ {
+  "id": "01_stdin_buffer",
+  "file": "01_stdin_buffer.py",
+  "needle": "sys.stdin.buffer",
+  "input": "01_stdin_buffer.in"
+ },
+ {
+  "id": "02_poprow_arity",
+  "file": "02_poprow_arity.py",
+  "needle": "' is bound from popping rows of",
+  "input": "02_poprow_arity.in"
+ },
+ {
+  "id": "03_str_number",
+  "file": "03_str_number.py",
+  "needle": "comparing a str with a number",
+  "input": null
+ },
+ {
+  "id": "04_dict_get_optional",
+  "file": "04_dict_get_optional.py",
+  "needle": "d.get(k) with one argument",
+  "input": null
+ },
+ {
+  "id": "05_dict_of_containers",
+  "file": "05_dict_of_containers.py",
+  "needle": "dict of containers",
+  "input": null
+ },
+ {
+  "id": "06_class_list_comp",
+  "file": "06_class_list_comp.py",
+  "needle": "class list comprehensions",
+  "input": null
+ },
+ {
+  "id": "07_bool_number_mix",
+  "file": "07_bool_number_mix.py",
+  "needle": "mixes bools and numbers",
+  "input": null
+ },
+ {
+  "id": "08_bytes_number_return",
+  "file": "08_bytes_number_return.py",
+  "needle": "returns bytes on one path and a number",
+  "input": null
+ },
+ {
+  "id": "09_while_else",
+  "file": "09_while_else.py",
+  "needle": "while-else is unsupported",
+  "input": null
+ },
+ {
+  "id": "10_nested_annotation",
+  "file": "10_nested_annotation.py",
+  "needle": "nested annotation",
+  "input": null
+ },
+ {
+  "id": "11_fraction_dunder",
+  "file": "11_fraction_dunder.py",
+  "needle": "dunder method Fraction.__float__",
+  "input": null
+ },
+ {
+  "id": "12_decimal_format",
+  "file": "12_decimal_format.py",
+  "needle": "format spec on a Decimal",
+  "input": null
+ },
+ {
+  "id": "13_yield",
+  "file": "13_yield.py",
+  "needle": "yield: this language has no generators",
+  "input": null
+ },
+ {
+  "id": "14_tuple_single_value",
+  "file": "14_tuple_single_value.py",
+  "needle": "a tuple used where a single value is needed",
+  "input": null
+ },
+ {
+  "id": "15_list_param_readonly",
+  "file": "15_list_param_readonly.py",
+  "needle": "is a list parameter, which is read-only",
+  "input": null
+ }
+]

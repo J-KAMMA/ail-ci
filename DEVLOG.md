@@ -1,3 +1,16 @@
+## 2026-11-07 -- err2: `--json` agent diagnostics for compiler errors and fallback notes (job-err2-11071812)
+
+`compile --json` keeps the `ail.build/1` report and adds `agent_diagnostics`: one object per known
+diagnostic family with stable `code` (`AIL0101`..`AIL0116`), `severity`, `file`, `line`, `col`, a
+one-sentence `cause` in the user's names, the human `message` byte for byte, and a literal
+`fix.replace_range`/`with` pair. The family table and its `Replace`/`With` blocks follow
+`docs/design/AGENT_ERRORS.md`; a note that points at a standard-library prelude (or has no position)
+is moved to the user's line when the literal edit is found. `lab/err/triggers/` supplies one program
+per family. The new `test_ail_agent_errors.py` compiles each with `--json`, parses the object, applies
+the edit and rebuilds: every family builds and matches CPython; 14/15 lose their message, while
+AIL0102 still needs the compiler-side row-arity fix from implementation step 2. No program output
+changes; the field is additive and `--json` still prints one report object.
+
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched
