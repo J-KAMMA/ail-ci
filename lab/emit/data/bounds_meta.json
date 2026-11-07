@@ -1,0 +1,30 @@
+{
+ "method": {
+  "tool": "callgrind Ir only",
+  "ail_cflags": [
+   "-O2",
+   "-g",
+   "-fno-tree-slp-vectorize",
+   "-ffp-contract=off",
+   "-fopenmp-simd"
+  ],
+  "c_cflags": [
+   "-O2",
+   "-g",
+   "-std=c11"
+  ],
+  "edits": "lab/emit/patches/*.diff"
+ },
+ "bounds": [
+  {
+   "task": "ticket_audit",
+   "variant": "ticket_audit_nometa",
+   "edit": "ail_blist_meta body -> (void)B (the invariant test)",
+   "target": "six-compare invariant test on every list operation",
+   "before": 13002099013,
+   "after": 11634167277,
+   "saved": 1367931736,
+   "stdout_same": true
+  }
+ ]
+}

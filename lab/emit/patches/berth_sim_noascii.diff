@@ -1,0 +1,12 @@
+--- a/program.c
++++ b/program.c
+@@ -2315,9 +2315,6 @@
+         if (nl) {
+             int64_t take = (int64_t)(nl - start) + 1;
+             int _ascii = 1;
+-            for (int64_t _k = 0; _k < take; _k++) {
+-                if (start[_k] >= 0x80) { _ascii = 0; break; }
+-            }
+             if (_ascii) {
+                 int64_t bcap;
+                 uint8_t *q = (uint8_t *)ail__blk_take(take + 1, &bcap);

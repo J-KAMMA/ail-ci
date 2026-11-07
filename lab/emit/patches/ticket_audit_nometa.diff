@@ -1,0 +1,14 @@
+--- a/program.c
++++ b/program.c
+@@ -6914,10 +6914,7 @@
+ /* Inline: every list operation checks the header, and the call was 9% of an LLM-written line
+    validator splitting each line into a list[bytes]. */
+ static inline void ail_blist_meta(const ail_blist *B) {
+-    if (__builtin_expect(!B || !B->refs || B->n < 0 || B->cap < B->n || (B->cap && !B->p) ||
+-            (uintmax_t)B->cap > (uintmax_t)SIZE_MAX / sizeof *B->p ||
+-            (uintmax_t)B->cap > (uintmax_t)PTRDIFF_MAX / sizeof *B->p, 0))
+-        ail_die("invalid bytes list");
++    (void)B;   /* bound: the invariant check removed, everything else unchanged */
+ }
+ static void ail_blist_elements(const ail_blist *B) {
+     ail_blist_meta(B);

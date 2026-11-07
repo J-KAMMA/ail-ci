@@ -52,6 +52,195 @@ mixed-container 15, value-kind-lost 14.  41 of the 97
 non-typed lists are `strict_incomplete`; that is recorded per program.  `docs/design/
 PYREACH_NEXT.md` turns the top five into queued steps.
 
+## 2026-11-07 -- emit1 re-applied: lean-emission design and its measurement (job-rbemit1-11071906)
+
+Re-applied the accepted `job-emit1-11071640` change, fetched anonymously, on this tree: `docs/design/EMIT_LEAN.md`, the
+`lab/emit/` measurement (`analyze.py`, `classify.py`, `bounds.py`, `data/*.json`, `patches/*.diff`, `RESULTS.md`,
+`results.json`) and the one `DIFFERENCES.md` row. The change is docs and data only; no compiler or runtime file moved, so
+the `lab/emit/data/bounds.json` claim (every hand-edited variant prints byte-identical stdout) still rests on this tree's
+unchanged emitter. `.github/workflows/agent-worker.yml` was already identical here and the three `DEVLOG.md` entries
+conflicted only at the top (both sides added entries): theirs are kept above this one, then this tree's `rundiff1` and
+`arena1 S3` entries. `tools/diff_ids.py` is not present on this tree, so only `tools/update_manifest.py` ran; nothing it
+pins changed and `--check` passes. Modules run on the final tree: `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` all OK via `tools/par_check.py -j 2` (3 modules, 0 failed). The change touches no test module.
+Probes: `/tmp/probes/emit_data.py` (15 bounds, 15 patches, six tasks, design-doc paths, `causes.json` reproduced from
+`lines.json`), `emit_behaviour.py` and `emit_behaviour2.py` (dict fast path, int parsing, shifts, recursion, non-ASCII
+bytes, list reserves; both builds match CPython), and `emit_refused.py` / `emit_overflow.py` (the >18-digit constant and
+the int64 constant `+ 1` are refused by name).
+
+## 2026-11-07 -- emit1 review 2 fix: fast-dict escape, stale ranks (job-emit1-11071640)
+
+Review fix; docs/data only, no compiler or runtime change. The previous commit's three fixes were
+confirmed against the code; three defects remained in the design/measurement text.
+
+- **Design 1's fast mark still allowed escape.** The mark now also requires that the dict is never
+  returned and never stored into another container, attribute or global, so a caller cannot iterate
+  a fast dict after the function returns. Control added: `def f(): d={1:'a',2:'b'}; d[3]='c';
+  return d`, then `print(list(f()))` must print `[1, 2, 3]` (general table), not hash order. The
+  correctness section, step 1.2 test and the ready-to-queue task text say the same.
+- **Stale rank:** `docs/design/EMIT_LEAN.md` called ASCII/UTF-8 "rank 7"; it is rank 6 (490M).
+- **Stale rank:** `lab/emit/RESULTS.md` called the accessor bound "cause 6"; it is cause/rank 5
+  (952M). Also fixed the two pre-existing stale references: "rank 4/5" container/list helpers is
+  now "rank 2/4", and "causes 1, 4, 5" is now "causes 1, 3, 6" (dict probe, overflow, ASCII/parse).
+
+Probes re-run on the final tree (`bash ~/tools/cmp.sh <p> $PWD`, both builds):
+`/tmp/probes/emit_dict_order.py` and `/tmp/probes/emit_shift_negative.py` are CPython-identical;
+`/tmp/probes/emit_shift_overflow.py` (`-2**62 << 2`) is refused by name; and
+`/tmp/probes/emit_shift_negative_arg.py` stops with `OverflowError` on both builds. The source is
+unchanged since the previous commit, so these results are unchanged. Required modules on the final
+commit: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (3/3 pass); manifest
+`--check` clean.
+
+## 2026-11-07 -- emit1 review fix: recursion-edge net, strict fast-dict mark, signed shift bound (job-emit1-11071640)
+
+Review fix; no compiler or runtime change. All three defects were still present in the tree (the
+`tally_lang_edge` patch existed but no result row did).
+
+- **Rank 3 was the wrong number.** Re-ran
+  `bounds.py --tasks tally_lang --only tally_lang_edge,tally_lang_norec`: the entry-guard deletion
+  is 19,585,727,653 -> 18,401,358,764 (saved 1,184,368,889), but the correct replacement (guard at
+  the 5 self-calls plus the wrapper) is 19,585,727,653 -> 19,396,094,852, a net **189,632,801**
+  (190M). Added the `tally_lang_edge` row to `lab/emit/data/bounds.json` and `RESULTS.md`,
+  retitled design 2 to the net, moved the recursion cause to rank 7 (below overflow, list helpers,
+  accessors and ASCII), and restated the three queueable bounds as ~3.1e9 (about 10% of 31.1e9),
+  not 4.1e9/13%. Also noted that `echo_pack_dict2`'s 1,927M is an upper bound for the whole edit
+  (it also removes growth, the order list and cleanup), not the probe alone.
+- **Design 1's fast mark was too weak.** The fast dict has no order list, so the mark now excludes
+  every order-observing operation: iteration, `list`/`tuple`/`dict` conversion, `repr`/`str`/
+  print/format, equality/ordering comparison, and `keys`/`values`/`items`/`copy`/`popitem`. The
+  control `d={1:'a',2:'b'}; d[3]='c'; print(list(d))` must keep the general table and print
+  `[1, 2, 3]`.
+- **Design 3's shift rule was unsound for a negative left operand.** It now requires a constant
+  `0 <= k < 63` and proves both `lo(x) >= -(2^(63-k))` and `hi(x) < 2^(63-k)`, with the bound
+  computed in a wider integer; `x = -2**62; x << 2` therefore stays checked (its value `-2^64` is
+  outside int64), instead of being proved wrap by the old upper-bound-only rule.
+- Old entry's check share corrected to 9.8% (5,607/57,185 in `RESULTS.md`, not 11%).
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, both builds): `/tmp/probes/emit_dict_order.py` (list,
+items, repr and `dict(d)` order after inserts) and `/tmp/probes/emit_shift_negative.py` (safe
+negative shifts `-100<<2`, `-1<<63`, `-(2**61)<<1`, `-2**62<<0`, `0<<62`, `1<<62`) are
+CPython-identical on the default and forced-general builds. `/tmp/probes/emit_shift_overflow.py`
+(`-2**62 << 2`) is refused by name at compile time (`int64 constant expression out of range`), and
+`/tmp/probes/emit_shift_negative_arg.py` (same value through an argument) stops loudly with
+`OverflowError: integer overflow in << ...` on both builds, never a silent wrap. The source was not
+changed, so the two CPython-identical probes also pass on the base tree. Tests on the final commit:
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (3/3 pass); manifest
+`--check` clean.
+
+## 2026-11-07 -- emit1: where the typed C's extra instructions go, and a lean-emission design (job-emit1-11071326)
+
+Measurement and design only; no compiler change. `lab/emit/analyze.py` rebuilds both sides of six
+`lab/compare` programs (`ticket_audit`, `echo_pack`, `tree_fold`, `ledger_bin`, `tally_lang`,
+`berth_sim`) and reads Ir per emitted C line from valgrind callgrind (3.22, Ir only), checking
+stdout byte-identical. `lab/emit/classify.py` sub-classifies the `other` class by cause;
+`lab/emit/bounds.py` and `lab/emit/patches/*.diff` hand-edit a throwaway copy of the generated C,
+rebuild it with the same flags and measure the real saving.
+
+Headline: `temporaries/one-statement` is 30.7% of the emitted lines' Ir, container/dict/string
+helper bodies another 31%, and the checks (bounds + overflow + refcount + copies) 9.8%
+(5,607/57,185). Measured bounds, largest first: specialised int-dict probe 1.93e9 (`echo_pack`),
+the `ail_blist_meta` invariant test 1.37e9 (`ticket_audit`, a safety check reported but not
+queueable as a removal), overflow-checked arithmetic 1.01e9 (`ledger_bin` + `ticket_audit`),
+list/sequence helpers 1.00e9, ASCII scan 0.49e9, recursion guard moved to the recursive edge
+0.19e9 net (`tally_lang`; 1.18e9 only if the entry guard is deleted with nothing put back), and
+one-loop shape rewrite 0.18e9; `always_inline` on the append helper saves 4.7M (negative).
+`docs/design/EMIT_LEAN.md` ranks these and splits the three queueable ones (dict probe, recursion
+guard at the recursive edge, overflow checks only where provable) into eight <=2h steps with
+files, tests and ready-to-queue task text.
+Reproduce with `python3 lab/emit/analyze.py && python3 lab/emit/classify.py && python3
+lab/emit/bounds.py` (about 12 minutes of callgrind).
+## 2026-11-07 -- err1: compiler messages an AI can act on -- measurement and design (job-err1-11071330)
+
+Design-only job; the compiler is unchanged. Collected the messages that actually fire by
+compiling the 8 vibe programs that built and 100 gdev programs (108 runs), plus the 11 AIL
+attempts in `lab/vibe/results.json`. Selected the 15 messages (the 9 reproducible messages from
+vibe1's run plus the 6 highest-frequency gdev-only families), wrote one trigger each in
+`lab/err/triggers/`, and asked the model vibe1 used (`cmd`, `deepseek-v4.1-flash`, `--effort
+low`, one turn, no tools) to fix each program from the message alone, 5 replies per trigger.
+
+Per-message fix rate (builds, matches CPython, message gone): 56/75 = 0.75. The dead ends are
+`_ail_l1l` row arity (0.20), "mixes bools and numbers" (0.00; the suggested `int(...)` changes
+`False` to `0`), `Fraction.__float__` (0.00; the note points at line 235 of a 3-line file), and
+the tuple/single-value note (0.40). `docs/design/AGENT_ERRORS.md` specifies an agent format
+(`file:line:col: CODE: cause` plus a literal `Replace`/`With`, and a `--json` object with
+`fix.replace_range`/`with`), rewrites all 15, and re-runs the harness on the rewritten text:
+69/75 = 0.92 (07, 11 and 14 go to 5/5; 02 stays at 0/5 because the cause is compiler-internal).
+Implementation is split into six steps of at most 2 h with files, tests and the number each
+moves. vibe1's #1 message (tuple element type) no longer fires from a user program on the
+current compiler (it was a prelude note; `test_ail_pre133` records the fix) and is kept as
+AIL0116 without a fix-rate row.
+
+Probes: each published `Replace`/`With` block was applied literally (byte for byte, indentation
+included) to its trigger in `/tmp/probes/NN.py`; every `Replace` matched exactly once, all 15
+built and matched CPython on both builds (`bash ~/tools/cmp.sh`), and 14/15 lost the message.
+Only 02 does not: `_ail_l1l` row arity is a compiler-side defect. Review fix: AIL0110 now
+replaces the function and its caller together, AIL0106/AIL0114 `With` blocks carry the replaced
+line's 4-space indent, and AIL0102's `With` is code only (indented) instead of prose; the four
+changed messages were re-measured with the same harness (same rates: 02 0/5, 06/10/14 5/5).
+
+Tests on this commit: `test_ail_safetynet` 5 OK, `test_ail_files` 18 OK (1 skipped),
+`test_ail_corpus_findings3` 2 OK.
+
+## 2026-11-07 -- fe1 re-applied: front-end speed measurement and design (job-rbfe1-11071854)
+
+Re-applied the accepted `job-fe1-11071637` change (`4cfea811`..`86f25ae1`), fetched anonymously, on
+this tree. `docs/design/FRONTEND_SPEED.md` and `lab/fe/` applied unchanged. The
+`.github/workflows/agent-worker.yml` hunk was already present here, so it was left as it is. `DEVLOG.md` conflicted only at the top:
+the accepted entries are kept below this one, then the existing tree's entries. No compiler,
+runtime or corpus file changed, so generated C cannot differ and no behaviour probes apply.
+
+## 2026-11-07 -- fe1 review 1 fix: correct the remaining measurement and ranking defects (job-fe1-11071637)
+
+Fixed the six defects from review 1; no compiler, runtime or corpus file changed, so generated C
+cannot differ. (1) `FE-SPEED-A0` now uses the warm `other` for the warm target: `ticket_audit`
+warm 25.5 s -> ≤2.2 s (25.505 - 23.329 = 2.18 s), and `scar_life` cold 97.4 s -> ≤86.5 s
+(97.381 - 10.938 = 86.44 s), not ≤86 s. (2) The per-function cache is no longer ranked by a cold
+share: a cold build has an empty cache, so its cold Amdahl bound is 0; 50.4% is only the edit
+ceiling, `E/W x (N-1)/N`. The table, option section and one-line ranking now say so. (3) The
+top-20/hot-function 23.5% is labelled a derived estimate: 46.6% is a cProfile proportion applied to
+the measured emitter share, not a timed share. (4) `parse` is now a timed phase: `timed_outer.py`
+and `timed_inner.py` wrap `ast.parse`, `prof.py --parse-only` re-measured it into `results.json`,
+and `RESULTS.md` reports 3.890 s = 1.1% of the timed cold wall (nested in load/pre/emitters, not
+additive); the cProfile figure is corrected to 5.92 s = 0.6% of the profiled wall, not 1.6% of
+wall. (5) The server option uses the consistent fast-27 medians: 0.0263 + 0.1758 + 0.0549 = 0.257 s
+of a 0.468 s hit, 55% (2.2x), not the all-30 load divided by the fast wall (58%, 2.4x). (6) The
+commit message no longer carries a Claude trailer for a non-Claude worker. `report.py` re-renders
+`RESULTS.md` byte-identically; `python3 tools/update_manifest.py --check` passes.
+
+## 2026-11-07 -- fe1 review fix: correct the front-end measurement claims and ranking (job-fe1-11071326)
+
+Fixed the six review defects; no compiler, runtime or corpus file changed, so generated C cannot
+differ and no behaviour probes apply. (1) `docs/design/FRONTEND_SPEED.md` option sections now match
+the ranked table row for row (2 = mypyc, 3 = hot functions, 5 = typed pre-scan, 6 = server,
+7 = lazy imports). (2) The DEVLOG entry above now states the full-sample split (front end 54.4% /
+C 32.6%) and the corrected ranking. (3) The gcc shares on `g17_004`/`g04_006`/`g10_010` are
+64.7%/63.9%/70.5% (its own §1), not the 40–47% copied from tcc1. (4) `lab/fe/report.py` now counts
+10 of the 14 general-path programs with a typed attempt ≥0.01 s (`g14_014` 0.061 s, `g14_004`
+0.068 s included) and names the four refused before the emitter; `RESULTS.md` was regenerated.
+(5) The warm-outlier label is "three" (`scar_life`, `ticket_audit`, `term_rank`) and names them.
+(6) The top-20 Amdahl share is no longer the cProfile share: `RESULTS.md` §2 now derives it on the
+timed wall (46.6% of the profiled emitter cumulative x `E/W` 50.4% = 23.5%), so mypyc (32.6%) is
+decided above hot fixes (23.5%); the 30.7% figure is labelled a profiled-wall upper bound and is no
+longer used in the ranking. `report.py` re-renders `RESULTS.md` byte-identically; the three required
+modules pass on this commit.
+
+## 2026-11-07 -- fe1: where the Python front end spends compile time, and a design to cut it (job-fe1-11071326)
+
+Measurement and design only; the compiler, runtime and default build are unchanged. `lab/fe/prof.py`
+builds the ten `lab/compare/src/<task>/main.py`, their ten `typed.py` and the twelve `corpus/gdev`
+programs timed in tcc1 (32 programs) cold (fresh `AIL_CACHE`/`TMPDIR`, median of 3), times the
+driver's own pass boundaries through `timed_outer.py`/`timed_inner.py` wrappers, profiles both
+Python processes with `sitecustomize`+cProfile, measures a warm whole-build cache hit and the peak
+RSS with `/usr/bin/time -v`. `lab/fe/report.py` renders `lab/fe/results.json` as
+`lab/fe/RESULTS.md`. Across the 30 programs that build, the Python front end is 54.4% of the cold
+wall (197.98 s of 363.97 s) and the C compile+link 32.6% (118.62 s); on the general-path programs
+the emitters are the whole front end and the AST walks (`fastwalk.walk`, `ast.iter_*`) plus the
+memoised type queries are the top self-time functions. `docs/design/FRONTEND_SPEED.md` ranks six
+options by the measured Amdahl bound (per-function cache 50.4% > mypyc front end 32.6% >
+hot-function fixes 23.5% > drop the note check 12.8% > typed pre-scan 7.3% > server > lazy
+imports) and splits the chosen three into ready-to-queue tasks of at most two hours. No probes are
+needed: no behaviour changed. Tests on the final commit: `test_ail_frontend_speed`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched

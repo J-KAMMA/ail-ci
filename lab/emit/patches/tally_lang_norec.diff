@@ -1,0 +1,10 @@
+--- a/program.c
++++ b/program.c
+@@ -6630,7 +6630,6 @@
+ 
+ static
+ int64_t ev__d(ail_obj_Prog *v_p, int64_t v_i, int64_t ail_d) {
+-    if (ail_d > AIL_MAX_RECURSION_DEPTH) ail_die("maximum recursion depth exceeded");
+     ail_list *ir1 = (&(v_p)->f_n_op);
+     ail_list *ir3 = (&(v_p)->f_n_a);
+     int64_t ir2, ir4;

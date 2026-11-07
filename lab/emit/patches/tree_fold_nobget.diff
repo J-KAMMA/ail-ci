@@ -1,0 +1,55 @@
+--- a/program.c
++++ b/program.c
+@@ -7566,21 +7566,21 @@
+         while ((1) != 0) {
+             ail_sarena_keep_roots(&v__sarena, _wmark1, _wroots1, 0);
+             v_s = v_pos;
+-            while ((((((v__t2 = v_pos), (v__t3 = v_end), (v__t2 < v__t3)))) != 0 && (is_lower(ail_bytes_get(v_data, v_pos))) != 0)) {
++            while ((((((v__t2 = v_pos), (v__t3 = v_end), (v__t2 < v__t3)))) != 0 && (is_lower(((int64_t)(v_data).p[v_pos]))) != 0)) {
+                 v_pos = ((v__t4 = v_pos), (v__t5 = 1LL), ((v__t4) + (v__t5)));
+             }
+             if ((((((v__t6 = v_pos), (v__t7 = v_s), (v__t6 == v__t7)))) != 0 || ((((v__t10 = ((v__t8 = v_pos), (v__t9 = v_s), ((v__t8) - (v__t9)))), (v__t11 = 16LL), (v__t10 > v__t11)))) != 0)) {
+                 { int64_t _r1 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r1; }
+             }
+-            if ((((((v__t12 = v_pos), (v__t13 = v_end), (v__t12 >= v__t13)))) != 0 || ((((v__t14 = ail_bytes_get(v_data, v_pos)), (v__t15 = 58LL), (v__t14 != v__t15)))) != 0)) {
++            if ((((((v__t12 = v_pos), (v__t13 = v_end), (v__t12 >= v__t13)))) != 0 || ((((v__t14 = ((int64_t)(v_data).p[v_pos])), (v__t15 = 58LL), (v__t14 != v__t15)))) != 0)) {
+                 { int64_t _r2 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r2; }
+             }
+             v_name = ail_bytes_decode_utf8_view(((v__t16 = v_data), (v__t17 = v_s), (v__t18 = v_pos), ail_bytes_slice(v__t16, v__t17, v__t18)));
+             v_pos = ((v__t19 = v_pos), (v__t20 = 1LL), ((v__t19) + (v__t20)));
+             v_ds = v_pos;
+             v_v = 0LL;
+-            while ((((((v__t21 = v_pos), (v__t22 = v_end), (v__t21 < v__t22)))) != 0 && ((((v__t23 = ail_bytes_get(v_data, v_pos)), (v__t24 = 48LL), (v__t23 >= v__t24)))) != 0 && ((((v__t25 = ail_bytes_get(v_data, v_pos)), (v__t26 = 57LL), (v__t25 <= v__t26)))) != 0)) {
+-                v_v = ((v__t31 = ((v__t29 = ((v__t27 = v_v), (v__t28 = 10LL), ck_mul(v__t27, v__t28))), (v__t30 = ail_bytes_get(v_data, v_pos)), ((v__t29) + (v__t30)))), (v__t32 = 48LL), ck_sub(v__t31, v__t32));
++            while ((((((v__t21 = v_pos), (v__t22 = v_end), (v__t21 < v__t22)))) != 0 && ((((v__t23 = ((int64_t)(v_data).p[v_pos])), (v__t24 = 48LL), (v__t23 >= v__t24)))) != 0 && ((((v__t25 = ((int64_t)(v_data).p[v_pos])), (v__t26 = 57LL), (v__t25 <= v__t26)))) != 0)) {
++                v_v = ((v__t31 = ((v__t29 = ((v__t27 = v_v), (v__t28 = 10LL), ck_mul(v__t27, v__t28))), (v__t30 = ((int64_t)(v_data).p[v_pos])), ((v__t29) + (v__t30)))), (v__t32 = 48LL), ck_sub(v__t31, v__t32));
+                 if ((((v__t33 = v_v), (v__t34 = 1000000LL), (v__t33 > v__t34)))) {
+                     { int64_t _r3 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r3; }
+                 }
+@@ -7589,7 +7589,7 @@
+             if ((((v__t37 = v_pos), (v__t38 = v_ds), (v__t37 == v__t38)))) {
+                 { int64_t _r4 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r4; }
+             }
+-            if ((((((v__t39 = ail_bytes_get(v_data, v_ds)), (v__t40 = 48LL), (v__t39 == v__t40)))) != 0 && ((((v__t43 = ((v__t41 = v_pos), (v__t42 = v_ds), ((v__t41) - (v__t42)))), (v__t44 = 1LL), (v__t43 > v__t44)))) != 0)) {
++            if ((((((v__t39 = ((int64_t)(v_data).p[v_ds])), (v__t40 = 48LL), (v__t39 == v__t40)))) != 0 && ((((v__t43 = ((v__t41 = v_pos), (v__t42 = v_ds), ((v__t41) - (v__t42)))), (v__t44 = 1LL), (v__t43 > v__t44)))) != 0)) {
+                 { int64_t _r5 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r5; }
+             }
+             (void)(({ (void)0; v__t45 = v_name; ail_sfield_append(&(v_t)->f_nm, v__t45); }));
+@@ -7602,7 +7602,7 @@
+             }
+             v_me = v_n;
+             v_n = ((v__t50 = v_n), (v__t51 = 1LL), ck_add(v__t50, v__t51));
+-            if ((((((v__t52 = v_pos), (v__t53 = v_end), (v__t52 < v__t53)))) != 0 && ((((v__t54 = ail_bytes_get(v_data, v_pos)), (v__t55 = 91LL), (v__t54 == v__t55)))) != 0)) {
++            if ((((((v__t52 = v_pos), (v__t53 = v_end), (v__t52 < v__t53)))) != 0 && ((((v__t54 = ((int64_t)(v_data).p[v_pos])), (v__t55 = 91LL), (v__t54 == v__t55)))) != 0)) {
+                 (void)(ail_list_push(&v_stack, v_me));
+                 v_pos = ((v__t56 = v_pos), (v__t57 = 1LL), ((v__t56) + (v__t57)));
+                 continue;
+@@ -7616,7 +7616,7 @@
+                     if ((((v__t58 = v_pos), (v__t59 = v_end), (v__t58 >= v__t59)))) {
+                         { int64_t _r6 = (((v__t60 = v_stack.n), (v__t61 = 0LL), (v__t60 == v__t61))); ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r6; }
+                     }
+-                    v_c = ail_bytes_get(v_data, v_pos);
++                    v_c = ((int64_t)(v_data).p[v_pos]);
+                     if ((((v__t62 = v_c), (v__t63 = 93LL), (v__t62 == v__t63)))) {
+                         if ((((v__t64 = v_stack.n), (v__t65 = 0LL), (v__t64 == v__t65)))) {
+                             { int64_t _r7 = 0; ail_cleanup_top = v__cleanup_frame.previous; ail_list_free(&v__t1); ail_list_free(&v_stack); ail_sarena_free(&v__sarena); return _r7; }

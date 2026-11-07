@@ -1,0 +1,71 @@
+--- a/program.c
++++ b/program.c
+@@ -5163,6 +5163,11 @@
+     return;
+ }
+ 
++static int64_t sp_find(const int64_t *head, const int64_t *prev, const int64_t *keys, int64_t key) {
++    int64_t h = ((uint32_t)key * 2654435761u) >> 12;
++    for (int64_t p = head[h]; p >= 0; p = prev[p]) if (keys[p] == key) return p;
++    return -1;
++}
+ static void ail_unwind_pack(void **p) { ail_idict_free((ail_idict *)p[0]); ail_bytearray_release(*(ail_bytearray **)p[1]); ail_list_free((ail_list *)p[2]); ail_list_free((ail_list *)p[3]); }
+ int64_t pack(ail_bytes v_d) {
+     ail_idict v_head = {0};
+@@ -5200,6 +5205,11 @@
+     ail_list *ir16 = &v_prev;
+     { ail_list ir17 = *(ir14); *(ir14) = (ail_list){0}; ail_list_free(ir16); *(ir16) = ir17; }
+     { ail_idict_free(&v_head); ail_idict_init(&v_head); }
++    int64_t *idhead = (int64_t *)malloc((size_t)(1u << 20) * sizeof(int64_t));
++    int64_t *idprev = (int64_t *)malloc((size_t)(ir1 + 1) * sizeof(int64_t));
++    int64_t *idkey = (int64_t *)malloc((size_t)(ir1 + 1) * sizeof(int64_t));
++    if (!idhead || !idprev || !idkey) ail_die("out of memory");
++    memset(idhead, 0xff, (size_t)(1u << 20) * sizeof(int64_t));
+     int64_t ir18 = 0;
+     int64_t ir19 = 0;
+     int64_t ir20 = 0LL;
+@@ -5230,10 +5240,10 @@
+             int64_t ir38 = ((ir20) + (3LL));
+             int64_t ir39 = ((int64_t)(v_d).p[ir38]);
+             int64_t ir40 = ((ir37) + (ir39));
+-            int64_t ir41 = (ail_idict_has(&v_head, ir40) != 0);
++            int64_t ir41 = ((sp_find(idhead, idprev, idkey, ir40) != -1) != 0);
+             int64_t ir42 = 0;
+             if (ir41) {
+-                int64_t ir43 = ail_idict_need(&v_head, ir40);
++                int64_t ir43 = sp_find(idhead, idprev, idkey, ir40);
+                 ir42 = ir43;
+             } else {
+                 ir42 = -1LL;
+@@ -5412,12 +5422,12 @@
+                     int64_t ir126 = ((ir112) + (3LL));
+                     int64_t ir127 = ((int64_t)(v_d).p[ir126]);
+                     int64_t ir128 = ((ir125) + (ir127));
+-                    int64_t ir129 = (ail_idict_has(&v_head, ir128) != 0);
++                    int64_t ir129 = ((sp_find(idhead, idprev, idkey, ir128) != -1) != 0);
+                     if (ir129) {
+-                        int64_t ir130 = ail_idict_need(&v_head, ir128);
++                        int64_t ir130 = sp_find(idhead, idprev, idkey, ir128);
+                         ir110_p[ir112] = ir130;
+                     }
+-                    ail_idict_put(&v_head, ir128, ir112);
++                    { int64_t _hk = ((uint32_t)(ir128) * 2654435761u) >> 12; idkey[(ir112)] = (ir128); idprev[(ir112)] = idhead[_hk]; idhead[_hk] = (ir112); }
+                 }
+                 int64_t ir131 = ((ir112) + (1LL));
+                 ir112 = ir131;
+@@ -5457,12 +5467,12 @@
+                 int64_t ir148 = ((ir20) + (3LL));
+                 int64_t ir149 = ((int64_t)(v_d).p[ir148]);
+                 int64_t ir150 = ((ir147) + (ir149));
+-                int64_t ir151 = (ail_idict_has(&v_head, ir150) != 0);
++                int64_t ir151 = ((sp_find(idhead, idprev, idkey, ir150) != -1) != 0);
+                 if (ir151) {
+-                    int64_t ir152 = ail_idict_need(&v_head, ir150);
++                    int64_t ir152 = sp_find(idhead, idprev, idkey, ir150);
+                     (ir16)->p[ir20] = ir152;
+                 }
+-                ail_idict_put(&v_head, ir150, ir20);
++                { int64_t _hk = ((uint32_t)(ir150) * 2654435761u) >> 12; idkey[(ir20)] = (ir150); idprev[(ir20)] = idhead[_hk]; idhead[_hk] = (ir20); }
+             }
+             int64_t ir153 = ((ir20) + (1LL));
+             ir97 = ir153;
