@@ -131,15 +131,19 @@ The rewrite moves exactly the four dead ends it targets: 07, 11 and 14 go from 0
 zero: its cause is a compiler-internal temporary, so text alone cannot tell the user which
 value to change; step 2 of the design changes the emitter.
 
-Raw per-reply records: `lab/err/fixrate_rewritten.json`.
+Raw per-reply records: `lab/err/fixrate_rewritten.json`. The four messages whose text changed
+after review (02, 06, 10, 14) were re-measured on the final text: 06/10/14 stay at 5/5 and 02
+stays at 0/5, so the totals above are unchanged.
 
 ## 4. Self-check probes
 
-Candidate fixes for every trigger were written to `/tmp/fixes/NN.py`, compiled with
-`AIL_CURRENT/ail_chatgpt.py compile --syntax python`, run, and compared with CPython on the
-trigger's input. `message_gone` is the trigger's original message substring in stderr. Each file
-was also run through `bash ~/tools/cmp.sh /tmp/fixes/NN.py $PWD`: all 15 matched CPython on both
-the general (`AIL_UNIFIED_FORCE=1`) and default builds (`g same stdout` / `d same stdout`).
+Each published `Replace`/`With` block was applied literally to its trigger (the `Replace` text
+is matched byte for byte, indentation included) to produce `/tmp/probes/NN.py`. These were
+compiled with `AIL_CURRENT/ail_chatgpt.py compile --syntax python`, run, and compared with
+CPython on the trigger's input. `message_gone` is the trigger's original message substring in
+stderr. Each file was also run through `bash ~/tools/cmp.sh /tmp/probes/NN.py $PWD`: all 15
+matched CPython on both the general (`AIL_UNIFIED_FORCE=1`) and default builds (`g same stdout`
+/ `d same stdout`), and every `Replace` string occurred exactly once in its trigger.
 
 | probe | build | message gone | output = CPython |
 |---|---|---|---|
@@ -153,15 +157,16 @@ the general (`AIL_UNIFIED_FORCE=1`) and default builds (`g same stdout` / `d sam
 | 08 | ok | yes | yes |
 | 09 | ok | yes | yes |
 | 10 | ok | yes | yes |
-| 11 | ok | no | yes |
+| 11 | ok | yes | yes |
 | 12 | ok | yes | yes |
 | 13 | ok | yes | yes |
 | 14 | ok | yes | yes |
 | 15 | ok | yes | yes |
 
-02 and 11 are the two messages that survive their own suggested fix: 02 because the refused
-construct is a compiler-internal temporary, 11 because the refusing line is in the standard
-library prelude. Both are reported as such, not as working fixes.
+14 of the 15 literal edits lose their message. 02 is the only one that does not: the refused
+construct is a compiler-internal temporary, so the local list edit keeps the output correct but
+the note survives; it is reported as such, not as a working fix. 11's edit replaces the
+`fractions` import along with the call, so the prelude note is never emitted.
 
 ## 5. Limits
 

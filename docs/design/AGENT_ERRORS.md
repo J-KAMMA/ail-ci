@@ -41,9 +41,13 @@ Rules for the emitter:
    the standard library's fractions module`).
 2. The cause names only identifiers that occur in the user's source or the standard-library
    name they called. `_ail_l1l`, mangled locals and internal row names never appear.
-3. `Replace` / `With` is a literal edit. `With` must build on the typed path and keep the
-   program's output. If no local edit can do both, the message says which structure must
-   change and shows the smallest working shape (a class, a named list, a flag).
+3. `Replace` / `With` is a literal edit. `Replace` is copied byte for byte from the user's
+   file, including the replaced line's leading spaces, and `With` starts at the same column;
+   an agent concatenates `With` where `Replace` was. When the fix also touches another line
+   (the caller of a changed signature, a second heap operation), `Replace` spans every
+   changed line so the pair stays one literal edit. `With` must build on the typed path and
+   keep the program's output. If no local edit can do both, the message says which structure
+   must change and shows the smallest working shape (a class, a named list, a flag).
 4. A fallback note keeps `note:` and adds `this did not block the build; the program still
    runs, about 20x slower`. A refusal uses `error:`.
 5. One code per family, stable across releases (`AIL0101` … `AIL0116`).
@@ -64,12 +68,15 @@ prints the same bytes it sends.
 ## The 15 rewrites
 
 Full text (with the complete `Replace`/`With` blocks) is `lab/err/messages_rewritten.json`;
-the table shows the cause and the edit it asks for.
+the table shows the cause and the edit it asks for. Every block was applied literally to its
+trigger (same indentation, no re-typing): all 15 build, print CPython's output on both the
+default and the general build, and 14 of 15 lose the message (02 does not; see the last
+section).
 
 | # | code | old (current compiler) | new (agent format) |
 |---|---|---|---|
 | 01 | AIL0101 | `sys.stdin.buffer.readline` … "used as a value is not" (no edit) | **Cause:** `sys.stdin.buffer.readline` is saved in `read`; only a direct call is supported. **Replace** `read = sys.stdin.buffer.readline` / `print(read().decode().strip())` **with** `print(sys.stdin.readline().strip())`. |
-| 02 | AIL0102 | `'_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another` (internal name) | **Cause:** `b = heapq.heappop(fh)` takes one field from `free1/2/3`, `entry = heapq.heappop(wait1)` takes a 5-field row from `wait1/2/3`; the compiler reuses one temporary. **Replace** `b = heapq.heappop(fh)` **with** `fh.sort()` / `b = fh.pop(0)`, and `heapq.heappush(freeN, b)` with `freeN.append(b)`. |
+| 02 | AIL0102 | `'_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another` (internal name) | **Cause:** `b = heapq.heappop(fh)` takes one field from `free1/2/3`, `entry = heapq.heappop(wait1)` takes a 5-field row from `wait1/2/3`; the compiler reuses one temporary. **Replace** `b = heapq.heappop(fh)` (at its 16-space indent) **with** `fh.sort()` / `b = fh.pop(0)`. |
 | 03 | AIL0103 | "comparing a str with a number … write instead: compare like with like …" | **Cause:** `s` is a str and `1` is a number; `s == 1` is always False. **Replace** `if s == 1:` **with** `if s == "1":`. |
 | 04 | AIL0104 | "`d.get(k)` with one argument gives None … give the default" | **Cause:** `d.get(k)` gives None for a missing key and there is no None for an int. **Replace** `v = d.get(k)` **with** `v = d.get(k, -1)`. |
 | 05 | AIL0105 | "`accounts[rid] = [name, initial, True]` uses `accounts` as a dict of containers …" (then repeats the bool/number note) | **Cause:** `accounts` is a dict whose values are lists; a typed dict holds int/float/str/bytes. **Replace** the assignment **with** a `class Account` and `accounts: dict[int, Account] = {}` / `accounts[rid] = Account(name, initial, True)`. |
@@ -77,7 +84,7 @@ the table shows the cause and the edit it asks for.
 | 07 | AIL0107 | "mixes bools and numbers … make every operand a bool (or `int(...)` every operand)" | **Cause:** the dict has an int (`'line': 3`) and a bool (`'has_else': False`); writing `0`/`1` would print `0` instead of `False`. **Replace** the dict **with** a `class Node` and `Node('when', 3, False)`. |
 | 08 | AIL0108 | "make_term returns bytes on one path and a number on another" (no edit) | **Cause:** one function has one return type; this path returns the number `0`. **Replace** `return 0` **with** `return b"0"`. |
 | 09 | AIL0109 | "while-else is unsupported. write instead: a flag …" | **Cause:** the loop has no `break`, so the `else` body always runs. **Replace** `while i < 3: … else: print("done", i)` **with** the loop followed by `print("done", i)` (and, with a `break`, a `done` flag). |
-| 10 | AIL0110 | "a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two" | **Cause:** `list[dict[str, str]]` is two levels; the typed path takes `list[SomeClass]`. **Replace** the signature and body **with** `class Row` + `def sizes(records: list[Row]) -> list[int]:`. |
+| 10 | AIL0110 | "a nested annotation (a list of lists) is not a records parameter; one level of rows is recognised, not two" | **Cause:** `list[dict[str, str]]` is two levels; the typed path takes `list[SomeClass]`. **Replace** the function **and its call site** (lines 1–7) **with** `class Row` + `def sizes(records: list[Row]) -> list[int]:` + `print(sizes([Row("1", ""), Row("2", "3")]))`. |
 | 11 | AIL0111 | "dunder method `Fraction.__float__`; only `__init__` is supported …" at `:235:5` of a 3-line file | **Cause:** `float(x)` needs `Fraction.__float__`; importing `fractions` prints this note, and the old position was line 235 of the prelude. **Replace** the import and `print(float(x))` **with** `print(1 / 2)`. |
 | 12 | AIL0112 | "a format spec on a Decimal in an f-string (`__format__` is not built)" at `:1687:1` of a 4-line file | **Cause:** format specs apply to int/float/str, not `Decimal`; the old position was line 1687 of the `decimal` prelude. **Replace** `print(f"{d:.2f}")` **with** `print(f"{float(d):.2f}")`. |
 | 13 | AIL0113 | "yield: this language has no generators. write instead: build a list with `out.append(x)` and `return out`" | **Cause:** `yield` makes a generator; none are built. **Replace** `def gen(...): for i in range(n): yield i` **with** `def gen(n: int) -> list[int]:` / `out: list[int] = []` / `for i in range(n): out.append(i)` / `return out`. |

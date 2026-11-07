@@ -82,7 +82,7 @@
   "id": "02_poprow_arity",
   "file": "02_poprow_arity.py",
   "needle": "' is bound from popping rows of",
-  "message": "lab/err/triggers/02_poprow_arity.py:126:17: AIL0102: `b = heapq.heappop(fh)` takes one field (a berth number) out of `free1`/`free2`/`free3`, while `entry = heapq.heappop(wait1)` takes a 5-field job row out of `wait1`/`wait2`/`wait3`; the compiler reuses one temporary (`_ail_l1l`) for both and a captured row must have one width.\nFix: give the two kinds of heap different code so no temporary is shared. Keep heapq only for the wait heaps, and take a free berth with a plain list:\nReplace:\nb = heapq.heappop(fh)\nWith:\nfh.sort()\nb = fh.pop(0)\nand replace every `heapq.heappush(free1, b)` / `free2` / `free3` with `free1.append(b)` / `free2.append(b)` / `free3.append(b)`.",
+  "message": "lab/err/triggers/02_poprow_arity.py:126:17: AIL0102: `b = heapq.heappop(fh)` pops a berth number from a 1-field free list, while `entry = heapq.heappop(wait1)` pops a 5-field job row; the compiler captures both pops in one temporary and a captured row must have one width.\nReplace:\n                b = heapq.heappop(fh)\nWith:\n                fh.sort()\n                b = fh.pop(0)",
   "baseline": {
    "build_rc": 0,
    "cpython_rc": 0,
@@ -94,8 +94,8 @@
   "attempts": [
    {
     "n": 1,
-    "reply_chars": 4551,
-    "code_chars": 4538,
+    "reply_chars": 4578,
+    "code_chars": 4565,
     "error": "",
     "build_rc": 0,
     "message": "note: built on the general path (about 20x slower) because '_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another; a captured row has one arity, the same rule an ordinary list of records already follows; run with --strict to see why",
@@ -107,8 +107,8 @@
    },
    {
     "n": 2,
-    "reply_chars": 4551,
-    "code_chars": 4538,
+    "reply_chars": 4578,
+    "code_chars": 4565,
     "error": "",
     "build_rc": 0,
     "message": "note: built on the general path (about 20x slower) because '_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another; a captured row has one arity, the same rule an ordinary list of records already follows; run with --strict to see why",
@@ -120,8 +120,8 @@
    },
    {
     "n": 3,
-    "reply_chars": 4551,
-    "code_chars": 4538,
+    "reply_chars": 4578,
+    "code_chars": 4565,
     "error": "",
     "build_rc": 0,
     "message": "note: built on the general path (about 20x slower) because '_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another; a captured row has one arity, the same rule an ordinary list of records already follows; run with --strict to see why",
@@ -133,8 +133,8 @@
    },
    {
     "n": 4,
-    "reply_chars": 4551,
-    "code_chars": 4538,
+    "reply_chars": 4578,
+    "code_chars": 4565,
     "error": "",
     "build_rc": 0,
     "message": "note: built on the general path (about 20x slower) because '_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another; a captured row has one arity, the same rule an ordinary list of records already follows; run with --strict to see why",
@@ -146,8 +146,8 @@
    },
    {
     "n": 5,
-    "reply_chars": 4551,
-    "code_chars": 4538,
+    "reply_chars": 4578,
+    "code_chars": 4565,
     "error": "",
     "build_rc": 0,
     "message": "note: built on the general path (about 20x slower) because '_ail_l1l' is bound from popping rows of 1 fields in one place and 5 in another; a captured row has one arity, the same rule an ordinary list of records already follows; run with --strict to see why",
@@ -410,7 +410,7 @@
   "id": "06_class_list_comp",
   "file": "06_class_list_comp.py",
   "needle": "class list comprehensions",
-  "message": "lab/err/triggers/06_class_list_comp.py:6:5: AIL0106: `[P(x) for x in xs]` is a list comprehension that builds class instances; this compiler builds comprehensions of numbers, strings and bytes only.\nReplace:\nreturn [P(x) for x in xs]\nWith:\nout: list[P] = []\nfor x in xs:\n    out.append(P(x))\nreturn out",
+  "message": "lab/err/triggers/06_class_list_comp.py:6:5: AIL0106: `[P(x) for x in xs]` is a list comprehension that builds class instances; this compiler builds comprehensions of numbers, strings and bytes only.\nReplace:\n    return [P(x) for x in xs]\nWith:\n    out: list[P] = []\n    for x in xs:\n        out.append(P(x))\n    return out",
   "baseline": {
    "build_rc": 0,
    "cpython_rc": 0,
@@ -738,7 +738,7 @@
   "id": "10_nested_annotation",
   "file": "10_nested_annotation.py",
   "needle": "nested annotation",
-  "message": "lab/err/triggers/10_nested_annotation.py:1:1: AIL0110: `records: list[dict[str, str]]` is two levels deep (a list of dicts); the typed path recognises one level of rows, `list[SomeClass]`.\nReplace:\ndef sizes(records: list[dict[str, str]]) -> list[int]:\n    out = []\n    for r in records:\n        out.append(len(r))\n    return out\nWith:\nclass Row:\n    def __init__(self, a: str, b: str) -> None:\n        self.a = a\n        self.b = b\n\ndef sizes(records: list[Row]) -> list[int]:\n    out: list[int] = []\n    for r in records:\n        n = 1\n        if r.b:\n            n = 2\n        out.append(n)\n    return out",
+  "message": "lab/err/triggers/10_nested_annotation.py:1:1: AIL0110: `records: list[dict[str, str]]` is two levels deep (a list of dicts); the typed path recognises one level of rows, `list[SomeClass]`.\nReplace:\ndef sizes(records: list[dict[str, str]]) -> list[int]:\n    out = []\n    for r in records:\n        out.append(len(r))\n    return out\n\nprint(sizes([{\"a\": \"1\"}, {\"b\": \"2\", \"c\": \"3\"}]))\nWith:\nclass Row:\n    def __init__(self, a: str, b: str) -> None:\n        self.a = a\n        self.b = b\n\ndef sizes(records: list[Row]) -> list[int]:\n    out: list[int] = []\n    for r in records:\n        n = 1\n        if r.b:\n            n = 2\n        out.append(n)\n    return out\n\nprint(sizes([Row(\"1\", \"\"), Row(\"2\", \"3\")]))",
   "baseline": {
    "build_rc": 0,
    "cpython_rc": 0,
@@ -750,8 +750,8 @@
   "attempts": [
    {
     "n": 1,
-    "reply_chars": 446,
-    "code_chars": 433,
+    "reply_chars": 367,
+    "code_chars": 354,
     "error": "",
     "build_rc": 0,
     "message": "",
@@ -763,8 +763,8 @@
    },
    {
     "n": 2,
-    "reply_chars": 291,
-    "code_chars": 278,
+    "reply_chars": 369,
+    "code_chars": 356,
     "error": "",
     "build_rc": 0,
     "message": "",
@@ -776,8 +776,8 @@
    },
    {
     "n": 3,
-    "reply_chars": 427,
-    "code_chars": 414,
+    "reply_chars": 331,
+    "code_chars": 318,
     "error": "",
     "build_rc": 0,
     "message": "",
@@ -802,8 +802,8 @@
    },
    {
     "n": 5,
-    "reply_chars": 301,
-    "code_chars": 288,
+    "reply_chars": 331,
+    "code_chars": 318,
     "error": "",
     "build_rc": 0,
     "message": "",
@@ -1066,14 +1066,14 @@
   "id": "14_tuple_single_value",
   "file": "14_tuple_single_value.py",
   "needle": "a tuple used where a single value is needed",
-  "message": "lab/err/triggers/14_tuple_single_value.py:4:5: AIL0114: the comprehension builds a list of 2-field tuples in one expression; this compiler needs the list named, then pairs appended to it.\nReplace:\nreturn [(m, pow(base, -1, m)) for m in moduli]\nWith:\nout: list[tuple[int, int]] = []\nfor m in moduli:\n    out.append((m, pow(base, -1, m)))\nreturn out",
+  "message": "lab/err/triggers/14_tuple_single_value.py:4:5: AIL0114: the comprehension builds a list of 2-field tuples in one expression; this compiler needs the list named, then pairs appended to it.\nReplace:\n    return [(m, pow(base, -1, m)) for m in moduli]\nWith:\n    out: list[tuple[int, int]] = []\n    for m in moduli:\n        out.append((m, pow(base, -1, m)))\n    return out",
   "baseline": {
    "build_rc": 0,
    "cpython_rc": 0,
    "cpython_out": "[(11, 4), (17, 6)]\n",
    "ail_rc": 0,
    "ail_same": true,
-   "saw_message": "note: /tmp/errfix-14_tuple_single_value-9d8226s6/main.py:4:5: built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why"
+   "saw_message": "note: /tmp/errfix-14_tuple_single_value-lppwifdm/main.py:4:5: built on the general path (about 20x slower) because a tuple used where a single value is needed. write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`); run with --strict to see why"
   },
   "attempts": [
    {

@@ -19,9 +19,13 @@ moves. vibe1's #1 message (tuple element type) no longer fires from a user progr
 current compiler (it was a prelude note; `test_ail_pre133` records the fix) and is kept as
 AIL0116 without a fix-rate row.
 
-Probes: a candidate fix for every trigger in `/tmp/fixes/NN.py`; `bash ~/tools/cmp.sh` on all
-15 matched CPython on both builds. `lab/err/measure.py`-side compile with fallback notes on left
-13/15 without the message (02 and 11 do not; those are the two compiler-side defects).
+Probes: each published `Replace`/`With` block was applied literally (byte for byte, indentation
+included) to its trigger in `/tmp/probes/NN.py`; every `Replace` matched exactly once, all 15
+built and matched CPython on both builds (`bash ~/tools/cmp.sh`), and 14/15 lost the message.
+Only 02 does not: `_ail_l1l` row arity is a compiler-side defect. Review fix: AIL0110 now
+replaces the function and its caller together, AIL0106/AIL0114 `With` blocks carry the replaced
+line's 4-space indent, and AIL0102's `With` is code only (indented) instead of prose; the four
+changed messages were re-measured with the same harness (same rates: 02 0/5, 06/10/14 5/5).
 
 Tests on this commit: `test_ail_safetynet` 5 OK, `test_ail_files` 18 OK (1 skipped),
 `test_ail_corpus_findings3` 2 OK.
