@@ -1,3 +1,57 @@
+## 2026-11-07 -- pyreach9 re-applied: typed-path census and next steps (job-rbpyreach9-11071805)
+
+Re-applied the accepted `job-pyreach9-11071621` change, fetched anonymously, on this tree.
+`docs/design/PYREACH_NEXT.md` and `lab/pyreach9/` (`RESULTS.md`, `census.jsonl`, `census.py`,
+`classify.py`, `programs.txt`) applied unchanged; they are docs and measurement only, no
+compiler change. The `.github/workflows/agent-worker.yml` hunk was already present here (the
+claude-token/`agent` input removal), so it was left as it is. `DEVLOG.md` conflicted only at the
+top: the accepted entries are kept below this one, then the existing tree's entries.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` regenerated the
+manifest (`--check` passes). No other change.
+
+## 2026-11-07 -- pyreach9 review fix 2: move counts and module counts (job-pyreach9-11071621)
+
+Review fix (no compiler change). `PYREACH_NEXT.md` now separates programs *touched* from
+sole moves: step 2b moves 0 (`compare/rail_transfer/main.py`'s int64 blocker is a shift and
+its `INF = 1 << 200` is a refused list-element/assignment shape), step 3c moves 0
+(`vibe/ledger_bin/python-0.py` carries four other reasons), step 4b moves 1 (`g16_030` also
+needs `min()`), and §5 is json/statistics/itertools/collections = 1/1/1/0 sole moves rather
+than 5-6/3/4/4-5 touched programs. Census module counts are corrected (json 6 not 8;
+itertools 5; re 4; the `traceback`/`logging` boilerplate in `g15_024`/`g15_028` is not a
+module use). `classify.py` now recognises `_AilEnum`/`_AilStrEnum`/`_AilFlag` as generated
+prelude code, so `g25_000`/`g25_022` are sole generated-prelude: generated-prelude 7 sole /
+138 blockers, class-dunders 8 programs / 33 blockers. `programs.txt` regenerated.
+
+## 2026-11-07 -- pyreach9 review fix: corrected census labels and move claims (job-pyreach9-11071331)
+
+Review fix (no compiler change). `classify.py`'s no-blocker fallback no longer scans the
+compiler's explanatory "write instead" prose: `vibe/csv_rollup/ail-0.py` is
+`str-number-compare`, not `buffer-io` (buffer-io 2 programs / 0 sole; str-number-compare 2 / 1).
+`RESULTS.md` lists the five actual vibe refusals (`rail_transfer/python-0` is general, not
+refused) and no longer claims `scar_life` gets `--exact-int` (its `census.jsonl` record has
+`flags: []`, and it carries no `# ail-build:` directive). `PYREACH_NEXT.md` now matches
+`strict_incomplete`: the array prelude is 2 moves (`berth_sim/python-0`,
+`rail_transfer/python-0`, both incomplete), not 3 (`berth_sim/ail-0`'s sole blocker is the
+`_ail_l1l` lowering-name conflict); namedtuple typing moves 0 clean programs (`g06_008` has no
+NamedTuple; `g01_022` also carries a `tuple[Field, ...]` annotation, a module-level `FIELDS`
+list and a false caller conflict); deque `g11_002` and `g03_032` are incomplete-list moves.
+`programs.txt` regenerated from the fixed classifier.
+
+## 2026-11-07 -- pyreach9 census: why plain `.py` still takes the general path (job-pyreach9-11071331)
+
+Measurement and design only; the compiler is unchanged.  `lab/pyreach9/census.py` built 134
+programs (10 compare `main.py`, 24 `lab/vibe` Python, 100 `corpus/gdev` with seed 20261107)
+with `--strict --json` and the default build: **37 typed, 81 general, 16 refused**; the AI
+corpus is 0 typed / 19 general / 5 refused.  `lab/pyreach9/classify.py` groups the ranked
+strict blockers (full dump in `lab/pyreach9/programs.txt`) and `RESULTS.md` reports the
+ranking, the sole-blocked programs, and AI-typical vs corpus-typical reasons.  Ranked by
+programs whose only blocker is the reason: generated-prelude 7, int64-literal 3,
+parameter-readonly 3, generator-yield 3, unsupported-module 2; by programs touched:
+unsupported-module 21, dict-of-containers 18, generated-prelude/tuple-unpack 16,
+mixed-container 15, value-kind-lost 14.  41 of the 97
+non-typed lists are `strict_incomplete`; that is recorded per program.  `docs/design/
+PYREACH_NEXT.md` turns the top five into queued steps.
+
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched

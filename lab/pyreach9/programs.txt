@@ -1,0 +1,150 @@
+compare  general   lab/compare/src/chain_relax/main.py                int64-literal
+compare  general   lab/compare/src/ledger_bin/main.py                 dict-of-containers, nested-def-in-loopx10, none-optionalx4
+compare  general   lab/compare/src/rail_transfer/main.py              int64-literal, none-optionalx4, str-number-concat, tuple-unpack
+compare  general   lab/compare/src/scar_life/main.py                  bytes-str-methods, mixed-container, unsupported-builtinx2, unsupported-module
+compare  refused   lab/compare/src/tally_lang/main.py                 class-dunders, dict-of-containers, generated-preludex14, mixed-container, mixed-return-kind
+compare  general   lab/compare/src/term_rank/main.py                  bytes-str-methodsx2, generated-prelude, mixed-container, module-level-constantx3, unsupported-module
+compare  general   lab/compare/src/ticket_audit/main.py               dict-of-containers, none-optionalx2
+compare  refused   lab/compare/src/tree_fold/main.py                  other, tuple-holds, unsupported-module
+vibe     general   lab/vibe/programs/berth_sim/ail-0.py               generated-prelude
+vibe     refused   lab/vibe/programs/berth_sim/python-0.py            generated-preludex7
+vibe     general   lab/vibe/programs/berth_sim/python-1.py            buffer-io, str-number-concat, value-kind-lostx2
+vibe     refused   lab/vibe/programs/chain_relax/python-0.py          int64-literal
+vibe     refused   lab/vibe/programs/chain_relax/python-1.py          int64-literal
+vibe     general   lab/vibe/programs/csv_rollup/ail-0.py              str-number-compare
+vibe     general   lab/vibe/programs/csv_rollup/python-0.py           bytes-str-methodsx2, mixed-return-kind, value-kind-lostx2
+vibe     general   lab/vibe/programs/echo_pack/ail-0.py               none-optional
+vibe     general   lab/vibe/programs/echo_pack/python-0.py            bytes-str-methods, none-optionalx2, unsupported-module
+vibe     general   lab/vibe/programs/echo_pack/python-1.py            bytes-str-methods, none-optionalx2, other, unsupported-module
+vibe     general   lab/vibe/programs/ledger_bin/ail-0.py              dict-of-containersx5, tuple-unpackx4, value-kind-lost
+vibe     general   lab/vibe/programs/ledger_bin/python-0.py           dict-of-containers, parameter-readonly, str-number-concat, tuple-unpackx7, value-kind-lostx5
+vibe     general   lab/vibe/programs/ledger_bin/python-1.py           class-shape, dict-of-containers, mixed-return-kind, tuple-unpackx8, value-kind-lostx2
+vibe     general   lab/vibe/programs/rail_transfer/python-0.py        generated-preludex7
+vibe     general   lab/vibe/programs/scar_life/ail-0.py               comprehension
+vibe     refused   lab/vibe/programs/scar_life/python-1.py            bytes-str-methodsx2, exceptions, mixed-containerx2, mixed-return-kind, module-level-constantx2, tuple-holds, tuple-unpack, value-kind-lostx6
+vibe     general   lab/vibe/programs/tally_lang/ail-0.py              class-shape, mixed-container, mixed-return-kind
+vibe     refused   lab/vibe/programs/tally_lang/python-0.py           class-dunders, class-shapex2, mixed-containerx2, mixed-return-kind, module-level-constant
+vibe     general   lab/vibe/programs/term_rank/ail-0.py               mixed-return-kind, module-level-constantx2
+vibe     general   lab/vibe/programs/term_rank/python-0.py            buffer-io, bytes-str-methodsx2, key-argument, module-level-constantx2, slice-for-number, tuple-unpackx4, value-kind-lostx2
+vibe     general   lab/vibe/programs/term_rank/python-1.py            mixed-return-kind, module-level-constant, unsupported-module
+vibe     general   lab/vibe/programs/ticket_audit/ail-0.py            bytes-sequence-paramx11, mixed-container, str-number-concat, value-kind-lost, while-else
+vibe     general   lab/vibe/programs/ticket_audit/python-0.py         module-level-constant, slice-for-numberx3, str-number-compare, tuple-unpack
+vibe     general   lab/vibe/programs/ticket_audit/python-1.py         bytes-sequence-paramx12, bytes-str-methodsx4, dict-of-containersx2, generated-prelude, other, slice-for-numberx6, tuple-unpackx2, value-kind-lostx10
+gdev     general   corpus/gdev/g00_004.py                             generic-annotation
+gdev     general   corpus/gdev/g00_008.py                             tuple-unpackx2
+gdev     general   corpus/gdev/g01_008.py                             generated-prelude
+gdev     general   corpus/gdev/g01_022.py                             generated-preludex14, module-level-constant, other
+gdev     general   corpus/gdev/g01_026.py                             dict-of-containers
+gdev     refused   corpus/gdev/g01_032.py                             generated-preludex5, unsupported-builtin
+gdev     general   corpus/gdev/g01_034.py                             none-optionalx2, value-kind-lost
+gdev     general   corpus/gdev/g01_036.py                             annotation-caller-conflict, none-optional, tuple-unpack
+gdev     general   corpus/gdev/g03_012.py                             mixed-containerx2, unsupported-modulex2
+gdev     general   corpus/gdev/g03_016.py                             mixed-container
+gdev     general   corpus/gdev/g03_018.py                             mixed-container, tuple-unpack, unsupported-module
+gdev     general   corpus/gdev/g03_032.py                             unsupported-modulex2
+gdev     general   corpus/gdev/g03_034.py                             mixed-containerx2, numeric-kind
+gdev     general   corpus/gdev/g03_036.py                             mixed-container
+gdev     general   corpus/gdev/g04_010.py                             parameter-readonlyx2
+gdev     general   corpus/gdev/g04_018.py                             comprehension
+gdev     general   corpus/gdev/g05_018.py                             comprehension, tuple-unpack, unsupported-modulex2
+gdev     general   corpus/gdev/g05_022.py                             value-kind-lostx2
+gdev     general   corpus/gdev/g06_002.py                             comprehension, other
+gdev     general   corpus/gdev/g06_008.py                             generated-prelude, value-kind-lost
+gdev     general   corpus/gdev/g06_026.py                             dict-of-containers, module-level-constant, other
+gdev     general   corpus/gdev/g07_008.py                             generic-annotation, module-level-constant
+gdev     general   corpus/gdev/g08_002.py                             parameter-readonly
+gdev     general   corpus/gdev/g08_034.py                             parameter-readonly
+gdev     general   corpus/gdev/g09_006.py                             numeric-kind
+gdev     general   corpus/gdev/g10_008.py                             tuple-unpack
+gdev     general   corpus/gdev/g10_018.py                             dict-of-containers, other
+gdev     general   corpus/gdev/g10_036.py                             dict-of-containersx2, module-level-constant, none-optional
+gdev     general   corpus/gdev/g11_002.py                             generated-prelude
+gdev     general   corpus/gdev/g11_032.py                             comprehension, tuple-unpack
+gdev     general   corpus/gdev/g11_034.py                             none-optionalx7
+gdev     general   corpus/gdev/g12_016.py                             class-dundersx6, generated-prelude, mixed-return-kind, otherx2, value-kind-lost
+gdev     general   corpus/gdev/g13_008.py                             class-dundersx2, class-shape
+gdev     refused   corpus/gdev/g13_010.py                             class-shapex2, comprehension, generic-annotation, value-kind-lost
+gdev     general   corpus/gdev/g13_012.py                             class-dundersx4
+gdev     general   corpus/gdev/g13_024.py                             mixed-return-kind, other, unsupported-builtin, unsupported-module
+gdev     refused   corpus/gdev/g14_006.py                             class-shape
+gdev     general   corpus/gdev/g14_014.py                             class-dundersx8, generic-annotationx3
+gdev     refused   corpus/gdev/g14_022.py                             other
+gdev     refused   corpus/gdev/g15_024.py                             generic-annotation, unsupported-module
+gdev     refused   corpus/gdev/g15_028.py                             none-optionalx2, records-annotation, unsupported-module
+gdev     general   corpus/gdev/g15_032.py                             class-dunders, generic-annotation, none-optional
+gdev     general   corpus/gdev/g16_000.py                             generator-yield
+gdev     general   corpus/gdev/g16_006.py                             generator-yield
+gdev     general   corpus/gdev/g16_030.py                             generator-yield, unsupported-builtinx2
+gdev     general   corpus/gdev/g16_032.py                             generic-annotation, other
+gdev     general   corpus/gdev/g16_038.py                             generator-yieldx2
+gdev     general   corpus/gdev/g17_024.py                             dict-of-containers, unsupported-modulex2
+gdev     general   corpus/gdev/g18_014.py                             annotation-caller-conflict, unsupported-modulex2
+gdev     general   corpus/gdev/g18_026.py                             comprehension, records-annotation
+gdev     refused   corpus/gdev/g20_004.py                             dict-of-containers, module-level-constant, unsupported-module
+gdev     general   corpus/gdev/g20_010.py                             generated-preludex2, generic-annotation, tuple-unpack
+gdev     general   corpus/gdev/g20_030.py                             generated-preludex2, generic-annotation
+gdev     general   corpus/gdev/g21_000.py                             dict-of-containers, mixed-container, unsupported-module
+gdev     refused   corpus/gdev/g21_004.py                             dict-of-containers, mixed-container, unsupported-modulex5
+gdev     refused   corpus/gdev/g21_008.py                             dict-of-containers, unsupported-modulex2
+gdev     general   corpus/gdev/g21_012.py                             generic-annotation, unsupported-builtin, unsupported-modulex2
+gdev     general   corpus/gdev/g21_022.py                             unsupported-module
+gdev     general   corpus/gdev/g22_026.py                             bytes-str-methods, slice-for-number
+gdev     general   corpus/gdev/g23_006.py                             mixed-container, numeric-kind
+gdev     general   corpus/gdev/g23_012.py                             dict-of-containers, numeric-kind, tuple-unpack
+gdev     general   corpus/gdev/g23_032.py                             class-dundersx10, dict-of-containers
+gdev     general   corpus/gdev/g25_000.py                             generated-preludex40
+gdev     general   corpus/gdev/g25_008.py                             generic-annotationx2, module-level-constant
+gdev     general   corpus/gdev/g25_022.py                             generated-preludex40
+
+reason                     progs  sole    blk  appears (c/v/g)
+generated-prelude             16     7    138  c2/v4/g10
+generator-yield                4     3      5  c0/v0/g4
+int64-literal                  4     3      4  c2/v2/g0
+parameter-readonly             4     3      5  c0/v1/g3
+unsupported-module            21     2     32  c3/v3/g15
+tuple-unpack                  16     2     37  c1/v7/g8
+mixed-container               15     2     19  c3/v4/g8
+none-optional                 12     2     29  c3/v3/g6
+comprehension                  7     2      7  c0/v1/g6
+dict-of-containers            18     1     24  c3/v4/g11
+value-kind-lost               14     1     37  c0/v9/g5
+generic-annotation            11     1     14  c0/v0/g11
+other                         11     1     12  c1/v2/g8
+class-dunders                  8     1     33  c1/v1/g6
+class-shape                    6     1      8  c0/v3/g3
+numeric-kind                   4     1      4  c0/v0/g4
+str-number-compare             2     1      2  c0/v2/g0
+module-level-constant         13     0     18  c1/v6/g6
+mixed-return-kind             10     0     10  c1/v7/g2
+bytes-str-methods              9     0     16  c2/v6/g1
+unsupported-builtin            5     0      7  c1/v0/g4
+slice-for-number               4     0     11  c0/v3/g1
+str-number-concat              4     0      4  c1/v3/g0
+annotation-caller-conflict     2     0      2  c0/v0/g2
+buffer-io                      2     0      2  c0/v2/g0
+bytes-sequence-param           2     0     23  c0/v2/g0
+records-annotation             2     0      2  c0/v0/g2
+tuple-holds                    2     0      2  c1/v1/g0
+exceptions                     1     0      1  c0/v1/g0
+key-argument                   1     0      1  c0/v1/g0
+nested-def-in-loop             1     0     10  c1/v0/g0
+while-else                     1     0      1  c0/v1/g0
+
+sole-category programs:
+generated-prelude          7 (c0/v3/g4): lab/vibe/programs/berth_sim/ail-0.py, lab/vibe/programs/berth_sim/python-0.py, lab/vibe/programs/rail_transfer/python-0.py, corpus/gdev/g01_008.py, corpus/gdev/g11_002.py, corpus/gdev/g25_000.py, corpus/gdev/g25_022.py
+int64-literal              3 (c1/v2/g0): lab/compare/src/chain_relax/main.py, lab/vibe/programs/chain_relax/python-0.py, lab/vibe/programs/chain_relax/python-1.py
+parameter-readonly         3 (c0/v0/g3): corpus/gdev/g04_010.py, corpus/gdev/g08_002.py, corpus/gdev/g08_034.py
+generator-yield            3 (c0/v0/g3): corpus/gdev/g16_000.py, corpus/gdev/g16_006.py, corpus/gdev/g16_038.py
+none-optional              2 (c0/v1/g1): lab/vibe/programs/echo_pack/ail-0.py, corpus/gdev/g11_034.py
+comprehension              2 (c0/v1/g1): lab/vibe/programs/scar_life/ail-0.py, corpus/gdev/g04_018.py
+tuple-unpack               2 (c0/v0/g2): corpus/gdev/g00_008.py, corpus/gdev/g10_008.py
+mixed-container            2 (c0/v0/g2): corpus/gdev/g03_016.py, corpus/gdev/g03_036.py
+unsupported-module         2 (c0/v0/g2): corpus/gdev/g03_032.py, corpus/gdev/g21_022.py
+str-number-compare         1 (c0/v1/g0): lab/vibe/programs/csv_rollup/ail-0.py
+generic-annotation         1 (c0/v0/g1): corpus/gdev/g00_004.py
+dict-of-containers         1 (c0/v0/g1): corpus/gdev/g01_026.py
+value-kind-lost            1 (c0/v0/g1): corpus/gdev/g05_022.py
+numeric-kind               1 (c0/v0/g1): corpus/gdev/g09_006.py
+class-dunders              1 (c0/v0/g1): corpus/gdev/g13_012.py
+class-shape                1 (c0/v0/g1): corpus/gdev/g14_006.py
+other                      1 (c0/v0/g1): corpus/gdev/g14_022.py
