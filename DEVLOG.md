@@ -1,3 +1,54 @@
+## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
+
+Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched
+anonymously, on this tree. `packaging/ail_lang/cli.py`, `docs/CLI.md`, `lab/rundiff/` and
+`test_ail_rundiff.py` (registered in `tests.d/`) applied unchanged. The
+`.github/workflows/agent-worker.yml` hunk was already present here (the claude-token removal), so it
+was left as it is. `DEVLOG.md` conflicted only at the top: the accepted entry is kept below this one,
+then the existing tree's entries. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` regenerated the manifest (`--check` passes). No other change.
+
+## 2026-11-06 -- rundiff1: `ail run --diff`, run natively and under CPython and stop on any difference
+
+New command mode, `ail run --diff [--python PATH] [--timeout SEC] [--json] prog.py [args...]`
+(`packaging/ail_lang/cli.py`, documented in the new `docs/CLI.md`). It builds as `ail run` does, runs
+the native program (stdout/stderr live, as `ail run` shows them), then the same source under CPython
+(default `sys.executable`, same cwd, arguments, environment and timeout), and reports one
+`ail diff:` line on stderr:
+
+- `agree`, exiting with the program's own code;
+- `DIFFER: stdout line N ...` / `DIFFER: exit code A vs B` / `DIFFER: exception X vs Y`, exit 3
+  (reserved for a difference);
+- `loud stop by design: <reason>` for AIL's documented loud errors where CPython continued, exit 4.
+  The recognised messages are one table (`LOUD_STOPS`) in `cli.py` and the same table in
+  `docs/CLI.md`; a recognised build-time refusal counts whatever CPython does, since no native
+  program exists for any input;
+- `timeout: native` / `timeout: cpython`, exit 124.
+
+A build that stops for an unrecognised reason has no native program to compare; when CPython runs the
+program it is a by-design stop, and when CPython fails too the line is
+`DIFFER: no native program, the build stopped (exit A) where CPython exited B: <first build message>`
+(exit 3), rather than a bare `exit code A vs B` that would suggest a native run happened.
+
+stdin is read once (when it is not a TTY) into a temp file and the same bytes feed both runs; an
+interactive stdin is inherited untouched. `--json` prints one object on stdout at the end
+(`outcome`, `line`, `native`, `cpython`, `exit`, `seconds`) instead of the stderr line. Exception
+comparison is by type name from the last stderr line only, never the traceback text.
+
+`ail run` without `--diff` keeps its argument parsing and behaviour: `_split_source` is byte-for-byte
+the same scan (the `-o`/`-I`/... value options are now one module constant it reads), and
+`_split_diff` only looks at the words before the source, so `ail run prog.py --diff` still passes
+`--diff` to the program.
+
+The census over `lab/compare/src/*/main.py` and the corpus is in `lab/rundiff/RESULTS.md`; the
+"differ" list there is a compiler bug list, not fixed by this job.
+
+Review fix: `_split_diff` kept a two-word compiler option (`-I`, `--syntax`, `--debug-dir`, `-o`, ...)
+but dropped its value, so `ail run --diff -I . prog.py` reached the build with a dangling option and no
+source (usage, exit 2). It now copies the option and its value, and detects `--diff` in a single scan
+of the option words rather than by membership, so a value is never mistaken for `--diff`. `docs/CLI.md`
+says so; a regression test covers `-I .`, `--syntax python` and `--debug-dir DIR`.
+
 ## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
 
 Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a
