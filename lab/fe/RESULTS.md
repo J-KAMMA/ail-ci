@@ -93,7 +93,7 @@ For a program that ends on the general path, the front end first tries the typed
 | g23_036 | 4.520 | 0.402 | 0.366 | 9.2% |
 | g10_010 | 3.628 | 0.172 | 0.264 | 4.6% |
 
-Across the general-path programs the failed typed attempt costs 26.55 s of 289.67 s wall (9.2%), and the general emitter 109.67 s (37.9%). 8 of the 14 general-path programs enter the typed emitter and then fall back (ledger_bin 0.33s, scar_life 6.16s, ticket_audit 18.58s, g05_030 0.29s, g04_006 0.21s, g02_014 0.26s, g23_036 0.40s, g10_010 0.17s); the rest are refused by a cheap pre-pass (`_refuse_big_capable` and friends) before the emitter runs, so their typed attempt is ~0.
+Across the general-path programs the failed typed attempt costs 26.55 s of 289.67 s wall (9.2%), and the general emitter 109.67 s (37.9%). 10 of the 14 general-path programs spend time in the typed emitter (at least 0.01 s) and then fall back (ledger_bin 0.33s, scar_life 6.16s, ticket_audit 18.58s, g05_030 0.29s, g14_014 0.06s, g04_006 0.21s, g14_004 0.07s, g02_014 0.26s, g23_036 0.40s, g10_010 0.17s); the other 4 (chain_relax 0.000s, rail_transfer 0.000s, term_rank 0.000s, g17_004 0.009s) are refused by a cheap pre-pass (`_refuse_big_capable` and friends) before the emitter runs, so their typed attempt is ~0.
 
 ### The `other` bucket is a second front end (`check` for the fallback note)
 
@@ -153,6 +153,10 @@ Summed over every profiled cold build. cProfile overhead inflates these numbers;
 | 19 | `stype` | `AIL_CURRENT/python/pkg-v12/unified_lists.py:496` | 2.664 | 2731684 |
 | 20 | `_is_slist_expr` | `AIL_CURRENT/python/pkg-v12/pyfunc.py:7896` | 2.643 | 897062 |
 
+Summed top-20 self time is 289.27 s, 30.7% of the profiled wall (942.66 s) and 46.6% of the profiled emitter cumulative (`typed_emit_cum` + `general_emit_cum` = 620.76 s). The emitters are 50.4% of the timed cold wall, so the top-20 functions cover 46.6% x 50.4% = 23.5% of the timed wall. The 30.7% figure overstates it because cProfile charges call-heavy functions the most, so it is not used as an Amdahl share.
+
+Within the top 20, the AST-walk family (`walk`, `iter_child_nodes`, `iter_fields`, `_walk_uncached`) is 145.80 s = 15.5% of the profiled wall, and the memoised type queries (`_etype` twice, `_is_str_expr`, `_is_slist_expr`) 50.31 s = 5.3%.
+
 ## 3. Warm (whole-build cache hit)
 
 A first run fills `AIL_CACHE`; the next runs hit the driver's `fe` entry and copy the stored binary. What still runs: the outer interpreter and its imports, `_load_sources` (reading and merging the source), the front-end key (hashing the merged source and every compiler source in `python/pkg-v12`), the cache lookup and unpack, and writing the output. `pyc.py` is not started, so `typed`/`general`/`cc` are 0. On a general-path program the hit ALSO runs the `check` subprocess that positions the advisory fallback note (the `other` column below and §1), so `scar_life` and `ticket_audit` stay at 12.3 s and 25.5 s warm: the whole-build cache does not remove that second front end.
@@ -190,7 +194,7 @@ A first run fills `AIL_CACHE`; the next runs hit the driver's `fe` entry and cop
 | g23_036 | 4.520 | 4.505 | 1.022 | 0.026 | 0.103 | 0.054 | 0.827 |
 | g10_010 | 3.628 | 3.694 | 0.628 | 0.025 | 0.104 | 0.054 | 0.429 |
 
-Median over these programs: cold 3.86 s -> warm 0.51 s (7.6x). Excluding the two note-check outliers: cold 3.63 s -> warm 0.47 s (7.8x). The whole-build cache removes the front end; the fast residual is the outer process's load, hashing and binary copy.
+Median over these programs: cold 3.86 s -> warm 0.51 s (7.6x). Excluding the three note-check outliers (`scar_life`, `ticket_audit`, `term_rank`): cold 3.63 s -> warm 0.47 s (7.8x). The whole-build cache removes the front end; the fast residual is the outer process's load, hashing and binary copy.
 
 ## 4. Peak memory of the front end
 

@@ -47,9 +47,10 @@ The share that matters for every option below is **the front end's share of the 
 | interpreter + import share (`I/W`) | 0.8% | `RESULTS.md` §1 |
 | failed typed attempt on general-path programs | 26.55 s = 7.3% of all wall (9.2% of the general-path wall) | `RESULTS.md` §1 |
 | second `check` for the fallback note (`other` bucket) | 46.67 s = 12.8% (25.2% of `ticket_audit`, 11.2% of `scar_life`) | `RESULTS.md` §1 |
-| top-20 functions' share of wall (cProfile) | 30.7% | `RESULTS.md` §2 |
-| … of which AST walking (`fastwalk.walk`, `ast.iter_*`, `_walk_uncached`) | 15.8% | `RESULTS.md` §2 |
-| … of which type queries (`_etype`, `_is_str_expr`, `_is_slist_expr`, …) | 6.0% | `RESULTS.md` §2 |
+| top-20 functions' self time, share of the profiled wall (cProfile) | 30.7% | `RESULTS.md` §2 |
+| top-20 functions, share of the timed cold wall (46.6% of the profiled emitter × `E/W`) | 23.5% | `RESULTS.md` §2 |
+| … of which AST walking (`fastwalk.walk`, `ast.iter_*`, `_walk_uncached`), profiled self-time share | 15.5% | `RESULTS.md` §2 |
+| … of which type queries (`_etype`, `_is_str_expr`, `_is_slist_expr`, …), profiled self-time share | 5.3% | `RESULTS.md` §2 |
 | warm (whole-build cache hit) wall, fast programs | 0.47 s median (cold 3.63 s, 7.8x) | `RESULTS.md` §3 |
 | warm wall on fallback programs (still paying `check`) | 12.3 s `scar_life`, 25.5 s `ticket_audit` | `RESULTS.md` §3 |
 
@@ -57,19 +58,22 @@ Key facts for the design:
 
 * **The front end is the majority of a cold build**, and on `berth_sim` it is 88% of the wall —
   exactly the kind of program where tcc1 got no speedup. On the C-dominated programs (`g17_004`,
-  `g04_006`, `g10_010`) gcc is 40–47% and tcc could halve them.
+  `g04_006`, `g10_010`) gcc is 64.7%, 63.9% and 70.5% of the wall, so tcc could halve those.
 * **The typed and general emitters are almost all of the front end** (50.4% of wall of 54.4%).
   Parsing, refusals and source loading are small (3.2% together). A win has to come from the
   emitter, not from the cheap passes.
-* **The failed typed attempt is worth 7.3% of all wall**, but it is concentrated: 8 of the 14
+* **The failed typed attempt is worth 7.3% of all wall**, but it is concentrated: 10 of the 14
   general-path programs enter `to_c` and fall back, and two of them dominate — `ticket_audit`
-  18.58 s (19.4% of that build) and `scar_life` 6.16 s (6.4%). The other 6 general-path programs
-  are refused by a cheap pre-pass before the emitter. A "decide fallback from a pre-scan" option is
-  therefore worth a real but bounded 7.3%, and 19.4% on the program that resembles a real app.
-* **The top-20 functions are a large, addressable slice** (30.7% of wall) of the front end, and two
-  families dominate: repeated AST walks (`fastwalk.walk` alone is 9.9% of wall, 81.8 M calls; the
-  walk family 15.8% including `ast.iter_child_nodes`/`iter_fields`/`_walk_uncached`) and the
-  memoised type queries (`_etype` and friends, 6.0%, plus the `_query_memo` wrapper 0.9%).
+  18.58 s (19.4% of that build) and `scar_life` 6.16 s (6.4%). The other 4 (`chain_relax`,
+  `rail_transfer`, `term_rank`, `g17_004`; ≤0.01 s each) are refused by a cheap pre-pass before the
+  emitter. A "decide fallback from a pre-scan" option is therefore worth a real but bounded 7.3%,
+  and 19.4% on the program that resembles a real app.
+* **The top-20 functions are a large, addressable slice** (23.5% of the timed cold wall; 30.7% of
+  the profiled wall) of the front end, and two families dominate: repeated AST walks
+  (`fastwalk.walk` alone is 9.9% of the profiled wall, 81.8 M calls; the walk family 15.5% of the
+  profiled wall including `ast.iter_child_nodes`/`iter_fields`/`_walk_uncached`) and the
+  memoised type queries (`_etype` and friends, 5.3% of the profiled wall, plus the `_query_memo`
+  wrapper 0.9%).
 * **A whole-build cache hit already removes the front end** (`docs/design/FE_CACHE.md`,
   `AIL_SERVER`): the fast programs go 3.63 s cold → 0.47 s warm. But the residual includes a
   second full front end on fallback programs: `compile` spawns `ail_chatgpt.py check` to position
@@ -88,16 +92,20 @@ front end. `x` is the wall speedup implied by that share, `1/(1-share)`.
 |---:|---|---:|---:|---:|---|---|
 | 1 | Per-function analysis cache across edits | emitter share `E/W` = 50.4% | 50.4% | 2.02x | high | `pyc.py`, `pyfunc.py`, `pyboxed2.py`, `buildcache.py`, `fecache.py` |
 | 2 | Compile the front end (mypyc / Cython) | `F/W` = 54.4%; k=2.5 | 32.6% | 1.48x | medium-high | `pyproject.toml`, `packaging/`, new build target |
-| 3 | Algorithmic fixes in the top-20 hot functions | 30.7% (walk 15.8%, queries 6.0%) | 30.7% | 1.44x | low | `fastwalk.py`, `pyfunc.py`, `pyboxed2.py`, `optlib.py`, `unified*.py` |
+| 3 | Algorithmic fixes in the top-20 hot functions | 23.5% (46.6% of the profiled emitter × `E/W`; walk 11.8%, queries 4.1% of timed wall) | 23.5% | 1.31x | low | `fastwalk.py`, `pyfunc.py`, `pyboxed2.py`, `optlib.py`, `unified*.py` |
 | 4 | Drop the second `check` that positions the fallback note | `other` = 12.8% | 12.8% | 1.15x | low | `ail_chatgpt.py` |
 | 5 | Skip the doomed typed attempt from a pre-scan | 7.3% | 7.3% | 1.08x | low | `pyc._refuse_big_capable`, `pyc.build` |
 | 6 | Long-lived compile server (`ail run`) | 0.8% cold; 58% of the 0.47 s warm residual | 0.8% cold / 58% warm | 1.008x cold, 2.4x warm | medium | `ail_server.py`, `ail_chatgpt.py`, `pyc.py` |
 | 7 | Lazy imports | 0.8% cold; 5.5% of a warm hit | 0.8% cold | 1.008x cold | low | `ail_chatgpt.py`, `pyc.py`, `pyfront.py` |
 
-Options 2 and 3 overlap (a compiled front end speeds up the same hot functions but does not make
-the repeated walks disappear); their bounds are alternatives, not additive. Option 4 is outside the
-brief's six; it fell out of the measurement of the `other` bucket and is ranked because it is the
-cheapest real win.
+All shares in the table are fractions of the 363.97 s timed cold wall. Option 3 has no timed
+wrapper of its own, so its share is derived on that wall: the top-20 self time is 46.6% of the
+profiled emitter cumulative and the emitters are `E/W` = 50.4% of the timed wall, giving 23.5%
+(`RESULTS.md` §2). The raw cProfile share of the profiled wall (30.7%) is an upper bound that
+cProfile inflates and is not used as an Amdahl share. Options 2 and 3 overlap (a compiled front end
+speeds up the same hot functions but does not make the repeated walks disappear); their bounds are
+alternatives, not additive. Option 4 is outside the brief's six; it fell out of the measurement of
+the `other` bucket and is ranked because it is the cheapest real win.
 
 ### 1. Per-function analysis cache across edits — the largest measured share
 
@@ -120,27 +128,7 @@ after touching one function body; the C the compiler sees must be **byte-identic
 uncached build, including the fallback note. The existing `lab/fecache/verify.py` compares the
 exact C the compiler was handed; reuse it and add the edit case.
 
-### 2. Algorithmic fixes in the top-20 hot functions — the safest large share
-
-Measured share: the top-20 functions' self time is 30.7% of the profiled wall; AST walking is 15.8%
-and the type queries 6.0%. Removing (or memoising per analysis epoch) the repeated walks in the
-fixed-point and per-function rounds attacks the single largest call count (`fastwalk.walk` is
-81.8 M calls across the sample; `pyfunc.py` alone has ~395 `ast.walk(` call sites). A 50% cut of the
-walk family is a 7.9% wall win on its own (1.09x).
-
-Risk: **low**. These are pure computations over the AST and the query cache; the node order and
-results can be pinned. The project already has the pattern: `fastwalk.py` replaced `ast.walk`
-behind `AIL_FASTWALK`, and `_query_memo` caches `_etype` and friends behind `AIL_QUERY_CACHE`.
-
-Files touched: `fastwalk.py` (a per-node children index or a per-body walk memo keyed by the
-analysis epoch), `pyfunc.py` (call the memo instead of re-walking in the fixed-point rounds; flatten
-`_query_memo`'s key), `pyboxed2.py`, `optlib.py`, `unified*.py`.
-
-Equality proof: `test_ail_frontend_speed` already asserts `fastwalk.walk` yields exactly the
-standard library's nodes and that `AIL_QUERY_CACHE=0` generates byte-identical C. Extend it to the
-new memo and diff the generated C over the whole corpus with the option on and off.
-
-### 3. Compile the front end itself (mypyc / Cython) — the biggest absolute share
+### 2. Compile the front end itself (mypyc / Cython) — the biggest absolute share
 
 Measured share: the front end is `F/W` = 54.4% of cold wall; with a conservative 2.5x on the
 pure-Python front end the bound is `(F/W)(1-1/2.5)` = 32.6% (1.48x wall; 1.57x at k=3, 1.37x at
@@ -160,6 +148,28 @@ Equality proof: the compiled front end is a drop-in: on the corpus the generated
 byte-identical to the pure-Python front end's, and `test_ail_frontend_speed`, `test_ail_safetynet`
 and `test_ail_corpus_findings3` must pass on both. `tools/wheel_same_c.py` already compares the C
 the wheel produces.
+
+### 3. Algorithmic fixes in the top-20 hot functions — the safest large share
+
+Measured share: the top-20 functions' self time is 46.6% of the profiled emitter cumulative, and the
+emitters are 50.4% of the timed cold wall, so their timed share is 23.5% (`RESULTS.md` §2). Within
+the top 20, AST walking is 15.5% of the profiled wall (11.8% of timed wall) and the type queries
+5.3% (4.1% of timed wall). Removing (or memoising per analysis epoch) the repeated walks in the
+fixed-point and per-function rounds attacks the single largest call count (`fastwalk.walk` is
+81.8 M calls across the sample; `pyfunc.py` alone has 394 `ast.walk(` call sites). A 50% cut of the
+walk family is a 5.9% wall win on its own (1.06x).
+
+Risk: **low**. These are pure computations over the AST and the query cache; the node order and
+results can be pinned. The project already has the pattern: `fastwalk.py` replaced `ast.walk`
+behind `AIL_FASTWALK`, and `_query_memo` caches `_etype` and friends behind `AIL_QUERY_CACHE`.
+
+Files touched: `fastwalk.py` (a per-node children index or a per-body walk memo keyed by the
+analysis epoch), `pyfunc.py` (call the memo instead of re-walking in the fixed-point rounds; flatten
+`_query_memo`'s key), `pyboxed2.py`, `optlib.py`, `unified*.py`.
+
+Equality proof: `test_ail_frontend_speed` already asserts `fastwalk.walk` yields exactly the
+standard library's nodes and that `AIL_QUERY_CACHE=0` generates byte-identical C. Extend it to the
+new memo and diff the generated C over the whole corpus with the option on and off.
 
 ### 4. Drop the second `check` that positions the fallback note — the cheapest win
 
@@ -184,7 +194,26 @@ Equality proof: generated C must be byte-identical on the corpus; stderr is expe
 by the position on the note line (record the exact diff). `test_ail_fallback_note` pins the note
 wording.
 
-### 5. Long-lived compile server — removes the fixed per-invocation cost
+### 5. Skip the doomed typed attempt from a cheap pre-scan — measured, concentrated
+
+Measured share: the failed typed attempt is 26.55 s of 363.97 s (7.3% of all cold wall; 9.2% of the
+general-path wall). It is concentrated: `ticket_audit` 18.58 s (19.4% of that build) and
+`scar_life` 6.16 s (6.4%) are most of it; `ledger_bin` 0.33 s; the corpus programs 0.01–0.40 s. Four
+of the 14 general-path programs are already refused by the cheap passes before the emitter
+(`chain_relax`, `rail_transfer`, `term_rank`, `g17_004`; ≤0.01 s each), so their typed attempt is
+~0; `g14_014` (0.061 s, 2.2%) and `g14_004` (0.068 s, 3.3%) enter the emitter and fall back with the
+rest.
+
+Risk: **low** if the pre-scan only moves an existing refusal earlier; **medium** if it tries to
+predict a refusal the emitter would otherwise discover, because a wrong prediction changes the
+error message or the path. Keep it to a reordering of existing, proven passes.
+
+Files touched: `pyc.build`, `pyc._build_unshadowed`.
+
+Equality proof: byte-identical C and the same stderr on the corpus; the refusal wording is pinned by
+`test_ail_refusal_messages` and `test_ail_typed_blockers`.
+
+### 6. Long-lived compile server — removes the fixed per-invocation cost
 
 Measured share: on a cold build only the interpreter+import share, `I/W` = 0.8%. On a fast warm hit
 (0.47 s) the outer import is 0.026 s (5.5%), `_load_sources` 0.193 s (41%) and the key hash 0.055 s
@@ -205,7 +234,7 @@ merged source instead of a temp file), `fecache.py`.
 Equality proof: server on vs off must produce byte-identical C on the corpus and on the edit case;
 the existing `test_ail_server` and `test_ail_fe_cache` cover the keying.
 
-### 6. Lazy imports — small on a cold build, visible on a warm hit
+### 7. Lazy imports — small on a cold build, visible on a warm hit
 
 Measured share: `I/W` = 0.8% on a cold build; `importtime` shows the two entry points cost 0.039 s
 and 0.081 s, and the outer import is 0.026 s of a 0.47 s warm hit (5.5% there). The inner compiler
@@ -219,27 +248,9 @@ Files touched: `ail_chatgpt.py`, `pyc.py`, `pyfront.py`.
 Equality proof: byte-identical C on the corpus; `python3 -X importtime` before/after; the warm hit
 must not regress.
 
-### 7. Skip the doomed typed attempt from a cheap pre-scan — measured, concentrated
-
-Measured share: the failed typed attempt is 26.55 s of 363.97 s (7.3% of all cold wall; 9.2% of the
-general-path wall). It is concentrated: `ticket_audit` 18.58 s (19.4% of that build) and
-`scar_life` 6.16 s (6.4%) are most of it; `ledger_bin` 0.33 s; the corpus programs 0.01–0.40 s. Six
-of the 14 general-path programs are already refused by the cheap passes before the emitter
-(`chain_relax`, `rail_transfer`, `term_rank`, `g17_004`, `g14_014`, `g14_004`), so their typed
-attempt is ~0.
-
-Risk: **low** if the pre-scan only moves an existing refusal earlier; **medium** if it tries to
-predict a refusal the emitter would otherwise discover, because a wrong prediction changes the
-error message or the path. Keep it to a reordering of existing, proven passes.
-
-Files touched: `pyc.build`, `pyc._build_unshadowed`.
-
-Equality proof: byte-identical C and the same stderr on the corpus; the refusal wording is pinned by
-`test_ail_refusal_messages` and `test_ail_typed_blockers`.
-
 ### Ranking, in one line
 
-Per-function cache (50.4%) > front-end mypyc (32.6%) > hot-function fixes (30.7%) > drop the note
+Per-function cache (50.4%) > front-end mypyc (32.6%) > hot-function fixes (23.5%) > drop the note
 check (12.8%) > typed pre-scan (7.3%) > server (0.8% cold, 58% of the 0.47 s warm residual) > lazy
 imports (0.8%).
 
@@ -250,7 +261,7 @@ note check (12.8%) is queued first anyway: it is nearly free, it also fixes the 
 fallback programs, and every later measurement gets cleaner once it is gone.
 
 1. **Drop the second `check` for the fallback note** (option 4) — 12.8% for near-zero risk.
-2. **Hot-function algorithmic fixes** (option 3) — 30.7%, lowest risk of the big levers.
+2. **Hot-function algorithmic fixes** (option 3) — 23.5%, lowest risk of the big levers.
 3. **Front-end compilation with mypyc** (option 2) — 32.6%, independent of option 3 and multiplies
    whatever option 3 leaves.
 4. **Per-function analysis cache** (option 1) — 50.4%, the largest bound, but it needs the

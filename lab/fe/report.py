@@ -155,11 +155,13 @@ def main(argv=None):
             p['name'], f(p['cold_median']), f(ph['typed_attempt']), f(ph['general_attempt']),
             pct(ph['typed_attempt'], p['phases']['total'])))
     add('')
-    entered = [p for p in general if p['phases']['typed_attempt'] >= 0.1]
+    entered = [p for p in general if p['phases']['typed_attempt'] >= 0.01]
+    refused = [p for p in general if p['phases']['typed_attempt'] < 0.01]
     add('Across the general-path programs the failed typed attempt costs %s s of %s s wall (%s), and'
-        ' the general emitter %s s (%s). %d of the %d general-path programs enter the typed emitter'
-        ' and then fall back (%s); the rest are refused by a cheap pre-pass (`_refuse_big_capable`'
-        ' and friends) before the emitter runs, so their typed attempt is ~0.'
+        ' the general emitter %s s (%s). %d of the %d general-path programs spend time in the typed'
+        ' emitter (at least 0.01 s) and then fall back (%s); the other %d (%s) are refused by a cheap'
+        ' pre-pass (`_refuse_big_capable` and friends) before the emitter runs, so their typed attempt'
+        ' is ~0.'
         % (f(_total(general, lambda p: p['phases']['typed_attempt']), 2),
            f(_total(general, lambda p: p['cold_median']), 2),
            pct(_total(general, lambda p: p['phases']['typed_attempt']),
@@ -168,7 +170,9 @@ def main(argv=None):
            pct(_total(general, lambda p: p['phases']['general_attempt']),
                _total(general, lambda p: p['cold_median'])),
            len(entered), len(general),
-           ', '.join('%s %ss' % (p['name'], f(p['phases']['typed_attempt'], 2)) for p in entered)))
+           ', '.join('%s %ss' % (p['name'], f(p['phases']['typed_attempt'], 2)) for p in entered),
+           len(refused),
+           ', '.join('%s %ss' % (p['name'], f(p['phases']['typed_attempt'], 3)) for p in refused)))
     add('')
 
     add('### The `other` bucket is a second front end (`check` for the fallback note)')
@@ -234,6 +238,34 @@ def main(argv=None):
         add('| %d | `%s` | `%s:%s` | %s | %d |' % (
             index, row['function'], row['file'], row['line'], f(row['self']), row['calls']))
     add('')
+    if data.get('top20_self'):
+        top20 = sum(row['self'] for row in data['top20_self'])
+        profiled = sum(p.get('profile_wall') or 0.0 for p in built)
+        emitter_cum = (_total(built, lambda p: (p['passes'] or {}).get('typed_emit_cum') or 0.0)
+                       + _total(built, lambda p: (p['passes'] or {}).get('general_emit_cum') or 0.0))
+        emitter_timed = _total(built, lambda p: p['phases']['typed_emit']
+                               + p['phases']['general_emit'])
+        timed_wall = _total(built, lambda p: p['cold_median'])
+        hot_share = (top20 / emitter_cum) * (emitter_timed / timed_wall) if emitter_cum else 0.0
+        walk = sum(row['self'] for row in data['top20_self']
+                   if row['function'] in ('walk', 'iter_child_nodes', 'iter_fields', '_walk_uncached'))
+        queries = sum(row['self'] for row in data['top20_self']
+                      if row['function'] in ('_etype', '_is_str_expr', '_is_slist_expr'))
+        add('Summed top-20 self time is %s s, %s of the profiled wall (%s s) and %s of the profiled'
+            ' emitter cumulative (`typed_emit_cum` + `general_emit_cum` = %s s). The emitters are %s'
+            ' of the timed cold wall, so the top-20 functions cover %s x %s = %s of the timed wall.'
+            ' The %s figure overstates it because cProfile charges call-heavy functions the most, so'
+            ' it is not used as an Amdahl share.'
+            % (f(top20, 2), pct(top20, profiled), f(profiled, 2), pct(top20, emitter_cum),
+               f(emitter_cum, 2), pct(emitter_timed, timed_wall),
+               pct(top20, emitter_cum), pct(emitter_timed, timed_wall), pct(hot_share, 1.0),
+               pct(top20, profiled)))
+        add('')
+        add('Within the top 20, the AST-walk family (`walk`, `iter_child_nodes`, `iter_fields`,'
+            ' `_walk_uncached`) is %s s = %s of the profiled wall, and the memoised type queries'
+            ' (`_etype` twice, `_is_str_expr`, `_is_slist_expr`) %s s = %s.'
+            % (f(walk, 2), pct(walk, profiled), f(queries, 2), pct(queries, profiled)))
+        add('')
     if not data.get('top20_self'):
         add('(The top-20 table is written when a run finishes; this file was rendered from a partial'
             ' run.)')
@@ -271,9 +303,10 @@ def main(argv=None):
     if warm_rows:
         fast = [(p.get('cold_median'), p['warm']['median']) for p in built
                 if (p.get('warm') or {}).get('median') and p['warm']['median'] < 2.0]
-        add('Median over these programs: cold %s s -> warm %s s (%.1fx). Excluding the two'
-            ' note-check outliers: cold %s s -> warm %s s (%.1fx). The whole-build cache removes the'
-            ' front end; the fast residual is the outer process\'s load, hashing and binary copy.'
+        add('Median over these programs: cold %s s -> warm %s s (%.1fx). Excluding the three'
+            ' note-check outliers (`scar_life`, `ticket_audit`, `term_rank`): cold %s s -> warm %s s'
+            ' (%.1fx). The whole-build cache removes the front end; the fast residual is the outer'
+            ' process\'s load, hashing and binary copy.'
             % (f(_median([a for a, _ in warm_rows]), 2), f(_median([b for _, b in warm_rows]), 2),
                _ratio(_median([a for a, _ in warm_rows]), _median([b for _, b in warm_rows])),
                f(_median([a for a, _ in fast]), 2), f(_median([b for _, b in fast]), 2),
