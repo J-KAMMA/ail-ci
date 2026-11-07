@@ -685,7 +685,7 @@
   "test_ail_std_pprint": 40.5,
   "test_ail_std_quopri": 40.5,
   "test_ail_std_random": 40.5,
-  "test_ail_std_re": 40.5,
+  "test_ail_std_re": 1500.0,
   "test_ail_std_sched": 40.5,
   "test_ail_std_shlex": 40.5,
   "test_ail_std_sqlite3": 40.5,
@@ -786,7 +786,8 @@
    "test_ail_stdlib_batch4"
   ],
   [
-   "test_ail_re"
+   "test_ail_re",
+   "test_ail_std_re"
   ],
   [
    "test_ail_bound_builtin",
@@ -833,7 +834,6 @@
    "test_ail_std_pprint",
    "test_ail_std_quopri",
    "test_ail_std_random",
-   "test_ail_std_re",
    "test_ail_std_sched",
    "test_ail_std_shlex",
    "test_ail_std_sqlite3",
