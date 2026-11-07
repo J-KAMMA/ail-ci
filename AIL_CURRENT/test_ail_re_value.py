@@ -224,6 +224,13 @@ bt = b'pad ' * 600 + b'abc:12 de:3'
 print(BYT.search(bt, 10).group(1).decode(), BYT.match(bt, 2400).group(2).decode(), BYT.search(bt, 2403).span())
 uni = 'x' * 2000 + 'é' + ' 42 zz' + 'q' * 2000
 print(TOK.match(uni, 2001).group(1), WB.search(uni, 3).span(), WB.search(uni, 2002).group(0))
+# zero-width patterns whose scan reaches every window end: the window grows to the whole text and stops
+ZW = re.compile(r'\b')
+NONE = re.compile(r'(?:)')
+TAIL = re.compile(r'a*\Z')
+blank = ' ' * 9000
+print(ZW.search(blank, 10), NONE.search(blank, 3000).span(), NONE.match(blank, 7000).span(), ZW.match(blank, 4000))
+print(TAIL.search('a' * 9000, 5).span(), TAIL.match('a' * 9000, 100).end(), TAIL.search('b' * 9000, 7).span())
 '''
 
 
