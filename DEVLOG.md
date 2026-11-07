@@ -2,10 +2,10 @@
 
 Design-only job; the compiler is unchanged. Collected the messages that actually fire by
 compiling the 8 vibe programs that built and 100 gdev programs (108 runs), plus the 11 AIL
-attempts in `lab/vibe/results.json`. Selected the 15 messages (vibe1's 10 plus the 5
-highest-frequency gdev-only families), wrote one trigger each in `lab/err/triggers/`, and asked
-the model vibe1 used (`cmd`, `deepseek-v4.1-flash`, `--effort low`, one turn, no tools) to fix
-each program from the message alone, 5 replies per trigger.
+attempts in `lab/vibe/results.json`. Selected the 15 messages (the 9 reproducible messages from
+vibe1's run plus the 6 highest-frequency gdev-only families), wrote one trigger each in
+`lab/err/triggers/`, and asked the model vibe1 used (`cmd`, `deepseek-v4.1-flash`, `--effort
+low`, one turn, no tools) to fix each program from the message alone, 5 replies per trigger.
 
 Per-message fix rate (builds, matches CPython, message gone): 56/75 = 0.75. The dead ends are
 `_ail_l1l` row arity (0.20), "mixes bools and numbers" (0.00; the suggested `int(...)` changes

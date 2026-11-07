@@ -25,8 +25,9 @@ What actually fired:
   `lab/vibe/results.json` with compiler rows (11 AIL attempts, 12 message occurrences).
 - 100 programs from the gdev corpus (`corpus/gdev/g*.py`), compiled with
   `compile --syntax python` (`lab/err/compile_runs.json`, 108 runs).
-- A long tail: most messages occur once. The 15 selected are the 10 messages vibe1's model
-  actually saw, plus the 5 highest-frequency messages that only the gdev corpus produced.
+- A long tail: most messages occur once. The 15 selected are the 9 reproducible messages vibe1's
+  model actually saw (its #1 is retired, see below), plus the 6 highest-frequency messages that
+  only the gdev corpus produced (three at 3 occurrences, three at 2).
 
 | # | message (short) | vibe1 | gdev | total |
 |---|---|---|---|---|
