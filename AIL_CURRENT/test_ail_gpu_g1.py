@@ -1049,10 +1049,6 @@ REFUSALS = [
     ('math.exp', '    # ail: gpu\n    for i in range(n):\n        out[i] = math.exp(a[i])\n', 3,
      ['math.exp has no exact GPU form', "write instead: drop '# ail: gpu' (the loop runs on the CPU) or move the "
                                         'math.exp call out of the loop']),
-    ('math.sqrt', '    # ail: gpu\n    for i in range(n):\n        out[i] = math.sqrt(a[i])\n', 3,
-     ['math.sqrt needs the correctly rounded GPU square root of stage G5']),
-    ('float division', '    # ail: gpu\n    for i in range(n):\n        out[i] = a[i] / b[i]\n', 3,
-     ['`/` needs the correctly rounded GPU division of stage G5', 'write instead: compute with']),
     ('power', '    # ail: gpu\n    for i in range(n):\n        out[i] = a[i] ** 2\n', 3, ['`**` has no exact GPU form']),
     ('float modulo', '    # ail: gpu\n    for i in range(n):\n        out[i] = a[i] % 3.0\n', 3,
      ['float `%` has no exact GPU form (libm)']),
@@ -1180,10 +1176,6 @@ class Refusals(Base):
     def test_the_command_line_names_file_line_column_and_exits_with_3(self):
         cases = [('exp', '    # ail: gpu\n    for i in range(n):\n        out[i] = math.exp(a[i])\n', 3,
                   'math.exp has no exact GPU form'),
-                 ('sqrt', '    # ail: gpu\n    for i in range(n):\n        out[i] = math.sqrt(a[i])\n', 3,
-                  'math.sqrt needs the correctly rounded GPU square root of stage G5'),
-                 ('divide', '    # ail: gpu\n    for i in range(n):\n        out[i] = a[i] / b[i]\n', 3,
-                  '`/` needs the correctly rounded GPU division of stage G5'),
                  ('whiled', '    i = 0\n    # ail: gpu\n    while i < n:\n        i += 1\n', 3, 'a while loop'),
                  ('lowered', '    ys = [(x, x) for x in a]  # ail: gpu\n', 1, 'a tuple')]
         for name, body, offset, wanted in cases:

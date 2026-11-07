@@ -183,14 +183,11 @@ _STMT_NAMES = {
     ast.Raise: 'raise', ast.Assert: 'assert', ast.Delete: 'del', ast.Global: 'global', ast.Nonlocal: 'nonlocal',
     ast.Import: 'import', ast.ImportFrom: 'import', ast.FunctionDef: 'a nested def', ast.ClassDef: 'a class',
 }
-_FLOAT_MATH_G5 = {'sqrt': 'math.sqrt needs the correctly rounded GPU square root of stage G5'}
 _FLOAT_MATH = {'exp', 'log', 'log2', 'log10', 'pow', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'sinh',
                'cosh', 'tanh', 'hypot', 'fmod', 'fabs', 'copysign', 'fsum', 'isnan', 'isinf', 'isfinite', 'cbrt',
                'expm1', 'log1p', 'erf', 'gamma', 'lgamma', 'degrees', 'radians', 'ldexp', 'frexp', 'modf',
                'factorial', 'comb', 'perm', 'gcd', 'lcm', 'isqrt', 'remainder', 'dist', 'prod'}
-_BAD_BIN = {ast.Div: ('`/` needs the correctly rounded GPU division of stage G5',
-                      'compute with `*` and `//`, or drop the marker (the loop runs on the CPU)'),
-            ast.Pow: ('`**` has no exact GPU form (floats: libm; ints: big integers)',
+_BAD_BIN = {ast.Pow: ('`**` has no exact GPU form (floats: libm; ints: big integers)',
                       'write the product out (`x * x`), or drop the marker'),
             ast.LShift: ('`<<` is not available on the GPU yet', 'use `* 2` or drop the marker'),
             ast.RShift: ('`>>` is not available on the GPU yet', 'use `// 2` or drop the marker'),
@@ -198,7 +195,7 @@ _BAD_BIN = {ast.Div: ('`/` needs the correctly rounded GPU division of stage G5'
             ast.BitOr: ('`|` is not available on the GPU yet', 'drop the marker'),
             ast.BitXor: ('`^` is not available on the GPU yet', 'drop the marker'),
             ast.MatMult: ('`@` is not available on the GPU', 'drop the marker')}
-_OPS = {ast.Add: 'add', ast.Sub: 'sub', ast.Mult: 'mul', ast.FloorDiv: 'floordiv', ast.Mod: 'mod'}
+_OPS = {ast.Add: 'add', ast.Sub: 'sub', ast.Mult: 'mul', ast.Div: 'div', ast.FloorDiv: 'floordiv', ast.Mod: 'mod'}
 _CMPS = {ast.Lt: '<', ast.LtE: '<=', ast.Gt: '>', ast.GtE: '>=', ast.Eq: '==', ast.NotEq: '!='}
 
 
@@ -473,6 +470,10 @@ class Builder:
             return self.name(node, frame)
         if isinstance(node, ast.BinOp):
             op = type(node.op)
+            if op is ast.Pow and _half_exponent(node.right):
+                raise self.fail(node, '`** 0.5` has no exact GPU form: CPython makes a negative base a complex '
+                                      'number, which the kernel cannot represent',
+                                'write math.sqrt(x) when the operand is not negative, or drop the marker')
             if op in _BAD_BIN:
                 raise self.fail(node, *_BAD_BIN[op])
             if op not in _OPS:
@@ -559,6 +560,15 @@ class Builder:
             return e                              # bool is 0/1 in an int64
         return e
 
+    def to_float_checked(self, node, e):
+        """`/` and `sqrt` convert an int operand to binary64, which is exact only up to 2**53; beyond it the kernel
+        flags and the CPU replay computes CPython's value from the exact integers (GPU.md 3.2)."""
+        if e[1] in ('f', '?'):
+            return e
+        if e[1] in ('i', 'b'):
+            return ('cvt', 'f', 'i2fchk', e)
+        raise self.fail(node, 'an operand is not an int or float')
+
     def name(self, node, frame):
         n = node.id
         if n in frame.vars:
@@ -583,6 +593,10 @@ class Builder:
     def binop(self, node, op, a, b):
         self.num(node, a[1], 'the left operand')
         self.num(node, b[1], 'the right operand')
+        if op is ast.Div:                       # Python `/` is always float; G5 does it exactly
+            if '?' in (a[1], b[1]):
+                return ('bin', '?', 'div', a, b)
+            return ('bin', 'f', 'div', self.to_float_checked(node, a), self.to_float_checked(node, b))
         if op is ast.FloorDiv and a[1] == 'f' and b[0] == 'c' and b[1] in ('i', 'f') and b[2] == 1:
             return ('cvt', 'f', 'ffloor', a)          # math.floor(x) is written int(x // 1) (ail_syntax.py): exact
         if op in (ast.FloorDiv, ast.Mod) and 'f' in (a[1], b[1]):
@@ -631,12 +645,15 @@ class Builder:
                     if a[1] in ('i', 'b'):
                         return self.as_(a, 'i')
                     return ('cvt', 'i', fn, a)
-                if fn in _FLOAT_MATH_G5:
-                    raise self.fail(node, _FLOAT_MATH_G5[fn], 'drop the marker, or wait for stage G5')
-                if fn in _FLOAT_MATH or True:
-                    raise self.fail(node, 'math.%s has no exact GPU form (CPython uses the C library\'s result)' % fn,
-                                    "drop '# ail: gpu' (the loop runs on the CPU) or move the math.%s call out of the "
-                                    'loop' % fn)
+                if fn == 'sqrt':                      # stage G5: correctly rounded square root
+                    if len(node.args) != 1:
+                        raise self.fail(node, 'math.sqrt() takes one argument')
+                    a = self.ex(node.args[0], frame)
+                    self.num(node, a[1], 'the argument')
+                    return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
+                raise self.fail(node, 'math.%s has no exact GPU form (CPython uses the C library\'s result)' % fn,
+                                "drop '# ail: gpu' (the loop runs on the CPU) or move the math.%s call out of the "
+                                'loop' % fn)
             raise self.fail(node, 'a method call (.%s) is not allowed in a GPU loop body' % f.attr)
         if not isinstance(f, ast.Name):
             raise self.fail(node, 'only plain calls are allowed')
@@ -653,10 +670,20 @@ class Builder:
                 if a[1] in ('i', 'b'):
                     return self.as_(a, 'i')
                 return ('cvt', 'i', fn, a)
-            if fn in _FLOAT_MATH_G5:
-                raise self.fail(node, _FLOAT_MATH_G5[fn], 'drop the marker, or wait for stage G5')
+            if fn == 'sqrt':                          # stage G5, as above
+                if len(node.args) != 1:
+                    raise self.fail(node, 'math.sqrt() takes one argument')
+                a = self.ex(node.args[0], frame)
+                self.num(node, a[1], 'the argument')
+                return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
             raise self.fail(node, 'math.%s has no exact GPU form (CPython uses the C library\'s result)' % fn,
                             "drop '# ail: gpu' (the loop runs on the CPU) or move the math.%s call out of the loop" % fn)
+        if getattr(node, GPU_SQRT_CALL, False):       # stage G5: the helper math.sqrt was lowered to
+            if len(node.args) != 1:
+                raise self.fail(node, 'math.sqrt() takes one argument')
+            a = self.ex(node.args[0], frame)
+            self.num(node, a[1], 'the argument')
+            return ('sqrt', '?' if a[1] == '?' else 'f', self.to_float_checked(node, a))
         if n in self.funcs:
             return self.inline(node, frame)
         args = node.args
@@ -781,6 +808,85 @@ class Builder:
 
 def _tname(t):
     return {'i': 'int', 'f': 'float', 'b': 'bool', '?': 'unknown'}.get(t, t)
+
+
+def _half_exponent(node):
+    """`x ** 0.5` is a square root (the typed path writes it as ail_fsqrt); no other `**` is built."""
+    return (isinstance(node, ast.Constant) and isinstance(node.value, float) and node.value == 0.5)
+
+
+GPU_SQRT = '_ail_gpu_sqrt'           # the typed helper math.sqrt is lowered to (see _SqrtRewrite)
+GPU_SQRT_CALL = '_ail_gpu_sqrt_call'  # marks the call _SqrtRewrite built, so a user function of any name is inlined
+GPU_SQRT_SOURCE = '''def %s(x: float) -> float:
+    if x < 0.0:
+        raise ValueError("math domain error")
+    if x == 0.0:
+        return x
+    return x ** 0.5
+'''
+
+
+def fresh_helper_name(tree):
+    """A top-level name for the sqrt helper that no name in the program binds or reads.
+
+    `prepare` injects the helper, so a user function (or local) called `_ail_gpu_sqrt` must not shadow it: a collision
+    would silently run the user's function on the device path and the helper (or the other way round) on the CPU path.
+    The kernel builder lowers only the tagged call `_SqrtRewrite` builds, never a call by name alone."""
+    used = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name):
+            used.add(n.id)
+        elif isinstance(n, ast.arg):
+            used.add(n.arg)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            used.add(n.name)
+        elif isinstance(n, ast.alias):
+            used.add(n.asname or n.name.split('.')[0])
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            used.add(n.name)
+    name, i = GPU_SQRT, 0
+    while name in used:
+        i += 1
+        name = '%s_%d' % (GPU_SQRT, i)
+    return name
+
+
+class _SqrtRewrite(ast.NodeTransformer):
+    """math.sqrt(x) -> _ail_gpu_sqrt(float(x)), where `_ail_gpu_sqrt` is the typed helper of GPU_SQRT_SOURCE.
+
+    The typed path has no `math.sqrt` (and refuses a call to the surface's `_ail_math_sqrt` helper), so a marked loop
+    that calls it would fall to the general path, which never offloads (GPU.md 1.1).  This keeps the loop typed and
+    CPython-exact: the helper returns the zero unchanged (-0.0 -> -0.0, as math.sqrt does), a positive value is the
+    same correctly rounded square root (`x ** 0.5` is ail_fsqrt on the typed path), NaN is the square root of NaN as
+    CPython's math.sqrt(NaN) is NaN, and a negative value raises CPython's `ValueError("math domain error")`, so a
+    caller's `except ValueError` still catches it.  The kernel builder lowers the same call to its sqrt op, whose flag
+    sends a negative operand to the CPU replay (and every other guarded case with it)."""
+
+    def __init__(self, helper=GPU_SQRT):
+        self.helper = helper
+        self.used = False
+
+    @staticmethod
+    def name_of(call):
+        f = call.func
+        if (isinstance(f, ast.Attribute) and f.attr == 'sqrt' and isinstance(f.value, ast.Name)
+                and f.value.id == 'math'):
+            return True
+        return isinstance(f, ast.Name) and f.id == '_ail_math_sqrt'
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        if not self.name_of(node) or node.keywords or len(node.args) != 1:
+            return node
+        x = node.args[0]
+
+        def as_float():
+            return ast.Call(func=ast.Name(id='float', ctx=ast.Load()), args=[x], keywords=[])
+
+        out = ast.Call(func=ast.Name(id=self.helper, ctx=ast.Load()), args=[as_float()], keywords=[])
+        out.__dict__[GPU_SQRT_CALL] = True
+        self.used = True
+        return ast.copy_location(out, node)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1031,6 +1137,27 @@ def prepare(tree, text):
     tagged = [n for n in ast.walk(tree) if isinstance(n, ast.stmt) and getattr(n, '_ail_gpu', False)]
     if not tagged:
         return 0
+    helper = fresh_helper_name(tree)         # never a name the program already binds or reads
+    rewriter = _SqrtRewrite(helper)          # math.sqrt has no typed form: lower it to a call gpu.py defines
+    for s in tagged:
+        rewriter.visit(s)
+        ast.fix_missing_locations(s)
+    if rewriter.used:
+        # a plain typed function (the typed path refuses a call to the surface's `_ail_math_*` helpers):
+        # the kernel builder lowers the tagged call to its sqrt op, and the C text raises CPython's ValueError
+        i = 0
+        while i < len(tree.body) and (isinstance(tree.body[i], (ast.Import, ast.ImportFrom))
+                                      or (i == 0 and isinstance(tree.body[i], ast.Expr)
+                                          and isinstance(tree.body[i].value, ast.Constant))):
+            i += 1
+        tree.body.insert(i, ast.parse(GPU_SQRT_SOURCE % helper).body[0])
+        ast.fix_missing_locations(tree)
+    # the surface adds a `_ail_math_sqrt` helper for the general path; with every call rewritten it is dead code that
+    # would keep the whole program off the typed path (and so off the GPU), so drop it when nothing calls it any more
+    if not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == '_ail_math_sqrt'
+               for n in ast.walk(tree)):
+        tree.body = [n for n in tree.body
+                     if not (isinstance(n, ast.FunctionDef) and n.name == '_ail_math_sqrt')]
     sites = analyze(tree, text, tagged)
     _FUNCS = _funcs_of(tree)
     if not sites:
@@ -1387,6 +1514,7 @@ RUNTIME = r'''
 #define GK_DENORM   8u   /* a float operand or result below 2**-1000      */
 #define GK_NAN     16u   /* a NaN operand, or a NaN made from numbers     */
 #define GK_RANGE   32u   /* int(float) outside int64; int vs float compare beyond 2**53 */
+#define GK_FDIV    64u   /* `/` or sqrt: zero/inf/NaN or |operand| outside [2**-480, 2**480], sqrt of x < 0 */
 static inline int64_t gk_add(int64_t a, int64_t b, unsigned *f) { int64_t r; if (__builtin_add_overflow(a, b, &r)) { *f |= GK_OVERFLOW; return 0; } return r; }
 static inline int64_t gk_sub(int64_t a, int64_t b, unsigned *f) { int64_t r; if (__builtin_sub_overflow(a, b, &r)) { *f |= GK_OVERFLOW; return 0; } return r; }
 static inline int64_t gk_mul(int64_t a, int64_t b, unsigned *f) { int64_t r; if (__builtin_mul_overflow(a, b, &r)) { *f |= GK_OVERFLOW; return 0; } return r; }
@@ -1410,6 +1538,25 @@ static inline double gk_fsub(double a, double b, unsigned *f) { return gk_chk(a 
 static inline double gk_fmul(double a, double b, unsigned *f) {
     if (a != 0.0 && b != 0.0 && isfinite(a) && isfinite(b)) { int ea, eb; frexp(a, &ea); frexp(b, &eb); if (ea + eb < -1000) { *f |= GK_DENORM; return 0.0; } }
     return gk_chk(a * b, f); }
+/* GPU.md stage G5: correctly rounded `/` and sqrt.  The device computes them with an exact residual in binary64 ops;
+   the operands it can do that for are the ones inside G5_LIM (a device that flushed a subnormal or overflowed an
+   intermediate would otherwise show a different bit), so anything else sets GK_FDIV and the CPU loop replays, which
+   reproduces CPython exactly (ZeroDivisionError, ValueError, inf, NaN).  This emulation uses the CPU's own correctly
+   rounded division and sqrt as the oracle the device twin is compared against. */
+#define G5_LIM 0x1p480
+static inline int gk_fdiv_ok(double x, unsigned *f) {
+    double m;
+    if (x != x) { *f |= GK_NAN; return 0; }
+    m = fabs(x);
+    if (!isfinite(x) || m == 0.0 || m < 0x1p-480 || m > G5_LIM) { *f |= GK_FDIV; return 0; }
+    return 1; }
+static inline double gk_fdiv(double a, double b, unsigned *f) {
+    if (!gk_fdiv_ok(a, f) || !gk_fdiv_ok(b, f)) return 0.0;
+    return gk_chk(a / b, f); }
+static inline double gk_fsqrt(double x, unsigned *f) {
+    if (x != x) { *f |= GK_NAN; return 0.0; }
+    if (!isfinite(x) || x <= 0.0 || x < 0x1p-480 || x > G5_LIM) { *f |= GK_FDIV; return 0.0; }
+    return gk_chk(sqrt(x), f); }
 static inline int64_t gk_f2i(double x, unsigned *f) { if (!(x >= -9223372036854775808.0 && x < 9223372036854775808.0)) { *f |= GK_RANGE; return 0; } return (int64_t)x; }
 static inline int64_t gk_floor(double x, unsigned *f) { return gk_f2i(floor(x), f); }
 static inline double gk_ffloor(double x, unsigned *f) { if (!isfinite(x)) { *f |= GK_RANGE; return 0.0; } return floor(x); }
@@ -1433,8 +1580,9 @@ static inline void gk_trace_run(int k, int64_t n) { if (gk_tracing()) fprintf(st
 static inline void gk_trace_cpu(int k, const char *why) { if (gk_tracing()) fprintf(stderr, "gpu: k%d cpu (%s)\n", k, why); }
 static inline void gk_trace_replay(int k, unsigned f) {
     if (!gk_tracing()) return;
-    fprintf(stderr, "gpu: k%d replay flags=0x%x (%s%s%s%s%s%s)\n", k, f, f & GK_INDEX ? "index " : "", f & GK_ZERODIV ? "zero-division " : "",
-            f & GK_OVERFLOW ? "overflow " : "", f & GK_DENORM ? "denormal " : "", f & GK_NAN ? "nan " : "", f & GK_RANGE ? "range " : ""); }
+    fprintf(stderr, "gpu: k%d replay flags=0x%x (%s%s%s%s%s%s%s)\n", k, f, f & GK_INDEX ? "index " : "", f & GK_ZERODIV ? "zero-division " : "",
+            f & GK_OVERFLOW ? "overflow " : "", f & GK_DENORM ? "denormal " : "", f & GK_NAN ? "nan " : "", f & GK_RANGE ? "range " : "",
+            f & GK_FDIV ? "float-division " : ""); }
 #endif
 '''
 
@@ -1486,8 +1634,10 @@ class _Emit:
             return 'fabs(%s)' % self.ex(e[2]) if t == 'f' else 'gk_abs(%s, &_f)' % self.ex(e[2])
         if op == 'bin':
             a, b = self.ex(e[3]), self.ex(e[4])
-            name = {'add': 'add', 'sub': 'sub', 'mul': 'mul', 'floordiv': 'floordiv', 'mod': 'mod'}[e[2]]
+            name = {'add': 'add', 'sub': 'sub', 'mul': 'mul', 'div': 'div', 'floordiv': 'floordiv', 'mod': 'mod'}[e[2]]
             return 'gk_%s%s(%s, %s, &_f)' % ('f' if t == 'f' else '', name, a, b)
+        if op == 'sqrt':
+            return 'gk_fsqrt(%s, &_f)' % self.ex(e[2])
         if op == 'cmp':
             a, b, mode = self.ex(e[3]), self.ex(e[4]), e[5]
             if mode == 'if':
@@ -1515,6 +1665,8 @@ class _Emit:
             kind, a = e[2], self.ex(e[3])
             if kind == 'i2f':
                 return '((double)(%s))' % a
+            if kind == 'i2fchk':
+                return 'gk_i2fx(%s, &_f)' % a
             if kind == 'ffloor':
                 return 'gk_ffloor(%s, &_f)' % a
             if kind == 'b2i':

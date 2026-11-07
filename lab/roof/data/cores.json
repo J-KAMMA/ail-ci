@@ -1,0 +1,122 @@
+{
+ "berth_sim": {
+  "c": {
+   "wall_s": 1.9085,
+   "cpu_s": 1.9,
+   "cores": 1.0
+  },
+  "ail": {
+   "wall_s": 2.439,
+   "cpu_s": 2.4299999999999997,
+   "cores": 1.0
+  }
+ },
+ "chain_relax": {
+  "c": {
+   "wall_s": 1.0449,
+   "cpu_s": 1.04,
+   "cores": 1.0
+  },
+  "ail": {
+   "wall_s": 1.2596,
+   "cpu_s": 1.25,
+   "cores": 0.99
+  }
+ },
+ "echo_pack": {
+  "c": {
+   "wall_s": 0.643,
+   "cpu_s": 0.63,
+   "cores": 0.98
+  },
+  "ail": {
+   "wall_s": 1.0829,
+   "cpu_s": 1.0750000000000002,
+   "cores": 0.99
+  }
+ },
+ "ledger_bin": {
+  "c": {
+   "wall_s": 0.6558,
+   "cpu_s": 0.645,
+   "cores": 0.98
+  },
+  "ail": {
+   "wall_s": 0.9113,
+   "cpu_s": 0.895,
+   "cores": 0.98
+  }
+ },
+ "rail_transfer": {
+  "c": {
+   "wall_s": 0.1041,
+   "cpu_s": 0.09,
+   "cores": 0.86
+  },
+  "ail": {
+   "wall_s": 0.0686,
+   "cpu_s": 0.05500000000000001,
+   "cores": 0.8
+  }
+ },
+ "scar_life": {
+  "c": {
+   "wall_s": 19.3564,
+   "cpu_s": 19.340000000000003,
+   "cores": 1.0
+  },
+  "ail": {
+   "wall_s": 29.9617,
+   "cpu_s": 29.945,
+   "cores": 1.0
+  }
+ },
+ "tally_lang": {
+  "c": {
+   "wall_s": 1.1395,
+   "cpu_s": 1.13,
+   "cores": 0.99
+  },
+  "ail": {
+   "wall_s": 1.4562,
+   "cpu_s": 1.4449999999999998,
+   "cores": 0.99
+  }
+ },
+ "term_rank": {
+  "c": {
+   "wall_s": 2.7571,
+   "cpu_s": 2.745,
+   "cores": 1.0
+  },
+  "ail": {
+   "wall_s": 2.367,
+   "cpu_s": 2.355,
+   "cores": 0.99
+  }
+ },
+ "ticket_audit": {
+  "c": {
+   "wall_s": 0.9175,
+   "cpu_s": 0.905,
+   "cores": 0.99
+  },
+  "ail": {
+   "wall_s": 1.7924,
+   "cpu_s": 1.7799999999999998,
+   "cores": 0.99
+  }
+ },
+ "tree_fold": {
+  "c": {
+   "wall_s": 0.9986,
+   "cpu_s": 0.985,
+   "cores": 0.99
+  },
+  "ail": {
+   "wall_s": 1.4331,
+   "cpu_s": 1.42,
+   "cores": 0.99
+  }
+ }
+}
