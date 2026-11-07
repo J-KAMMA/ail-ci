@@ -5564,6 +5564,8 @@ def _strict_blockers(args, source, objects, python):
             os.environ['AIL_SURFACE'] = 'python'
         else:
             os.environ.pop('AIL_SURFACE', None)
+        import modfold                    # the typed build folds pure module constants first (pyc.to_c)
+        text = modfold.fold(text)
         blockers, incomplete = strictmode.collect(text, to_c, Unsupported, external=external, reword=reword)
     finally:
         if saved_surface is None:
