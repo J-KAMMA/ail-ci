@@ -1,3 +1,11 @@
+## 2026-11-07 -- vibe2: five surfaces on the vibe1 tasks (job-vibe2-11071844)
+
+Added `lab/vibe2/` (`STRICT_SPEC.md`, `NEW_SURFACE.md`, `translate.py`, `test_translate.py`) and
+extended `lab/vibe/run.py` with the `ail-strict` and `ail-new` arms, reply-token accounting and a
+`--programs` option. The vibe1 arms still run unchanged. `ail-new` translates the AIL-N surface to
+AIL Python with a kept line map and compiles that; a translator error is fed back as a surface
+error. No compiler change.
+
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
 Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`), fetched
