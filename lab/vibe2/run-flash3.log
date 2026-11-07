@@ -1,0 +1,109 @@
+[cases] berth_sim: 3 public, 23 hidden
+[cases] chain_relax: 3 public, 29 hidden
+[cases] echo_pack: 3 public, 54 hidden
+[cases] ledger_bin: 3 public, 52 hidden
+[cases] rail_transfer: 3 public, 21 hidden
+[cases] scar_life: 3 public, 50 hidden
+[cases] tally_lang: 3 public, 72 hidden
+[cases] term_rank: 3 public, 40 hidden
+[cases] ticket_audit: 3 public, 88 hidden
+[cases] tree_fold: 3 public, 52 hidden
+[cases] csv_rollup: 3 public, 6 hidden
+[11:52:22 1] csv_rollup ail-new seed 0: correct rounds 2 silent 0 loud 0 general
+[11:55:50 2] rail_transfer ail-new seed 0: correct rounds 2 silent 0 loud 0 general
+{
+ "deepseek-v4.1-flash": {
+  "python": {
+   "n": 11,
+   "correct": 9,
+   "public_pass": 9,
+   "gave_up": 2,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "rounds_median": 1,
+   "reply_tokens": 156282,
+   "tokens_per_correct": 17364.7,
+   "surface_error_rounds": 0,
+   "loop_seconds": 0.45,
+   "final_run_seconds": 0.445,
+   "paths": null
+  },
+  "rust": {
+   "n": 11,
+   "correct": 7,
+   "public_pass": 7,
+   "gave_up": 4,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "rounds_median": 1,
+   "reply_tokens": 89312,
+   "tokens_per_correct": 12758.9,
+   "surface_error_rounds": 0,
+   "loop_seconds": 3.07,
+   "final_run_seconds": 0.018,
+   "paths": null
+  },
+  "ail": {
+   "n": 11,
+   "correct": 8,
+   "public_pass": 8,
+   "gave_up": 3,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "rounds_median": 1.0,
+   "reply_tokens": 152447,
+   "tokens_per_correct": 19055.9,
+   "surface_error_rounds": 0,
+   "loop_seconds": 157.84,
+   "final_run_seconds": 0.021,
+   "paths": {
+    "typed": 0,
+    "general": 8,
+    "refused": 0
+   }
+  },
+  "ail-strict": {
+   "n": 11,
+   "correct": 6,
+   "public_pass": 7,
+   "gave_up": 4,
+   "silent_wrong": 0,
+   "loud_stop": 1,
+   "other_wrong": 0,
+   "rounds_median": 1,
+   "reply_tokens": 134267,
+   "tokens_per_correct": 22377.8,
+   "surface_error_rounds": 0,
+   "loop_seconds": 81.07,
+   "final_run_seconds": 0.019,
+   "paths": {
+    "typed": 2,
+    "general": 5,
+    "refused": 0
+   }
+  },
+  "ail-new": {
+   "n": 11,
+   "correct": 5,
+   "public_pass": 5,
+   "gave_up": 6,
+   "silent_wrong": 0,
+   "loud_stop": 0,
+   "other_wrong": 0,
+   "rounds_median": 2,
+   "reply_tokens": 147258,
+   "tokens_per_correct": 29451.6,
+   "surface_error_rounds": 1,
+   "loop_seconds": 102.8,
+   "final_run_seconds": 0.013,
+   "paths": {
+    "typed": 0,
+    "general": 5,
+    "refused": 0
+   }
+  }
+ }
+}

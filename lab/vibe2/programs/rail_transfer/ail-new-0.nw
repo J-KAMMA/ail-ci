@@ -1,0 +1,174 @@
+fn heap_less(a: tuple[int,int,int], b: tuple[int,int,int]) -> bool:
+  if a[0] < b[0]:
+    return True
+  if a[0] > b[0]:
+    return False
+  return a[1] < b[1]
+
+fn heap_push(heap: list[tuple[int,int,int]], item: tuple[int,int,int]) -> int:
+  heap.append(item)
+  var i: int = len(heap) - 1
+  while i > 0:
+    let p: int = (i - 1) // 2
+    if not heap_less(heap[i], heap[p]):
+      break
+    let tmp: tuple[int,int,int] = heap[p]
+    heap[p] = heap[i]
+    heap[i] = tmp
+    i = p
+  return 0
+
+fn heap_pop(heap: list[tuple[int,int,int]]) -> tuple[int,int,int]:
+  let top: tuple[int,int,int] = heap[0]
+  let last: tuple[int,int,int] = heap[len(heap) - 1]
+  heap.pop()
+  if len(heap) > 0:
+    heap[0] = last
+    var i: int = 0
+    while i * 2 + 1 < len(heap):
+      let left: int = i * 2 + 1
+      let right: int = left + 1
+      var best: int = i
+      if heap_less(heap[left], heap[best]):
+        best = left
+      if right < len(heap) and heap_less(heap[right], heap[best]):
+        best = right
+      if best == i:
+        break
+      let tmp: tuple[int,int,int] = heap[i]
+      heap[i] = heap[best]
+      heap[best] = tmp
+      i = best
+  return top
+
+fn get_state(key: int, N: int, smap: dict[int, int], st_station: list[int], head: list[int], station_states: list[list[int]]) -> int:
+  if key in smap:
+    return smap[key]
+  let sid: int = len(st_station)
+  smap[key] = sid
+  let v: int = key % N
+  st_station.append(v)
+  head.append(-1)
+  station_states[v].append(sid)
+  return sid
+
+fn solve(S: int, D: int, qid: int, N: int, X: list[int], st_station: list[int], station_states: list[list[int]], head: list[int], e_to: list[int], e_w: list[int], e_next: list[int], dt: list[int], db: list[int], done: list[int]) -> tuple[int,int,int]:
+  let heap: list[tuple[int,int,int]] = []
+  let touched: list[int] = []
+  for sid: int in station_states[S]:
+    if dt[sid] == -1:
+      dt[sid] = 0
+      db[sid] = 1
+      touched.append(sid)
+      heap_push(heap, (0, 1, sid))
+  var found: int = 0
+  var ans_t: int = 0
+  var ans_b: int = 0
+  while len(heap) > 0:
+    let item: tuple[int,int,int] = heap_pop(heap)
+    let t: int = item[0]
+    let b: int = item[1]
+    let s: int = item[2]
+    if dt[s] != t or db[s] != b:
+      continue
+    let v: int = st_station[s]
+    if v == D:
+      found = 1
+      ans_t = t
+      ans_b = b
+      break
+    if done[v] != qid:
+      done[v] = qid
+      let nt: int = t + X[v]
+      let nb: int = b + 1
+      for ns: int in station_states[v]:
+        if dt[ns] == -1:
+          dt[ns] = nt
+          db[ns] = nb
+          touched.append(ns)
+          heap_push(heap, (nt, nb, ns))
+        elif nt < dt[ns] or (nt == dt[ns] and nb < db[ns]):
+          dt[ns] = nt
+          db[ns] = nb
+          heap_push(heap, (nt, nb, ns))
+    var e: int = head[s]
+    while e != -1:
+      let ns: int = e_to[e]
+      let nt2: int = t + e_w[e]
+      let nb2: int = b
+      if dt[ns] == -1:
+        dt[ns] = nt2
+        db[ns] = nb2
+        touched.append(ns)
+        heap_push(heap, (nt2, nb2, ns))
+      elif nt2 < dt[ns] or (nt2 == dt[ns] and nb2 < db[ns]):
+        dt[ns] = nt2
+        db[ns] = nb2
+        heap_push(heap, (nt2, nb2, ns))
+      e = e_next[e]
+  for s2: int in touched:
+    dt[s2] = -1
+    db[s2] = -1
+  return (found, ans_t, ans_b)
+
+let header: list[str] = read_line().split()
+let N: int = int(header[0])
+let M: int = int(header[1])
+let Q: int = int(header[2])
+let xparts: list[str] = read_line().split()
+let X: list[int] = []
+for i: int in range(N):
+  X.append(int(xparts[i]))
+let station_states: list[list[int]] = []
+for i2: int in range(N):
+  let empty_list: list[int] = []
+  station_states.append(empty_list)
+let smap: dict[int, int] = {}
+let st_station: list[int] = []
+let head: list[int] = []
+let e_to: list[int] = []
+let e_w: list[int] = []
+let e_next: list[int] = []
+for j: int in range(M):
+  let parts: list[str] = read_line().split()
+  let u: int = int(parts[0])
+  let v: int = int(parts[1])
+  let l: int = int(parts[2])
+  let t: int = int(parts[3])
+  let keyu: int = l * N + u
+  let keyv: int = l * N + v
+  let sidu: int = get_state(keyu, N, smap, st_station, head, station_states)
+  let sidv: int = get_state(keyv, N, smap, st_station, head, station_states)
+  let e1: int = len(e_to)
+  e_to.append(sidv)
+  e_w.append(t)
+  e_next.append(head[sidu])
+  head[sidu] = e1
+  let e2: int = len(e_to)
+  e_to.append(sidu)
+  e_w.append(t)
+  e_next.append(head[sidv])
+  head[sidv] = e2
+let K: int = len(st_station)
+let dt: list[int] = []
+for k: int in range(K):
+  dt.append(-1)
+let db: list[int] = []
+for k2: int in range(K):
+  db.append(-1)
+let done: list[int] = []
+for k3: int in range(N):
+  done.append(-1)
+for qi: int in range(Q):
+  let qparts: list[str] = read_line().split()
+  let s: int = int(qparts[0])
+  let d: int = int(qparts[1])
+  if s == d:
+    write("0 0\n")
+  else:
+    let res: tuple[int,int,int] = solve(s, d, qi, N, X, st_station, station_states, head, e_to, e_w, e_next, dt, db, done)
+    if res[0] == 1:
+      write(str(res[1]) + " " + str(res[2]) + "\n")
+    else:
+      write("none\n")
+exit(0)

@@ -255,6 +255,41 @@ output bit, kT ln 2 = 2.871e-21 J at 300 K) and the ranked avoidable-energy spli
 `lab/energy/RESULTS.md`. Coverage and the cells that stay `n/a` (CPython except `rail_transfer`,
 `chain_relax` and `scar_life`; AIL `main.py` on the four long tasks; `scar_life` for AIL/C/Rust) are
 stated there.
+## 2026-11-07 -- vibe2 fix: div_ceil overflow and function scope (job-vibe2-11072207)
+
+Fixed the two regressions the review found in `lab/vibe2/translate.py`. `__div_ceil` now computes
+`a // b + (a % b != 0)` instead of `-((-a) // b)`, so `a = INT64_MIN` no longer overflows when the
+dividend is negated (`div_ceil(-9223372036854775808, 2)` -> `-4611686018427387904`, divisor 1 ->
+`-9223372036854775808`). The binding check now looks only at the current frame (`active[-1]`), so a
+function that assigns a top-level name is refused by name (`declare the binding first`) instead of
+silently emitting a Python local; local `var` reassignment and reading top-level bindings still
+work. `test_translate.py` gains boundary/through-value `div_ceil` cases and both scope cases (19
+tests). No compiler change.
+
+## 2026-11-07 -- vibe2 fix: regenerate results, enforce the AIL-N surface (job-vibe2-11072121)
+
+Regenerated `lab/vibe2/results.json` from its stored rows with the fixed `compiler_messages` rule:
+the 24 general-path lines are now all `note` (three were mislabeled `error` by the old substring
+rule), the `surface` row is present (`ail_error_table` no longer truncates to 10), `meta.started`
+is the first recorded completion (10:24:28Z) and `completed_attempts`/`scheduled_attempts` are 55.
+Cleared the two `program` fields (`berth_sim`, `echo_pack` `ail-new`) whose sources the earlier
+invocation did not retain, and corrected `RESULTS.md`'s compiler-message table and paragraph.
+`translate.py` now also refuses the remaining constructs `NEW_SURFACE.md` excludes: a bare `def`,
+the walrus `:=`, comprehensions/generator expressions, and match arms that are numerically equal
+(`0`/`0.0`, `True`/`1`); `test_translate.py` covers each. No compiler change.
+
+## 2026-11-07 -- vibe2: five surfaces on the vibe1 tasks (job-vibe2-11071844)
+
+Added `lab/vibe2/` (`STRICT_SPEC.md`, `NEW_SURFACE.md`, `translate.py`, `test_translate.py`,
+`RESULTS.md`, `results.json`) and extended `lab/vibe/run.py` with the `ail-strict` and `ail-new`
+arms, reply-token accounting and a `--programs` option. The vibe1 arms still run unchanged.
+`ail-new` translates the AIL-N surface to AIL Python with a kept line map and compiles that; a
+translator error is fed back as a surface error (the synthetic stderr is a `str`, so
+`compiler_messages` no longer raises and the attempt is recorded; the real run exercised this on
+`rail_transfer`). `Store.rows` is keyed `(task, lang, seed, model)`, and `summary`/`ail_errors` are
+per model, so one results file holds several models. Run: 5 arms x 11 tasks x 1 model
+(`deepseek-v4.1-flash`) x 1 seed; `reflection/beam:free` was confirmed callable but not run (budget
+cut, stated in `RESULTS.md`). No compiler change.
 
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 
