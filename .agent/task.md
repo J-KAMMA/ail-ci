@@ -6,41 +6,62 @@
 
 --- LAST REVIEW ---
 ## review 1
-(free quota used up; paid model from here)
-[model commandcode/deepseek-v4.1-flash]
-I have enough. Final verification of the remaining claims is done; here is my review.
+[model opencode/deepseek-v4.1-flash-free]
+## Review
 
-**What the change really does.** Adds a new AST linter `packaging/ail_lang/perflint.py` (six rules P1–P6 over loop bodies, text/JSON output, `--strict` exit 5), wires `ail check --perf` into `packaging/ail_lang/cli.py`, and adds docs, tests/registration, manifest rows, and `lab/algo/` census+measure scripts. No compiler or runtime code is touched: `program.c` from `--debug-dir` is byte-identical between `work` and HEAD (only transient temp/cwd paths in `native_report.json` differ), and `cmp.sh` on a plain program matches CPython on both builds.
+**What the change really does.** Three commits on `work..HEAD`. They type `split`/`rsplit`/`splitlines` receivers as `str`, give P3 literal/annotation evidence when the RHS is unknown, add time-scoped alias edges (name, container literal, subscript/attribute read, mutation detection) that suppress P1/P4/P6, and add docs/tests/manifest rows. Only `perflint.py`, `docs/CLI.md`, `test_ail_perflint.py`, `DEVLOG.md`, `manifest.d/a7.txt` change; no compiler/runtime code. `cmp.sh` on `r_split.py`: both builds match CPython. HEAD also has `54e756f` (container aliases/rebinding), not mentioned in the report (which says `5665e64`).
 
-**Claims.** Census re-ran and matches exactly (compare 0/10, required 50 0/50, gdev 1/510 at `g15_022.py:84`, lab/corpus 219→0, vibe 24→0). `measure.py --runs 1` reproduces the table (all six "output identical", every after-hit `-`). Targeted tests on HEAD: `test_ail_perflint`, `test_ail_cli_args`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` — 5/5 pass, 0 failed. P3/P6 reset and P4 key behaviour verified by probes (`p3_reset`, `p6_reset`, `p6_loopvar`, `p4_keyvar` silent; sibling `+=` and constant keys still report). Error path verified (syntax/NUL source → exit 2, no hits).
+**Review defects checked.** All three named defects are fixed:
+- `r_split.py`: no P1 (was false P1 on `text`); fixed.
+- `r_alias.py`, `r_alias_p1.py`, `w_alias_*`: silent on mutation through a direct/container/attribute alias; `r_alias_rebind_p1/p4`, `r_alias_looptarget`, `r_p6_alias`: behave as reported; fixed.
+- `r_p3shape.py`: P3 at lines 4 and 10 for `s=""`/`s: str` + unknown `+=`; fixed.
 
-**Defects.**
+**Claims.** Census verified exactly (`compare` 0, corpus-50 0, gdev 1 at `g15_022.py:84`, lab/corpus 0, lab/vibe 0). `update_manifest.py --check` passes. Targeted tests 2/2 pass (`test_ail_perflint`, `test_ail_safetynet`). "Suppresses only on actual mutation, not alias rebinding" is **false**: rebinding the alias inside the loop still suppresses (defect 2). The 8-probe `cmp.sh` claim and `test_ail_files`/`test_ail_corpus_findings3` rerun were not repeated.
 
-1. **`.split()` types its receiver as a list — false P1 on a string, and the published fix changes output.** `_collect_call` does `elif func.attr in LIST_METHODS: self._hint(name, "list")`, but `split` is a *str* method; the receiver is a str. Probe `/tmp/rprobes/r_split.py`:
-```python
-def scan(text):
-    for _ in range(3):
-        fields = text.split(",")
-        if "b,c" in text:
-            print("yes", fields)
-scan("a,b,c")
-```
-Actual: `r_split.py:4:12: perf P1: membership test on the list 'text' ... fix: build a set/dict once ...`. Expected: nothing (`text` is a str). Applying the JSON `fix` (`in set(text)`) changes the program from 3 `yes` lines to none (verified). This is the "value through an argument / types" boundary the docs say is handled.
+**Blocking defects (introduced vs `work`).**
+1. **Subscript reads are always treated as aliases, so copies and scalar elements suppress valid hits.**
+   `v_slice_copy_p4.py`:
+   ```python
+   def f(items: list[int]) -> int:
+       view = items[:]
+       total = 0
+       for i in range(3):
+           view.append(i)
+           total += sum(items)
+       return total
+   ```
+   Expected P4 (`items` unchanged; `view` is a copy); actual: no hit (base: P4 at `6:18`). Same for `v_item_copy_p4.py` (`view = items[0]`, `view += 1`; expected P4, actual none; base P4 `6:18`) and `v_slice_copy_p6.py` (expected P6, actual none; base P6 `6:9`). `.copy()`/`list(items)` correctly still report, so only the `Subscript` path is wrong.
+2. **Rebinding an alias inside the loop before mutating it still suppresses.**
+   `v_rebind_inside_p4.py`:
+   ```python
+   def f(items: list[int]) -> int:
+       view = items
+       total = 0
+       for i in range(3):
+           view = []
+           view.append(i)
+           total += sum(items)
+       return total
+   ```
+   Expected P4 (`items` never changes; the append touches the rebound list); actual: no hit (base: P4 at `7:18`). Likewise `v_rebind_inside_p6.py` (expected P6, actual none; base P6 `7:9`), contradicting the report's "not alias rebinding" claim.
 
-2. **Aliasing is not treated as loop mutation; P1/P4 advice changes output.** `for i in range(3): data.append(i); total += sum(xs)` with `data = xs` reports P4 on `sum(xs)`; hoisting takes the result from 7 to 3 (`/tmp/rprobes/r_alias.py`). Likewise `view = items; view.append(probe); if probe in items` reports P1 and the set-before-loop fix takes output from `1 2` to nothing. Expected: silent, since the named list is mutated (docs: "a name that is rebound or mutated in the loop ... not reported").
+**Pre-existing (identical on `work`; listed, not blocking).** The same aliasing class still gives wrong advice for untracked aliases: tuple unpacking (`v_tuple_unpack.py`, `v_tuple_unpack_p1.py`), `d.get` (`v_dict_get.py`), conditional (`v_ifexp.py`), loop-target capture (`v_loop_target_alias.py`), and in-loop alias creation (`v_inloop_alias_p1.py`). Applying the reported fix changes output (e.g. `13`→`9`, `found`→nothing, `0 1 2`→`1 2`). These reproduce identically on `work`.
 
-3. **P3 misses the annotated/literal string target when the RHS type is unknown (dead branch).** In `_augment_kind`, `current = self.kinds.get(name)` is always `None` because `_classify` returns early when the name is in `self.kinds`; so `s: str` / `s = ""` + `s += <unknown>` is discarded as "other". Probe `/tmp/rprobes/r_p3shape.py`: `def f(items): s = ""; for x in items: s += x` and `def k(items): s = "start"; ...` produce **no hit**, while `def h(items: list[str])` reports at line 18. Expected: P3 (the target is provably a string, so any `+=` that runs is a string concat; docs promise annotation/literal evidence). This is a false negative, not wrong advice.
-
-**Pre-existing.** None: `perflint.py` and the `--perf` branch are new in this change; no compile-time difference exists on the base.
-
-**Unverified.** The worker's `/tmp/probes` claim (17 compile probes) — not rerun; immaterial since no compiler code changed and my own `--debug-dir` diff is identical. Wall-clock numbers in `RESULTS.md` are environment-dependent (I reran only `--runs 1`, output equality confirmed).
+**Unverified.** Wall-clock/`measure.py` numbers; `test_ail_files`, `test_ail_corpus_findings3`; the worker's exact 8 `cmp.sh` probes.
 
 VERDICT: FIX
-
-1. Probe /tmp/rprobes/r_split.py — expected: no hit (text is a str); actual: `4:12: perf P1: membership test on the list 'text'`; applying the fix changes output from three `yes` lines to none.
-2. Probes /tmp/rprobes/r_alias.py (and r_alias_p1_orig/fixed) — expected: no P4/P1 hit when the list is mutated through an alias; actual: hits whose fixes change output (7→3, `1 2`→empty).
-3. Probe /tmp/rprobes/r_p3shape.py — expected: P3 for `s = ""`/`s: str` + `s += unknown`; actual: no hit (only the `list[str]` case at line 18 reports).
-[commandcode stop=end_turn turns=35 out_tokens=45550]
+1. `v_slice_copy_p4.py` / `v_item_copy_p4.py` / `v_slice_copy_p6.py` — expected P4/P4/P6 (base reports them); actual no hit. `_edge_names` treats any `Subscript` value as an alias, so `items[:]` (a copy) and `items[0]` (an element) suppress hits on the unchanged list.
+2. `v_rebind_inside_p4.py` / `v_rebind_inside_p6.py` — expected P4/P6 (base reports them); actual no hit. An alias rebound inside the loop is still assumed to alias the list, so mutating the rebound name suppresses a valid hit, contrary to the report.
+[cost $0.0000, opencode tokens {"total": 937775, "input": 68517, "output": 6132, "reasoning": 26262, "cache.write": 0, "cache.read": 836864}]
+    tool time: bash 1.4 min
+         80s bash   cd AIL_CURRENT && python3 ../tools/par_check.py -j 2 test_ail_perflint test_ail_safetynet 2>&1 | tail -20
+          1s bash   date; bash ~/tools/cmp.sh /tmp/rprobes/r_split.py $PWD 2>&1 | tail -8
+          1s bash   date; python3 lab/algo/census.py 2>&1 | grep -E '^###|^\| [0-9]|^- `' | head -40
+          0s bash   python3 tools/update_manifest.py --check 2>&1 | tail -5; echo "manifest exit $?"
+          0s bash   cd /tmp/rprobes cat > v_tuple_unpack_fixed.py <<'EOF' def f(items: list[int]) -> int:     view, n = items, 0  
+          0s bash   cd /tmp/rprobes cat > v_inloop_alias_p1.py <<'EOF' def f(items: list[int]):     for i in range(3):         vie
+          0s bash   date; pwd; git log --oneline work..HEAD; echo ---; git status --short
+          0s bash   cd /tmp/rprobes cat > v_slice_copy_p4.py <<'EOF' def f(items: list[int]) -> int:     view = items[:]     total
 
 
 --- ORIGINAL TASK ---
