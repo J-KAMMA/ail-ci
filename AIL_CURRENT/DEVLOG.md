@@ -16,6 +16,26 @@ CPython stdout and exit status, except `p08_int64` and `p20_bigvalue_store`, whi
 prefix then stop loudly with `OverflowError: integer overflow ...` (the documented int64 default;
 CPython promotes). Tests on the final commit, `-j 2`: `test_ail_fclist1`, `test_ail_safetynet`,
 `test_ail_files` and `test_ail_corpus_findings3` (4/4, 413 s).
+## 2026-11-07 -- rundiff1 re-applied (job-rbrundiff1_rr1-11071140)
+
+Re-applied the accepted `job-rundiff1_rr1-11070956` change (`983eee20`..`ddd45305`). `packaging/ail_lang/cli.py`,
+`docs/CLI.md`, `lab/rundiff/`, `test_ail_rundiff.py` and its `tests.d/` registration applied unchanged.
+The `.github/workflows/agent-worker.yml` hunk was already present on this tree, so it was left alone.
+`AIL_CURRENT/DEVLOG.md` conflicted only at the top and keeps both sides: the accepted entry below,
+then this tree's entries. `tools/diff_ids.py` is not present here; `tools/update_manifest.py`
+regenerated the manifest and `--check` passes. No other change.
+
+## 2026-11-07 -- rundiff1: `ail run --diff` (job-rundiff1_rr1-11070956)
+
+Adds the diff mode described in `docs/CLI.md`: build as `ail run` does, feed the same stdin to the
+native program and to CPython, and compare stdout bytes, the exit code and the exception type. The
+report is one `ail diff:` line (or one JSON object under `--json`); exit 3 means a difference, 4 one
+of AIL's documented loud stops, 124 a timeout. `LOUD_STOPS` in `packaging/ail_lang/cli.py` and the
+table in `docs/CLI.md` list the recognised messages. A build stop is a loud stop only when it matches
+that table: a broken link, a bad `-I` directory or another toolchain failure is a `DIFFER` (exit 3),
+even when CPython runs the program fine, because it is not an AIL limit. Tests are
+`test_ail_rundiff.py` (registered in `tests.d/`); the census of `lab/compare` and 50 corpus programs
+is `lab/rundiff/RESULTS.md`.
 
 ## 2026-11-06 -- rbarena1s2c re-applied: read-only field aliases and call-site str errors (job-rbrbarena1s2c_rr1-11070527)
 
