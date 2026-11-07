@@ -1186,6 +1186,25 @@ def fallback_note(reason, location=None):
         location + ': ' if location else '', ' '.join(str(reason).split()).rstrip(';'))
 
 
+def fallback_fields(reason, location=None, source_text=None):
+    """The machine form of `fallback_note(...)`: code, file, line, col, cause, fix and the exact message.
+
+    The table lives in ail_agent_errors.py beside ail_chatgpt.py; when this compiler runs from an
+    export that does not carry it, the human message alone is returned."""
+    message = fallback_note(reason, location)
+    try:
+        root = pathlib.Path(__file__).resolve().parents[2]
+        if str(root) not in sys.path:
+            sys.path.append(str(root))
+        import ail_agent_errors
+        fields = ail_agent_errors.diagnostic(message, source_text=source_text)
+        if fields is not None:
+            return fields
+    except Exception:
+        pass
+    return dict(message=message)
+
+
 def build(source, out, strict=True, report=None, force_general=False):
     global last_fallback_reason, last_fallback_line, _FE_CAPTURE
     last_fallback_reason = last_fallback_line = None
