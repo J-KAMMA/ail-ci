@@ -9,6 +9,11 @@ report carries `agent_diagnostics`, one object per known family:
 lines, 1-based inclusive) and the result must build; for every family but the compiler-internal
 row-arity note (AIL0102, implementation step 2) the family's message must be gone.  Every fixed
 program also prints what CPython prints.
+
+The variants below are the shapes the first version got wrong: a renamed variable, a prelude line
+inside the file, a second function that also returns a number, two identical bad comparisons, and a
+renamed `.get` receiver.  A failed build (refusal) and `--strict --json` carry the field too, with
+`severity:"error"`.
 """
 import json
 import os
@@ -35,6 +40,60 @@ CODES = {
     '14_tuple_single_value': 'AIL0114', '15_list_param_readonly': 'AIL0115',
 }
 
+# name -> (source, code, line the diagnostic must name)
+VARIANTS = {
+    'fraction_renamed': ("""from fractions import Fraction
+y = Fraction(2, 3)
+print(float(y))
+""", 'AIL0111', 3),
+    'decimal_shifted': ("""from decimal import Decimal
+x = Decimal("1.234")
+y = x * 2
+print(f"{y:.2f}")
+""", 'AIL0112', 4),
+    'class_comp_renamed': ("""class Q:
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+def build(zs: list[int]) -> list[Q]:
+    return [Q(z) for z in zs]
+
+print(build([3, 4])[0].x)
+""", 'AIL0106', 6),
+    'bytes_second_function': ("""def zero() -> int:
+    return 0
+
+def term(tok: bytes):
+    t = tok.replace(b"'", b"")
+    if len(t) > 0:
+        return b"#" + str(len(t)).encode()
+    return 0
+
+print(zero(), term(b"x"))
+""", 'AIL0108', 8),
+    'get_renamed': ("""m = {1: 10, 2: 20}
+k = 1
+v = m.get(k)
+print(v)
+""", 'AIL0104', 3),
+    'duplicate_comparison': ("""s = "abc"
+if s == 1:
+    print("one")
+print("mid")
+if s == 1:
+    print("two")
+print("end")
+""", 'AIL0103', 2),
+}
+
+ASYNC = """import asyncio
+
+async def main() -> int:
+    return 5
+
+print(asyncio.run(main()))
+"""
+
 
 class AgentErrors(unittest.TestCase):
     def setUp(self):
@@ -42,13 +101,37 @@ class AgentErrors(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.original = json.loads(ORIGINAL.read_text(encoding='utf-8'))
 
-    def compile(self, source, name, as_json=True):
+    def compile(self, source, name, as_json=True, extra=()):
         command = [sys.executable, '-B', str(CLI), 'compile', str(source), '--syntax', 'python',
-                   '-o', str(self.tmp / name)] + (['--json'] if as_json else [])
+                   '-o', str(self.tmp / name)] + list(extra) + (['--json'] if as_json else [])
         environment = {key: value for key, value in os.environ.items()
                        if key not in ('AIL_NO_GENERAL', 'AIL_QUIET_FALLBACK', 'AIL_STRICT')}
         return subprocess.run(command, cwd=REPO, capture_output=True, text=True, timeout=900,
                               env=environment)
+
+    def apply(self, source, item, name):
+        """Write the source with `item['fix']` applied; return its path."""
+        lines = source.read_text(encoding='utf-8').split('\n')
+        first, last = item['fix']['replace_range']
+        fixed = '\n'.join(lines[:first - 1] + item['fix']['with'].split('\n') + lines[last:])
+        path = self.tmp / (name + '.py')
+        path.write_text(fixed, encoding='utf-8')
+        return path
+
+    def check_fix(self, source, item, code, name):
+        self.assertIn('fix', item, (code, item))
+        fix = item['fix']
+        self.assertEqual(len(fix['replace_range']), 2)
+        self.assertLessEqual(fix['replace_range'][0], fix['replace_range'][1])
+        self.assertTrue(fix['with'])
+        fixed_path = self.apply(source, item, name)
+        rebuilt = self.compile(fixed_path, name + '_fixed')
+        self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+        after = [entry['code'] for entry in json.loads(rebuilt.stdout).get('agent_diagnostics', [])]
+        self.assertNotIn(code, after, after)
+        native = subprocess.run([str(self.tmp / (name + '_fixed'))], capture_output=True, timeout=120)
+        cpython = subprocess.run([sys.executable, str(fixed_path)], capture_output=True, timeout=120)
+        self.assertEqual((native.returncode, native.stdout), (cpython.returncode, cpython.stdout))
 
     def test_one_program_per_family(self):
         for stem, code in CODES.items():
@@ -65,14 +148,19 @@ class AgentErrors(unittest.TestCase):
                 self.assertIsInstance(item['line'], int)
                 self.assertIsInstance(item['col'], int)
                 self.assertTrue(item['cause'])
+                self.assertNotIn('_ail_', item['cause'])
+                self.assertNotIn('-line file', item['cause'])
                 self.assertEqual(item['message'], self.original[stem])
+
+                text = (REPO / source).read_text(encoding='utf-8')
+                lines = text.split('\n')
+                self.assertGreaterEqual(item['line'], 1, (code, item['line']))
+                self.assertLessEqual(item['line'], len(lines), (code, item['line']))
                 fix = item['fix']
                 self.assertEqual(len(fix['replace_range']), 2)
                 self.assertLessEqual(fix['replace_range'][0], fix['replace_range'][1])
                 self.assertTrue(fix['with'])
 
-                text = (REPO / source).read_text(encoding='utf-8')
-                lines = text.split('\n')
                 first, last = fix['replace_range']
                 fixed = '\n'.join(lines[:first - 1] + fix['with'].split('\n') + lines[last:])
                 fixed_path = self.tmp / (stem + '_fixed.py')
@@ -95,11 +183,7 @@ class AgentErrors(unittest.TestCase):
                 self.assertEqual(built.returncode, 0, built.stderr)
                 item = next(item for item in json.loads(built.stdout)['agent_diagnostics']
                             if item['code'] == CODES[stem])
-                lines = source.read_text(encoding='utf-8').split('\n')
-                first, last = item['fix']['replace_range']
-                fixed = '\n'.join(lines[:first - 1] + item['fix']['with'].split('\n') + lines[last:])
-                fixed_path = self.tmp / (stem + '_run.py')
-                fixed_path.write_text(fixed, encoding='utf-8')
+                fixed_path = self.apply(source, item, stem + '_run')
                 rebuilt = self.compile(fixed_path, stem + '_run_fixed')
                 self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
                 stdin = source.with_suffix('.in')
@@ -109,6 +193,51 @@ class AgentErrors(unittest.TestCase):
                 cpython = subprocess.run([sys.executable, str(fixed_path)], input=data,
                                          capture_output=True, timeout=120)
                 self.assertEqual((native.returncode, native.stdout), (cpython.returncode, cpython.stdout))
+
+    def test_variants_locate_the_users_code(self):
+        for name, (text, code, line) in VARIANTS.items():
+            with self.subTest(name=name):
+                source = self.tmp / (name + '.py')
+                source.write_text(text, encoding='utf-8')
+                built = self.compile(source, name)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                report = json.loads(built.stdout)
+                found = [item for item in report.get('agent_diagnostics', []) if item['code'] == code]
+                self.assertEqual(len(found), 1, (code, report.get('agent_diagnostics')))
+                item = found[0]
+                self.assertEqual(item['severity'], 'note')
+                self.assertEqual(item['file'], str(source))
+                self.assertEqual(item['line'], line, item)
+                self.assertIn('fix', item, item)
+                self.check_fix(source, item, code, name)
+
+    def test_refusal_carries_an_error_diagnostic(self):
+        source = self.tmp / 'async_refusal.py'
+        source.write_text(ASYNC, encoding='utf-8')
+        built = self.compile(source, 'async_refusal')
+        self.assertEqual(built.returncode, 3, built.stderr)
+        report = json.loads(built.stdout)
+        self.assertEqual(report['status'], 'failed')
+        diagnostics = report.get('agent_diagnostics') or []
+        self.assertEqual(len(diagnostics), 1, diagnostics)
+        item = diagnostics[0]
+        self.assertEqual(item['severity'], 'error')
+        self.assertEqual(item['code'], 'AIL0000')
+        self.assertIsInstance(item['line'], int)
+        self.assertEqual(item['line'], 3, item)
+        self.assertTrue(item['cause'])
+
+    def test_strict_json_carries_the_same_field(self):
+        source = Path('lab') / 'err' / 'triggers' / '13_yield.py'
+        built = self.compile(source, 'strict_yield', extra=['--strict'])
+        self.assertEqual(built.returncode, 3, built.stderr)
+        report = json.loads(built.stdout)
+        self.assertEqual(report['schema'], 'ail.strict/1')
+        diagnostics = report.get('agent_diagnostics') or []
+        found = [item for item in diagnostics if item['code'] == 'AIL0113']
+        self.assertEqual(len(found), 1, diagnostics)
+        self.assertEqual(found[0]['severity'], 'error')
+        self.assertEqual(found[0]['line'], 3)
 
 
 if __name__ == '__main__':

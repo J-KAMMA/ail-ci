@@ -1,3 +1,19 @@
+## 2026-11-07 -- err2 fix-up: positions and edits read from the user's source (job-err2-11071812)
+
+The reviewer's defects are fixed. `ail_agent_errors.py` now locates each family in the user's AST
+instead of searching for one hard-coded trigger block: the position is the construct the note is
+about (`AIL0111`/`AIL0112` are moved off the prelude line even when that line number falls inside a
+long user file), and the edit is rebuilt from the user's names. Verified on the reviewer's probes:
+renamed `Fraction` (line 3), shifted `Decimal` (line 4), a 243-line file (line 243, range 241-243),
+renamed class comprehension (line 6), a number return in the *second* function (line 8, output
+unchanged), a renamed `.get` receiver (fix present), and two identical comparisons (one range fixes
+both). The `cause` text no longer names `_ail_*` or a file length. A failed build now carries
+`agent_diagnostics` with `severity:"error"` (uncatalogued refusals use `AIL0000`), and
+`--strict --json` adds the same field to `ail.strict/1`. `pyc.fallback_fields` is called by
+`fallback_note`, so the compiler-side helper is no longer dead. `docs/CLI.md` no longer claims
+`ail build --json` without a source; `ail build prog.py --json` was run through the wrapper.
+`test_ail_agent_errors.py` adds the six variant shapes, the async refusal and strict JSON.
+
 ## 2026-11-07 -- err2: `--json` agent diagnostics for compiler errors and fallback notes (job-err2-11071812)
 
 `compile --json` keeps the `ail.build/1` report and adds `agent_diagnostics`: one object per known

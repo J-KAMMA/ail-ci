@@ -5531,17 +5531,24 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
     return notes
 
 
-def _agent_diagnostics(source, messages):
-    """Machine-form records for the messages in `messages` (empty for families not in the table)."""
+def _agent_diagnostics(source, messages, severity=None, refusals=False):
+    """Machine-form records for the messages in `messages` (empty for families not in the table).
+
+    `refusals=True` is used on a failed build: a construct outside the catalogue still gets a
+    generic error record, so a refusal never carries an empty `agent_diagnostics`."""
     try:
         text = source.read_text(encoding='utf-8')
     except (OSError, UnicodeError):
         text = None
     found = []
     shown = _relpath(source)
+    where = source if shown.startswith('..') else shown
     for message in messages:
-        item = ail_agent_errors.diagnostic(message, source_text=text,
-                                           path=source if shown.startswith('..') else shown)
+        if refusals:
+            item = ail_agent_errors.refusal(message, source_text=text, path=where)
+        else:
+            item = ail_agent_errors.diagnostic(message, source_text=text, path=where,
+                                               severity=severity)
         if item is not None:
             found.append(item)
     return found
@@ -5633,12 +5640,21 @@ def _strict_text(blockers, incomplete):
 
 
 def _strict_json(args, source, blockers, incomplete):
+    try:
+        text = source.read_text(encoding='utf-8')
+    except (OSError, UnicodeError):
+        text = None
+    diagnostics = [ail_agent_errors.refusal(blocker.get('message') or '', source_text=text,
+                                             path=blocker.get('path'), line=blocker.get('line'),
+                                             col=blocker.get('column'))
+                   for blocker in blockers]
     return json.dumps(dict(
         schema='ail.strict/1', status='refused', strict=True, command=args.command, source=str(source),
         exit_code=3, blocker_count=len(blockers), incomplete=incomplete,
         blockers=[{key: blocker.get(key) for key in (
             'rank', 'path', 'line', 'column', 'function', 'statement', 'construct', 'why', 'write_instead',
-            'blocks_lines', 'blocks_functions', 'message')} for blocker in blockers]), ensure_ascii=False)
+            'blocks_lines', 'blocks_functions', 'message')} for blocker in blockers],
+        agent_diagnostics=diagnostics), ensure_ascii=False)
 
 
 def _strict_refusal(args, source, objects, first_message):
@@ -6627,7 +6643,8 @@ def main(argv=None):
                     message = _python_notes(message, notes, source)
                     human_message = _python_notes(human_message, notes, source)
                 return native_build.emit(args, {}, result.returncode, message=message,
-                    agent_diagnostics=_agent_diagnostics(source, [human_message])
+                    agent_diagnostics=_agent_diagnostics(source, [human_message], severity='error',
+                                                         refusals=True)
                     if args.command == 'compile' else None)
             built = target if target.is_file() else Path(str(target) + '.exe')
             if not built.is_file():
