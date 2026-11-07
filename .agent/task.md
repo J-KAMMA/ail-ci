@@ -1,3 +1,45 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review — fe1 measurement + design
+
+**What the change really does.** Adds a cold/warm measurement harness (`lab/fe/prof.py`, `timed_outer.py`, `timed_inner.py`), a renderer (`report.py`), `results.json`, `RESULTS.md`, `docs/design/FRONTEND_SPEED.md`, and DEVLOG entries. The compiler is untouched: `git diff 4cfea81..HEAD -- AIL_CURRENT tools bench corpus` is empty, so no behaviour probes apply and generated C cannot change. The report's one-line description matches the diff.
+
+**Checks run**
+- `par_check.py -j 2 test_ail_safetynet test_ail_frontend_speed` on HEAD: 2 modules, **0 failed** (154.6 s, 3.9 s). (`test_ail_files`, `test_ail_corpus_findings3` not re-run, per instructions.)
+- `report.py` re-renders `RESULTS.md` **byte-identically**; `update_manifest.py --check` rc 0.
+- Every cell of the §1/§3/§4 tables matches `results.json` (0 mismatches); 15 sampled top-20 `file:line` entries are exact. Recomputed: 54.4/32.6/50.4/7.3/46.6/23.5/15.5/5.3/64.7/63.9/70.5/7.76x — all match.
+- No `icount`: no hot code touched.
+
+**Report claims**
+- Sections match the ranked table; DEVLOG 54.4/32.6; gcc 64.7/63.9/70.5; 10-of-14 typed attempts incl. `g14_014` 0.061/`g14_004` 0.068; three warm outliers named — **verified**.
+- "46.6% × E/W 50.4% = 23.5%; mypyc > hot decided by timed-wall numbers" — arithmetic verified, but **partly false**: 46.6% is a cProfile ratio (top-20 self / profiled emitter cumulative); only E/W is timed.
+- "16/16 checks", byte-identical render, manifest, "no probes applicable" — **verified**.
+- "g17_004 refused before the emitter" — **unverified** (typed attempt 0.0093 s, not 0).
+
+**Defects**
+1. `FE-SPEED-A0` warm target is wrong. From `results.json`: `ticket_audit` warm median 25.5054 s, warm `other` 23.329 s → **2.18 s**, not `≤1.7 s`. The doc subtracted the *cold* `other` (23.801) from the warm wall (25.505−23.801=1.704).
+2. `FE-SPEED-A0` `scar_life` cold target is unreachable: 97.381−10.938 = **86.44 s**, not `≤86 s`.
+3. The per-function cache's "Amdahl bound (cold / edit)" = 50.4% is wrong for a cold build: a cache hit rate of zero on a cache miss means the cold bound is 0. 50.4% (=E/W) is an edit-only upper bound, and the doc's own text gives the realistic edit bound as `E/W×(N−1)/N`. So "ranked #1 by measured share" is not established.
+4. The `parse` row is not a timed phase: 5.92 s is cProfile cumulative. It is **0.63%** of the profiled wall, not "1.6% of wall" (that divides cProfile time by the timed wall). The brief asked for parse in the wall split; wrapping `ast.parse` was possible.
+5. Server option's "58% of the warm residual" uses the all-30 median load (0.193) against the fast-27 wall (0.468). Consistent fast-27 medians are 0.0263+0.1758+0.0549 = **55%** (speedup 2.2x, not 2.4x).
+6. Process: commit trailers say `Claude Sonnet 5.5`, but the worker model tag is `commandcode/deepseek-v4.1-flash`; the task says non-Claude models omit the line.
+
+**Pre-existing:** none (no probe differences; no source change).
+
+**Unverified:** mypyc `k=2.5` (a guess, and the task said "not guesses"); "analysis and C emission interleave so cannot be split without a compiler change"; `test_ail_files`/`test_ail_corpus_findings3` (2 of the 4 claimed modules); machine-dependent absolute seconds.
+
+VERDICT: FIX
+[commandcode stop=end_turn turns=29 out_tokens=56541]
+
+
+--- ORIGINAL TASK ---
 Lane: fedesign
 
 # fe1: where the Python front end spends compile time, and a design to cut it (measurement + design only)
