@@ -1,3 +1,59 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+Time check: I started at 00:15 and it is now ~00:52, so I'm stopping probes here and writing up.
+
+## What the change really does
+
+Beyond the reported fix, `git diff work..HEAD` adds the whole feature: a `--diff` mode in `packaging/ail_lang/cli.py` (`_split_diff`, `_diff_run`, `_diff_verdict`, `_diff_report`, `_diff_build_failed`, `LOUD_STOPS`), `docs/CLI.md`, `test_ail_rundiff.py` (+ registration), `lab/rundiff/*`, DEVLOG. The last commit `a30063f` is the reported fix: `_split_diff` now keeps a two-word compiler option **and its value** and detects `--diff` in the same scan. That part is correct and verified.
+
+## Defect
+
+The build-failure classifier reports **any** unrecognised build stop as `loud stop by design` (exit 4) whenever CPython ran the program, not just AIL's documented loud errors. The task says exit 4 is for "one of AIL's documented loud errors … list the recognised messages in one table"; a broken link or a bad option is not one of them, and exit 3 is "reserved" for a difference. A real toolchain/compiler breakage is therefore mislabelled as "by design" — the exact failure class the command exists to surface.
+
+Probe 1 — `/tmp/rprobes/p_agree.py` (reads stdin, echoes argv; CPython exits 0):
+```
+ail run --diff --link /nonexistent/libnope.so p_agree.py   (stdin empty)
+```
+- expected: `DIFFER` (no native program, the build stopped), exit 3
+- actual: `ail diff: loud stop by design: the C compiler rejected this:` , exit 4 (CPython's `read 0` was fine). The "reason" is the driver's banner line, not a cause.
+
+Probe 2 — same program:
+```
+ail run --diff -I /nonexistent/dir p_agree.py
+```
+- expected: exit 3 (difference) or exit 2 (usage), not a language limit
+- actual: `ail diff: loud stop by design: each --module-path must name an existing directory`, exit 4
+
+`docs/CLI.md` codifies this wrong rule ("Any other build stop is `loud stop by design` when CPython runs the program fine"), so code and docs agree with each other but not with the task.
+
+## Verified (agree with the report)
+
+- Two-word option values now reach the build: `--diff -I .`, `--diff --syntax python`, `--diff --debug-dir DIR`, `--diff -o OUT` all `agree`, exit 0; `-I`-less base exit 2 was the old bug.
+- `--diff` detection: `run --diff … prog.py --diff` hands `--diff` to the program (`arg --diff`, agree); `run --diff --` and `run --diff --cc tcc` behave exactly as base (pre-existing).
+- `ail run` without `--diff` unchanged: plain run, `--strict --json`, stdin/argv — same as `/tmp/base`; generated C identical (`--debug-dir` A/B diff empty).
+- Modes: agree (with stdin/args/base exit code 5), stdout DIFFER (line N, both lines), exception type only (IndexError both → agree, exit 1), exit-code DIFFER, `--json` shape (agree/differ/loud/timeout, `line` null, `seconds` pair, own line after non-newline output), `--timeout 1` → `timeout: native` 124 and `timeout: cpython` 124, `--python` name/path/`=value`, `--timeout=0`/`-3`/`soon` refused with exit 2, int64 overflow → loud stop exit 4, `--exact-int` agree, project mode (`ail.toml` entry) agree.
+- Tests: `test_ail_rundiff` ok (12.4 s), `test_ail_safetynet` ok (192.9 s), `test_ail_files` ok, `test_ail_corpus_findings3` ok; `tools/update_manifest.py --check` clean.
+- Census spot-check: `corpus/gdev/g01_008.py` really differs (`native ''` vs `'Parsed entries: 6'`).
+
+## Unverified / pre-existing
+
+- Census counts 17/4/9 and 46/1/3: only the one spot-check above was reproduced; the table as a whole is unverified.
+- `--cc tcc`, `-- p.py`, `--link` failure exit code: identical on `/tmp/base` — pre-existing, not caused here.
+- Speed: CLI-only change, no hot code touched, so no icount run.
+
+VERDICT: FIX
+1. `_diff_build_failed` treats every build stop where CPython succeeded as `loud stop by design` (exit 4) instead of only the `LOUD_STOPS` table. Probe `/tmp/rprobes/p_agree.py` with `ail run --diff --link /nonexistent/libnope.so p_agree.py`: expected a `DIFFER`/exit 3 (unrecognised build failure — a compiler/toolchain defect, which this command must not call "by design"), actual `ail diff: loud stop by design: the C compiler rejected this:` exit 4. Same for `-I /nonexistent/dir` (actual exit 4, expected 3 or 2). Fix: gate the exit-4 path on `_loud_stop(..., "build")` and report other build stops as differences; update the docs sentence that blesses the current rule.
+[commandcode stop=end_turn turns=31 out_tokens=149397]
+
+
+--- ORIGINAL TASK ---
 Lane: cli
 
 > Re-run of rundiff1, whose GitHub run was lost (no verdict 6.5 h after dispatch). If its branch job-rundiff1-* has work commits, cherry-pick them first and continue; otherwise do the task from scratch on origin/integ. Commit and push after every sub-step, so a cancel does not lose the work again.
