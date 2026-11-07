@@ -16,7 +16,7 @@ import sys
 import math
 
 def __div_ceil(a: int, b: int) -> int:
-    return -((-a) // b)
+    return a // b + (a % b != 0)
 
 def __sqrt(x: float) -> float:
     return math.sqrt(x)
@@ -292,10 +292,8 @@ def translate(source):
     active = [top]
 
     def lookup(name):
-        for frame in reversed(active):
-            if name in frame['declared']:
-                return frame
-        return None
+        frame = active[-1]
+        return frame if name in frame['declared'] else None
 
     def close_match(ctx):
         if ctx.get('closed') or (ctx.get('has_ok') and ctx.get('has_err')):

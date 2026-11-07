@@ -1,3 +1,14 @@
+## 2026-11-07 -- vibe2 fix: div_ceil overflow and function scope (job-vibe2-11072207)
+
+Fixed the two regressions the review found in `lab/vibe2/translate.py`. `__div_ceil` now computes
+`a // b + (a % b != 0)` instead of `-((-a) // b)`, so `a = INT64_MIN` no longer overflows when the
+dividend is negated (`div_ceil(-9223372036854775808, 2)` -> `-4611686018427387904`, divisor 1 ->
+`-9223372036854775808`). The binding check now looks only at the current frame (`active[-1]`), so a
+function that assigns a top-level name is refused by name (`declare the binding first`) instead of
+silently emitting a Python local; local `var` reassignment and reading top-level bindings still
+work. `test_translate.py` gains boundary/through-value `div_ceil` cases and both scope cases (19
+tests). No compiler change.
+
 ## 2026-11-07 -- vibe2 fix: regenerate results, enforce the AIL-N surface (job-vibe2-11072121)
 
 Regenerated `lab/vibe2/results.json` from its stored rows with the fixed `compiler_messages` rule:

@@ -190,6 +190,42 @@ let d: int = div_ceil(5, 2)
 write(str(a) + " " + str(b) + " " + str(c) + " " + str(d) + "\\n")
 ''', '-2 -2 3 3\n')
 
+    def test_div_ceil_int64_boundaries(self):
+        self.check('''\
+let a: int = div_ceil(-9223372036854775808, 2)
+let b: int = div_ceil(-9223372036854775808, 1)
+write(str(a) + " " + str(b) + "\\n")
+''', '-4611686018427387904 -9223372036854775808\n')
+
+    def test_div_ceil_through_values(self):
+        self.check('''\
+fn by_arg(x: int) -> int:
+  return div_ceil(x, 2)
+
+let xs: list[int] = [-9223372036854775808]
+let d: dict[str, int] = {"x": -9223372036854775808}
+write(str(by_arg(-9223372036854775808)) + " " + str(div_ceil(xs[0], 2)) + " " + str(div_ceil(d["x"], 2)) + "\\n")
+''', '-4611686018427387904 -4611686018427387904 -4611686018427387904\n')
+
+    def test_fn_cannot_assign_outer(self):
+        for src in [
+            'var g: int = 1\nfn f() -> int:\n  g = 2\n  return 0\nwrite(str(f()) + "\\n")\n',
+            'var total: int = 0\nfn add(v: int) -> int:\n  total = total + v\n  return 0\n'
+            'write(str(add(1)) + " " + str(total) + "\\n")\n',
+        ]:
+            with self.assertRaises(TranslateError, msg=src) as cm:
+                translate(src)
+            self.assertIn('declare the binding', cm.exception.message, msg=src)
+
+    def test_fn_local_var_still_reassignable(self):
+        self.check('''\
+fn add(v: int) -> int:
+  var total: int = 0
+  total = total + v
+  return total
+write(str(add(3)) + "\\n")
+''', '3\n')
+
     def test_let_reassigned_after_fn(self):
         with self.assertRaises(TranslateError) as cm:
             translate('''\
