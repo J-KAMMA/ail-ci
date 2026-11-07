@@ -9,8 +9,9 @@ LLC counts reuse roof1's `lab/roof/data/programs.json`; Rust and CPython were me
 valgrind 3.22 cachegrind (the harness unpacks the Ubuntu package under `$TMPDIR` because the image
 does not ship valgrind). The table, the Landauer counting rule (1 bit per retired instruction + every
 output bit, kT ln 2 = 2.871e-21 J at 300 K) and the ranked avoidable-energy split are in
-`lab/energy/RESULTS.md`. Coverage and the cells that stay `n/a` (CPython except `rail_transfer` and
-`scar_life`; AIL `main.py` on the four long tasks; `scar_life` for AIL/C/Rust) are stated there.
+`lab/energy/RESULTS.md`. Coverage and the cells that stay `n/a` (CPython except `rail_transfer`,
+`chain_relax` and `scar_life`; AIL `main.py` on the four long tasks; `scar_life` for AIL/C/Rust) are
+stated there.
 
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 

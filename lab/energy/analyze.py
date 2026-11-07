@@ -4,7 +4,7 @@
     python3 lab/energy/analyze.py [--energy PATH] [--attrib PATH]
 
 The avoidable-energy split reuses roof1's line attribution (`lab/roof/data/attrib/attrib.json`):
-the AIL-minus-C instruction energy of the five attributed typed builds is divided by the measured
+the AIL-minus-C instruction energy of the nine attributed typed builds is divided by the measured
 per-category Ir shares. The DRAM term (LLC misses x 64 B x E_dram) is reported separately, because
 roof1's seven categories are source-line patterns, not memory traffic. Unattributed programs are
 reported only as totals; nothing is invented for them.
@@ -62,7 +62,7 @@ def table(energy):
 
 
 def avoidable(energy, attrib, e_instr, e_dram_byte):
-    """AIL (typed.py) minus C, split by roof1's categories for the five attributed programs."""
+    """AIL (typed.py) minus C, split by roof1's categories for the nine attributed programs."""
     out = {}
     for task in TASKS:
         rows = energy.get(task, {})

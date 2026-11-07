@@ -145,10 +145,11 @@ Counting rule: **every retired instruction is counted as one irreversible bit er
 destination register bit or flag must be overwritten), plus every output bit the program writes;
 that is the smallest defensible count, so the floor is a true lower bound. The floor is
 `(instructions + 8 x output bytes) x kT ln 2`, with `kT ln 2 = 2.871e-21 J` at 300 K. Across the
-rows the floor is 0.9e-12 J to 3.2e-10 J, and `J model / floor` is **3.5e7 to 4.1e10** (the
-low end is the `term_rank` dagger row, where only the instruction term exists). Even the
-most efficient row (a 3.2e9-instruction CPython run, floor 9.4e-12 J) is about 35 million times above
-Landauer.
+rows the floor is 6.8e-13 J to 3.4e-10 J, and `J model / floor` is **3.5e7 to 5.0e10** (the low end
+is `tally_lang` and the `term_rank` dagger row, where only the instruction term exists). Even the
+most efficient complete rows (`tally_lang`, about 3.5e7x above the floor) are tens of millions of
+times above Landauer; the CPython `rail_transfer` row (3.26e9 instructions, floor 9.36e-12 J) is
+1.2e10x.
 
 That gap is not something a language can close. The floor assumes one bit erased per instruction and
 no other cost; a real CMOS gate spends ~1e5-1e6 kT per switching event, and an off-chip DRAM read
