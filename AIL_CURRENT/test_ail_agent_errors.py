@@ -11,9 +11,10 @@ row-arity note (AIL0102, implementation step 2) the family's message must be gon
 program also prints what CPython prints.
 
 The variants below are the shapes the first version got wrong: a renamed variable, a prelude line
-inside the file, a second function that also returns a number, two identical bad comparisons, and a
-renamed `.get` receiver.  A failed build (refusal) and `--strict --json` carry the field too, with
-`severity:"error"`.
+inside the file, a second function that also returns a number, two identical bad comparisons, a
+renamed `.get` receiver, an edit range that spanned lines its `with` did not reproduce, a branch the
+edit flipped, and a `.get` default that replaced a real `None`.  A failed build (refusal) and
+`--strict --json` carry the field too, with `severity:"error"`.
 """
 import json
 import os
@@ -93,6 +94,34 @@ async def main() -> int:
 
 print(asyncio.run(main()))
 """
+
+# The shapes where the first version published an edit that changed the program: an edit range that
+# spanned lines its `with` did not reproduce (AIL0111/AIL0101), a branch that the edit flipped
+# (AIL0103), and a `.get` default that replaced a real `None` (AIL0104).
+UNSAFE = {
+    'fraction_line_between': ("""from fractions import Fraction
+x = Fraction(1, 2)
+print("side")
+print(float(x))
+""", 'AIL0111', 'side\n0.5\n'),
+    'stdin_line_between': ("""import sys
+read = sys.stdin.buffer.readline
+print("mid")
+print(read().decode().strip())
+""", 'AIL0101', 'mid\nhello\n'),
+    'str_equals_literal': ("""s = "1"
+if s == 1:
+    print("one")
+else:
+    print("not one")
+""", 'AIL0103', 'not one\n'),
+    'str_not_equals_literal': ("""s = "1"
+if s != 1:
+    print("taken")
+else:
+    print("not")
+""", 'AIL0103', 'taken\n'),
+}
 
 
 class AgentErrors(unittest.TestCase):
@@ -210,6 +239,74 @@ class AgentErrors(unittest.TestCase):
                 self.assertEqual(item['line'], line, item)
                 self.assertIn('fix', item, item)
                 self.check_fix(source, item, code, name)
+
+    def test_unsafe_shapes_keep_the_output(self):
+        for name, (text, code, expected) in UNSAFE.items():
+            with self.subTest(name=name):
+                source = self.tmp / (name + '.py')
+                source.write_text(text, encoding='utf-8')
+                built = self.compile(source, name)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                found = [item for item in json.loads(built.stdout).get('agent_diagnostics', [])
+                         if item['code'] == code]
+                self.assertEqual(len(found), 1, found)
+                item = found[0]
+                self.assertIn('fix', item, item)
+                first, last = item['fix']['replace_range']
+                lines = text.split('\n')
+                self.assertTrue(1 <= first <= last <= len(lines), item['fix'])
+                # The range may drop only the lines the replacement text itself covers: the
+                # `fractions` import and the `Fraction(...)` assignment (AIL0111), the saved
+                # `readline` line (AIL0101).  Every other line of the range must be reproduced.
+                kept = {'AIL0111': 2, 'AIL0101': 1}.get(code, 0)
+                self.assertEqual(len(item['fix']['with'].split('\n')),
+                                 (last - first + 1) - kept, item['fix'])
+                fixed_path = self.apply(source, item, name)
+                rebuilt = self.compile(fixed_path, name + '_fixed')
+                self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+                after = [entry['code'] for entry in json.loads(rebuilt.stdout).get('agent_diagnostics', [])]
+                self.assertNotIn(code, after, after)
+                data = b'hello\n' if code == 'AIL0101' else b''
+                native = subprocess.run([str(self.tmp / (name + '_fixed'))], input=data,
+                                        capture_output=True, timeout=120)
+                cpython = subprocess.run([sys.executable, str(fixed_path)], input=data,
+                                         capture_output=True, timeout=120)
+                self.assertEqual((native.returncode, native.stdout), (cpython.returncode, cpython.stdout))
+                self.assertEqual(native.stdout.decode(), expected)
+
+    def test_no_edit_when_the_values_are_not_provable(self):
+        # `d.get(k, -1)` prints `-1` where CPython prints `None`, and `s == "1"` takes a branch
+        # CPython does not when `s` turns out to be `"1"`: neither edit may be published unless the
+        # source proves the value.  The diagnostic still carries its position and cause.
+        for name, text, code in (
+                ('absent_key', 'd = {"a": 1, "b": 2}\nk = "c"\nprint(d.get(k))\n', 'AIL0104'),
+                ('literal_absent_key', 'd = {"a": 1, "b": 2}\nprint(d.get("c"))\n', 'AIL0104'),
+                ('stored_key', 'd = {"a": 1, "b": 2}\nd["b"] = 5\nk = "b"\nprint(d.get(k))\n',
+                 'AIL0104'),
+                ('unknown_str', 's = input()\nif s == 1:\n    print("one")\nelse:\n    print("no")\n',
+                 'AIL0103')):
+            with self.subTest(name=name):
+                source = self.tmp / (name + '.py')
+                source.write_text(text, encoding='utf-8')
+                built = self.compile(source, name)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                found = [item for item in json.loads(built.stdout).get('agent_diagnostics', [])
+                         if item['code'] == code]
+                self.assertEqual(len(found), 1, found)
+                self.assertNotIn('fix', found[0], found[0])
+                self.assertIsInstance(found[0]['line'], int)
+                self.assertIsInstance(found[0]['col'], int)
+                self.assertTrue(found[0]['cause'])
+
+    def test_empty_file_refusal_has_a_position(self):
+        source = self.tmp / 'empty.py'
+        source.write_text('', encoding='utf-8')
+        built = self.compile(source, 'empty')
+        self.assertEqual(built.returncode, 3, built.stderr)
+        diagnostics = json.loads(built.stdout).get('agent_diagnostics') or []
+        self.assertEqual(len(diagnostics), 1, diagnostics)
+        self.assertEqual(diagnostics[0]['code'], 'AIL0000')
+        self.assertEqual((diagnostics[0]['line'], diagnostics[0]['col']), (1, 1), diagnostics[0])
 
     def test_refusal_carries_an_error_diagnostic(self):
         source = self.tmp / 'async_refusal.py'

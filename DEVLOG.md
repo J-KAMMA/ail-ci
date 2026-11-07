@@ -1,3 +1,21 @@
+## 2026-11-07 -- err2 fix-up 2: no edit that changes the program's output (job-err2-11072002)
+
+The reviewer's five defects are fixed, and the same class of defect behind #1-#4 is closed rather
+than patched case by case.  `AIL0111` and `AIL0101` built `with_text` from the statement alone but
+spanned from the import: the range now starts at the import / saved-method line and `with` keeps
+every line the user wrote between it and the call byte for byte (p6 `side\n0.5\n`, p7
+`mid\nhello\n`, both matching CPython).  `AIL0103` wrote `s == "1"`, which flips the branch when the
+str *is* `"1"`: it now writes the number as a string only when the str provably differs from that
+text, and otherwise replaces the always-`False`/always-`True` comparison with the constant, and its
+cause says "always True" for `!=`.  `AIL0104` published `d.get(k, -1)` for every `.get(k)`, turning a
+real `None` into `-1`: the edit is published only when the key is provably in a dict literal that
+nothing else writes (`d["b"] = 5` disqualifies it), so an absent key keeps its `None` and gets no
+edit.  The same gate covers `input()`-derived strings, which the hard-coded trigger block used to
+"fix" into a different branch.  An empty file's `AIL0000` now carries `line:1,col:1`, as
+`docs/CLI.md` promises.  The table's literal `replace`/`with` pair is still used for the other
+families when the whole block occurs verbatim, but a locator that decides no edit is safe sets
+`no_fallback`, so a computed range can never come from the trigger program.
+
 ## 2026-11-07 -- err2 fix-up: positions and edits read from the user's source (job-err2-11071812)
 
 The reviewer's defects are fixed. `ail_agent_errors.py` now locates each family in the user's AST
