@@ -1,3 +1,17 @@
+## 2026-11-07 -- pyreach9 census: why plain `.py` still takes the general path (job-pyreach9-11071331)
+
+Measurement and design only; the compiler is unchanged.  `lab/pyreach9/census.py` built 134
+programs (10 compare `main.py`, 24 `lab/vibe` Python, 100 `corpus/gdev` with seed 20261107)
+with `--strict --json` and the default build: **37 typed, 81 general, 16 refused**; the AI
+corpus is 0 typed / 19 general / 5 refused.  `lab/pyreach9/classify.py` groups the ranked
+strict blockers (full dump in `lab/pyreach9/programs.txt`) and `RESULTS.md` reports the
+ranking, the sole-blocked programs, and AI-typical vs corpus-typical reasons.  Ranked by
+programs whose only blocker is the reason: generated-prelude 5, none-optional 3,
+parameter-readonly 3, generator-yield 3, int64-literal 3; by programs touched: none-optional
+17, dict-of-containers/tuple-unpack/generated-prelude 16, mixed-container 15.  41 of the 97
+non-typed lists are `strict_incomplete`; that is recorded per program.  `docs/design/
+PYREACH_NEXT.md` turns the top five into queued steps.
+
 ## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
 
 Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a
