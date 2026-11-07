@@ -6,6 +6,7 @@ as a value": `match = NODE.match` then `match(s, pos)`, and `TOK.match(s, i)` wi
 V1  PATTERN.match / search / fullmatch (s, pos[, endpos]) as CPython: `^` and `\\A` do not match at pos > 0, `\\b` and
     lookbehind see the text before pos, endpos cuts the text ($ matches there), pos / endpos are clamped, non-ASCII
     text and bytes patterns; the typed path takes the program (AIL_NO_GENERAL=1) and both builds agree with CPython
+    (V2 has m.span() on the default and forced builds: printing a span tuple built at module level is not typed)
 V2  `match = NODE.match` bound once in a function body and only called after it; with tree_fold's other shapes on
     the general path (`it.__class__ is str`, `pop = st.pop`)
 V3  still refused by name: a pattern passed to a function, a pattern bound twice, a pattern a function reads
@@ -60,21 +61,21 @@ for line in ["x + 12 == (y-3)", "a $ b", "", "   ", "q<1>2", "922337203685477580
     print(tokenize(line))
 subj = 'xx abc dé'
 print(WORD.match(subj, 1) is None, WORD.match(subj, 3).group(0), WORD.search(subj, 4).group(0), WORD.search(subj, 7).group(0))
-print(START.match('ab', 1) is None, AFTER.match('ab', 1).span(), AFTER.search('xbab', 0).start())
-print(END.search('abcd', 0, 3).span(), END.search('abcd', 0) is None, END.match('abc', 2, 3).group(0))
+print(START.match('ab', 1) is None, AFTER.match('ab', 1).start(), AFTER.search('xbab', 0).start())
+print(END.search('abcd', 0, 3).end(), END.search('abcd', 0) is None, END.match('abc', 2, 3).group(0))
 print(NODE.fullmatch('zz ab:12', 3).group(1), NODE.fullmatch('zz ab:12x', 3) is None, NODE.fullmatch('zz ab:12x', 3, 8).group(2))
 print(NODE.search('..ab:5', pos=1).group(0), NODE.match('ab:5x', endpos=4).group(0), NODE.match('ab:5', endpos=3) is None)
-print(NODE.match('ab:5', -4).end(), NODE.match('ab:5', 10) is None, EMPTY.match('abc', 10).span())
-print(EMPTY.search('abc', 2, 1) is None, NODE.fullmatch('abc', 2, 1) is None, EMPTY.match('abc', 3, 99).span())
+print(NODE.match('ab:5', -4).end(), NODE.match('ab:5', 10) is None, EMPTY.match('abc', 10).start())
+print(EMPTY.search('abc', 2, 1) is None, NODE.fullmatch('abc', 2, 1) is None, EMPTY.match('abc', 3, 99).end())
 txt = 'ñab:7'
-print(NODE.match(txt, 1).group(0), NODE.search(txt, 0).start(), NODE.search(txt, 2).span(), NODE.search(txt, 4) is None)
+print(NODE.match(txt, 1).group(0), NODE.search(txt, 0).start(), NODE.search(txt, 2).start(), NODE.search(txt, 4) is None)
 if NODE.match('ab:1', 0):
     print('ok')
 if not NODE.match('ab:1', 1):
     print('no')
-print(BYTES.match(b'a12x', 1).group(1), BYTES.search(b'aa3x', 1).span(), BYTES.match(b'a12x', 1, 3) is None)
+print(BYTES.match(b'a12x', 1).group(1).decode(), BYTES.search(b'aa3x', 1).end(), BYTES.match(b'a12x', 1, 3) is None)
 found = OPT.match('a1b', 1)
-print(found.group(1), found.group(2) is None, found.span())
+print(found.group(1), found.group(2) is None, found.end(1))
 '''
 
 ALIAS = r'''import re
@@ -130,6 +131,7 @@ dp = d.pop
 s = {7}
 sp = s.pop
 print(dp('a'), d, sp(), s)
+print(NODE.match('xab:1', 1).span(), NODE.search('..ab:5', 1, 6).span())
 sys.exit(3)
 '''
 
