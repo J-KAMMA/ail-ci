@@ -8,7 +8,7 @@
 |---|---|
 | silent races | **0** |
 | safe matched | **17** of 18 |
-| safe GIL-free | **17** of 18 |
+| safe GIL-free | **16** of 18 |
 
 Baseline when this job started (races1): silent races 0, safe matched 11 of 12, safe GIL-free 11 of 12. The five new safe probes (`map_range`, `map_range_start`, `map_enumerate`, `futures_after_with`, `submit_after_with`) all build on the typed parallel path. The one unmatched safe probe is `int_beyond_int64`, which stops loudly at the int64 boundary (its own note says that is allowed) and is the expected failure in `test_ail_race_probes`.
 
@@ -32,23 +32,23 @@ No racy probe was a silent race: every one was refused by name or built on the g
 | racy/two_names.py | racy | general | yes | general (forced) | yes | - | - |
 | racy/write_slot0.py | racy | general | yes | general (forced) | yes | - | - |
 | safe/exception_first.py | safe | general | yes | general (forced) | yes | - | - |
-| safe/futures_after_with.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/int_beyond_int64.py | safe | typed parallel | no | general (forced) | no | - | exit 1: OverflowError: integer overflow in * (ints are 64-bit; --exact-int gives exact ints) |
-| safe/large_map.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/map_enumerate.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/map_float.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/map_int.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/map_range.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/map_range_start.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/more_results.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/one_worker.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/partial_sums.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/pool_map.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/shared_append.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/sixteen_on_three.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/submit_after_with.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/thread_blocks.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
-| safe/thread_k.py | safe | typed parallel | yes | general (forced) | yes | - | clean |
+| safe/futures_after_with.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/int_beyond_int64.py | safe | typed parallel | no | general (forced) | no | - | REPORT: ThreadSanitizer report |
+| safe/large_map.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/map_enumerate.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/map_float.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/map_int.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/map_range.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/map_range_start.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/more_results.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/one_worker.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/partial_sums.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/pool_map.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/shared_append.py | safe | general | yes | general (forced) | yes | - | - |
+| safe/sixteen_on_three.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/submit_after_with.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/thread_blocks.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
+| safe/thread_k.py | safe | typed parallel | yes | general (forced) | yes | - | REPORT: ThreadSanitizer report |
 | hybrid/hybrid_bytearray.py | hybrid | refused | no | refused | no | accelerated tagged; extension loaded; match yes | - |
 | hybrid/hybrid_ints.py | hybrid | typed parallel | yes | general (forced) | yes | accelerated combine; extension loaded; match yes | - |
 | hybrid/hybrid_list_append.py | hybrid | general | yes | general (forced) | yes | accelerated total; extension loaded; match yes | - |
@@ -67,7 +67,7 @@ No racy probe was a silent race: every one was refused by name or built on the g
 - `hybrid/hybrid_bytearray.py` (default): `lab/race/hybrid/hybrid_bytearray_run.py:3:1: not in the subset: threading, queue and concurrent.futures are built on the general path only (one interpreter lock, CPython's GIL semantics); this program is compiled there (the general path could not build this program either); general path: join() called with too many positional arguments`
 - `hybrid/hybrid_bytearray.py` (force): `not in the subset: join() called with too many positional arguments`
 
-Elapsed: 210 s. 34 rows (13 racy, 18 safe, 3 hybrid).
+Elapsed: 212 s. 34 rows (13 racy, 18 safe, 3 hybrid).
 
 ## Owner decisions (2026-11-05)
 

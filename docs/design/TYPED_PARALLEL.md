@@ -99,9 +99,13 @@ A map-like body (the `par_range` loop, including the loop `typedpar` inlines a s
 `Thread` list into; not a free-running thread list) may append to **one** list `out` defined
 before the loop, when its only use in the body is `out.append(v)` -- any number of times per
 iteration, conditional or not, with `v` an int, float or str value.
-`parallel._Body._append` accepts that expression statement, refuses any other read of `out`, a
+`parallel._Body._append` accepts that expression statement, refuses any other use of `out`, a
 second appended list, a list of objects and a body that also reduces, and records the name in the
-loop's `.par` facts (`appends`). `pyfunc._par_for` then asks for the `PARBUF` part.
+loop's `.par` facts (`appends`). The receiver names are collected from the whole body before the
+walk, so a read, an element write or `len(out)` that textually precedes the first append is refused
+too (the walk order does not matter). `pyfunc._par_for` then asks for the `PARBUF` part.
+Scope in v1: the Python surface only (`AIL_SURFACE=python`); the AIL surface's `parallel for`
+keeps the old refusal.
 
 `_par_outline` rewrites the emitted `ail_list_push(&v_out, ...)` (or `ail_flist_push` /
 `ail_slist_push`) into `ail_par_buf_push_i/f/s(_pbK, ...)` and declares

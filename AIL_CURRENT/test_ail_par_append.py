@@ -61,6 +61,18 @@ REFUSED = {
     "a list of objects": ("def main():\n    out = []\n    for i in par_range(0, 10):\n"
                           "        out.append([i])\n    print(len(out))\nmain()\n",
                           "not allowed"),
+    "write before the first append": ("def main():\n    out = [0, 0]\n    for i in par_range(0, 4):\n"
+                                     "        out[i] = i * 10\n        out.append(i)\n"
+                                     "    print(len(out))\nmain()\n",
+                                     "only use"),
+    "read before the first append": ("def main():\n    out = [7, 8]\n    for i in par_range(0, 4):\n"
+                                    "        x = out[i]\n        out.append(x + 100)\n"
+                                    "    print(len(out))\nmain()\n",
+                                    "only use"),
+    "len before the first append": ("def main():\n    out = []\n    for i in par_range(0, 8):\n"
+                                   "        n = len(out)\n        out.append(i)\n"
+                                   "    print(n, len(out))\nmain()\n",
+                                   "only use"),
     "reduce and append": ("def main():\n    acc = 0\n    out = []\n    for i in par_range(0, 10):\n"
                           "        acc += i\n        out.append(i)\n    print(acc, len(out))\nmain()\n",
                           "reduces"),

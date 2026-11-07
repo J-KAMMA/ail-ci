@@ -52,6 +52,13 @@ def _refuse(Unsupported, node, message):
     return error
 
 
+def _append_call(node):
+    """`NAME.append(v)`: the one form a parallel body may use a pre-loop list in."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'append' and isinstance(node.func.value, ast.Name)
+            and len(node.args) == 1 and not node.keywords)
+
+
 class _Body:
     """Checks one loop body (and every function it calls); collects what the ownership proof needs."""
 
@@ -70,8 +77,19 @@ class _Body:
         # `out.append(v)`; each block appends into its own buffer, joined in block order.
         self.appends = []
         self.appends_ok = True
+        # A name that is the receiver of `.append(...)` in the body may be used there in no other
+        # way.  Collect every receiver name up front, so a read or an element write that textually
+        # precedes the first append is refused as well (the body is checked in walk order, and
+        # `self.appends` only fills in when an append is reached).
+        nodes = list(ast.walk(ast.Module(body=loop.body, type_ignores=[])))
+        # The buffered append is a Python-surface shape: the AIL surface's `parallel for` keeps the old
+        # refusal.  typedpar's thread/map bodies (spelled `_ail_par_range`) are map-like and accept it.
+        self.appends_allowed = (os.environ.get('AIL_SURFACE') == 'python'
+                                or (isinstance(loop.iter, ast.Call) and isinstance(loop.iter.func, ast.Name)
+                                    and loop.iter.func.id == PAR_ITER_CAP))
+        self.append_names = ({n.func.value.id for n in nodes if _append_call(n)}
+                             if self.appends_allowed else set())
         if os.environ.get('AIL_SURFACE') == 'python':
-            nodes = list(ast.walk(ast.Module(body=loop.body, type_ignores=[])))
             aug = {}
             for node in nodes:
                 if (isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name)
@@ -191,6 +209,8 @@ class _Body:
                 and call.func.attr == 'append' and isinstance(call.func.value, ast.Name)
                 and len(call.args) == 1 and not call.keywords):
             return False
+        if not self.appends_allowed:
+            return False                            # the AIL surface keeps the old refusal
         name, value = call.func.value.id, call.args[0]
         if not self.appends_ok:
             return False
@@ -214,9 +234,9 @@ class _Body:
         base = node.value
         if not isinstance(base, ast.Name) or isinstance(node.slice, ast.Slice):
             raise self.refuse(node, 'only xs[index] on a plain name is allowed (no slices, fields or nested indexing)')
-        if base.id in self.appends:
-            raise self.refuse(node, '%r is appended to in the body, so it cannot be read there; its '
-                                     'only use must be `%s.append(v)`' % (base.id, base.id))
+        if base.id in self.append_names:
+            raise self.refuse(node, '%r is appended to in the body, so it cannot be read or written '
+                                     'there; its only use must be `%s.append(v)`' % (base.id, base.id))
         if base.id in self.stored:
             raise self.refuse(node, '%r is assigned inside the body, so it cannot be indexed' % base.id)
         self.expr(node.slice, defined)
@@ -228,7 +248,7 @@ class _Body:
                 return
             raise self.refuse(e, 'only int, float and bool constants are allowed (no str, bytes or None)')
         if isinstance(e, ast.Name):
-            if e.id in self.appends:
+            if e.id in self.append_names:
                 raise self.refuse(e, '%r is appended to in the body, so its only use there must be '
                                      '`%s.append(v)`' % (e.id, e.id))
             if e.id in self.stored and e.id not in defined:
@@ -270,6 +290,9 @@ class _Body:
             if name == 'len':
                 if len(e.args) != 1 or not isinstance(e.args[0], ast.Name) or e.args[0].id in self.stored:
                     raise self.refuse(e, 'len() takes a list or bytearray name')
+                if e.args[0].id in self.append_names:
+                    raise self.refuse(e, '%r is appended to in the body, so its only use there must be '
+                                         '`%s.append(v)`' % (e.args[0].id, e.args[0].id))
                 return
             if name in self.funcs:
                 fn = self.funcs[name]

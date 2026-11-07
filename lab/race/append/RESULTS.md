@@ -60,6 +60,16 @@ build: `2003705 4014916227594`.
 appending to two lists in one body, any other read of the appended list, a list of objects, and a
 body that both reduces (`acc += e`) and appends.
 
+A use of `out` that textually precedes the first append is refused too: `out[i] = v`, `x = out[i]`,
+`len(out)` and a bare `out` in any expression. The receiver names are collected from the whole body
+before the walk, so walk order does not matter (`parallel._Body.append_names`). Regression probes
+(`write before the first append`, `read before the first append`, `len before the first append` in
+`test_refused`); before this fix both built and exited 0 with a wrong list (`[0, 10, 0, 1, 2, 3]`
+for the write shape, `[7, 8, 107, 108, 100, 100]` for the read shape).
+
+Scope in v1: the Python surface only (`AIL_SURFACE=python`). The AIL surface's `parallel for` keeps
+the old refusal (`test_ail_parallel_for`).
+
 ## Files
 
 - `lab/race/append/p01..p10*.py`: the probes and the speed load.
