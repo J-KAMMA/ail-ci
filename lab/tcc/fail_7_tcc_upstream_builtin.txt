@@ -1,0 +1,10 @@
+variant: tcc-upstream
+program: lab/compare/src/berth_sim/main.py (compare)
+bucket: builtin
+construct: unsupported __builtin_*
+first error:
+  tcc: error: unresolved reference to '__builtin_add_overflow'
+  tcc: error: unresolved reference to '__builtin_sub_overflow'
+  tcc: error: unresolved reference to '__builtin_mul_overflow'
+generated C line None: 
+emitted by: cruntime.py:433,4169,4190 (__builtin_unreachable); bigint_obj.py:403-411 (__builtin_*_overflow)

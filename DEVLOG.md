@@ -247,6 +247,115 @@ CPython; under `ulimit -v 400000`, `p7_gen_budget` (300 live) and `p9_gen_reclai
 400 live) match too, and `p8_gen_cap_stop` under `ulimit -v 200000` stops by name, catchable.
 `test_ail_recursion_stop` 13, `test_ail_gcstress` 8, `test_ail_gcroots` 6, `test_ail_safety_stops`
 1, `test_ail_safetynet` 5, `test_ail_files` 18 (1 skipped), `test_ail_corpus_findings3` 2: all pass.
+## 2026-11-06 -- rtcc1: re-apply the tcc quick-run probe on the current tree (job-rbtcc1-11070757)
+
+Re-applied the accepted `tcc1` change (`18d8dd67`..`job-tcc1-11070607`) on this export. Every hunk
+applied: `lab/tcc/` is new (`run.py`, `RESULTS.md`, `cc_tcc.py`, `run.sh`, `tcc.yml`,
+`tcc_prelude.h`, eight `fail_*.txt` excerpts) and its two DEVLOG entries are kept as written.
+`lab/tcc/` is byte-identical to the fetched branch. The `.github/workflows/agent-worker.yml` hunk
+would delete the Opus/`CLAUDE_CODE_OAUTH_TOKEN` wiring this tree keeps, so that file is unchanged
+and both sides' fixes stay. No compiler, runtime or default build changed (release stays `gcc -O2`),
+so no DIFFERENCES row and no new test module.
+
+The accepted emitter pointers were line numbers of the accepted base; on this tree the same
+constructs sit at different lines, so `CONSTRUCT_EMITTER`, the `emitted by:` line of the eight
+excerpts and the `RESULTS.md` blocker table and `__int128` paragraph were re-anchored:
+`_Thread_local` 17347-17348 -> 17489-17490, `ail_stdout_parts` call site 24977 -> 25000 (emitter
+1542 -> 1570), bytes `spans[]` 6450,6508,6538 -> 6575,6633,6663, `ail__idiv_exact` 3835-3844 ->
+3960-3969, range slice 16995-17010 -> 17137-17152, int `pow` 19127-19143/29615-29622 ->
+19304-19320/29792-29799, `ail_rand_floordiv` 29811-29819 -> 29988-29996, sum reducers 31094 ->
+31275, `__builtin_unreachable` 433,4044,4065 -> 433,4169,4190. `jsonrt.py:858` and
+`bigint_obj.py:403-411` were already correct. `run.py`'s int128-repositioning `diagnose` path is
+unchanged and still moves a 0.9.27 one-line-early report onto the `__uint128_t` line.
+
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran (the
+new paths are outside `AIL_CURRENT`, so no pin changed); `--check` passes. tcc is not installed on
+this runner, so none of the build counts in `RESULTS.md` were re-measured here: they are the
+accepted job's recorded measurement, and the 0/58 and 35/58 rows are unverified on this tree.
+
+Probes (`/tmp/probes`, all under `cmp.sh`; the six Python tools are refused by name in both builds,
+as expected, and run clean under CPython): `tcc_classify.py` (37 classify cases: unsized compound
+literal vs declaration vs sized forms, `__thread`, `__attribute__`, `vector_size`, statement
+expression, asm, link error, implicit-declaration builtin, int128 precedence) plus
+`index_too_large_construct` on 8 strings; `tcc_diagnose.py` (23 checks: the int128 one-line-early
+move up and down, no move when the line already carries it, named-unit preference, unknown unit,
+out-of-range/0 line, no `file:line`, and `c_line`/`first_error` edges);
+`tcc_cctcc.py` (13 argv rewrites: `-o` pairs, `.c` patching with the prelude prepended, `-MF`/`-MT`/
+`-MQ`/`-x`/`-include`/`-isystem`/`-iquote` dropped, missing values, kept `-I/-D/-U/-L/-l/-O/-g/-std=/
+-c/-shared/-static/-pthread`, gcc-only flags dropped, non-flag passthrough, original file untouched);
+`tcc_report.py` (parse_report single/multi/no-object/missing-file, `-o` before and after the input,
+`_flags_before`/`_libs_after` edges, `c_flags` for all four labels, `median` on odd/even/empty, and
+`write_excerpts` dedup/ordering/skips); `tcc_build.py` (build command shapes, a real gcc build and
+run, a failing build, multi-unit `-c` objects, timeout, exit status, stdin and args cases,
+`prepare_sources` prelude copy); `tcc_summarize.py` (per-kind counts, bucket ordering, medians over
+built programs only, wrong-output list, empty input); `tcc_pointers.py` (24 of 24 cited lines carry
+the asserted construct and every cited number is present, with 20 stale numbers absent from
+`lab/tcc`). The prelude was checked against GCC's own builtins over 2700 (a, b) triples x
+add/sub/mul = 8100 operations: 0 mismatches. `cmp.sh` on `/tmp/probes/div_c.py` (int `/`, `pow`,
+3-arg `pow`, range and str slices, `sum`, float division) matches CPython on both builds.
+## 2026-11-06 -- tcc1 review 2: `__int128` blocker path and front-end ratio range
+
+`lab/tcc/` + this file only; no measured number changed.
+
+- The `__int128` blocker was attributed only to the general runtime's range slice (`16995`) and
+  `ail_rand_floordiv` (`29811`). The actual first error in the sampled corpus-blocked programs
+  (`g03_030`, `g11_038`, `g11_026`) is `ail__idiv_exact`, `cruntime.py:3835-3844`
+  (`'__uint128_t' undeclared` / `cannot convert 'unsigned long' to 'struct __uint128__'` at
+  `__uint128_t num, den;` / `(__uint128_t)ua << shift`): the typed path emits and calls the
+  exactly-rounded int `/` helper, which needs two-word 128-bit shift/div/mod. Added it to the
+  blocker table, `run.py` `CONSTRUCT_EMITTER`, the derived `fail_*_int128.txt` excerpts, the
+  "cost to remove" paragraph and the typed-path note. The general path (`chain_relax`) still first
+  stops at the range slice (7398/7435), unchanged.
+- `RESULTS.md`'s "41-91%" was the tcc/gcc cold ratio column, whose actual range is 41-158%
+  (`g00_036` = 1.424/0.903); now stated as 41-158% with `g00_036` named as the outlier, in both
+  places.
+- `run.py` `diagnose` now moves an int128 excerpt off tcc 0.9.27's one-line-earlier report to the
+  line carrying `__uint128_t` (fail_3: 3438, not 3437).
+- Probes: apt tcc 0.9.27 and upstream 0.9.28rc (`e23dabe`) on the emitted C of `g03_030`,
+  `g11_038`, `g11_026`; upstream errors at program.c 68/2930/3439, all inside `ail__idiv_exact`
+  (`chain_relax` still at the slice site 7398). cmp.sh on `g18_008`/`g04_006`; `test_ail_safetynet`,
+  `test_ail_files`, `test_ail_corpus_findings3`; manifest `--check` clean.
+
+## 2026-11-06 -- tcc1 review fixes: blocker source pointers and refusal reasons
+
+`lab/tcc/` + this file only; no measured number changed.
+
+- `run.py` `CONSTRUCT_EMITTER` (and the derived `fail_*.txt` / `RESULTS.md` table) pointed at the
+  wrong lines: `_Thread_local` is `cruntime.py:17347-17348` (not 17245), the `ail_stdout_parts`
+  call site `pyfunc.py:24977` (not 24481), and `__int128` is the exactly-rounded int division
+  helper `ail__idiv_exact` at `cruntime.py:3835-3844` (the first stop in the sampled corpus
+  programs), the range slice at 16995, and `ail_rand_floordiv` at 29811 (not 29709, a comment).
+  Fixed in all three places.
+- `RESULTS.md`'s refusal reasons were wrong: `tally_lang` stops on the field `v` type error (a list
+  or dict that gets bools and numbers), with tuple-shape / `re` notes; `tree_fold` stops on
+  `import of 're' with a use that is not built`, with `cannot tell the type of element 0 of this
+  tuple` notes at lines 44/72/85/89. Stated as the actual fatal first error, not swapped.
+- Also corrected the "front end is 60-85%" claim to the measured tcc/gcc cold ratio range
+  (41-158%, median 59%; `g00_036` is the 158% case where tcc is slower).
+- Probes: `/tmp/probes/emitter_pointers.py` (15 pointers + 3 stale-pointer checks: PASS) and
+  `/tmp/probes/refusal_reasons.py` (both fatal messages match AIL and the report: PASS); cmp.sh on
+  `g18_008`/`g04_006` still matches CPython in both builds; `test_ail_safetynet`,
+  `test_ail_files`, `test_ail_corpus_findings3` pass; manifest `--check` clean.
+
+## 2026-11-06 -- tcc1 quick-run probe: TinyCC vs gcc -O2 (job-tcc1-11070326)
+
+`lab/tcc/` only; no compiler or default change. Full report in `lab/tcc/RESULTS.md`.
+
+- apt tcc 0.9.27 builds 0/58 generated C (41 first stops at `_Thread_local`, 11 unsized runtime
+  aggregates, 4 builtins, 2 `__int128`). Unusable.
+- upstream tcc 0.9.28rc (`e23dabe`) builds 5/58 raw; with `lab/tcc/tcc_prelude.h` (portable overflow
+  builtins) 35/58 (2/8 compare `main.py`, 33/50 corpus), all byte-identical to gcc -O2.
+- The only remaining blocker is `__int128` (23/58; 6/8 compare): the general runtime's range slice
+  and int `pow`. tcc has no 128-bit type; it needs a two-word int64 fallback in cruntime, not a
+  prelude.
+- C compile median on the 35 that build: 3.12 s (gcc -O2) / 0.83 s (gcc -O0) / 0.026 s (tcc); the
+  runner was loaded (~2.3x inflated). Program run is 1.7x slower.
+- Edit-run (cold AIL compile + run, 14 programs): 4.62 s -> 2.93 s (1.58x ratio of medians, 1.70x
+  median per-program). The warm cache is ~0.4 s for both, so tcc only helps a cold build.
+- Probes: the overflow prelude is 588/588 byte-identical to GCC's builtins; the classifier 13/13;
+  the saved C equals the compiler input and both rebuilds reproduce the AIL binary; cmp.sh on
+  g18_008/g04_006 matches CPython in both modes.
+
 ## 2026-11-05 -- bce s6: field values in the range pass (job-bces6-11060753)
 
 All of it behind `bce_enabled()` (`AIL_BCE=0` emits C byte-identical to the base tree for
