@@ -146,6 +146,43 @@ print(s == 1, t == 1)
 }
 
 
+# The saved method or the `float(...)` call need not sit on the statement's first line: `print(`
+# on one line and the call on the next, or the call itself split across lines.  An earlier version
+# keyed the edit to `statement.lineno` / `call.lineno` while the columns belonged to the argument, so
+# `with` glued `prin` to the replacement and dropped the call.  The edit now replaces the whole span
+# of the argument/call, and the range may drop only the lines the replacement covers.
+SPLIT = {
+    'stdin_print_then_call': ("""import sys
+read = sys.stdin.buffer.readline
+print(
+    read().decode().strip())
+""", 'AIL0101', 'hello\n', 1),
+    'stdin_call_split_before_decode': ("""import sys
+read = sys.stdin.buffer.readline
+print(read()
+      .decode().strip())
+""", 'AIL0101', 'hello\n', 2),
+    'stdin_chain_one_per_line': ("""import sys
+read = sys.stdin.buffer.readline
+print(
+    read()
+    .decode()
+    .strip()
+)
+""", 'AIL0101', 'hello\n', 3),
+    'fraction_print_then_call': ("""from fractions import Fraction
+x = Fraction(1, 2)
+print(float(
+    x))
+""", 'AIL0111', '0.5\n', 3),
+    'fraction_call_split_before_close': ("""from fractions import Fraction
+x = Fraction(1, 2)
+print(float(x
+            ))
+""", 'AIL0111', '0.5\n', 3),
+}
+
+
 class AgentErrors(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix='ail-agent-errors-'))
@@ -262,38 +299,46 @@ class AgentErrors(unittest.TestCase):
                 self.assertIn('fix', item, item)
                 self.check_fix(source, item, code, name)
 
+    def assert_applied_output(self, name, text, code, expected, dropped):
+        source = self.tmp / (name + '.py')
+        source.write_text(text, encoding='utf-8')
+        built = self.compile(source, name)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        found = [item for item in json.loads(built.stdout).get('agent_diagnostics', [])
+                 if item['code'] == code]
+        self.assertEqual(len(found), 1, found)
+        item = found[0]
+        self.assertIn('fix', item, item)
+        first, last = item['fix']['replace_range']
+        lines = text.split('\n')
+        self.assertTrue(1 <= first <= last <= len(lines), item['fix'])
+        # The range may drop only the lines the replacement text itself covers: the
+        # `fractions` import and every line of the `Fraction(...)` assignment (AIL0111), the
+        # saved `readline` lines (AIL0101).  Every other line of the range is reproduced.
+        self.assertEqual(len(item['fix']['with'].split('\n')),
+                         (last - first + 1) - dropped, item['fix'])
+        fixed_path = self.apply(source, item, name)
+        rebuilt = self.compile(fixed_path, name + '_fixed')
+        self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+        after = [entry['code'] for entry in json.loads(rebuilt.stdout).get('agent_diagnostics', [])]
+        self.assertNotIn(code, after, after)
+        data = b'hello\n' if code == 'AIL0101' else b''
+        native = subprocess.run([str(self.tmp / (name + '_fixed'))], input=data,
+                                capture_output=True, timeout=120)
+        cpython = subprocess.run([sys.executable, str(fixed_path)], input=data,
+                                 capture_output=True, timeout=120)
+        self.assertEqual((native.returncode, native.stdout), (cpython.returncode, cpython.stdout))
+        self.assertEqual(native.stdout.decode(), expected)
+
     def test_unsafe_shapes_keep_the_output(self):
         for name, (text, code, expected, dropped) in UNSAFE.items():
             with self.subTest(name=name):
-                source = self.tmp / (name + '.py')
-                source.write_text(text, encoding='utf-8')
-                built = self.compile(source, name)
-                self.assertEqual(built.returncode, 0, built.stderr)
-                found = [item for item in json.loads(built.stdout).get('agent_diagnostics', [])
-                         if item['code'] == code]
-                self.assertEqual(len(found), 1, found)
-                item = found[0]
-                self.assertIn('fix', item, item)
-                first, last = item['fix']['replace_range']
-                lines = text.split('\n')
-                self.assertTrue(1 <= first <= last <= len(lines), item['fix'])
-                # The range may drop only the lines the replacement text itself covers: the
-                # `fractions` import and every line of the `Fraction(...)` assignment (AIL0111), the
-                # saved `readline` lines (AIL0101).  Every other line of the range is reproduced.
-                self.assertEqual(len(item['fix']['with'].split('\n')),
-                                 (last - first + 1) - dropped, item['fix'])
-                fixed_path = self.apply(source, item, name)
-                rebuilt = self.compile(fixed_path, name + '_fixed')
-                self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
-                after = [entry['code'] for entry in json.loads(rebuilt.stdout).get('agent_diagnostics', [])]
-                self.assertNotIn(code, after, after)
-                data = b'hello\n' if code == 'AIL0101' else b''
-                native = subprocess.run([str(self.tmp / (name + '_fixed'))], input=data,
-                                        capture_output=True, timeout=120)
-                cpython = subprocess.run([sys.executable, str(fixed_path)], input=data,
-                                         capture_output=True, timeout=120)
-                self.assertEqual((native.returncode, native.stdout), (cpython.returncode, cpython.stdout))
-                self.assertEqual(native.stdout.decode(), expected)
+                self.assert_applied_output(name, text, code, expected, dropped)
+
+    def test_split_call_shapes_keep_the_output(self):
+        for name, (text, code, expected, dropped) in SPLIT.items():
+            with self.subTest(name=name):
+                self.assert_applied_output(name, text, code, expected, dropped)
 
     def test_no_edit_when_the_values_are_not_provable(self):
         # `d.get(k, -1)` prints `-1` where CPython prints `None`, and `s == "1"` takes a branch
