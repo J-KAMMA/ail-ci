@@ -994,13 +994,15 @@ def build(source_path, output_dir):
     module = _module_name(stem)
     output_dir.mkdir(parents=True, exist_ok=True)
     report = {
-        'schema': 'ail.cpython_hybrid/1',
+        'schema': 'ail.cpython_hybrid/2',
         'source': str(source_path),
         'python': sys.version.split()[0],
         'module': module,
         'accelerated': [],
         'rejected': {},
         'extension': None,
+        'run_file': stem + '_run.py',
+        'python_file': stem + '.py',
     }
     chosen = {}
     try:
@@ -1018,14 +1020,33 @@ def build(source_path, output_dir):
     except Exception as error:
         report['note'] = 'no extension: %s' % error
 
-    # Always keep an unmodified copy and a runnable hybrid copy.
+    # Always keep an unmodified copy and a runnable hybrid copy.  `prog_run.py` is the file the
+    # task names; the `<stem>.py` copy stays for callers of the earlier --cpython prototype.
     (output_dir / (stem + '.orig.py')).write_text(source, encoding='utf-8')
     hybrid = _hybrid_source(source, tree, module, report['accelerated'], source_path)
-    (output_dir / (stem + '.py')).write_text(hybrid, encoding='utf-8')
+    (output_dir / report['run_file']).write_text(hybrid, encoding='utf-8')
+    legacy = output_dir / report['python_file']
+    if legacy.resolve() != source_path:
+        legacy.write_text(hybrid, encoding='utf-8')
     launcher = output_dir / stem
-    launcher.write_text('#!/bin/sh\nexec "${AIL_PYTHON:-python3}" "$(dirname "$0")/%s.py" "$@"\n' % stem,
-                        encoding='utf-8')
+    launcher.write_text('#!/bin/sh\nexec "${AIL_PYTHON:-python3}" "$(dirname "$0")/%s" "$@"\n'
+                        % report['run_file'], encoding='utf-8')
     launcher.chmod(0o755)
     (output_dir / 'build.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n',
                                            encoding='utf-8')
     return report
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='build a CPython hybrid: typed functions become an extension module, '
+                    'everything else runs in CPython')
+    parser.add_argument('source', metavar='SOURCE')
+    parser.add_argument('-o', '--out', metavar='DIR')
+    args = parser.parse_args()
+    source = Path(args.source)
+    output = Path(args.out) if args.out else source.parent / (source.stem + '_hybrid')
+    report = build(source, output)
+    print('built %s: %d function(s) accelerated' % (output, len(report.get('accelerated') or [])))
+    print('run %s' % (output / report['run_file']))
