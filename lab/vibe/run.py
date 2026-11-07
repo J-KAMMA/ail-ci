@@ -649,6 +649,7 @@ class Store:
 
     def put(self, rec):
         with self.lock:
+            rec['model'] = self.meta.get('model')
             self.rows[(rec['task'], rec['lang'], rec['seed'])] = rec
             self.write()
 
