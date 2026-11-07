@@ -1,0 +1,23 @@
+[cases] berth_sim: 3 public, 23 hidden
+[cases] chain_relax: 3 public, 29 hidden
+[cases] echo_pack: 3 public, 54 hidden
+[cases] ledger_bin: 3 public, 52 hidden
+[cases] rail_transfer: 3 public, 21 hidden
+[cases] scar_life: 3 public, 50 hidden
+[cases] tally_lang: 3 public, 72 hidden
+[cases] term_rank: 3 public, 40 hidden
+[cases] ticket_audit: 3 public, 88 hidden
+[cases] tree_fold: 3 public, 52 hidden
+[cases] csv_rollup: 3 public, 6 hidden
+[11:09:26 1] csv_rollup ail seed 0: correct rounds 1 silent 0 loud 0 general
+[11:10:33 2] berth_sim ail-strict seed 0: gave up rounds 1 silent 0 loud 0
+[11:12:23 3] chain_relax ail-strict seed 0: correct rounds 1 silent 0 loud 0 general
+[11:14:33 4] echo_pack ail-strict seed 0: gave up rounds 1 silent 0 loud 0
+[11:14:42 5] ledger_bin ail-strict seed 0: correct rounds 1 silent 0 loud 0 typed
+[11:17:36 6] rail_transfer ail-strict seed 0: correct rounds 1 silent 0 loud 0 general
+[11:17:54 7] scar_life ail-strict seed 0: correct rounds 1 silent 0 loud 0 general
+[11:21:36 8] tally_lang ail-strict seed 0: gave up rounds 1 silent 0 loud 0
+[11:21:42 9] term_rank ail-strict seed 0: correct rounds 1 silent 0 loud 0 general
+[11:24:08 10] ticket_audit ail-strict seed 0: wrong rounds 1 silent 0 loud 1 general
+[11:25:32 11] csv_rollup ail-strict seed 0: correct rounds 1 silent 0 loud 0 typed
+[11:25:42 12] tree_fold ail-strict seed 0: gave up rounds 1 silent 0 loud 0

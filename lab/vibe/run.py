@@ -36,13 +36,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+LAB2 = REPO / 'lab' / 'vibe2'
 AIL = REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'
 RESULTS = HERE / 'results.json'
 PROGRAMS = HERE / 'programs'
-LANGS = ('python', 'rust', 'ail')
-EXT = {'python': '.py', 'rust': '.rs', 'ail': '.py'}
-CODE_TAG = {'python': 'python', 'rust': 'rust', 'ail': 'python'}
-LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'ail': 'AIL (a Python-syntax language)'}
+AIL_LANGS = ('ail', 'ail-strict', 'ail-new')
+LANGS = ('python', 'rust', 'ail', 'ail-strict', 'ail-new')
+EXT = {'python': '.py', 'rust': '.rs', 'ail': '.py', 'ail-strict': '.py', 'ail-new': '.nw'}
+CODE_TAG = {'python': 'python', 'rust': 'rust', 'ail': 'python', 'ail-strict': 'python', 'ail-new': 'ail'}
+LANG_NAME = {'python': 'Python 3.12', 'rust': 'Rust 2021', 'ail': 'AIL (a Python-syntax language)',
+             'ail-strict': 'AIL (a Python-syntax language; strict-path rules in the note)',
+             'ail-new': 'AIL-N (the typed surface in the note)'}
 
 CASE_TIMEOUT = 90
 BUILD_TIMEOUT = 300
@@ -56,6 +60,8 @@ LANG_NOTE = {
              '`rustc -O --edition=2021 main.rs` and run as `./main [args...]`; it reads standard '
              'input and writes standard output.'),
     'ail': None,   # filled from AIL_FOR_AI.md
+    'ail-strict': None,   # filled from lab/vibe2/STRICT_SPEC.md
+    'ail-new': None,      # filled from lab/vibe2/NEW_SURFACE.md
 }
 
 
@@ -146,7 +152,7 @@ def compile_env(work):
     return env
 
 
-def build_program(lang, src, work, exe):
+def build_program(lang, src, work, exe, line_map=None):
     """Compile; python needs no build. Returns ok, seconds, run command, stderr, typed probe."""
     if lang == 'python':
         return dict(ok=True, seconds=0.0, cmd=[sys.executable, '-B', str(src)], stderr='', stdout='', typed=None)
@@ -163,9 +169,11 @@ def build_program(lang, src, work, exe):
         rc, out, err = 124, b'', b'(build timeout)'
     except OSError as e:
         rc, out, err = 127, b'', str(e).encode()
+    if rc != 0 and line_map:
+        err = remap_errors(err, line_map)
     rec = dict(ok=rc == 0 and exe.is_file(), seconds=time.perf_counter() - t0, cmd=[str(exe)],
                stderr=tail(err), stdout=tail(out, 400), typed=None)
-    if lang == 'ail' and rec['ok']:
+    if lang in AIL_LANGS and rec['ok']:
         strict = work / (exe.name + '-strict')
         try:
             sp = subprocess.run([sys.executable, '-B', str(AIL), 'compile', str(src), '--syntax', 'python',
@@ -177,6 +185,30 @@ def build_program(lang, src, work, exe):
         finally:
             strict.unlink(missing_ok=True)
     return rec
+
+
+LINE_RE = re.compile(rb'(main\.py):(\d+)(:\d+)?')
+
+
+def remap_errors(err, line_map):
+    """Point generated-Python line numbers back at the AIL-N source lines."""
+    def sub(m):
+        try:
+            n = int(m.group(2))
+        except ValueError:
+            return m.group(0)
+        ai = line_map[n - 1] if 1 <= n <= len(line_map) else 0
+        return b'main.ail:%d' % (ai or n) + (m.group(3) or b'')
+    return LINE_RE.sub(sub, err)
+
+
+def translate_new(code):
+    """AIL-N -> AIL Python. Returns (translated code, line map) or raises TranslateError."""
+    if str(LAB2) not in sys.path:
+        sys.path.insert(0, str(LAB2))
+    from translate import translate
+    tr = translate(code)
+    return tr['code'], tr['line_map']
 
 
 def ail_path(rec):
@@ -274,7 +306,7 @@ class Model:
             cmd += ['--effort', self.effort]
         rc, raw, err = run_cli(cmd, prompt.encode(), workdir, self.timeout,
                                workdir / 'model-out.jsonl', workdir / 'model-err.txt')
-        final = None
+        final, tokens = None, 0
         for line in raw.splitlines():
             try:
                 e = json.loads(line)
@@ -283,12 +315,15 @@ class Model:
             if isinstance(e, dict):
                 if e.get('type') == 'result' or 'finalText' in e:
                     final = e.get('finalText') or final
+                    usage = e.get('usage') or {}
+                    if isinstance(usage, dict):
+                        tokens += int(usage.get('outputTokens') or 0)
         if not final:
             blob = raw[-2000:] + err[-1500:]
             if FATAL_PAT.search(blob):
                 raise ModelFatal(blob.strip()[-400:])
-            return ''
-        return final
+            return '', tokens
+        return final, tokens
 
     def _opencode(self, prompt, workdir):
         pf = workdir / 'prompt.txt'
@@ -297,21 +332,26 @@ class Model:
                '-f', str(pf), 'Answer the attached prompt. Do not edit files or run commands.']
         rc, raw, err = run_cli(cmd, None, workdir, self.timeout,
                                workdir / 'model-out.jsonl', workdir / 'model-err.txt')
-        texts = []
+        texts, tokens = [], 0
         for line in raw.splitlines():
             try:
                 e = json.loads(line)
             except ValueError:
                 continue
-            part = (e.get('part') or {}) if isinstance(e, dict) else {}
+            if not isinstance(e, dict):
+                continue
+            part = e.get('part') or {}
             if part.get('type') == 'text' and part.get('text'):
                 texts.append(part['text'])
+            tok = part.get('tokens') or {}
+            if isinstance(tok, dict):
+                tokens += int(tok.get('output') or 0)
         if not texts:
             blob = raw[-1000:] + err[-1500:]
             if FATAL_PAT.search(blob):
                 raise ModelFatal(blob.strip()[-400:])
-            return ''
-        return texts[-1]
+            return '', tokens
+        return texts[-1], tokens
 
 
 FENCE = re.compile(r'```[ \t]*([A-Za-z0-9_+.-]*)[ \t]*\n(.*?)```', re.S)
@@ -333,6 +373,10 @@ def extract_code(reply):
 def language_note(lang):
     if lang == 'ail':
         return (HERE / 'AIL_FOR_AI.md').read_text()
+    if lang == 'ail-strict':
+        return (LAB2 / 'STRICT_SPEC.md').read_text()
+    if lang == 'ail-new':
+        return (LAB2 / 'NEW_SURFACE.md').read_text()
     return LANG_NOTE[lang]
 
 
@@ -410,16 +454,21 @@ def failure_feedback(case, actual):
 
 
 def compiler_messages(stderr):
-    """Normalized compiler error/note lines from a build's stderr."""
+    """Normalized compiler error/note lines from a build's stderr.
+
+    The compiler writes informational diagnostics as `note:` lines (often "built on the general
+    path ..."); those stay notes even when their text contains words like "unsupported" or
+    "refuses". Only a real diagnostic marker makes a line an error.
+    """
     msgs = []
     for line in (stderr or '').splitlines():
         s = line.strip()
         if not s:
             continue
-        if re.search(r'not in the subset|error:|Error|refus|out of range|unsupported', s):
-            msgs.append(('error', norm_message(s)))
-        elif s.startswith('note:') or 'general path' in s:
+        if s.startswith('note:') or 'built on the general path' in s:
             msgs.append(('note', norm_message(s)))
+        elif re.search(r'not in the subset|error:|^error\b', s, re.I):
+            msgs.append(('error', norm_message(s)))
     return msgs
 
 
@@ -442,12 +491,12 @@ def ail_error_table(records):
                 slot = counts.setdefault(key, {'kind': kind, 'message': msg, 'occurrences': 0, 'fixed_next': 0})
                 slot['occurrences'] += 1
                 nxt = rounds[i + 1] if i + 1 < len(rounds) else None
-                if kind == 'error' and nxt is not None and nxt.get('build_ok'):
+                if kind in ('error', 'surface') and nxt is not None and nxt.get('build_ok'):
                     slot['fixed_next'] += 1
     rows = sorted(counts.values(), key=lambda r: (-r['occurrences'], r['message']))
     for r in rows:
         r['fixed_rate'] = round(r['fixed_next'] / r['occurrences'], 3) if r['occurrences'] else 0.0
-    return rows[:10]
+    return rows
 
 
 # --------------------------------------------------------------------------------------------
@@ -468,32 +517,54 @@ def evaluate(task_name, task_dir, lang, seed, cases, model, rounds_limit):
     try:
         for n in range(1, rounds_limit + 1):
             try:
-                reply = model.call(prompt, work)
+                reply, tokens = model.call(prompt, work)
             except ModelTimeout as e:
                 # A call the model did not finish in --call-timeout ends this attempt (gave up); it must
                 # not stop the whole benchmark, and retrying a runaway generation only burns the budget.
-                rounds.append(dict(round=n, prompt_chars=len(prompt), reply_chars=0, build_ok=False,
-                                   build_seconds=0.0, build_error=str(e), compiler=[], public_passed=False,
-                                   public_failed=[], run_seconds=0.0, error_sent=str(e)))
+                rounds.append(dict(round=n, prompt_chars=len(prompt), reply_chars=0, reply_tokens=0,
+                                   build_ok=False, build_seconds=0.0, build_error=str(e), compiler=[],
+                                   public_passed=False, public_failed=[], run_seconds=0.0, error_sent=str(e)))
                 break
             if not (reply or '').strip():
                 err = 'the model returned no text'
-                rounds.append(dict(round=n, prompt_chars=len(prompt), reply_chars=0, build_ok=False,
-                                   build_seconds=0.0, build_error=err, compiler=[], public_passed=False,
-                                   public_failed=[], run_seconds=0.0, error_sent=err))
+                rounds.append(dict(round=n, prompt_chars=len(prompt), reply_chars=0, reply_tokens=tokens,
+                                   build_ok=False, build_seconds=0.0, build_error=err, compiler=[],
+                                   public_passed=False, public_failed=[], run_seconds=0.0, error_sent=err))
                 prompt = fix_prompt(task_name, task_dir, lang, code, err)
                 continue
             code = extract_code(reply)
             src.write_text(code)
-            build_rec = build_program(lang, src, work, exe)
+            surface_error = ''
+            line_map = None
+            build_src = src
+            if lang == 'ail-new':
+                try:
+                    tcode, line_map = translate_new(code)
+                    build_src = work / 'main.py'
+                    build_src.write_text(tcode)
+                except Exception as e:       # TranslateError from lab/vibe2/translate.py
+                    lno = getattr(e, 'line', 0)
+                    surface_error = 'line %d: %s' % (lno, getattr(e, 'message', str(e)))
+                    build_src = None
+                    build_rec = dict(ok=False, seconds=0.0, cmd=[], typed=None,
+                                     stderr='surface error at ' + surface_error, stdout='')
+            if build_src is not None:
+                build_rec = build_program(lang, build_src, work, exe, line_map)
             loop_seconds += build_rec['seconds']
+            msgs = compiler_messages(build_rec['stderr']) if lang in AIL_LANGS else []
+            if surface_error:
+                msgs.append(('surface', surface_error))
             rnd = dict(round=n, prompt_chars=len(prompt), reply_chars=len(reply or ''),
-                       build_ok=build_rec['ok'], build_seconds=round(build_rec['seconds'], 3),
+                       reply_tokens=tokens, build_ok=build_rec['ok'],
+                       build_seconds=round(build_rec['seconds'], 3),
                        build_error=(build_rec['stderr'] or '')[:600] if not build_rec['ok'] else '',
-                       compiler=compiler_messages(build_rec['stderr']) if lang == 'ail' else [],
+                       compiler=msgs, surface_error=bool(surface_error),
                        public_passed=False, public_failed=[], run_seconds=0.0)
             if not build_rec['ok']:
-                rnd['error_sent'] = ('compiler error:\n' + (build_rec['stderr'] or '(no message)'))[:1500]
+                if surface_error:
+                    rnd['error_sent'] = ('AIL-N surface error:\n' + surface_error)[:1500]
+                else:
+                    rnd['error_sent'] = ('compiler error:\n' + (build_rec['stderr'] or '(no message)'))[:1500]
                 rounds.append(rnd)
                 prompt = fix_prompt(task_name, task_dir, lang, code, rnd['error_sent'])
                 continue
@@ -539,18 +610,24 @@ def evaluate(task_name, task_dir, lang, seed, cases, model, rounds_limit):
                         status = 'wrong_exit'
                 hidden_rows.append(dict(name=case['name'], status=status,
                                         exit=actual['returncode'], expected_exit=exp['returncode']))
-        path = ail_path(build_rec) if lang == 'ail' and build_rec else None
+        path = ail_path(build_rec) if lang in AIL_LANGS and build_rec else None
+        surface_rounds = sum(1 for r in rounds if r.get('surface_error'))
         rec = dict(task=task_name, lang=lang, seed=seed, public_pass=public_pass, correct=correct,
                    rounds_used=len(rounds), gave_up=not public_pass,
                    silent_wrong=silent, loud_stop=loud, other_wrong=other, hidden_total=len(hidden),
                    hidden=hidden_rows, loop_seconds=round(loop_seconds, 3),
                    final_run_seconds=round(final_run_seconds, 3),
+                   reply_tokens=sum(r.get('reply_tokens') or 0 for r in rounds),
+                   surface_error_rounds=surface_rounds,
                    path=path, final_build_ok=bool(build_rec and build_rec['ok']), rounds=rounds)
         if code:
             dst = PROGRAMS / task_name / ('%s-%d%s' % (lang, seed, EXT[lang]))
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(code)
-            rec['program'] = str(dst.relative_to(HERE))
+            try:
+                rec['program'] = str(dst.relative_to(HERE))
+            except ValueError:
+                rec['program'] = str(dst)
         return rec
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -563,21 +640,28 @@ class Store:
     def __init__(self, path, meta):
         self.path, self.meta, self.lock = path, meta, threading.Lock()
         self.rows = {}
+        self.prev_scheduled = 0
         if path.is_file():
             try:
                 old = json.loads(path.read_text())
-                for r in old.get('results', []):
-                    self.rows[(r['task'], r['lang'], r['seed'])] = r
                 old_meta = old.get('meta') or {}
-                for k in ('started', 'harness'):
-                    if k in old_meta and k not in self.meta:
-                        self.meta[k] = old_meta[k]
+                for r in old.get('results', []):
+                    self.rows[(r['task'], r['lang'], r['seed'],
+                               r.get('model') or old_meta.get('model'))] = r
+                # `started` is the first run that wrote this file; a resumed run must not reset it.
+                if 'started' in old_meta:
+                    self.meta['started'] = old_meta['started']
+                if 'harness' in old_meta and 'harness' not in self.meta:
+                    self.meta['harness'] = old_meta['harness']
+                self.prev_scheduled = max(int(old_meta.get('scheduled_attempts') or 0),
+                                          len(self.rows))
             except (OSError, ValueError):
                 pass
 
     def put(self, rec):
         with self.lock:
-            self.rows[(rec['task'], rec['lang'], rec['seed'])] = rec
+            rec['model'] = self.meta.get('model')
+            self.rows[(rec['task'], rec['lang'], rec['seed'], rec['model'])] = rec
             self.write()
 
     def write(self):
@@ -591,14 +675,26 @@ class Store:
             self.meta['tasks'] = sorted({r['task'] for r in every})
         data = dict(meta=self.meta, results=rows)
         data['summary'] = summarize(every)
-        data['ail_errors'] = ail_error_table([r for r in every if r['lang'] == 'ail'])
+        models = sorted({r.get('model') or '' for r in every})
+        data['ail_errors'] = {
+            m: ail_error_table([r for r in every
+                                if r['lang'] in AIL_LANGS and (r.get('model') or '') == m])
+            for m in models}
         tmp = self.path.with_suffix('.tmp')
         tmp.write_text(json.dumps(data, indent=1) + '\n')
         tmp.replace(self.path)
 
 
 def summarize(rows):
-    """Per language: n, correct, public pass, gave up, silent wrong, loud stops, rounds and seconds."""
+    """Per model, then per language: n, correct, public pass, gave up, silent wrong, loud stops,
+    rounds and seconds. Rows from different models never merge."""
+    out = {}
+    for model in sorted({r.get('model') or '' for r in rows}):
+        out[model] = _summarize_langs([r for r in rows if (r.get('model') or '') == model])
+    return out
+
+
+def _summarize_langs(rows):
     out = {}
     for lang in LANGS:
         rs = [r for r in rows if r['lang'] == lang]
@@ -615,10 +711,15 @@ def summarize(rows):
                          loud_stop=sum(r['loud_stop'] for r in rs),
                          other_wrong=sum(r['other_wrong'] for r in rs),
                          rounds_median=med,
+                         reply_tokens=sum(r.get('reply_tokens') or 0 for r in rs),
+                         tokens_per_correct=(round(sum(r.get('reply_tokens') or 0 for r in rs) /
+                                                   sum(1 for r in rs if r['correct']), 1)
+                                             if any(r['correct'] for r in rs) else None),
+                         surface_error_rounds=sum(r.get('surface_error_rounds') or 0 for r in rs),
                          loop_seconds=round(sum(r['loop_seconds'] for r in rs), 2),
                          final_run_seconds=round(sum(r['final_run_seconds'] for r in rs), 3),
                          paths={p: sum(1 for r in rs if r.get('path') == p)
-                                for p in ('typed', 'general', 'refused')} if lang == 'ail' else None)
+                                for p in ('typed', 'general', 'refused')} if lang in AIL_LANGS else None)
     return out
 
 
@@ -632,6 +733,7 @@ def parse_seeds(text):
 
 
 def main():
+    global PROGRAMS
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--tasks', help='comma-separated task names (default: all)')
     ap.add_argument('--langs', default=','.join(LANGS))
@@ -644,6 +746,7 @@ def main():
     ap.add_argument('--effort', default=None, help='cmd reasoning effort (low/medium/high)')
     ap.add_argument('--call-timeout', type=int, default=300)
     ap.add_argument('--out', default=str(RESULTS))
+    ap.add_argument('--programs', default=str(PROGRAMS), help='directory for the final program of each attempt')
     ap.add_argument('--only', help='restrict to task:lang:seed (debugging)')
     args = ap.parse_args()
 
@@ -651,6 +754,7 @@ def main():
     for l in langs:
         if l not in LANGS:
             raise SystemExit('unknown language %r' % l)
+    PROGRAMS = Path(args.programs)
     tasks = task_list()
     if args.tasks:
         want = set(args.tasks.split(','))
@@ -663,7 +767,9 @@ def main():
     meta = dict(started=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), harness='lab/vibe/run.py',
                 model=args.model, cli=kind, effort=args.effort, rounds=args.rounds, seeds=seeds, languages=langs,
                 tasks=[t[0] for t in tasks], jobs=jobs, case_timeout=CASE_TIMEOUT,
-                mode='python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax python',
+                mode='python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax '
+                     'python; ail-strict = AIL with lab/vibe2/STRICT_SPEC.md; ail-new = lab/vibe2/'
+                     'NEW_SURFACE.md translated to AIL Python by lab/vibe2/translate.py',
                 seed_note='seed = independent repeated attempt; the CLI exposes no sampling seed')
     store = Store(Path(args.out), meta)
 
@@ -683,7 +789,7 @@ def main():
                 key = '%s:%s:%d' % (name, lang, seed)
                 if args.only and key != args.only:
                     continue
-                if (name, lang, seed) in store.rows:
+                if (name, lang, seed, args.model) in store.rows:
                     continue
                 combos.append((name, tdir, lang, seed))
 
@@ -765,8 +871,8 @@ def main():
     store.meta['stopped_early'] = bool(fatal) or stopped[0]
     if fatal:
         store.meta['fatal'] = fatal
-    store.meta['completed_attempts'] = done
-    store.meta['scheduled_attempts'] = len(combos)
+    store.meta['completed_attempts'] = len(store.rows)
+    store.meta['scheduled_attempts'] = store.prev_scheduled + len(combos)
     store.write()
     s = summarize(list(store.rows.values()))
     print(json.dumps(s, indent=1))
