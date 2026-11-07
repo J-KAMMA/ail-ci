@@ -1,3 +1,51 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: pyreach9 (census + design only)
+
+**What the change really does:** adds `lab/pyreach9/census.py` (compiles 134 programs with `--strict --json` and the default build), `classify.py` (reason bucketing over `census.jsonl`), `RESULTS.md`, `programs.txt`, and `docs/design/PYREACH_NEXT.md`; **no compiler/runtime file is touched** (`git diff work..HEAD --stat` = DEVLOG + 6 lab/design files). That matches the report's "no compiler change".
+
+**Independent checks**
+- `classify.py` output reproduces every table in `RESULTS.md`; `--dump` is byte-identical to `programs.txt`.
+- Re-ran `census_one` on `g11_002`, `g03_032`, `g06_008`, `g08_002`: path, `strict_incomplete` and blocker text match `census.jsonl`. Data is not fabricated.
+- Totals: 134 = 37 typed / 81 general / 16 refused; 41 incomplete of 97 — correct.
+- `tools/update_manifest.py --check` rc=0; tree clean except `.agent/pipeline.md`.
+- `par_check -j 2 test_ail_safetynet test_ail_files test_ail_corpus_findings3` → 3 modules, 0 failed (347 s).
+- Speed: no hot code changed, skipped. No `cmp.sh` probes: no emitted C changed.
+
+**Report claims:** (1) array=2/incomplete, deque+g03_032 incomplete, g01_008/g04_010/g16_006/g16_038 complete — **verified**; (2) `_ail_l1l` sole blocker of `berth_sim/ail-0` — **verified**; (3) g06_008 has no NamedTuple and its two blockers are the generated `_ail_trepr_s_i` tuple-repr helper (`_AilT_s_i` caller conflict) + `sset` — **verified** (the name is the blocker's `function` field); g01_022 extras — verified; (4) five vibe refusals, `rail_transfer/python-0` general — **verified**; (5) `scar_life` flags `[]`, only compare chain_relax/rail_transfer get `--exact-int` — **verified**; (6) classifier fallback fix + regenerated dump — **verified**; (7) HEAD has no `Co-Authored-By`, earlier commits carry Claude — **verified**. But the lane's own design still overstates move counts.
+
+### Defects
+1. `PYREACH_NEXT.md:212` step 2b "moves 1 (`rail_transfer`)". Census (`census.jsonl`): `compare/rail_transfer/main.py` has four reasons (`none-optional`, `tuple-unpack`, `str-number-concat`, `int64-literal`), and its int64 blocker is "`main()` shifts beyond int64", while `INF = 1 << 200` is a list element/assignment/`==` — which the doc itself (line 168) says must stay refused. `vibe/rail_transfer/python-0.py` has **no** int64 blocker (7 array-prelude blockers). Expected move: **0**.
+2. `PYREACH_NEXT.md:284` step 3c "moves 1 (`ledger_bin/python-0`)". That program's reasons are `dict-of-containers, parameter-readonly, str-number-concat, tuple-unpack, value-kind-lost`; it is not sole. Expected: **0**.
+3. `PYREACH_NEXT.md:348` step 4b "moves 2". `g16_030.py` also blocks on `unsupported-builtin` (`min()`, `next()`); only `g16_000` is sole. Expected: **1**.
+4. `PYREACH_NEXT.md:389-405` §5 move counts (json 5-6, statistics 3, itertools 4, collections 4-5). From the sole data those are *touched* programs, not moves: json **1** (`g21_022`), statistics **1** (`g03_032`), itertools **1** (`g14_022`, labelled `other`), collections **0**.
+5. Wrong census counts: `:363`/`RESULTS.md:166` say "`json` 8 programs" — 6 programs carry json blockers (`g13_024, g21_000, g21_004, g21_008, g21_012, g21_022`); 8 only results from matching the refusal boilerplate "… re, json" in `g15_024`/`g15_028` (traceback/logging). `RESULTS.md:166` "itertools/functools/re 1-2 each" — itertools blockers occur in **5** programs (`g06_026, g14_022, g16_032, g18_014, g18_026`), as the design's own "4" contradicts.
+6. Minor, `classify.py:33` generated-prelude regex misses `_AilEnum` (only `_AilIntEnum` is listed), so 6 prelude dunders in `g25_000`/`g25_022` are labelled `class-dunders`. It does not change the ranking, but the per-reason blocker counts are wrong.
+
+### Pre-existing
+None identified (no compiler change; nothing to diff against base).
+
+### Unverified
+Full census re-run (~31 min) not repeated; I verified 4 records by recompilation and the classifier end-to-end. Speed not applicable.
+
+VERDICT: FIX
+1. `docs/design/PYREACH_NEXT.md:212` — step 2b claims 1 move (`compare/rail_transfer/main.py`); expected 0. Evidence: `classify.program_categories` on that record returns `{int64-literal, none-optional, tuple-unpack, str-number-concat}`; the int64 blocker is "`main() shifts beyond int64`" and `INF = 1 << 200` is used as `[INF] * n`, `best = INF` and `== INF`, which line 168 says stays refused.
+2. `PYREACH_NEXT.md:284` — step 3c claims 1 move (`ledger_bin/python-0`); expected 0. Evidence: its categories are `{dict-of-containers, parameter-readonly, str-number-concat, tuple-unpack, value-kind-lost}`.
+3. `PYREACH_NEXT.md:348` — step 4b claims 2 moves; expected 1. Evidence: `g16_030.py` categories are `{generator-yield, unsupported-builtin}`.
+4. `PYREACH_NEXT.md:389-405` — §5 "moves" (json 5-6, statistics 3, itertools 4, collections 4-5) are touched counts; sole moves are json 1 (`g21_022`), statistics 1 (`g03_032`), itertools 1 (`g14_022`), collections 0.
+5. `PYREACH_NEXT.md:363` / `RESULTS.md:166` — "json 8 programs" should be 6 (`g13_024, g21_000, g21_004, g21_008, g21_012, g21_022`); the 8 only matches the boilerplate module list in `g15_024`/`g15_028`. `RESULTS.md:166` "itertools … 1-2 each" should be 5 programs (`g06_026, g14_022, g16_032, g18_014, g18_026`).
+6. `lab/pyreach9/classify.py:33` — add `_AilEnum` (and its helper names) to the generated-prelude pattern; 6 `_AilEnum` dunder blockers in `g25_000`/`g25_022` are currently counted as `class-dunders`.
+[commandcode stop=end_turn turns=34 out_tokens=36159]
+
+
+--- ORIGINAL TASK ---
 Lane: pyreachdesign
 
 # pyreach9: why plain `.py` still falls to the general path after pyreachs1-8, and the next steps (census + design only)
