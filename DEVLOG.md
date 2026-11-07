@@ -1,3 +1,32 @@
+## 2026-11-07 -- err2 suite fix 2: the manifest repair keeps a compiler-imported module in sdk_files (job-err2-11080418)
+
+`test_ail_packaging` and `test_ail_sdk_environment` failed on the integration branch although they
+pass on this tree: the `manifest.d` line that pins `ail_agent_errors.py` with the `s` flag had been
+lost on the merged side, so `ail_manifest.load()` left the module out of `sdk_files`, `export_sdk()`
+and the wheel omitted it, and every fresh-SDK run died at `ail_chatgpt.py`'s import with
+`ModuleNotFoundError: No module named 'ail_agent_errors'` (reproduced on a scratch merge of integ plus
+this change: `test_ail_sdk_environment` failed in 0.7 s with that traceback). `tools/update_manifest.py`
+could not heal it, because its "must be an SDK source" rule knew only `python/pkg-v12/` and `stdlib/`.
+
+`tools/update_manifest.py` now scans the top-level module names `ail_chatgpt.py` imports (`import X` /
+`from X import`) and treats a tracked `AIL_CURRENT/X.py` as an SDK source: an unpinned one is pinned
+with `s`, and a pin that lost its `s` flag gets it back on the next run, so the integration repair step
+heals the loss whichever side a shard conflict kept. On a tree without `ail_chatgpt.py` (the throwaway
+repositories the manifest tests build) the scan is empty. `test_ail_registry` gains
+`test_a_regenerated_module_imported_by_the_compiler_keeps_the_sdk_flag`: it adds an imported module,
+then removes its pin line and demotes the flag to `-`; both `update_manifest.py` runs restore `s` and
+the name in `sdk_files`.
+
+Probes: the manifest before/after (line removed -> `pinned ail_agent_errors.py`; flag `-` ->
+`selected ail_agent_errors.py`), `update_manifest.py --check` rc 0 here, and on the scratch merge
+`test_ail_sdk_environment` went from 1 failure (0.7 s, `ModuleNotFoundError`) to passing, with
+`test_ail_packaging` 22/22 OK in the same run. No compiler, runtime or generated-C change:
+`bash ~/tools/cmp.sh` p1_plain / p2_strnum (AIL0103 shape) / p3_fraction (AIL0111 shape) match CPython
+stdout and exit status on both the general and default builds. Tests on the final commit, `-j 2` via
+`tools/par_check.py`: `test_ail_registry`, `test_ail_manifest_compiler`, `test_ail_packaging`,
+`test_ail_sdk_environment`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_agent_errors` -- 8/8 modules, 0 failed (510 s).
+
 ## 2026-11-07 -- err2 fix-up 4: a published edit replaces the whole span of the node it rewrites (job-err2-11072315)
 
 Review 3 found that `AIL0101`'s edit was keyed to `statement.lineno` while the columns belonged to
