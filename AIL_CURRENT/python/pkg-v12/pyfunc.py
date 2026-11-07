@@ -22299,90 +22299,270 @@ def _debug_site(node, ind):
     return '#line %d "%s"\n%s#line %d "%s"\n' % (line, name, site, line, name)
 
 
-def _emptied_name(stmt):
-    if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) \
-            and isinstance(stmt.value, ast.List) and not stmt.value.elts:
-        return stmt.target.id
-    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
-            and isinstance(stmt.targets[0], ast.Name) and isinstance(stmt.value, ast.List) \
-            and not stmt.value.elts:
-        return stmt.targets[0].id
-    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) \
-            and isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr == 'clear' \
-            and not stmt.value.args and not stmt.value.keywords \
-            and isinstance(stmt.value.func.value, ast.Name):
-        return stmt.value.func.value.id
-    return None
+def _append_call(node, name):
+    """`name.append(value)` as one call, with exactly one plain positional value."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'append' and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == name and len(node.args) == 1 and not node.keywords
+            and not isinstance(node.args[0], ast.Starred))
 
 
-_APPEND_LOOP_SKIPS = tuple(node for node in (
-    ast.Break, ast.Continue, ast.Return, ast.Raise, ast.Yield, ast.YieldFrom,
-    ast.If, ast.While, ast.For, ast.AsyncFor, ast.Try, getattr(ast, 'TryStar', None),
-    getattr(ast, 'Match', None), ast.With, ast.AsyncWith, ast.Assert,
-) if node is not None)
+def _append_mentions(node, name):
+    return any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node))
 
 
-def _append_loop_reserve(previous, node, ctx, ind):
-    if not previous or not isinstance(node, ast.For):
+def _append_has_call(node, name):
+    return any(_append_call(n, name) for n in ast.walk(node))
+
+
+def _append_block_count(body, name):
+    """(largest number of appends on one path through `body`, safe).
+
+    `safe` is False when an append is inside an inner loop (unbounded per outer iteration) or is
+    not a whole expression statement (its position in an expression is not one push).
+    """
+    total = 0
+    for stmt in body:
+        count, ok = _append_stmt_count(stmt, name)
+        if not ok:
+            return 0, False
+        total += count
+    return total, True
+
+
+def _append_stmt_count(stmt, name):
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        # A closure that mentions the list captures it; its appends are not the outer loop's.
+        return 0, not _append_mentions(stmt, name)
+    if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+        return 0, not _append_has_call(stmt, name)
+    if isinstance(stmt, ast.If):
+        if _append_has_call(stmt.test, name):
+            return 0, False
+        left, ok1 = _append_block_count(stmt.body, name)
+        right, ok2 = _append_block_count(stmt.orelse, name)
+        return max(left, right), ok1 and ok2
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        if any(_append_has_call(item.context_expr, name) for item in stmt.items):
+            return 0, False
+        return _append_block_count(stmt.body, name)
+    if isinstance(stmt, ast.Try) or type(stmt).__name__ == 'TryStar':
+        body_count, ok = _append_block_count(stmt.body, name)
+        if not ok:
+            return 0, False
+        final_count, ok = _append_block_count(stmt.finalbody, name)
+        if not ok:
+            return 0, False
+        handler_counts = []
+        for handler in stmt.handlers:
+            if handler.type is not None and _append_has_call(handler.type, name):
+                return 0, False
+            count, ok = _append_block_count(handler.body, name)
+            if not ok:
+                return 0, False
+            handler_counts.append(count)
+        # The body and one handler are exclusive; `finally` always runs after either.
+        base = max([body_count] + handler_counts)
+        return base + final_count, True
+    if type(stmt).__name__ == 'Match':
+        if _append_has_call(stmt.subject, name):
+            return 0, False
+        counts = []
+        for case in stmt.cases:
+            if case.guard is not None and _append_has_call(case.guard, name):
+                return 0, False
+            count, ok = _append_block_count(case.body, name)
+            if not ok:
+                return 0, False
+            counts.append(count)
+        return (max(counts) if counts else 0), True
+    if isinstance(stmt, ast.Expr):
+        if _append_call(stmt.value, name):
+            return 1, True
+        return 0, not _append_has_call(stmt.value, name)
+    return 0, not _append_has_call(stmt, name)
+
+
+def _append_reads_ok(node, name, ctx, ancestors):
+    """Every read of `name` in the loop body is its own append receiver, a `len(name)`, or part
+    of one of its append arguments. Any other read (an index, another iteration, a call) keeps
+    the reserve away, as does any store to the name."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        return not _append_mentions(node, name)
+    if isinstance(node, ast.Name) and node.id == name:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            return False
+        if ancestors:
+            parent = ancestors[-1]
+            if (isinstance(parent, ast.Attribute) and parent.attr == 'append'
+                    and parent.value is node and len(ancestors) >= 2):
+                call = ancestors[-2]
+                if isinstance(call, ast.Call) and call.func is parent:
+                    return True
+            if (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
+                    and parent.func.id == 'len' and parent.func.id not in ctx.funcs
+                    and parent.func.id not in ctx.classes and len(parent.args) == 1
+                    and parent.args[0] is node and not parent.keywords):
+                return True
+        for ancestor in reversed(ancestors):
+            if _append_call(ancestor, name):
+                return True
+        return False
+    return all(_append_reads_ok(child, name, ctx, ancestors + (node,))
+               for child in ast.iter_child_nodes(node))
+
+
+def _append_body_reads_ok(body, name, ctx):
+    return all(_append_reads_ok(stmt, name, ctx, ()) for stmt in body)
+
+
+_APPEND_SPECIAL_SETS = ('blist', 'tstride', 'rowof', 'nlist', 'srowtypes',
+                        'handles', 'rowparam', 'gridparam', 'gridrow')
+
+
+def _append_plain_local(name, ctx):
+    return (ctx.types.get(name) in (LIST, FLIST, SLIST) and name in ctx.locals
+            and name not in ctx.kind
+            and not any(name in getattr(ctx, attr, ()) for attr in _APPEND_SPECIAL_SETS))
+
+
+def _append_candidate_ok(name, node, ctx):
+    if any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store)
+           for n in ast.walk(node.target)):
+        return False
+    count, ok = _append_block_count(node.body, name)
+    if not ok or count != 1:
+        return False
+    return _append_body_reads_ok(node.body, name, ctx)
+
+
+def _append_kind(name, ctx):
+    try:
+        return ctx.type_of(name)
+    except Exception:
+        return None
+
+
+def _append_bound(e, ctx):
+    """(C expression, exact value) for a pure int bound; a side-effecting bound gives None."""
+    if e is None:
+        return '0', 0
+    try:
+        folded = fold_int_constant(e)
+    except Unsupported:
+        folded = None
+    if folded is not None:
+        return str(folded), folded
+    if isinstance(e, ast.Name):
+        if (e.id not in ctx.funcs and e.id not in ctx.classes
+                and _append_kind(e.id, ctx) == INT and not _is_handle_producing(e, ctx)):
+            return ctx.cname(e.id), None
+        return None, None
+    if (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id == 'len'
+            and e.func.id not in ctx.funcs and e.func.id not in ctx.classes
+            and len(e.args) == 1 and not e.keywords
+            and not isinstance(e.args[0], ast.Starred)):
+        arg = e.args[0]
+        if isinstance(arg, ast.Name):
+            kind = _append_kind(arg.id, ctx)
+            if kind in (LIST, FLIST, SLIST):
+                return '%s.n' % ctx.cname(arg.id), None
+            if kind == 'array':
+                return ctx.alen(arg.id), None
+        if (isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name)
+                and _append_kind(arg.value.id, ctx) is not None):
+            try:
+                kind = _field_kind(arg, ctx)
+            except Unsupported:
+                kind = None
+            if kind in (LIST, FLIST, SLIST):
+                return '(%s)->f_%s.n' % (ctx.cname(arg.value.id), arg.attr), None
+    return None, None
+
+
+def _append_trip(node, ctx):
+    """The C `extra` for a loop's known trip count, capped like a comprehension; None when the
+    iterable is not a pure `range()` or a plain local list."""
+    it = node.iter
+    limit = _LIST_RESERVE_LIMIT
+    is_range = (isinstance(it, ast.Call) and isinstance(it.func, ast.Name)
+                and it.func.id == 'range' and it.func.id not in ctx.funcs
+                and it.func.id not in ctx.classes and not it.keywords
+                and 1 <= len(it.args) <= 3)
+    if is_range:
+        if len(it.args) == 3:
+            step_value = _int_const(it.args[2])
+            if step_value != 1:
+                return None
+        lo_e = it.args[0] if len(it.args) > 1 else None
+        hi_e = it.args[-1] if len(it.args) > 1 else it.args[0]
+        lo, lo_value = _append_bound(lo_e, ctx)
+        hi, hi_value = _append_bound(hi_e, ctx)
+        if lo is None or hi is None:
+            return None
+        if lo_value is not None and hi_value is not None:
+            trip = hi_value - lo_value
+            return str(min(trip, limit)) if trip > 0 else None
+        # Unsigned subtraction gives the exact `hi - lo` whenever `hi > lo`, without signed
+        # overflow when the two bounds are far apart, and the cap keeps the result small.
+        trip = ('((%s) > (%s) ? (uint64_t)(%s) - (uint64_t)(%s) : (uint64_t)0)'
+                % (hi, lo, hi, lo))
+        return '(%s > %dULL ? %d : (int64_t)(%s))' % (trip, limit, limit, trip)
+    if not isinstance(it, ast.Name):
+        return None
+    kind = _append_kind(it.id, ctx)
+    if kind in (LIST, FLIST, SLIST):
+        length = '%s.n' % ctx.cname(it.id)
+    elif kind == 'array':
+        length = ctx.alen(it.id)
+    else:
+        return None
+    if any(it.id in getattr(ctx, attr, ()) for attr in _APPEND_SPECIAL_SETS):
+        return None
+    trip = '(uint64_t)(%s)' % length
+    return '(%s > %dULL ? %d : (int64_t)(%s))' % (trip, limit, limit, trip)
+
+
+def _append_loop_reserve(node, ctx, ind):
+    """Reserve the known trip count before a `range()` or list `for` that appends to a local list
+    at most once on every path. Reserving removes glibc's realloc-doubling holes, which stay
+    resident; it changes capacity only, never output."""
+    if not isinstance(node, ast.For) or node.orelse:
         return ''
-    names = [name for name in (_emptied_name(stmt) for stmt in previous) if name is not None]
-    names = [name for name in names if ctx.types.get(name) in (LIST, FLIST, SLIST)
-             and name in ctx.locals and name not in ctx.kind]
+    names = []
+    for stmt in node.body:
+        for sub in ast.walk(stmt):
+            if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == 'append' and isinstance(sub.func.value, ast.Name)):
+                name = sub.func.value.id
+                if name not in names and _append_plain_local(name, ctx):
+                    names.append(name)
     if not names:
         return ''
-    it = node.iter
-    if not (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range'
-            and it.func.id not in ctx.funcs and it.func.id not in ctx.classes and not it.keywords
-            and 1 <= len(it.args) <= 3):
+    is_range = (isinstance(node.iter, ast.Call) and isinstance(node.iter.func, ast.Name)
+                and node.iter.func.id == 'range')
+    kept = []
+    for name in names:
+        if not _append_candidate_ok(name, node, ctx):
+            continue
+        if not is_range and _append_mentions(node.iter, name):
+            continue
+        kept.append(name)
+    if not kept:
         return ''
-    def bound(e):
-        if isinstance(e, ast.Constant) and type(e.value) is int:
-            return str(e.value)
-        if isinstance(e, ast.Name) and ctx.types.get(e.id) == INT:
-            return ctx.cname(e.id)
-        return None
-    if len(it.args) == 3:
-        step = bound(it.args[2])
-        if step != '1':
-            return ''
-    lo = bound(it.args[0]) if len(it.args) > 1 else '0'
-    hi = bound(it.args[-1] if len(it.args) > 1 else it.args[0])
-    if lo is None or hi is None:
+    sized = _append_trip(node, ctx)
+    if sized is None:
         return ''
-    parents = {}
-    for stmt in node.body:
-        for child in ast.walk(stmt):
-            for sub in ast.iter_child_nodes(child):
-                parents[sub] = child
     padded = list(getattr(ctx, 'packed_slist', ()))
-    packed = [name for name in names if name in padded]
-    plain = [name for name in names if name not in padded]
-    trip = hi if len(it.args) == 1 else '(%s) - (%s)' % (hi, lo)
-    limit = _LIST_RESERVE_LIMIT
-    if trip.isdigit() and int(trip) <= limit:
-        sized = trip
-    else:
-        sized = '(%s) < %d ? (%s) : %d' % (trip, limit, trip, limit)
     out = []
-    if packed:
-        # A packed local only has `.append()` and `len()` uses, so control flow in the loop
-        # (an `if` around an append, a `continue`) can only make the trip count an upper bound,
-        # never make an append unsound; reserving the full range is still the right shape.
-        appended, hints, ok = set(), {}, True
-        for stmt in node.body:
-            for n in ast.walk(stmt):
-                if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    ok = False
-                    break
-                if not (isinstance(n, ast.Name) and n.id in packed):
-                    continue
-                attr = parents.get(n)
-                call = parents.get(attr) if attr is not None else None
-                if (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
-                        and isinstance(call, ast.Call) and call.func is attr
-                        and isinstance(parents.get(call), ast.Expr)):
-                    appended.add(n.id)
-                    arg = call.args[0] if len(call.args) == 1 else None
+    for name in kept:
+        if name in padded:
+            hints = []
+            for stmt in node.body:
+                for sub in ast.walk(stmt):
+                    if not _append_call(sub, name):
+                        continue
+                    arg = sub.args[0]
                     hint = '0'
                     if (isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Attribute)
                             and isinstance(arg.value.value, ast.Name)
@@ -22392,55 +22572,14 @@ def _append_loop_reserve(previous, node, ctx, ind):
                                 hint = '(%s)->f_%s.tn' % (ctx.cname(arg.value.value.id), arg.value.attr)
                         except Unsupported:
                             hint = '0'
-                    hints.setdefault(n.id, []).append(hint)
-                    continue
-                if (isinstance(parents.get(n), ast.Call)
-                        and len(parents[n].args) == 1 and parents[n].args[0] is n
-                        and isinstance(parents[n].func, ast.Name) and parents[n].func.id == 'len'
-                        and parents[n].func.id not in ctx.funcs and parents[n].func.id not in ctx.classes):
-                    continue
-                ok = False
-                break
-            if not ok:
-                break
-        if ok:
-            for name in packed:
-                if name not in appended:
-                    continue
-                found = hints.get(name, ['0'])
-                text_hint = found[0] if all(hint == found[0] for hint in found) else '0'
-                out.append('%sail_pslist_reserve(&%s, %s, %s);\n'
-                           % ('    ' * ind, ctx.cname(name), sized, text_hint))
-    if plain:
-        appended = set()
-        ok = True
-        for stmt in node.body:
-            for n in ast.walk(stmt):
-                if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    ok = False
-                    break
-                if isinstance(n, _APPEND_LOOP_SKIPS):
-                    ok = False
-                    break
-                if not (isinstance(n, ast.Name) and n.id in plain):
-                    continue
-                attr = parents.get(n)
-                call = parents.get(attr) if attr is not None else None
-                if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
-                        and isinstance(call, ast.Call) and call.func is attr
-                        and isinstance(parents.get(call), ast.Expr)):
-                    ok = False
-                    break
-                appended.add(n.id)
-            if not ok:
-                break
-        if ok:
-            for name in plain:
-                if name in appended:
-                    out.append('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
-                                                                 ctx.cname(name), sized))
+                    hints.append(hint)
+            text_hint = hints[0] if hints and all(hint == hints[0] for hint in hints) else '0'
+            out.append('%sail_pslist_reserve(&%s, %s, %s);\n'
+                       % ('    ' * ind, ctx.cname(name), sized, text_hint))
+        else:
+            out.append('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
+                                                          ctx.cname(name), sized))
     return ''.join(out)
-
 
 def _stmts(body, ctx, ind):
     emitted, index = [], 0
@@ -22454,11 +22593,7 @@ def _stmts(body, ctx, ind):
         consumed = 3 if fused is not None else 1
         if fused is None:
             fused = _emit_string_repeat_loop(body[index], ctx, ind)
-        previous, j = [], index - 1
-        while j >= 0 and _emptied_name(body[j]) is not None:
-            previous.append(body[j])
-            j -= 1
-        reserve = (_append_loop_reserve(previous, body[index], ctx, ind)
+        reserve = (_append_loop_reserve(body[index], ctx, ind)
                    if fused is None else '')
         try:
             first_temp = ctx.tmp
