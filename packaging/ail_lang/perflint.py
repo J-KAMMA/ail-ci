@@ -474,12 +474,16 @@ def _loop_target_names(node):
     return names
 
 
-def _loop_touches(loop, name, ignore=None):
-    """Whether this loop rebinds or mutates `name` in its own iteration (nested scopes excluded)."""
+def _loop_touches(loop, name, ignore=None, accumulate=None):
+    """Whether this loop rebinds or mutates `name` in its own iteration (nested scopes excluded).
+
+    `ignore` skips the hit being checked.  `accumulate(node, name)` marks bindings that are the
+    accumulation pattern itself (e.g. `s += x`): those grow the value, they do not reset it.
+    """
     if name in _loop_target_names(loop.node):
         return True
     for node in _walk_no_scopes(_loop_parts(loop)):
-        if node is ignore:
+        if node is ignore or (accumulate is not None and accumulate(node, name)):
             continue
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
             targets = getattr(node, "targets", None) or [getattr(node, "target", None)]
@@ -522,6 +526,41 @@ def _list_plus(node, name):
     return (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
             and isinstance(node.left, ast.Name) and node.left.id == name
             and isinstance(node.right, ast.List))
+
+
+def _is_p3_accumulation(node, name):
+    return (isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Add)
+            and isinstance(node.target, ast.Name) and node.target.id == name)
+
+
+def _is_p6_accumulation(node, name):
+    if not isinstance(node, ast.Assign):
+        return False
+    if not any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+        return False
+    return _list_plus(node.value, name) or _starred_list(node.value, name)
+
+
+def _keyword_values(call):
+    """The `key` and `reverse` expressions of a sort call; these must not change per iteration."""
+    return [keyword.value for keyword in call.keywords if keyword.arg in ("key", "reverse")]
+
+
+def _loop_dependent(loops, nodes):
+    """Whether any expression reads a name that changes between iterations."""
+    names = set()
+    for node in nodes:
+        names |= {child.id for child in ast.walk(node)
+                  if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)}
+    if not names:
+        return False
+    for loop in loops:
+        if names & _loop_target_names(loop.node):
+            return True
+        for name in names:
+            if _loop_touches(loop, name):
+                return True
+    return False
 
 
 class Linter(object):
@@ -586,7 +625,7 @@ class Linter(object):
                     self._visit(condition, inner)
             return
         if loops:
-            self._detect(node, loops[-1])
+            self._detect(node, loops)
         for child in ast.iter_child_nodes(node):
             self._visit(child, loops)
 
@@ -601,7 +640,8 @@ class Linter(object):
             "loop_line": loop_line,
         })
 
-    def _detect(self, node, loop):
+    def _detect(self, node, loops):
+        loop = loops[-1]
         scope = self.scope
         loop_line = loop.node.lineno
         if isinstance(node, ast.Compare):
@@ -623,12 +663,14 @@ class Linter(object):
                         self._add("P2", node, MESSAGES["P2-pop"], loop_line)
                     elif func.attr == "insert" and len(node.args) >= 2 and _literal_zero(node.args[0]):
                         self._add("P2", node, MESSAGES["P2-insert"], loop_line)
-                    elif func.attr == "sort" and not _loop_touches(loop, name, ignore=node):
+                    elif func.attr == "sort" and not _loop_touches(loop, name, ignore=node) \
+                            and not _loop_dependent(loops, _keyword_values(node)):
                         self._add("P4", node, MESSAGES["P4-sort"] % name, loop_line)
             elif isinstance(func, ast.Name) and func.id in SCALAR_LIST_BUILTINS and node.args:
                 argument = node.args[0]
                 if isinstance(argument, ast.Name) and scope.kind(argument.id) == "list" \
-                        and not _loop_touches(loop, argument.id):
+                        and not _loop_touches(loop, argument.id) \
+                        and not _loop_dependent(loops, _keyword_values(node)):
                     self._add("P4", node, MESSAGES["P4-call"] % (func.id, argument.id), loop_line)
         elif isinstance(node, ast.Delete):
             for target in node.targets:
@@ -647,11 +689,17 @@ class Linter(object):
                 else:
                     target_name, is_str = "", False
                 if is_str:
-                    self._add("P3", node, MESSAGES["P3"] % target_name, loop_line)
+                    suppressed = (isinstance(target, ast.Name)
+                                  and _loop_touches(loop, target.id, ignore=node,
+                                                    accumulate=_is_p3_accumulation))
+                    if not suppressed:
+                        self._add("P3", node, MESSAGES["P3"] % target_name, loop_line)
         elif isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    if _list_plus(node.value, target.id) or _starred_list(node.value, target.id):
+                    if (_list_plus(node.value, target.id) or _starred_list(node.value, target.id)) \
+                            and not _loop_touches(loop, target.id, ignore=node,
+                                                  accumulate=_is_p6_accumulation):
                         self._add("P6", node, MESSAGES["P6"] % target.id, loop_line)
 
     def _maybe_pairwise(self, outer, inner, body):

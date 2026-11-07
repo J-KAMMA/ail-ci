@@ -30,17 +30,14 @@ and all-lab/corpus sets are shown too so a hit outside the required 50 is not hi
 
 | files | hits | P1 | P2 | P3 | P4 | P5 | P6 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 50 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
-
-- `corpus/gdev/g00_006.py:14:13` P3: string concatenation on `count_digits` inside a loop.
+| 50 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ### corpus gdev (all 510)
 
 | files | hits | P1 | P2 | P3 | P4 | P5 | P6 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 510 | 2 | 1 | 0 | 1 | 0 | 0 | 0 |
+| 510 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
 
-- `corpus/gdev/g00_006.py:14:13` P3 (the required-50 hit above).
 - `corpus/gdev/g15_022.py:84:16` P1: `items.index(item)` inside `enumerate(items)`.
 
 ### lab/corpus (all 219 programs)
@@ -57,15 +54,27 @@ and all-lab/corpus sets are shown too so a hit outside the required 50 is not hi
 
 ### False positives, checked by hand
 
-The final census has **no false positives** in the required sets. Both hits were read by hand:
+The final census has **no false positives** in the required sets; in fact no hit remains there at all.
+The only remaining hit in any set was read by hand:
 
-- `g00_006.py` P3: `count_digits += ch` accumulates a run-length count one digit at a time. True
-  positive; the applied fix is the same pattern as `cases/p3_*` below.
 - `g15_022.py` P1: `items.index(item) == i` inside `enumerate(items)` scans the list once per element,
   so it is O(n^2) by pattern. True positive, but it is a constant-size invariant check (four items),
   so no fix was applied; the scalable P1 case below measures the same fix.
 
-The hand check did remove four false-positive shapes before this final census:
+Review probes found and this version now suppresses three false-positive shapes:
+
+- P3 flagged `s = ""` / `s += str(i)` inside the same loop (`g00_006.py:14`, a run-length counter reset
+  every iteration) and `for s in [...]: s += "!"`. P3 now stays silent when the string is rebound by a
+  non-accumulating assignment or is the loop target. `g00_006` was the former required-50 "hit", so that
+  set is now empty.
+- P6 flagged `L = []` / `L = L + [i]` in one loop and `for values in [...]: values = values + [3]`.
+  P6 uses the same suppression, while sibling `L = L + [x]` / `L = [*L, x]` assignments still count as
+  growth, not a reset.
+- P4 hoisted `sorted(rows, key=lambda row: row[k])`, `.sort(key=...)`, `min`/`max`/`sum` when the key or
+  reverse value reads the loop variable `k` (or any name that changes per iteration). P4 now inspects
+  those keywords and stays silent; a constant key is still reported.
+
+The earlier hand check also removed these false-positive shapes before the first census:
 
 - P5 first flagged dynamic-programming comparisons (`a[i - 1] == b[j - 1]` in `lab/corpus/t255`,
   `t306`, `t308` and `corpus/gdev/g09_002`, `g10_028`). It now ignores subscript indices and does not

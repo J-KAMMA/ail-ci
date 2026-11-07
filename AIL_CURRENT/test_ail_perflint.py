@@ -213,6 +213,62 @@ def main() -> None:
 main()
 '''
 
+P3_RESET = '''\
+def main() -> None:
+    for i in range(5):
+        s = ""
+        s += str(i)
+        print(s)
+    for s in ["a", "b"]:
+        s += "!"
+        print(s)
+
+
+main()
+'''
+
+P4_KEYVAR = '''\
+def main() -> None:
+    rows = [[3, 1], [2, 4]]
+    for k in range(2):
+        print(sorted(rows, key=lambda row: row[k]))
+        print(min(rows, key=lambda row: row[k]))
+        rows.sort(key=lambda row: row[k])
+    flags = [True, False]
+    for flag in flags:
+        print(sorted(rows, key=lambda row: row[0], reverse=flag))
+    print(rows)
+
+
+main()
+'''
+
+P4_CONSTKEY = '''\
+def main() -> None:
+    rows = [[3, 1], [2, 4]]
+    for _ in range(2):
+        print(sorted(rows, key=lambda row: row[0]))
+        print(min(rows, key=lambda row: row[0]))
+    print(rows)
+
+
+main()
+'''
+
+P6_RESET = '''\
+def main() -> None:
+    for i in range(5):
+        values: list[int] = []
+        values = values + [i]
+        print(values)
+    for values in [[1], [2]]:
+        values = values + [3]
+        print(values)
+
+
+main()
+'''
+
 NO_HITS = '''\
 def main() -> None:
     total = 0
@@ -251,11 +307,20 @@ class RuleTests(Base):
     def test_p3_negative_outside_a_loop_and_numeric_addition(self):
         self.assertEqual(self.rules(P3_NEGATIVE), [])
 
+    def test_p3_not_reported_when_the_string_is_reset_or_is_the_loop_target(self):
+        self.assertEqual(self.rules(P3_RESET), [])
+
     def test_p4_sort_and_reductions_inside_a_loop(self):
         self.assertEqual(self.rules(P4), ["P4", "P4", "P4", "P4", "P4"])
 
     def test_p4_negative_outside_a_loop_on_a_set_and_on_a_loop_variant_list(self):
         self.assertEqual(self.rules(P4_NEGATIVE), [])
+
+    def test_p4_not_reported_when_the_key_or_reverse_depends_on_the_loop(self):
+        self.assertEqual(self.rules(P4_KEYVAR), [])
+
+    def test_p4_still_reported_for_a_constant_key(self):
+        self.assertEqual(self.rules(P4_CONSTKEY), ["P4", "P4"])
 
     def test_p5_nested_loop_pairing_by_key(self):
         self.assertEqual(self.rules(P5), ["P5"])
@@ -268,6 +333,9 @@ class RuleTests(Base):
 
     def test_p6_negative_outside_a_loop_and_a_returned_list(self):
         self.assertEqual(self.rules(P6_NEGATIVE), [])
+
+    def test_p6_not_reported_when_the_list_is_reset_or_is_the_loop_target(self):
+        self.assertEqual(self.rules(P6_RESET), [])
 
 
 class CliTests(Base):

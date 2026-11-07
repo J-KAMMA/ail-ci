@@ -140,8 +140,11 @@ ail check --perf [--json] [--strict] prog.py
 "Loop" means a `for`, `while` or comprehension body; a nested function, lambda or class body is a new
 scope and is not counted as running on each iteration. The rules are deliberately local: a name is
 treated as a list or a string only when that is obvious from its annotations, literals, builtins or
-list methods. A membership test on a `set` or dict, a call outside a loop, and a list that is rebound
-or mutated in the loop (for P1 and P4) are not reported. P5 only looks at loops over items (not two
+list methods. A membership test on a `set` or dict, a call outside a loop, and a name that is rebound
+or mutated in the loop (for P1, P3, P4 and P6) are not reported; P3 and P6 also stay silent when the
+name is the loop target, so a string or list that is recreated each iteration is not called O(n^2).
+P4 stays silent when the `key` or `reverse` value reads a loop variable, because hoisting would change
+the result. P5 only looks at loops over items (not two
 `range`/`enumerate`/`zip` index loops) and ignores subscript indices, so a dynamic-programming table
 is not mistaken for a pairwise search.
 

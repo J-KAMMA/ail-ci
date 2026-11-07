@@ -1,3 +1,18 @@
+## 2026-11-07 -- algo1 review fix: P3/P6 resets, P4 loop-dependent sort key
+
+Review probes found three false positives in `perflint.py`, fixed here. P3 and P6 now suppress a hit
+when the same name is rebound by a non-accumulating assignment in the loop or is the loop target, so
+`for i: s = ""; s += str(i)` and `for values in [...]: values = values + [3]` are silent while sibling
+`+=` / `L = L + [x]` statements still count as growth. This removes the former required-50 hit
+`corpus/gdev/g00_006.py:14` (a run-length counter reset each iteration); the required sets now have no
+hits. P4 inspects the `key`/`reverse` keywords of `sorted`/`min`/`max`/`sum`/`.sort()` and stays silent
+when they read a loop variable or a name that changes per iteration, so hoisting cannot change output;
+a constant key is still reported. Regression tests cover all three shapes, and `docs/CLI.md` and
+`lab/algo/RESULTS.md` (census 0/0/1/0/0) match the new behaviour. Required modules
+`test_ail_perflint`, `test_ail_cli_args`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `lab/algo/measure.py` still prints identical before/after output and
+loses every hit.
+
 ## 2026-11-07 -- algo1: `ail check --perf`, static slow-algorithm advice (job-algo1-11071446)
 
 New `packaging/ail_lang/perflint.py` and the `ail check --perf [--json] [--strict] prog.py` entry in
