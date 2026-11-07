@@ -1,3 +1,24 @@
+## 2026-11-07 -- emit1: where the typed C's extra instructions go, and a lean-emission design (job-emit1-11071326)
+
+Measurement and design only; no compiler change. `lab/emit/analyze.py` rebuilds both sides of six
+`lab/compare` programs (`ticket_audit`, `echo_pack`, `tree_fold`, `ledger_bin`, `tally_lang`,
+`berth_sim`) and reads Ir per emitted C line from valgrind callgrind (3.22, Ir only), checking
+stdout byte-identical. `lab/emit/classify.py` sub-classifies the `other` class by cause;
+`lab/emit/bounds.py` and `lab/emit/patches/*.diff` hand-edit a throwaway copy of the generated C,
+rebuild it with the same flags and measure the real saving.
+
+Headline: `temporaries/one-statement` is 30.7% of the emitted lines' Ir, container/dict/string
+helper bodies another 31%, and the checks (bounds + overflow + refcount + copies) 11%. Measured
+bounds, largest first: specialised int-dict probe 1.93e9 (`echo_pack`), the `ail_blist_meta`
+invariant test 1.37e9 (`ticket_audit`, a safety check reported but not queueable as a removal),
+recursion-depth guard 1.18e9 (`tally_lang`), overflow-checked arithmetic 1.01e9 (`ledger_bin` +
+`ticket_audit`), list/sequence helpers 1.00e9, ASCII scan 0.49e9, one-loop shape rewrite 0.18e9;
+`always_inline` on the append helper saves 4.7M (negative). `docs/design/EMIT_LEAN.md` ranks these
+and splits the three queueable ones (dict probe, recursion guard at the recursive edge, overflow
+checks only where provable) into eight <=2h steps with files, tests and ready-to-queue task text.
+Reproduce with `python3 lab/emit/analyze.py && python3 lab/emit/classify.py && python3
+lab/emit/bounds.py` (about 12 minutes of callgrind).
+
 ## 2026-11-06 -- rbpyreachs2_rr1: a select passed straight to a call argument (job-rbpyreachs2_rr1)
 
 Review fix. `total(heapq.nsmallest(2, ys))` -- and the same through a `list[str]` parameter or a

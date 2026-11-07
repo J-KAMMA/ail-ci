@@ -1,0 +1,20 @@
+--- a/program.c
++++ b/program.c
+@@ -5324,7 +5324,7 @@
+                         int64_t ir80 = 0;
+                         if (ir79) {
+                             int64_t ir81 = ck_add(ir52, ir78);
+-                            int64_t ir82 = ail_bytes_get(v_d, ir81);
++                            int64_t ir82 = ((int64_t)(v_d).p[ir81]);
+                             int64_t ir83 = ((ir20) + (ir78));
+                             int64_t ir84 = ((int64_t)(v_d).p[ir83]);
+                             int64_t ir85 = (ir82 == ir84);
+@@ -5352,7 +5352,7 @@
+                     ir89 = ir51;
+                 }
+                 int64_t ir90 = ((ir53) + (1LL));
+-                int64_t ir91 = ail_ir_view_get(ir47_p, ir47_n, ir52);
++                int64_t ir91 = ir47_p[ir52];
+                 int64_t ir92 = ir88;
+                 int64_t ir93 = ir89;
+                 int64_t ir94 = ir91;

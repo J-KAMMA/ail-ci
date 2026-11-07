@@ -1,0 +1,68 @@
+{
+ "method": {
+  "ail_cflags": [
+   "-O2",
+   "-g",
+   "-fno-tree-slp-vectorize",
+   "-ffp-contract=off",
+   "-fopenmp-simd"
+  ],
+  "c_cflags": [
+   "-O2",
+   "-g",
+   "-std=c11"
+  ],
+  "tool": "callgrind Ir only",
+  "input": "lab/roof/attrib.py:case()"
+ },
+ "tasks": {
+  "ticket_audit": {
+   "ail": 13001768557,
+   "c": 2405978982,
+   "extra": 10595789575,
+   "ratio": 5.404,
+   "stdout_same": true,
+   "top": []
+  },
+  "echo_pack": {
+   "ail": 5447661158,
+   "c": 1866703610,
+   "extra": 3580957548,
+   "ratio": 2.918,
+   "stdout_same": true,
+   "top": []
+  },
+  "tree_fold": {
+   "ail": 8786004035,
+   "c": 4445946990,
+   "extra": 4340057045,
+   "ratio": 1.976,
+   "stdout_same": true,
+   "top": []
+  },
+  "ledger_bin": {
+   "ail": 5233460176,
+   "c": 2732522608,
+   "extra": 2500937568,
+   "ratio": 1.915,
+   "stdout_same": true,
+   "top": []
+  },
+  "tally_lang": {
+   "ail": 19585728693,
+   "c": 11900634574,
+   "extra": 7685094119,
+   "ratio": 1.646,
+   "stdout_same": true,
+   "top": []
+  },
+  "berth_sim": {
+   "ail": 8289014902,
+   "c": 5912491070,
+   "extra": 2376523832,
+   "ratio": 1.402,
+   "stdout_same": true,
+   "top": []
+  }
+ }
+}
