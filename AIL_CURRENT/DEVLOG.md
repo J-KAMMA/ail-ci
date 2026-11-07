@@ -1,3 +1,14 @@
+## 2026-11-07 -- algo1 fix: `ail check --perf` typing and alias boundaries (job-algo1-11071611)
+
+Fixed the three review defects in `packaging/ail_lang/perflint.py`. `split`/`rsplit`/`splitlines`
+now type their receiver as a string (the result stays a list), so `if "b,c" in text` is not a P1
+list hit; alias assignments (`view = items`) propagate loop mutation, so P1/P4 stay silent when the
+list is appended through an alias; and P3 uses literal/annotation evidence for the target when the
+`+=` right-hand side is unknown, so `s = ""` / `s: str` plus `s += x` reports. Regression probes and
+three new cases in `test_ail_perflint.py` cover each; census counts are unchanged (`compare` 0,
+required corpus 50 0, all gdev still the single `g15_022.py` P1, lab/corpus 0, lab/vibe 0). Manifest
+regenerated with `tools/update_manifest.py`, `--check` passes.
+
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
 Re-applied the accepted `job-fclist1-op1106` change (`8c2c99c1`..`FETCH_HEAD`, 3 commits) on this

@@ -282,6 +282,52 @@ def main() -> None:
 main()
 '''
 
+P3_UNKNOWN_RHS = '''\
+def literal(items):
+    s = ""
+    for x in items:
+        s += x
+    return s
+
+
+def annotated(items):
+    s: str = ""
+    for x in items:
+        s += x
+    return s
+'''
+
+SPLIT_RECEIVER = '''\
+def scan(text):
+    for _ in range(3):
+        fields = text.split(",")
+        if "b,c" in text:
+            print("yes", fields)
+
+
+scan("a,b,c")
+'''
+
+ALIAS_MUTATION = '''\
+def total_of():
+    xs = [1, 2, 3]
+    data = xs
+    total = 0
+    for i in range(3):
+        data.append(i)
+        total += sum(xs)
+    return total
+
+
+def find():
+    items = [1, 2]
+    view = items
+    for probe in [1, 2]:
+        view.append(probe)
+        if probe in items:
+            print(probe)
+'''
+
 
 class RuleTests(Base):
     def test_p1_list_membership_index_count_inside_a_loop(self):
@@ -309,6 +355,15 @@ class RuleTests(Base):
 
     def test_p3_not_reported_when_the_string_is_reset_or_is_the_loop_target(self):
         self.assertEqual(self.rules(P3_RESET), [])
+
+    def test_p3_reported_for_a_literal_or_annotated_string_with_an_unknown_rhs(self):
+        self.assertEqual(self.rules(P3_UNKNOWN_RHS), ["P3", "P3"])
+
+    def test_p1_does_not_report_a_string_receiver_of_split(self):
+        self.assertEqual(self.rules(SPLIT_RECEIVER), [])
+
+    def test_p1_and_p4_do_not_report_a_list_mutated_through_an_alias(self):
+        self.assertEqual(self.rules(ALIAS_MUTATION), [])
 
     def test_p4_sort_and_reductions_inside_a_loop(self):
         self.assertEqual(self.rules(P4), ["P4", "P4", "P4", "P4", "P4"])

@@ -153,8 +153,35 @@ class Scope(object):
         self.explicit = {}
         self.evidence = {}
         self.touched = set()
+        self._alias_edges = {}
+        self._alias_cache = {}
         self._collect()
+        self._collect_aliases()
         self._resolve()
+
+    def _collect_aliases(self):
+        """Undirected edges between names bound directly to one another (`view = items`)."""
+        for name, values in self.bindings.items():
+            for value in values:
+                if isinstance(value, ast.Name) and value.id != name:
+                    self._alias_edges.setdefault(name, set()).add(value.id)
+                    self._alias_edges.setdefault(value.id, set()).add(name)
+
+    def aliases(self, name):
+        """`name` and every name that is the same object through a direct assignment."""
+        cached = self._alias_cache.get(name)
+        if cached is not None:
+            return cached
+        seen = {name}
+        stack = [name]
+        while stack:
+            current = stack.pop()
+            for other in self._alias_edges.get(current, ()):
+                if other not in seen:
+                    seen.add(other)
+                    stack.append(other)
+        self._alias_cache[name] = seen
+        return seen
 
     def kind(self, name):
         if name in self.kinds:
@@ -285,7 +312,8 @@ class Scope(object):
         elif func.attr in STR_METHODS:
             self._hint(name, "str")
         elif func.attr in LIST_METHODS:
-            self._hint(name, "list")
+            # split/rsplit/splitlines return a list, but their receiver is a string.
+            self._hint(name, "str")
         elif func.attr == "copy":
             self._touch(name)
 
@@ -329,7 +357,10 @@ class Scope(object):
                 if kind == "list" and one_element:
                     element = one_element
         for node in self.augments.get(name, ()):
-            kind, one_element = self._augment_kind(name, node)
+            current = kinds.pop() if len(kinds) == 1 else None
+            if current is not None:
+                kinds.add(current)
+            kind, one_element = self._augment_kind(name, node, current)
             if kind is None:
                 unknown = True
             else:
@@ -353,10 +384,11 @@ class Scope(object):
             return "other", None
         return None, None
 
-    def _augment_kind(self, name, node):
+    def _augment_kind(self, name, node, current=None):
         if not isinstance(node.op, ast.Add):
             return "other", None
-        current = self.kinds.get(name)
+        if current is None:
+            current = self.kinds.get(name)
         kind, element = self._expr_kind(node.value)
         if current == "str":
             return "str", None
@@ -474,12 +506,20 @@ def _loop_target_names(node):
     return names
 
 
-def _loop_touches(loop, name, ignore=None, accumulate=None):
+def _loop_touches(loop, name, ignore=None, accumulate=None, aliases=()):
     """Whether this loop rebinds or mutates `name` in its own iteration (nested scopes excluded).
 
     `ignore` skips the hit being checked.  `accumulate(node, name)` marks bindings that are the
     accumulation pattern itself (e.g. `s += x`): those grow the value, they do not reset it.
+    `aliases` are other names bound to the same object, so mutating one mutates all of them.
     """
+    for current in (name, *(alias for alias in aliases if alias != name)):
+        if _loop_touches_one(loop, current, ignore, accumulate):
+            return True
+    return False
+
+
+def _loop_touches_one(loop, name, ignore=None, accumulate=None):
     if name in _loop_target_names(loop.node):
         return True
     for node in _walk_no_scopes(_loop_parts(loop)):
@@ -546,7 +586,7 @@ def _keyword_values(call):
     return [keyword.value for keyword in call.keywords if keyword.arg in ("key", "reverse")]
 
 
-def _loop_dependent(loops, nodes):
+def _loop_dependent(loops, nodes, scope=None):
     """Whether any expression reads a name that changes between iterations."""
     names = set()
     for node in nodes:
@@ -558,7 +598,8 @@ def _loop_dependent(loops, nodes):
         if names & _loop_target_names(loop.node):
             return True
         for name in names:
-            if _loop_touches(loop, name):
+            aliases = scope.aliases(name) if scope is not None else ()
+            if _loop_touches(loop, name, aliases=aliases):
                 return True
     return False
 
@@ -648,29 +689,35 @@ class Linter(object):
             for op, comparator in zip(node.ops, node.comparators):
                 if isinstance(op, (ast.In, ast.NotIn)) and isinstance(comparator, ast.Name):
                     name = comparator.id
-                    if scope.kind(name) == "list" and not _loop_touches(loop, name):
+                    if scope.kind(name) == "list" \
+                            and not _loop_touches(loop, name, aliases=scope.aliases(name)):
                         self._add("P1", node, MESSAGES["P1-in"] % name, loop_line)
         elif isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
                 name = func.value.id
                 if scope.kind(name) == "list":
-                    if func.attr == "index" and not _loop_touches(loop, name):
+                    if func.attr == "index" \
+                            and not _loop_touches(loop, name, aliases=scope.aliases(name)):
                         self._add("P1", node, MESSAGES["P1-index"] % name, loop_line)
-                    elif func.attr == "count" and not _loop_touches(loop, name):
+                    elif func.attr == "count" \
+                            and not _loop_touches(loop, name, aliases=scope.aliases(name)):
                         self._add("P1", node, MESSAGES["P1-count"] % name, loop_line)
                     elif func.attr == "pop" and node.args and _literal_zero(node.args[0]):
                         self._add("P2", node, MESSAGES["P2-pop"], loop_line)
                     elif func.attr == "insert" and len(node.args) >= 2 and _literal_zero(node.args[0]):
                         self._add("P2", node, MESSAGES["P2-insert"], loop_line)
-                    elif func.attr == "sort" and not _loop_touches(loop, name, ignore=node) \
-                            and not _loop_dependent(loops, _keyword_values(node)):
+                    elif func.attr == "sort" \
+                            and not _loop_touches(loop, name, ignore=node,
+                                                  aliases=scope.aliases(name)) \
+                            and not _loop_dependent(loops, _keyword_values(node), scope):
                         self._add("P4", node, MESSAGES["P4-sort"] % name, loop_line)
             elif isinstance(func, ast.Name) and func.id in SCALAR_LIST_BUILTINS and node.args:
                 argument = node.args[0]
                 if isinstance(argument, ast.Name) and scope.kind(argument.id) == "list" \
-                        and not _loop_touches(loop, argument.id) \
-                        and not _loop_dependent(loops, _keyword_values(node)):
+                        and not _loop_touches(loop, argument.id,
+                                              aliases=scope.aliases(argument.id)) \
+                        and not _loop_dependent(loops, _keyword_values(node), scope):
                     self._add("P4", node, MESSAGES["P4-call"] % (func.id, argument.id), loop_line)
         elif isinstance(node, ast.Delete):
             for target in node.targets:
