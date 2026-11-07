@@ -1,3 +1,15 @@
+## 2026-11-07 -- vibe2 fix: regenerate results, enforce the AIL-N surface (job-vibe2-11072121)
+
+Regenerated `lab/vibe2/results.json` from its stored rows with the fixed `compiler_messages` rule:
+the 24 general-path lines are now all `note` (three were mislabeled `error` by the old substring
+rule), the `surface` row is present (`ail_error_table` no longer truncates to 10), `meta.started`
+is the first recorded completion (10:24:28Z) and `completed_attempts`/`scheduled_attempts` are 55.
+Cleared the two `program` fields (`berth_sim`, `echo_pack` `ail-new`) whose sources the earlier
+invocation did not retain, and corrected `RESULTS.md`'s compiler-message table and paragraph.
+`translate.py` now also refuses the remaining constructs `NEW_SURFACE.md` excludes: a bare `def`,
+the walrus `:=`, comprehensions/generator expressions, and match arms that are numerically equal
+(`0`/`0.0`, `True`/`1`); `test_translate.py` covers each. No compiler change.
+
 ## 2026-11-07 -- vibe2: five surfaces on the vibe1 tasks (job-vibe2-11071844)
 
 Added `lab/vibe2/` (`STRICT_SPEC.md`, `NEW_SURFACE.md`, `translate.py`, `test_translate.py`,

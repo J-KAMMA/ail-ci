@@ -223,6 +223,13 @@ write(str(f() + g) + "\\n")
             ('for a, b in [(1, 2)]:\n  write(str(a))\n', 'for target'),
             ('match x:\n  case 1:\n    write("a")\n  case _:\n    write("b")\n  case 2:\n    write("c")\n',
              'case after'),
+            ('def h(a):\n  return a\n', 'not in the surface'),
+            ('let y: int = (x := 1)\n', '`:=`'),
+            ('let xs: list[int] = [x * 2 for x in [1, 2]]\n', 'comprehension'),
+            ('match 0.0:\n  case 0:\n    write("a")\n  case 0.0:\n    write("b")\n  case _:\n    write("c")\n',
+             'duplicate'),
+            ('match 1:\n  case True:\n    write("a")\n  case 1:\n    write("b")\n  case _:\n    write("c")\n',
+             'duplicate'),
         ]:
             with self.assertRaises(TranslateError, msg=src) as cm:
                 translate(src)

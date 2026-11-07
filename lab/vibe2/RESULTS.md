@@ -86,18 +86,38 @@ public cases and 87/88 hidden cases, then **loud-stopped** on hidden `random4` (
 
 ## Compiler-message fix rates (AIL arms, per normalized message)
 
+`results.json` records 25 compiler-message occurrences over 21 distinct normalized messages: 24
+general-path notes (20 distinct messages) and one AIL-N surface error.
+
 | kind | occurrences | fixed on next round | message (short) |
 |---|---|---|---|
-| error | 2 | 0.5 | `Tree.weights` field type `array` unsupported |
-| error | 2 | 0.5 | dict of containers (`sold[ev] = set()`) |
-| error | 1 | 0.0 | `format()` is not a builtin |
-| note | 2 | 0.0 | `dict[int, list[int]]` has no typed rule (general path) |
-| note | 2 | 0.0 | list parameter is read-only (`h.append()`) |
-| note | 1 each | 0.0 | read-before-assign; `dict[bytes, int]`; list parameter; positional-args rule; tuple-used-as-value |
-| surface | 1 | 1.0 | `let` reassignment |
+| note | 2 | – | `dict[int, list[int]]` annotation (`idx`): no typed rule |
+| note | 2 | – | `Tree.weights` field type `array` unsupported |
+| note | 2 | – | `sold[ev] = set()`: dict of containers |
+| note | 2 | – | list parameter is read-only (`h.append()`) |
+| note | 1 | – | `'ALLOWED'` read before assigned |
+| note | 1 | – | `dict[bytes, int]` annotation (`counts`): no typed rule |
+| note | 1 | – | list parameter is read-only (`parent`) |
+| note | 1 | – | `Tree.subtree_weights` must take plain positional arguments |
+| note | 1 | – | tuple used where a single value is needed |
+| note | 1 | – | `format()` is not a builtin |
+| note | 1 | – | class list comprehensions unsupported |
+| note | 1 | – | comparing a str with a number |
+| note | 1 | – | `normalize` returns bytes on one path, a number on another |
+| note | 1 | – | `ord()`: crossing between a str and a code point |
+| note | 1 | – | `parse_codes`: return paths disagree on a class instance |
+| note | 1 | – | `parse_qty` returns a tuple on one path, a value on another |
+| note | 1 | – | `parse_qty`: return paths disagree on a class instance |
+| note | 1 | – | returning a set where the function returns a number |
+| note | 1 | – | typed dict parameters are read-only |
+| note | 1 | – | `unpack_data` returns a class on one path, something else on another |
+| surface | 1 | 1.0 | `let` reassignment (`rail_transfer`) |
 
-The general-path notes (10 of 13 messages) are not errors and the AI mostly ignored them; the two
-typed-path errors it saw were fixed half the time.
+Every general-path line begins "built on the general path", so all 24 occurrences are `note`s, not
+errors; the earlier version of this table mislabeled three of them (`Tree.weights`, the dict of
+containers, `format()`) because it matched "unsupported"/"refuses" inside the message text. The
+harness attributes a fix rate only to `error` and `surface` entries, so the note rows carry no fix
+rate; the single surface error was fixed on the next round (1/1).
 
 ## Decision table (what the numbers support; no decision taken)
 
@@ -126,7 +146,12 @@ mask program outcomes.
 ## Files
 
 - `results.json` — the 55 rows (5 arms × 11 tasks × 1 model × seed 0), with `summary` and
-  `ail_errors` keyed by model.
+  `ail_errors` keyed by model. `meta.started` is the first recorded completion in `run-flash.log`
+  (10:24:28Z; the process start was not logged), `meta.last_completed` is 11:55:50Z, and
+  `completed_attempts`/`scheduled_attempts` are 55 (one per row). Two `ail-new` rows (`berth_sim`,
+  `echo_pack`) have no `program` field: their source was not retained by the earlier invocation,
+  so the reference was cleared and `program_note` says so; the three retained `.nw` programs
+  reproduce 0 failures.
 - `translate.py`, `test_translate.py` — AIL-N translator and its CPython/AIL round-trip tests.
 - `STRICT_SPEC.md`, `NEW_SURFACE.md` — the two prompt notes.
 - `run-flash.log`, `run-flash2.log`, `run-flash3.log` — run logs.

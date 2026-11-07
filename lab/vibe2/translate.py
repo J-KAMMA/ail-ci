@@ -86,11 +86,17 @@ def _has_fstring(text):
     return False
 
 def _literal_key(pattern):
-    """A canonical key for a match literal, so `0`/`-0` and `"a"`/`'a'` collide."""
+    """A canonical key for a match literal, so `0`/`-0`, `0`/`0.0`, `True`/`1` and `"a"`/`'a'`
+    collide: a bool is an int, and Python compares an int and a float by value."""
     try:
-        return repr(ast.literal_eval(pattern))
+        value = ast.literal_eval(pattern)
     except (ValueError, SyntaxError):
-        return pattern
+        return ('source', pattern)
+    if isinstance(value, bool):
+        value = int(value)
+    if isinstance(value, (int, float)):
+        return ('number', value)
+    return ('literal', repr(value))
 
 def _split_args(text):
     """Split call arguments at top-level commas, ignoring strings and brackets."""
@@ -201,6 +207,11 @@ def rewrite_expr(text, line):
         mm = pat.search(plain)
         if mm:
             raise TranslateError(line, 'not in the surface: ' + what % mm.group(1))
+    if ':=' in plain:
+        raise TranslateError(line, 'not in the surface: `:=`; write a `let`/`var` binding')
+    if re.search(r'\bfor\b', plain):
+        raise TranslateError(line, 'not in the surface: comprehension or generator expression; '
+                             'write an explicit `for` loop')
     if '?' in plain:
         raise TranslateError(line, 'not in the surface: `?`; match the Result explicitly')
     return _rewrite_calls(text, line)
@@ -428,6 +439,8 @@ def translate(source):
             emit(pad + stripped, no)
             continue
 
+        if re.match(r'^(async\s+)?def\b', stripped):
+            raise TranslateError(no, 'not in the surface: `def`; write `fn name(a: T) -> R:`')
         if re.match(r'^(import|from|class|try|except|finally|raise|assert|with|global|nonlocal|'
                     r'async|await|yield|del)\b', stripped) or stripped.startswith('@'):
             raise TranslateError(no, 'not in the surface: `%s`' % stripped.split()[0].rstrip(':'))

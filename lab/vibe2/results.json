@@ -1,6 +1,6 @@
 {
  "meta": {
-  "started": "2026-11-07T11:48:29Z",
+  "started": "2026-11-07T10:24:28Z",
   "harness": "lab/vibe/run.py",
   "model": "deepseek-v4.1-flash",
   "cli": "cmd",
@@ -33,10 +33,12 @@
   "case_timeout": 90,
   "mode": "python = CPython 3.12; rust = rustc -O --edition=2021; ail = AIL compile --syntax python; ail-strict = AIL with lab/vibe2/STRICT_SPEC.md; ail-new = lab/vibe2/NEW_SURFACE.md translated to AIL Python by lab/vibe2/translate.py",
   "seed_note": "seed = independent repeated attempt; the CLI exposes no sampling seed",
-  "updated": "2026-11-07T11:55:50Z",
+  "updated": "2026-11-07T12:41:29Z",
   "stopped_early": false,
-  "completed_attempts": 2,
-  "scheduled_attempts": 2
+  "completed_attempts": 55,
+  "scheduled_attempts": 55,
+  "started_note": "first recorded completion (run-flash.log); process start was not logged",
+  "last_completed": "2026-11-07T11:55:50Z"
  },
  "results": [
   {
@@ -279,8 +281,8 @@
      "run_seconds": 0.003
     }
    ],
-   "program": "lab/vibe2/programs/berth_sim/ail-new-0.nw",
-   "model": "deepseek-v4.1-flash"
+   "model": "deepseek-v4.1-flash",
+   "program_note": "source not retained by the earlier invocation; field cleared"
   },
   {
    "task": "berth_sim",
@@ -738,7 +740,7 @@
      "build_error": "",
      "compiler": [
       [
-       "error",
+       "note",
        "built on the general path (about 20x slower) because comparing a str with a number; str and bytes are separate types here and a str is never a number -- this is refused by name rather than answered. write instead: compar"
       ]
      ],
@@ -993,7 +995,7 @@
      "build_error": "",
      "compiler": [
       [
-       "error",
+       "note",
        "built on the general path (about 20x slower) because call to format(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. write instead: define `format` yourself wi"
       ]
      ],
@@ -2598,8 +2600,8 @@
      "run_seconds": 0.003
     }
    ],
-   "program": "lab/vibe2/programs/echo_pack/ail-new-0.nw",
-   "model": "deepseek-v4.1-flash"
+   "model": "deepseek-v4.1-flash",
+   "program_note": "source not retained by the earlier invocation; field cleared"
   },
   {
    "task": "echo_pack",
@@ -9347,7 +9349,7 @@
      "build_error": "",
      "compiler": [
       [
-       "error",
+       "note",
        "built on the general path (about 20x slower) because `sold[ev] = set()` uses `sold` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of"
       ]
      ],
@@ -9371,7 +9373,7 @@
      "build_error": "",
      "compiler": [
       [
-       "error",
+       "note",
        "built on the general path (about 20x slower) because `sold[ev] = set()` uses `sold` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of"
       ]
      ],
@@ -9980,7 +9982,7 @@
      "build_error": "",
      "compiler": [
       [
-       "error",
+       "note",
        "built on the general path (about 20x slower) because class list comprehensions are unsupported; run with --strict to see why"
       ]
      ],
@@ -10962,7 +10964,7 @@
      "build_error": "",
      "compiler": [
       [
-       "error",
+       "note",
        "built on the general path (about 20x slower) because Tree.weights has unsupported field type array; fields require a known nonnullable scalar, container or managed class type; run with --strict to see why"
       ]
      ],
@@ -10984,7 +10986,7 @@
      "build_error": "",
      "compiler": [
       [
-       "error",
+       "note",
        "built on the general path (about 20x slower) because Tree.weights has unsupported field type array; fields require a known nonnullable scalar, container or managed class type; run with --strict to see why"
       ]
      ],
@@ -11566,18 +11568,18 @@
     "fixed_rate": 0.0
    },
    {
-    "kind": "error",
+    "kind": "note",
     "message": "built on the general path (about 20x slower) because Tree.weights has unsupported field type array; fields require a known nonnullable scalar, container or managed class type; run with --strict to see why",
     "occurrences": 2,
-    "fixed_next": 1,
-    "fixed_rate": 0.5
+    "fixed_next": 0,
+    "fixed_rate": 0.0
    },
    {
-    "kind": "error",
+    "kind": "note",
     "message": "built on the general path (about 20x slower) because `sold[ev] = set()` uses `sold` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of",
     "occurrences": 2,
-    "fixed_next": 1,
-    "fixed_rate": 0.5
+    "fixed_next": 0,
+    "fixed_rate": 0.0
    },
    {
     "kind": "note",
@@ -11622,11 +11624,88 @@
     "fixed_rate": 0.0
    },
    {
-    "kind": "error",
+    "kind": "note",
     "message": "built on the general path (about 20x slower) because call to format(); this compiler builds only the builtins it names, and refuses the rest by name rather than guessing at one. write instead: define `format` yourself wi",
     "occurrences": 1,
     "fixed_next": 0,
     "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because class list comprehensions are unsupported; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because comparing a str with a number; str and bytes are separate types here and a str is never a number -- this is refused by name rather than answered. write instead: compar",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because normalize returns bytes on one path and a number on another; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because ord(); crossing between a str and a code point number is not built. A one-character str is what s[i] already gives, and comparing it against a literal (s[i] == 'a') is",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because parse_codes: return paths disagree on which class instance (('obj', '_AilT_b_LiE') vs ('obj', '_AilT_b_s')); run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because parse_qty returns a tuple on one path and a single value on another; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because parse_qty: return paths disagree on which class instance (('obj', '_AilT_b_i') vs ('obj', '_AilT_b_s')); run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because returning a set, but this function returns a number: no return path used a shape that settles a set return (for a str those are a literal, str(<int>), a name, s[i], s[",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because typed dict parameters are read-only; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "note",
+    "message": "built on the general path (about 20x slower) because unpack_data returns a class instance on one path and something else on another; run with --strict to see why",
+    "occurrences": 1,
+    "fixed_next": 0,
+    "fixed_rate": 0.0
+   },
+   {
+    "kind": "surface",
+    "message": "line 33: 'best' is a let binding and cannot be reassigned; declare it with var",
+    "occurrences": 1,
+    "fixed_next": 1,
+    "fixed_rate": 1.0
    }
   ]
  }
