@@ -27,6 +27,12 @@ len/sorted/sum, singleton `pop`, order-free operators, keyed sort, unhashable di
 refused; `s1`'s `s.pop` bound-method alias is unsupported on this base (AttributeError) though it
 matches on the integ worktree.
 
+Tests on the final commit, `-j 2`: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_setorder` (6 tests) and `test_ail_sets_general` (5/5); earlier on the same code,
+`test_ail_int_dict_set`, `test_ail_collections`, `test_ail_gaps_api1`, `test_ail_gaps_api2`,
+`test_ail_lang_gaps`, `test_ail_refusal_messages` and `test_ail_dict_delete` (7/7).
+`tools/update_manifest.py --check` passes.
+
 ## 2026-11-07 -- setord1 review fix: drop the non-empty pprint set branch
 
 The reviewer found that `prelude_genlib._safe_repr`'s new non-empty set/frozenset branch printed a
