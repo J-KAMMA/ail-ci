@@ -57,6 +57,7 @@ import gpu
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
 import modtables
+import modfold
 import unbound
 from pyfunc import NORET
 # pymix (whole-program kind analysis for the general path) is not imported here any more: it pulls in
@@ -645,7 +646,9 @@ def _remap_rewrite_line(error, text):
 def to_c(source, strict=True, name='run', info=None, external=None):
     unbound.SCRIPT.clear()
     try:
-        return _to_c(fold_int_constants(source), strict, name, info, external)
+        # module-level constants built from pure builtins become the literal they equal (modfold.py);
+        # the typed path only: a refusal below still sends the source as written to the general path
+        return _to_c(fold_int_constants(modfold.fold(source)), strict, name, info, external)
     finally:
         unbound.SCRIPT.clear()
 
