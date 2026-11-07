@@ -1,31 +1,6 @@
-Lane: setord
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_bigint test_ail_examples_algos test_ail_fuzz81 test_ail_pyreach_dictrows test_ail_re_value test_ail_std_difflib test_ail_std_pprint.
 
-# setord1: silent wrong: iterating a frozenset/set of ints prints a different order from CPython
-
-Time budget: 90 minutes. Commit and push after each sub-step. Follow `C:\Users\bluec\ail-work\agent-brief-rules.md`
-(no regressions, CI first, memory cap).
-
-**Why:** the owner's rule: any difference from CPython must be loud (a refusal by name or a documented
-difference), never silent. The pyreach11 Opus agent found, on origin/integ (not caused by its change), that
-iterating `frozenset(range(40, 0, -7))` inside a function prints a different order from CPython, in the default build
-and with `AIL_UNIFIED_FORCE=1`. That is a silent wrong result.
-
-**Do:**
-1. Reproduce: `def f():\n    for x in frozenset(range(40, 0, -7)): print(x)\nf()` plus variants: `set(...)`, a set
-   literal, `list(s)`, `sorted(s)` (must already match), `print(s)`, `for x in s` at module level, negative ints,
-   ints past 2**31, str elements, mixed add/remove before iterating. Run each in both builds and with
-   `python3 -X importtime` irrelevant; compare against CPython (`bash ~/tools/cmp.sh` or `.agent/cmp.sh`).
-2. Find where order diverges (typed set table, general-path set, or the iteration lowering).
-3. Fix: either iterate in CPython's exact order (CPython's int hash is the value mod 2**61-1 and its table probing
-   and resize rules are fixed for a given insertion sequence; match them exactly, including after removals), or,
-   where exact order cannot be guaranteed, refuse order-revealing iteration of a set by name with a rewrite hint
-   (`sorted(s)`). Order-free uses (`in`, `len`, `sorted`, `min`, `max`, `sum`) must keep building.
-4. Census: grep the test corpus and lab programs for set iteration that now changes behaviour; list them.
-
-Files: the set runtime/lowering you find (search `frozenset`, set iteration in `pyfunc.py`, `collib.py`,
-`cruntime.py`, `pyboxed2.py`), new `AIL_CURRENT/test_ail_setorder.py` + `AIL_CURRENT/tests.d/test_ail_setorder.txt`.
-Tests: test_ail_setorder, test_ail_sets_general, test_ail_int_dict_set, test_ail_collections, test_ail_safetynet.
-Report: the cause, which option you took and why, probes table (CPython vs both builds), programs affected.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
