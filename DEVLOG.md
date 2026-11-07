@@ -6,9 +6,10 @@ with `--strict --json` and the default build: **37 typed, 81 general, 16 refused
 corpus is 0 typed / 19 general / 5 refused.  `lab/pyreach9/classify.py` groups the ranked
 strict blockers (full dump in `lab/pyreach9/programs.txt`) and `RESULTS.md` reports the
 ranking, the sole-blocked programs, and AI-typical vs corpus-typical reasons.  Ranked by
-programs whose only blocker is the reason: generated-prelude 5, none-optional 3,
-parameter-readonly 3, generator-yield 3, int64-literal 3; by programs touched: none-optional
-17, dict-of-containers/tuple-unpack/generated-prelude 16, mixed-container 15.  41 of the 97
+programs whose only blocker is the reason: generated-prelude 5, int64-literal 3,
+parameter-readonly 3, generator-yield 3, unsupported-module 2; by programs touched:
+unsupported-module 21, dict-of-containers 18, generated-prelude/tuple-unpack 16,
+mixed-container 15, value-kind-lost 14.  41 of the 97
 non-typed lists are `strict_incomplete`; that is recorded per program.  `docs/design/
 PYREACH_NEXT.md` turns the top five into queued steps.
 
