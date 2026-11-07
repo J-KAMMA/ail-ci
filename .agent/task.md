@@ -1,3 +1,47 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: fbpmap3 (D3 per-block append buffers)
+
+**What the change really does:** `parallel.py` accepts exactly one pre-loop list whose only body use is `out.append(v)` (int/float/`list[str]` literal) in Python-surface and `_ail_par_range` bodies; `pyfunc._par_outline` rewrites the emitted `ail_*_push` into `ail_par_buf_push_*`; `cruntime.PARBUF` adds a mutex-guarded per-block-start buffer table, joined in block order (up to the failing block) before re-raising.
+
+**Verified (my probes, HEAD vs base and CPython/`range` twin):**
+- Order/content at 1, 2, 4, 16 threads and `AIL_PAR_SCHED=guided`: `a_int_initial`, `g_multi_full` (2 appends, 600 elems, full order+sum), `h_two_regions`, `i_float_func`, `n_neg_empty`, `q_three_kinds` (int+str+float in one program), `r_bool`, `s_thread_append_order`, `p03`, `p07` — all match.
+- Named refusals kept: alias (`e_alias`), bytearray (`j_bytearray`), int/float mix (`k_mixed`), str variable/call (`l_str_var`, `m_str_call`), callee-with-region (`p_callee_region`).
+- `test_ail_par_append` + `test_ail_safetynet`: pass. Manifest `--check`: pass.
+- C unchanged for no-feature programs: 4 race probes + 14 corpus programs byte-identical.
+- TSan: 0 warnings for `map_int`, `p01..p04`, `p07`, `safe/shared_append` at 4 and 16 threads.
+- Speed: 2.63x at 4 threads, RSS 1.94x (targets 2x/2x met).
+- `lab/race/run.py --quick`: silent races 0, safe matched 17/18, **safe GIL-free 17/18** (base: 16/17). `shared_append` builds typed (no "general path" note, `ail_par_buf_run` present) and prints 10.
+
+**False (committed HEAD):** `lab/race/RESULTS.md` says `safe GIL-free 16 of 18`, marks all 16 typed probes `REPORT: ThreadSanitizer report`, and lists `safe/shared_append.py` as `general`. None of that reproduces.
+
+**Defects**
+1. **Committed verification record is false and fails the done-check.**
+   Probe: `python3 lab/race/run.py --quick`; `gcc -fsanitize=thread` on the kept C of `lab/race/safe/shared_append.py` at `AIL_THREADS=4,16`.
+   Expected (and measured): `safe GIL-free 17 of 18`, 0 TSan warnings, shared_append `typed parallel`.
+   Actual in `git show HEAD:lab/race/RESULTS.md`: `16 of 18`, 16 `REPORT` rows, shared_append `general`. The commit message claims "typed path … TSan is clean", so the branch contradicts itself. A corrected copy exists only as an **uncommitted** edit (appeared at 01:28:48, not made by me); `run.py` also rewrites this file.
+2. **Required probe missing: "an exception halfway with a `try` that prints `out`".** `p04_exception.py` has no `try`, so the partial-buffer join is never observed. A `try` around the loop is refused on *both* HEAD and base (`parallel for cannot be inside try`), so the claim "`out` holds exactly the state the sequential loop leaves" is untested/unobservable.
+
+**Code observation (not demonstrated as wrong output, item 4b):** `_par_outline`'s `pb` early return precedes the `facts['cap']` return, so an append region that also carries a worker cap runs `ail_par_buf_run` (unbounded `ail_par_threads()`) instead of `ail_par_run_n`. Ordering/output is unaffected; only the `workers` contract is dropped.
+
+**Pre-existing:** `par_range` inside `try` refused (both trees); `par_range` unknown on the forced general path (both); alias/second-name refusal (both).
+
+**Not checked:** `test_ail_files`, `test_ail_corpus_findings3`, the 20 CI shards, the full 110-program hash list (sampled 18 programs), and the exception-join runtime path (unobservable).
+
+VERDICT: FIX
+1. Commit the corrected `lab/race/RESULTS.md` (17/18 GIL-free, TSan clean, `safe/shared_append.py` = typed parallel); the committed table currently records the opposite.
+2. Add the required exception-in-`try` probe (or record and assert the refusal by name) so the partial-buffer join is actually exercised.
+[commandcode stop=end_turn turns=43 out_tokens=60925]
+
+
+--- ORIGINAL TASK ---
 Lane: fb-pmap
 Needs: fbpmap2 fbred3
 
