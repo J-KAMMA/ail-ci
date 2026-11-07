@@ -1454,6 +1454,61 @@ _AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_count
 
 
 # names stdlib3.py (random) lowers to: (result kind, C function, argument kinds); all in cruntime RANDOM
+# ail_array f32 kernels (f32rt.py, job fdarr3): name -> (result kind, C function, argument kinds); B is a bytearray
+# (the 4-byte storage of an f32 array), I an int, F a float. The prelude defines each name in plain Python too (the exact
+# binary64 + r32 definition, run by CPython and the general path); the typed path drops those definitions (_strip_tz_defs)
+# and calls the C kernels, which give the same bits (tools/f32_identity.c, test_ail_array_f32native.py).
+_AIL_TZ = {'_ail_tz_get': (FLT, 'ailz_get', 'BI'), '_ail_tz_put': (INT, 'ailz_put', 'BIF'),
+           '_ail_tz_aa': (INT, 'ailz_aa', 'BBBII'), '_ail_tz_as': (INT, 'ailz_as', 'BBFIII'),
+           '_ail_tz_un': (INT, 'ailz_un', 'BBII'), '_ail_tz_fsum': (FLT, 'ailz_fsum', 'BBII'),
+           '_ail_tz_mm': (INT, 'ailz_mm', 'BBBIII'), '_ail_tz_badnan': (INT, 'ailz_badnan', 'BI')}
+
+
+def _strip_tz_defs(source):
+    """The source with the module-level Python definitions of the _AIL_TZ names blanked (lines kept, so every line number
+    stays); the typed path calls the C kernels for them. A source without them comes back as it was."""
+    if '_ail_tz_' not in source:
+        return source
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    lines = source.split('\n')
+    hit = False
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in _AIL_TZ and node.end_lineno is not None:
+            first = node.lineno - 1 - len(node.decorator_list)
+            for i in range(first, node.end_lineno):
+                lines[i] = ''
+            hit = True
+    return '\n'.join(lines) if hit else source
+
+
+def _tz_call(node, ctx):
+    f = node.func.id
+    kind, cfunc, argkinds = _AIL_TZ[f]
+    if node.keywords or len(node.args) != len(argkinds):
+        raise Unsupported('%s takes %d arguments' % (f, len(argkinds)))
+    decls, names = [], []
+    for each, want in zip(node.args, argkinds):
+        ctx.tmp += 1
+        name = '_tz%d' % ctx.tmp
+        if want == 'B':
+            decls.append('ail_bytearray *%s = %s;' % (name, _bytearray_value(each, ctx)))
+        elif want == 'I':
+            if _etype(each, ctx) != INT:
+                raise Unsupported('%s needs an int argument' % f)
+            decls.append('int64_t %s = %s;' % (name, _expr(each, ctx)))
+        else:
+            if _etype(each, ctx) not in (INT, FLT):
+                raise Unsupported('%s needs a float argument' % f)
+            decls.append('double %s = (double)(%s);' % (name, _expr(each, ctx)))
+        names.append(name)
+    ctx.parts.update(('DIE', 'BYTEARRAY', 'F32K'))
+    ctx.has_try = True
+    return '({ %s %s(%s); })' % (' '.join(decls), cfunc, ', '.join(names))
+
+
 _AIL_RAND = {'_ail_rand_seed': (INT, 'ail_rand_seed', (INT,)), '_ail_rand_random': (FLT, 'ail_rand_random', ()),
              '_ail_rand_uniform': (FLT, 'ail_rand_uniform', (FLT, FLT)), '_ail_rand_gauss': (FLT, 'ail_rand_gauss', (FLT, FLT)),
              '_ail_rand_normalvariate': (FLT, 'ail_rand_normalvariate', (FLT, FLT)),
@@ -1900,6 +1955,8 @@ def _etype(node, ctx):
             return _AIL_RAND[f][0]
         if f in _AIL_CLOCK and f not in ctx.funcs:
             return _AIL_CLOCK[f][0]
+        if f in _AIL_TZ and f not in ctx.funcs:
+            return _AIL_TZ[f][0]
         if f in filelib.PRIMS and f not in ctx.funcs and f not in ctx.classes:
             return {'int': INT, 'float': FLT, 'str': STR, 'bytes': BYTES}[filelib.PRIMS[f][0]]
         if f in _AIL_JF and f not in ctx.funcs:
@@ -18333,6 +18390,8 @@ def _call(node, ctx):
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
     if _is_fileprim_call(node, ctx, 'int') or _is_fileprim_call(node, ctx, 'float'):
         return _fileprim_value(node, ctx)
+    if f in _AIL_TZ and f not in ctx.funcs:
+        return _tz_call(node, ctx)      # ail_array f32 kernels (f32rt.py), arguments evaluated left to right
     if f in _AIL_CLOCK and f not in ctx.funcs:
         # the wall clock and the OS time zone (clockrt.py): ints only, evaluated left to right
         kind, cfunc, argkinds = _AIL_CLOCK[f]
@@ -38246,6 +38305,7 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
         _number_is = numidentity.refusal(source)
         if _number_is is not None:
             raise Unsupported(_number_is)
+    source = _strip_tz_defs(source)      # ail_array f32: the C kernels replace the prelude's Python definitions
     linked = [key for section in ('exports', 'constants') for key in (external or {}).get(section, {})]
     source, shadow = shadowing.rename_all(source, Unsupported, linked)
     if shadow:
