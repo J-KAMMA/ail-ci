@@ -1,3 +1,15 @@
+## 2026-11-07 -- algo1 review 3 fix: alias flow through containers and rebinding (job-algo1-11071611)
+
+Follow-up to review 2 in `packaging/ail_lang/perflint.py`. Alias tracking now follows values read back
+from containers (`box.items = items`, `pair = [items]; view = pair[0]`, `d = {"xs": items};
+view = d["xs"]`) and a mutation rooted at any of those names (`box.items.append`, a subscript store,
+`del`, `+=`) suppresses P1/P4/P6, so their advice is never given for a list that is actually changed.
+Alias edges are also time-scoped: only the last binding before the loop counts, so
+`view = items; view = []` no longer hides a P4 hit. Regression tests `ALIAS_CONTAINER` and
+`ALIAS_REBIND_BEFORE` cover both; `docs/CLI.md` states the container aliases and the "before the
+loop" qualifier. Census unchanged (`compare` 0, required corpus 50 0, all gdev still the single
+`g15_022.py` P1, lab/corpus 0, lab/vibe 0) and the manifest is regenerated.
+
 ## 2026-11-07 -- algo1 review 2 fix: aliases only suppress on real mutation, P6 alias (job-algo1-11071611)
 
 Fixed the two review defects in `packaging/ail_lang/perflint.py`. Alias propagation now counts only an

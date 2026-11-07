@@ -368,6 +368,54 @@ main()
 '''
 
 
+ALIAS_CONTAINER = '''\
+def by_dict(items: list[int]) -> int:
+    box = {"xs": items}
+    view = box["xs"]
+    total = 0
+    for i in range(3):
+        view.append(i)
+        total += sum(items)
+    return total
+
+
+def by_item(items: list[int]) -> int:
+    pair = [items, 0]
+    view = pair[0]
+    total = 0
+    for i in range(3):
+        view.append(i)
+        total += sum(items)
+    return total
+
+
+class Box:
+    def __init__(self) -> None:
+        self.items: list[int] = []
+
+
+def by_attr(items: list[int]) -> int:
+    box = Box()
+    box.items = items
+    total = 0
+    for i in range(3):
+        box.items.append(i)
+        total += sum(items)
+    return total
+'''
+
+ALIAS_REBIND_BEFORE = '''\
+def f(items: list[int]) -> int:
+    view = items
+    view = []
+    total = 0
+    for i in range(3):
+        view.append(i)
+        total += sum(items)
+    return total
+'''
+
+
 class RuleTests(Base):
     def test_p1_list_membership_index_count_inside_a_loop(self):
         program = self.write(P1)
@@ -409,6 +457,12 @@ class RuleTests(Base):
 
     def test_p6_does_not_report_a_list_mutated_through_an_alias(self):
         self.assertEqual(self.rules(P6_ALIAS), [])
+
+    def test_p1_and_p4_do_not_report_a_list_mutated_through_a_container_alias(self):
+        self.assertEqual(self.rules(ALIAS_CONTAINER), [])
+
+    def test_rebinding_an_alias_before_the_loop_does_not_hide_a_p4_hit(self):
+        self.assertEqual(self.rules(ALIAS_REBIND_BEFORE), ["P4"])
 
     def test_p4_sort_and_reductions_inside_a_loop(self):
         self.assertEqual(self.rules(P4), ["P4", "P4", "P4", "P4", "P4"])

@@ -100,6 +100,27 @@ def _contains_name(node, name):
     return any(isinstance(child, ast.Name) and child.id == name for child in ast.walk(node))
 
 
+def _root_name(node):
+    """The base name of `name`, `obj.attr`, `d[key]` or `d[key].attr`; None for other expressions."""
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _edge_names(value):
+    """Names whose object `value` may share: a name, a container literal, or a container read."""
+    if isinstance(value, ast.Name):
+        return {value.id}
+    if isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+        return {item.id for item in value.elts if isinstance(item, ast.Name)}
+    if isinstance(value, ast.Dict):
+        return {item.id for item in value.values if isinstance(item, ast.Name)}
+    if isinstance(value, (ast.Subscript, ast.Attribute)):
+        root = _root_name(value)
+        return {root} if root else set()
+    return set()
+
+
 def _names_in(node):
     """Loaded names of a comparison, ignoring subscript indices: a[i-1] contributes `a`, not `i`.
 
@@ -153,34 +174,48 @@ class Scope(object):
         self.explicit = {}
         self.evidence = {}
         self.touched = set()
-        self._alias_edges = {}
+        self._name_edges = {}
         self._alias_cache = {}
         self._collect()
-        self._collect_aliases()
         self._resolve()
 
-    def _collect_aliases(self):
-        """Undirected edges between names bound directly to one another (`view = items`)."""
-        for name, values in self.bindings.items():
-            for value in values:
-                if isinstance(value, ast.Name) and value.id != name:
-                    self._alias_edges.setdefault(name, set()).add(value.id)
-                    self._alias_edges.setdefault(value.id, set()).add(name)
+    def _add_edge(self, name, other, line):
+        """Record that `name` is bound to `other` (or to a non-alias value when other is None)."""
+        self._name_edges.setdefault(name, []).append((line, other))
 
-    def aliases(self, name):
-        """`name` and every name that is the same object through a direct assignment."""
-        cached = self._alias_cache.get(name)
+    def _active_aliases(self, name, before):
+        """The names `name` aliases through the last binding before line `before`."""
+        edges = self._name_edges.get(name, ())
+        latest = None
+        targets = set()
+        for line, other in edges:
+            if before is not None and line >= before:
+                continue
+            if latest is None or line > latest:
+                latest, targets = line, set()
+            if line == latest and other is not None:
+                targets.add(other)
+        return targets
+
+    def aliases(self, name, before=None):
+        """`name` and every name that is the same object through an assignment before `before`."""
+        key = (name, before)
+        cached = self._alias_cache.get(key)
         if cached is not None:
             return cached
         seen = {name}
         stack = [name]
         while stack:
             current = stack.pop()
-            for other in self._alias_edges.get(current, ()):
+            for other in self._active_aliases(current, before):
                 if other not in seen:
                     seen.add(other)
                     stack.append(other)
-        self._alias_cache[name] = seen
+            for other in self._name_edges:
+                if other not in seen and current in self._active_aliases(other, before):
+                    seen.add(other)
+                    stack.append(other)
+        self._alias_cache[key] = seen
         return seen
 
     def kind(self, name):
@@ -249,6 +284,7 @@ class Scope(object):
             if isinstance(one, ast.Assign):
                 for target in one.targets:
                     self._collect_target(target, one.value)
+                    self._collect_edges(target, one.value)
             elif isinstance(one, ast.AnnAssign):
                 kind, element = _annotation_kind(one.annotation)
                 if isinstance(one.target, ast.Name):
@@ -258,9 +294,11 @@ class Scope(object):
                             self.elements[one.target.id] = element
                     if one.value is not None:
                         self._bind(one.target.id, one.value)
+                        self._collect_edges(one.target, one.value)
                     else:
                         self._touch(one.target.id)
                 elif one.value is not None:
+                    self._collect_edges(one.target, one.value)
                     self._collect_mutation(one.target)
             elif isinstance(one, ast.AugAssign):
                 if isinstance(one.target, ast.Name):
@@ -275,6 +313,7 @@ class Scope(object):
             elif isinstance(one, ast.NamedExpr):
                 if isinstance(one.target, ast.Name):
                     self._bind(one.target.id, one.value)
+                self._collect_edges(one.target, one.value)
             elif isinstance(one, ast.With):
                 for item in one.items:
                     if isinstance(item.optional_vars, ast.Name):
@@ -297,6 +336,19 @@ class Scope(object):
                 self.bindings.setdefault(name, []).append(None)
         else:
             self._collect_mutation(target)
+
+    def _collect_edges(self, target, value):
+        """Record which object a name or container slot is bound to, and when."""
+        root = target.id if isinstance(target, ast.Name) else _root_name(target)
+        if root is None:
+            return
+        line = getattr(value, "lineno", getattr(target, "lineno", 0))
+        names = _edge_names(value)
+        if not names:
+            self._add_edge(root, None, line)
+        for other in names:
+            if other != root:
+                self._add_edge(root, other, line)
 
     def _collect_mutation(self, target):
         if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
@@ -521,23 +573,25 @@ def _loop_touches(loop, name, ignore=None, accumulate=None, aliases=()):
 
 
 def _loop_mutates_one(loop, name):
-    """Whether this loop mutates the object `name` refers to, without rebinding the name."""
+    """Whether this loop mutates the object `name` refers to, without rebinding the name.
+
+    A mutator called on `name`, `name[i]`, `name.attr`, `name[i].attr` and so on mutates the object
+    rooted at `name`; the whole root is treated as touched (conservative, so no wrong advice).
+    """
     for node in _walk_no_scopes(_loop_parts(loop)):
         if isinstance(node, ast.Call):
             func = node.func
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
-                    and func.value.id == name and func.attr in MUTATORS:
+            if isinstance(func, ast.Attribute) and func.attr in MUTATORS \
+                    and _root_name(func.value) == name:
                 return True
         elif isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)) \
-                and isinstance(node.value, ast.Name) and node.value.id == name:
+                and _root_name(node.value) == name:
             return True
-        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) \
-                and node.target.id == name:
+        elif isinstance(node, ast.AugAssign) and _root_name(node.target) == name:
             return True
         elif isinstance(node, ast.Delete):
             for target in node.targets:
-                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
-                        and target.value.id == name:
+                if _root_name(target) == name:
                     return True
     return False
 
@@ -621,7 +675,7 @@ def _loop_dependent(loops, nodes, scope=None):
         if names & _loop_target_names(loop.node):
             return True
         for name in names:
-            aliases = scope.aliases(name) if scope is not None else ()
+            aliases = scope.aliases(name, loop.node.lineno) if scope is not None else ()
             if _loop_touches(loop, name, aliases=aliases):
                 return True
     return False
@@ -708,12 +762,16 @@ class Linter(object):
         loop = loops[-1]
         scope = self.scope
         loop_line = loop.node.lineno
+
+        def aliases_of(name):
+            return scope.aliases(name, loop_line)
+
         if isinstance(node, ast.Compare):
             for op, comparator in zip(node.ops, node.comparators):
                 if isinstance(op, (ast.In, ast.NotIn)) and isinstance(comparator, ast.Name):
                     name = comparator.id
                     if scope.kind(name) == "list" \
-                            and not _loop_touches(loop, name, aliases=scope.aliases(name)):
+                            and not _loop_touches(loop, name, aliases=aliases_of(name)):
                         self._add("P1", node, MESSAGES["P1-in"] % name, loop_line)
         elif isinstance(node, ast.Call):
             func = node.func
@@ -721,10 +779,10 @@ class Linter(object):
                 name = func.value.id
                 if scope.kind(name) == "list":
                     if func.attr == "index" \
-                            and not _loop_touches(loop, name, aliases=scope.aliases(name)):
+                            and not _loop_touches(loop, name, aliases=aliases_of(name)):
                         self._add("P1", node, MESSAGES["P1-index"] % name, loop_line)
                     elif func.attr == "count" \
-                            and not _loop_touches(loop, name, aliases=scope.aliases(name)):
+                            and not _loop_touches(loop, name, aliases=aliases_of(name)):
                         self._add("P1", node, MESSAGES["P1-count"] % name, loop_line)
                     elif func.attr == "pop" and node.args and _literal_zero(node.args[0]):
                         self._add("P2", node, MESSAGES["P2-pop"], loop_line)
@@ -732,14 +790,14 @@ class Linter(object):
                         self._add("P2", node, MESSAGES["P2-insert"], loop_line)
                     elif func.attr == "sort" \
                             and not _loop_touches(loop, name, ignore=node,
-                                                  aliases=scope.aliases(name)) \
+                                                  aliases=aliases_of(name)) \
                             and not _loop_dependent(loops, _keyword_values(node), scope):
                         self._add("P4", node, MESSAGES["P4-sort"] % name, loop_line)
             elif isinstance(func, ast.Name) and func.id in SCALAR_LIST_BUILTINS and node.args:
                 argument = node.args[0]
                 if isinstance(argument, ast.Name) and scope.kind(argument.id) == "list" \
                         and not _loop_touches(loop, argument.id,
-                                              aliases=scope.aliases(argument.id)) \
+                                              aliases=aliases_of(argument.id)) \
                         and not _loop_dependent(loops, _keyword_values(node), scope):
                     self._add("P4", node, MESSAGES["P4-call"] % (func.id, argument.id), loop_line)
         elif isinstance(node, ast.Delete):
@@ -770,7 +828,7 @@ class Linter(object):
                     if (_list_plus(node.value, target.id) or _starred_list(node.value, target.id)) \
                             and not _loop_touches(loop, target.id, ignore=node,
                                                   accumulate=_is_p6_accumulation,
-                                                  aliases=scope.aliases(target.id)):
+                                                  aliases=aliases_of(target.id)):
                         self._add("P6", node, MESSAGES["P6"] % target.id, loop_line)
 
     def _maybe_pairwise(self, outer, inner, body):
