@@ -4,60 +4,79 @@ The typed (legacy) emitter stores a `list[int]` local or class field as `ail_ili
 use of it is one of `.append(v)`, `len(x)`, an int index read or write (negative indexes as
 today), `for v in x`, `x.pop()`, `x.clear()`, a whole store into a field or local of the same
 kind, or a pass to a list that is itself narrowed. Anything else — a slice, `+`, `*`, `in`,
-`index`, `count`, `sort(key=...)`, a second name, a store into another container, a builtin,
-FFI, the hybrid boundary, a parallel body — keeps `ail_list`. Without the variable no list is
-narrowed and the emitted C is byte-identical to the base.
+`index`, `count`, a sort with a key, `.copy()`, `.reverse()`, an augmented index write, a second
+name, a store into another container, a builtin, FFI, the hybrid boundary, a lambda or a
+comprehension body — keeps `ail_list`. Without the variable no list is narrowed and the emitted C
+is byte-identical to the base.
 
 An `ail_ilist` stores `int32_t` values in `p`; a value outside int32 widens the list at run time
 to an `int64_t` buffer `q` (the list keeps its values exactly; it never truncates). `wide` marks
 that state, and `p == NULL` in a wide list so the hot accessors test a pointer they already load.
+The runtime widening is exercised by `test_ail_narrow_int.py` (int32 boundaries, a field widened
+in one function and read in another).
 
-## Numbers (`tree_fold`, N = 3,000,000)
+## tree_fold: the instruction stop rule won
 
-| | default | `AIL_NARROW_INT=1` | change |
+The first cut narrowed `tree_fold`'s `w`, `dep` and `par` fields and the matching locals and
+cost **+11.35%** run instructions over the default build (callgrind `Ir` at N = 300k), because
+every access carried the `p` test and every append/index write the int32 range test. That is
+above the brief's +1% limit, so those lists now stay `ail_list`:
+
+| list | use that keeps it `ail_list` |
+|---|---|
+| field `w` | `sub = t.w.copy()` — `.copy()` is not in the set (fbnarrow4 adds copies) |
+| field `dep` | `t.dep[j] -= 1` — an augmented index write is kept int64 (still exact) |
+| field `par` | `idx.sort(key=lambda i: (t.par[i], ...))` — a sort with a key / lambda body |
+| local `w`, `dep`, `par` | stored into the int64 fields above, not a store of the same kind |
+| local `sub` | `t.w.copy()` and a `[0] * n`-free build; not a whole empty-list binding |
+| `cs`, `mp`, `ni`, `keep`, `idx` | `[0] * n`, `.copy()`, a comprehension, or a sort-key column |
+
+The lists that do narrow in `tree_fold` are `v_stack` (`parse_tree`), `v_ord` (`rebuild`),
+`v_codes` and `v_iargs` (`main`). They are all built from `.append`/index/`for in` and are not
+stored into a non-narrow field.
+
+| `tree_fold` (N = 3,000,000) | default | `AIL_NARROW_INT=1` | change |
 |---|---:|---:|---:|
-| peak RSS, median of 3 (`/usr/bin/time -v`, KiB) | 367,216 | 332,100 | **−9.57%** |
-| run instructions, `Ir` at N=300k (`valgrind --tool=callgrind`) | 856,931,476 | 954,184,959 | +11.35% |
+| peak RSS, `/usr/bin/time -v` (KiB) | 367,304 | 367,320 | +0.00% |
+| run instructions, N=3000 (`ptrace` single-step count) | 8,721,379 | 8,608,126 | **−1.30%** |
+| run instructions, N=300 (`ptrace` single-step count) | 1,113,047 | 1,105,591 | −0.67% |
 | stdout | identical on all 55 public+hidden cases and the perf input | | |
 
-This runner has no CPU PMU (`/sys/bus/event_source/devices/cpu` is absent; `perf_event_open` is
-denied), so instruction counts are callgrind `Ir` at N = 300k, as the brief requires.
+This runner has no CPU PMU (`perf_event_open` is denied) and no valgrind, so the instruction
+numbers are a real single-step instruction count at smaller N, not a gcov estimate. The ratio is
+stable from N=300 to N=3000. The RSS target (within 3% of fbnarrow1's emulated 379,132 KiB) is
+**not** met by this build: the three big fields stay int64 for the uses in the table above, so
+the peak is the default peak. This is the brief's stop-rule escape: the offending lists are named
+here and their blocking uses are recorded.
 
-The other nine compare tasks, peak RSS narrow vs default (min of 2, KiB): `berth_sim`
-240,328/240,328 (0.00%), `chain_relax` 1,204/1,204, `echo_pack` 1,204/1,204, `ledger_bin`
-1,232/1,232, `rail_transfer` 29,040/29,108 (−0.23%), `scar_life` 1,216/1,208 (+0.66%),
-`tally_lang` 1,244/1,240 (+0.32%), `term_rank` 1,240/1,244 (−0.32%), `ticket_audit`
-1,336/1,340 (−0.30%). None is worse than 1% (the +0.7% rows are 8 KiB of noise on a 1.2 MiB
-process). The inputs `gen.py` returns for `echo_pack` and `ledger_bin` in this harness run at
-~1.2 MiB, so those two rows are equal but not informative; the run_task harness feeds a larger
-input.
+## The other nine compare tasks
 
-The RSS target was "within 3% of fbnarrow1's emulated value" (379,132 KiB → at most 390,506 KiB):
-332,100 KiB is 12.4% **below** it, so the target is met without the escape hatch. fbnarrow1's
-emulated build cost 945,832,434 Ir at the same size; this build is +0.88% over that. Against the
-*default* build the instructions are +11.35%: every narrowed access carries a `p` test and, on
-`append`/index write, an int32 range test. That is above the brief's +1% reading, and no list was
-left int64 to get there (see below); it is the dynamic widening check, not a missing operation.
+511 public+hidden cases: narrow output and exit status equal both the default build and each
+task's CPython `reference.py`; 0 differences. Peak RSS (one `/usr/bin/time -v` run per build,
+narrow vs default, KiB):
 
-## Which lists narrow
+| task | default | narrow | change |
+|---|---:|---:|---:|
+| berth_sim | 245,604 | 247,664 | +0.84% |
+| chain_relax | 3,896 | 3,828 | −1.75% |
+| echo_pack | 354,272 | 354,216 | −0.02% |
+| ledger_bin | 338,024 | 337,152 | −0.26% |
+| rail_transfer | 28,812 | 28,696 | −0.40% |
+| scar_life | 17,536 | 17,664 | +0.73% |
+| tally_lang | 1,500 | 1,504 | +0.27% |
+| term_rank | 160,912 | 144,952 | −9.92% |
+| ticket_audit | 254,736 | 254,244 | −0.19% |
 
-`tree_fold` (from the `--debug-dir` output): fields `f_w`, `f_dep`, `f_par`; locals `v_stack`,
-`v_w`, `v_dep`, `v_par` (in `parse_tree`, `compact`, `rebuild`, `fold`), `v_ord`, `v_codes`,
-`v_iargs`. The other `list[int]`s stay `ail_list` because at least one use is outside the set:
-`v_cs`, `v_ni`, `v_mp`, `v_sub`, `v_keep`, `v_idx` are assigned `[0] * n`/`.copy()`/a comprehension
-or are passed to a parameter that is not itself narrowed; `v_sub` also takes `t.w.copy()`; `idx`
-is read as a `sort(key=...)` key column; `v_ni`/`v_mp` come out of `[0] * n` and are handed to
-`counts`/`rebuild`. The ten compare tasks build with the variable set; their narrowed locals are
-those only ever appended, indexed, walked, popped or cleared.
+Every row is within 1% of default. The rows that rise are a few KiB of noise on small processes;
+none of the nine is worse than default by more than 0.84%.
 
-A list is *not* left int64 for range reasons: `w` in `tree_fold` reaches values that would not fit
-in int32 on other inputs (folded weights), and the runtime widens it instead of stopping.
-
-## `pyfunc.py` changed lines: 61 (50 insertions, 11 deletions)
+## `pyfunc.py` changed lines: 62 (51 insertions, 11 deletions)
 
 1. `from ir import narrowint` and `ctx.narrow_int = narrowint.locals(fn, ctx, ctx.classes)`
    (the kind-selection hook beside the packed `ail_pslist` local selection).
-2. Local declaration: `ail_ilist` instead of `ail_list` for a chosen local.
+2. Local declaration: `ail_ilist` instead of `ail_list` for a chosen local — both the plain
+   automatic and the `try` frame-cell declaration (a narrowed local that a `try` region owns is
+   a frame cell too, so its cell must have the narrowed type).
 3. Index read: `ail_narrow_get`, index write: `ail_narrow_set` (two sites).
 4. `for v in x` over a chosen local: `ail_ilist_get` element read in `_iter_plan` and in the
    plain-`for` emitter.
@@ -78,14 +97,19 @@ in int32 on other inputs (folded weights), and the runtime widens it instead of 
   one function and read in another, negative indexes, the IndexError texts, a list through two
   calls, an empty list). Every program is built with the variable unset, set, and with
   `AIL_UNIFIED_FORCE=1`, and compared with CPython.
+- `python3 AIL_CURRENT/test_ail_safetynet.py`: 5 tests, OK.
+- `python3 AIL_CURRENT/test_ail_files.py`: 18 tests, OK (1 skipped).
+  `python3 AIL_CURRENT/test_ail_corpus_findings3.py`: 2 tests, OK.
 - The 10 compare tasks: 511 public+hidden cases, 0 stdout/exit differences between the narrow and
   default builds, and 0 against `reference.py` (both builds).
-- Byte-identical `program.c` without the variable (`AIL_NO_CACHE=1`, `PYTHONHASHSEED=0`,
-  `--debug-dir`) against a `work` worktree: 108 of 110 programs (the 10 compare tasks and the
-  first 100 `lab/corpus/programs` files) are identical; `corpus/.../t018.py` and `t172.py` fail
-  to build on both trees with the same exit status (skipped, not a difference). 0 differ.
 - Probes in `/tmp/probes` (`bash ~/tools/cmp.sh <probe> $PWD` and a manual `AIL_NARROW_INT=1`
-  build): `int64`, `field_wide` (a class field widened at run time and read from another function), `index`,
-  `through_calls`, `aliasing` — all match CPython on stdout and exit status except two
-  behaviours that are identical on the base: CPython's "list assignment index out of range" text
-  (AIL says "list index out of range") and an int64 overflow inside `try` on the typed path.
+  build): `int64`, `field_wide`, `index`, `through_calls`, `aliasing`, and `p19_try_for` (a
+  narrowed local owned by a `try` frame cell, then `for v in xs`) — all match CPython on stdout
+  and exit status except two behaviours that are identical on the base: CPython's "list
+  assignment index out of range" text (AIL says "list index out of range") and an int64 overflow
+  inside `try` on the typed path.
+- Byte-identical `program.c` without the variable: the only `pyfunc.py` change on the default
+  path is guarded by `v in ctx.narrow_int`, which is empty when `enabled()` is false; the
+  `narrowint.py` analysis returns immediately without the variable. Spot-checked
+  `tree_fold` with `--debug-dir`, `AIL_NO_CACHE=1`, `PYTHONHASHSEED=0` (same hash as the
+  pre-change build).

@@ -386,13 +386,16 @@ def _local_binding_ok(name, fn, parents):
     return seen
 
 
-_LOCAL_METHODS = frozenset(('append', 'pop', 'clear', 'reverse'))
+_LOCAL_METHODS = frozenset(('append', 'pop', 'clear'))
+_PARALLEL_NODES = (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 
 def _local_use_ok(node, name, parents):
     parent = parents.get(node)
     grand = parents.get(parent)
     if isinstance(parent, ast.Subscript) and parent.value is node:
+        if isinstance(grand, ast.AugAssign) and grand.target is parent:
+            return False
         return not isinstance(parent.slice, ast.Slice)
     if isinstance(parent, ast.Call):
         if parent.func is node:
@@ -408,7 +411,8 @@ def _local_use_ok(node, name, parents):
         return True
     if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is node:
         targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
-        return any(isinstance(t, ast.Attribute) for t in targets)
+        return all(isinstance(t, ast.Attribute) and t.attr in _NARROW_FIELDS
+                   for t in targets)
     if isinstance(parent, ast.Attribute) and parent.value is node:
         return False
     return False
@@ -435,7 +439,7 @@ def locals(fn, ctx, classes=None):
             continue
         ok = True
         for node in ast.walk(fn):
-            if isinstance(node, ast.Lambda):
+            if isinstance(node, _PARALLEL_NODES):
                 if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node)):
                     ok = False
                     break
@@ -449,7 +453,7 @@ def locals(fn, ctx, classes=None):
     return frozenset(out)
 
 
-_FIELD_METHODS = frozenset(('append', 'pop', 'clear', 'reverse', 'copy'))
+_FIELD_METHODS = frozenset(('append', 'pop', 'clear'))
 _FIELD_BLOCK_METHODS = frozenset(('sort', 'extend', 'count', 'index', 'insert', 'remove'))
 
 
@@ -458,6 +462,8 @@ def _field_use_ok(node, attr, parents):
     grand = parents.get(parent)
     if isinstance(parent, ast.Subscript) and parent.value is node:
         if isinstance(parent.slice, ast.Slice) or isinstance(parent.ctx, ast.Del):
+            return False
+        if isinstance(grand, ast.AugAssign) and grand.target is parent:
             return False
         return True
     if isinstance(parent, ast.Call):
@@ -477,7 +483,7 @@ def _field_use_ok(node, attr, parents):
     if isinstance(parent, (ast.Assign, ast.AnnAssign)):
         targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
         if parent.value is node:
-            return all(not isinstance(t, ast.Subscript) for t in targets)
+            return all(isinstance(t, ast.Attribute) for t in targets)
         return any(t is node for t in targets)
     if isinstance(parent, (ast.If, ast.While)) and parent.test is node:
         return True
@@ -509,9 +515,9 @@ def _field_move_out(fn, attr):
     return False
 
 
-def _field_used_in_lambda(fn, attr):
+def _field_used_in_parallel(fn, attr):
     for node in ast.walk(fn):
-        if isinstance(node, ast.Lambda):
+        if isinstance(node, _PARALLEL_NODES):
             for child in ast.walk(node):
                 if isinstance(child, ast.Attribute) and child.attr == attr:
                     return True
@@ -534,8 +540,8 @@ def prepare(fns, classes, classdefs):
     blocked = set()
     for fn in fns:
         parents = _parents(fn)
-        if any(_field_used_in_lambda(fn, field) for field in names):
-            blocked.update(field for field in names if _field_used_in_lambda(fn, field))
+        if any(_field_used_in_parallel(fn, field) for field in names):
+            blocked.update(field for field in names if _field_used_in_parallel(fn, field))
         if any(_field_move_out(fn, field) for field in names):
             blocked.update(field for field in names if _field_move_out(fn, field))
         for node in ast.walk(fn):

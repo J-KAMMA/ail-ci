@@ -42860,6 +42860,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   else 'ail_nsum' if t == NSUM
                   else 'ail_flist' if t == FLIST else 'ail_pslist' if t == SLIST and v in getattr(ctx, 'packed_slist', ()) else 'ail_slist' if t == SLIST else 'ail_%s' % t if t in MAPS
                   else 'ail_srows' if t == SROWS else 'ail_srow' if t == SROW
+                  else 'ail_ilist' if t == LIST and v in getattr(ctx, 'narrow_int', ())
                   else 'ail_list' if t == LIST else tab_struct)
             decls += frame_cell(ct, 'v_' + v)
         elif callable_types.valid(t):
