@@ -7,3 +7,7 @@ build/
 
 # generated documentation site
 site/
+
+# Claude Code per-user settings: never commit (permission lists can hold pasted commands with credentials)
+.claude/settings.local.json
+.claude/settings.local.*.json
