@@ -11,11 +11,11 @@ lists/dicts.  The reader accepts that layout, including `r` references.
 
 The values the lab programs use are covered: None, True/False, ints (the
 32-bit `i` form and the `l` long form, including the int64 boundaries),
-binary floats, str (ASCII and UTF-8), bytes, tuples, lists and dicts.  A set,
-frozenset or a user class is refused by name with `ValueError`; so is a
-container that is shared but not through a cycle.  The integer arithmetic is
-AIL's int64, so `dumps`/`loads` stop loudly at the int64 boundary; ints
-beyond it cannot be literals in the default build in any case.
+binary floats, str (ASCII and UTF-8), bytes, tuples, lists and dicts.  Shared
+lists and tuples use CPython's `r` reference form.  A set, frozenset or a user
+class is refused by name with `ValueError`.  The integer arithmetic is AIL's
+int64, so `dumps`/`loads` stop loudly at the int64 boundary; ints beyond it
+cannot be literals in the default build in any case.
 """
 
 __all__ = ["dump", "dumps", "load", "loads", "version"]
