@@ -432,6 +432,9 @@ class Emitter(TextEmitter):
         self.orphans = None                # --debug: statement lines no instruction came from (_orphan_lines)
         self.shadows = None                # --debug: value -> Python names it was stored to (_shadow_plan)
         self.bce_site = 0
+        self.aug_seq = 0
+        self.aug_index = {}
+        self.aug_live = None
         self.parts = set()
         self.need = set()
         self.floor = set()
@@ -559,6 +562,40 @@ class Emitter(TextEmitter):
         self.bce_site += 1
         self.line(depth, 'if (__builtin_expect((uint64_t)(%s) >= (uint64_t)(%s), 0)) '
                          'ail_bce_audit_fail("%s", %d);' % (index, length, self.fn.sym, site))
+
+    def aug_read_index(self, ins, depth, n, index, fail):
+        """`xs[i] op= v` (lower.py pairs its checked read 'augr' and its write 'aug' with one number): the read
+        normalises and checks the index once into a C local, reads at it, and the paired write stores at the
+        same local with no second check. Nothing between them can resize the list (lower.py marks only a
+        right-hand side without calls), and the write finds the local only when its own read was emitted
+        just before in the same block. Returns the C local for the read, or None: no pair, or the range pass
+        already proved the write (then the read keeps its usual helper, which needs no merged index)."""
+        k = ins.attrs.get('augr')
+        if k is None or ins.attrs.get('mode') != 'ck':
+            return None
+        if self.aug_live is None:
+            self.aug_live = {w.attrs['aug'] for w in I.walk(self.fn.body)
+                             if w.op in ('list.set', 'span.set') and w.attrs.get('aug') is not None
+                             and w.attrs.get('mode') == 'ck'}
+        if k not in self.aug_live:
+            return None
+        name = 'augj%d' % self.aug_seq
+        self.aug_seq += 1
+        self.line(depth, 'int64_t %s = %s;' % (name, index))
+        self.line(depth, 'if (__builtin_expect((uint64_t)%s >= (uint64_t)(%s), 0)) { %s += (%s); '
+                         'if ((uint64_t)%s >= (uint64_t)(%s)) %s; }' % (name, n, name, n, name, n, fail))
+        self.aug_index[k] = (ins.operands[0], ins.operands[1], name)
+        return name
+
+    def aug_write_index(self, ins):
+        """The C local of the paired read's normalised index (aug_read_index), or None."""
+        k = ins.attrs.get('aug')
+        if k is None or ins.attrs.get('mode') != 'ck':
+            return None
+        got = self.aug_index.pop(k, None)
+        if got is None or got[0] is not ins.operands[0] or got[1] is not ins.operands[1]:
+            return None
+        return got[2]
 
     def source_line(self, ins, depth):
         """`ail build --debug`: from an instruction lowered from a different statement than the last one
@@ -1164,13 +1201,22 @@ class Emitter(TextEmitter):
                 self.parts.add('NUMVIEW')
                 view = 'ail_%s_view' % f
             if op == 'span.get':
+                self.aug_index.pop(ins.attrs.get('augr'), None)     # a stale pair never reaches a later write
                 if ins.attrs.get('mode') == 'nck':
                     self.bce_audit(depth, o[1], sn)
                     return self.assign_new(depth, ins.result, '%s[%s]' % (sp, o[1]))
+                fail = ('ail_ir_%s_fail()' % f) if ins.operands[0] in self.span_own else \
+                    ('ail_%s_span_fail(%s, %s, %s)' % (f, sp, sn, o[1]))
+                j = self.aug_read_index(ins, depth, sn, o[1], fail)
+                if j is not None:
+                    return self.assign_new(depth, ins.result, '%s[%s]' % (sp, j))
                 return self.assign_new(depth, ins.result, '%s_get(%s, %s, %s)' % (view, sp, sn, o[1]))
             if ins.attrs.get('mode') == 'nck':
                 self.bce_audit(depth, o[1], sn)
                 return self.line(depth, '%s[%s] = %s;' % (sp, o[1], o[2]))
+            j = self.aug_write_index(ins)
+            if j is not None:
+                return self.line(depth, '%s[%s] = %s;' % (sp, j, o[2]))
             return self.line(depth, '%s_set(%s, %s, %s, %s);' % (view, sp, sn, o[1], o[2]))
         if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear'):
             return self.list_op(ins, depth, o)
@@ -1612,14 +1658,22 @@ class Emitter(TextEmitter):
         if op == 'list.len':
             return self.assign_new(depth, ins.result, 'ail_%s_span_len((%s)->p, (%s)->n)' % (f, L, L))
         if op == 'list.get':
+            self.aug_index.pop(ins.attrs.get('augr'), None)     # a stale pair never reaches a later write
             if ins.attrs.get('mode') == 'nck':
                 self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
+            j = self.aug_read_index(ins, depth, '(%s)->n' % L, o[1],
+                                    'ail_%s_span_fail((%s)->p, (%s)->n, %s)' % (f, L, L, o[1]))
+            if j is not None:
+                return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, j))
             return self.assign_new(depth, ins.result, 'ail_%s_span_get((%s)->p, (%s)->n, %s)' % (f, L, L, o[1]))
         if op == 'list.set':
             if ins.attrs.get('mode') == 'nck':
                 self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.line(depth, '(%s)->p[%s] = %s;' % (L, o[1], o[2]))
+            j = self.aug_write_index(ins)
+            if j is not None:
+                return self.line(depth, '(%s)->p[%s] = %s;' % (L, j, o[2]))
             return self.line(depth, 'ail_numfield_%s_set(%s, %s, %s);' % (f, L, o[1], o[2]))
         if op == 'list.push':
             return self.line(depth, 'ail_numfield_%s_append(%s, %s);' % (f, L, o[1]))
@@ -1650,14 +1704,21 @@ class Emitter(TextEmitter):
         if op == 'list.len':
             return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % L)
         if op == 'list.get':
+            self.aug_index.pop(ins.attrs.get('augr'), None)     # a stale pair never reaches a later write
             if ins.attrs.get('mode') == 'nck':
                 self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
+            j = self.aug_read_index(ins, depth, '(%s)->n' % L, o[1], '%s_fail()' % ir)
+            if j is not None:
+                return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, j))
             return self.assign_new(depth, ins.result, '%s_get(%s, %s)' % (ir, L, o[1]))
         if op == 'list.set':
             if ins.attrs.get('mode') == 'nck':
                 self.bce_audit(depth, o[1], '(%s)->n' % L)
                 return self.line(depth, '(%s)->p[%s] = %s;' % (L, o[1], o[2]))
+            j = self.aug_write_index(ins)
+            if j is not None:
+                return self.line(depth, '(%s)->p[%s] = %s;' % (L, j, o[2]))
             return self.line(depth, '%s_set(%s, %s, %s);' % (ir, L, o[1], o[2]))
         if op == 'list.push':
             return self.line(depth, 'ail_%s_push(%s, %s);' % (f, L, o[1]))
