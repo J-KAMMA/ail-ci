@@ -1,3 +1,24 @@
+## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
+
+`test_ail_sdk` was green before err2 and its
+`test_declared_distribution_excludes_unadopted_files_and_checks_closure` failed after: err2 added
+`ail_agent_errors.py`, imported by `ail_chatgpt.py`, and pinned it with `s`, so the declared export
+carries it, but `ail_sdk.export_sdk()`'s legacy branch (a MANIFEST without `sdk_files`) still listed
+only the older hard-coded CLI modules.  Re-exporting an SDK whose `sdk_files` list was removed
+therefore dropped `ail_agent_errors.py` and its `sha256` differed from the declared export's.
+The legacy list now includes `ail_agent_errors.py`, like the other compiler-imported modules, so
+both paths export the same module set; an older legacy manifest without that pin is unchanged
+because the list is only intersected with the pins present.
+
+Counts: `test_ail_sdk` 30/31 -> 31/31 (the failing case now passes).  On the final commit,
+`tools/par_check.py -j 2` ran `test_ail_sdk`, `test_ail_agent_errors`, `test_ail_registry`,
+`test_ail_manifest_compiler`, `test_ail_packaging`, `test_ail_sdk_environment`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`: 9/9 modules, 0 failed.  `python3 -m compileall -q
+-j 0 AIL_CURRENT tools` is clean.  The probe `/tmp/probes/sdk_legacy_agent_errors.py` checks the
+declared/legacy equality, the presence of `ail_agent_errors.py`, and that an older legacy snapshot
+without its pin stays unchanged; it passes.  `tools/update_manifest.py` regenerated the `ail_sdk.py`
+pin (shard `manifest.d/60.txt`) and `--check` passes.
+
 ## 2026-11-07 -- layout1: flat-layout measurement and ranking (job-layout1-11080009)
 
 Measurement and design only; no compiler, runtime, test or bench change. `lab/layout/` now has
