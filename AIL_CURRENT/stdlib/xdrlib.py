@@ -1,5 +1,7 @@
 """Implements (a subset of) Sun XDR -- eXternal Data Representation.
 
+Derived from CPython 3.12 Lib/xdrlib.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 See: RFC 1014
 
 This is CPython 3.12's Lib/xdrlib.py as AIL source.  Every class, method, signature and error

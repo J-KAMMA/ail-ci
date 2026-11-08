@@ -13,6 +13,7 @@ the file already named its origin and license before this inventory was added.
 
 | File | Origin | License | License file | Notice before |
 | --- | --- | --- | --- | --- |
+| `AIL_CURRENT/stdlib/chunk.py` | CPython 3.12 `Lib/chunk.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | no |
 | `AIL_CURRENT/stdlib/colorsys.py` | CPython 3.12 `Lib/colorsys.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | no |
 | `AIL_CURRENT/stdlib/copy.py` | CPython 3.12 `Lib/copy.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | yes |
 | `AIL_CURRENT/stdlib/difflib.py` | CPython 3.12 `Lib/difflib.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
@@ -29,6 +30,7 @@ the file already named its origin and license before this inventory was added.
 | `AIL_CURRENT/stdlib/struct.py` | AIL's own, written for AIL; behaviour follows CPython 3.12 `Lib/struct.py` | MIT OR Apache-2.0 | `LICENSE-MIT`, `LICENSE-APACHE` | origin named |
 | `AIL_CURRENT/stdlib/timeit.py` | CPython 3.12 `Lib/timeit.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | yes |
 | `AIL_CURRENT/stdlib/token.py` | CPython 3.12 `Lib/token.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
+| `AIL_CURRENT/stdlib/xdrlib.py` | CPython 3.12 `Lib/xdrlib.py` | PSF-2.0 | `AIL_CURRENT/stdlib/LICENSE-PSF.txt` | origin only |
 | `AIL_CURRENT/stdlib/tomllib/*.py` | CPython 3.12 `Lib/tomllib/*.py` (upstream `tomli`, Taneli Hukkinen) | MIT (SPDX header in each file) | - | SPDX MIT; origin named |
 | `AIL_CURRENT/stdlib/zlib.py` | AIL's own, written over the system zlib; behaviour follows CPython 3.12 `Modules/zlibmodule.c` | MIT OR Apache-2.0 | `LICENSE-MIT`, `LICENSE-APACHE` | origin named |
 | `AIL_CURRENT/stdlib/zlib_glue.c` | AIL's own glue; links the system `<zlib.h>`, copies no zlib source | MIT OR Apache-2.0 | `LICENSE-MIT`, `LICENSE-APACHE` | origin named |
@@ -42,17 +44,20 @@ the file already named its origin and license before this inventory was added.
 
 Counts:
 
-- 16 files derived from CPython under `AIL_CURRENT/stdlib/` (12 modules plus
-  the 4 files of `tomllib/`). All 16 carry a notice in their module docstring.
+- 20 files derived from CPython under `AIL_CURRENT/stdlib/` (16 modules plus
+  the 4 files of `tomllib/`). All 20 carry a notice in their module docstring.
+- 1 file derived from PyPy (`marshal.py`), with the PyPy MIT text beside it.
 - 50 files under `third_party/typeshed` (48 `stdlib/**/*.pyi` stubs plus
   `LICENSE` and `VERSION.md`), all under Apache-2.0 with the license beside
   them.
 - 4 files under `AIL_CURRENT/stdlib/` are AIL's own (`zlib.py`,
   `zlib_glue.c`, `zlib_glue.h`, `struct.py`); they link the system zlib or
   implement the behaviour themselves, they do not copy upstream source.
-- Total files under `AIL_CURRENT/stdlib/` and `third_party/`: 71, of which 67
-  are third-party or derived (16 CPython-derived, 50 typeshed, and the PSF
-  license text) and 4 are AIL's own.
+- 2 files under `AIL_CURRENT/stdlib/` are license texts (`LICENSE-PSF.txt`,
+  `LICENSE-PYPY-MIT.txt`).
+- Total files under `AIL_CURRENT/stdlib/` and `third_party/`: 77, of which 71
+  are third-party or derived (20 CPython-derived, 1 PyPy-derived, 50 typeshed,
+  and 2 license texts) and 4 are AIL's own. 0 files are without a notice.
 - These counts describe the tree when this inventory was last updated.
   `AIL_CURRENT/test_ail_third_party_notices.py` does not compare them: it
   checks that every file under `AIL_CURRENT/stdlib/` and `third_party/` has a
@@ -67,10 +72,16 @@ an AIL-owned file; no separate file is vendored.
 
 ## Follow-ups
 
-- The wheel now carries the PSF notice: `packaging/ail_wheel_backend.py` copies
-  `AIL_CURRENT/stdlib/LICENSE-PSF.txt` to `.dist-info/licenses/LICENSE-PSF.txt` in both
-  `collect()` and `prepare_metadata_for_build_wheel()`, and `test_ail_third_party_notices`
-  checks it. An exported SDK still carries the notice only where the source selection puts it:
-  `sdk_files()` selects stdlib files by the `.py`/`.c`/`.h` suffix, so a `stdlib/LICENSE-PSF.txt`
-  beside the SDK's stdlib would need a separate addition in `AIL_CURRENT/ail_sdk.py`
-  (`_license_payloads`); the derived stdlib files themselves are already in the wheel.
+- The `ailc` wheel does not yet carry the PSF notice. `packaging/ail_wheel_backend.py`
+  is owned by another lane; it needs this exact change. After
+  `LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")` (line ~43) add
+  `PSF_LICENSE = "AIL_CURRENT/stdlib/LICENSE-PSF.txt"`, and in `collect()` after
+  the `for name in LICENSE_FILES:` loop add
+  `entries[info + "/licenses/LICENSE-PSF.txt"] = (REPO / PSF_LICENSE).read_bytes()`,
+  and in `prepare_metadata_for_build_wheel()` after its `for name in LICENSE_FILES:` loop add
+  `(info / "licenses" / "LICENSE-PSF.txt").write_bytes((REPO / PSF_LICENSE).read_bytes())`.
+  Do not add `LICENSE-PSF.txt` to the manifest's `sdk_files`: `test_ail_packaging`
+  checks the wheel file list against that selection, and the notice belongs under
+  `.dist-info/licenses/`, not in the SDK tree.
+  Until that change lands `test_ail_third_party_notices` accepts the missing PSF wheel
+  entry only because this paragraph exists; remove this paragraph when it lands.

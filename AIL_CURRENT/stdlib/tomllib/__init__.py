@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """TOML 1.0 parser, a port of CPython 3.12's ``tomllib`` to the AIL subset.
 
+Derived from CPython 3.12 Lib/tomllib/__init__.py; MIT License (upstream tomli); PSF License text, see stdlib/LICENSE-PSF.txt.
+
 The package keeps CPython's public surface (``loads``, ``load`` and
 ``TOMLDecodeError``), its results and its error messages, including the
 ``(at line L, column C)`` / ``(at end of document)`` suffix.  AIL refuses

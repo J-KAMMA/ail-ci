@@ -1,5 +1,7 @@
 """G5a: the standard-library `difflib` module, shipped as AIL source.
 
+Derived from CPython 3.12 Lib/difflib.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 `import difflib` finds this file in the bundled `stdlib/` directory when the
 program's own directory and `AIL_PATH` have no `difflib.py` (see `ail_modules.py`).
 The algorithms follow CPython 3.12's `Lib/difflib.py`: `SequenceMatcher` (with

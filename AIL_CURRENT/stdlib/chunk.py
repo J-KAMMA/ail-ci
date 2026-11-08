@@ -1,5 +1,7 @@
 """Simple class to read IFF chunks.
 
+Derived from CPython 3.12 Lib/chunk.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 An IFF chunk (used in formats such as AIFF, TIFF, RMFF (RealMedia File
 Format)) has the following structure:
 

@@ -1,5 +1,7 @@
 """Recognize image file formats based on their first few bytes.
 
+Derived from CPython 3.12 Lib/imghdr.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 This is CPython 3.12's Lib/imghdr.py as AIL source.  `what`, every `test_*` function, their order in
 `tests` and the returned strings are CPython's.
 

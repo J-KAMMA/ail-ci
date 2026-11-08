@@ -1,5 +1,7 @@
 """Constants/functions for interpreting results of os.stat() and os.lstat().
 
+Derived from CPython 3.12 Lib/stat.py; PSF License, see stdlib/LICENSE-PSF.txt.
+
 Suggested usage: from stat import *
 
 This is CPython 3.12's Lib/stat.py as AIL source.  Every public name and value is kept: the
