@@ -16618,6 +16618,14 @@ static inline int ail_setx_det(ail_obj key) {
             for (int64_t i = 0; i < v->n; i++) if (!ail_setx_det(v->p[i])) return 0;
             return 1;
         }
+        case AIL_T_FROZENSET: {
+            /* frozenset_hash only depends on the elements' stored hashes, so a frozenset of
+               deterministic keys has a deterministic hash too (nested frozensets included). */
+            ail_setobj *s = AIL_SETOBJ(key);
+            for (int64_t i = 0; i < s->n; i++)
+                if (ail_setx_live(&s->ent[i]) && !ail_setx_det(s->ent[i].key)) return 0;
+            return 1;
+        }
         default: return 0;
     }
 }
@@ -16738,8 +16746,13 @@ static inline void ail_setx_rebuild(ail_ctx *cx, ail_setobj *so, int64_t newcap)
             if (so->ctab[slot] >= 0) so->ctab[slot] = remap[so->ctab[slot]];
     }
     int64_t nf = 0;
-    for (int64_t i = 0; i < oldfin && i < oldn; i++) if (remap[i] >= 0) nf++;
-    so->fin = nf;
+    if (!hasct) {
+        for (int64_t i = 0; i < oldfin && i < oldn; i++) if (remap[i] >= 0) nf++;
+        so->fin = nf;
+    }
+    /* with a CPython table `fin` is a slot cursor, not an entry index: the table itself is only
+       remapped in place, so the cursor keeps its value (CPython's set_table_resize keeps finger). */
+    else so->fin = oldfin;
     free(remap);
     free(old);
     ail_setx_account(cx, so, ail_setx_bytes(newcap) - ail_setx_bytes(oldcap));
@@ -16897,6 +16910,7 @@ static inline ail_st ail_set_rebuild_from(ail_ctx *cx, ail_obj dst, ail_obj src)
     return AIL_OK;
 }
 /* a's elements that are (keep 1) / are not (keep 0) in b, in CPython's order */
+static inline void ail_setx_difference_update_set(ail_ctx *cx, ail_setobj *so, ail_obj otheri);
 static inline void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo, int keep) {
     ail_obj r = ail_setx_newlike(cx, ao);
     ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
@@ -16910,7 +16924,20 @@ static inline void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_ob
     *out = r;
 }
 static inline void ail_setx_intersection(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 1); }
-static inline void ail_setx_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 0); }
+static inline void ail_setx_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
+    /* set_difference: when len(a)>>2 > len(b), CPython copies a and deletes b's elements, which
+       keeps a's table layout (and its finger); otherwise it filters into a fresh set. */
+    ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
+    if ((a->used >> 2) > b->used) {
+        ail_obj r = ail_setx_copy_as(cx, ao.tag == AIL_T_FROZENSET, a);
+        AIL_ROOT1(cx, fr, r);
+        ail_setx_difference_update_set(cx, AIL_SETOBJ(r), bo);
+        AIL_FRAME_LEAVE(cx, fr);
+        *out = r;
+        return;
+    }
+    ail_setx_filter(cx, out, ao, bo, 0);
+}
 static inline void ail_setx_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
     /* CPython: copy b, then discard/add each element of a in its table order */
     ail_obj r = ail_setx_copy_as(cx, ao.tag == AIL_T_FROZENSET, AIL_SETOBJ(bo));
@@ -26763,6 +26790,21 @@ static ail_iset ail_iset_and(const ail_iset *a, const ail_iset *b) {
 }
 static ail_iset ail_iset_minus(const ail_iset *a, const ail_iset *b) {
     ail_iset_check(a); ail_iset_check(b);
+    /* set_difference: len(a)>>2 > len(b) copies a, then deletes b's keys (keeping a's layout). */
+    if ((a->table.n >> 2) > b->table.n) {
+        ail_iset r = {0};
+        ail_iset_merge(&r, a);
+        if (b->con) {
+            for (int64_t s = 0; s <= b->cmask; s++)
+                if (b->ckind[s] == AIL_IS_LIVE) ail_iset_discard(&r, b->ckey[s]);
+        } else {
+            const int64_t *order = ail_tab_order(&b->table);
+            for (int64_t j = 0; j < b->table.n; j++) ail_iset_discard(&r, order[j]);
+        }
+        if (r.con && (r.cf - r.cu) > r.cmask / 4)
+            ail_iset_cp_resize(&r, r.cu > 50000 ? r.cu * 2 : r.cu * 4);
+        return r;
+    }
     ail_iset r = {0};
     ail_iset_arm(&r);
     if (a->con) {

@@ -1,3 +1,40 @@
+## 2026-11-08 -- rbsetord2 review fixes: set pop finger, difference heuristic, frozenset keys (job-rbsetord2_rr1-11081819)
+
+The review of the re-applied setord2 emulation found three wrong orders inherited from the accepted
+change. All are fixed in `python/pkg-v12/cruntime.py`:
+
+- **Pop finger.** `fin` is a CPython-table slot cursor when `co` is live, but `ail_setx_rebuild`
+  recomputed it from dense-entry indices and used that value, so a `pop()` followed by an `add`
+  that reused the freed dummy slot made the next `pop()` return the re-added key. The rebuild now
+  keeps the old slot cursor whenever the CPython table is live and only remaps it for the
+  insertion-order body. A table resize keeps the numeric cursor, as CPython's `set_table_resize`
+  does (it does not reset `finger`).
+- **Difference.** `ail_setx_difference` and typed `ail_iset_minus` always filtered into a fresh set.
+  They now take CPython's `set_difference` copy-and-delete path when `len(a)>>2 > len(b)`, keeping
+  a's table layout; `difference_update` follows the same layout and dummy-resize rule.
+- **Frozenset keys.** `ail_setx_det` treated a `frozenset` as non-deterministic, so a set of
+  frozensets silently fell back to insertion order. It now recurses into the frozenset's elements;
+  `ail_frozenset_hash` already reproduces CPython's deterministic mix, so those sets (and tuples
+  holding frozensets) walk and pop in CPython's order.
+
+`test_ail_setorder.py` gains S8 (pop after mutation/growth/clear), S9 (boxed and typed difference
+across both sides of the threshold) and S10 (sets of frozensets, tuples of frozensets, nested
+frozensets, empty/negative/64-bit elements). DIFFERENCES gains the review row and extends A2 /
+the setord2 row to frozensets; `tools/update_manifest.py` regenerated the `cruntime.py` and
+`test_ail_setorder.py` pins and `--check` passes (`tools/diff_ids.py` is absent on this tree).
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, general and default, all match CPython 3.12):
+`/tmp/probes/p_pop_boundary.py` (pop then add, growth, clear, difference_update dummies,
+negative/64-bit values, argument/list-item/attribute/dict-value routes, empty KeyError),
+`p_typed_pop_boundary.py` (typed growth and dummy cleanup), `p_diff_boundary.py` (both sides of
+`len(a)>>2 > len(b)`, empty/self, negatives, non-set iterable, multiple arguments, frozenset),
+`p_typed_diff_boundary.py`, `p_frozen_boundary.py` (empty/negative/64-bit leaves, bool/None/float,
+nested frozensets, tuples, routes, add/discard); the reviewer's `p_min1`, `p_finger`,
+`p_typed_finger`, `p_ops2`, `p_typed_ops` and `p_frozen_keys` also re-run 6/6 matching.
+
+Tests (`tools/par_check.py -j 2`): `test_ail_setorder`, `test_ail_sets_general`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed.
+
 ## 2026-11-08 -- rbsetord2 re-applied: CPython set order emulation on the current tree (job-rbsetord2_rr1-11081819)
 
 Re-applied the accepted `job-setord2-11080819` change (`fd0162e..c7a948e8`) on this tree; its diff no

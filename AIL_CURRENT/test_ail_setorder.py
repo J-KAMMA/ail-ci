@@ -18,6 +18,9 @@ S3  typed `set[int]` iteration and pop match CPython on the typed path as well
 S4  int-set operators and frozensets match CPython
 S5  str sets build and run with no refusal, deterministically, on every build
 S6  empty set / frozenset displays print and walk as CPython does
+S8  pop's table finger survives a rebuild, a growth and a clear
+S9  a - b / difference / difference_update use CPython's copy-and-delete heuristic
+S10 a set of frozensets (or of tuples holding them) walks in CPython's order
 """
 import os
 import subprocess
@@ -148,6 +151,119 @@ FROZENSET_ORDER = '''def main():
 main()
 '''
 
+# set.pop()'s search finger walks CPython's table; an insertion after a pop may reuse a dummy
+# slot without moving the finger, and a growth/resize keeps it too.
+FINGER = '''def main():
+    s = set()
+    for i in range(8):
+        s.add(i * 10)
+    print("first", s.pop())
+    s.add(64)
+    out = []
+    while s:
+        out.append(s.pop())
+    print("drain", out)
+
+    t = set()
+    for i in range(5):
+        t.add(i * 10)
+    print("grow1", t.pop())
+    for i in range(5, 30):
+        t.add(i * 10)
+    out = []
+    while t:
+        out.append(t.pop())
+    print("growdrain", out)
+
+    u = set()
+    for i in range(8):
+        u.add(i)
+    u.pop()
+    u.clear()
+    u.add(50)
+    u.add(10)
+    u.add(30)
+    print("clear", [u.pop(), u.pop(), u.pop()])
+main()
+'''
+
+TYPED_FINGER = '''def main() -> None:
+    t: set[int] = set()
+    for i in range(40):
+        t.add(i * 128)
+    print("p1", t.pop())
+    for i in range(40, 80):
+        t.add(i * 128)
+    print("p2", t.pop())
+    out = []
+    while len(t) > 0:
+        out.append(t.pop())
+    print("drain", out)
+main()
+'''
+
+# a - b: CPython copies a and deletes b's elements when len(a)>>2 > len(b), keeping a's table
+# layout; otherwise it filters into a fresh set. The threshold and both sides of it are here.
+DIFF_ORDER = '''def big(n, step):
+    s = set()
+    for i in range(n):
+        s.add(i * step)
+    return s
+
+def main():
+    a = big(40, 128)
+    small = {0, 128}
+    print("minus", list(a - small))
+    print("rev", list(small - a))
+    b = big(8, 128)
+    print("threshold", list(b - big(2, 128)), list(a - big(10, 128)))
+    print("copy", list(big(44, 128) - big(10, 128)))
+    print("list", list(a.difference([0, 128])))
+    d = big(40, 128)
+    print("method", list(d.difference(small)))
+    d.difference_update(small)
+    print("update", list(d))
+    fa = frozenset(big(40, 128))
+    print("frozen", list(fa - frozenset(small)))
+    print("empty", list(set() - small), list(a - set()))
+    print("self", list(a - a))
+main()
+'''
+
+TYPED_DIFF = '''def main() -> None:
+    c: set[int] = set()
+    for i in range(40):
+        c.add(i * 128)
+    d: set[int] = set()
+    for i in range(8):
+        d.add(32 + i * 32)
+    print("minus", list(c - d))
+    e = c.copy()
+    e.difference_update(d)
+    print("dupdate", list(e))
+    small: set[int] = {0, 128}
+    print("small", list(c - small))
+    print("rev", list(small - c))
+main()
+'''
+
+# A frozenset of deterministic keys has a deterministic CPython hash, so a set of frozensets
+# (or of tuples holding them) must walk in CPython's table order too.
+FROZEN_KEYS = '''def main():
+    s = {frozenset([1]), frozenset([2]), frozenset([3]), frozenset([4]), frozenset([5])}
+    print(list(s))
+    t = {frozenset([40, 33, 26]), frozenset([19, 12, 5]), frozenset([1, 2, 3])}
+    print(list(t))
+    u = {(frozenset([1]),), (frozenset([2]),), (frozenset([3]),)}
+    print(list(u))
+    v = {frozenset([7]), frozenset([8]), frozenset([9])}
+    v.add(frozenset([10]))
+    v.discard(frozenset([8]))
+    print(list(v))
+    print(list({frozenset(), frozenset([-1]), frozenset([1 << 60])}))
+main()
+'''
+
 # str sets: no refusal anywhere. The order is AIL's own (deterministic); CPython's is random per
 # run, so this compares only against CPython's order-free answers.
 STR_SET_TYPED = '''def main() -> None:
@@ -246,6 +362,17 @@ class SetOrderTests(unittest.TestCase):
 
     def test_s6_empty_display(self):
         self._same('empty', EMPTY, ('general', 'default'))
+
+    def test_s8_pop_finger_survives_mutation(self):
+        self._same('finger', FINGER, ('general', 'default'))
+        self._same('typedfinger', TYPED_FINGER, ALL_MODES)
+
+    def test_s9_difference_uses_cpython_copy_and_delete(self):
+        self._same('difforder', DIFF_ORDER, ('general', 'default'))
+        self._same('typeddiff', TYPED_DIFF, ALL_MODES)
+
+    def test_s10_set_of_frozensets_walks_in_cpython_order(self):
+        self._same('frozenkeys', FROZEN_KEYS, ('general', 'default'))
 
     def test_s7_mutation_during_iteration_still_fails(self):
         text = ('def f():\n'
