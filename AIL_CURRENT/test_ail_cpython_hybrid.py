@@ -247,6 +247,60 @@ for empty in (lambda: at([], 0), lambda: last([])):
             self.assertIn(b'key-exc KeyError 3', got.stdout)
             self.assertIn(b'nested-exc IndexError list index out of range', got.stdout)
 
+    def test_indexing_extension_really_loads(self):
+        """obs1 defect: an indexing unit's extension failed to import (undefined trap symbol), the
+        preamble swallowed the ImportError and build.json still claimed `first` was native."""
+        text = 'def first(xs: list[int]) -> int:\n    return xs[0]\n'
+        probe = '''
+import sys
+import _ail_first_fast as ext
+import first as m
+assert m._ail_hybrid_native is ext, m._ail_hybrid_native
+assert NATIVE_CHECK, 'first is not the native entry'
+print(m.first([7, 8]), ext.first([7, 8]))
+try:
+    m.first([])
+except IndexError as e:
+    print('IndexError', e)
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'first', text)
+            self.assertEqual(report['accelerated'], ['first'], report)
+            self.assertTrue((out / report['extension']).is_file(), report)
+            check = 'ext._ail_is_native(m.first)'
+            # cwd = out: `import first` must find the hybrid copy, not the source beside `tmp`
+            got = run([sys.executable, '-B', '-c', probe.replace('NATIVE_CHECK', check)],
+                      str(out), env=dict(os.environ, PYTHONPATH=str(out)))
+            self.assertEqual(got.returncode, 0, got.stderr[-2000:])
+            self.assertEqual(got.stdout, b'7 7\nIndexError list index out of range\n')
+
+    def test_extension_that_does_not_import_is_not_claimed(self):
+        """A `.so` that links but cannot load must not be listed as accelerated."""
+        import ail_cpython_hybrid as hybrid
+        text = 'def first(xs: list[int]) -> int:\n    return xs[0]\n\nprint(first([3]))\n'
+        old = hybrid._trap_patch
+
+        def broken(csrc, mangled):
+            # reintroduce the obs1 defect: the trap flag loses external linkage
+            return old(csrc, mangled).replace('\n__thread int %s__hybrid_trap' % mangled,
+                                              '\nstatic __thread int %s__hybrid_trap' % mangled)
+        hybrid._trap_patch = broken
+        try:
+            with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+                src = Path(tmp) / 'first.py'
+                src.write_text(text, encoding='utf-8')
+                report = hybrid.build(src, Path(tmp) / 'out')
+                self.assertEqual(report['accelerated'], [], report)
+                self.assertFalse(report['extension'], report)
+                self.assertIn('did not import', report['rejected']['first'])
+                self.assertFalse(list((Path(tmp) / 'out').glob('*.so')))
+                saved = json.loads((Path(tmp) / 'out' / 'build.json').read_text())
+                self.assertEqual(saved['accelerated'], [])
+                got = run([str(Path(tmp) / 'out' / 'first')], tmp)
+                self.assertEqual(got.stdout, b'3\n')
+        finally:
+            hybrid._trap_patch = old
+
     def test_rejected_reasons_are_named(self):
         """Every top-level function that stays in CPython carries a visible reason (wedge1 W0)."""
         text = '''
@@ -314,6 +368,67 @@ print(m.f(4), m.g(), m.g(4), m.g(n=5), m.h(1, 2, 3), m.k(4, 5, 6))
             for name in ('f', 'g', 'h', 'k'):
                 self.assertIn(name, report['accelerated'])
             self.compare_imported(tmp, out, runner)
+
+    def test_vectorcall_entry_matches_cpython(self):
+        """obs2: the C entry is installed on the original function object.  Keywords, defaults,
+        wrong arity, non-fitting arguments, `*args`/`**kw` call sites, map/partial, a replaced
+        `__code__` or `__defaults__`, and introspection must all behave exactly as CPython."""
+        text = '''
+def add(a: int, b: int = 10) -> int:
+    return a + b
+
+def scale(x: float, k: float) -> float:
+    return x * k
+
+def flag(b: bool, n: int) -> int:
+    return n + 1 if b else n - 1
+
+def greet(s: str) -> str:
+    return s + '!'
+'''
+        runner = '''
+import functools, inspect, types
+import vc as m
+print(type(m.add) is types.FunctionType, m.add.__name__, m.add.__qualname__, m.add.__defaults__)
+print(inspect.signature(m.add), m.add.__code__.co_varnames, m.add.__globals__ is vars(m))
+print(m.add(1, 2), m.add(1), m.add(a=1, b=2), m.add(1, b=5), m.add(*(3, 4)), m.add(**{'a': 5}))
+print(m.add(2**63 - 1, 1), m.add(-2**63, -1), m.add(2**70, 1), m.add(True, True), m.add(1.5, 2))
+print(list(map(m.add, [1, 2], [3, 4])), functools.partial(m.add, b=1)(4))
+for bad in ((), (1, 2, 3), ('a', 1), (None,)):
+    try:
+        print(m.add(*bad))
+    except TypeError as e:
+        print('TypeError', e)
+try:
+    m.add(1, c=2)
+except TypeError as e:
+    print('TypeError', e)
+print(m.scale(1.5, 2.0), m.scale(3, 0.5), m.scale(float('nan'), 0.0), m.scale(1e308, 10.0))
+print(m.flag(True, 1), m.flag(False, 1), m.flag(1, 1), m.greet('x'), m.greet('東京'))
+try:
+    m.greet(b'x')
+except TypeError as e:
+    print('TypeError', e)
+m.add.__defaults__ = (100,)
+print(m.add(1))
+def other(a, b=0):
+    return a - b
+m.add.__code__ = other.__code__
+print(m.add(1, 2), m.add(1))
+'''
+        probe = '''
+import vc as m
+nat = m._ail_hybrid_native
+print([nat._ail_is_native(getattr(m, n)) for n in ('add', 'scale', 'flag', 'greet')])
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'vc', text)
+            for name in ('add', 'scale', 'flag', 'greet'):
+                self.assertIn(name, report['accelerated'])
+            self.compare_imported(tmp, out, runner)
+            got = run([sys.executable, '-B', '-c', probe], str(out),
+                      env=dict(os.environ, PYTHONPATH=str(out)))
+            self.assertEqual(got.stdout, b'[True, True, True, True]\n', got.stderr[-2000:])
 
     def test_fallback_from_later_arguments_releases_buffers(self):
         text = '''
