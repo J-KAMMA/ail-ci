@@ -247,6 +247,60 @@ for empty in (lambda: at([], 0), lambda: last([])):
             self.assertIn(b'key-exc KeyError 3', got.stdout)
             self.assertIn(b'nested-exc IndexError list index out of range', got.stdout)
 
+    def test_indexing_extension_really_loads(self):
+        """obs1 defect: an indexing unit's extension failed to import (undefined trap symbol), the
+        preamble swallowed the ImportError and build.json still claimed `first` was native."""
+        text = 'def first(xs: list[int]) -> int:\n    return xs[0]\n'
+        probe = '''
+import sys
+import _ail_first_fast as ext
+import first as m
+assert m._ail_hybrid_native is ext, m._ail_hybrid_native
+assert NATIVE_CHECK, 'first is not the native entry'
+print(m.first([7, 8]), ext.first([7, 8]))
+try:
+    m.first([])
+except IndexError as e:
+    print('IndexError', e)
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'first', text)
+            self.assertEqual(report['accelerated'], ['first'], report)
+            self.assertTrue((out / report['extension']).is_file(), report)
+            check = ('m.first.__globals__ is not vars(m)')
+            # cwd = out: `import first` must find the hybrid copy, not the source beside `tmp`
+            got = run([sys.executable, '-B', '-c', probe.replace('NATIVE_CHECK', check)],
+                      str(out), env=dict(os.environ, PYTHONPATH=str(out)))
+            self.assertEqual(got.returncode, 0, got.stderr[-2000:])
+            self.assertEqual(got.stdout, b'7 7\nIndexError list index out of range\n')
+
+    def test_extension_that_does_not_import_is_not_claimed(self):
+        """A `.so` that links but cannot load must not be listed as accelerated."""
+        import ail_cpython_hybrid as hybrid
+        text = 'def first(xs: list[int]) -> int:\n    return xs[0]\n\nprint(first([3]))\n'
+        old = hybrid._trap_patch
+
+        def broken(csrc, mangled):
+            # reintroduce the obs1 defect: the trap flag loses external linkage
+            return old(csrc, mangled).replace('\n__thread int %s__hybrid_trap' % mangled,
+                                              '\nstatic __thread int %s__hybrid_trap' % mangled)
+        hybrid._trap_patch = broken
+        try:
+            with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+                src = Path(tmp) / 'first.py'
+                src.write_text(text, encoding='utf-8')
+                report = hybrid.build(src, Path(tmp) / 'out')
+                self.assertEqual(report['accelerated'], [], report)
+                self.assertFalse(report['extension'], report)
+                self.assertIn('did not import', report['rejected']['first'])
+                self.assertFalse(list((Path(tmp) / 'out').glob('*.so')))
+                saved = json.loads((Path(tmp) / 'out' / 'build.json').read_text())
+                self.assertEqual(saved['accelerated'], [])
+                got = run([str(Path(tmp) / 'out' / 'first')], tmp)
+                self.assertEqual(got.stdout, b'3\n')
+        finally:
+            hybrid._trap_patch = old
+
     def test_rejected_reasons_are_named(self):
         """Every top-level function that stays in CPython carries a visible reason (wedge1 W0)."""
         text = '''

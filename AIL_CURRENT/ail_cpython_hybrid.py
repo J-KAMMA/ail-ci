@@ -746,8 +746,11 @@ def _trap_patch(csrc, mangled):
         inits.append('ail_exc_top')
         restores.append('        ail_exc_top = s->exc_top;')
 
+    # The flag has external linkage: the wrapper (another translation unit of the same `.so`)
+    # reads it through `extern __thread int`.  A `static` here left that reference undefined, so
+    # every indexing unit's extension failed to import (obs1).  `_verify_import` now catches that.
     decl = ('\n#include <setjmp.h>\n'
-            'static __thread int %s = 0;\n'
+            '__thread int %s = 0;\n'
             'static __thread jmp_buf %s;\n'
             'static inline void %s(void);\n' % (flag, jmp, hit))
     if fields:
@@ -779,6 +782,17 @@ def _trap_patch(csrc, mangled):
         body.append('    %s = previous;\n' % savep)
     body.extend(('    return result;\n', '}\n'))
     csrc = _TRAP_DIES.sub(hit + '()', csrc)
+    # Some runtime helpers raise instead of dying (`ail_olist_index` -> `ail_raise_named(
+    # AIL_EXC_INDEX)` for `a[n][m]`).  A hybrid unit never runs under an AIL `try` (the selection
+    # refuses `try`), so such a raise is always uncaught and would print a name and `_Exit(1)` the
+    # whole CPython process.  Turn the uncaught path into the same per-call fallback: CPython
+    # re-runs the original and raises the exact exception.  (Found once obs2 made the units load.)
+    uncaught = 'static void ail_exception_uncaught(ail_exception *value) {\n'
+    if uncaught in csrc:
+        csrc = csrc.replace(uncaught, uncaught +
+                            '    ail_exception_store(&ail_exc_value, NULL, 1);\n'
+                            '    ail_exc_code = 0;\n'
+                            '    %s();\n' % hit, 1)
     csrc = csrc.replace(marker, marker + decl, 1)
     return csrc + helper + ''.join(body)
 
@@ -1199,6 +1213,38 @@ def _compile(items, units, module, out_dir):
     return so
 
 
+_VERIFY = r'''
+import importlib.util, json, sys
+name, path, wanted = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+spec = importlib.util.spec_from_file_location(name, path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+missing = [n for n in wanted if not callable(getattr(mod, n, None))]
+if missing:
+    raise SystemExit('the extension lacks ' + ', '.join(missing))
+'''
+
+
+def _verify_import(so, module, names):
+    """Import the freshly linked extension in a separate interpreter (the same one that will run
+    the program) and return None, or the reason it cannot be used.
+
+    The generated preamble treats an import failure as "run on CPython" so that a moved or
+    mismatched `.so` never breaks the program.  Without this check a unit that links but cannot
+    load (obs1: an undefined trap symbol) silently ran everything on CPython while build.json
+    listed the functions as accelerated."""
+    try:
+        r = subprocess.run([sys.executable, '-I', '-B', '-c', _VERIFY, module, str(so),
+                            json.dumps(list(names))],
+                           capture_output=True, text=True, timeout=120)
+    except Exception as error:
+        return 'import check failed: %s' % error
+    if r.returncode != 0:
+        lines = [l for l in (r.stderr or r.stdout or '').strip().splitlines() if l.strip()]
+        return (lines[-1] if lines else 'exit status %d' % r.returncode)[:600]
+    return None
+
+
 def build(source_path, output_dir):
     """Build a CPython hybrid for `source_path` into `output_dir`; return the report dict."""
     source_path = Path(source_path).resolve()
@@ -1228,8 +1274,24 @@ def build(source_path, output_dir):
                  if any(u[1] == name for u in units)]
         if items:
             so = _compile(items, units, module, output_dir)
-            report['extension'] = so.name
-            report['accelerated'] = sorted(i['name'] for i in items)
+            names = sorted(i['name'] for i in items)
+            broken = _verify_import(so, module, names)
+            if broken is None:
+                report['extension'] = so.name
+                report['accelerated'] = names
+            else:
+                # Never claim native for code that does not load: drop the extension, keep the
+                # program on CPython, name the reason per function and say so on stderr.
+                try:
+                    so.unlink()
+                except OSError:
+                    pass
+                why = 'the extension did not import (%s), stays in CPython' % broken
+                for name in names:
+                    report['rejected'][name] = why
+                report['note'] = 'no extension: ' + why
+                print('ail build --cpython: WARNING: %s; %d function(s) run in CPython'
+                      % (why, len(names)), file=sys.stderr)
         elif units:
             report['note'] = 'the typed functions were not safe to wrap; the program runs in CPython'
     except Exception as error:
