@@ -60,18 +60,18 @@
     "call": 6,
     "division": 2,
     "indexing": 8,
+    "list-param": 3,
     "store": 6
    },
    "solo_self_s": 0.0,
    "solo_share_of_kept": 0.0,
    "solo_functions": 0,
    "solo_examples": [],
-   "with_w4_self_s": 3.2421,
-   "with_w4_share_of_kept": 0.0734,
-   "with_w4_functions": 4,
+   "with_w4_self_s": 3.0841,
+   "with_w4_share_of_kept": 0.0698,
+   "with_w4_functions": 3,
    "with_w4_examples": [
     "dataframe_group:group_count",
-    "dataframe_group:group_sum",
     "matrix:identity",
     "matrix:mat_mul"
    ],
@@ -399,7 +399,8 @@
    "body_blockers": {
     "call": 1,
     "division": 3,
-    "indexing": 2
+    "indexing": 2,
+    "list-param": 4
    },
    "solo_self_s": 0.2098,
    "solo_share_of_kept": 0.0047,
@@ -408,12 +409,10 @@
     "float_loops:max_abs",
     "float_loops:sq_sum"
    ],
-   "with_w4_self_s": 0.8251,
-   "with_w4_share_of_kept": 0.0187,
-   "with_w4_functions": 4,
+   "with_w4_self_s": 0.2098,
+   "with_w4_share_of_kept": 0.0047,
+   "with_w4_functions": 2,
    "with_w4_examples": [
-    "float_loops:blend",
-    "float_loops:dot",
     "float_loops:max_abs",
     "float_loops:sq_sum"
    ],
@@ -524,7 +523,8 @@
    ],
    "body_blockers": {
     "call": 1,
-    "indexing": 1
+    "indexing": 1,
+    "list-param": 1
    },
    "solo_self_s": 0.0,
    "solo_share_of_kept": 0.0,
@@ -809,10 +809,11 @@
      "self_s": 0.158,
      "body_blockers": [
       "indexing",
+      "list-param",
       "store"
      ],
      "solo": false,
-     "with_w4": true
+     "with_w4": false
     },
     "scaled_total": {
      "family": "division-can-raise",
@@ -1006,10 +1007,11 @@
      "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b, double v_w'",
      "self_s": 0.3467,
      "body_blockers": [
-      "indexing"
+      "indexing",
+      "list-param"
      ],
      "solo": false,
-     "with_w4": true
+     "with_w4": false
     },
     "dot": {
      "family": "list-float-abi",
@@ -1017,10 +1019,11 @@
      "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b'",
      "self_s": 0.2686,
      "body_blockers": [
-      "indexing"
+      "indexing",
+      "list-param"
      ],
      "solo": false,
-     "with_w4": true
+     "with_w4": false
     },
     "max_abs": {
      "family": "list-float-abi",
@@ -1037,7 +1040,8 @@
      "reason": "the emitted prototype is 'ail_flist v_xs'",
      "self_s": 0.1606,
      "body_blockers": [
-      "division"
+      "division",
+      "list-param"
      ],
      "solo": false,
      "with_w4": false
@@ -1080,7 +1084,8 @@
      "self_s": 0.168,
      "body_blockers": [
       "call",
-      "division"
+      "division",
+      "list-param"
      ],
      "solo": false,
      "with_w4": false
@@ -1459,7 +1464,8 @@
      "self_s": 1.7214,
      "body_blockers": [
       "call",
-      "indexing"
+      "indexing",
+      "list-param"
      ],
      "solo": false,
      "with_w4": false
@@ -1521,6 +1527,7 @@
      "body_blockers": [
       "call",
       "indexing",
+      "list-param",
       "store"
      ],
      "solo": false,
@@ -1533,7 +1540,8 @@
      "self_s": 0.0,
      "body_blockers": [
       "call",
-      "indexing"
+      "indexing",
+      "list-param"
      ],
      "solo": false,
      "with_w4": false

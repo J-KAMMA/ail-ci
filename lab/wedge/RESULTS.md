@@ -80,12 +80,12 @@ Method: cProfile on each `run.py` gives the self-time (`tottime`) of every funct
 
 `share` is the percentage of the corpus's **profiled** whole-function self time (44.2 s across 15 modules).  `native` time is 2.19 s = 5.0% of it.  The profiled base is 1.57x the 28.17 s of CPython wall time in section 2, because cProfile adds per-call overhead; the shares rank the refused functions but are **not shares of real wall time** (for example `ast_lint` is 5.67 s of self time for a 1.739 s program, `tree_build` 5.80 s for 1.97 s).
 
-A first gate is only a **ceiling**: `_select` applies a second, independent body rule (`_unsafe_body`), so a function fixed at its first gate can still be refused for a subscript, a call, an index store or a division.  Of the 11 list-return functions 0 pass that body rule, of the 7 tuple-parameter 0, of the 6 nested-list 1, of the 7 list-float 2.  The `solo` column is the time of the functions with no other body gate; the `W4` column adds the index/index-store fix (W4).
+A first gate is only a **ceiling**: `_select` applies `_unsafe_body` and then `_list_param_mutated`, so a function fixed at its first gate can still be refused for a subscript, a call, an index store, a division or passing a list parameter on to a call (including `len`).  Of the 11 list-return functions 0 pass that body rule, of the 7 tuple-parameter 0, of the 6 nested-list 1, of the 7 list-float 2.  The `solo` column is the time of the functions with no other body gate; the `W4` column adds the index/index-store fix (W4) but not the list-parameter gate.
 
 | # | reason | self time s | share | solo self s | solo funcs | +W4 self s | +W4 funcs | functions | modules | example functions |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | 1 | not-a-top-level-function | 8.53 | 19.3% | 0 | 0 | 0 | 0 | 23 | 3 | `Frame`, `__init__`, `rows` |
-| 2 | list-return-kind | 6.98 | 15.8% | 0 | 0 | 3.24 | 4 | 11 | 6 | `bloom_set`, `make_hashes`, `group_count` |
+| 2 | list-return-kind | 6.98 | 15.8% | 0 | 0 | 3.08 | 3 | 11 | 6 | `bloom_set`, `make_hashes`, `group_count` |
 | 3 | tuple-parameter | 5.67 | 12.8% | 0 | 0 | 0 | 0 | 7 | 1 | `count_ints`, `count_tag`, `has_tag` |
 | 4 | indexing-can-raise | 5.58 | 12.6% | 0 | 1 | 0 | 1 | 10 | 6 | `bloom_probe`, `set_intersect`, `weighted_sum` |
 | 5 | nested-list-annotation | 3.91 | 8.9% | 0.01 | 1 | 0.01 | 1 | 6 | 1 | `bfs_reach`, `build_graph`, `degree_sum` |
@@ -94,18 +94,18 @@ A first gate is only a **ceiling**: `_select` applies a second, independent body
 | 8 | untyped-return-kind | 2.01 | 4.6% | 2.01 | 5 | 2.01 | 5 | 5 | 2 | `is_simple_email`, `score_ok`, `valid_len` |
 | 9 | module-constant | 1.63 | 3.7% | 0.93 | 3 | 0.93 | 3 | 4 | 1 | `count_fields`, `field_chars`, `max_field_len` |
 | 10 | bytes-parameter | 1.48 | 3.4% | 1.48 | 6 | 1.48 | 6 | 6 | 1 | `adler32_simple`, `crc32_table_free`, `fnv1a` |
-| 11 | list-float-abi | 1.26 | 2.8% | 0.21 | 2 | 0.83 | 4 | 7 | 1 | `blend`, `dot`, `max_abs` |
+| 11 | list-float-abi | 1.26 | 2.8% | 0.21 | 2 | 0.21 | 2 | 7 | 1 | `blend`, `dot`, `max_abs` |
 | 12 | division-can-raise | 0.24 | 0.5% | 0.13 | 2 | 0.13 | 2 | 3 | 3 | `multiples`, `scaled_total`, `mean_scaled` |
 | 13 | user-class-annotation | 0.01 | 0.0% | 0 | 1 | 0 | 1 | 2 | 1 | `build_tree`, `count_nodes` |
 | 14 | unannotated-list-parameter | 0.01 | 0.0% | 0 | 0 | 0 | 0 | 2 | 1 | `best_match`, `total_length` |
 | 15 | list-return | 0 | 0.0% | 0 | 0 | 0 | 0 | 1 | 1 | `top_score` |
 
-Read the `solo` column, not the ceiling.  By solo-achievable time the five largest fixes are untyped-return-kind (2.01 s), bytes-parameter (1.48 s), call-can-raise (1.32 s), module-constant (0.93 s), list-float-abi (0.21 s).  The five first-gate reasons below are still the biggest when their prerequisites are fixed, but **W4 (indexing-can-raise) is the prerequisite for W2/W3/W6**, and the call-can-raise and index-assignment rules are additional gates; so the W1-W6 order is dependency-aware, not the ceiling order.
+Read the `solo` column, not the ceiling.  By solo-achievable time the five largest fixes are untyped-return-kind (2.01 s), bytes-parameter (1.48 s), call-can-raise (1.32 s), module-constant (0.93 s), list-float-abi (0.21 s).  The five first-gate reasons below are still the biggest when their prerequisites are fixed, but **W4 (indexing-can-raise) is the prerequisite for W2/W3/W6**, and the call, division and list-parameter rules are additional gates; so the W1-W6 order is dependency-aware, not the ceiling order.
 
 ### The five reasons that matter, spelled out
 
 1. **not-a-top-level-function** -- the hybrid's unit is a top-level `def`, so a class method, a nested helper or a constructor is refused before any typing happens.  This is the largest single bucket because the hottest code in a real module is often a method (`Tree._inorder` 2.15 s of `tree_build`'s 5.8 s of function self time; the three tree methods alone are 5.69 s).  The corpus's 8.53 s is plain methods taking `self`, which the two-hour W1 scope (staticmethods and closures) does not cover, so W1 measures 0 solo here.
-2. **list-return-kind** -- `-> list[int]` / `-> list[str]` / `-> list[float]`.  `pymix` has no return kind for a container, and the boundary has no ABI for one.  The first gate alone accelerates **0 of 11**: every body also indexes, calls or divides.  With W4 also applied, 4 of 11 (`group_count`, `group_sum`, `identity`, `mat_mul`, 3.24 s) become reachable; the rest still need the call or division rule.
+2. **list-return-kind** -- `-> list[int]` / `-> list[str]` / `-> list[float]`.  `pymix` has no return kind for a container, and the boundary has no ABI for one.  The first gate alone accelerates **0 of 11**: every body also indexes, calls or divides.  With W4 also applied, 3 of 11 (`group_count`, `identity`, `mat_mul`, 3.08 s) become reachable; the rest still need the call, division or list-parameter rule.
 3. **tuple-parameter** -- a `tuple` parameter (`node: tuple`) is not a tracked kind.  `ast_lint`'s recursive walk is 5.7 s of the corpus, but all 7 functions also index and call, so W3 alone accelerates **0 of 7**; W4 and the call rule are additional prerequisites for the whole 5.67 s.
 4. **indexing-can-raise** -- `_unsafe_body` refuses any subscript, because the typed clone cannot reproduce `IndexError` back into the caller's `try`.  It is the most common second gate, but only 1 of the 10 indexing functions (`trace`) has no other body gate, because 8 also call and 1 divides; `levenshtein` appends to a list as well, so it needs the call rule too.  W4 alone moves 1 function; its value is as the prerequisite for W2/W6.
 5. **nested-list-annotation** -- `list[list[int]]` (an adjacency list) is not a tracked parameter kind.  Only 1 of 6 (`edges_above`, 0.01 s) has no other body gate; the other 5 call, so W5 alone accelerates 1 and the 3.9 s is a ceiling.
@@ -114,7 +114,7 @@ The rest, in order: `list-str-parameter` (`list[str]`, 2.5 s), `call-can-raise` 
 
 ### A defect found on the way: `list[float]` cannot be wrapped at all
 
-`float_loops` gets none of its 8 functions, but `list[float]` ABI is **not** the only reason: the typed emitter accepts 7 of the 8, and `scale_into` is refused earlier by `pymix` as `unresolved-return` (family list-return-kind), so it never reaches the ABI gate.  For the 7 that do, `pyfunc.to_c` spells a `list[float]` parameter as a whole `ail_flist` value (`double dot(ail_flist v_a, ail_flist v_b)`); `pyboxed2._mix_validate_signature` demands the `const double *v_a, int64_t v_a_len` pair it demands for `list[int]`, and `ail_cpython_hybrid._c_proto` / `_wrapper_source` build the same pointer+length call.  Every `list[float]` candidate therefore fails the ABI cross-check and stays boxed.  This is not a semantic limit: the whole-program typed build compiles the same module on the typed path (2.20 s -> 0.15 s), and the hybrid wrapper already allocates and fills the `double *` buffer -- it just hands it over in the wrong shape (`ail_flist` is `{double *p; int64_t n, cap}`, so a value can be built in one line).  With the ABI spelling fixed only `max_abs` and `sq_sum` have no other body gate (2 of the 7); `dot`/`blend` also index and need W4, `mean`/`variance`/`norm` divide by a non-constant, and `scale_into` needs W2.  With W4 too, 4 of the 7 become reachable (0.83 s); the module does not go from 0 to 8.
+`float_loops` gets none of its 8 functions, but `list[float]` ABI is **not** the only reason: the typed emitter accepts 7 of the 8, and `scale_into` is refused earlier by `pymix` as `unresolved-return` (family list-return-kind), so it never reaches the ABI gate.  For the 7 that do, `pyfunc.to_c` spells a `list[float]` parameter as a whole `ail_flist` value (`double dot(ail_flist v_a, ail_flist v_b)`); `pyboxed2._mix_validate_signature` demands the `const double *v_a, int64_t v_a_len` pair it demands for `list[int]`, and `ail_cpython_hybrid._c_proto` / `_wrapper_source` build the same pointer+length call.  Every `list[float]` candidate therefore fails the ABI cross-check and stays boxed.  This is not a semantic limit: the whole-program typed build compiles the same module on the typed path (2.20 s -> 0.15 s), and the hybrid wrapper already allocates and fills the `double *` buffer -- it just hands it over in the wrong shape (`ail_flist` is `{double *p; int64_t n, cap}`, so a value can be built in one line).  With the ABI spelling fixed only `max_abs` and `sq_sum` have no other body gate (2 of the 7); `dot`/`blend` also index and pass a list parameter to `len()` (W4 plus the list-parameter gate), `mean`/`variance`/`norm` divide by a non-constant, and `scale_into` needs W2.  With W4 too, 2 of the 7 become reachable (0.21 s); the module does not go from 0 to 8.
 
 ### A second defect: 54 of the 73 refusals are silent
 
@@ -140,15 +140,15 @@ Let a clone that may raise `IndexError` fall back instead of being refused.  `_u
 
 **Guard:** `matrix.trace` (list[int] parameter, int return, `m[i*n+i]`) is the one indexing function whose body has no other gate; it is accelerated and its driver stays byte-identical.  `edit_dist.levenshtein` (3.6 s) also appends to a list, so it needs the call rule as well, not W4 alone.  Guard: a new `test_ail_cpython_hybrid` case with an in-range index, an index exactly at `len`, a negative index and an empty list; plus the four required modules.
 
-**Gain:** measured: solo 0 s (1 of 10 functions, `trace`); W4 also unblocks 3.24 s of list-return (4 functions) and 0.83 s of list-float (4 functions).  The 5.6 s first-gate ceiling is reached only when the call and index-store rules are applied too.
+**Gain:** measured: solo 0 s (1 of 10 functions, `trace`); W4 also unblocks 3.08 s of list-return (3 functions) and 0.21 s of list-float (2 functions).  The 5.6 s first-gate ceiling is reached only when the call and division rules are applied too.
 
 ### W2 -- list-return-kind (measured ceiling 15.8% of the corpus self time)
 
 Give `pymix` and the boundary a `list[int]` / `list[float]` return kind.  `pymix` reports `unresolved-return` for a body whose `return xs` is a list, and the hybrid `_wrapper_source` has no C path for a returned list.  Add `pymix.LIST_INT` /`LIST_FLOAT` to the return kinds it resolves from a `return <list literal or list name>` and a list-append loop, and add a wrapper branch that returns `PyList_New` filled from the emitted `(const int64_t *out, int64_t n)` out-parameter pair the library ABI already uses (`compile-library`).
 
-**Guard:** W2 alone accelerates **0 of 11** functions because every body also indexes or calls.  With W4 also applied (covering subscript stores), `group_count`, `group_sum`, `identity`, `mat_mul` (3.24 s) become native and their drivers stay byte-identical; `window_sums`, `make_hashes` and `scale_into` still need the call rule, and `bloom_set` also divides.  Guard: a new `test_ail_cpython_hybrid` case with an empty list return, a one-element list return and a 100k-element list return; plus `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+**Guard:** W2 alone accelerates **0 of 11** functions because every body also indexes or calls.  With W4 also applied (covering subscript stores), `group_count`, `identity`, `mat_mul` (3.08 s) become native and their drivers stay byte-identical; `group_sum` also passes a list parameter to `len()` (the `_list_param_mutated` gate), `window_sums`, `make_hashes`, `row_sums`, `make_samples`, `scale_into` and `top_indices` still need the call rule, and `bloom_set` also divides.  Guard: a new `test_ail_cpython_hybrid` case with an empty list return, a one-element list return and a 100k-element list return; plus `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 
-**Gain:** measured: solo 0.0 s; W2+W4 3.24 s of 44.2 s (4 of 11 functions); the 7.0 s first-gate ceiling is not reachable by this task alone.
+**Gain:** measured: solo 0.0 s; W2+W4 3.08 s of 44.2 s (3 of 11 functions); the 7.0 s first-gate ceiling is not reachable by this task alone.
 
 ### W3 -- tuple-parameter (measured ceiling 12.8% of the corpus self time)
 
@@ -162,9 +162,9 @@ Track a `tuple` parameter as an opaque homogeneous element stream.  `ast_lint` p
 
 Fix the `ail_flist` prototype mismatch (section 4).  Either teach `_mix_validate_signature` that `ail_flist v_x` is the same ABI as `const double *v_x, int64_t v_x_len` (the call site already builds that pair), or make `to_c` spell a mixed-mode `list[float]` parameter the pointer+len way.  This is the cheapest task in the list: one prototype spelling.
 
-**Guard:** With W6 alone `max_abs` and `sq_sum` become native (2 of 7, 0.21 s); with W4 also `dot` and `blend` become reachable (4 of 7, 0.83 s).  `mean`/`variance`/`norm` divide by a non-constant and `scale_into` is list-return-kind (W2), so `float_loops` does **not** go from 0 to 8.  Its driver stays byte-identical on all 9 printed lines.  Guard: a new `test_ail_cpython_hybrid` case with an empty `list[float]`, a NaN, `-0.0`, and a value that arrives through an argument, a list item and a dict value; plus the four required modules.
+**Guard:** With W6 alone `max_abs` and `sq_sum` become native (2 of 7, 0.21 s); W4 adds nothing, because `dot` and `blend` also index and pass a list parameter to `len()` (W4 plus the `_list_param_mutated` gate), `mean`/`variance` divide by a non-constant, `variance` also calls, `norm` uses `**`, and `scale_into` is list-return-kind (W2).  So `float_loops` does **not** go from 0 to 8.  Its driver stays byte-identical on all 9 printed lines.  Guard: a new `test_ail_cpython_hybrid` case with an empty `list[float]`, a NaN, `-0.0`, and a value that arrives through an argument, a list item and a dict value; plus the four required modules.
 
-**Gain:** measured: solo 0.21 s (2 of 7); W6+W4 0.83 s (4 of 7); the 1.26 s ceiling needs W2 for `scale_into` as well.
+**Gain:** measured: solo 0.21 s (2 of 7); W6+W4 also 0.21 s (2 of 7); only the division, call and list-parameter gates plus W2 for `scale_into` reach the 1.26 s ceiling.
 
 ### W5 -- nested-list-annotation (measured ceiling 8.9% of the corpus self time)
 

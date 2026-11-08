@@ -243,12 +243,13 @@ def main():
          pct(100 * analysis['native_share_of_self']),
          fmt(prof_total / wall_total, 2) if wall_total else 'n/a', fmt(wall_total, 2)))
     A('')
-    A('A first gate is only a **ceiling**: `_select` applies a second, independent body rule '
-      '(`_unsafe_body`), so a function fixed at its first gate can still be refused for a '
-      'subscript, a call, an index store or a division.  Of the %d list-return functions %d pass '
+    A('A first gate is only a **ceiling**: `_select` applies `_unsafe_body` and then '
+      '`_list_param_mutated`, so a function fixed at its first gate can still be refused for a '
+      'subscript, a call, an index store, a division or passing a list parameter on to a call '
+      '(including `len`).  Of the %d list-return functions %d pass '
       'that body rule, of the %d tuple-parameter %d, of the %d nested-list %d, of the %d '
       'list-float %d.  The `solo` column is the time of the functions with no other body gate; '
-      'the `W4` column adds the index/index-store fix (W4).'
+      'the `W4` column adds the index/index-store fix (W4) but not the list-parameter gate.'
       % (byfam['list-return-kind']['functions'], byfam['list-return-kind']['solo_functions'],
          byfam['tuple-parameter']['functions'], byfam['tuple-parameter']['solo_functions'],
          byfam['nested-list-annotation']['functions'],
@@ -268,7 +269,7 @@ def main():
     A('Read the `solo` column, not the ceiling.  By solo-achievable time the five largest fixes '
       'are %s.  The five first-gate reasons below are still the biggest when their prerequisites '
       'are fixed, but **W4 (indexing-can-raise) is the prerequisite for W2/W3/W6**, and the '
-      'call-can-raise and index-assignment rules are additional gates; so the W1-W6 order is '
+      'call, division and list-parameter rules are additional gates; so the W1-W6 order is '
       'dependency-aware, not the ceiling order.'
       % ', '.join('%s (%s s)' % (r['family'], fmt(r['solo_self_s'], 2)) for r in solo_rank
                   if r['solo_self_s'] > 0))
@@ -289,8 +290,8 @@ def main():
     A('2. **list-return-kind** -- `-> list[int]` / `-> list[str]` / `-> list[float]`.  `pymix` '
       'has no return kind for a container, and the boundary has no ABI for one.  The first gate '
       'alone accelerates **0 of %d**: every body also indexes, calls or divides.  With W4 also '
-      'applied, %d of %d (`%s`, %s s) become reachable; the rest still need the call or division '
-      'rule.'
+      'applied, %d of %d (`%s`, %s s) become reachable; the rest still need the call, division '
+      'or list-parameter rule.'
       % (byfam['list-return-kind']['functions'],
          byfam['list-return-kind']['with_w4_functions'],
          byfam['list-return-kind']['functions'],
@@ -346,7 +347,8 @@ def main():
       'wrapper already allocates and fills the `double *` buffer -- it just hands it over in '
       'the wrong shape (`ail_flist` is `{double *p; int64_t n, cap}`, so a value can be built '
       'in one line).  With the ABI spelling fixed only `max_abs` and `sq_sum` have no other '
-      'body gate (%s of the 7); `dot`/`blend` also index and need W4, `mean`/`variance`/`norm` '
+      'body gate (%s of the 7); `dot`/`blend` also index and pass a list parameter to `len()` '
+      '(W4 plus the list-parameter gate), `mean`/`variance`/`norm` '
       'divide by a non-constant, and `scale_into` needs W2.  With W4 too, %d of the 7 become '
       'reachable (%s s); the module does not go from 0 to 8.'
       % (byfam['list-float-abi']['solo_functions'],
@@ -416,7 +418,7 @@ def main():
          'plus the four required modules.',
          'measured: solo %s s (%d of %d functions, `%s`); W4 also unblocks %s s of list-return '
          '(%d functions) and %s s of list-float (%d functions).  The 5.6 s first-gate ceiling '
-         'is reached only when the call and index-store rules are applied too.'
+         'is reached only when the call and division rules are applied too.'
          % (fmt(byfam['indexing-can-raise']['solo_self_s'], 2),
             byfam['indexing-can-raise']['solo_functions'],
             byfam['indexing-can-raise']['functions'],
@@ -435,8 +437,10 @@ def main():
          'pair the library ABI already uses (`compile-library`).',
          'W2 alone accelerates **0 of %d** functions because every body also indexes or calls.  '
          'With W4 also applied (covering subscript stores), `%s` (%s s) become native and their drivers stay byte-identical; '
-         '`window_sums`, `make_hashes` and `scale_into` still need the call rule, and '
-         '`bloom_set` also divides.  Guard: a new `test_ail_cpython_hybrid` case with an '
+         '`group_sum` also passes a list parameter to `len()` (the `_list_param_mutated` gate), '
+         '`window_sums`, `make_hashes`, `row_sums`, `make_samples`, `scale_into` and `top_indices` '
+         'still need the call rule, and `bloom_set` also divides.  Guard: a new '
+         '`test_ail_cpython_hybrid` case with an '
          'empty list return, a one-element list return and a 100k-element list return; plus '
          '`test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, '
          '`test_ail_corpus_findings3`.'
@@ -469,19 +473,19 @@ def main():
          '`const double *v_x, int64_t v_x_len` (the call site already builds that pair), or make '
          '`to_c` spell a mixed-mode `list[float]` parameter the pointer+len way.  This is the '
          'cheapest task in the list: one prototype spelling.',
-         'With W6 alone `max_abs` and `sq_sum` become native (%d of %d, %s s); with W4 also '
-         '`dot` and `blend` become reachable (%d of %d, %s s).  `mean`/`variance`/`norm` divide '
-         'by a non-constant and `scale_into` is list-return-kind (W2), so `float_loops` does '
+         'With W6 alone `max_abs` and `sq_sum` become native (%d of %d, %s s); W4 adds nothing, '
+         'because `dot` and `blend` also index and pass a list parameter to `len()` (W4 plus the '
+         '`_list_param_mutated` gate), `mean`/`variance` divide by a non-constant, `variance` '
+         'also calls, `norm` uses `**`, and `scale_into` is list-return-kind (W2).  So '
+         '`float_loops` does '
          '**not** go from 0 to 8.  Its driver stays byte-identical on all 9 printed lines.  '
          'Guard: a new `test_ail_cpython_hybrid` case with an empty `list[float]`, a NaN, '
          '`-0.0`, and a value that arrives through an argument, a list item and a dict value; '
          'plus the four required modules.'
          % (byfam['list-float-abi']['solo_functions'], byfam['list-float-abi']['functions'],
-            fmt(byfam['list-float-abi']['solo_self_s'], 2),
-            byfam['list-float-abi']['with_w4_functions'], byfam['list-float-abi']['functions'],
-            fmt(byfam['list-float-abi']['with_w4_self_s'], 2)),
-         'measured: solo %s s (%d of %d); W6+W4 %s s (%d of %d); the 1.26 s ceiling needs W2 '
-         'for `scale_into` as well.'
+            fmt(byfam['list-float-abi']['solo_self_s'], 2)),
+         'measured: solo %s s (%d of %d); W6+W4 also %s s (%d of %d); only the division, call '
+         'and list-parameter gates plus W2 for `scale_into` reach the 1.26 s ceiling.'
          % (fmt(byfam['list-float-abi']['solo_self_s'], 2),
             byfam['list-float-abi']['solo_functions'], byfam['list-float-abi']['functions'],
             fmt(byfam['list-float-abi']['with_w4_self_s'], 2),

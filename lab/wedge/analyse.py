@@ -10,10 +10,11 @@ summing it over the functions that stayed on CPython, plus the driver's module-l
 profiled time the CPython boundary keeps.  Each reason family is then ranked by that sum, and by
 the number of functions and of modules it touches.
 
-The first gate is only a ceiling: `_select` also applies `_unsafe_body`, so a function fixed at
-its first gate can still be refused for indexing, a call, an index store or a division.  Each
-family therefore also carries the `solo` time (functions with no other body gate) and the
-`with_w4` time (solo once the indexing/index-store rule is also fixed).
+The first gate is only a ceiling: `_select` also applies `_unsafe_body` and then
+`_list_param_mutated`, so a function fixed at its first gate can still be refused for indexing,
+a call, an index store, a division or passing a list parameter to a call.  Each family therefore
+also carries the `solo` time (functions with no other body gate) and the `with_w4` time (solo once
+the indexing/index-store rule is also fixed).
 """
 import argparse
 import ast
@@ -34,7 +35,7 @@ _BODY_OWN = {
     'indexing-can-raise': 'indexing',
     'call-can-raise': 'call',
     'division-can-raise': 'division',
-    'list-parameter-mutated': 'store',
+    'list-parameter-mutated': 'list-param',
 }
 
 
@@ -111,12 +112,13 @@ def _annotation_kind(text):
 
 
 def _body_blockers(fn, params=(), ret=None):
-    """Every body gate `_unsafe_body` would apply to this function, not only the first one.
+    """Every body gate `_select` would apply to this function, not only the first one.
 
     The first gate in `boundary.json` is where a refusal stops today; a function fixed at that
     gate can still be refused by an independent `_select` body rule.  This scan mirrors
-    `ail_cpython_hybrid._unsafe_body`, but collects every category so the report can say which
-    fixes a function needs together.
+    `ail_cpython_hybrid._unsafe_body` plus the `_list_param_mutated` gate that `_select` applies
+    after it, collecting every category so the report can say which fixes a function needs
+    together.
     """
     import ail_cpython_hybrid as hybrid
     str_names = {p for p, k in params if k == 'str'}
@@ -150,6 +152,11 @@ def _body_blockers(fn, params=(), ret=None):
             cats.add('store')
         if isinstance(node, (ast.Await, ast.Yield, ast.YieldFrom)):
             cats.add('yield')
+    # `_select` applies `_list_param_mutated` after `_unsafe_body`: a function that mutates or
+    # passes a list parameter on to any call (including `len`) stays in CPython even if its body
+    # rule is otherwise satisfied.  Model the real predicate so `solo`/`+W4` do not count those.
+    if hybrid._list_param_mutated(fn, list_names):
+        cats.add('list-param')
     return cats
 
 
