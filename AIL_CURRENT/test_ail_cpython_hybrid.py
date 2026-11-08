@@ -393,5 +393,360 @@ print(f(1))
             self.assertEqual(got.returncode, want.returncode)
 
 
+    def test_methods_read_write_call_and_raise(self):
+        """A plain class method goes native: `self.<field>` reads/writes cross the C wrapper.
+
+        Covers an int field store (`add`), a `list[int]` field read through `len` (`Cols`), and a
+        method that raises: `boom` stays in CPython so the caller sees CPython's own exception.
+        A method that calls another method (`Counter.twice`, `Pair.both`) stays in CPython by
+        name: `self.m(...)` keeps CPython's dynamic dispatch (subclass/instance/class-attribute
+        overrides), which a direct kernel call would bypass.
+        """
+        text = '''
+class Counter:
+    def __init__(self, total: int) -> None:
+        self.total = total
+        self.count = 0
+
+    def add(self, x: int) -> int:
+        self.total = self.total + x
+        self.count = self.count + 1
+        return self.total
+
+    def get(self) -> int:
+        return self.total
+
+    def twice(self) -> int:
+        return self.get() + self.get()
+
+    def boom(self) -> int:
+        raise ValueError("boom")
+
+
+class Pair:
+    def __init__(self, a: int, b: int) -> None:
+        self.a = a
+        self.b = b
+
+    def only_b(self) -> int:
+        return self.b
+
+    def both(self) -> int:
+        return self.only_b() + self.a
+
+
+class Cols:
+    def __init__(self, xs: list[int]) -> None:
+        self.xs = xs
+
+    def size(self) -> int:
+        return len(self.xs)
+
+
+def main():
+    c = Counter(0)
+    print('add', c.add(5), c.add(7), c.get(), c.twice(), c.count, c.total)
+    p = Pair(100, 7)
+    print('pair', p.both(), p.only_b())
+    print('cols', Cols([1, 2, 3]).size(), Cols([]).size(), Cols([-4]).size())
+    try:
+        c.boom()
+    except ValueError as e:
+        print('exc', type(e).__name__, e)
+
+if __name__ == '__main__':
+    main()
+'''
+        runner = '''
+import methods_run as m
+native = m._ail_hybrid_native
+print('native', native is not None)
+c = m.Counter(3)
+print('direct', native.__ail_hybrid_method_Counter_add(c, 4), c.total, type(c.total).__name__)
+print('get', native.__ail_hybrid_method_Counter_get(c))
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'methods', text)
+            accelerated = set(report['accelerated'])
+            for name in ('Counter.add', 'Counter.get', 'Pair.only_b', 'Cols.size'):
+                self.assertIn(name, accelerated, report)
+            for name in ('Counter.twice', 'Pair.both'):
+                self.assertNotIn(name, accelerated, report)
+                self.assertIn('another method', report['rejected'][name], report)
+            self.assertIn('Counter.boom', report['rejected'])
+            self.assertTrue(report['rejected']['Counter.boom'])
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'methods')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            # The extension must really import: an undefined trap/overflow symbol would otherwise
+            # leave every call on the Python fallback while still comparing equal.
+            (Path(tmp) / 'run_native.py').write_text(runner, encoding='utf-8')
+            direct = run([sys.executable, str(Path(tmp) / 'run_native.py')], tmp,
+                         env=dict(os.environ, PYTHONPATH=str(out)))
+            self.assertEqual(direct.returncode, 0, direct.stderr[-2000:])
+            self.assertIn(b'native True', direct.stdout)
+            self.assertIn(b'direct 7 7 int', direct.stdout)
+
+    def test_method_dispatch_is_not_bypassed(self):
+        """`self.m(...)` keeps CPython's dynamic dispatch under the hybrid.
+
+        A method that calls another method is refused by name, so a subclass override, an
+        instance attribute and a monkeypatched class attribute all change the answer exactly as in
+        CPython.  A field-only method (`get`) is still lifted, and the refused caller falls back
+        to its original Python body.
+        """
+        text = '''
+class Base:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def get(self) -> int:
+        return self.n
+
+    def twice(self) -> int:
+        return self.get() * 2 + self.get()
+
+
+class Sub(Base):
+    def get(self) -> int:
+        return self.n + 100
+
+
+class Raiser(Base):
+    def get(self) -> int:
+        raise ValueError("override")
+
+
+class Patch:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def get(self) -> int:
+        return self.n
+
+    def twice(self) -> int:
+        return self.get() * 2 + self.get()
+
+
+print('base', Base(5).twice())
+print('sub', Sub(5).twice())
+try:
+    print(Raiser(5).twice())
+except ValueError as e:
+    print('raiser', type(e).__name__, e)
+inst = Base(5)
+inst.get = lambda: 99
+print('inst', inst.twice())
+patched = Patch(3)
+Patch.get = lambda self: 7 + self.n
+print('patch', patched.twice())
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'dispatch', text)
+            accelerated = set(report['accelerated'])
+            self.assertIn('Base.get', accelerated, report)
+            self.assertIn('Patch.get', accelerated, report)
+            for name in ('Base.twice', 'Patch.twice'):
+                self.assertNotIn(name, accelerated, report)
+                self.assertIn('another method', report['rejected'][name], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'dispatch')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'base 15', got.stdout)
+            self.assertIn(b'sub 315', got.stdout)
+            self.assertIn(b'raiser ValueError override', got.stdout)
+            self.assertIn(b'inst 297', got.stdout)
+            self.assertIn(b'patch 30', got.stdout)
+
+    def test_subclass_field_override_prevents_batching(self):
+        """A subclass that rebinds a field name keeps the parent's methods in CPython.
+
+        The wrapper reads each field once and re-executes the body, while CPython evaluates every
+        `self.n` occurrence.  A property (or other class-body binding of `n`) makes each access
+        observable, so the parent's method must not be lifted.
+        """
+        text = '''
+class Base:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def twice(self) -> int:
+        return self.n + self.n
+
+
+class Sub(Base):
+    def __init__(self) -> None:
+        self.i = 5
+        self.calls = 0
+
+    @property
+    def n(self):
+        self.calls += 1
+        return self.i + self.calls
+
+
+class Plain(Base):
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+
+s = Sub()
+print('sub', s.twice(), s.calls)
+print('base', Base(3).twice())
+print('plain', Plain(4).twice())
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'fieldbatch', text)
+            self.assertNotIn('Base.twice', report['accelerated'], report)
+            self.assertIn('subclass', report['rejected']['Base.twice'], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'fieldbatch')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'sub 13 2', got.stdout)
+
+    def test_subclass_with_uninspectable_base_refuses_by_name(self):
+        """A local mixin (or explicit `object`) whose base is not module-local must not crash.
+
+        `_field_override_subclass` walks every base on a descendant's MRO.  `object` and imported
+        bases have no body in this module, so their field bindings cannot be ruled out.  The
+        method is refused by name instead of raising `KeyError` and disabling the whole extension.
+        """
+        text = '''
+class Mixin(object):
+    pass
+
+
+class Base:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def twice(self) -> int:
+        return self.n + self.n
+
+
+class ViaMixin(Base, Mixin):
+    pass
+
+
+class ViaObject(Base, object):
+    pass
+
+
+print('mixin', ViaMixin(3).twice())
+print('object', ViaObject(4).twice())
+print('base', Base(5).twice())
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'unknownbase', text)
+            self.assertIsNone(report.get('note'), report)
+            self.assertNotIn('Base.twice', report['accelerated'], report)
+            self.assertIn('subclass', report['rejected']['Base.twice'], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'unknownbase')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'mixin 6', got.stdout)
+
+    def test_return_kinds_agree_or_refuse(self):
+        """A return kind is inferred from every `return` when they all agree; mixed stays CPython.
+
+        `and`/`or` of two bools is a bool (the old inference left it unresolved); `0 or a`
+        evaluates to an int; a function with an int return and a str return is refused by name.
+        """
+        text = '''
+def agree_bool(a: int, b: int) -> bool:
+    return a > 0 and b > 0
+
+def agree_int(a: int) -> int:
+    return 0 or a
+
+def mixed(flag: bool) -> int:
+    if flag:
+        return 1
+    return "x"
+
+def both_values(a: int, b: int) -> int:
+    return a or b
+
+print('bool', agree_bool(1, 2), agree_bool(1, 0), agree_bool(-1, 2))
+print('int', agree_int(0), agree_int(7), agree_int(-3))
+print('both', both_values(0, 5), both_values(3, 5), both_values(-1, -2))
+print('mixed', mixed(True))
+try:
+    print('mixed', mixed(False))
+except Exception as e:
+    print('mixed-exc', type(e).__name__)
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'returns', text)
+            for name in ('agree_bool', 'agree_int', 'both_values'):
+                self.assertIn(name, report['accelerated'], report)
+            self.assertIn('mixed', report['rejected'])
+            self.assertIn('unresolved-return', report['rejected']['mixed'])
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'returns')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+
+    def test_annotated_and_unannotated_parameters(self):
+        """Parameter kinds come from annotations and from the module's own call sites.
+
+        An unannotated top-level parameter with consistent int call sites resolves; conflicting
+        call sites (int and str) leave it unresolved and the function in CPython.  A class whose
+        `__init__` and one method parameter are unannotated resolves them from `Q(1)` and from the
+        `self.plus(k)` call site inside the class.  `Q.step` itself stays in CPython because it
+        calls another method, but that call site still seeds `Q.plus`'s parameter.
+        """
+        text = '''
+class Q:
+    def __init__(self, n):
+        self.n = n
+
+    def step(self, k: int) -> int:
+        return self.plus(k)
+
+    def plus(self, k):
+        return self.n + k
+
+
+def annotated(n: int, s: str) -> str:
+    return s + str(n)
+
+
+def unannotated(n):
+    return n + 1
+
+
+def agreement(a, b):
+    return a * b
+
+
+def disagreement(x):
+    return x
+
+
+print('annotated', annotated(3, 'n'), annotated(-4, 'n'))
+print('unannotated', unannotated(1), unannotated(2))
+print('agreement', agreement(2, 3), agreement(-2, 5))
+print('disagreement', disagreement(1), disagreement('a'))
+q = Q(1)
+print('q', q.step(2), q.plus(10))
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'params', text)
+            for name in ('annotated', 'unannotated', 'agreement', 'Q.plus'):
+                self.assertIn(name, report['accelerated'], report)
+            self.assertNotIn('Q.step', report['accelerated'], report)
+            self.assertIn('another method', report['rejected']['Q.step'], report)
+            self.assertIn('disagreement', report['rejected'])
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'params')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+
+
 if __name__ == '__main__':
     unittest.main()
