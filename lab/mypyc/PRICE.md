@@ -60,9 +60,12 @@ Notes:
 
 ## 4. Pick: `rangecheck.py`
 
-`rangecheck.py` has the largest own-time share of any non-excluded compiler module: **0.997 s
-pooled (3.24%)** and **0.239 s on scar_life (14.57% of that task's cold wall)**. `fastwalk.py` is
-second (0.858 s pooled, 2.79%; best 4.13% on tree_fold).
+`rangecheck.py` has the largest per-task own-time share of any non-excluded compiler module:
+**0.997 s pooled (3.24%)** and **0.239 s on scar_life (14.57% of that task's cold wall)**.
+`fastwalk.py` is second (0.858 s pooled, 2.79%; best 4.13% on tree_fold). The whole `ir` group's
+pooled 3.32% is slightly above rangecheck's, but the group includes the excluded `ir/passes/*`;
+its free module `ir/ir.py` is only 0.245 s pooled (0.8%), and the group's best task share (6.32%
+on berth_sim) halves to 1.0108x. The choice does not change the gate.
 
 | task | own s | share of cold wall | full | halved |
 |---|---:|---:|---:|---:|
