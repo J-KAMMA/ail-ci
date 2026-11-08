@@ -1,0 +1,834 @@
+[
+ {
+  "all_defs": [
+   "bloom_probe",
+   "bloom_set",
+   "make_hashes",
+   "multiples",
+   "popcount",
+   "rotate_xor",
+   "set_intersect"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "bloom_probe",
+     "bloom_set",
+     "make_hashes",
+     "multiples",
+     "popcount",
+     "rotate_xor",
+     "set_intersect"
+    ],
+    "build_rc": 0,
+    "build_s": 10.48,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "bloom_probe",
+     "bloom_set",
+     "make_hashes",
+     "multiples",
+     "popcount",
+     "rotate_xor",
+     "set_intersect"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "bloom_probe",
+   "bloom_set",
+   "make_hashes",
+   "multiples",
+   "popcount",
+   "rotate_xor",
+   "set_intersect"
+  ],
+  "icount": {
+   "cpython": 27156033567,
+   "hand": 6568292015
+  },
+  "module": "bitset_bloom",
+  "observe_same_output": true,
+  "profile": {
+   "bloom_probe": {
+    "big": {},
+    "calls": 6,
+    "generator": false,
+    "params": {
+     "bits": {
+      "int": 6
+     },
+     "keys": {
+      "list[int]": 6
+     },
+     "table": {
+      "list[int]": 6
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 6
+    },
+    "self_s": 2.167197
+   },
+   "bloom_set": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "bits": {
+      "int": 2
+     },
+     "keys": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.589936
+   },
+   "make_hashes": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "mod": {
+      "int": 2
+     },
+     "n": {
+      "int": 2
+     },
+     "seed": {
+      "int": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.503904
+   },
+   "multiples": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "d": {
+      "int": 1
+     },
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.028677
+   },
+   "popcount": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "table": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.008194
+   },
+   "rotate_xor": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.147484
+   },
+   "set_intersect": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.024581
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Frame.__init__",
+   "Frame.rows",
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "scaled_total",
+     "total_of",
+     "weighted_sum"
+    ],
+    "build_rc": 0,
+    "build_s": 7.41,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "scaled_total",
+     "total_of",
+     "weighted_sum"
+    ],
+    "rejected": {
+     "Frame.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+     "Frame.rows": "method: a loop-free body would copy a list field on every call, stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "icount": {
+   "cpython": 14251110320,
+   "hand": 5890709552
+  },
+  "module": "dataframe_group",
+  "observe_same_output": true,
+  "profile": {
+   "Frame": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Frame.__init__": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "key": {
+      "list[int]": 1
+     },
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Frame.rows": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "filter_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "hi": {
+      "int": 1
+     },
+     "lo": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.112633
+   },
+   "group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.075089
+   },
+   "group_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.15852
+   },
+   "max_group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "scaled_total": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "den": {
+      "int": 1
+     },
+     "num": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.162692
+   },
+   "total_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "weighted_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "w": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.34207
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "blend",
+   "dot",
+   "max_abs",
+   "mean",
+   "norm",
+   "scale_into",
+   "sq_sum",
+   "variance"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "blend",
+     "dot",
+     "max_abs",
+     "mean",
+     "scale_into",
+     "sq_sum",
+     "variance"
+    ],
+    "build_rc": 0,
+    "build_s": 22.31,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "blend",
+     "dot",
+     "max_abs",
+     "mean",
+     "scale_into",
+     "sq_sum",
+     "variance"
+    ],
+    "rejected": {
+     "norm": "division or power can raise"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "blend",
+   "dot",
+   "max_abs",
+   "mean",
+   "norm",
+   "scale_into",
+   "sq_sum",
+   "variance"
+  ],
+  "icount": {
+   "cpython": 27824141787,
+   "hand": 13681358987
+  },
+  "module": "float_loops",
+  "observe_same_output": true,
+  "profile": {
+   "blend": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[float]": 1
+     },
+     "b": {
+      "list[float]": 1
+     },
+     "w": {
+      "float": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.533069
+   },
+   "dot": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[float]": 1
+     },
+     "b": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.51628
+   },
+   "max_abs": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.159501
+   },
+   "mean": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 2
+    },
+    "self_s": 0.344187
+   },
+   "norm": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.142711
+   },
+   "scale_into": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "k": {
+      "float": 1
+     },
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[float]": 1
+    },
+    "self_s": 3.530011
+   },
+   "sq_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.146909
+   },
+   "variance": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.293818
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_over",
+   "longest_run",
+   "make_samples",
+   "mean_scaled",
+   "rising_streak",
+   "second_moment",
+   "total",
+   "window_sums"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_over",
+     "longest_run",
+     "make_samples",
+     "mean_scaled",
+     "rising_streak",
+     "second_moment",
+     "total",
+     "window_sums"
+    ],
+    "build_rc": 0,
+    "build_s": 9.57,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_over",
+     "longest_run",
+     "make_samples",
+     "mean_scaled",
+     "rising_streak",
+     "second_moment",
+     "total",
+     "window_sums"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_over",
+   "longest_run",
+   "make_samples",
+   "mean_scaled",
+   "rising_streak",
+   "second_moment",
+   "total",
+   "window_sums"
+  ],
+  "icount": {
+   "cpython": 35545827596,
+   "hand": 4555440298
+  },
+  "module": "rolling_stats",
+  "observe_same_output": true,
+  "profile": {
+   "count_over": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "limit": {
+      "int": 2
+     },
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.124621
+   },
+   "longest_run": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "want": {
+      "int": 2
+     },
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.149546
+   },
+   "make_samples": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "n": {
+      "int": 1
+     },
+     "seed": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.71865
+   },
+   "mean_scaled": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "scale": {
+      "int": 1
+     },
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.199394
+   },
+   "rising_streak": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.56495
+   },
+   "second_moment": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.178624
+   },
+   "total": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.116313
+   },
+   "window_sums": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "w": {
+      "int": 3
+     },
+     "xs": {
+      "list[int]": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 3
+    },
+    "self_s": 3.306621
+   }
+  }
+ }
+]

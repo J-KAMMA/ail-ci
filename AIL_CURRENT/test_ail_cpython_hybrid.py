@@ -4,9 +4,10 @@ typed-compilable, the generated extension is loaded and the Python module output
 CPython byte for byte, including the cases that must abandon the native call: an int outside
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
 (default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
-(indexing, division by a variable, arbitrary calls, raise/try) stay in CPython; that includes
-`divide` here; `first` indexes `xs[0]`, but an out-of-range index is detected and the Python
-wrapper re-runs the original, so it is native too.  A division by a literal nonzero constant
+(arbitrary calls, raise/try) stay in CPython.  `first` indexes `xs[0]`, but an out-of-range
+index is detected and the Python wrapper re-runs the original, so it is native too; since obs5 a
+zero divisor in `divide` is handled the same way (CPython re-runs and raises, even into a
+`try/except` around the call).  A division by a literal nonzero constant
 (`half`, `x / 2`) and a proved pure str method call cannot raise and are eligible.  A program the
 compiler cannot analyse at all still runs unchanged in CPython with no extension.
 """
@@ -118,10 +119,10 @@ class CPythonHybrid(unittest.TestCase):
             src, out, report = self.build(tmp, 'prog', PROGRAM)
             self.assertTrue(report['extension'], report)
             accelerated = set(report['accelerated'])
-            for name in ('add1', 'mul', 'isbig', 'half', 'join', 'total', 'first', 'dflt', 'echo'):
+            for name in ('add1', 'mul', 'isbig', 'half', 'join', 'total', 'first', 'dflt', 'echo',
+                         'divide'):
                 self.assertIn(name, accelerated)
             self.assertNotIn('push', accelerated)          # a list parameter that is mutated
-            self.assertNotIn('divide', accelerated)        # floor division can raise
             want = run([sys.executable, str(src)], tmp)
             got = run([str(out / 'prog')], tmp)
             self.assertEqual(got.stdout, want.stdout)
@@ -307,8 +308,8 @@ except IndexError as e:
 def keep(xs: list[int], i: int) -> int:
     return xs[i]
 
-def divide(a: int, b: int) -> int:
-    return a // b
+def power(a: float, b: float) -> float:
+    return a ** b
 
 def push(xs: list[int]) -> int:
     xs.append(9)
@@ -321,7 +322,7 @@ def nope(x: tuple) -> int:
             src, out, report = self.build(tmp, 'reasons', text)
             self.assertIn('keep', report['accelerated'])
             rejected = report['rejected']
-            for name in ('divide', 'push', 'nope'):
+            for name in ('power', 'push', 'nope'):
                 self.assertIn(name, rejected)
                 self.assertTrue(rejected[name], 'empty reason for %s' % name)
 

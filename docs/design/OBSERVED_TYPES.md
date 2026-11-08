@@ -361,3 +361,27 @@ bound-method allocation if `self` methods are called, and the list copies. For `
 entry per traversal runs 121k recursive native calls, so the guards are noise; `min_key`/`max_key`
 copy two 60k-element lists to walk ~20 nodes, slower than CPython for those two (0.0% of the
 module; option-3 element-use guards would remove the copy).
+
+## 6. obs5: local lists, container parameters, division, field stores, `int(str)`
+
+Priced from `obs4_task3.json` (a function's sampled self-time share in its module times the
+module's share of corpus CPython instructions; the sampler ranks, it does not bound exactly):
+division by a variable ~9% (`bloom_probe` 4.1, `bloom_set`/`make_hashes` 1.2 each, `float_loops`
+`mean`/`variance` 1.4, `scaled_total` 0.5, `mean_scaled`), a local list built by `append` 7.6%
+(`levenshtein`), container parameters ~16% (`bytes` 6.2, `list[str]` 5.9, `list[list[int]]` 4.5),
+methods that store a field 4.7% (`json_parse`), `int(str)` 2.2% (`sum_column`). Order: division
+(one mechanism, many functions), local lists, containers, `int(str)`, field stores.
+
+**obs5 task 1 (division by a variable).** `/`, `//`, `%` (and the augmented forms, which the old
+check missed entirely) with a divisor that is not a nonzero literal are accepted when the exact-kind
+pass proves both operands int/bool/float (`_variable_division_ok`; a str `%` formats and stays
+refused, `**` stays refused: a negative float base gives a complex). The typed runtime already
+computes CPython's values: `pydiv`/`pymod` floor for ints, `ail_ffloormod` after CPython's
+`float_divmod` (signed zeros, inf, nan), `ail_fdiv_i` correctly rounded int `/`, and
+`INT64_MIN // -1` takes the overflow stop. The zero-divisor stops ("integer division or modulo by
+zero", "division by zero", ...) join `_TRAP_DIES`, a unit with such a body (or reaching one through a
+callee or a self-called method) gets the trap pad, and pymix's "ZeroDivisionError can escape to a
+try/except" refusal is lifted in the hybrid's analysis like the subscript one: CPython re-runs the
+call and raises its own exception, message included. Measured (`obs5_task1.json`, `hand`,
+instructions vs CPython): `bitset_bloom` 0.919 -> 0.242, `float_loops` 0.626 -> 0.492,
+`dataframe_group` 0.510 -> 0.413, `rolling_stats` 0.171 -> 0.128; all outputs byte-identical.

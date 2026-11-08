@@ -317,6 +317,36 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
     return False
 
 
+def _variable_division_ok(node, kinds):
+    """obs5: `/`, `//`, `%` by a divisor that is not a nonzero literal.  When both operands are
+    exactly int/bool/float (the exact-kind pass; never a str, whose `%` formats), the typed clone
+    computes CPython's value: floor `//`/`%` for ints and floats (`pydiv`/`pymod`,
+    `ail_ffloormod`, written after CPython's float_divmod), a correctly rounded int `/`
+    (`ail_fdiv_i`), and an int64 overflow (`INT64_MIN // -1`) takes the overflow stop.  A zero
+    divisor stops the clone with a ZeroDivisionError message, which `_TRAP_DIES` turns into a
+    fallback: CPython re-runs the call and raises its own exception.  `**` stays refused (a
+    negative float base gives a complex result)."""
+    if kinds is None or not isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+        return False
+    if isinstance(node, ast.BinOp):
+        left, right = node.left, node.right
+    else:
+        left, right = node.target, node.value
+    return kinds.kind(left) in _NUM_KINDS and kinds.kind(right) in _NUM_KINDS
+
+
+def _has_variable_division(fn):
+    """The body divides by something other than a nonzero literal (a zero-division stop is
+    reachable, so the unit needs the trap pad)."""
+    for node in _own_nodes(fn):
+        if isinstance(node, (ast.BinOp, ast.AugAssign)) \
+                and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+            right = node.right if isinstance(node, ast.BinOp) else node.value
+            if not _nonzero_constant(right):
+                return True
+    return False
+
+
 def _unsafe_body(fn, params=(), ret=None, fresh=(), natives=None, kinds=None):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
@@ -343,9 +373,13 @@ def _unsafe_body(fn, params=(), ret=None, fresh=(), natives=None, kinds=None):
             # turned into a per-call fallback (see _trap_patch), so the Python wrapper
             # re-runs the original function and CPython's exception is the one observed.
             continue
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+        if isinstance(node, (ast.BinOp, ast.AugAssign)) \
+                and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+            right = node.right if isinstance(node, ast.BinOp) else node.value
             if (isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod))
-                    and _nonzero_constant(node.right)):
+                    and _nonzero_constant(right)):
+                continue
+            if _variable_division_ok(node, kinds):
                 continue
             return 'division or power can raise'
         if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names, num_names,
@@ -535,6 +569,10 @@ def _link_natives(chosen, rejected, funcs, consts, values, csrcs=None, methods=N
         item['nfuncs'] = len(unit)
         item['recursive'] = recursive
         if item['callees'] or recursive:
+            item['trap'] = True
+        # obs5: a zero divisor anywhere in the unit (a callee's or a self-called method's body
+        # included) stops the clone; the trap pad turns that into a fallback.
+        if any(chosen[m].get('vardiv') for m in unit if m in chosen):
             item['trap'] = True
 
 
@@ -1456,6 +1494,10 @@ _old_raise_site = pymix._raise_site_exc
 def _raise_site_exc(node):
     if isinstance(node, ast.Subscript):
         return None
+    # obs5: a zero divisor traps the same way (`_TRAP_DIES`), and `_select` admits a variable
+    # divisor only with exact numeric operands, so the ZeroDivisionError is always CPython's own.
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+        return None
     return _old_raise_site(node)
 pymix._raise_site_exc = _raise_site_exc
 # obs3: pymix cannot type `out = []; out.append(x); return out` (an empty literal has no element
@@ -1771,7 +1813,9 @@ def _select(src, tree, report, facts, methods=None):
             # The trap landing pad turns an index/key stop, an uncaught AIL exception and an
             # int64 overflow stop into "run the original in CPython".  An int result with the
             # mixed-mode overflow signal already handles its overflow stops.
-            'trap': bool(indexes or ret in _LIST or _overflow_stop_reachable(csrc, mangled)),
+            'vardiv': _has_variable_division(funcs[pyname]),
+            'trap': bool(indexes or ret in _LIST or _overflow_stop_reachable(csrc, mangled)
+                         or _has_variable_division(funcs[pyname])),
         }, None
 
     # obs4: a body that calls other natives is selectable only once they are, so selection runs
@@ -1817,7 +1861,10 @@ _TRAP_DIES = re.compile(
     r'ail_die\("(?:list index out of range|list assignment index out of range|'
     r'pop index out of range|pop from empty list|key error|string index out of range|'
     r'bytes index out of range|grid row index out of range|grid column index out of range|'
-    r'maximum recursion depth exceeded|MemoryError|OverflowError: integer overflow[^"\\]*)"\)')
+    r'maximum recursion depth exceeded|MemoryError|OverflowError: integer overflow[^"\\]*|'
+    # obs5: a zero divisor (selected only with exact numeric operands, `_variable_division_ok`)
+    r'integer division or modulo by zero|integer modulo by zero|division by zero|'
+    r'float division by zero|float modulo|float divmod\(\))"\)')
 # A checked int64 operation (`ck_mul`, `ck_add`, ...) stops the process with this message.  In a
 # hybrid unit that would kill the CPython process (obs3: found for list results; a float or str
 # result with int arithmetic inside had the same hole), so the trap pad turns it into a fallback.
