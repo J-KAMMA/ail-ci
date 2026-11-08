@@ -123,7 +123,9 @@ def main():
         A('**Against PyPy** (%s, section 2): PyPy runs the corpus at **%sx** CPython time; the AIL '
           'standalone binary is **faster than PyPy on %d of %d modules** (geomean '
           '**%sx** PyPy) and the hybrid on **%d of %d** (geomean **%sx**), with PyPy\'s output '
-          'byte-identical to CPython on %d of %d modules.'
+          'byte-identical to CPython on %d of %d modules.  The standalone pair is %d of %d because '
+          'the two modules whose default binary stops loudly on int64 need `--exact-int`, so they have '
+          'no default-run time in `measure.json`.'
           % (_pypy_label(measure),
              fmt(statistics.geometric_mean([measure[m]['pypy_s'] / measure[m]['cpython_s']
                                             for m in pp_ok]), 3),
@@ -131,7 +133,8 @@ def main():
              fmt(statistics.geometric_mean([v for _, v in se_pairs]), 3) if se_pairs else 'n/a',
              sum(1 for _, v in hy_pairs if v < 1), len(hy_pairs),
              fmt(statistics.geometric_mean([v for _, v in hy_pairs]), 3) if hy_pairs else 'n/a',
-             sum(1 for m in modules if measure[m].get('pypy_match')), len(modules)))
+             sum(1 for m in modules if measure[m].get('pypy_match')), len(modules),
+             len(se_pairs), len(pp_ok)))
         A('')
     A('## 1. The corpus')
     A('')
@@ -261,6 +264,16 @@ def main():
           'or a container-returning builder: the hybrid leaves it on CPython (so it pays CPython '
           'plus the boundary) and PyPy makes it fast.  Where the standalone binary types the whole '
           'driver it beats PyPy by the C-quality margin the table shows.')
+        lose = sorted((v, m) for m, v in se_pairs if v >= 1)
+        if lose:
+            A('')
+            A('The standalone arm is not uniformly ahead: it loses to PyPy on **%d of %d** measured '
+              'modules, worst on %s.  Those are the programs whose data model (tuple-heavy ASTs, '
+              'string-keyed dicts, per-element object churn) costs more in the typed lowering than a '
+              'JIT that specializes the same shapes at run time, so the comparison is not "C beats a '
+              'JIT" on this corpus -- it is task-dependent.'
+              % (len(lose), len(se_pairs),
+                 ', '.join('`%s` %.2fx' % (m, v) for v, m in lose[:4])))
         A('')
     A('## 3. The Rust bar')
     A('')

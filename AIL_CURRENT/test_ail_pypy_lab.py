@@ -106,7 +106,7 @@ class RivalPyPyRow(unittest.TestCase):
 
     def test_ratio_table_reports_both_arms(self):
         self.assertIn('AIL standalone / PyPy', self.text)
-        self.assertIn('| tree_fold | 2000 | 1500 | 0.75x | 0.50x | 0.75x |', self.text)
+        self.assertIn('| tree_fold | 2000 | 1500 | 0.75x |', self.text)
 
     def test_warm_run_mismatch_is_reported_as_a_pypy_result(self):
         self.data['tasks']['scar_life']['results']['pypy']['warm5_correct'] = False
@@ -158,11 +158,22 @@ class WarmHarness(unittest.TestCase):
         return json.loads(out.read_text())
 
     def test_each_run_is_timed_and_checked(self):
-        report = self.run_harness('import sys\nsys.stdout.write("ok\\n")\n', reps=3)
+        report = self.run_harness('def main():\n    print("ok")\n\n\nmain()\n', reps=3)
         self.assertEqual(len(report['runs']), 3)
         self.assertTrue(report['last_match'])
         self.assertTrue(all(r['match'] for r in report['runs']))
         self.assertTrue(all(r['seconds'] >= 0 for r in report['runs']))
+
+    def test_a_module_with_main_repeats_the_entry_in_one_state(self):
+        # The 5th run is the 5th call of main(), not a re-exec: that is what a long-lived process does,
+        # and re-exec would make the JIT throw its traces away (measured: later runs get 2.8x slower).
+        report = self.run_harness('def main():\n    print("ok")\n\n\nmain()\n', reps=3)
+        self.assertEqual(report['mode'], 'one-import')
+
+    def test_a_driver_without_main_re_executes_and_says_so(self):
+        report = self.run_harness('print("ok")\n', reps=2)
+        self.assertEqual(report['mode'], 're-exec')
+        self.assertTrue(report['last_match'])
 
     def test_a_wrong_warm_output_does_not_match(self):
         report = self.run_harness('print("different")\n', reps=2)
@@ -175,8 +186,13 @@ class WarmHarness(unittest.TestCase):
         payload.write_text('7 8\n')
         src = tmp / 'prog.py'
         src.write_text('import sys\n'
-                       'a, b = sys.stdin.read().split()\n'
-                       'print(int(a) + int(b), sys.argv[1])\n')
+                       '\n'
+                       'def main() -> None:\n'
+                       '    a, b = sys.stdin.read().split()\n'
+                       '    print(int(a) + int(b), sys.argv[1])\n'
+                       '\n'
+                       '\n'
+                       'main()\n')
         exp = tmp / 'expected.txt'
         exp.write_text('15 ping\n')
         out = tmp / 'r.json'
@@ -186,6 +202,7 @@ class WarmHarness(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr.decode('utf-8', 'replace'))
         report = json.loads(out.read_text())
         self.assertTrue(report['last_match'], 'stdin and argv are replayed on the 2nd run too')
+        self.assertEqual(report['mode'], 'one-import')
 
     def test_a_program_that_exits_non_zero_is_recorded(self):
         report = self.run_harness('import sys\nsys.stdout.write("ok\\n")\nsys.exit(3)\n', reps=2, expect='ok\n')

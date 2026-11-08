@@ -340,7 +340,8 @@ def warm5(rec, case, expected, work):
     if len(runs) < 5:
         return dict(warm5_ms=None, warm5_note='only %d runs' % len(runs))
     return dict(warm5_ms=round(runs[4]['seconds'] * 1000, 1), warm5_runs_ms=[round(r['seconds'] * 1000, 1) for r in runs],
-                warm5_correct=runs[4]['match'], warm5_all_correct=all(r['match'] for r in runs))
+                warm5_correct=runs[4]['match'], warm5_all_correct=all(r['match'] for r in runs),
+                warm_mode=report.get('mode'))
 
 
 def measure(rec, task, case, expected, check, expected_cases, work, icount, mode):
@@ -534,7 +535,7 @@ def summary(tasks, data):
     return lines, wins
 
 
-PY_ARMS = [('ail', 'AIL standalone (typed.py)'), ('ail-py', 'AIL standalone (main.py)')]
+PY_ARMS = [('ail', 'AIL from typed.py'), ('ail-py', 'AIL from main.py')]
 
 
 def against_pypy(tasks, data, key='wall_ms'):
@@ -576,12 +577,15 @@ def pypy_lines(tasks, data):
     L.append('')
     L.append('PyPy runs `src/<task>/main.py` unchanged, in the interpreter, on the same perf input and against the '
              'same `reference.py`. Nothing is compiled, so `compile s` is `-` and the build-disk cell is the '
-             'interpreter install, marked `interpreter` in `results.json` (`build_kind`). Wall time is the median '
-             'of 5 fresh processes, like every other row. `warm5 ms` is the **5th run inside one process** '
-             '(`pypy_warm.py` times `exec` of the compiled source with a fresh globals dict, a fresh stdin over the '
-             'same bytes and its own stdout, and checks that output against the same reference): that is the run a '
-             'JIT that has seen the hot loops once gives, and it is the fairer number for a long-lived process, '
-             'while the plain column is what a short-lived `python main.py` pays. `warm/plain` is the ratio.')
+             'interpreter install, marked `interpreter` in `results.json` (`interpreter: true`). Wall time is the '
+             'median of 5 fresh processes, like every other row. `warm5 ms` is the **5th run inside one '
+             'process** (`pypy_warm.py`): the first run imports the program and runs its `main()`, runs 2-5 '
+             'call that same `main()` again in the same module state with a fresh stdin over the same bytes '
+             'and their own stdout, and every run is checked against the same reference.  That is what a '
+             'long-lived process (a server, a notebook) pays, and it is the only way the JIT sees the same '
+             'code twice -- re-executing the source builds new function objects and throws the traces away. '
+             'A driver with no module-level `main` is re-executed instead and the row says `warm_mode`.  '
+             '`warm/plain` is the ratio.')
     L.append('')
     if not warm:
         if warmed:
@@ -591,8 +595,8 @@ def pypy_lines(tasks, data):
             L.append('No PyPy row was measured in this result file.')
         L.append('')
     else:
-        L.append('| task | PyPy plain ms | PyPy warm5 ms | warm / plain | AIL standalone / PyPy | AIL (main.py) / PyPy |')
-        L.append('|---|---|---|---|---|---|')
+        L.append('| task | PyPy plain ms | PyPy warm5 ms | warm / plain | mode | AIL standalone / PyPy | AIL (main.py) / PyPy |')
+        L.append('|---|---|---|---|---|---|---|')
         for t, r in sorted(warmed):
             w = r.get('warm5_ms')
             res = data['tasks'][t]['results']
@@ -600,9 +604,10 @@ def pypy_lines(tasks, data):
             for arm, _ in PY_ARMS:
                 a, p = usable(res.get(arm), 'wall_ms'), usable(res.get('pypy'), 'wall_ms')
                 cells.append('%.2fx' % (a / p) if a and p else '-')
-            L.append('| %s | %.0f | %s | %s | %s | %s |' % (
+            L.append('| %s | %.0f | %s | %s | %s | %s | %s |' % (
                 t, r['wall_ms'], '%.0f' % w if w else '-',
-                '%.2fx' % (w / r['wall_ms']) if w and r.get('wall_ms') else '-', cells[0], cells[1]))
+                '%.2fx' % (w / r['wall_ms']) if w and r.get('wall_ms') else '-',
+                r.get('warm_mode') or '-', cells[0], cells[1]))
         L.append('')
         diffs = [(t, r) for t, r in warmed if r.get('warm5_correct') is False]
         L.append('Every warm run produced the CPython reference output on %d of %d tasks; a mismatch would be a '
@@ -761,6 +766,62 @@ def render(result):
     return '\n'.join(L) + '\n'
 
 
+def layer_base(result, base, tools, head):
+    """Lay the rows `result` measured now over `base`, and record which run made each column.
+
+    The base keeps every tool it had, the rows measured now replace theirs, and `tool_runs` says
+    which run produced each column -- a reader must be able to tell a number measured here from one
+    measured on CI.  A version this run could not probe (toolchain not installed here) comes from
+    the base only when this run's value says `missing`.
+    """
+    merged_tasks = dict(base.get('tasks') or {})
+    for task, rec in result['tasks'].items():
+        old = merged_tasks.get(task) or {}
+        rows = dict(old.get('results') or {})
+        rows.update(rec.get('results') or {})
+        merged_tasks[task] = dict(old, **dict(rec, results=rows))
+    result['tasks'] = merged_tasks
+    measured_now = {t for task in result['tasks'].values() for t in task['results']} & set(tools)
+    old_runs = base.get('tool_runs') or {}
+    result['tool_runs'] = {}
+    for tool in sorted({t for task in result['tasks'].values() for t in task['results']}):
+        if tool in measured_now:
+            result['tool_runs'][tool] = dict(date=result['date'], head=head, source='this run')
+        else:
+            result['tool_runs'][tool] = dict(old_runs.get(tool) or
+                                             dict(date=base.get('date'), head=base.get('head')),
+                                             source='base')
+    for k, v in (base.get('tools') or {}).items():
+        if str(result['tools'].get(k, '')).startswith('missing'):
+            result['tools'][k] = v
+    return result
+
+
+def warm_only(src_json, out_json):
+    """Re-measure only the PyPy warm5 column (the harness changed, not the programs)."""
+    data = json.loads(Path(src_json).read_text())
+    tasks = [t for t in data['tasks'] if (data['tasks'][t]['results'].get('pypy') or {}).get('build_ok')]
+    root = Path(tempfile.mkdtemp(prefix='compare-rival-warm-'))
+    for task in tasks:
+        RT.CURRENT_TASK = task
+        work = Path(tempfile.mkdtemp(prefix='warm-' + task + '-', dir=str(root)))
+        try:
+            case = RT.make_case(task, False, work)
+            expected = reference_for(task, case, work)
+            rec = data['tasks'][task]['results']['pypy']
+            rec.update(warm5(rec, case, expected, work))
+            print('%-14s warm5=%s mode=%s' % (task, rec.get('warm5_ms'), rec.get('warm_mode')), file=sys.stderr,
+                  flush=True)
+        except Exception as e:
+            data['tasks'][task]['results']['pypy']['warm5_note'] = '%s: %s' % (type(e).__name__, e)
+            print('%-14s warm5 failed: %s' % (task, e), file=sys.stderr, flush=True)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+    Path(out_json).write_text(json.dumps(data, indent=1) + '\n', encoding='utf8')
+    (HERE / 'RESULTS.md').write_text(render(data), encoding='utf8')
+    print('wrote %s' % out_json, file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--tasks', default=' '.join(TASKS))
@@ -775,7 +836,13 @@ def main():
                     help='start from this results.json and add/replace only the tools measured now; the '
                          'result records which tools came from which run in `tool_runs`.  Use it when a '
                          'toolchain is not installed here (the CI job measures everything).')
+    ap.add_argument('--warm-only', metavar='JSON',
+                    help='re-measure only the PyPy warm5 column from this results.json (the harness '
+                         'changed, not the program) and write the result to --out.  Nothing else is run.')
     args = ap.parse_args()
+    if args.warm_only:
+        warm_only(args.warm_only, args.out)
+        return
     if args.merge:
         # actions/download-artifact with `pattern:` writes each artifact under results/<artifact>/,
         # so the parts are nested; rglob also finds a flat layout.
@@ -846,30 +913,8 @@ def main():
         result['tasks'] = {t: result['tasks'][t] for t in tasks if t in result['tasks']}
 
     if base:
-        # Layer the rows measured now over the base result.  The base keeps every tool it had, the
-        # rows measured now replace theirs, and `tool_runs` says which run produced each column --
-        # a reader must be able to tell a number measured here from one measured on CI.
-        merged_tasks = dict(base.get('tasks') or {})
-        for task, rec in result['tasks'].items():
-            old = merged_tasks.get(task) or {}
-            rows = dict(old.get('results') or {})
-            rows.update(rec.get('results') or {})
-            merged_tasks[task] = dict(old, **dict(rec, results=rows))
-        result['tasks'] = merged_tasks
-        measured_now = {t for task in result['tasks'].values() for t in task['results']} & set(tools)
-        old_runs = base.get('tool_runs') or {}
-        result['tool_runs'] = {}
-        for tool in sorted({t for task in result['tasks'].values() for t in task['results']}):
-            if tool in measured_now:
-                result['tool_runs'][tool] = dict(date=result['date'], head=head, source='this run')
-            else:
-                result['tool_runs'][tool] = dict(old_runs.get(tool) or
-                                                 dict(date=base.get('date'), head=base.get('head')),
-                                                 source='base')
-        # A version this run could not probe (the toolchain is not installed here) comes from the base.
-        for k, v in (base.get('tools') or {}).items():
-            if str(result['tools'].get(k, '')).startswith('missing'):
-                result['tools'][k] = v
+        # Layer the rows measured now over the base result.
+        layer_base(result, base, tools, head)
 
     if not args.no_safety:
         print('safety probes', file=sys.stderr, flush=True)

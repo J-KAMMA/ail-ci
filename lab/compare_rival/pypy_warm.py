@@ -3,11 +3,17 @@
 
     pypy3 lab/compare_rival/pypy_warm.py SRC REPS EXPECTED_OUT EXPECTED_EXIT [STDIN|-] OUT.json [args...]
 
-The timed section is `exec` of the already-compiled source, so the interpreter start-up and
-`compile()` of the first run are excluded; run i gets a fresh globals dict, a fresh stdin over the
-same input bytes and its own stdout file.  The JSON report carries each run's seconds and whether
-its stdout/exit status equals the CPython reference's, so `run.py` can report the 5th run in a
-process -- PyPy's JIT needs that warm-up -- next to the plain wall time of a fresh process.
+The first run executes the source (which calls its own `main()` at the bottom); runs 2..REPS call the
+module's `main()` again in the **same** module state, with a fresh stdin over the same input bytes,
+its own stdout file and `sys.argv` reset.  That is what a long-lived process (a server, a notebook)
+does, and it is the only way PyPy's JIT sees the same code twice: re-executing the source with fresh
+globals creates new function objects and the JIT discards its traces, which makes later runs *slower*
+than the first (measured on a 40x3M-iteration loop: 133 ms re-exec vs 366 ms, against 365 ms for the
+first import and ~9 ms per repeat call in one module state).
+
+Every run's stdout and exit status are compared with the CPython reference, so a warm run that
+computes something else cannot pass silently.  A driver with no `main` in its module globals is
+re-executed instead (`mode: "re-exec"` in the report), which is the best that driver allows.
 """
 import io
 import json
@@ -32,6 +38,8 @@ def main():
     expected_exit = int(exp_exit)
     saved = os.dup(1)
     runs = []
+    ns = None
+    mode = 'one-import'
     try:
         for i in range(reps):
             got = os.path.join(os.path.dirname(out_json) or '.', 'warm-run-%d.out' % i)
@@ -42,10 +50,17 @@ def main():
             fd = os.open(got, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
             os.dup2(fd, 1)
             os.close(fd)
+            entry = ns.get('main') if i and ns else None
+            if i and not callable(entry) and mode == 'one-import':
+                mode = 're-exec'
             start = time.perf_counter()
             status = 0
             try:
-                exec(code, {'__name__': '__main__', '__file__': src, '__builtins__': __builtins__})
+                if callable(entry):
+                    entry()
+                else:
+                    ns = {'__name__': '__main__', '__file__': src, '__builtins__': __builtins__}
+                    exec(code, ns)
             except SystemExit as exc:
                 status = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
             except BaseException as exc:                      # a crash is a result, not a harness bug
@@ -62,7 +77,8 @@ def main():
         os.dup2(saved, 1)
         os.close(saved)
     with open(out_json, 'w') as f:
-        json.dump(dict(src=src, reps=reps, runs=runs, last_match=runs[-1]['match'] if runs else False), f)
+        json.dump(dict(src=src, reps=reps, mode=mode, runs=runs,
+                       last_match=runs[-1]['match'] if runs else False), f)
 
 
 if __name__ == '__main__':
