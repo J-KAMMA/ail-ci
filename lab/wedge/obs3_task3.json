@@ -1,0 +1,5583 @@
+[
+ {
+  "all_defs": [
+   "count_ints",
+   "count_tag",
+   "has_tag",
+   "leaves",
+   "max_depth",
+   "node_count",
+   "sum_ints"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 4.26,
+    "decisions": {
+     "count_ints": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "node": {
+        "big": 0,
+        "kind": [
+         "tuple[str, int, str, int]",
+         "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]",
+         "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]",
+         "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]",
+         "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]"
+        ],
+        "verdict": "poly"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "count_tag": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "node": {
+        "big": 0,
+        "kind": [
+         "tuple[str, int, str, int]",
+         "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]",
+         "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]",
+         "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]",
+         "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]"
+        ],
+        "verdict": "poly"
+       },
+       "tag": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "has_tag": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "node": {
+        "big": 0,
+        "kind": [
+         "tuple[str, int, str, int]",
+         "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]",
+         "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]",
+         "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]",
+         "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]"
+        ],
+        "verdict": "poly"
+       },
+       "tag": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     },
+     "leaves": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "node": {
+        "big": 0,
+        "kind": [
+         "tuple[str, int, str, int]",
+         "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]",
+         "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]",
+         "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]",
+         "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]"
+        ],
+        "verdict": "poly"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "max_depth": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "node": {
+        "big": 0,
+        "kind": [
+         "tuple[str, int, str, int]",
+         "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]",
+         "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]",
+         "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]",
+         "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]"
+        ],
+        "verdict": "poly"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "node_count": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "node": {
+        "big": 0,
+        "kind": [
+         "tuple[str, int, str, int]",
+         "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]",
+         "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]",
+         "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]",
+         "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]"
+        ],
+        "verdict": "poly"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "sum_ints": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "node": {
+        "big": 0,
+        "kind": [
+         "tuple[str, int, str, int]",
+         "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]",
+         "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]",
+         "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]",
+         "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]"
+        ],
+        "verdict": "poly"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "count_ints": "unresolved-param: node stays in CPython",
+     "count_tag": "a call can raise or have side effects",
+     "has_tag": "a call can raise or have side effects",
+     "leaves": "unresolved-param: node stays in CPython",
+     "max_depth": "unresolved-param: node stays in CPython",
+     "node_count": "unresolved-param: node stays in CPython",
+     "sum_ints": "unresolved-param: node stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 3.19,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "count_ints": "unresolved-param: node stays in CPython",
+     "count_tag": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc stays in CPython",
+     "has_tag": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc stays in CPython",
+     "leaves": "unresolved-param: node stays in CPython",
+     "max_depth": "unresolved-param: node stays in CPython",
+     "node_count": "unresolved-param: node stays in CPython",
+     "sum_ints": "unresolved-param: node stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_ints",
+   "count_tag",
+   "has_tag",
+   "leaves",
+   "max_depth",
+   "node_count",
+   "sum_ints"
+  ],
+  "icount": {
+   "bare+obs": 27732395571,
+   "cpython": 27725698963,
+   "hand": 27732641107
+  },
+  "module": "ast_lint",
+  "observe_same_output": true,
+  "profile": {
+   "count_ints": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.992893
+   },
+   "count_tag": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     },
+     "tag": {
+      "str": 15940
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 1.016915
+   },
+   "has_tag": {
+    "big": {},
+    "calls": 525,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 35,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 35,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 210,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 35,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 210
+     },
+     "tag": {
+      "str": 525
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 170
+    },
+    "self_s": 0.004004
+   },
+   "leaves": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.932839
+   },
+   "max_depth": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.900811
+   },
+   "node_count": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.824742
+   },
+   "sum_ints": {
+    "big": {},
+    "calls": 955710,
+    "generator": false,
+    "params": {
+     "node": {
+      "tuple[str, int, str, int]": 9525,
+      "tuple[str, int, tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]]": 153,
+      "tuple[str, int, tuple[tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple], tuple[str, int, tuple]]]": 55,
+      "tuple[tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int], tuple[str, int, str, int]]": 4663,
+      "tuple[tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]], tuple[str, int, tuple[tuple, tuple, tuple, tuple]]]": 1544
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 1.000901
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "bloom_probe",
+   "bloom_set",
+   "make_hashes",
+   "multiples",
+   "popcount",
+   "rotate_xor",
+   "set_intersect"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "popcount",
+     "rotate_xor",
+     "set_intersect"
+    ],
+    "build_rc": 0,
+    "build_s": 6.02,
+    "decisions": {
+     "bloom_probe": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "bits": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "keys": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "table": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "bloom_set": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "bits": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "keys": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "make_hashes": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "mod": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "n": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "seed": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "multiples": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "d": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "keys": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "popcount": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "table": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "rotate_xor": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "keys": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "set_intersect": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "popcount",
+     "rotate_xor",
+     "set_intersect"
+    ],
+    "rejected": {
+     "bloom_probe": "division or power can raise",
+     "bloom_set": "division or power can raise",
+     "make_hashes": "division or power can raise",
+     "multiples": "division or power can raise"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "popcount",
+     "rotate_xor",
+     "set_intersect"
+    ],
+    "build_rc": 0,
+    "build_s": 5.39,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "popcount",
+     "rotate_xor",
+     "set_intersect"
+    ],
+    "rejected": {
+     "bloom_probe": "division or power can raise",
+     "bloom_set": "division or power can raise",
+     "make_hashes": "division or power can raise",
+     "multiples": "division or power can raise"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "bloom_probe",
+   "bloom_set",
+   "make_hashes",
+   "multiples",
+   "popcount",
+   "rotate_xor",
+   "set_intersect"
+  ],
+  "icount": {
+   "bare+obs": 24936078208,
+   "cpython": 27081474894,
+   "hand": 24924587590
+  },
+  "module": "bitset_bloom",
+  "observe_same_output": true,
+  "profile": {
+   "bloom_probe": {
+    "big": {},
+    "calls": 6,
+    "generator": false,
+    "params": {
+     "bits": {
+      "int": 6
+     },
+     "keys": {
+      "list[int]": 6
+     },
+     "table": {
+      "list[int]": 6
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 6
+    },
+    "self_s": 1.347063
+   },
+   "bloom_set": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "bits": {
+      "int": 2
+     },
+     "keys": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.485428
+   },
+   "make_hashes": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "mod": {
+      "int": 2
+     },
+     "n": {
+      "int": 2
+     },
+     "seed": {
+      "int": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.449021
+   },
+   "multiples": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "d": {
+      "int": 1
+     },
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.036407
+   },
+   "popcount": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "table": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004045
+   },
+   "rotate_xor": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.117312
+   },
+   "set_intersect": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.024271
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "quote_count"
+    ],
+    "build_rc": 0,
+    "build_s": 4.44,
+    "decisions": {
+     "count_fields": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "line": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "field_chars": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "line": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "max_field_len": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "quote_count": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "split_lines": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[str]",
+       "kind": "list[str]",
+       "verdict": "mono"
+      }
+     },
+     "sum_column": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "col": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "quote_count"
+    ],
+    "rejected": {
+     "count_fields": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "field_chars": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "max_field_len": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "split_lines": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "sum_column": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "quote_count"
+    ],
+    "build_rc": 0,
+    "build_s": 4.81,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "quote_count"
+    ],
+    "rejected": {
+     "count_fields": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "field_chars": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "max_field_len": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython",
+     "split_lines": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "sum_column": "to_c-refused: 'COMMA' is read before it is assigned stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "icount": {
+   "bare+obs": 27867285527,
+   "cpython": 29896779185,
+   "hand": 27904207592
+  },
+  "module": "csv_parse",
+  "observe_same_output": true,
+  "profile": {
+   "count_fields": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.580052
+   },
+   "field_chars": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.463236
+   },
+   "max_field_len": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.39073
+   },
+   "quote_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.17321
+   },
+   "split_lines": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[str]": 1
+    },
+    "self_s": 0.362533
+   },
+   "sum_column": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "col": {
+      "int": 1
+     },
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.998979
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Frame.__init__",
+   "Frame.rows",
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "total_of",
+     "weighted_sum"
+    ],
+    "build_rc": 0,
+    "build_s": 4.91,
+    "decisions": {
+     "Frame.__init__": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "key": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "self": {
+        "big": 0,
+        "kind": "cls:dataframe_group.Frame",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "None",
+       "kind": "None",
+       "verdict": "mono"
+      }
+     },
+     "Frame.rows": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:dataframe_group.Frame",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "filter_sum": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "hi": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "lo": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "vals": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "group_count": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "key": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "ngroups": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "group_sum": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "key": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "ngroups": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "vals": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "max_group_count": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "counts": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "scaled_total": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "den": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "num": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "vals": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "total_of": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "weighted_sum": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "w": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "total_of",
+     "weighted_sum"
+    ],
+    "rejected": {
+     "scaled_total": "division or power can raise"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "total_of",
+     "weighted_sum"
+    ],
+    "build_rc": 0,
+    "build_s": 5.81,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "total_of",
+     "weighted_sum"
+    ],
+    "rejected": {
+     "scaled_total": "division or power can raise"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "icount": {
+   "bare+obs": 7256140234,
+   "cpython": 14251013678,
+   "hand": 7259420128
+  },
+  "module": "dataframe_group",
+  "observe_same_output": true,
+  "profile": {
+   "Frame": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Frame.__init__": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "key": {
+      "list[int]": 1
+     },
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Frame.rows": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "filter_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "hi": {
+      "int": 1
+     },
+     "lo": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.102813
+   },
+   "group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.106926
+   },
+   "group_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.222076
+   },
+   "max_group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "scaled_total": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "den": {
+      "int": 1
+     },
+     "num": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.119263
+   },
+   "total_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "weighted_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "w": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.287877
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "best_match",
+   "bigram_overlap",
+   "common_prefix",
+   "hamming",
+   "levenshtein",
+   "total_length"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "bigram_overlap",
+     "common_prefix",
+     "hamming"
+    ],
+    "build_rc": 0,
+    "build_s": 5.51,
+    "decisions": {
+     "best_match": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "cands": {
+        "added": "list[str]",
+        "big": 0,
+        "kind": "list[str]",
+        "verdict": "mono"
+       },
+       "word": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "bigram_overlap": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "common_prefix": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "hamming": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "levenshtein": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "total_length": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "words": {
+        "added": "list[str]",
+        "big": 0,
+        "kind": "list[str]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "bigram_overlap",
+     "common_prefix",
+     "hamming"
+    ],
+    "rejected": {
+     "best_match": "unresolved-param: cands stays in CPython",
+     "levenshtein": "a call can raise or have side effects",
+     "total_length": "unresolved-param: words stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "bigram_overlap",
+     "common_prefix",
+     "hamming"
+    ],
+    "build_rc": 0,
+    "build_s": 5.41,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "bigram_overlap",
+     "common_prefix",
+     "hamming"
+    ],
+    "rejected": {
+     "best_match": "unresolved-param: cands stays in CPython",
+     "levenshtein": "a call can raise or have side effects",
+     "total_length": "unresolved-param: words stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "best_match",
+   "bigram_overlap",
+   "common_prefix",
+   "hamming",
+   "levenshtein",
+   "total_length"
+  ],
+  "icount": {
+   "bare+obs": 31541619820,
+   "cpython": 32807780690,
+   "hand": 31546358265
+  },
+  "module": "edit_dist",
+  "observe_same_output": true,
+  "profile": {
+   "best_match": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "cands": {
+      "list[str]": 1070
+     },
+     "word": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.020033
+   },
+   "bigram_overlap": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1070
+     },
+     "b": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.112184
+   },
+   "common_prefix": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1070
+     },
+     "b": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.032053
+   },
+   "hamming": {
+    "big": {},
+    "calls": 4000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1070
+     },
+     "b": {
+      "str": 1070
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 0.01202
+   },
+   "levenshtein": {
+    "big": {},
+    "calls": 24000,
+    "generator": false,
+    "params": {
+     "a": {
+      "str": 1383
+     },
+     "b": {
+      "str": 1383
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1056
+    },
+    "self_s": 2.624304
+   },
+   "total_length": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "field_weight",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name"
+    ],
+    "build_rc": 0,
+    "build_s": 3.86,
+    "decisions": {
+     "field_weight": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "email": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       },
+       "name": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       },
+       "score": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "is_simple_email": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "addr": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     },
+     "is_upper_name": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "name": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     },
+     "looks_like_version": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "tag": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     },
+     "normalise_name": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "raw": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "str",
+       "kind": "str",
+       "verdict": "mono"
+      }
+     },
+     "score_ok": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "score": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     },
+     "valid_len": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "name": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "field_weight",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name"
+    ],
+    "rejected": {
+     "is_simple_email": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "score_ok": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "valid_len": "unresolved-return: no return, or contradictory returns stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "field_weight",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name"
+    ],
+    "build_rc": 0,
+    "build_s": 3.35,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "field_weight",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name"
+    ],
+    "rejected": {
+     "is_simple_email": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "score_ok": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "valid_len": "unresolved-return: no return, or contradictory returns stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "icount": {
+   "bare+obs": 19685075601,
+   "cpython": 29909285536,
+   "hand": 19664831134
+  },
+  "module": "field_valid",
+  "observe_same_output": true,
+  "profile": {
+   "field_weight": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "email": {
+      "str": 11945
+     },
+     "name": {
+      "str": 11945
+     },
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.752531
+   },
+   "is_simple_email": {
+    "big": {},
+    "calls": 1400000,
+    "generator": false,
+    "params": {
+     "addr": {
+      "str": 22883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 1.372969
+   },
+   "is_upper_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.36826
+   },
+   "looks_like_version": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "tag": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.400283
+   },
+   "normalise_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "raw": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "str": 1088
+    },
+    "self_s": 1.000707
+   },
+   "score_ok": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.272192
+   },
+   "valid_len": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.528373
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "blend",
+   "dot",
+   "max_abs",
+   "mean",
+   "norm",
+   "scale_into",
+   "sq_sum",
+   "variance"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "blend",
+     "dot",
+     "max_abs",
+     "scale_into",
+     "sq_sum"
+    ],
+    "build_rc": 0,
+    "build_s": 12.69,
+    "decisions": {
+     "blend": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       },
+       "w": {
+        "added": "float",
+        "big": 0,
+        "kind": "float",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "float",
+       "kind": "float",
+       "verdict": "mono"
+      }
+     },
+     "dot": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "float",
+       "kind": "float",
+       "verdict": "mono"
+      }
+     },
+     "max_abs": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "float",
+       "kind": "float",
+       "verdict": "mono"
+      }
+     },
+     "mean": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "float",
+       "kind": "float",
+       "verdict": "mono"
+      }
+     },
+     "norm": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "float",
+       "kind": "float",
+       "verdict": "mono"
+      }
+     },
+     "scale_into": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "k": {
+        "added": "float",
+        "big": 0,
+        "kind": "float",
+        "verdict": "mono"
+       },
+       "xs": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[float]",
+       "kind": "list[float]",
+       "verdict": "mono"
+      }
+     },
+     "sq_sum": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "float",
+       "kind": "float",
+       "verdict": "mono"
+      }
+     },
+     "variance": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[float]",
+        "big": 0,
+        "kind": "list[float]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "float",
+       "kind": "float",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "blend",
+     "dot",
+     "max_abs",
+     "scale_into",
+     "sq_sum"
+    ],
+    "rejected": {
+     "mean": "division or power can raise",
+     "norm": "division or power can raise",
+     "variance": "division or power can raise"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "blend",
+     "dot",
+     "max_abs",
+     "scale_into",
+     "sq_sum"
+    ],
+    "build_rc": 0,
+    "build_s": 11.09,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "blend",
+     "dot",
+     "max_abs",
+     "scale_into",
+     "sq_sum"
+    ],
+    "rejected": {
+     "mean": "division or power can raise",
+     "norm": "division or power can raise",
+     "variance": "division or power can raise"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "blend",
+   "dot",
+   "max_abs",
+   "mean",
+   "norm",
+   "scale_into",
+   "sq_sum",
+   "variance"
+  ],
+  "icount": {
+   "bare+obs": 17423314377,
+   "cpython": 27877069920,
+   "hand": 17433083555
+  },
+  "module": "float_loops",
+  "observe_same_output": true,
+  "profile": {
+   "blend": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[float]": 1
+     },
+     "b": {
+      "list[float]": 1
+     },
+     "w": {
+      "float": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.361139
+   },
+   "dot": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[float]": 1
+     },
+     "b": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.264556
+   },
+   "max_abs": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.104982
+   },
+   "mean": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 2
+    },
+    "self_s": 0.201566
+   },
+   "norm": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.11758
+   },
+   "scale_into": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "k": {
+      "float": 1
+     },
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[float]": 1
+    },
+    "self_s": 1.234593
+   },
+   "sq_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.100783
+   },
+   "variance": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[float]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "float": 1
+    },
+    "self_s": 0.209965
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "bfs_reach",
+   "build_graph",
+   "degree_sum",
+   "dfs_count",
+   "edges_above",
+   "max_degree"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 1.99,
+    "decisions": {
+     "bfs_reach": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "adj": {
+        "added": "list[list[int]]",
+        "big": 0,
+        "kind": "list[list[int]]",
+        "verdict": "mono"
+       },
+       "start": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "build_graph": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "fanout": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "n": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[list[int]]",
+       "kind": "list[list[int]]",
+       "verdict": "mono"
+      }
+     },
+     "degree_sum": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "adj": {
+        "added": "list[list[int]]",
+        "big": 0,
+        "kind": "list[list[int]]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "dfs_count": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "adj": {
+        "added": "list[list[int]]",
+        "big": 0,
+        "kind": "list[list[int]]",
+        "verdict": "mono"
+       },
+       "start": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "edges_above": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "adj": {
+        "added": "list[list[int]]",
+        "big": 0,
+        "kind": "list[list[int]]",
+        "verdict": "mono"
+       },
+       "lo": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "max_degree": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "adj": {
+        "added": "list[list[int]]",
+        "big": 0,
+        "kind": "list[list[int]]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "bfs_reach": "unresolved-param: adj stays in CPython",
+     "build_graph": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "degree_sum": "unresolved-param: adj stays in CPython",
+     "dfs_count": "unresolved-param: adj stays in CPython",
+     "edges_above": "unresolved-param: adj stays in CPython",
+     "max_degree": "unresolved-param: adj stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 2.99,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "bfs_reach": "unresolved-param: adj stays in CPython",
+     "build_graph": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "degree_sum": "unresolved-param: adj stays in CPython",
+     "dfs_count": "unresolved-param: adj stays in CPython",
+     "edges_above": "unresolved-param: adj stays in CPython",
+     "max_degree": "unresolved-param: adj stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "bfs_reach",
+   "build_graph",
+   "degree_sum",
+   "dfs_count",
+   "edges_above",
+   "max_degree"
+  ],
+  "icount": {
+   "bare+obs": 18803033600,
+   "cpython": 18778474567,
+   "hand": 18785060671
+  },
+  "module": "graph_search",
+  "observe_same_output": true,
+  "profile": {
+   "bfs_reach": {
+    "big": {},
+    "calls": 22,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 22
+     },
+     "start": {
+      "int": 22
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 22
+    },
+    "self_s": 1.580779
+   },
+   "build_graph": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "fanout": {
+      "int": 1
+     },
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[list[int]]": 1
+    },
+    "self_s": 1.038914
+   },
+   "degree_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004074
+   },
+   "dfs_count": {
+    "big": {},
+    "calls": 22,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 22
+     },
+     "start": {
+      "int": 22
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 22
+    },
+    "self_s": 1.52374
+   },
+   "edges_above": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 1
+     },
+     "lo": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.016297
+   },
+   "max_degree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "adj": {
+      "list[list[int]]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "adler32_simple",
+   "crc32_table_free",
+   "djb2",
+   "fnv1a",
+   "fnv1a_64",
+   "sum_bytes",
+   "xor_fold"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 4.92,
+    "decisions": {
+     "adler32_simple": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "data": {
+        "added": "bytes",
+        "big": 0,
+        "kind": "bytes",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "crc32_table_free": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "data": {
+        "added": "bytes",
+        "big": 0,
+        "kind": "bytes",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "djb2": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "fnv1a": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "data": {
+        "added": "bytes",
+        "big": 0,
+        "kind": "bytes",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "fnv1a_64": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "data": {
+        "added": "bytes",
+        "big": 0,
+        "kind": "bytes",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "sum_bytes": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "data": {
+        "added": "bytes",
+        "big": 0,
+        "kind": "bytes",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "xor_fold": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "data": {
+        "added": "bytes",
+        "big": 0,
+        "kind": "bytes",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "adler32_simple": "unresolved-param: data stays in CPython",
+     "crc32_table_free": "unresolved-param: data stays in CPython",
+     "djb2": "a call can raise or have side effects",
+     "fnv1a": "unresolved-param: data stays in CPython",
+     "fnv1a_64": "unresolved-param: data stays in CPython",
+     "sum_bytes": "unresolved-param: data stays in CPython",
+     "xor_fold": "unresolved-param: data stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 6.23,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "adler32_simple": "unresolved-param: data stays in CPython",
+     "crc32_table_free": "unresolved-param: data stays in CPython",
+     "djb2": "a call can raise or have side effects",
+     "fnv1a": "unresolved-param: data stays in CPython",
+     "fnv1a_64": "unresolved-param: data stays in CPython",
+     "sum_bytes": "unresolved-param: data stays in CPython",
+     "xor_fold": "unresolved-param: data stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "adler32_simple",
+   "crc32_table_free",
+   "djb2",
+   "fnv1a",
+   "fnv1a_64",
+   "sum_bytes",
+   "xor_fold"
+  ],
+  "icount": {
+   "bare+obs": 28268526230,
+   "cpython": 28261643143,
+   "hand": 28268395256
+  },
+  "module": "hashing",
+  "observe_same_output": true,
+  "profile": {
+   "adler32_simple": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.325249
+   },
+   "crc32_table_free": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.016062
+   },
+   "djb2": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.200771
+   },
+   "fnv1a": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.369419
+   },
+   "fnv1a_64": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.441696
+   },
+   "sum_bytes": {
+    "big": {},
+    "calls": 48,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 48
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 45
+    },
+    "self_s": 0.19274
+   },
+   "xor_fold": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.072278
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Parser.__init__",
+   "Parser.parse_array",
+   "Parser.parse_number",
+   "Parser.parse_object",
+   "Parser.parse_string",
+   "Parser.parse_value",
+   "Parser.skip_ws",
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "count_tokens",
+     "depth_of",
+     "document_bytes"
+    ],
+    "build_rc": 0,
+    "build_s": 5.27,
+    "decisions": {
+     "Parser.__init__": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:json_parse.Parser",
+        "verdict": "unexpressible"
+       },
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "None",
+       "kind": "None",
+       "verdict": "mono"
+      }
+     },
+     "Parser.parse_array": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:json_parse.Parser",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Parser.parse_number": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:json_parse.Parser",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Parser.parse_object": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:json_parse.Parser",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Parser.parse_string": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:json_parse.Parser",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Parser.parse_value": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:json_parse.Parser",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Parser.skip_ws": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:json_parse.Parser",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "None",
+       "kind": "None",
+       "verdict": "mono"
+      }
+     },
+     "count_tokens": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "depth_of": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "digits_in": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "document_bytes": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "text": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_tokens",
+     "depth_of",
+     "document_bytes"
+    ],
+    "rejected": {
+     "digits_in": "a call can raise or have side effects"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "count_tokens",
+     "depth_of",
+     "document_bytes"
+    ],
+    "build_rc": 0,
+    "build_s": 5.13,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_tokens",
+     "depth_of",
+     "document_bytes"
+    ],
+    "rejected": {
+     "digits_in": "a call can raise or have side effects"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "icount": {
+   "bare+obs": 18703384399,
+   "cpython": 21206058181,
+   "hand": 18704413157
+  },
+  "module": "json_parse",
+  "observe_same_output": true,
+  "profile": {
+   "Parser": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Parser.__init__": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 3
+     },
+     "text": {
+      "str": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 3
+    },
+    "self_s": 0.0
+   },
+   "Parser.parse_array": {
+    "big": {},
+    "calls": 120003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.124145
+   },
+   "Parser.parse_number": {
+    "big": {},
+    "calls": 240000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 4758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.428502
+   },
+   "Parser.parse_object": {
+    "big": {},
+    "calls": 120000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.160188
+   },
+   "Parser.parse_string": {
+    "big": {},
+    "calls": 1080000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 1.181383
+   },
+   "Parser.parse_value": {
+    "big": {},
+    "calls": 1080003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.885036
+   },
+   "Parser.skip_ws": {
+    "big": {},
+    "calls": 4080006,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 64758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1104
+    },
+    "self_s": 2.082438
+   },
+   "count_tokens": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.072084
+   },
+   "depth_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.12815
+   },
+   "digits_in": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.064075
+   },
+   "document_bytes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "apply_threshold",
+   "count_negative",
+   "identity",
+   "mat_mul",
+   "max_element",
+   "row_sums",
+   "scale_vec",
+   "trace"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "apply_threshold",
+     "count_negative",
+     "identity",
+     "mat_mul",
+     "max_element",
+     "row_sums",
+     "scale_vec",
+     "trace"
+    ],
+    "build_rc": 0,
+    "build_s": 5.16,
+    "decisions": {
+     "apply_threshold": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "m": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "t": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "count_negative": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "m": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "identity": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "n": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "mat_mul": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "a": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "b": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "n": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "max_element": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "m": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "row_sums": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "m": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "n": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "scale_vec": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "k": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "v": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "trace": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "m": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "n": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "apply_threshold",
+     "count_negative",
+     "identity",
+     "mat_mul",
+     "max_element",
+     "row_sums",
+     "scale_vec",
+     "trace"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "apply_threshold",
+     "count_negative",
+     "identity",
+     "mat_mul",
+     "max_element",
+     "row_sums",
+     "scale_vec",
+     "trace"
+    ],
+    "build_rc": 0,
+    "build_s": 5.49,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "apply_threshold",
+     "count_negative",
+     "identity",
+     "mat_mul",
+     "max_element",
+     "row_sums",
+     "scale_vec",
+     "trace"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "apply_threshold",
+   "count_negative",
+   "identity",
+   "mat_mul",
+   "max_element",
+   "row_sums",
+   "scale_vec",
+   "trace"
+  ],
+  "icount": {
+   "bare+obs": 654653154,
+   "cpython": 44190070349,
+   "hand": 652591770
+  },
+  "module": "matrix",
+  "observe_same_output": true,
+  "profile": {
+   "apply_threshold": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     },
+     "t": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004006
+   },
+   "count_negative": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.004006
+   },
+   "identity": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.0
+   },
+   "mat_mul": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 3.060224
+   },
+   "max_element": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "row_sums": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 1
+     },
+     "n": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.008011
+   },
+   "scale_vec": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "k": {
+      "int": 1
+     },
+     "v": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "trace": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "m": {
+      "list[int]": 3
+     },
+     "n": {
+      "int": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 3
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_over",
+   "longest_run",
+   "make_samples",
+   "mean_scaled",
+   "rising_streak",
+   "second_moment",
+   "total",
+   "window_sums"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "count_over",
+     "longest_run",
+     "make_samples",
+     "rising_streak",
+     "second_moment",
+     "total",
+     "window_sums"
+    ],
+    "build_rc": 0,
+    "build_s": 5.11,
+    "decisions": {
+     "count_over": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "limit": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "longest_run": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "want": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "make_samples": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "n": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "seed": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "mean_scaled": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "scale": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "rising_streak": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "second_moment": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "total": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "window_sums": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "w": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "xs": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_over",
+     "longest_run",
+     "make_samples",
+     "rising_streak",
+     "second_moment",
+     "total",
+     "window_sums"
+    ],
+    "rejected": {
+     "mean_scaled": "division or power can raise"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "count_over",
+     "longest_run",
+     "make_samples",
+     "rising_streak",
+     "second_moment",
+     "total",
+     "window_sums"
+    ],
+    "build_rc": 0,
+    "build_s": 5.14,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_over",
+     "longest_run",
+     "make_samples",
+     "rising_streak",
+     "second_moment",
+     "total",
+     "window_sums"
+    ],
+    "rejected": {
+     "mean_scaled": "division or power can raise"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_over",
+   "longest_run",
+   "make_samples",
+   "mean_scaled",
+   "rising_streak",
+   "second_moment",
+   "total",
+   "window_sums"
+  ],
+  "icount": {
+   "bare+obs": 6104934006,
+   "cpython": 35618652539,
+   "hand": 6148083740
+  },
+  "module": "rolling_stats",
+  "observe_same_output": true,
+  "profile": {
+   "count_over": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "limit": {
+      "int": 2
+     },
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.100531
+   },
+   "longest_run": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "want": {
+      "int": 2
+     },
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.100531
+   },
+   "make_samples": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "n": {
+      "int": 1
+     },
+     "seed": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.540356
+   },
+   "mean_scaled": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "scale": {
+      "int": 1
+     },
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.113098
+   },
+   "rising_streak": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 2
+    },
+    "self_s": 0.460769
+   },
+   "second_moment": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.117287
+   },
+   "total": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.075398
+   },
+   "window_sums": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "w": {
+      "int": 3
+     },
+     "xs": {
+      "list[int]": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 3
+    },
+    "self_s": 1.432571
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_above",
+   "count_terms",
+   "hash_spread",
+   "max_count",
+   "top_indices",
+   "top_score",
+   "total_count"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "count_above",
+     "max_count",
+     "total_count"
+    ],
+    "build_rc": 0,
+    "build_s": 4.11,
+    "decisions": {
+     "count_above": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "counts": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "threshold": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "count_terms": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "vocab_size": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "words": {
+        "added": "list[str]",
+        "big": 0,
+        "kind": "list[str]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "hash_spread": {
+      "added": 4,
+      "observed": true,
+      "params": {
+       "buckets": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "vocab_size": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "words": {
+        "added": "list[str]",
+        "big": 0,
+        "kind": "list[str]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "max_count": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "counts": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "top_indices": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "counts": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "k": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "list[int]",
+       "kind": "list[int]",
+       "verdict": "mono"
+      }
+     },
+     "top_score": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "counts": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       },
+       "k": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "total_count": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "counts": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_above",
+     "max_count",
+     "total_count"
+    ],
+    "rejected": {
+     "count_terms": "unresolved-param: words stays in CPython",
+     "hash_spread": "unresolved-param: words stays in CPython",
+     "top_indices": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "top_score": "to_c-refused: returning Subscript as a list stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "count_above",
+     "max_count",
+     "total_count"
+    ],
+    "build_rc": 0,
+    "build_s": 5.09,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_above",
+     "max_count",
+     "total_count"
+    ],
+    "rejected": {
+     "count_terms": "unresolved-param: words stays in CPython",
+     "hash_spread": "unresolved-param: words stays in CPython",
+     "top_indices": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "top_score": "to_c-refused: returning Subscript as a list stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_above",
+   "count_terms",
+   "hash_spread",
+   "max_count",
+   "top_indices",
+   "top_score",
+   "total_count"
+  ],
+  "icount": {
+   "bare+obs": 23447243951,
+   "cpython": 23453999344,
+   "hand": 23446823214
+  },
+  "module": "sort_rank",
+  "observe_same_output": true,
+  "profile": {
+   "count_above": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     },
+     "threshold": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "count_terms": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "vocab_size": {
+      "int": 1
+     },
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.679945
+   },
+   "hash_spread": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "buckets": {
+      "int": 1
+     },
+     "vocab_size": {
+      "int": 1
+     },
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.69216
+   },
+   "max_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "top_indices": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 2
+     },
+     "k": {
+      "int": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.0
+   },
+   "top_score": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     },
+     "k": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "total_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [
+     "count_keywords"
+    ],
+    "build_rc": 0,
+    "build_s": 5.37,
+    "decisions": {
+     "count_idents": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "src": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "count_keywords": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "kw": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       },
+       "src": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "digit_count": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "src": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "is_ident_char": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "ch": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     },
+     "is_ident_start": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "ch": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "bool",
+       "kind": "bool",
+       "verdict": "mono"
+      }
+     },
+     "longest_ident": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "src": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "token_weight": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "src": {
+        "added": "str",
+        "big": 0,
+        "kind": "str",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_keywords"
+    ],
+    "rejected": {
+     "count_idents": "a call can raise or have side effects",
+     "digit_count": "a call can raise or have side effects",
+     "is_ident_char": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "is_ident_start": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "longest_ident": "a call can raise or have side effects",
+     "token_weight": "a call can raise or have side effects"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [
+     "count_keywords"
+    ],
+    "build_rc": 0,
+    "build_s": 4.42,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_keywords"
+    ],
+    "rejected": {
+     "count_idents": "a call can raise or have side effects",
+     "digit_count": "a call can raise or have side effects",
+     "is_ident_char": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "is_ident_start": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "longest_ident": "a call can raise or have side effects",
+     "token_weight": "a call can raise or have side effects"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "icount": {
+   "bare+obs": 10799572840,
+   "cpython": 14081179421,
+   "hand": 10799731503
+  },
+  "module": "tokenizer",
+  "observe_same_output": true,
+  "profile": {
+   "count_idents": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.108206
+   },
+   "count_keywords": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "kw": {
+      "str": 1
+     },
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.268511
+   },
+   "digit_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.056107
+   },
+   "is_ident_char": {
+    "big": {},
+    "calls": 3760000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 59758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1056
+    },
+    "self_s": 1.574995
+   },
+   "is_ident_start": {
+    "big": {},
+    "calls": 2840000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 45383
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1072
+    },
+    "self_s": 1.021943
+   },
+   "longest_ident": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.116221
+   },
+   "token_weight": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.132251
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Node.__init__",
+   "Tree.__init__",
+   "Tree._depth",
+   "Tree._height",
+   "Tree._inorder",
+   "Tree.depth_sum",
+   "Tree.height",
+   "Tree.inorder_sum",
+   "Tree.insert",
+   "Tree.max_key",
+   "Tree.min_key",
+   "build_tree",
+   "count_nodes"
+  ],
+  "configs": {
+   "bare+obs": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 2.47,
+    "decisions": {
+     "Node.__init__": {
+      "added": 0,
+      "observed": false,
+      "params": {},
+      "return": null
+     },
+     "Tree.__init__": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "None",
+       "kind": "None",
+       "verdict": "mono"
+      }
+     },
+     "Tree._depth": {
+      "added": 3,
+      "observed": true,
+      "params": {
+       "d": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "idx": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Tree._height": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "idx": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Tree._inorder": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "idx": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Tree.depth_sum": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Tree.height": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Tree.inorder_sum": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Tree.insert": {
+      "added": 2,
+      "observed": true,
+      "params": {
+       "key": {
+        "added": "int",
+        "big": 0,
+        "kind": "int",
+        "verdict": "mono"
+       },
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "None",
+       "kind": "None",
+       "verdict": "mono"
+      }
+     },
+     "Tree.max_key": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "Tree.min_key": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "self": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     },
+     "build_tree": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "keys": {
+        "added": "list[int]",
+        "big": 0,
+        "kind": "list[int]",
+        "verdict": "mono"
+       }
+      },
+      "return": {
+       "kind": "cls:tree_build.Tree",
+       "verdict": "unexpressible"
+      }
+     },
+     "count_nodes": {
+      "added": 1,
+      "observed": true,
+      "params": {
+       "t": {
+        "big": 0,
+        "kind": "cls:tree_build.Tree",
+        "verdict": "unexpressible"
+       }
+      },
+      "return": {
+       "added": "int",
+       "kind": "int",
+       "verdict": "mono"
+      }
+     }
+    },
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "build_tree": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "count_nodes": "unresolved-param: t stays in CPython"
+    },
+    "source_same_output": true
+   },
+   "hand": {
+    "accelerated": [],
+    "build_rc": 0,
+    "build_s": 2.66,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [],
+    "rejected": {
+     "build_tree": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "count_nodes": "unresolved-param: t stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "build_tree",
+   "count_nodes"
+  ],
+  "icount": {
+   "bare+obs": 22969550697,
+   "cpython": 22962891173,
+   "hand": 22969774952
+  },
+  "module": "tree_build",
+  "observe_same_output": true,
+  "profile": {
+   "Node": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree.__init__": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree._depth": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "d": {
+      "int": 152884
+     },
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1328
+    },
+    "self_s": 6.257766
+   },
+   "Tree._height": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1328
+    },
+    "self_s": 6.373799
+   },
+   "Tree._inorder": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1328
+    },
+    "self_s": 6.94596
+   },
+   "Tree.depth_sum": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.height": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.inorder_sum": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.insert": {
+    "big": {},
+    "calls": 60000,
+    "generator": false,
+    "params": {
+     "key": {
+      "int": 1945
+     },
+     "self": {
+      "cls:tree_build.Tree": 1945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1024
+    },
+    "self_s": 0.172049
+   },
+   "Tree.max_key": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.min_key": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.004001
+   },
+   "build_tree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "cls:tree_build.Tree": 1
+    },
+    "self_s": 0.0
+   },
+   "count_nodes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "t": {
+      "cls:tree_build.Tree": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ }
+]

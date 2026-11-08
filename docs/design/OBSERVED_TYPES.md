@@ -137,6 +137,28 @@ loop iteration (was ~10); the int64-overflow fallback costs 66 ns vs 53 ns (was 
 bound); every other module within icount noise (+-1.3%; `hashing`, with no native function,
 moved 0.992 -> 1.005); all outputs byte-identical.
 
+**obs3 task 3 (list results, `list[float]` parameters).** A function returning `list[int]` /
+`list[float]` is native when `_list_return_proof` shows the result is a fresh local (built by
+`[]`, a literal or `[c] * n`, then only appended to, indexed, stored into or measured, and returned
+by every `return`) whose elements are all exact `int` (never bool) or all `float`; the exact types
+come from a small optimistic pass over the body (`_Kinds`), not from `pymix`'s merged kinds. The
+analysis process seeds that kind into `pymix` and builds the clone itself (the base mixed mode
+does not wire list results); the wrapper reads the clone's `_out`/`_cap` buffer (a long list from
+the unit's spill slot) and builds a new CPython list, holding the GIL. A `list[float]` parameter
+that `to_c` passes as `ail_flist` is now called with that struct (`_unit_abi`). `len(xs)` and the
+other read-only builtins no longer count as mutating a list parameter. Two holes found and closed
+in the hybrid only: a reachable int64-overflow / MemoryError stop in a non-int unit now falls back
+instead of exiting CPython (trap pad only where the stop is reachable, `_overflow_stop_reachable`),
+and the IR's `xs[i] op= v` (checked get, then an unchecked set at the raw index: `out[-1] += 1`
+corrupts the heap, **also in the default build**, left for a core fix) keeps the set checked in
+hybrid clones. Measured (`obs3_task3.json`, instructions vs CPython, `hand` = `bare+obs`): natives
+29 -> 44, corpus 0.934 -> 0.719 (1.39x vs CPython; 1.30x vs obs2); `matrix` 0.993 -> 0.015
+(`mat_mul`), `rolling_stats` 0.880 -> 0.173, `dataframe_group` 0.921 -> 0.509, `float_loops`
+1.000 -> 0.625, `bitset_bloom` 0.941 -> 0.920; every other module within noise; all 30 builds
+byte-identical to the oracle and live CPython. Sampled native share 19.2% (bound 1.237x) is below
+what was achieved: the 1 ms sampler under-counts these long-running loop bodies, so the share is a
+ranking, not a bound, here.
+
 ## 4. Step 3 split into tasks of at most 2 hours, ranked by measured gain
 
 0. **Load the trap units** (minutes): drop `static` from the trap flag in `_trap_patch`, and make

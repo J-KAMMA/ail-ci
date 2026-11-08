@@ -242,12 +242,17 @@ def _provably_float(node, float_names):
 
 
 def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_names=(), ret=None,
-               bool_names=()):
+               bool_names=(), fresh=()):
     """A call this pass can prove cannot raise and has no side effect.  Everything else stays a
-    refusal: the hybrid must return CPython's value or fall back, never a partial answer."""
+    refusal: the hybrid must return CPython's value or fall back, never a partial answer.
+    `fresh` names the list the function builds and returns (`_list_return_proof`): appending to
+    it changes nothing any caller can see before the return."""
     func = node.func
     if isinstance(func, ast.Attribute):
         receiver = func.value
+        if isinstance(receiver, ast.Name) and receiver.id in fresh and func.attr == 'append' \
+                and len(node.args) == 1 and not node.keywords:
+            return True
         if _provably_str(receiver, str_names):
             if not node.keywords:
                 if not node.args and func.attr in _SAFE_STR_NOARGS:
@@ -291,7 +296,7 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
     return False
 
 
-def _unsafe_body(fn, params=(), ret=None):
+def _unsafe_body(fn, params=(), ret=None, fresh=()):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
     subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), an
@@ -300,7 +305,7 @@ def _unsafe_body(fn, params=(), ret=None):
     `reversed`) whose receiver and arguments are provably the right type cannot raise either, so
     both stay eligible.  This is deliberately conservative; a missed speed-up is safe."""
     str_names = {p for p, kind in params if kind == 'str'}
-    list_names = {p for p, kind in params if kind in _LIST}
+    list_names = {p for p, kind in params if kind in _LIST} | set(fresh)
     num_names = {p for p, kind in params if kind in ('int', 'float', 'bool')}
     int_names = {p for p, kind in params if kind in ('int', 'bool')}
     bool_names = {p for p, kind in params if kind == 'bool'}
@@ -319,7 +324,8 @@ def _unsafe_body(fn, params=(), ret=None):
                 continue
             return 'division or power can raise'
         if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names, num_names,
-                                                          int_names, float_names, ret, bool_names):
+                                                          int_names, float_names, ret, bool_names,
+                                                          fresh):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'
@@ -336,7 +342,416 @@ def _unsafe_body(fn, params=(), ret=None):
     return None
 
 
-def _list_param_mutated(fn, list_params):
+# Builtins that only read a list argument: passing a list parameter to one of these is not a
+# mutation (`n = len(xs)` used to refuse every such function as "the list parameter is mutated").
+# Trusted only while the module does not rebind the name (`_module_bindings`).
+_READ_ONLY_BUILTINS = frozenset({'len', 'sum', 'min', 'max', 'sorted', 'any', 'all'})
+
+
+def _module_bindings(tree):
+    """Every name the module binds at top level (a def, a class, an assignment, an import): a
+    builtin of that name is not the builtin."""
+    names = set()
+    for node in getattr(tree, 'body', ()):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split('.')[0])
+        else:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+                    names.add(sub.id)
+    return names
+
+
+# ---- exact CPython result types (obs3) ---------------------------------------------------------
+#
+# `pymix` kinds are hypotheses: `_merge` turns int+bool evidence into `int` and int+float into
+# `float`, which is right for a C slot but not for the Python object a list element or a `bool`
+# result must be.  The hybrid returns real CPython objects, so a list's element type and an
+# `a and b` result are accepted only when this pass proves CPython's exact type: 'int' (never a
+# bool), 'float', 'bool', 'str', 'list[int]', 'list[float]', 'list[str]', or None (unknown).
+# Parameters are exact because the C entry checks them (`PyLong_CheckExact`, `PyFloat_CheckExact`,
+# `PyBool_Check`, every list element).  Locals take the join of every assignment, solved
+# optimistically ('top' = no evidence yet), so `acc = 0; acc += a[i]` is 'int' while
+# `x = 0; x = x * 1.5` is None (CPython holds an int or a float there).
+
+_TOP = 'top'
+_NUM_KINDS = ('int', 'float', 'bool')
+_STR_METHOD_RESULT = {
+    'isdigit': 'bool', 'isalpha': 'bool', 'isalnum': 'bool', 'isspace': 'bool', 'isupper': 'bool',
+    'islower': 'bool', 'istitle': 'bool', 'isdecimal': 'bool', 'isnumeric': 'bool',
+    'isidentifier': 'bool', 'isprintable': 'bool', 'isascii': 'bool', 'startswith': 'bool',
+    'endswith': 'bool', 'find': 'int', 'rfind': 'int', 'count': 'int', 'upper': 'str',
+    'lower': 'str', 'casefold': 'str', 'strip': 'str', 'lstrip': 'str', 'rstrip': 'str',
+    'capitalize': 'str', 'title': 'str', 'swapcase': 'str', 'replace': 'str',
+    'removeprefix': 'str', 'removesuffix': 'str', 'join': 'str',
+}
+
+
+def _binop_kind(op, left, right):
+    if _TOP in (left, right):
+        other = right if left == _TOP else left
+        if other == _TOP:
+            return _TOP
+        if other is None:
+            return None
+        left = right = other
+    if left is None or right is None:
+        return None
+    if left in _NUM_KINDS and right in _NUM_KINDS:
+        has_float = 'float' in (left, right)
+        if isinstance(op, ast.Div):
+            return 'float'
+        if isinstance(op, (ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod)):
+            return 'float' if has_float else 'int'
+        if isinstance(op, (ast.LShift, ast.RShift)):
+            return None if has_float else 'int'
+        if isinstance(op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
+            if has_float:
+                return None
+            return 'bool' if left == right == 'bool' else 'int'
+        return None                       # `**` can make a float from ints; `@`
+    if left == right == 'str' and isinstance(op, ast.Add):
+        return 'str'
+    return None
+
+
+class _Kinds:
+    """Exact kinds of one function's names (see the section comment above)."""
+
+    def __init__(self, fn, params, shadowed=frozenset(), skip=frozenset()):
+        self.shadowed = set(shadowed)
+        self.env = {}
+        sources = {}
+        for p, k in params:
+            sources.setdefault(p, []).append(('kind', k))
+        for node in _own_nodes(fn):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        sources.setdefault(target.id, []).append(('expr', node.value))
+                    elif not isinstance(target, (ast.Subscript, ast.Attribute)):
+                        for sub in ast.walk(target):
+                            if isinstance(sub, ast.Name):
+                                sources.setdefault(sub.id, []).append(('bad', None))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                sources.setdefault(node.target.id, []).append(
+                    ('expr', node.value) if node.value is not None else ('bad', None))
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                sources.setdefault(node.target.id, []).append(('aug', node))
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                if isinstance(node.target, ast.Name) and isinstance(node, ast.For):
+                    sources.setdefault(node.target.id, []).append(('iter', node.iter))
+                else:
+                    for sub in ast.walk(node.target):
+                        if isinstance(sub, ast.Name):
+                            sources.setdefault(sub.id, []).append(('bad', None))
+            elif isinstance(node, ast.NamedExpr):
+                sources.setdefault(node.target.id, []).append(('expr', node.value))
+            elif isinstance(node, ast.comprehension):
+                # A comprehension variable lives in its own scope; this flat map cannot tell
+                # it apart from a local of the same name, so that name is simply unknown.
+                for sub in ast.walk(node.target):
+                    if isinstance(sub, ast.Name):
+                        sources.setdefault(sub.id, []).append(('bad', None))
+            elif isinstance(node, (ast.With, ast.AsyncWith, ast.ExceptHandler, ast.Import,
+                                   ast.ImportFrom, ast.Global, ast.Nonlocal, ast.Delete)):
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+                        sources.setdefault(sub.id, []).append(('bad', None))
+                if isinstance(node, ast.ExceptHandler) and node.name:
+                    sources.setdefault(node.name, []).append(('bad', None))
+                if isinstance(node, (ast.Global, ast.Nonlocal)):
+                    for name in node.names:
+                        sources.setdefault(name, []).append(('bad', None))
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        sources.setdefault((alias.asname or alias.name).split('.')[0],
+                                           []).append(('bad', None))
+        for name in skip:
+            sources.pop(name, None)
+        self.local_names = set(sources)
+        self.sources = sources
+        self.extra = {}                   # names solved by the caller (a returned fresh list)
+        self.solve()
+
+    def solve(self, rounds=64):
+        env = {name: _TOP for name in self.sources}
+        env.update(self.extra)
+        for _ in range(rounds):
+            self.env = env
+            new = dict(self.extra)
+            for name, srcs in self.sources.items():
+                known = []
+                bad = False
+                for tag, value in srcs:
+                    if tag == 'kind':
+                        k = value
+                    elif tag == 'bad':
+                        k = None
+                    elif tag == 'expr':
+                        k = self.kind(value)
+                    elif tag == 'aug':
+                        k = _binop_kind(value.op, env.get(value.target.id), self.kind(value.value))
+                    else:
+                        k = self.iter_kind(value)
+                    if k is None:
+                        bad = True
+                        break
+                    if k != _TOP:
+                        known.append(k)
+                if bad or (known and any(k != known[0] for k in known)):
+                    new[name] = None
+                else:
+                    new[name] = known[0] if known else _TOP
+            if new == env:
+                break
+            env = new
+        self.env = {name: (None if k == _TOP else k) for name, k in env.items()}
+        self.env.update(self.extra)
+
+    def builtin(self, name):
+        return name not in self.shadowed and name not in self.local_names
+
+    def iter_kind(self, it):
+        if isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range' \
+                and self.builtin('range') and not it.keywords:
+            return 'int'
+        k = self.kind(it)
+        if k == _TOP:
+            return _TOP
+        if k == 'str':
+            return 'str'
+        if k in ('list[int]', 'list[float]', 'list[str]'):
+            return k[5:-1]
+        return None
+
+    def kind(self, e):
+        env = self.env
+        if isinstance(e, ast.Constant):
+            v = e.value
+            if isinstance(v, bool):
+                return 'bool'
+            if isinstance(v, int):
+                return 'int'
+            if isinstance(v, float):
+                return 'float'
+            if isinstance(v, str):
+                return 'str'
+            return None
+        if isinstance(e, ast.Name):
+            return env.get(e.id)
+        if isinstance(e, ast.BinOp):
+            return _binop_kind(e.op, self.kind(e.left), self.kind(e.right))
+        if isinstance(e, ast.UnaryOp):
+            if isinstance(e.op, ast.Not):
+                return 'bool'
+            k = self.kind(e.operand)
+            if k == _TOP:
+                return _TOP
+            if isinstance(e.op, (ast.UAdd, ast.USub)):
+                return {'int': 'int', 'bool': 'int', 'float': 'float'}.get(k)
+            return 'int' if k in ('int', 'bool') else None
+        if isinstance(e, ast.Compare):
+            ok = ('int', 'float', 'bool', 'str', 'list[int]', 'list[float]', 'list[str]', _TOP)
+            if all(self.kind(x) in ok for x in [e.left] + list(e.comparators)):
+                return 'bool'
+            return None
+        if isinstance(e, (ast.BoolOp, ast.IfExp)):
+            # `a and b` / `a or b` return one of the operands, never a converted bool.
+            values = e.values if isinstance(e, ast.BoolOp) else [e.body, e.orelse]
+            ks = [self.kind(v) for v in values]
+            if None in ks:
+                return None
+            known = [k for k in ks if k != _TOP]
+            if not known:
+                return _TOP
+            return known[0] if all(k == known[0] for k in known) else None
+        if isinstance(e, ast.Subscript):
+            b = self.kind(e.value)
+            if b == _TOP:
+                return _TOP
+            if isinstance(e.slice, ast.Slice):
+                return b if b in ('str', 'list[int]', 'list[float]', 'list[str]') else None
+            if b == 'str':
+                return 'str'
+            if b in ('list[int]', 'list[float]', 'list[str]'):
+                return b[5:-1]
+            return None
+        if isinstance(e, ast.Call):
+            if e.keywords or any(isinstance(a, ast.Starred) for a in e.args):
+                return None
+            func, args = e.func, e.args
+            if isinstance(func, ast.Attribute):
+                if self.kind(func.value) == 'str':
+                    return _STR_METHOD_RESULT.get(func.attr)
+                return None
+            if not isinstance(func, ast.Name) or not self.builtin(func.id):
+                return None
+            name = func.id
+            ks = [self.kind(a) for a in args]
+            if name in ('len', 'ord') and len(args) == 1:
+                return 'int'
+            if name in ('int', 'float', 'str', 'bool') and len(args) <= 1:
+                return name
+            if name == 'chr' and len(args) == 1:
+                return 'str'
+            if name == 'round' and len(args) == 1:
+                return 'int'
+            if name == 'abs' and len(args) == 1:
+                return {'int': 'int', 'bool': 'int', 'float': 'float', _TOP: _TOP}.get(ks[0])
+            if name in ('min', 'max'):
+                if len(args) == 1:
+                    return {'list[int]': 'int', 'list[float]': 'float', 'list[str]': 'str',
+                            _TOP: _TOP}.get(ks[0])
+                if len(args) >= 2 and None not in ks:
+                    known = [k for k in ks if k != _TOP]
+                    if not known:
+                        return _TOP
+                    return known[0] if all(k == known[0] for k in known) else None
+                return None
+            if name == 'sum' and len(args) == 1:
+                # sum([]) is the int 0, so only an int list has one result type.
+                return {'list[int]': 'int', _TOP: _TOP}.get(ks[0])
+            return None
+        return None
+
+
+def _parents(fn):
+    out = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            out[id(child)] = node
+    return out
+
+
+def _list_return_proof(fn, params, shadowed=frozenset()):
+    """(kind, name) when `fn` returns a list it built itself whose elements are all CPython
+    `int` (never bool) or all `float`; otherwise (None, reason).
+
+    The returned list must be a fresh local: created by `[]`, a literal or `[c] * n`, then only
+    appended to, indexed, stored into (`out[i] = e`, `out[i] += e`) or measured with `len`, and
+    returned by every `return`.  Nothing else can hold a reference to it, so a new CPython list
+    with the same elements (what the native entry hands back) cannot be told apart from the
+    original object."""
+    pk = dict(params)
+    if not fn.body or not isinstance(fn.body[-1], ast.Return):
+        return None, 'a path can fall off the end (returns None)'
+    returns = [n for n in _own_nodes(fn) if isinstance(n, ast.Return)]
+    if any(not isinstance(r.value, ast.Name) for r in returns):
+        return None, 'a return is not a local list name'
+    names = {r.value.id for r in returns}
+    if len(names) != 1:
+        return None, 'returns more than one name'
+    var = names.pop()
+    if var in pk:
+        return None, 'returns a parameter'
+    own = set(id(n) for n in _own_nodes(fn))
+    parents = _parents(fn)
+    creations, elements, aug_elements = [], [], []
+    for node in ast.walk(fn):
+        if not (isinstance(node, ast.Name) and node.id == var):
+            continue
+        if id(node) not in own:
+            return None, 'the list is used by a nested function'
+        parent = parents.get(id(node))
+        if isinstance(node.ctx, ast.Store):
+            if isinstance(parent, ast.Assign) and len(parent.targets) == 1 \
+                    and parent.targets[0] is node:
+                creations.append(parent.value)
+                continue
+            return None, 'the list name is rebound in an unsupported way'
+        if isinstance(node.ctx, ast.Del):
+            return None, 'the list is deleted'
+        if isinstance(parent, ast.Return):
+            continue
+        if isinstance(parent, ast.Attribute) and parent.attr == 'append':
+            call = parents.get(id(parent))
+            stmt = parents.get(id(call))
+            if isinstance(call, ast.Call) and call.func is parent and len(call.args) == 1 \
+                    and not call.keywords and isinstance(stmt, ast.Expr) \
+                    and not isinstance(call.args[0], ast.Starred):
+                elements.append(call.args[0])
+                continue
+            return None, 'an unsupported use of append'
+        if isinstance(parent, ast.Subscript) and parent.value is node \
+                and not isinstance(parent.slice, ast.Slice):
+            holder = parents.get(id(parent))
+            if isinstance(parent.ctx, ast.Load):
+                continue
+            if isinstance(parent.ctx, ast.Store):
+                if isinstance(holder, ast.Assign) and parent in holder.targets:
+                    elements.append(holder.value)
+                    continue
+                if isinstance(holder, ast.AugAssign) and holder.target is parent:
+                    aug_elements.append(holder)
+                    continue
+            return None, 'an unsupported store into the list'
+        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
+                and parent.func.id == 'len' and parent.args == [node] and not parent.keywords \
+                and 'len' not in shadowed:
+            continue
+        return None, 'the list escapes or is used in an unsupported way'
+    if not creations:
+        return None, 'the list is not created here'
+    for value in creations:
+        if isinstance(value, ast.List):
+            elements.extend(value.elts)
+        elif isinstance(value, ast.BinOp) and isinstance(value.op, ast.Mult):
+            lst, count = ((value.left, value.right) if isinstance(value.left, ast.List)
+                          else (value.right, value.left))
+            if not (isinstance(lst, ast.List) and len(lst.elts) == 1):
+                return None, 'an unsupported list creation'
+            elements.append(lst.elts[0])
+            aug_elements.append(('count', count))
+        else:
+            return None, 'an unsupported list creation'
+    if any(isinstance(e, ast.Starred) for e in elements):
+        return None, 'a starred element'
+    kinds = _Kinds(fn, params, shadowed, skip={var})
+    elem = None
+    for _ in range(8):
+        found = set()
+        for e in elements:
+            found.add(kinds.kind(e))
+        for holder in aug_elements:
+            if isinstance(holder, tuple):
+                if kinds.kind(holder[1]) not in ('int', 'bool'):
+                    found.add(None)
+                continue
+            found.add(_binop_kind(holder.op, elem or _TOP, kinds.kind(holder.value)))
+        found.discard(_TOP)
+        if len(found) != 1:
+            return None, 'the element types are mixed or unknown'
+        new = found.pop()
+        if new not in ('int', 'float'):
+            return None, 'the elements are %s' % (new or 'of unknown type')
+        if new == elem:
+            break
+        elem = new
+        kinds.extra = {var: 'list[%s]' % elem}
+        kinds.solve()
+    else:
+        return None, 'the element type does not settle'
+    return 'list[%s]' % elem, var
+
+
+def _return_kinds(fn, params, shadowed=frozenset()):
+    """The exact kind of every `return` value (None where unknown, 'none' for a bare return or
+    falling off the end)."""
+    kinds = _Kinds(fn, params, shadowed)
+    out = []
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Return):
+            out.append('none' if node.value is None else kinds.kind(node.value))
+    if not fn.body or not isinstance(fn.body[-1], ast.Return):
+        out.append('none')
+    return out
+
+
+def _list_param_mutated(fn, list_params, shadowed=frozenset()):
     """A list argument is copied into the typed call, so a function that mutates it must stay in
     CPython (mutation would otherwise not be visible to the caller).  This also refuses passing a
     list parameter on to another user function, which may mutate it one step away."""
@@ -377,8 +792,15 @@ def _list_param_mutated(fn, list_params):
                 return True
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             return True
+    local_bound = {a.arg for a in fn.args.args} | {
+        n.id for n in nodes if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load)}
     for node in nodes:
         if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in _READ_ONLY_BUILTINS \
+                    and node.func.id not in shadowed and node.func.id not in local_bound \
+                    and not node.keywords \
+                    and not any(isinstance(a, ast.Starred) for a in node.args):
+                continue                  # len(xs), sum(xs), ...: a read, not a mutation
             for arg in list(node.args) + [kw.value for kw in node.keywords]:
                 if isinstance(arg, ast.Name) and arg.id in aliases:
                     return True
@@ -420,6 +842,39 @@ try:
     import pyboxed2, pyfunc, pymix
 except Exception:
     raise SystemExit(0)
+sys.path.insert(0, %r)
+try:
+    import ail_cpython_hybrid as _hy
+except Exception:
+    _hy = None
+# obs3: the IR lowers `xs[i] op= v` as a checked get and then an UNCHECKED set at the same raw
+# index.  The checked get accepts a negative index (it normalises it internally), so `out[-1] += 1`
+# then writes before the buffer (heap corruption: found with a list result, reproduced in the
+# default build too; reported for a core fix).  The hybrid's clones keep the set checked whenever
+# the get was, so the set normalises the index itself; a proven-in-range subscript is unchanged.
+try:
+    import ir.lower as _ir_lower
+    _old_aug_target = _ir_lower.Lowering.aug_target
+    _old_builder_emit = _ir_lower._Builder.emit
+    _aug_ck = []
+    def _builder_emit(self, op, operands=(), types=(), attrs=None, regions=()):
+        if _aug_ck and op == 'list.set' and attrs == {'mode': 'nck'}:
+            attrs = {'mode': 'ck'}
+        return _old_builder_emit(self, op, operands, types, attrs, regions)
+    def _aug_target(self, s):
+        t = s.target
+        if isinstance(t, ast.Subscript) and not isinstance(t.slice, ast.Slice) \
+                and self.index_mode(t) != 'nck':
+            _aug_ck.append(1)
+            try:
+                return _old_aug_target(self, s)
+            finally:
+                _aug_ck.pop()
+        return _old_aug_target(self, s)
+    _ir_lower._Builder.emit = _builder_emit
+    _ir_lower.Lowering.aug_target = _aug_target
+except Exception:
+    pass
 # The CLI's Python-surface pass marks every annotated return with a `__ail_checked_*__` contract
 # (dunders.py), which `to_c` treats as a request for a checked outer contract and refuses for a
 # str entry.  Mixed mode never asked for that contract; the body's own proof is the gate and the
@@ -459,7 +914,13 @@ pymix._FnFacts.__init__ = _fn_init
 # default (non-hybrid) build path is byte-for-byte unchanged.
 _old_expr_kind = pymix._expr_kind
 _DICT_PREFIX = '__ail_hybrid_dict__'
+# obs3: a return value whose exact type the hybrid proved (`_seed_returns` below).  Keyed by node
+# id and checked by identity, so a later tree reusing an id is never mistaken for it.
+_SEEDED = {}
 def _hybrid_expr_kind(e, facts, rets):
+    seeded = _SEEDED.get(id(e))
+    if seeded is not None and seeded[0] is e:
+        return seeded[1]
     if isinstance(e, ast.Dict):
         vk = None
         for v in e.values:
@@ -506,6 +967,106 @@ def _raise_site_exc(node):
         return None
     return _old_raise_site(node)
 pymix._raise_site_exc = _raise_site_exc
+# obs3: pymix cannot type `out = []; out.append(x); return out` (an empty literal has no element
+# kind, and an append is not evidence).  `_list_return_proof` proves the exact element type from
+# the body; the result kind and the local are seeded, every return node is marked so pymix's own
+# "one tag on every return" check agrees, and the fixed point runs again so callers see it.
+# `_select` repeats the proof on the original source; this only lets the candidate exist.
+_seeded_names = {}
+_old_fixed_point = pymix._fixed_point
+def _seed_returns(tree, fn_facts):
+    shadowed = _hy._module_bindings(tree)
+    seeded = {}
+    for name, f in fn_facts.items():
+        if name == pymix.MODULE_SCOPE or f.ret is not None:
+            continue
+        if any(k is None for k in f.params.values()):
+            continue
+        kind, var = _hy._list_return_proof(f.node, list(f.params.items()), shadowed)
+        if kind is None:
+            continue
+        f.ret = kind
+        f.locals[var] = kind
+        for node in ast.walk(f.node):
+            if isinstance(node, ast.Return) and node.value is not None:
+                _SEEDED[id(node.value)] = (node.value, kind)
+        seeded[name] = kind
+    return seeded
+def _fixed_point(tree):
+    fn_facts = _old_fixed_point(tree)
+    if _hy is None:
+        return fn_facts
+    try:
+        seeded = _seed_returns(tree, fn_facts)
+        if seeded:
+            owner = pymix._scope_owner(fn_facts)
+            for _ in range(pymix.MAX_ROUNDS):
+                if not pymix._one_pass(fn_facts, pymix._collect_calls(tree, fn_facts, owner)):
+                    break
+            _seeded_names.update(seeded)
+    except Exception:
+        pass
+    return fn_facts
+pymix._fixed_point = _fixed_point
+# A candidate the base mixed mode does not wire -- a list result, or a `list[float]` parameter
+# `to_c` passes as `ail_flist` -- gets its clone here, for the hybrid only: it is captured beside
+# the base units and never added to the analysis build's own boxed program (whose call sites do
+# not know these ABIs).  The hybrid's `_unit_abi` reads the prototype and its wrapper calls it.
+_extra_units = []
+_old_setup_mix = pyboxed2.Compiler._setup_mix
+def _extra_mix_units(self, source, tree):
+    if pymix is None or os.environ.get('AIL_NO_MIX') or not self.allow_mix or _hy is None:
+        return
+    import walkmemo, bigcap
+    report = walkmemo.mix_report(pymix, source)
+    defs_src = pyboxed2._mix_defs_only_source(tree)
+    big_hard = bigcap.marked(tree, local=False)
+    big_local = bigcap.marked(tree)
+    for name, cand in sorted(report.candidates.items()):
+        if name in self.mix_typed or name in big_hard:
+            continue
+        facts = getattr(report, 'function_ir', {}).get(name)
+        if facts is None or not facts.matches(source, name):
+            continue
+        cand = facts.signature()
+        params = list(cand['params'].items())
+        ret = cand['ret']
+        if ret not in ('int', 'bool', 'float', 'str', 'list[int]', 'list[float]'):
+            continue
+        if not (ret in ('list[int]', 'list[float]') or any(k == 'list[float]' for _, k in params)):
+            continue
+        if ret in ('int', 'bool') and name in big_local:
+            continue
+        if any(k not in ('int', 'bool', 'float', 'str', 'list[int]', 'list[float]')
+               for _, k in params):
+            continue
+        info = self.functions.get(name)
+        if info is None or info.get('vararg') or info.get('kwarg') or info.get('kwonly'):
+            continue
+        mangled = pyfunc._mangle_csym(name) + '__typed'
+        info2 = {'_checked_arrays': True, '_mixed_clone': True}
+        try:
+            csrc = pyfunc.to_c(defs_src, entry=name, sig=pymix._scalar_sig(cand['params']),
+                               name=mangled, info=info2)
+        except Exception:
+            continue
+        if info2.get('io'):
+            continue
+        csrc = re.sub(r'__attribute__\(\(always_inline\)\) static inline\r?\n'
+                      r'(?=\S[^\n]*\b' + re.escape(mangled) + r'\s*\()', '', csrc)
+        if _hy._unit_abi(csrc, mangled, params, ret) is None:
+            continue
+        csrc = pyboxed2._mix_drain_before_exit(csrc)
+        if csrc is None:
+            continue
+        _extra_units.append([mangled, name, '/* AIL_MIXED_TYPED: ' + name + ' */\n' + csrc])
+def _setup_mix(self, source, tree):
+    _old_setup_mix(self, source, tree)
+    try:
+        _extra_mix_units(self, source, tree)
+    except Exception:
+        pass
+pyboxed2.Compiler._setup_mix = _setup_mix
 _old_extract = pyboxed2._mix_extract_signature
 _old_validate = pyboxed2._mix_validate_signature
 _old_build = pyboxed2.build
@@ -544,7 +1105,8 @@ def _pymix_rejected():
         return {}
 def _dump(report):
     try:
-        data = {'mix_units': [list(u) for u in (report.get('mix_units') or [])],
+        data = {'mix_units': [list(u) for u in (report.get('mix_units') or [])] + _extra_units,
+                'seeded': dict(_seeded_names),
                 'typed_inline': list(report.get('typed_inline') or []),
                 'facts': _facts(), 'pymix_rejected': _pymix_rejected(),
                 'note': str(report.get('note') or '')}
@@ -573,7 +1135,7 @@ pyboxed2._mix_extract_signature = _extract
 pyboxed2._mix_validate_signature = _validate
 pyboxed2.build = _build
 pymix.analyze = _analyze
-""" % str(_PKG), encoding='utf-8')
+""" % (str(_PKG), str(_HERE)), encoding='utf-8')
     env = dict(os.environ, PYTHONPATH=str(run_dir) + os.pathsep + os.environ.get('PYTHONPATH', ''),
                AIL_HYBRID_CAPTURE=str(capture_path), AIL_NO_CACHE='1', AIL_CACHE=str(run_dir / 'cache'),
                AIL_EXACT_INT='1', AIL_SURFACE='python', AIL_GENERAL='v2')
@@ -614,6 +1176,7 @@ pymix.analyze = _analyze
     facts = data.get('facts') or {}
     report = {'mix_units': data.get('mix_units') or [], 'typed_inline': data.get('typed_inline') or [],
               'pymix_rejected': data.get('pymix_rejected') or {},
+              'seeded': data.get('seeded') or {},
               'note': data.get('note') or ''}
     return report, facts
 
@@ -628,6 +1191,7 @@ def _select(src, tree, report, facts):
     big_hard = bigcap.marked(tree, local=False)
     big_local = bigcap.marked(tree)
     id_reach, id_any = pyboxed2._mix_identity_unsafe(tree)
+    shadowed = _module_bindings(tree)
     chosen = {}
     rejected = {}
     for mangled, pyname, csrc in report.get('mix_units') or []:
@@ -638,14 +1202,32 @@ def _select(src, tree, report, facts):
             continue
         params = [(p, k) for p, k in info.get('params') or []]
         ret = info.get('ret')
-        if ret not in _SCALAR:
+        fresh = ()
+        if ret in _LIST:
+            # obs3: a returned list becomes a new CPython list of exact ints or floats; the
+            # body must prove that element type itself (pymix's own kind may merge int/bool).
+            kind, why = _list_return_proof(funcs[pyname], params, shadowed)
+            if kind != ret:
+                rejected[pyname] = 'list result: %s' % (why if kind is None else
+                                                        'elements are %s, not %s' % (kind, ret))
+                continue
+            fresh = (why,)
+        elif ret not in _SCALAR:
             rejected[pyname] = 'result kind %s stays in CPython' % ret
+            continue
+        abi = _unit_abi(csrc, mangled, params, ret)
+        if abi is None:
+            rejected[pyname] = "the typed clone's C signature is not one the hybrid calls"
             continue
         if pyname in big_hard:
             rejected[pyname] = 'needs an int beyond int64'
             continue
         if pyname in big_local and ret not in ('int', 'bool'):
             rejected[pyname] = 'may overflow but does not return an int'
+            continue
+        if ret in ('int', 'bool') and pyname in big_local \
+                and ('%s__mix_overflow' % mangled) not in csrc:
+            rejected[pyname] = 'may overflow and has no overflow signal'
             continue
         if id_any and (pyname in id_reach or any(k == 'float' for _, k in params) or ret == 'float'):
             rejected[pyname] = 'the program compares numbers with `is`'
@@ -654,19 +1236,25 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname], params, ret)
+        unsafe = _unsafe_body(funcs[pyname], params, ret, fresh)
         if unsafe:
             rejected[pyname] = unsafe
             continue
         list_params = {p for p, k in params if k in _LIST}
-        if _list_param_mutated(funcs[pyname], list_params):
+        if _list_param_mutated(funcs[pyname], list_params, shadowed):
             rejected[pyname] = 'the list parameter is mutated'
             continue
+        indexes = any(isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice)
+                      for n in _own_nodes(funcs[pyname]))
+        mix_ovf = ('int %s__mix_overflow = 0;' % mangled) in csrc
         chosen[pyname] = {
             'name': pyname, 'mangled': mangled, 'params': params,
             'ret': ret, 'is_bool_ret': bool(info.get('is_bool_ret')),
-            'indexes': any(isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice)
-                           for n in _own_nodes(funcs[pyname])),
+            'indexes': indexes, 'abi': abi, 'mix_ovf': mix_ovf,
+            # The trap landing pad turns an index/key stop, an uncaught AIL exception and an
+            # int64 overflow stop into "run the original in CPython".  An int result with the
+            # mixed-mode overflow signal already handles its overflow stops.
+            'trap': bool(indexes or ret in _LIST or _overflow_stop_reachable(csrc, mangled)),
         }
     # wedge1: a function refused before it reaches _select (pymix or the emitter) used to leave
     # no trace, so most refusals were silent.  Name every remaining top-level function too.
@@ -690,7 +1278,139 @@ def _select(src, tree, report, facts):
 _TRAP_DIES = re.compile(
     r'ail_die\("(?:list index out of range|list assignment index out of range|'
     r'pop index out of range|pop from empty list|key error|string index out of range|'
-    r'bytes index out of range|grid row index out of range|grid column index out of range)"\)')
+    r'bytes index out of range|grid row index out of range|grid column index out of range|'
+    r'MemoryError|OverflowError: integer overflow[^"\\]*)"\)')
+# A checked int64 operation (`ck_mul`, `ck_add`, ...) stops the process with this message.  In a
+# hybrid unit that would kill the CPython process (obs3: found for list results; a float or str
+# result with int arithmetic inside had the same hole), so the trap pad turns it into a fallback.
+_OVERFLOW_DIE = re.compile(r'ail_die\("(?:OverflowError: integer overflow|MemoryError")')
+_C_IDENT = re.compile(r'[A-Za-z_]\w*')
+
+
+def _c_definitions(csrc):
+    """{name: body text} for the unit's top-level C functions and `#define` macros, plus the text
+    outside all of them.  A small scanner (strings, chars and comments skipped for brace counting);
+    enough for the emitter's own regular output."""
+    defs = {}
+    outside = []
+    i, n = 0, len(csrc)
+    head = re.compile(r'(?m)^(?:#define[ \t]+([A-Za-z_]\w*)|[A-Za-z_][^;{}()#\n]*?\b([A-Za-z_]\w*)'
+                      r'\s*\([^;{}]*\)\s*\{)')
+    while i < n:
+        m = head.search(csrc, i)
+        if m is None:
+            outside.append(csrc[i:])
+            break
+        outside.append(csrc[i:m.start()])
+        if m.group(1):                                  # a macro, with its continuation lines
+            j = m.end()
+            while True:
+                e = csrc.find('\n', j)
+                if e < 0:
+                    e = n
+                    break
+                if csrc[e - 1:e] != '\\':
+                    break
+                j = e + 1
+            defs.setdefault(m.group(1), []).append(csrc[m.start():e])
+            i = e
+            continue
+        depth, j = 1, m.end()
+        while j < n and depth:
+            c = csrc[j]
+            if c in '"\'':
+                q = c
+                j += 1
+                while j < n and csrc[j] != q:
+                    j += 2 if csrc[j] == '\\' else 1
+            elif csrc.startswith('/*', j):
+                e = csrc.find('*/', j + 2)
+                j = n if e < 0 else e + 1
+            elif csrc.startswith('//', j):
+                e = csrc.find('\n', j)
+                j = n if e < 0 else e
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+            j += 1
+        defs.setdefault(m.group(2), []).append(csrc[m.start():j])
+        i = j
+    return {k: '\n'.join(v) for k, v in defs.items()}, ''.join(outside)
+
+
+def _overflow_stop_reachable(csrc, entry):
+    """Whether the unit's entry can reach an int64-overflow or MemoryError stop.
+
+    Every typed unit carries the whole runtime prelude, whose checked helpers (`ck_mul`, ...) stop
+    the process on overflow; most entries never call them.  The trap pad (a `setjmp` per call) is
+    only needed when a stop is reachable: names are tainted by containing a stop or by mentioning
+    a tainted name, to a fixed point.  A stop outside every recognised definition counts as
+    reachable."""
+    if not _OVERFLOW_DIE.search(csrc):
+        return False
+    defs, outside = _c_definitions(csrc)
+    if _OVERFLOW_DIE.search(outside):
+        return True
+    mentions = {name: set(_C_IDENT.findall(body)) - {name} for name, body in defs.items()}
+    tainted = {name for name, body in defs.items() if _OVERFLOW_DIE.search(body)}
+    changed = True
+    while changed:
+        changed = False
+        for name, used in mentions.items():
+            if name not in tainted and used & tainted:
+                tainted.add(name)
+                changed = True
+    return entry in tainted
+
+
+def _unit_abi(csrc, mangled, params, ret):
+    """{param: 'scalar' | 'arr' | 'flist'} read from the clone's own C prototype, or None when the
+    prototype is not one the wrapper knows how to call.  A `list[float]` parameter comes either as
+    `const double *v_x, int64_t v_x_len` or, when `to_c` settles it as a float list, as the
+    `ail_flist v_x` struct by value (obs1: "list[float] ABI defect", 2.8% of corpus time)."""
+    m = re.search(r'^([A-Za-z_][\w ]*\*?\s*\b' + re.escape(mangled) + r'\s*\([^\n{;]*\))\s*\{',
+                  csrc, re.MULTILINE)
+    if m is None:
+        return None
+    sig = m.group(1)
+    name_at = re.search(r'\b' + re.escape(mangled) + r'\s*\(', sig).start()
+    rtype = re.sub(r'^(?:(?:static|inline|extern)\s+)+', '', sig[:name_at].strip())
+    if rtype != ('double' if ret == 'float' else 'int64_t'):
+        return None
+    inside = sig[sig.index('(') + 1:sig.rindex(')')].strip()
+    parts = [x.strip() for x in inside.split(',')] if inside and inside != 'void' else []
+    abi = {}
+    idx = 0
+    for p, kind in params:
+        cn = 'v_' + p
+        if kind in ('int', 'bool'):
+            options = ((['int64_t ' + cn], 'scalar'),)
+        elif kind == 'float':
+            options = ((['double ' + cn], 'scalar'),)
+        elif kind == 'str':
+            options = ((['ail_str ' + cn], 'scalar'),)
+        elif kind == 'list[int]':
+            options = ((['const int64_t *' + cn, 'int64_t %s_len' % cn], 'arr'),)
+        elif kind == 'list[float]':
+            options = ((['const double *' + cn, 'int64_t %s_len' % cn], 'arr'),
+                       (['ail_flist ' + cn], 'flist'))
+        else:
+            return None
+        for want, tag in options:
+            if parts[idx:idx + len(want)] == want:
+                abi[p] = tag
+                idx += len(want)
+                break
+        else:
+            return None
+    tail = {'str': ['uint8_t *_out', 'int64_t _cap'],
+            'list[int]': ['int64_t *_out', 'int64_t _cap'],
+            'list[float]': ['double *_out', 'int64_t _cap']}.get(ret, [])
+    if parts[idx:idx + len(tail)] != tail:
+        return None
+    idx += len(tail)
+    return abi if idx == len(parts) else None
 
 
 def _trap_patch(csrc, mangled):
@@ -799,6 +1519,7 @@ def _trap_patch(csrc, mangled):
 
 def _c_proto(item, symbol=None):
     args = []
+    abi = item.get('abi') or {}
     for p, kind in item['params']:
         cn = 'v_' + p
         if kind in ('int', 'bool'):
@@ -809,10 +1530,16 @@ def _c_proto(item, symbol=None):
             args.append('ail_str ' + cn)
         elif kind == 'list[int]':
             args.extend(['const int64_t *' + cn, 'int64_t ' + cn + '_len'])
+        elif kind == 'list[float]' and abi.get(p) == 'flist':
+            args.append('ail_flist ' + cn)
         elif kind == 'list[float]':
             args.extend(['const double *' + cn, 'int64_t ' + cn + '_len'])
     if item['ret'] == 'str':
         args.extend(['uint8_t *_out', 'int64_t _cap'])
+    elif item['ret'] == 'list[int]':
+        args.extend(['int64_t *_out', 'int64_t _cap'])
+    elif item['ret'] == 'list[float]':
+        args.extend(['double *_out', 'int64_t _cap'])
     rtype = 'double' if item['ret'] == 'float' else 'int64_t'
     return '%s %s(%s)' % (rtype, symbol or item['mangled'], ', '.join(args))
 
@@ -938,6 +1665,7 @@ def _wrapper_source(module, items):
         '#include <string.h>',
         '',
         'typedef struct { const uint8_t *p; int64_t n; _Bool bytes; } ail_str;',
+        'typedef struct { double *p; int64_t n, cap; } ail_flist;',
         'static PyObject *AilHybridFallback;',
         'void ail_mix_drain_out(void) { }',
         'static PyObject *ail_hybrid_fallback(void) {',
@@ -947,20 +1675,26 @@ def _wrapper_source(module, items):
         _VECTORCALL_HELPERS,
     ]
     for item in items:
-        callee = item['mangled'] + '__hybrid_call' if item.get('indexes') else item['mangled']
+        callee = item['mangled'] + '__hybrid_call' if item.get('trap') else item['mangled']
         out.append('extern %s;' % _c_proto(item, callee))
+        if item['ret'] in _LIST:
+            elem = 'int64_t' if item['ret'] == 'list[int]' else 'double'
+            out.append('extern int64_t %s__hybrid_spill(const %s **p);' % (item['mangled'], elem))
+            out.append('extern void %s__hybrid_spill_free(void);' % item['mangled'])
         out.append('static PyObject *ail_core_%s(PyObject *const *o);' % item['name'])
     out.append('')
     for item in items:
         name = item['name']
         params = item['params']
         ret = item['ret']
-        callee = item['mangled'] + '__hybrid_call' if item.get('indexes') else item['mangled']
+        abi = item.get('abi') or {}
+        callee = item['mangled'] + '__hybrid_call' if item.get('trap') else item['mangled']
         trap = item['mangled'] + '__hybrid_trap'
         # Owner decision D4 (2026-11-05): a call whose arguments include a container keeps the GIL.
         # The list is copied into a C buffer first, but the safe default is not to release while
         # other CPython threads may hold and mutate a container.  Scalar-only calls still release.
-        hold = any(kind in _LIST for _p, kind in params)
+        # A list result keeps it too: the unit's one spill slot for a long result is shared.
+        hold = any(kind in _LIST for _p, kind in params) or ret in _LIST
         begin = [] if hold else ['    Py_BEGIN_ALLOW_THREADS']
         end = [] if hold else ['    Py_END_ALLOW_THREADS']
         n = len(params)
@@ -977,7 +1711,7 @@ def _wrapper_source(module, items):
         # an int64 overflow, an index/key trap), or NULL with an exception (MemoryError only).
         # Every check runs before any native work, so a fallback has nothing to undo.
         out.append('static PyObject *ail_core_%s(PyObject *const *o) {' % name)
-        if item.get('indexes'):
+        if item.get('trap'):
             out.append('    extern __thread int %s;' % trap)
         # Every conversion failure after the declarations below must free whatever buffers an
         # earlier list argument already filled; `fallback:` does that.  When there are no buffers
@@ -1046,15 +1780,20 @@ def _wrapper_source(module, items):
                 out.append('        if (v%d == -1.0 && PyErr_Occurred()) { PyErr_Clear(); goto fallback; }' % i)
                 out.append('        b%d[k%d] = v%d;' % (i, i, i))
                 out.append('    }')
-                call.append('b%d' % i)
-                call.append('(int64_t)n%d' % i)
+                if abi.get(p) == 'flist':
+                    # The clone reads an `ail_flist` by value and never frees or grows a
+                    # parameter; the buffer stays ours.
+                    call.append('(ail_flist){b%d, (int64_t)n%d, (int64_t)n%d}' % (i, i, i))
+                else:
+                    call.append('b%d' % i)
+                    call.append('(int64_t)n%d' % i)
         cargs = ', '.join(call)
         if ret == 'str':
             out.append('    int64_t need;')
             out.extend(begin)
             out.append('    need = %s(%s%sNULL, 0);' % (callee, cargs, ', ' if cargs else ''))
             out.extend(end)
-            if item.get('indexes'):
+            if item.get('trap'):
                 out.append('    if (%s) %s;' % (trap, fail))
             out.append('    if (need < 0) %s;' % fail)
             out.append('    uint8_t *sb = (uint8_t *)PyMem_Malloc((size_t)(need > 0 ? need : 1));')
@@ -1066,7 +1805,7 @@ def _wrapper_source(module, items):
             out.extend(begin)
             out.append('    if (need > 0) %s(%s%s(void *)sb, need);' % (callee, cargs, ', ' if cargs else ''))
             out.extend(end)
-            if item.get('indexes'):
+            if item.get('trap'):
                 out.append('    if (%s) { PyMem_Free(sb); %s; }' % (trap, fail))
             out.append('    PyObject *res = PyUnicode_DecodeUTF8((const char *)sb, (Py_ssize_t)need, NULL);')
             out.append('    PyMem_Free(sb);')
@@ -1079,19 +1818,55 @@ def _wrapper_source(module, items):
             out.extend(begin)
             out.append('    r = %s(%s);' % (callee, cargs))
             out.extend(end)
-            if item.get('indexes'):
+            if item.get('trap'):
                 out.append('    if (%s) %s;' % (trap, fail))
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    return PyFloat_FromDouble(r);')
+        elif ret in _LIST:
+            # obs3: a list result comes back through the clone's own buffer ABI (`_out`, `_cap`,
+            # the true length as the C result).  A short list fits the stack buffer; a long one
+            # is kept whole in the unit's spill slot and read from there, never by calling the
+            # clone twice.  The CPython list is built fresh from exact ints / floats.
+            elem = 'int64_t' if ret == 'list[int]' else 'double'
+            box = 'PyLong_FromLongLong((long long)lp[k])' if ret == 'list[int]' \
+                else 'PyFloat_FromDouble(lp[k])'
+            out.append('    %s lb[64]; const %s *lp = lb; int64_t ln; int sp = 0;' % (elem, elem))
+            out.extend(begin)
+            out.append('    ln = %s(%s%slb, 64);' % (callee, cargs, ', ' if cargs else ''))
+            out.extend(end)
+            if item.get('trap'):
+                out.append('    if (%s) %s;' % (trap, fail))
+            out.append('    if (ln < 0) %s;' % fail)
+            out.append('    if (ln > 64) {')
+            out.append('        int64_t sn = %s__hybrid_spill(&lp);' % item['mangled'])
+            out.append('        sp = 1;')
+            out.append('        if (sn != ln || !lp) { %s__hybrid_spill_free(); %s; }'
+                       % (item['mangled'], fail))
+            out.append('    }')
+            out.append('    PyObject *res = PyList_New((Py_ssize_t)ln);')
+            out.append('    if (res) {')
+            out.append('        for (Py_ssize_t k = 0; k < (Py_ssize_t)ln; k++) {')
+            out.append('            PyObject *e = %s;' % box)
+            out.append('            if (!e) { Py_CLEAR(res); break; }')
+            out.append('            PyList_SET_ITEM(res, k, e);')
+            out.append('        }')
+            out.append('    }')
+            out.append('    if (sp) %s__hybrid_spill_free();' % item['mangled'])
+            for b in bufs:
+                out.append('    PyMem_Free(%s);' % b)
+            out.append('    return res;')
         else:
-            out.append('    extern __thread int %s__mix_overflow;' % item['mangled'])
-            out.append('    int64_t r; int ovf;')
+            mix_ovf = item.get('mix_ovf', True)
+            if mix_ovf:
+                out.append('    extern __thread int %s__mix_overflow;' % item['mangled'])
+            out.append('    int64_t r; int ovf = 0;')
             out.extend(begin)
             out.append('    r = %s(%s);' % (callee, cargs))
-            out.append('    ovf = %s__mix_overflow;' % item['mangled'])
+            if mix_ovf:
+                out.append('    ovf = %s__mix_overflow;' % item['mangled'])
             out.extend(end)
-            if item.get('indexes'):
+            if item.get('trap'):
                 out.append('    if (%s) %s;' % (trap, fail))
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
@@ -1301,7 +2076,24 @@ def _compile(items, units, module, out_dir):
     objects = []
     for i, item in enumerate(items):
         csrc = next(u[2] for u in units if u[1] == item['name'])
-        if item.get('indexes'):
+        # Runtime entry points a typed unit exports by name (`ail_ret_spill_take`, ...) would be
+        # defined once per unit in the same `.so`; give each unit's copy its own name.
+        for export in sorted(set(re.findall(r'(?m)^AIL_LINK_EXPORT\s+[\w \*]*?\b(ail_\w+)\s*\(',
+                                            csrc))):
+            csrc = re.sub(r'\b%s\b' % re.escape(export), '%s__%s' % (item['mangled'], export),
+                          csrc)
+        if item['ret'] in _LIST:
+            # The unit's spill slot (static) holds a returned list longer than the wrapper's
+            # buffer; the wrapper reads it in place and frees it (it is a malloc'd array).
+            spill = 'ail_ret_spill' if item['ret'] == 'list[int]' else 'ail_fret_spill'
+            elem = 'int64_t' if item['ret'] == 'list[int]' else 'double'
+            if not re.search(r'\b%s_p\b' % spill, csrc):
+                raise RuntimeError('typed unit %r: no list return slot' % item['name'])
+            csrc += ('\nint64_t %s__hybrid_spill(const %s **p) { *p = %s_p; return %s_n; }\n'
+                     'void %s__hybrid_spill_free(void) { free(%s_p); %s_p = NULL; %s_n = 0; }\n'
+                     % (item['mangled'], elem, spill, spill, item['mangled'], spill, spill,
+                        spill))
+        if item.get('trap'):
             csrc = _trap_patch(csrc, item['mangled'])
         # The mixed-mode overflow signal is a per-function global.  The hybrid releases the GIL
         # around every native call, so two threads can otherwise reset/read each other's flag and

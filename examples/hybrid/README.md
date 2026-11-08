@@ -56,7 +56,7 @@ wall clock milliseconds for the whole program, including process start-up.
 | `mandel_rows.py` | yes | 717 | 27 | 26.2x |
 | `prime_count.py` | yes | 912 | 44 | 20.8x |
 | `checksum_text.py` | no | 16.3 | 17.9 | 0.9x |
-| `sum_squares_list.py` | no | 123.8 | 127.6 | 1.0x |
+| `sum_squares_list.py` | yes | 123.8 | 127.6 | 1.0x (before obs3; not re-timed) |
 | `fallback_demo.py` | yes | 12.8 | 24.0 | 0.5x |
 
 `fallback_demo.py` is slower because it makes only four calls and pays the wrapper and extension
@@ -113,8 +113,10 @@ print(f("abc"))
 `build.json` rejects `f` with `"a call can raise or have side effects"`.  `checksum_text.py` is
 the full version of this example and runs entirely in CPython.
 
-**A `list[float]` parameter produces no mixed-mode unit.**  It is not even listed as rejected; the
-analysis finds no unit to select.
+**Fixed in obs3: a `list[float]` parameter produced no mixed-mode unit.**  `to_c` passes such a
+list as an `ail_flist` struct, which the base mixed mode does not call; the hybrid now builds that
+unit itself and its wrapper passes the struct (`ail_cpython_hybrid._unit_abi`), so
+`sum_squares_list.py` is accelerated.  Before obs3 it was not even listed as rejected:
 
 ```python
 def f(xs: list[float]) -> float:
@@ -122,9 +124,7 @@ def f(xs: list[float]) -> float:
 print(f([1.0]))
 ```
 
-`build.json` has `"accelerated": []` and an empty `"rejected"` map.  The same function with
-`list[int]` is accelerated.  `sum_squares_list.py` keeps the requested `list[float]` and records
-this limit.
+`build.json` had `"accelerated": []` and an empty `"rejected"` map.
 
 **A direct call with a non-annotated type demotes the whole function.**  The module kind analysis
 sees the float before the hybrid selection does:
