@@ -1,3 +1,20 @@
+## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
+
+Adds `llms.txt` (llmstxt.org shape, under 150 lines), `docs/AGENT_GUIDE.md` (a worked example with a
+recorded run), `integrations/claude-code/skills/ailc/SKILL.md`, `integrations/AGENTS.md`, and
+`integrations/mcp/` (a stdlib stdio MCP server with `ailc_check`, `ailc_build`, `ailc_explain`, and
+three example files). No compiler or runtime code changed. The planned `ailc ext` command and
+`--why` flag do not exist in this build; they are left out of the docs and reported as 2-hour
+follow-up tasks instead. The command forms that do exist are checked by
+`test_ail_agent_integrations.py` (registered in `tests.d/`): `check`, `compile` (including
+`--strict --json`), `build --cpython`, the `ail` wrapper's `check`/`build`/`run`/`run --diff`, and
+the MCP JSON-RPC loop on three examples. The guide's refusal is AIL0103 on `slow.py`; applying
+`fix.replace_range` `[8,8]` produces `fixed.py`, which rebuilds `passed`, matches CPython, and runs
+28.9x faster (4.63 s vs 0.16 s, median of three). The strict refusal report is `ail.strict/1`; a
+successful build is `ail.build/1`. Probes under `/tmp/probes/` (the two guide files, the three MCP
+examples, a `LABEL = "1"` boundary, and five value-channel/width probes) all match CPython on the
+general and default builds with `bash ~/tools/cmp.sh`.
+
 ## 2026-11-08 -- wedge2: hybrid-native functions index lists and dicts (job-wedge2-11081603)
 
 `_unsafe_body` now allows a non-slice `Subscript` (slices, attribute stores, list-parameter mutation and

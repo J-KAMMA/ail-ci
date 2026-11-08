@@ -50,6 +50,16 @@ element (the first re-apply shared the elements via `x.copy()` / `x | frozenset(
 fixed that); `copy/02` prints `sorted(s)` rather than `sorted(list(s))`.  The copy/02, memo and marshal-version probes
 (`q_copy_set`, `q_copy_memo`, `q_marshal_versions`, `q_marshal_default`, `q_timeit_clock`) match
 CPython, or refuse by name, in the default and `AIL_UNIFIED_FORCE=1` builds.
+## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
+
+Adds `llms.txt`, `docs/AGENT_GUIDE.md`, the Claude Code skill and `AGENTS.md` snippet, and
+`integrations/mcp/` (a stdlib stdio MCP server with `ailc_check`, `ailc_build`, `ailc_explain` and
+three example files). No compiler or runtime code changed. The planned `ailc ext` command and
+`--why` flag do not exist in this build and are left out of the docs; the commands that do exist are
+checked by `test_ail_agent_integrations.py` (registered in `tests.d/`). The guide's AIL0103 fix
+produces a build that matches CPython at 28.9x (4.63 s vs 0.16 s, median of three). The strict
+refusal report is `ail.strict/1`; a successful build is `ail.build/1`. Probes under
+`/tmp/probes/` (eleven programs) match CPython on the general and default builds.
 
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 

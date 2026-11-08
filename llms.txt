@@ -1,0 +1,74 @@
+# AIL (ailc)
+
+> AIL compiles typed Python to native code; the hybrid build keeps functions it cannot prove on CPython, so output still matches CPython.
+
+AIL reads Python 3 syntax, builds the typed parts to C, and refuses a construct by name rather than
+producing a different answer. CPython is the oracle: a compiled program must print what CPython
+prints, or stop loudly.
+
+## When to use AIL
+
+- A profiler shows a CPU-bound pure-Python function at the top of the profile.
+- You are about to rewrite that hot path in Rust or C through PyO3.
+- The code is algorithmic: loops, arithmetic, lists, dicts, strings, and simple classes.
+- You need one native executable with no interpreter, or an importable extension that falls back to
+  CPython for the functions it cannot prove.
+
+## When not to use AIL
+
+- I/O-bound code: network, disk, database, or waiting on subprocesses.
+- Startup-bound code or a program that runs for a few milliseconds.
+- Code that depends on CPython internals, monkeypatching, `eval`, threads with shared mutable state,
+  or unsupported standard-library modules.
+- Code whose main cost is already inside a C extension such as NumPy or a database driver.
+
+## Commands
+
+From a source checkout, `AIL_CURRENT/ail_chatgpt.py` is the compiler:
+
+```sh
+python3 AIL_CURRENT/ail_chatgpt.py check --syntax python prog.py
+python3 AIL_CURRENT/ail_chatgpt.py compile --syntax python prog.py -o hello
+python3 AIL_CURRENT/ail_chatgpt.py compile --strict --json --syntax python prog.py -o hello_strict
+python3 AIL_CURRENT/ail_chatgpt.py build --cpython prog.py -o hello_fast
+./hello
+```
+
+After `pip install ailc`, the `ail` wrapper provides the same checks and builds:
+
+```sh
+ail check prog.py
+ail build prog.py -o hello_wrapper
+ail run prog.py
+ail run --diff prog.py
+```
+
+`compile --json` prints one report: `ail.build/1` on success, `ail.strict/1` on a `--strict`
+refusal. Both have an `agent_diagnostics` array that gives each problem a stable `code`, a
+`file`/`line`/`col`, a one-sentence `cause`, and, when a literal edit exists, a `fix.replace_range`
+and `fix.with` that an agent can apply without parsing the message. `--strict` turns every "built on
+the general path" note into a refusal.
+
+`build --cpython` writes an extension plus a launcher. Its `build.json` lists the accelerated
+functions and, under `rejected`, why each remaining function stays in CPython.
+
+`ail run --diff` runs the native program and CPython on the same input and reports whether stdout,
+the exit code and the exception type agree.
+
+## Docs
+
+- [Quickstart](docs/QUICKSTART.md): install, build, and run your first program.
+- [CLI reference](docs/CLI.md): commands, `--json` diagnostics, and `ail run --diff`.
+- [Agent guide](docs/AGENT_GUIDE.md): a worked example from a slow function to a verified speedup.
+- [Why AIL](docs/WHY.md): the measured claims and where they do not hold.
+- [Limitations](docs/LIMITATIONS.md): the constructs AIL refuses, with the supported rewrite.
+- [Porting](docs/PORTING.md) and [Migrating](docs/MIGRATING.md): moving existing Python code.
+- [Claude Code skill](integrations/claude-code/skills/ailc/SKILL.md): the same workflow for an agent.
+- [AGENTS.md snippet](integrations/AGENTS.md): the short form for Codex, Cursor and other agents.
+- [MCP server](integrations/mcp/README.md): `ailc_check`, `ailc_build`, and `ailc_explain` over stdio.
+
+## Optional
+
+- [Comparison](docs/COMPARISON.md): AIL against Rust and C on the compare-lab tasks.
+- [FFI](docs/FFI.md): call C libraries from AIL.
+- [Debugging](docs/DEBUGGING.md): map generated C back to the source.
