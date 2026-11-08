@@ -1,3 +1,116 @@
+## 2026-11-08 -- wedge4 review fix 2: container searches keep lifted float methods in CPython (job-rbwedge4-11090123)
+
+The C117 guard added last commit only fired when `unified.nan_capable` could see a NaN token.
+A NaN made by arithmetic on an overflow (`x = 1e308 * 10.0; n = x - x`) or parsed from data
+(`float('n' + 'an')`) is invisible to it, so `c.get() in {c.f}` printed `False` where CPython
+prints `True`; the same held for `[c.f]`, `(c.f,)`, a dict lookup and `.count`.  The standalone
+path's C118 `float_search_risk` cannot gate the method plan either: it scans a function plan, and
+a program made only of classes and module-level statements has no plan for its module code, so it
+reports no risk (verified with `AIL_UNIFIED_STATS`).  The method plan now also refuses a method
+that reads/writes a `float` field or takes/returns one whenever the program has a container
+search (`in`/`not in`, non-constant `==`/`!=`, `count`/`index`/`remove`/`get`/`pop`/`setdefault`/
+`discard`, a non-constant subscript), with the named reason `the program searches a container, so
+a float field would lose a NaN's identity`.  Int methods still accelerate.  Probes under
+`/tmp/probes/`: `p_nan_arith`, `p_nan_split`, `p_nan_subscript`, `p_nan_count`, `p_nan_argument`,
+`p_nan_alias`, `p_nan_empty`, `p_nan_negative`, `p_nan_container_eq`, `p_nan_listfield`,
+`p15_nan_containers`, `p13_nan_set`, `p_finite_search`, `p_intfield_search`, `p_nofeature` -- all
+match CPython on the hybrid build; `bash ~/tools/cmp.sh` default/general builds match, or refuse
+the numeric-`is` program by name (`C114`).  A pre-existing standalone limitation is untouched:
+a `tuple` comparison holding a NaN raises `ValueError` in the unified `tuplegen` path on both
+builds (not reached by the hybrid, which keeps the method in CPython).
+
+## 2026-11-08 -- wedge4 review fix: lifted float fields keep a NaN's identity (job-rbwedge4-11090123)
+
+A lifted method reads its `float` fields into C doubles and boxes every value it hands back
+afresh, so `c.get()` was a different object from `c.f` for a NaN.  CPython's container `in`,
+`==`/`!=` and dict lookup compare identity first, so `c.get() in {c.f}` (and with a `list`,
+`tuple` or `dict`) printed `False` where CPython prints `True`; the previous fix guarded only
+`is`.  When the program can make a NaN or an infinity (`unified.nan_capable`, the standalone
+C117 gate: `float('nan')`, `math.nan`/`inf`, `isnan`), a method that reads or writes a `float`
+field, takes a `float` parameter or returns `float` now stays in CPython with the named reason
+`the program can make a NaN, so a float field would lose its identity`.  Methods that touch no
+float (an `int` field) are still lifted, and a program with only finite floats still accelerates
+(`C.get` native, membership unchanged).  Probes under `/tmp/probes/`: `p15_nan_containers`,
+`p13_nan_set`, `p_nan_param`, `p_nan_write`, `p_nan_listfield`, `p_finite_float`, `p_is_int` --
+all match CPython on the hybrid build; `p_finite_float` keeps `C.get` accelerated and
+`p_is_int` still refuses the `is` program; `bash ~/tools/cmp.sh` default/general builds match or
+refuse by name (`C114`).  Tests on the final commit, `-j 2`: `test_ail_cpython_hybrid`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
+## 2026-11-08 -- wedge4 review fix: method kernels respect numeric `is` identity (job-rbwedge4-11090021)
+
+The hybrid method wrapper recomputed every statically-written field and stored it back
+unconditionally, so a path that never executed the store (or `self.n = self.n`) replaced the
+attribute object with a fresh box: `c.n is saved` printed `False` where CPython prints `True`.
+The C102 identity guard now covers lifted methods too: when the whole program has a numeric
+`is`/`is not`, every plain-class method stays in CPython with the named reason `the program
+compares numbers with \`is\``, and no method kernel is emitted.  Top-level functions keep the
+existing per-candidate guard, so an unrelated top-level int function is still accelerated.
+Probes under `/tmp/probes/`: `r12_identity`, `r13_alias`, `r22_accel`, `r23_toplevel_is`,
+`r24_readonly_is`, `r25_bool_float_is` -- all match CPython on the hybrid build; `bash
+~/tools/cmp.sh` default/general builds match or refuse by name (`C114`).  Tests on the final
+commit, `-j 2`: `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` -- 4 modules, 0 failed, 220 s.
+
+## 2026-11-08 -- wedge4 re-applied: method kernels refuse observable dispatch and non-local bases (job-rbwedge4-11090021)
+
+Re-applied the accepted `job-wedge4-11082211` change (`fe64ce0d..FETCH_HEAD`, 3 commits) on this
+tree.  The `AIL_CURRENT/ail_cpython_hybrid.py` and `AIL_CURRENT/test_ail_cpython_hybrid.py` hunks
+applied unchanged; the `.github/workflows/agent-worker.yml` hunk (removing the `agent` input and
+the Claude token path) is already present here byte-for-byte, so it was left alone.
+`tools/diff_ids.py` is not present on this tree, so only `python3 tools/update_manifest.py` ran
+(`--check` passes).  Probes `w4_*` under `/tmp/probes/`: `w4_methods` (int/bool/str/list fields,
+two same-typed fields, negative index, empty list, values through an attribute, a list item and a
+dict value, aliasing), `w4_dispatch` (subclass and instance overrides), `w4_field_override`
+(property and `__getattribute__` hooks), `w4_nonlocal_base` (local mixin and explicit `object`),
+`w4_returns` (`and`/`or`, mixed return), `w4_params` (annotated/unannotated, constructor and
+`self.m(...)` call sites) and `w4_widths` (beyond int64 through an argument, list item, attribute
+and dict value).  All seven match CPython on the hybrid build; on `bash ~/tools/cmp.sh`
+default/general builds they match, or are refused by name (`attribute access hooks`,
+`multiple inheritance`, `int64 constant expression out of range`).  Tests on the final commit,
+`-j 2`: `test_ail_cpython_hybrid` (16 tests), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` -- 4 modules, 0 failed, 289 s.
+
+## 2026-11-08 -- wedge4 review fix: non-local MRO bases refuse by name (job-wedge4-11082211)
+
+`_field_override_subclass` walked every base on a descendant's MRO and indexed `classes[name]`
+unconditionally, so an ordinary local mixin (`class Mixin(object)`) or an explicit `object` base
+raised `KeyError: 'object'`.  `build()` caught it and replaced the whole plan with the generic
+`no extension: 'object'` note.  A base whose body is not in this module cannot be inspected -- it
+may bind the field or an attribute hook -- so the planner now refuses that class's methods by name
+(`subclass 'Sub' can change field access, so a batched wrapper would differ`) instead of guessing.
+`test_subclass_with_uninspectable_base_refuses_by_name` covers both the local-mixin and `object`
+forms and asserts the CPython output matches.
+
+## 2026-11-08 -- wedge4 review fix: field-overriding subclasses keep methods in CPython (job-wedge4-11082211)
+
+The method wrapper reads each needed field once and writes each changed field once, while CPython
+re-evaluates every `self.<field>` occurrence.  A subclass that rebinds a field name in its class
+body (for example a `property`) or defines an attribute-protocol hook makes each access observable,
+so a lifted parent method could answer differently: `/tmp/rprobes/m16_readvalue.py` printed
+`twice 12 calls 1` where CPython prints `twice 13 calls 2`.  `_field_override_subclass` now walks
+this module's subclass graph (including mixins on the subclasses' MRO) and refuses every method of
+a class whose fields can be observed that way, with the reason `subclass 'Sub' can change field
+access, so a batched wrapper would differ`.  Subclasses that only override methods still let the
+parent's field-only methods lift.  `test_subclass_field_override_prevents_batching` covers a
+property-rebound field and the matching CPython output.
+
+## 2026-11-08 -- wedge4 review fix: method calls keep CPython dispatch (job-wedge4-11081958)
+
+The hybrid was lifting `self.m(...)` inside a method to a direct call of `m`'s kernel. CPython
+resolves that attribute dynamically, so a subclass override, an instance attribute (`obj.m = ...`)
+or a monkeypatched class attribute changed nothing under the hybrid: `Base(5).twice()` printed
+`15 15` where CPython prints `15 315`, and an override that raises was never called.  A method that
+contains any `self.m(...)` call is now refused by name (`a call to another method 'm' stays in
+CPython`) before the field-only kernel is built; the `_MethodBody` call rewrite and the
+callee-field plumbing are gone.  Field-only methods still lift, and `self.<field>` reads/writes
+still use `PyObject_GetAttrString`/`PyObject_SetAttrString`, so inherited field access keeps the
+subclass's own attribute protocol.  `test_ail_cpython_hybrid.py` gains
+`test_method_dispatch_is_not_bypassed` (subclass override, raising override, instance shadow,
+class patch) and its method/parameter tests now assert the named refusal.  Probes: `w4_*` plus new
+`w5_dispatch*.py`, all matching CPython; `bash ~/tools/cmp.sh` default and general builds unchanged.
+
+
 ## 2026-11-08 -- stdfall2c review 2: set/frozenset deepcopy copies each element (job-rbstdfall2c-11081827)
 
 Fixes the remaining stdfall2c defect.  `copy.deepcopy` of a `set`/`frozenset` used
