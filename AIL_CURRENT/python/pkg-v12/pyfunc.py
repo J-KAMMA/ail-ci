@@ -12235,18 +12235,6 @@ def _set_into_temp(arg, ctx):
     return c
 
 
-def _walk_set_refusal(spelling):
-    """The named refusal for any construct that exposes the iteration order of a set.
-    CPython walks its hash table (per-run random for a set of str), AIL keeps insertion
-    order, so the two can differ; `sorted`, `in`, `len`, `min`, `max` and `sum` stay
-    order-free and keep building."""
-    return ('walking a set shows the order its elements were inserted, where CPython walks its '
-            'hash table (and a set of str in a per-run random order); the two can differ, so this '
-            'is refused rather than printed wrong.\n'
-            '  write instead: `sorted(%s)` for a fixed order; `x in s`, `len(s)`, `sorted(s)`, '
-            '`min(s)`, `max(s)` and `sum(s)` are order-free and still build' % spelling)
-
-
 def _is_set_valued(node, ctx):
     if isinstance(node, ast.Name):
         try:
@@ -12258,6 +12246,31 @@ def _is_set_valued(node, ctx):
     if isinstance(node, ast.BinOp) and type(node.op) in SET_OPS:
         return _is_set_valued(node.left, ctx) and _is_set_valued(node.right, ctx)
     return False
+
+
+def _refuse_untyped_set_walk(node, ctx, what):
+    """An unannotated int set is the internal `SET` table (ail_tab), which keeps insertion order and
+    does not reproduce CPython's hash-table layout. A walk of it would print a different order, so
+    it is refused by name and the default build falls back to the general path, where the boxed set
+    emulates CPython exactly. `set[int]` (ISET) does emulate. A str/bytes-keyed set follows the
+    random-hash rule and is never refused."""
+    try:
+        kind = _set_kind_of(node, ctx)
+    except Unsupported:
+        return
+    if kind != SET:
+        return
+    try:
+        if _set_keys_are_str_or_bytes(node, ctx):
+            return
+    except Unsupported:
+        return
+    raise Unsupported(
+        '%s of an unannotated int set: this compiler walks its insertion-ordered int table, which '
+        'is not CPython\'s hash-table order. Annotate the set `set[int]` (the typed set emulates '
+        'CPython) or let the default build fall back to the general path.\n'
+        '  write instead: `sorted(s)` for a fixed order; `x in s`, `len(s)`, `sorted(s)`, '
+        '`min(s)`, `max(s)` and `sum(s)` are order-free and still build' % what)
 
 
 def _set_kind_of(node, ctx):
@@ -12286,9 +12299,11 @@ def _untyped_set_table(node, ctx, what):
         element = 'str' if node.id in ctx.skeys else 'bytes'
         if element == 'bytes':
             raise Unsupported('%s on %r, an unannotated set of bytes, is not built; key the set by '
-                              'str (`let %s: set[str] = set();` with `.decode()`)' % (what, node.id, node.id))
+                              'str (`let %s: set[str] = set();` with `.decode()`)\n'
+                              '  write instead: `sorted(s)` for a fixed order' % (what, node.id, node.id))
         raise Unsupported('%s on %r, an unannotated set of str, is not built; annotate it: '
-                          '`let %s: set[str] = set();`' % (what, node.id, node.id))
+                          '`let %s: set[str] = set();`\n'
+                          '  write instead: `sorted(s)` for a fixed order' % (what, node.id, node.id))
     if isinstance(node, ast.Set):
         # `{3, 7}` beside an unannotated int set: a table built here, once.
         ctx.parts.add('TAB')
@@ -12360,15 +12375,15 @@ def _set_disjoint(receiver, other, ctx):
 
 
 def _set_pop(kind, pointer, ctx):
-    """`s.pop()` returns the FIRST element in iteration order, so its result shows the order.
-    CPython's order is its hash table's (random for a str set), which AIL does not reproduce:
-    refuse rather than return a different element."""
-    raise Unsupported(
-        '%s.pop() returns the first element in iteration order, where CPython walks its hash '
-        'table (and a set of str in a per-run random order); the two can differ, so this is '
-        'refused rather than answer wrong.\n'
-        '  write instead: `sorted(s)[0]` (then `s.discard(...)` it if it should be removed)'
-        % _diagnostic_type(kind))
+    """`s.pop()` returns the FIRST element in CPython's iteration order. `ail_iset` reproduces
+    CPython's table layout for int sets; `ail_sset` (str) keeps insertion order, one valid
+    CPython run because CPython's own order is per-run random for str."""
+    ctx.parts.add(kind.upper() + 'OPS')
+    ctx.has_try = True
+    if kind == SSET:
+        ctx.parts.add('STR')
+        return 'ail_sset_pop(%s, &%s)' % (pointer, ctx.sarena())
+    return 'ail_iset_pop(%s)' % pointer
 
 
 def _set_value(node, ctx):
@@ -13887,6 +13902,23 @@ def _is_set_literal(node):
             and node.func.id == 'set' and len(node.args) <= 1 and not node.keywords)
 
 
+def _folded_set_elt(node):
+    """True when CPython's compiler leaves this set-display element as a plain constant, so the
+    display folds into a frozenset constant (and is then merged into a fresh set). The AST
+    optimizer folds literal arithmetic and unary signs first (`1 << 60`, `-1`) and a tuple display
+    of constants into a Constant (`fold_tuple`), so ask this interpreter itself."""
+    if isinstance(node, ast.Starred):
+        return False
+    try:
+        code = compile(ast.Expression(node), '<set-elt>', 'eval')
+    except Exception:
+        return False
+    import dis
+    ops = {i.opname for i in dis.get_instructions(code)}
+    return bool(ops & {'LOAD_CONST', 'RETURN_CONST'}) and ops <= {
+        'RESUME', 'CACHE', 'NOP', 'LOAD_CONST', 'RETURN_CONST', 'RETURN_VALUE'}
+
+
 def _set_literal(node, ctx, kind):
     if kind not in SETS:
         raise Unsupported('a set where a %s is required' % _diagnostic_type(kind))
@@ -13894,6 +13926,19 @@ def _set_literal(node, ctx, kind):
     ctx.parts.add(kind.upper())
     ctype = _map_key_ctype(kind)
     steps = ['ail_%s_clear(&%s);' % (kind, temporary)]
+    if (isinstance(node, ast.Set) and kind == ISET and len(node.elts) > 2
+            and all(_folded_set_elt(e) for e in node.elts)):
+        folded, _ = ctx.temp(kind)
+        rebuilt, _ = ctx.temp(kind)
+        steps.append('ail_%s_clear(&%s);' % (kind, folded))
+        for element in node.elts:
+            steps.append('{ %s _key = %s; ail_%s_add(&%s, _key); }' % (ctype, _map_key(element, ctx, kind), kind, folded))
+        steps.append('ail_%s_clear(&%s);' % (kind, rebuilt))
+        steps.append('ail_%s_rebuild(&%s, &%s);' % (kind, rebuilt, folded))
+        steps.append('ail_%s_merge(&%s, &%s);' % (kind, temporary, rebuilt))
+        steps.append('ail_%s_free(&%s);' % (kind, folded))
+        steps.append('ail_%s_free(&%s);' % (kind, rebuilt))
+        return temporary, '({ %s %s; })' % (' '.join(steps), temporary)
     for element in (node.elts if isinstance(node, ast.Set) else ()):
         if isinstance(element, ast.Starred):
             raise Unsupported('set unpacking is unsupported')
@@ -14770,8 +14815,11 @@ def _expr(node, ctx):
         kind = _map_kind(node, ctx)
         left, right = _map_pointer(node.left, ctx, kind), _map_pointer(node.right, ctx, kind)
         temporary, _ = ctx.temp(kind)
+        fn = SET_OPS[type(node.op)]
+        if getattr(node, '_ail_iset_update', False):
+            fn = 'xor_update'
         return ('({ const ail_%s *_a = %s; const ail_%s *_b = %s; ail_%s_replace(&%s, ail_%s_%s(_a, _b)); %s; })'
-                % (kind, left, kind, right, kind, temporary, kind, SET_OPS[type(node.op)], temporary))
+                % (kind, left, kind, right, kind, temporary, kind, fn, temporary))
     if isinstance(node, ast.BinOp) and any(_is_map_expr(e, ctx) for e in (node.left, node.right)):
         if any(_map_kind(e, ctx) in SETS for e in (node.left, node.right)):
             raise Unsupported('a typed set\'s | & - ^ (also union/intersection/difference/'
@@ -20719,11 +20767,10 @@ def _method(node, ctx, *, as_stmt=False):
     if m == 'get' and t == DICT and len(a) == 1:
         raise Unsupported(_ONE_ARG_GET)
     if m == 'pop' and t == SET and not a:
-        raise Unsupported(
-            'set.pop() returns the first element in iteration order, where CPython walks its hash '
-            'table (and a set of str in a per-run random order); the two can differ, so this is '
-            'refused rather than answer wrong.\n'
-            '  write instead: `sorted(s)[0]` (then `s.discard(...)` it if it should be removed)')
+        _refuse_untyped_set_walk(node.func.value, ctx, 'set.pop()')
+        ctx.parts.add('SETOPS')
+        ctx.has_try = True
+        return 'ail_tabset_pop(&%s)' % _untyped_set_table(node.func.value, ctx, 'set.pop()')
     if m == 'isdisjoint' and t == SET and len(a) == 1:
         return _set_disjoint(node.func.value, a[0], ctx)
     if m == 'get' and t == DICT and name in ctx.bkeys and len(a) in (1, 2):
@@ -21274,8 +21321,6 @@ def _listcomp_into_temp(node, ctx):
         return _listcomp_pair_into_temp(node, ctx)
     if not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
-    if _is_set_valued(g.iter, ctx):
-        raise Unsupported(_walk_set_refusal(ast.unparse(g.iter)))
     kind = _listcomp_kind(node, ctx)
     ctx.parts.add(kind.upper())
     c, _ = ctx.temp(kind)
@@ -24812,6 +24857,8 @@ def _stmt_inner(node, ctx, ind):
                                  else ast.Attribute(value=node.target.value, attr=node.target.attr, ctx=ast.Load()),
                                  node.target)
         value = ast.copy_location(ast.BinOp(left=load, op=node.op, right=node.value), node)
+        if isinstance(node.op, ast.BitXor) and _map_kind(node.target, ctx) == ISET:
+            value._ail_iset_update = True
         return _stmt(ast.copy_location(ast.Assign(targets=[node.target], value=value), node), ctx, ind)
     if isinstance(node, ast.AugAssign):
         if isinstance(node.target, ast.Name):
@@ -29424,15 +29471,6 @@ def _for_inner_impl(node, ctx, ind):
     source = it.func.value if items else it
     if _is_map_expr(source, ctx):
         kind = _map_kind(source, ctx)
-        if kind in SETS:
-            spelling = ast.unparse(source)
-            raise Unsupported(
-                'walking a %s shows the order its elements were inserted, where CPython walks its '
-                'hash table (and a set of str in a per-run random order); the two can differ, so '
-                'this is refused rather than printed wrong.\n'
-                '  write instead: `sorted(%s)` for a fixed order; `x in s`, `len(s)`, `sorted(s)`, '
-                '`min(s)`, `max(s)` and `sum(s)` are order-free and still build'
-                % (_diagnostic_type(kind), spelling))
         if items:
             if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
                     and all(isinstance(e, ast.Name) for e in node.target.elts)):
@@ -30307,8 +30345,6 @@ def _for_inner_impl(node, ctx, ind):
         # `for k in s:` (a str-keyed SET) or `for k in d:` (a str-keyed DICT -- Python iterates
         # its keys, the bare-name counterpart of `.keys()` above) -- mechanisms 4/5. `.order`
         # already holds the actual str VALUES, the STAB counterpart of the BTAB branch just below.
-        if it.id in getattr(ctx, 'untyped_str_sets', ()):
-            raise Unsupported(_walk_set_refusal(it.id))
         ctx.parts.add('STAB')
         c = ctx.cname(it.id)
         v = ctx.declare(node.target.id, STR)
@@ -30323,8 +30359,6 @@ def _for_inner_impl(node, ctx, ind):
         # iterates its keys, the bare-name counterpart of `.keys()` above). `.order` already
         # holds the actual bytes VALUES, so this needs no bpool lookup, unlike the `blist` case
         # immediately below.
-        if it.id in getattr(ctx, 'untyped_byte_sets', ()):
-            raise Unsupported(_walk_set_refusal(it.id))
         ctx.parts.update(('BTAB', 'BYTES'))
         c = ctx.cname(it.id)
         v = ctx.declare(node.target.id, BYTES)
@@ -30495,8 +30529,7 @@ def _for_inner_impl(node, ctx, ind):
         value, local = _list_call_value(it, ctx)
         ctx.pre.append('(void)%s;' % value)
         it = ast.Name(id=local, ctx=ast.Load())
-    if _is_set_valued(it, ctx):
-        raise Unsupported(_walk_set_refusal(ast.unparse(it)))
+    _refuse_untyped_set_walk(it, ctx, 'walking')
     p, n = _seq(it, ctx)
     if isinstance(it, ast.Name) and it.id in ctx.nlist:
         # `for r in g:` where `g` is a list of lists -- `r` is bound to a HANDLE on every
