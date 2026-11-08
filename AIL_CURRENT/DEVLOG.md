@@ -1,3 +1,14 @@
+## 2026-11-08 -- wedge4 review fix: non-local MRO bases refuse by name (job-wedge4-11082211)
+
+`_field_override_subclass` walked every base on a descendant's MRO and indexed `classes[name]`
+unconditionally, so an ordinary local mixin (`class Mixin(object)`) or an explicit `object` base
+raised `KeyError: 'object'`.  `build()` caught it and replaced the whole plan with the generic
+`no extension: 'object'` note.  A base whose body is not in this module cannot be inspected -- it
+may bind the field or an attribute hook -- so the planner now refuses that class's methods by name
+(`subclass 'Sub' can change field access, so a batched wrapper would differ`) instead of guessing.
+`test_subclass_with_uninspectable_base_refuses_by_name` covers both the local-mixin and `object`
+forms and asserts the CPython output matches.
+
 ## 2026-11-08 -- wedge4 review fix: field-overriding subclasses keep methods in CPython (job-wedge4-11082211)
 
 The method wrapper reads each needed field once and writes each changed field once, while CPython

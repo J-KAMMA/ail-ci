@@ -607,6 +607,49 @@ print('plain', Plain(4).twice())
             self.assertEqual(got.returncode, want.returncode)
             self.assertIn(b'sub 13 2', got.stdout)
 
+    def test_subclass_with_uninspectable_base_refuses_by_name(self):
+        """A local mixin (or explicit `object`) whose base is not module-local must not crash.
+
+        `_field_override_subclass` walks every base on a descendant's MRO.  `object` and imported
+        bases have no body in this module, so their field bindings cannot be ruled out.  The
+        method is refused by name instead of raising `KeyError` and disabling the whole extension.
+        """
+        text = '''
+class Mixin(object):
+    pass
+
+
+class Base:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def twice(self) -> int:
+        return self.n + self.n
+
+
+class ViaMixin(Base, Mixin):
+    pass
+
+
+class ViaObject(Base, object):
+    pass
+
+
+print('mixin', ViaMixin(3).twice())
+print('object', ViaObject(4).twice())
+print('base', Base(5).twice())
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'unknownbase', text)
+            self.assertIsNone(report.get('note'), report)
+            self.assertNotIn('Base.twice', report['accelerated'], report)
+            self.assertIn('subclass', report['rejected']['Base.twice'], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'unknownbase')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'mixin 6', got.stdout)
+
     def test_return_kinds_agree_or_refuse(self):
         """A return kind is inferred from every `return` when they all agree; mixed stays CPython.
 

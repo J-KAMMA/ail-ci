@@ -254,7 +254,8 @@ def _field_override_subclass(classdef, classes, field_names):
     re-evaluates every occurrence.  That is only invisible for an ordinary instance-dict field.
     A subclass (or a mixin on its MRO) that binds a field name in its class body -- a `property`,
     a method, a slot, ... -- or defines an attribute protocol hook makes each access observable,
-    so the batched wrapper could answer differently.  Refuse the parent's methods by name.
+    so the batched wrapper could answer differently.  A base whose body is not in this module
+    cannot be checked at all, so it refuses too.  Refuse the parent's methods by name.
     """
     parent = classdef.name
     descendants = set()
@@ -277,9 +278,12 @@ def _field_override_subclass(classdef, classes, field_names):
             if base in seen or base == parent:
                 continue
             seen.add(base)
+            if base not in classes:
+                # `object`, a builtin or an imported class has no body to inspect; it may bind
+                # the field name or an attribute hook, so the access cannot be proven ordinary.
+                return name
             related.add(base)
-            if base in classes:
-                stack.extend(_class_base_names(classes[base]))
+            stack.extend(_class_base_names(classes[base]))
     for name in sorted(related):
         for stmt in classes[name].body:
             bound = _bound_class_names(stmt)
