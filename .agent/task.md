@@ -1,3 +1,53 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode/deepseek-v4.1-flash-free]
+## Review
+
+**What the change does:** adds the new AIL-written recursive-descent expression parser (`selfhost/src/ailparse.py`, 1213 lines), its CPython stage-0 reference/extractor, the stage-1/2 driver, a registered test module, and `PARSE.md`. It does not touch the compiler or runtime. The worker report describes only the four fix-ups in `26c1aa5f`, but `work..HEAD` is the whole parser (both commits); that matches the task.
+
+**Verified claims**
+- S376 stage 1 independently re-run: 164,248 segments, 164,105 CPython-accepted, **164,105 identical, 0 different, 0 parser refusals**; the 143 CPython eval refusals are 106 `yield`, 35 `yield from`, 2 starred assignment targets. Exactly as reported.
+- Four fixes match CPython: `f'{x = }'`, `f'{ x=}'`, multiline debug; leading `{{` specs `f'{x:{{}}}'`, `f'{x:a{{}}}'`, `f'{x:{{a}}}'`; bytes `b'\u0041'`, `b'\U00000041'`, `b'\N{...}'`, `b'\400'`, `b'\777'`; `U'x'` kind `None`, `u'x'` kind `'u'`.
+- `test_ail_selfhost_parse` and `test_ail_safetynet` pass on HEAD (`par_check.py -j 2`, 130s).
+- `update_manifest.py --check` passes; diff touches only allowed files.
+- Non-feature program: `--debug-dir/program.c` is byte-identical between `/tmp/base` and HEAD.
+- Stage-2 `cmp.sh` probe (general and default builds) matches CPython on 13 expressions, including the defect cases.
+
+**Defects (accepted-but-different vs CPython 3.12)**
+1. Single starred subscript without a trailing comma. Probe `/tmp/rprobes/final_probe.py`: `a[*b]`.
+   Expected `Subscript(..., slice=Tuple(elts=[Starred(...)], ctx=Load()), ...)`; actual `Subscript(..., slice=Starred(...), ...)`. (`a[*b,]` and `a[*b, c]` are correct.)
+2. The `{{` format-spec fix is incomplete for repeated groups. Probe `f'{x:{{}}{{}}}'`.
+   Expected format_spec `JoinedStr([Constant(''), FV(Dict), Constant(''), FV(Dict), Constant('')])`; actual omits the middle `Constant('')`. Same for `f'{x:{y}{{}}}'`, `f'{x:a{{}}{{}}}'`, `f'{x:{{}}{{}}{{}}}'`.
+3. Empty string adjacent to an f-string. Probe `f'{x}' ''`.
+   Expected `JoinedStr([FV(x)])`; actual `JoinedStr([FV(x), Constant('')])`. Also `'' f'{x}'` expected `JoinedStr([FV(x)])`, actual `JoinedStr([Constant(''), FV(x)])`.
+4. (minor) Invalid Python is accepted instead of refused: `(*a)` → `Tuple([Starred(a)])` (CPython: `cannot use starred expression here`); `lambda /: 1` and `lambda *,: 1` → `Lambda(...)` (CPython: `invalid syntax` / `named arguments must follow bare *`).
+
+**Claim check:** the report's “63-case probe over the four areas: all valid-and-accepted outputs match” is false as a statement about those areas — its 63 cases may pass, but probes 2 and 3 above are valid, accepted, and different. All other numeric claims checked are correct.
+
+**Pre-existing:** none; the documented `'\N{...}'` str refusal is an allowed named refusal (`ailparse: \N named escape not supported`), and bytes `\N` matches CPython. Named refusals such as `(yield)` and `f'{a, b}'` are allowed by the task.
+
+**Unverified:** stage 2 on the 30-file set (I ran the test's 20 + edge and the 13-expression `cmp.sh` probe, all byte-identical); `test_ail_files`/`test_ail_corpus_findings3` (outside the review's test scope); `PARSE.md` stage-2 build time/binary size; instruction counts (change is not on the compiler path, so not applicable).
+
+VERDICT: FIX
+[cost $0.0000, opencode tokens {"total": 1445546, "input": 41927, "output": 10923, "reasoning": 29752, "cache.write": 0, "cache.read": 1362944}]
+    tool time: bash 5.1 min, read 0.0 min
+        131s bash   date; cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000 && timeout 1200 python3 tools/par_check.py -j 2 
+         92s bash   cat > /tmp/rprobes/parse_probe.py <<'PY' import ailast import ailparse   def main():     cases = [         "a 
+         42s bash   cat > /tmp/rprobes/parse_probe.py <<'PY' import sys sys.path.insert(0, '/home/runner/work/ail-ci/ail-ci/selfho
+         21s bash   cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000 && timeout 600 python3 - <<'PY' 2>&1 | tail -30 import
+          7s bash   mkdir -p /tmp/rprobes && cat > /tmp/rprobes/simple.py <<'PY' def f(n):     s = 0     for i in range(n):       
+          5s bash   cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000 && timeout 300 python3 - <<'PY' 2>&1 | tail -20 import
+          5s bash   cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000 && timeout 300 python3 - <<'PY' 2>&1 | tail -25 import
+          1s bash   git worktree add /tmp/base work 2>&1 | tail -3; echo ---; git show work:selfhost/src/ailparse.py 2>&1 | head -
+
+
+--- ORIGINAL TASK ---
 Lane: fa-selfhost
 Needs: shast1
 
