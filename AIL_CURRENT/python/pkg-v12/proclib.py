@@ -22,6 +22,7 @@ not import subprocess is not touched, so its C stays byte for byte what it was.
 """
 import ast
 import copy
+import os
 
 import iterlower
 
@@ -800,10 +801,33 @@ def _method(obj, name, *args):
 _Lowerer.method = staticmethod(_method)
 
 
+def wasi_target():
+    """Whether the build targets wasm32-wasi: AIL_TARGET=wasi, or AIL_TARGET_OS=wasi from tools/wasm_build.py."""
+    return os.environ.get('AIL_TARGET') == 'wasi' or os.environ.get('AIL_TARGET_OS') == 'wasi'
+
+
+def _subprocess_import(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(a.name == 'subprocess' for a in node.names):
+            return node
+        if isinstance(node, ast.ImportFrom) and not node.level and node.module == 'subprocess':
+            return node
+    return None
+
+
 def rewrite_tree(tree, Unsupported, general=False):
     """Lower subprocess in `tree` (in place). Returns whether the program uses it; a program that does not is untouched."""
     global ACTIVE
     ACTIVE = False
+    if wasi_target():
+        node = _subprocess_import(tree)
+        if node is not None:
+            error = Unsupported(
+                'subprocess is not available on wasm32-wasi: WASI has no process creation (no fork/exec), '
+                'so a child process cannot be started.\n'
+                '  write instead: run the program on the host target, or keep process work out of the wasm build')
+            error.source_line = getattr(node, 'lineno', None)
+            raise error
     lowerer = _Lowerer(tree, Unsupported, general)
     lowerer.scan()
     if not lowerer.wants():
