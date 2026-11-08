@@ -7,7 +7,11 @@ AIL source rewrite of CPython 3.12's copy.py.  The dispatch tables and the
 cannot use a type object as a plain value or as a dict key.  The copy/deepcopy
 messages, the memo protocol and the sharing rules are CPython's for the types
 this compiler builds: None, bool, int, float, str, bytes, bytearray, list,
-tuple (of any length), dict, set and frozenset.
+tuple (of any length), dict, set and frozenset.  This compiler has no `id`, so
+each memoised object gets a process-unique integer token inside the caller's
+memo dict (with one keep-alive entry), not CPython's `id(x)` key.  The dict is
+used in place: clearing or reusing it cannot return a stale copy, and existing
+keys are never overwritten.
 
 A class instance cannot be rebuilt here: the compiler has no `object.__new__`,
 no `cls.__new__` and no `type(x)` as a value, so a copy would not have the
@@ -68,65 +72,77 @@ def _copy_bytearray(x):
     return bytearray(x)
 
 
-_memo_links = []
+class _MemoMark:
+    def __init__(self) -> None:
+        self.tag = 0
 
 
-class _KeepAlive:
-    pass
+_MEMO_STATE = _MemoMark()
+_next_token = [0]
 
 
-_KEEPALIVE = _KeepAlive()
-
-
-def _memo_keepalive(d, obj):
-    for link in _memo_links:
-        if link[0] is d and link[1] is _KEEPALIVE:
-            link[2].append(obj)
-            return
-    value = []
-    d[len(d)] = value
-    _memo_links.append([d, _KEEPALIVE, value, True])
-    value.append(obj)
-
-
-def _memo_get(d, obj):
-    for link in _memo_links:
-        if link[0] is d and _same(link[1], obj):
-            return link[2]
-    return _NOT_FOUND
-
-
-def _memo_put(d, obj, val):
-    key = len(d)
-    d[key] = val
-    _memo_links.append([d, obj, val])
+def _new_token(d):
+    token = _next_token[0]
+    while token in d:
+        token = token - 1
+    _next_token[0] = token - 1
+    return token
 
 
 class _Memo:
-    def __init__(self, d=None):
+    def __init__(self, d):
         self.d = d
-        self.pairs = []
 
     def get(self, obj):
-        for pair in self.pairs:
-            if _same(pair[0], obj):
-                return pair[1]
-        if self.d is not None:
-            return _memo_get(self.d, obj)
+        state = []
+        found = False
+        for key in self.d:
+            value = self.d[key]
+            if isinstance(value, list) and len(value) > 0 and value[0] is _MEMO_STATE:
+                state = value
+                found = True
+                break
+        if not found:
+            return _NOT_FOUND
+        i = 1
+        while i < len(state):
+            if _same(state[i], obj):
+                token = state[i + 1]
+                if token in self.d:
+                    return self.d[token]
+                return _NOT_FOUND
+            i = i + 2
         return _NOT_FOUND
 
     def put(self, obj, val):
-        for pair in self.pairs:
-            if _same(pair[0], obj):
-                return
-        self.pairs.append((obj, val))
-        if self.d is not None:
-            _memo_put(self.d, obj, val)
-            _memo_keepalive(self.d, obj)
+        state = []
+        found = False
+        for key in self.d:
+            value = self.d[key]
+            if isinstance(value, list) and len(value) > 0 and value[0] is _MEMO_STATE:
+                state = value
+                found = True
+                break
+        if found:
+            i = 1
+            while i < len(state):
+                if _same(state[i], obj):
+                    self.d[state[i + 1]] = val
+                    return
+                i = i + 2
+        else:
+            key = _new_token(self.d)
+            state = [_MEMO_STATE]
+            self.d[key] = state
+        token = _new_token(self.d)
+        self.d[token] = val
+        state.append(obj)
+        state.append(token)
 
 
 class _NotFound:
-    pass
+    def __init__(self) -> None:
+        self.tag = 0
 
 
 _NOT_FOUND = _NotFound()
@@ -175,7 +191,7 @@ def deepcopy(x, memo=None, _nil=[]):
     See the module's __doc__ string for more info.
     """
     if memo is None:
-        memo = _Memo()
+        memo = _Memo({})
     elif not isinstance(memo, _Memo):
         if not isinstance(memo, dict):
             raise TypeError("memo must be a dict")

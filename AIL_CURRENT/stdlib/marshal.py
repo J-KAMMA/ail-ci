@@ -11,10 +11,15 @@ their bytes are fixed by the value alone.
 
 Versions 3/4 choose `FLAG_REF` and the ASCII/interned string codes from each
 object's CPython refcount and interned bit.  This compiler has neither (an int
-is a value and a string has no interned flag), so `dumps` refuses versions 3
-and 4 by name instead of writing different bytes.  The reader accepts both the
-version-2 layout and CPython's version-4 layout, including `r` references,
-`z`/`Z` short ASCII, `a`/`A` long ASCII and `t` interned strings.
+is a value and a string has no interned flag) and no `id`, so the flags depend
+on how the source happens to hold each object and cannot be reproduced for an
+arbitrary value.  The `version` argument is therefore required: a call that
+would default to CPython's version 4 is a named build-time refusal
+(`marshal.dumps() called without a required argument version`), and an explicit
+version 3/4 is refused by name at run time instead of writing different bytes.
+An explicit 0/1/2 is byte-exact.  The reader accepts both the version-2 layout
+and CPython's version-4 layout, including `r` references, `z`/`Z` short ASCII,
+`a`/`A` long ASCII and `t` interned strings.
 
 The values the lab programs use are covered: None, True/False, ints (the
 32-bit `i` form and the `l` long form, including the int64 boundaries), binary
@@ -452,6 +457,11 @@ class _Reader:
             v = _float_from_bytes(self._take(8))
             self._ref(v, flag)
             return v
+        if t == _TYPE_FLOAT:
+            n = self._take(1)[0]
+            v = float(self._take(n).decode("ascii"))
+            self._ref(v, flag)
+            return v
         if t == _TYPE_STRING:
             n = int.from_bytes(self._take(4), "little", signed=False)
             v = self._take(n)
@@ -526,13 +536,14 @@ def _version(v):
     return v
 
 
-def dumps(x, version=4):
-    """dumps(value[, version]) -> bytes: CPython's marshal layout, versions 0-2.
+def dumps(x, version, /):
+    """dumps(value, version) -> bytes: CPython's marshal layout, versions 0-2.
 
-    Versions 3 and 4 write FLAG_REF and interned-string codes chosen from each
-    object's CPython refcount and interned bit.  This compiler has neither (a
-    string is a value, not an interned object; there is no refcount), so those
-    versions cannot be byte-exact and are refused by name instead.
+    `version` has no default here.  CPython's default is 4, whose FLAG_REF and
+    interned-string bytes depend on each object's CPython refcount, which this
+    compiler does not keep; leaving the argument out is a named build-time
+    refusal rather than a silently different stream.  Versions 0/1/2 have no
+    such flags and are byte-exact; an explicit 3/4 is refused by name.
     """
     v = _version(version)
     if v >= 3:
@@ -553,8 +564,8 @@ def loads(data):
     return value
 
 
-def dump(x, f, version=4):
-    """dump(value, file): write the value to a binary file object."""
+def dump(x, f, version, /):
+    """dump(value, file, version): write the value to a binary file object."""
     f.write(dumps(x, version))
 
 

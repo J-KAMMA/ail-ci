@@ -2,11 +2,11 @@
 
 The eighteen programs under lab/stdlib/{copy,timeit,marshal}/ exercise the
 bundled AIL source modules `AIL_CURRENT/stdlib/copy.py`, `timeit.py` and
-`marshal.py` against CPython 3.12.  Fourteen of them build with the default
+`marshal.py` against CPython 3.12.  Nine of them build with the default
 command and with AIL_UNIFIED_FORCE=1 and print exactly what `python3` prints
 on the same source (stdout and exit status); they are listed in PASSING.
 
-The four remaining programs are recorded as named refusals in
+The other nine programs are recorded as named refusals in
 lab/stdlib/stdfall2/RESULTS.md instead of being compared:
 
 * copy/03_user_class_hooks.py and copy/04_user_class_plain.py build, then
@@ -15,12 +15,16 @@ lab/stdlib/stdfall2/RESULTS.md instead of being compared:
   cannot make an object of the original class, so it refuses by name.
 * timeit/06_string_stmt.py uses `exec` for its string statement and is
   refused at build time (`exec() is not built`).
-* marshal/02_big_ints.py cannot build: `2**70` is `int64 constant out of
-  range` in the default build.
+* the six marshal programs call `marshal.dumps(x)` without a version, whose
+  CPython default is 4.  Version 3/4 need CPython's per-object refcount and
+  interned bit, which this compiler does not keep, so the `version` argument
+  is required and an omitted one is a build-time refusal
+  (`marshal.dumps() called without a required argument version`).
+* marshal/02_big_ints.py additionally cannot build: `2**70` is `int64
+  constant out of range` in the default build.
 
-`marshal.dumps` is byte-exact for versions 0-2 (no object-reference flags);
-version 3/4 need CPython's per-object refcount and interned bit, which this
-compiler does not keep, so they are refused by name.
+`marshal.dumps(x, 0/1/2)` is byte-exact (no object-reference flags); an
+explicit version 3/4 is refused by name at run time.
 """
 import os
 import shutil
@@ -45,7 +49,11 @@ PASSING = [
     "timeit/03_timer_repeat.py",
     "timeit/04_module_timeit.py",
     "timeit/05_setup_and_custom_timer.py",
+]
+
+MARSHAL = [
     "marshal/01_ints_bool_none.py",
+    "marshal/02_big_ints.py",
     "marshal/03_floats.py",
     "marshal/04_strings_bytes.py",
     "marshal/05_lists_tuples.py",
@@ -93,8 +101,9 @@ class StdlibStdfall2Tests(unittest.TestCase):
 
     def test_lab_programs_exist(self):
         self.assertEqual(len(self.sources), 18)
-        self.assertEqual(len(PASSING), 14)
-        for name in PASSING:
+        self.assertEqual(len(PASSING), 9)
+        self.assertEqual(len(MARSHAL), 6)
+        for name in PASSING + MARSHAL:
             self.assertTrue((LAB / name).is_file(), name)
 
     def test_programs_match_cpython(self):
@@ -134,17 +143,52 @@ class StdlibStdfall2Tests(unittest.TestCase):
         built, _exe, _work = self._build(LAB / "marshal" / "02_big_ints.py",
                                          "marshal-02-refused")
         self.assertNotEqual(built.returncode, 0)
-        self.assertIn("int64 constant out of range", built.stdout + built.stderr)
+        text = built.stdout + built.stderr
+        self.assertTrue("int64 constant out of range" in text
+                        or "called without a required argument version" in text, text)
 
-    def test_marshal_v4_is_refused_by_name(self):
+    def test_marshal_default_version_is_a_build_time_refusal(self):
+        for name in MARSHAL:
+            if name.endswith("02_big_ints.py"):
+                continue
+            with self.subTest(program=name):
+                built, _exe, _work = self._build(LAB / name, name.replace("/", "-") + "-refused")
+                self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+                text = built.stdout + built.stderr
+                self.assertIn("marshal.dumps() called without a required argument version",
+                              text)
+
+    def test_marshal_explicit_versions_0_to_2_are_byte_exact(self):
+        source = self.dir / "marshal_v012.py"
+        source.write_text(
+            "import marshal\n"
+            "vals = [None, True, False, 0, 1, -1, 42, 2**40, 9223372036854775807,\n"
+            "        -9223372036854775807 - 1, -0.0, 1.5, 1e300, 'abc', 'caf\\xe9',\n"
+            "        b'xy', [1, 'a'], (1, 2), {'k': 1}]\n"
+            "for x in vals:\n"
+            "    for v in (0, 1, 2):\n"
+            "        raw = marshal.dumps(x, v)\n"
+            "        back = marshal.loads(raw)\n"
+            "        print(v, type(back).__name__, back == x, raw.hex())\n")
+        built, exe, work = self._build(source, "marshal-v012")
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        expected = run_cpython(source)
+        ran = subprocess.run([str(exe)], cwd=str(work), capture_output=True,
+                             text=True, timeout=120)
+        self.assertEqual(ran.returncode, expected.returncode)
+        self.assertEqual(ran.stdout, expected.stdout)
+
+    def test_marshal_explicit_v4_is_refused_by_name(self):
         source = self.dir / "marshal_v4.py"
-        source.write_text("import marshal\nprint(marshal.dumps([1]))\n")
+        source.write_text("import marshal\ntry:\n    marshal.dumps([1], 4)\n"
+                          "except ValueError as e:\n    print(type(e).__name__, e)\n")
         built, exe, work = self._build(source, "marshal-v4-refused")
         self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
         ran = subprocess.run([str(exe)], cwd=str(work), capture_output=True,
                              text=True, timeout=120)
-        self.assertNotEqual(ran.returncode, 0)
-        self.assertIn("version 4 needs CPython's per-object refcount", ran.stderr)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("ValueError marshal.dumps: version 4 needs CPython's per-object refcount",
+                      ran.stdout)
 
     def test_marshal_loads_null_is_typeerror(self):
         source = self.dir / "marshal_null.py"

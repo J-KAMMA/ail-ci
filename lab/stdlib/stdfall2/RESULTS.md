@@ -5,18 +5,21 @@ Three stdlib modules that AIL had no model of (`copy` and `timeit` from CPython
 `ad61ef7d8e42d7bbdec8d41cdd47d908aaa5241e`, MIT) are exercised by 18 lab
 programs under `lab/stdlib/{copy,timeit,marshal}/` (6 programs per module).
 
-**Before: 0/18. After: 14/18** (copy 4/6, timeit 5/6, marshal 5/6), in both
+**Before: 0/18. After: 9/18** (copy 4/6, timeit 5/6, marshal 0/6), in both
 the default build and `AIL_UNIFIED_FORCE=1`, with stdout and exit status equal
-to `python3` (CPython 3.12.3).  The four remaining programs are named refusals,
+to `python3` (CPython 3.12.3).  The nine remaining programs are named refusals,
 listed below; none crashes or prints a wrong value.
 
-`marshal.dumps` is exact for CPython's versions 0-2, whose stream has no
-object-reference flags and no interned-string codes (the marshal programs pass
-`version=2`).  Version 3/4 choose `FLAG_REF` and the interned code from each
-object's CPython refcount and interned bit; this compiler keeps neither (an int
-is a value, and a string has no interned flag), so `marshal.dumps` refuses
-versions 3 and 4 by name instead of writing different bytes.  `marshal.loads`
-still reads version 4, including `r` references.
+`marshal.dumps(x, v)` is exact for CPython's explicit versions 0-2, whose
+stream has no object-reference flags and no interned-string codes.  Version 3/4
+choose `FLAG_REF` and the interned code from each object's CPython refcount and
+interned bit; this compiler keeps neither (an int is a value, a string has no
+interned flag and there is no `id`), and the flags even change when the same
+value is held in a variable rather than passed as a temporary, so they cannot
+be reproduced for an arbitrary value.  `version` therefore has no default: the
+six programs (which call `marshal.dumps(x)`, CPython's default version 4) are
+refused at build time by name, and an explicit 3/4 is refused at run time.
+`marshal.loads` still reads version 4, including `r` references.
 
 ## Before, per program
 
@@ -68,12 +71,12 @@ Default build and `AIL_UNIFIED_FORCE=1` were both run with
 | `timeit/04_module_timeit.py` | same | same | module `timeit()` and `repeat()` |
 | `timeit/05_setup_and_custom_timer.py` | same | same | setup and injected clock |
 | `timeit/06_string_stmt.py` | build refused | build refused | string statement uses `exec`, follow-up 2 |
-| `marshal/01_ints_bool_none.py` | same | same | `i`/`l` forms, int64 boundaries, booleans, None |
-| `marshal/02_big_ints.py` | build refused | build refused | `2**70` literal, follow-up 3 |
-| `marshal/03_floats.py` | same | same | binary `g` floats, `-0.0`, 1e100 |
-| `marshal/04_strings_bytes.py` | same | same | ASCII/UTF-8 strings, bytes (version 2) |
-| `marshal/05_lists_tuples.py` | same | same | list/tuple nesting (version 2) |
-| `marshal/06_dicts.py` | same | same | dict pairs and `0` terminator (version 2) |
+| `marshal/01_ints_bool_none.py` | build refused | build refused | no `version`, follow-up 3 |
+| `marshal/02_big_ints.py` | build refused | build refused | `2**70` literal, follow-up 4 |
+| `marshal/03_floats.py` | build refused | build refused | no `version`, follow-up 3 |
+| `marshal/04_strings_bytes.py` | build refused | build refused | no `version`, follow-up 3 |
+| `marshal/05_lists_tuples.py` | build refused | build refused | no `version`, follow-up 3 |
+| `marshal/06_dicts.py` | build refused | build refused | no `version`, follow-up 3 |
 
 ## Follow-ups (named refusals)
 
@@ -90,6 +93,13 @@ Default build and `AIL_UNIFIED_FORCE=1` were both run with
    `__copy__`/`__deepcopy__` hooks are not dispatched for the same reason.
    Programs 01, 02, 05 and 06 (no user class) match CPython.
 
+   A caller-supplied memo dict is used in place, as CPython's is: each copied
+   object gets an identity-token key plus one keep-alive slot inside that dict.
+   `memo.clear()` followed by a reused dict therefore does not return a stale
+   copy, and pre-existing keys are not overwritten (`len(memo)` grows by the
+   same two entries per copied object as CPython).  A memo pre-seeded with
+   `memo[id(x)] = y` cannot be expressed because this compiler has no `id`.
+
 2. **A string `stmt`/`setup` needs `exec`.**  The string form is a CPython
    `exec` program, so `timeit/06_string_stmt.py` calls `exec` and the compiler
    refuses it by name at build time:
@@ -103,7 +113,21 @@ Default build and `AIL_UNIFIED_FORCE=1` were both run with
    reaches the module also stops, at run time, with
    `TypeError: timeit.Timer: a string stmt needs exec, which is not built`.
 
-3. **`2**70` is an int64 literal.**  `marshal/02_big_ints.py` is refused by the
+3. **`marshal.dumps` without a `version` is refused at build time.**  CPython's
+   default is version 4, whose `FLAG_REF` and interned-string bytes depend on
+   each object's CPython refcount and interned bit; this compiler keeps neither
+   (and has no `id`), so the bytes cannot be reproduced for an arbitrary value.
+   `version` is therefore a required argument, and the six marshal programs,
+   which call `marshal.dumps(x)` exactly as CPython's signature allows, stop in
+   the compiler with
+
+   ```
+   lab/stdlib/marshal/01_ints_bool_none.py:20:5: not in the subset: marshal.dumps() called without a required argument version
+   ```
+
+   This is deliberate: the programs were not edited to pass `version=2`.
+
+4. **`2**70` is an int64 literal.**  `marshal/02_big_ints.py` is refused by the
    compiler before the module is reached:
 
    ```
@@ -111,9 +135,8 @@ Default build and `AIL_UNIFIED_FORCE=1` were both run with
      write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower
    ```
 
-4. **`marshal.dumps` versions 3/4 are refused by name.**  Their `FLAG_REF` and
-   interned-string bytes depend on each object's CPython refcount and interned
-   bit, which AIL does not keep.  `marshal.dumps(x)` (default version 4) raises
+5. **An explicit `marshal.dumps` version 3/4 is refused by name.**  A call such
+   as `marshal.dumps(x, 4)` compiles and then raises
 
    ```
    ValueError: marshal.dumps: version 4 needs CPython's per-object refcount and
@@ -121,6 +144,7 @@ Default build and `AIL_UNIFIED_FORCE=1` were both run with
    exact version-2 layout
    ```
 
-   `marshal.dumps(x, 2)` (and 0/1) writes CPython's exact bytes; `marshal.loads`
-   reads version 4, including `r` references, and `marshal.loads(b"0")` raises
-   CPython's `TypeError: NULL object in marshal data for object`.
+   `marshal.dumps(x, 2)` (and 0/1) writes CPython's exact bytes, including the
+   version-0/1 text floats the reader now accepts; `marshal.loads` reads version
+   4, including `r` references, and `marshal.loads(b"0")` raises CPython's
+   `TypeError: NULL object in marshal data for object`.

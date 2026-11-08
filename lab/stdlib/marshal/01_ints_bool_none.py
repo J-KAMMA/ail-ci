@@ -17,6 +17,6 @@ values = [
     -9223372036854775807 - 1,
 ]
 for x in values:
-    raw = marshal.dumps(x, 2)
+    raw = marshal.dumps(x)
     back = marshal.loads(raw)
     print(type(back).__name__, back == x, raw.hex())
