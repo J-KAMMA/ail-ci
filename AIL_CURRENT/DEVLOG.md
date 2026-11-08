@@ -1,3 +1,12 @@
+## 2026-11-08 -- rbsetord2_rr1 full suite: `set.pop()` tests follow the accepted table order (job-rbsetord2_rr1-11081957)
+
+`test_ail_gaps_api2.SetPop` still expected `set.pop()` to be refused by name, which the re-applied
+setord2 change intentionally removed. The int-only pop programs now compare against CPython on the
+general and default builds: the fixed `SET_POP` program, an untyped fuzz that mixes add/discard/pop
+with iteration (directly and through a function argument), and a typed `set[int]` fuzz. The
+order-sensitive rolling hash makes a wrong popped element or a wrong remaining walk fail. The
+module's 14 tests pass; `test_ail_setorder` (S11) and `test_ail_safetynet` stay green.
+
 ## 2026-11-08 -- rbsetord2_rr1 fix: `symmetric_difference_update` / `^=` in-place order (job-rbsetord2_rr1-11081957)
 
 Fixed the last review defect: `set.symmetric_difference_update`/`^=` computed `a ^ b` (copy the
