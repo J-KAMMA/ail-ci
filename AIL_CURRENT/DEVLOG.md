@@ -1,3 +1,32 @@
+## 2026-11-08 -- stdfall2c re-applied: `copy` memo uses the caller's dict, `marshal` v4 is a build-time refusal (job-rbstdfall2c-11081827)
+
+Fixes the stdfall2c review.  `copy.deepcopy(x, memo)` no longer keeps a process-global
+`_memo_links` table: each memoised object gets a process-unique integer token in the caller's
+memo dict plus one keep-alive list (all keys are ints, so `len(memo)` and key types match
+CPython's two-entry growth).  `memo.clear()` followed by reuse no longer returns a stale copy,
+and pre-existing keys such as `{2: 'x', 5: 'y'}` are not overwritten.  Probes
+`q_copy_memo_clear`, `q_copy_memo_keys`, `q_copy_memo_reuse`, `q_copy_memo_nested`, plus
+clear-then-same-object, equal-distinct objects, atomic no-entry and non-int-key-deletion cases
+match CPython in the default and `AIL_UNIFIED_FORCE=1` builds.
+
+`marshal` keeps byte-exact explicit versions 0-2 (and the reader now accepts the version-0/1
+text float `f`, so `loads(dumps(x, 0/1))` round-trips) but makes `version` a required argument:
+a call that would take CPython's default v4 stops at build time with
+`marshal.dumps() called without a required argument version` instead of a run-time refusal, and
+the six marshal lab programs were restored to `marshal.dumps(x)` rather than edited to pass
+`version=2`.  An explicit 3/4 is still refused by name at run time.  `RESULTS.md` records
+before 0/18 and after 9/18 (copy 4/6, timeit 5/6, marshal 0/6).  Final tests, `-j 2`:
+`test_ail_std_stdfall2`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4/4, 0 failed); `tools/update_manifest.py --check` passes.
+
+Re-applied on top of the current tree.  The accepted change also walks sets in `copy`; this tree
+now refuses any order-revealing set walk by name (`test_ail_setorder`).  Both fixes are kept:
+`_copy_set` uses `x.copy()`, set deepcopy uses `x.copy()`, and frozenset deepcopy uses
+`x | frozenset()` (a fresh object, as in CPython) instead of `for item in x`; `copy/02` prints
+`sorted(s)` rather than `sorted(list(s))`.  The copy/02, memo and marshal-version probes
+(`q_copy_set`, `q_copy_memo`, `q_marshal_versions`, `q_marshal_default`, `q_timeit_clock`) match
+CPython, or refuse by name, in the default and `AIL_UNIFIED_FORCE=1` builds.
+
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
 Re-applied the accepted `job-fclist1-op1106` change (`8c2c99c1`..`FETCH_HEAD`, 3 commits) on this
