@@ -425,3 +425,24 @@ non-ASCII digits, 19+ digits, junk -- abandons the call and CPython re-runs it (
 ValueError). A unit whose parser is not the expected definition is refused. pymix's ValueError
 escape refusal for `int(...)` is lifted in the hybrid's analysis like division. Measured
 (`obs5_task4.json`): `csv_parse` 0.547 -> 0.220 (`sum_column`); all outputs byte-identical.
+
+**obs5 task 5 (methods that store a field: step b, opt-in).** Simplest safe subset: a leaf method
+(no `self.m()` calls) whose every return is bare and which stores exactly one field, an exact
+`int` (`self.f = e`, `self.f op= e`). Its synthetic takes the field as a parameter, assigns it as
+a local and returns its final value; the entry, after the section 5.3 guards plus
+`tp_setattro == PyObject_GenericSetAttr`, writes that value back once with `PyObject_SetAttr`
+(no descriptor of that name exists in the MRO, so this only sets the instance dict; nothing ran
+in between to observe the intermediate values) and returns None; an unchanged value is not
+written, as when CPython's loop never stored. A trap re-runs the original from the start, before
+any write-back. Such a method is never a native callee (a caller would read the field after the
+store). Tested against CPython for a raising body after stores, wrong field types, big ints, a
+subclass or class-level `__setattr__`, a property named like the field. **Measured slower** on the
+only corpus case: `json_parse` 0.843 -> 0.854 with `Parser.skip_ws` native (`obs5_task5_optin.json`;
+4M calls of 0-1 loop iterations, so guards, two field reads and the write-back cost more than the
+body). So it is off by default (`AIL_HYBRID_FIELD_STORES=1` turns it on); `parse_string` and the
+rest also return a value or call methods, which this subset does not cover.
+
+Found while measuring it: the str parameter conversion scanned every UTF-8 byte for the ASCII
+flag on each call, O(len); a method reading a 3 MB `self.text` 4M times did not finish in 900 s.
+The flag is now `PyUnicode_IS_ASCII` (identical meaning, O(1)): `field_valid` 0.319 -> 0.306,
+`tokenizer` 0.066 -> 0.061.

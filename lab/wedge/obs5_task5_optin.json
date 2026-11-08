@@ -1,0 +1,1122 @@
+[
+ {
+  "all_defs": [
+   "Frame.__init__",
+   "Frame.rows",
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "scaled_total",
+     "total_of",
+     "weighted_sum"
+    ],
+    "build_rc": 0,
+    "build_s": 4.49,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "filter_sum",
+     "group_count",
+     "group_sum",
+     "max_group_count",
+     "scaled_total",
+     "total_of",
+     "weighted_sum"
+    ],
+    "rejected": {
+     "Frame.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+     "Frame.rows": "method: a loop-free body would copy a list field on every call, stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "filter_sum",
+   "group_count",
+   "group_sum",
+   "max_group_count",
+   "scaled_total",
+   "total_of",
+   "weighted_sum"
+  ],
+  "icount": {
+   "cpython": 14270409435,
+   "hand": 5867252658
+  },
+  "module": "dataframe_group",
+  "observe_same_output": true,
+  "profile": {
+   "Frame": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Frame.__init__": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "key": {
+      "list[int]": 1
+     },
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.004149
+   },
+   "Frame.rows": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:dataframe_group.Frame": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "filter_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "hi": {
+      "int": 1
+     },
+     "lo": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.082978
+   },
+   "group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.087127
+   },
+   "group_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "key": {
+      "list[int]": 1
+     },
+     "ngroups": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.157658
+   },
+   "max_group_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "scaled_total": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "den": {
+      "int": 1
+     },
+     "num": {
+      "int": 1
+     },
+     "vals": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.091276
+   },
+   "total_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "xs": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "weighted_sum": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "a": {
+      "list[int]": 1
+     },
+     "b": {
+      "list[int]": 1
+     },
+     "w": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.215742
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "field_weight",
+     "is_simple_email",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name",
+     "score_ok",
+     "valid_len"
+    ],
+    "build_rc": 0,
+    "build_s": 3.72,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "field_weight",
+     "is_simple_email",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name",
+     "score_ok",
+     "valid_len"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "icount": {
+   "cpython": 29972463792,
+   "hand": 9186311448
+  },
+  "module": "field_valid",
+  "observe_same_output": true,
+  "profile": {
+   "field_weight": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "email": {
+      "str": 11945
+     },
+     "name": {
+      "str": 11945
+     },
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.785063
+   },
+   "is_simple_email": {
+    "big": {},
+    "calls": 1400000,
+    "generator": false,
+    "params": {
+     "addr": {
+      "str": 22883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 1.301763
+   },
+   "is_upper_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.33245
+   },
+   "looks_like_version": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "tag": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.384521
+   },
+   "normalise_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "raw": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "str": 1088
+    },
+    "self_s": 0.845144
+   },
+   "score_ok": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.256347
+   },
+   "valid_len": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.508689
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Parser.__init__",
+   "Parser.parse_array",
+   "Parser.parse_number",
+   "Parser.parse_object",
+   "Parser.parse_string",
+   "Parser.parse_value",
+   "Parser.skip_ws",
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "Parser.skip_ws",
+     "count_tokens",
+     "depth_of",
+     "digits_in",
+     "document_bytes"
+    ],
+    "build_rc": 0,
+    "build_s": 7.41,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "Parser.skip_ws",
+     "count_tokens",
+     "depth_of",
+     "digits_in",
+     "document_bytes"
+    ],
+    "rejected": {
+     "Parser.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+     "Parser.parse_array": "method: stores a field and calls a method, stays in CPython",
+     "Parser.parse_number": "method: stores a field and returns a value, stays in CPython",
+     "Parser.parse_object": "method: stores a field and calls a method, stays in CPython",
+     "Parser.parse_string": "method: stores a field and returns a value, stays in CPython",
+     "Parser.parse_value": "method: stores a field and calls a method, stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "icount": {
+   "cpython": 21206290677,
+   "hand": 18117750865
+  },
+  "module": "json_parse",
+  "observe_same_output": true,
+  "profile": {
+   "Parser": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Parser.__init__": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 3
+     },
+     "text": {
+      "str": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 3
+    },
+    "self_s": 0.0
+   },
+   "Parser.parse_array": {
+    "big": {},
+    "calls": 120003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.152099
+   },
+   "Parser.parse_number": {
+    "big": {},
+    "calls": 240000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 4758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.360234
+   },
+   "Parser.parse_object": {
+    "big": {},
+    "calls": 120000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.180117
+   },
+   "Parser.parse_string": {
+    "big": {},
+    "calls": 1080000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 1.152749
+   },
+   "Parser.parse_value": {
+    "big": {},
+    "calls": 1080003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.796517
+   },
+   "Parser.skip_ws": {
+    "big": {},
+    "calls": 4080006,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 64758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1088
+    },
+    "self_s": 1.869214
+   },
+   "count_tokens": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.052034
+   },
+   "depth_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.116075
+   },
+   "digits_in": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.052034
+   },
+   "document_bytes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_idents",
+     "count_keywords",
+     "digit_count",
+     "is_ident_char",
+     "is_ident_start",
+     "longest_ident",
+     "token_weight"
+    ],
+    "build_rc": 0,
+    "build_s": 6.46,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_idents",
+     "count_keywords",
+     "digit_count",
+     "is_ident_char",
+     "is_ident_start",
+     "longest_ident",
+     "token_weight"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "icount": {
+   "cpython": 14080978317,
+   "hand": 861244506
+  },
+  "module": "tokenizer",
+  "observe_same_output": true,
+  "profile": {
+   "count_idents": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.076172
+   },
+   "count_keywords": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "kw": {
+      "str": 1
+     },
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.236535
+   },
+   "digit_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.056127
+   },
+   "is_ident_char": {
+    "big": {},
+    "calls": 3760000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 59758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1056
+    },
+    "self_s": 1.16664
+   },
+   "is_ident_start": {
+    "big": {},
+    "calls": 2840000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 45383
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1056
+    },
+    "self_s": 0.853932
+   },
+   "longest_ident": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.092209
+   },
+   "token_weight": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.140318
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Node.__init__",
+   "Tree.__init__",
+   "Tree._depth",
+   "Tree._height",
+   "Tree._inorder",
+   "Tree.depth_sum",
+   "Tree.height",
+   "Tree.inorder_sum",
+   "Tree.insert",
+   "Tree.max_key",
+   "Tree.min_key",
+   "build_tree",
+   "count_nodes"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "Tree._depth",
+     "Tree._height",
+     "Tree._inorder",
+     "Tree.depth_sum",
+     "Tree.height",
+     "Tree.inorder_sum",
+     "Tree.max_key",
+     "Tree.min_key"
+    ],
+    "build_rc": 0,
+    "build_s": 5.97,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "Tree._depth",
+     "Tree._height",
+     "Tree._inorder",
+     "Tree.depth_sum",
+     "Tree.height",
+     "Tree.inorder_sum",
+     "Tree.max_key",
+     "Tree.min_key"
+    ],
+    "rejected": {
+     "Node.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+     "Tree.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+     "Tree.insert": "to_c-refused: __ail_f_keys.append(): '__ail_f_keys' is a list parameter, which is read-only here.\n  write instead: build and return a new list (`out = __ail_f_keys.copy()`, c stays in CPython",
+     "build_tree": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "count_nodes": "unresolved-param: t stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "build_tree",
+   "count_nodes"
+  ],
+  "icount": {
+   "cpython": 22914331464,
+   "hand": 5762019273
+  },
+  "module": "tree_build",
+  "observe_same_output": true,
+  "profile": {
+   "Node": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree.__init__": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Tree._depth": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "d": {
+      "int": 152884
+     },
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1264
+    },
+    "self_s": 4.773265
+   },
+   "Tree._height": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1248
+    },
+    "self_s": 4.933307
+   },
+   "Tree._inorder": {
+    "big": {},
+    "calls": 9720081,
+    "generator": false,
+    "params": {
+     "idx": {
+      "int": 152884
+     },
+     "self": {
+      "cls:tree_build.Tree": 152884
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1264
+    },
+    "self_s": 5.241389
+   },
+   "Tree.depth_sum": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.height": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.inorder_sum": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.insert": {
+    "big": {},
+    "calls": 60000,
+    "generator": false,
+    "params": {
+     "key": {
+      "int": 1945
+     },
+     "self": {
+      "cls:tree_build.Tree": 1945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1024
+    },
+    "self_s": 0.128034
+   },
+   "Tree.max_key": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "Tree.min_key": {
+    "big": {},
+    "calls": 81,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:tree_build.Tree": 81
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 81
+    },
+    "self_s": 0.0
+   },
+   "build_tree": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "keys": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "cls:tree_build.Tree": 1
+    },
+    "self_s": 0.008002
+   },
+   "count_nodes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "t": {
+      "cls:tree_build.Tree": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ }
+]

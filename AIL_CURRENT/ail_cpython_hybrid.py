@@ -1068,8 +1068,26 @@ class _Desugar(ast.NodeTransformer):
 
     def visit_Attribute(self, node):
         if _is_self_attr(node, self.selfname):
-            return ast.copy_location(ast.Name(id=_FIELD_PREFIX + node.attr, ctx=ast.Load()), node)
+            ctx = ast.Store() if isinstance(node.ctx, ast.Store) else ast.Load()
+            return ast.copy_location(ast.Name(id=_FIELD_PREFIX + node.attr, ctx=ctx), node)
         return self.generic_visit(node)
+
+
+class _ReturnField(ast.NodeTransformer):
+    """obs5 step b: `return` (no value) in a field-storing method becomes `return <field>`."""
+
+    def __init__(self, field):
+        self.field = field
+
+    def visit_Return(self, node):
+        return ast.copy_location(ast.Return(value=ast.Name(id=_FIELD_PREFIX + self.field,
+                                                           ctx=ast.Load())), node)
+
+    def visit_FunctionDef(self, node):
+        return node
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_Lambda = visit_FunctionDef
 
 
 def _method_synthetics(tree):
@@ -1092,7 +1110,7 @@ def _method_synthetics(tree):
                 refusals['%s.%s' % (cls.name, fn.name)] = why_cls + ', stays in CPython'
             continue
         fkinds = _field_kinds(cls)
-        own_fields, self_calls = {}, {}
+        own_fields, self_calls, stores = {}, {}, {}
         for name, fn in methods.items():
             selfname = _self_name(fn)
             qual = '%s.%s' % (cls.name, name)
@@ -1104,18 +1122,26 @@ def _method_synthetics(tree):
                 refusals[qual] = 'a name starting with __ail_ stays in CPython'
                 continue
             parents = _parents(fn)
-            fields, calls, ok = set(), set(), True
+            fields, calls, ok, stored = set(), set(), True, set()
             for node in ast.walk(fn):
                 if not (isinstance(node, ast.Name) and node.id == selfname):
                     continue
                 if node is fn.args.args[0]:
                     continue
                 parent = parents.get(id(node))
+                holder = parents.get(id(parent))
+                # obs5 step b: `self.f = e` / `self.f op= e` of one int field (checked below)
+                if isinstance(node.ctx, ast.Load) and isinstance(parent, ast.Attribute) \
+                        and isinstance(parent.ctx, ast.Store) and not parent.attr.startswith('__') \
+                        and ((isinstance(holder, ast.Assign) and holder.targets == [parent])
+                             or (isinstance(holder, ast.AugAssign) and holder.target is parent)):
+                    stored.add(parent.attr)
+                    fields.add(parent.attr)
+                    continue
                 if not isinstance(node.ctx, ast.Load) or not isinstance(parent, ast.Attribute) \
                         or not isinstance(parent.ctx, ast.Load) or parent.attr.startswith('__'):
                     ok = 'self is stored to or used other than by reading an attribute'
                     break
-                holder = parents.get(id(parent))
                 if isinstance(holder, ast.Call) and holder.func is parent:
                     if parent.attr not in methods or holder.keywords:
                         ok = 'calls self.%s, not a plain method of the class' % parent.attr
@@ -1133,6 +1159,28 @@ def _method_synthetics(tree):
                                                       ast.Lambda, ast.ClassDef)):
                     if any(isinstance(n, ast.Name) and n.id == selfname for n in ast.walk(sub)):
                         ok = 'a nested scope uses self'
+            if ok is True and stored:
+                # obs5 step b (simplest safe subset): one stored field, an exact int, a leaf
+                # method (no self-calls) whose every return is bare (it returns None).
+                # Opt-in: the one corpus case (`json_parse`'s `skip_ws`, 4M calls of 0-1
+                # iterations) measured 0.843 -> 0.854, the entry's guards and write-back
+                # costing more than the body; see OBSERVED_TYPES.md section 6.
+                f = next(iter(stored))
+                if not os.environ.get('AIL_HYBRID_FIELD_STORES'):
+                    ok = ('self is stored to or used other than by reading an attribute '
+                          '(field write-back is opt-in: AIL_HYBRID_FIELD_STORES=1)')
+                elif len(stored) != 1 or fkinds.get(f) != 'int':
+                    ok = 'stores a field that is not one int field'
+                elif calls:
+                    ok = 'stores a field and calls a method'
+                elif any(isinstance(n, ast.Return) and n.value is not None
+                         for n in _own_nodes(fn)) or (fn.returns is not None and not (
+                             isinstance(fn.returns, ast.Constant) and fn.returns.value is None)):
+                    ok = 'stores a field and returns a value'
+                elif any(isinstance(n, (ast.Global, ast.Nonlocal)) for n in _own_nodes(fn)):
+                    ok = 'global statement'
+                else:
+                    stores[name] = f
             if ok is True:
                 own_fields[name] = fields
                 self_calls[name] = calls
@@ -1140,7 +1188,9 @@ def _method_synthetics(tree):
                 refusals[qual] = 'method: %s, stays in CPython' % ok
         cands = set(own_fields)
         while True:
-            drop = {m for m in cands if not self_calls[m] <= cands}
+            # a field-storing method is never called natively by another method (the caller
+            # would read the field after the store)
+            drop = {m for m in cands if not self_calls[m] <= (cands - set(stores))}
             if not drop:
                 break
             cands -= drop
@@ -1171,6 +1221,11 @@ def _method_synthetics(tree):
                 continue
             body = [_Desugar(cls.name, selfname, fields_of).visit(ast.fix_missing_locations(
                     copy.deepcopy(stmt))) for stmt in fn.body]
+            returns = copy.deepcopy(fn.returns)
+            if m in stores:
+                body = [_ReturnField(stores[m]).visit(stmt) for stmt in body]
+                body.append(ast.Return(value=ast.Name(id=_FIELD_PREFIX + stores[m], ctx=ast.Load())))
+                returns = ast.Name(id='int', ctx=ast.Load())
             args = [ast.arg(arg=_FIELD_PREFIX + f, annotation=ast.parse(fkinds[f], mode='eval').body)
                     for f in fields_of[m]]
             args += [copy.deepcopy(a) for a in fn.args.args[1:]]
@@ -1179,11 +1234,12 @@ def _method_synthetics(tree):
                 name=_synthetic_name(cls.name, m),
                 args=ast.arguments(posonlyargs=[], args=args, vararg=None, kwonlyargs=[],
                                    kw_defaults=[], kwarg=None, defaults=[]),
-                body=body, decorator_list=[], returns=copy.deepcopy(fn.returns), **extra)
+                body=body, decorator_list=[], returns=returns, **extra)
             ast.fix_missing_locations(syn)
             out.append((syn, {'cls': cls.name, 'attr': m,
                               'fields': [(f, fkinds[f]) for f in fields_of[m]],
-                              'nown': len(fn.args.args) - 1, 'end': cls.end_lineno}))
+                              'nown': len(fn.args.args) - 1, 'end': cls.end_lineno,
+                              'store': stores.get(m)}))
     return out, refusals
 
 
@@ -2672,6 +2728,11 @@ def _method_source(item, items_by_name):
         '    if (Py_TYPE(t) != &PyType_Type || !(t->tp_flags & Py_TPFLAGS_HEAPTYPE)',
         '            || t->tp_getattro != PyObject_GenericGetAttr) return 0;',
     ])
+    if meta.get('store'):
+        # obs5 step b: the write-back goes through the generic setattr (no `__setattr__`), and
+        # guard 2 below already rules out a descriptor of that name, so it only sets the
+        # instance dict's entry and runs no Python code.
+        out.append('    if (t->tp_setattro != PyObject_GenericSetAttr) return 0;')
     for i in range(nf):
         out.append('    if (_PyType_Lookup(t, ail_mf_%s[%d]) != NULL) return 0;' % (name, i))
     for callee in mcalls:
@@ -2721,6 +2782,25 @@ def _method_source(item, items_by_name):
         out.append('            %s__hybrid_rlimit = budget < %d ? budget : %d;'
                    % (item['mangled'], item['rlimit'], item['rlimit']))
     out.append('            PyObject *r = ail_core_%s(o);' % name)
+    if meta.get('store'):
+        # obs5 step b: the synthetic returned the stored field's final value; write it back once
+        # (the GIL was held and no Python code ran, so nothing could observe the intermediate
+        # values), unless it is unchanged: a body that never stored leaves the object as it was.
+        k = fields.index(meta['store'])
+        out.extend([
+            '            if (r) {',
+            '                int same = 0;',
+            '                if (PyLong_CheckExact(held[%d])) {' % k,
+            '                    int c = PyObject_RichCompareBool(r, held[%d], Py_EQ);' % k,
+            '                    if (c < 0) PyErr_Clear(); else same = c;',
+            '                }',
+            '                if (!same && PyObject_SetAttr(args[0], ail_mf_%s[%d], r) < 0) {'
+            % (name, k),
+            '                    Py_CLEAR(r);',
+            '                }',
+            '                if (r) { Py_DECREF(r); r = Py_NewRef(Py_None); }',
+            '            }',
+        ])
     for i in range(nf):
         out.append('            Py_DECREF(held[%d]);' % i)
     out.extend([
@@ -2991,8 +3071,10 @@ def _wrapper_source(module, items):
                 out.append('    if (!PyUnicode_CheckExact(%s)) %s;' % (o, fail))
                 out.append('    Py_ssize_t n%d = 0; const char *p%d = PyUnicode_AsUTF8AndSize(%s, &n%d);' % (i, i, o, i))
                 out.append('    if (!p%d) { PyErr_Clear(); %s; }' % (i, fail))
-                out.append('    ail_str a%d; a%d.p = (const uint8_t *)p%d; a%d.n = (int64_t)n%d; a%d.bytes = 1;' % (i, i, i, i, i, i))
-                out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) if ((unsigned char)p%d[k%d] >= 0x80) { a%d.bytes = 0; break; }' % (i, i, i, i, i, i, i))
+                # obs5: the flag is "every UTF-8 byte < 0x80", i.e. the str is ASCII, which
+                # CPython records in the object (O(1)); the old byte scan was O(len) per call,
+                # quadratic for a method reading a long `self.text` millions of times.
+                out.append('    ail_str a%d; a%d.p = (const uint8_t *)p%d; a%d.n = (int64_t)n%d; a%d.bytes = PyUnicode_IS_ASCII(%s) ? 1 : 0;' % (i, i, i, i, i, i, o))
                 call.append('a%d' % i)
             elif kind == 'list[int]':
                 out.append('    if (!PyList_CheckExact(%s)) %s;' % (o, fail))

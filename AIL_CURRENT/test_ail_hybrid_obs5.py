@@ -10,6 +10,16 @@ Local lists: a list the body creates and keeps to itself (only appended to, inde
 measured, iterated without being changed in that loop, or aliased by another such local) may be
 appended to; a reference never leaves the call, so no caller can see the difference.  Aliases
 share the object as in CPython (`b = a; b.append(x)` changes `len(a)`).
+
+Container parameters: `list[str]` (views of each element's UTF-8) and `bytes` (the object's own
+buffer) are read in place; a non-exact list/str/bytes runs the original.  `ord` of one character
+of a str is accepted.
+
+`int(str)`: only a plain ASCII decimal (`-?[0-9]{1,18}`) is parsed natively; any other text makes
+CPython re-run the call, so its value or ValueError is CPython's.
+
+Field stores (opt-in, `AIL_HYBRID_FIELD_STORES=1`): a leaf method returning None that stores one
+int field writes the final value back once, through the generic setattr, after the native body.
 """
 import json
 import os
@@ -558,6 +568,132 @@ STRINT_NATIVE = ('sum_column', 'twice')
 STRINT_REFUSED = ('caught',)
 
 
+STORES = '''
+class Parser:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.pos = 0
+
+    def skip_ws(self) -> None:
+        n = len(self.text)
+        while self.pos < n and self.text[self.pos] in " \\t\\n\\r":
+            self.pos += 1
+
+    def skip_to(self, ch: str) -> None:
+        n = len(self.text)
+        while self.pos < n:
+            if self.text[self.pos] == ch:
+                return
+            self.pos += 1
+
+    def bump_then_peek(self) -> None:
+        k = 0
+        while k < 2:
+            self.pos += 1
+            k += 1
+        if self.text[self.pos] == "x":
+            self.pos = 0
+
+    def peek(self) -> int:
+        n = 0
+        i = self.pos
+        while i < len(self.text) and self.text[i] == " ":
+            n += 1
+            i += 1
+        return n
+
+    def ws_then_peek(self) -> int:
+        self.skip_ws()
+        return self.peek()
+'''
+
+STORES_RUNNER = r'''
+import stores as m
+
+
+def show(label, f, *args):
+    try:
+        r = f(*args)
+        print(label, type(r).__name__, repr(r))
+    except Exception as e:
+        print(label, 'raised', type(e).__name__, str(e))
+
+
+def state(label, p):
+    print(label, type(p.pos).__name__, repr(p.pos), sorted(vars(p)))
+
+
+p = m.Parser('   \t\n abc  d')
+show('skip', p.skip_ws)
+state('after', p)
+show('skip_again', p.skip_ws)
+state('again', p)
+p.pos = 9
+show('skip_to', p.skip_to, 'd')
+state('to', p)
+show('skip_to_missing', p.skip_to, 'q')
+state('missing', p)
+q = m.Parser('ab')
+show('bump_raise', q.bump_then_peek)
+state('bump_raise', q)
+q = m.Parser('abx')
+show('bump', q.bump_then_peek)
+state('bump', q)
+r = m.Parser('    z')
+show('ws_then_peek', r.ws_then_peek)
+state('wtp', r)
+for start in (True, 1.0, 2 ** 70, -1, 2 ** 63 - 1):
+    s = m.Parser('   x')
+    s.pos = start
+    show('start %r' % (start,), s.skip_ws)
+    state('start %r' % (start,), s)
+s = m.Parser('   x')
+del s.pos
+show('no_pos', s.skip_ws)
+s = m.Parser('   x')
+s.text = 5
+show('bad_text', s.skip_ws)
+state('bad_text', s)
+
+
+class Loud(m.Parser):
+    def __setattr__(self, k, v):
+        print('set', k, v)
+        object.__setattr__(self, k, v)
+
+
+l = Loud('  x')
+show('loud', l.skip_ws)
+log = []
+def tracer(self, k, v):
+    log.append((k, v))
+    object.__setattr__(self, k, v)
+m.Parser.__setattr__ = tracer
+t = m.Parser('   x')
+show('traced', t.skip_ws)
+print('log', log)
+del m.Parser.__setattr__
+def pset(self, v):
+    log.append(('prop', v))
+    self.__dict__['_p'] = v
+m.Parser.pos = property(lambda self: self.__dict__.get('_p', 0), pset)
+u = m.Parser.__new__(m.Parser)
+u.text = '    x'
+show('prop', u.skip_ws)
+print('log2', log)
+del m.Parser.pos
+w = m.Parser(' ' * 1000 + 'x')
+for _ in range(2000):
+    w.pos = 0
+    w.skip_ws()
+state('loop', w)
+print('loops-ok')
+'''
+
+STORES_NATIVE = ('Parser.skip_ws', 'Parser.skip_to', 'Parser.bump_then_peek', 'Parser.peek')
+STORES_REFUSED = ('Parser.ws_then_peek',)
+
+
 def run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, timeout=600)
 
@@ -565,12 +701,12 @@ def run(cmd, cwd=None, env=None):
 @unittest.skipUnless(HAVE_CC and HAVE_HEADERS, 'needs a C compiler and the CPython headers')
 class Runs(unittest.TestCase):
 
-    def build(self, tmp, name, text):
+    def build(self, tmp, name, text, out_name='out', **env):
         src = Path(tmp) / (name + '.py')
         src.write_text(text, encoding='utf-8')
-        out = Path(tmp) / 'out'
+        out = Path(tmp) / out_name
         built = run([sys.executable, '-B', CLI, 'build', '--cpython', str(src), '-o', str(out)],
-                    tmp, env=dict(os.environ, AIL_NO_CACHE='1'))
+                    tmp, env=dict(os.environ, AIL_NO_CACHE='1', **env))
         self.assertEqual(built.returncode, 0, built.stderr[-3000:])
         return out, json.loads((out / 'build.json').read_text(encoding='utf-8'))
 
@@ -619,6 +755,15 @@ class Runs(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-strint-') as tmp:
             out, report = self.build(tmp, 'strint', STRINT)
             self.compare(tmp, out, STRINT_RUNNER, STRINT_NATIVE, STRINT_REFUSED, report, 'strint')
+
+    def test_methods_storing_an_int_field_match_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-stores-') as tmp:
+            # opt-in (measured slower on json_parse); off by default
+            _off, plain = self.build(tmp, 'stores', STORES, 'out-default')
+            self.assertNotIn('Parser.skip_ws', plain['accelerated'])
+            self.assertIn('opt-in', plain['rejected']['Parser.skip_ws'])
+            out, report = self.build(tmp, 'stores', STORES, AIL_HYBRID_FIELD_STORES='1')
+            self.compare(tmp, out, STORES_RUNNER, STORES_NATIVE, STORES_REFUSED, report, 'stores')
 
 
 if __name__ == '__main__':
