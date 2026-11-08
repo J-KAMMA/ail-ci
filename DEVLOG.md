@@ -14,8 +14,11 @@ multiplication keeps the declared `OverflowError: integer overflow` (exit 1, std
 CPython's).  Added `test_ail_fz240.py` (registered in `tests.d`): the seed, the sign/power/bool/float
 constant neighbours, values through an argument, a list item, an attribute and a dict value inside
 int64, the named refusals and the declared wide-runtime contract, on the default and `AIL_IR=1`
-builds.  Probes: `/tmp/probes/fz240{,_min,_flow,_more,_runtime,_local,_local2,_exact,_huge}.py`; all
-match CPython or are refused by name except the declared int64 multiplication overflow.  Tests on
+builds.  Probes: `/tmp/probes/fz240{,_min,_flow,_more,_runtime,_local,_local2,_exact,_huge}.py`; the
+default/IR probes all match CPython or are refused by name except the declared int64 multiplication
+overflow.  An extra `AIL_EXACT_INT=1` probe showed the default build still stops on
+`v: int = 4611686018427387904 * 53` while the forced-general build prints CPython's exact value;
+that exact-int edge is outside this finding and was not changed.  Tests on
 this commit, `-j 2`: test_ail_fz240, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3
 (4/4, 339 s); manifest `--check` clean.
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
