@@ -1,3 +1,20 @@
+## 2026-11-08 -- wedge4 review fix: method kernels respect numeric `is` identity (job-rbwedge4-11090021)
+
+The hybrid method wrapper recomputed every statically-written field and stored it back
+unconditionally, so a path that never executed the store (or `self.n = self.n`) replaced the
+attribute object with a fresh box: `c.n is saved` printed `False` where CPython prints `True`.
+The C102 identity guard now covers lifted methods too: when the whole program has a numeric
+`is`/`is not`, every plain-class method stays in CPython with the named reason `the program
+compares numbers with \`is\``, and no method kernel is emitted.  Top-level functions keep the
+existing per-candidate guard, so an unrelated top-level int function is still accelerated.
+Probes under `/tmp/probes/`: `r12_identity` (untouched store, executed store), `r13_alias`
+(alias then store, read-only return), `r22_accel` (conditional/unconditional writes, int/bool/
+float fields, still accelerated), `r23_toplevel_is` (method refused while a top-level function
+is accelerated), `r24_readonly_is`, `r25_bool_float_is` -- all match CPython on the hybrid build;
+`bash ~/tools/cmp.sh` default/general builds match or refuse by name (`C114`).
+Tests on the final commit, `-j 2`: `test_ail_cpython_hybrid`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` -- 4 modules, 0 failed, 220 s.
+
 ## 2026-11-08 -- wedge4 re-applied: method kernels, return and parameter kinds (job-rbwedge4-11090021)
 
 Re-applied the accepted `job-wedge4-11082211` change (`fe64ce0d..FETCH_HEAD`, 3 commits) on this

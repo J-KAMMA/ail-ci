@@ -2143,7 +2143,25 @@ def build(source_path, output_dir):
     method_rebinds = []
     try:
         plan = _method_kernels(tree)
-        kernel_nodes = _method_kernel_nodes(plan)
+        # A lifted method reads its fields into C values and writes each statically-written
+        # field back as a fresh box, so an object read before the call is not the object the
+        # caller sees afterwards -- even on a path that never executes the store, and even for
+        # `self.n = self.n`.  CPython preserves that identity.  The top-level C102 guard already
+        # refuses a candidate when the program compares numbers with `is`; a method kernel boxes
+        # its field values just the same, so the guard must cover every lifted method too.
+        try:
+            import pyboxed2
+            _id_reach, id_any = pyboxed2._mix_identity_unsafe(tree)
+        except Exception:
+            id_any = False
+        if id_any:
+            for class_plan in plan.values():
+                for info in class_plan['methods'].values():
+                    if 'reason' not in info:
+                        info['reason'] = 'the program compares numbers with `is`'
+            kernel_nodes = []
+        else:
+            kernel_nodes = _method_kernel_nodes(plan)
         if kernel_nodes:
             analysis_source = source.rstrip('\n') + '\n\n' + '\n\n'.join(
                 ast.unparse(node) for node in kernel_nodes) + '\n'
