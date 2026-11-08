@@ -1,3 +1,16 @@
+## 2026-11-08 -- fbnarrow3 fix: `AIL_NARROW_INT` keys the compile server (job-fbnarrow3-11081820)
+
+`python/pkg-v12/ir/narrowint.py` registers the `ail_ilist` runtime by calling `register()` at import,
+and `register()` reads `AIL_NARROW_INT`.  The compile server's template therefore freezes whether
+that runtime is in `cruntime.SOURCE`, but the variable was not in `ail_server.IMPORT_ENV`: a request
+with a different value could reuse a server built with/without it, emitting narrowed C without the
+runtime or adding the runtime to a build that must be byte-identical to the default.  Added
+`AIL_NARROW_INT` to `IMPORT_ENV` beside the other import-time reads, so a different value starts a
+different server.  No compiler or runtime behaviour changes; `test_ail_server` passes again.
+
+Tests on the final commit, `-j 2`: `test_ail_server`, `test_ail_narrow_int`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-07 -- layout1: flat-layout measurement and ranking (job-layout1-11080009)
 
 Measurement and design only; no compiler, runtime, test or bench change. `lab/layout/` now has
