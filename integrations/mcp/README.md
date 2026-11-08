@@ -24,5 +24,5 @@ The compiler defaults to `AIL_CURRENT/ail_chatgpt.py` in this checkout. Override
 
 ## Test
 
-The tests are in `AIL_CURRENT/test_ail_agent_integrations.py` and use the three files under
-`examples/`: `typed.py`, `mutates.py`, and `refused.py`.
+The tests are in `AIL_CURRENT/test_ail_agent_integrations.py` and run the tools on the three files
+under `integrations/mcp/examples/`: `typed.py`, `mutates.py`, and `refused.py`.
