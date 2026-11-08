@@ -1,3 +1,64 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: fdlsp2 hover from compiler-inferred types
+
+**What the change really does.** `packaging/ail_lang/lsp.py` adds a per-uri cache of local types parsed from a `--strict --debug` build's `program.c` (`v_<name>` / `/* --debug: the Python local */` declarations, keyed by `native_report.json` C-function ranges), maps C types to Python names, and returns `x: T (inferred by the typed path)`. Because `int64_t` is both `int` and `bool` in C, a source heuristic (`_bool_kind`/`_int_kind`) decides between them. The build runs only after `didSave` or 1 s idle and is cached by version+digest. Also adds `lab/lsp/hover/*`, `test_ail_lsp_hover.py`, docs. That matches the report.
+
+**Bug in the fix commit.** It also no longer shows a type for a *certain* source literal (note the diff line `if len(kinds) == 1 and not uncertain` where the `uncertain` early-return was removed) — but I found no probe showing that loses a case; the literal path still wins. Not a defect on evidence.
+
+### Defects
+
+1. **A for-loop over a dict literal claims `int` where CPython gives `bool`.** `_for_iter_kind` handles `List/Tuple/Set` by element kind but falls through a bare `Name` to `_bool_kind`, and `_bool_kind` classifies a `Dict` literal as `"not-bool"`; dict iteration yields its *keys*.
+   Probe `/tmp/rprobes/pD.py`:
+   ```python
+   def f() -> None:
+       d = {True: 1}
+       for k in d:
+           print(k)
+   f()
+   ```
+   Hover on `k` (line 3): **expected** `k: bool` (CPython `type(k).__name__ == 'bool'`), **actual** `` `k`: `int` (inferred by the typed path) ``. Likely on base was nothing; wrong type is new. This is a *wrong type*, which the task says is worse than none.
+
+2. **A nested function's hover takes the outer function's C declaration.** `_compiler_type_map` keys `ranges` by the C function name from `native_report.json` (`outer__helper__0`), but `_hover_in_chain` looks it up with the Python name (`helper`). When a nested `def` has the same name as a top-level `def`, `compiler_types["helper"]` resolves to the top-level C function, so the nested local shows the wrong type.
+   Probe `/tmp/rprobes/pQ.py`:
+   ```python
+   def helper() -> None:
+       x = 1 / 2
+       print(x)
+
+   def outer() -> None:
+       def helper() -> None:
+           x = not 1
+           print(x)
+       helper()
+
+   helper()
+   outer()
+   ```
+   Confirmed in `dbgQ/program.c`: `helper` declares `double x`, `outer__helper__0` declares `int64_t x`. Hover on the nested `x` (line 8): **expected** `x: bool` (CPython `type(x).__name__ == 'bool'`), **actual** `` `x`: `float` (inferred by the typed path) ``. Base showed nothing.
+
+Both are the "wrong type" class the task makes a hard requirement (0 wrong). Other boundaries were clean: bytes/str (`ail_bytes`/`ail_str` distinct, p8), `bool(1)`/`int("3")`/`float(1)`/conditional exprs → nothing, tuple-unpack (pF) → nothing, slices (pS) and augmented assign (pT) → nothing, closure mutation of a list → nothing/no build, and the mutated-container fix itself (`xs[0]=1`, `append`, alias, parameter) → nothing.
+
+**Claims checked.** "oracle 38 cases, 0 CPython mismatches" — verified (`oracle: 38 cases, 32 must be shown, 0 CPython mismatches`). "6 modules, 0 failed" — I ran the 3 relevant + safetynet, all pass, LSP tests fine. "Diff touches only allowed files" — verified by `--stat`. "0 wrong" — **false** (defects 1–2). "Both defects fixed" — the specific mutated-container cases are fixed; the general "never a wrong type" claim is not met.
+
+**Pre-existing.** `pD.py` default build prints `1` vs CPython `True` — identical on base (`/tmp/basework`), so the bool-loss is pre-existing, not caused here.
+
+**Not checked.** icount speed comparison (change is LSP-only, no compiler/runtime hot path); `expect.json` coverage of nested same-name functions and dict-key iteration (absent).
+
+VERDICT: FIX
+1. For-loop over a dict literal shows `int` for a `bool` key — `/tmp/rprobes/pD.py` line 3: expected `k: bool`, actual `` `k`: `int` (inferred by the typed path) ``; `_for_iter_kind` must take dict *keys* (and refuse when unknown), not `_bool_kind`'s "not-bool" blanket.
+2. Nested function whose name matches a top-level function shows the outer's type — `/tmp/rprobes/pQ.py` line 8: expected `x: bool`, actual `` `x`: `float` (inferred by the typed path) ``; `_compiler_type_map` keys from `native_report.json` (`outer__helper__0`) while hover looks up the Python name (`helper`), so the lookup must match the mangled C name or the map must be keyed by Python name with scope identity.
+[commandcode stop=end_turn turns=72 out_tokens=96031]
+
+
+--- ORIGINAL TASK ---
 Lane: fd-lsp
 Needs: fdlsp1
 
