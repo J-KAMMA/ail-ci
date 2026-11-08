@@ -37,6 +37,7 @@ import textwrap
 import callable_types
 
 import cruntime
+from ir import narrowint
 import filelib
 import exctext
 import userexc
@@ -8190,9 +8191,15 @@ def _pure_int_index(node, ctx):
 def _numeric_snapshot(value, kind, ctx):
     temporary, _ = ctx.temp(kind)
     ctx.parts.add('NUMFIELD')
-    return temporary, ('({ ail_%s _source = %s; ail_%s _copy = ail_%s_snapshot(_source.p, _source.n); '
+    narrow = narrowint.enabled()
+    source_type = '__auto_type' if narrow else 'ail_%s' % kind
+    if narrow and kind == LIST:
+        return temporary, ('({ %s _source = %s; ail_list _copy = ail_list_snapshot_any(_source); '
+                           'ail_list_free(&%s); %s = _copy; %s; })'
+                          % (source_type, value, temporary, temporary, temporary))
+    return temporary, ('({ %s _source = %s; ail_%s _copy = ail_%s_snapshot(_source.p, _source.n); '
                        'ail_%s_free(&%s); %s = _copy; %s; })'
-                      % (kind, value, kind, kind, kind, temporary, temporary, temporary))
+                      % (source_type, value, kind, kind, kind, temporary, temporary, temporary))
 
 
 def _scalar_list_expression_kind(node, ctx):
@@ -12518,6 +12525,9 @@ def _iter_plan(node, ctx):
     pool rather than landing here.
     """
     pre = []
+    if isinstance(node, ast.Name) and node.id in getattr(ctx, 'narrow_int', ()):
+        c = ctx.cname(node.id)
+        return '0', '%s.n' % c, 'ail_ilist_get(&%s, @)' % c, pre
     if _seq_yields_handles(node, ctx):
         raise Unsupported('iterating a nested container whose elements are handles, not numbers')
     if _is_list_call(node, ctx):
@@ -14744,6 +14754,8 @@ def _expr(node, ctx):
             capture, owner = _owner_capture(node.value.value, owner_kind, ctx, _runs_no_code(node.slice))
             index = _map_inline(lambda: _expr(node.slice, ctx), ctx)
             field = '%s->f_%s' % (owner, node.value.attr)
+            if kind == LIST and _narrow_field(node.value, ctx):
+                return '({ %s; int64_t _index = %s; ail_ilist_field_get(&%s, _index); })' % (capture, index, field)
             if pure_index and capture == '(void)0' and kind == LIST and isinstance(node.value.value, ast.Name):
                 fast = _guard_marker_index(node.slice, '%s.%s' % (node.value.value.id, node.value.attr), ctx)
                 if fast is not None:
@@ -15191,7 +15203,8 @@ def _expr(node, ctx):
             if fast is not None:
                 return 'AIL_GG(%s&%s, %s, %s)' % (_range_mark(node, ctx), ctx.cname(recv_id), i, fast)
             mark = _range_mark(node, ctx) if isinstance(node.value, ast.Name) else ''
-            return 'ail_list_get(%s&%s, %s)' % (mark, ctx.cname(recv_id), i)
+            get = 'ail_narrow_get' if recv_id in getattr(ctx, 'narrow_int', ()) else 'ail_list_get'
+            return '%s(%s&%s, %s)' % (get, mark, ctx.cname(recv_id), i)
         if t == FLIST:
             ctx.parts.add('FLIST')
             if recv_id in ctx.tstride:
@@ -16242,6 +16255,15 @@ def _local_dead_after_value(value, ctx):
     return False
 
 
+def _narrow_field(node, ctx):
+    try:
+        owner_kind, kind = _field_info(node, ctx)
+        info = getattr(ctx, 'classes', {}).get(owner_kind[1])
+        return kind == LIST and node.attr in getattr(info, 'narrow_fields', ())
+    except Exception:
+        return False
+
+
 def _numeric_field_move_out(node, ctx):
     """Whether the whole-field read `y.g` (a list[int]/list[float] field) can take the field's list
     instead of copying it, because the field is overwritten before anything can look at it.
@@ -16255,7 +16277,8 @@ def _numeric_field_move_out(node, ctx):
     which otherwise copied each list."""
     fn = getattr(ctx, 'fn_node', None)
     if (fn is None or ctx.par_depth or not isinstance(node, ast.Attribute)
-            or not isinstance(node.value, ast.Name) or getattr(node, '_ail_synth', False)):
+            or not isinstance(node.value, ast.Name) or getattr(node, '_ail_synth', False)
+            or _narrow_field(node, ctx)):
         return False
     owner, field = node.value.id, node.attr
     try:
@@ -23782,6 +23805,8 @@ def _stmt_inner(node, ctx, ind):
         if numeric and t.id not in ctx.handles | ctx.nlist | ctx.ndict | ctx.dhandles | ctx.ddict:
             temporary, expression = _numeric_field_value(node.value, numeric, ctx)
             destination = ctx.declare(t.id, numeric)
+            if narrowint.enabled() and numeric == LIST:
+                return _flush(ctx, pad) + '%s(void)%s;\n%sail_obj_field_list_move(&%s, &%s);\n' % (pad, expression, pad, destination, temporary)
             return _flush(ctx, pad) + '%s(void)%s;\n%sail_%s_free(&%s); %s = %s; %s = (ail_%s){0};\n' % (pad, expression, pad, numeric, destination, destination, temporary, temporary, numeric)
         if known in MAPS or _is_map_expr(node.value, ctx):
             kind = known if known in MAPS else _map_kind(node.value, ctx)
@@ -26397,7 +26422,8 @@ def _setitem(target, value, ctx, ind):
         fast = _guard_marker_index(target.slice, name, ctx)
         if fast is not None:
             return pre + '%sAIL_GS(%s&%s, %s, %s, %s);\n' % (pad, _range_mark(target, ctx), c, k, fast, v)
-        return pre + '%sail_list_set(%s&%s, %s, %s);\n' % (pad, _range_mark(target, ctx), c, k, v)
+        set = 'ail_narrow_set' if name in getattr(ctx, 'narrow_int', ()) else 'ail_list_set'
+        return pre + '%s%s(%s&%s, %s, %s);\n' % (pad, set, _range_mark(target, ctx), c, k, v)
     if (t == 'array' and name in getattr(ctx, 'written_lists', ()) and name not in ctx.tstride
             and name not in ctx.gridparam and name not in ctx.byterow):
         # fclist1: a proven element-written list parameter points into the caller's own buffer
@@ -27758,7 +27784,8 @@ def _guard_plain_list(name, ctx):
     """A local `list[int]` stored as a plain `ail_list`: the only list the pass reasons about."""
     if (name in ctx.optional or name in ctx.stdin_unbound or name in ctx.handles or name in ctx.nlist
             or name in ctx.ndict or name in ctx.blist or name in ctx.tstride or name in ctx.rowof
-            or name in ctx.rowparam or name in ctx.strlist or name in ctx.flist or name in ctx.modconsts):
+            or name in ctx.rowparam or name in ctx.strlist or name in ctx.flist or name in ctx.modconsts
+            or name in getattr(ctx, 'narrow_int', ())):
         return False
     return ctx.kind.get(name, ctx.types.get(name)) == LIST
 
@@ -27788,7 +27815,8 @@ def _guard_field_key(node, ctx):
             or owner in ctx.modconsts or not _borrowable_owner(node.value, ctx)):
         return None
     try:
-        if _numeric_field_kind(node, ctx) != LIST or _nullable_receiver(node.value, ctx):
+        if _numeric_field_kind(node, ctx) != LIST or _nullable_receiver(node.value, ctx) \
+                or _narrow_field(node, ctx):
             return None
     except Unsupported:
         return None
@@ -28752,6 +28780,7 @@ def _span_cache_plan(node, ctx):
             probe = ast.Attribute(value=ast.Name(id=name, ctx=ast.Load()), attr=field, ctx=ast.Load())
             try:
                 if (_numeric_field_kind(probe, ctx) in (LIST, FLIST) and _field_info(probe, ctx)
+                        and not _narrow_field(probe, ctx)
                         and _borrowable_owner(probe.value, ctx)
                         and name not in ctx.optional and name not in ctx.modconsts):
                     plan.append((name, field))
@@ -30498,6 +30527,9 @@ def _for_inner_impl(node, ctx, ind):
     if _is_set_valued(it, ctx):
         raise Unsupported(_walk_set_refusal(ast.unparse(it)))
     p, n = _seq(it, ctx)
+    element = '%s[%s]' % (p, idx)
+    if isinstance(it, ast.Name) and it.id in getattr(ctx, 'narrow_int', ()):
+        element = 'ail_ilist_get(&%s, %s)' % (ctx.cname(it.id), idx)
     if isinstance(it, ast.Name) and it.id in ctx.nlist:
         # `for r in g:` where `g` is a list of lists -- `r` is bound to a HANDLE on every
         # iteration, not a number, and every later use of `r` has to inherit that: declaring it
@@ -30517,8 +30549,8 @@ def _for_inner_impl(node, ctx, ind):
     else:
         v = ctx.declare(node.target.id)
     pre = _flush(ctx, pad)
-    head = '%sfor (%s = 0; %s < %s; %s++) {\n%s    %s = %s[%s];\n' % (
-        pad, idx, idx, n, idx, pad, v, p, idx)
+    head = '%sfor (%s = 0; %s < %s; %s++) {\n%s    %s = %s;\n' % (
+        pad, idx, idx, n, idx, pad, v, element)
     old_kind = ctx.types.get(node.target.id)
     if old_kind == FLT and getattr(ctx, 'numeric_tokens', {}).get(v, (None, None, None))[1] == INT:
         ctx.types[node.target.id] = INT
@@ -36938,6 +36970,8 @@ static void ail__field_str_append_slow(ail_str *slot, ail_str value) {
                                 else 'ail_binaryfile *' if info.field_types[fn] == BINARYFILE
                                 else 'ail_tcpsocket *' if info.field_types[fn] == TCPSOCKET
                                 else 'ail_pslist' if info.field_types[fn] == SLIST
+                                else 'ail_ilist' if (info.field_types[fn] == LIST
+                                                     and fn in getattr(info, 'narrow_fields', ()))
                                 else 'ail_%s' % info.field_types[fn] if info.field_types[fn] in (LIST, FLIST)
                                 else _ref_ctype(info.field_types[fn], info.init_ctx) + ' *' if _is_olist_kind(info.field_types[fn])
                                 else '%s *' % classes[info.field_types[fn][1]].struct_name() if _is_obj_kind(info.field_types[fn])
@@ -40146,6 +40180,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
             parts |= set().union(*(info.init_ctx.parts for info in classes.values()))
             if info is not None:
                 info.update(runtime_parts=sorted(parts), function_signatures={}, libm=False, io=False)
+            narrowint.prepare([], classes, classdefs)
             return ('#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n'
                     + cruntime.emit(parts) + _emit_module_consts(_MODCONSTS)
                     + (_class_c_decls(classes) if classes else ''))
@@ -40259,6 +40294,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                                       % (_impl.replace('__', '.'), _f._ail_impls[0].replace('__', '.'), _f._ail_key[1],
                                          _f._ail_key[0], _got, ([k for _, k in sigs[_f._ail_impls[0]][0][1:]],
                                                                 sigs[_f._ail_impls[0]][1])))
+    narrowint.prepare(fns, classes, classdefs)
     if (any(callable_types.valid(kind) for params, result in sigs.values() for kind in [result, *(k for _, k in params)])
             or any(isinstance(value, ast.Name) and value.id in sigs
                    for f in fns for node in ast.walk(f)
@@ -41828,7 +41864,8 @@ def _one_function(*args, **kwargs):
 
 
 def _one_function_finish(result, args, kwargs):
-    if os.environ.get('AIL_IR', '1').strip().lower() in ('0', 'off', 'no', 'false'):
+    if (os.environ.get('AIL_IR', '1').strip().lower() in ('0', 'off', 'no', 'false')
+            or narrowint.blocks_ir(args[0], result[2])):
         final = result
     else:
         import sys as _sys
@@ -42505,6 +42542,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.trowsf = _propagate_row_float(
         fn, ctx.trowsf | (set(ctx.tstride) & ctx.flist), set(ctx.tstride))
     _bind_object_types(fn, ctx)
+    ctx.narrow_int = narrowint.locals(fn, ctx, ctx.classes)
     ctx.freeable_objs = _mark_freeable_objects(fn, ctx) if ctx.classes else set()
     ctx.borrowed_aliases = _mark_borrowed_aliases(fn, ctx) if ctx.classes else set()
     # The compile-time key range for a set, and therefore its representation -- decided here,
@@ -42822,6 +42860,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   else 'ail_nsum' if t == NSUM
                   else 'ail_flist' if t == FLIST else 'ail_pslist' if t == SLIST and v in getattr(ctx, 'packed_slist', ()) else 'ail_slist' if t == SLIST else 'ail_%s' % t if t in MAPS
                   else 'ail_srows' if t == SROWS else 'ail_srow' if t == SROW
+                  else 'ail_ilist' if t == LIST and v in getattr(ctx, 'narrow_int', ())
                   else 'ail_list' if t == LIST else tab_struct)
             decls += frame_cell(ct, 'v_' + v)
         elif callable_types.valid(t):
@@ -42850,7 +42889,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   # (SEMANTICS.md section 25).
                   else '    %s%s *%s = 0;\n' % (vol, _ref_ctype(t, ctx), ctx.cname(v))
                   if _is_ref_kind(t)
-                  else '    %s %s = {0};\n' % ('ail_list' if t == LIST else tab_struct,
+                  else '    %s %s = {0};\n' % ('ail_ilist' if v in getattr(ctx, 'narrow_int', ()) else
+                                               'ail_list' if t == LIST else tab_struct,
                                                ctx.cname(v)))
         if v in ctx.stdin_unbound:
             decls += '    %sint64_t _ail_stdin_bound_v_%s = 0;\n' % (qual('_ail_stdin_bound_v_' + v, v), v)
