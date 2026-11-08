@@ -105,7 +105,11 @@ def _unescape(s, raw, as_bytes):
             out.append('\\')
             break
         e = s[i]
-        if e == '\n':
+        if as_bytes and (e == 'u' or e == 'U' or e == 'N'):
+            out.append('\\')
+            out.append(e)
+            i += 1
+        elif e == '\n':
             i += 1
         elif e == '\r':
             i += 1
@@ -196,7 +200,10 @@ def _unescape(s, raw, as_bytes):
                 v = v * 8 + o
                 i += 1
                 k += 1
-            out.append(_chr(v))
+            if as_bytes:
+                out.append(_chr(v & 255))
+            else:
+                out.append(_chr(v))
         else:
             out.append('\\')
             out.append(e)
@@ -219,7 +226,7 @@ def _split_string_token(tok):
         ql = 3
     body = s[j + ql:n - ql]
     low = prefix.lower()
-    return prefix, body, ql, ('r' in low), ('b' in low), ('u' in low)
+    return prefix, body, ql, ('r' in low), ('b' in low), ('u' in prefix)
 
 
 def _merge_constants(values):
@@ -816,6 +823,7 @@ class Parser:
         values = []
         any_f = False
         any_b = False
+        any_s = False
         k = 0
         while self.at('STRING') or self.at('FSTRING_START'):
             if self.at('STRING'):
@@ -824,6 +832,7 @@ class Parser:
                 if is_b:
                     any_b = True
                 else:
+                    any_s = True
                     if is_u:
                         kind = 'u'
                     else:
@@ -850,6 +859,8 @@ class Parser:
             v = values[0]
             return ailast.Constant(v.value, v.kind, start.srow, start.scol,
                                    self.prev.erow, self.prev.ecol)
+        if any_b and any_s:
+            raise ParseError('ailparse: cannot mix bytes and nonbytes literals not supported')
         val = values[0].value
         k = 1
         while k < len(values):
@@ -891,12 +902,13 @@ class Parser:
         self.advance()
         self._skip()
         first = self.cur()
+        brace = self.prev
+        expr_start = self.offset(brace) + len(brace.string)
         value = self.parse_namedexpr_test(True)
         conversion = -1
         debug = None
         if self.at('EQUAL'):
             eq = self.cur()
-            expr_start = self.offset(first)
             self.advance()
             nxt = self.cur()
             debug = _normalize_newlines(self.text[expr_start:self.offset(nxt)])
@@ -930,6 +942,11 @@ class Parser:
     def parse_format_spec(self, raw):
         start = self.prev
         values = []
+        t0 = self.cur()
+        if t0.type == 'LBRACE' and self.i + 1 < len(self.toks):
+            nxt = self.toks[self.i + 1]
+            if nxt.type == 'LBRACE' and self.offset(nxt) == self.offset(t0) + len(t0.string):
+                values.append(ailast.Constant('', None, t0.srow, t0.scol, t0.srow, t0.scol))
         while True:
             t = self.cur()
             if t.type == 'FSTRING_MIDDLE':

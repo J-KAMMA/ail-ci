@@ -44,7 +44,8 @@ shast1 recorded):
         selfhost/drv/expr_drv.py -o expr_drv
 
 The build takes **59.8 s** and the binary is 1,643,336 bytes.  On the 30 fixed S376 files of the test
-(13,486 segments) stage 2 prints **byte for byte what stage 1 prints**: 0 different, 0 refused.
+(13,486 extracted segments, 13,457 of them parseable) stage 2 prints **byte for byte what stage 1
+prints**: 0 different, 0 refused.
 
 | run (30 files, 13,486 segments) | seconds, median of 3 | peak RSS |
 |---|---:|---:|
@@ -59,8 +60,12 @@ displays, slices, walrus, `await`, `...`) and they match stage 1 too.
 ## Refused constructs
 
 The parser refuses no expression that CPython accepts in eval mode on S376.  Named refusals exist for
-constructs outside this step: a complex literal (`1j`) and `\N{...}` escapes are refused with
-`ailparse: ... not supported`; neither occurs in S376.  `...` is represented by a small local
+constructs outside this step: a complex literal (`1j`) and string `\N{...}` escapes are refused with
+`ailparse: ... not supported`; neither occurs in S376.  Bytes literals follow CPython instead: `\u`,
+`\U` and `\N` stay as literal backslash text (`b'\u0041'` is `b'\\u0041'`), and an octal escape is
+truncated to a byte (`b'\400'` is `b'\x00'`, `b'\777'` is `b'\xff'`).  An f-string `=` debug field
+keeps the source from just after the opening `{`, and a format spec that begins with `{{` keeps the
+empty leading `Constant` CPython emits.  `...` is represented by a small local
 sentinel whose `repr` is `Ellipsis`, because AIL cannot hold the CPython `Ellipsis` object as a value.
 
 The reference's own top refused constructs (not parser refusals) are:
