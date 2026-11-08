@@ -7,7 +7,9 @@ Runs `ail_chatgpt.py compile SRC --debug-dir WORK/c` for the host (the host bina
 WORK/native), takes WORK/c/program.c plus every other generated C file WORK/c/native_report.json lists, and builds them
 with `zig cc -target wasm32-wasi -O2`, force-including tools/wasm_shim.h (the setjmp/longjmp tag, all behind
 `#ifdef __wasi__`). zig is AIL_ZIG, `zig` on PATH, or ~/tools/zig/zig (as test_ail_cross_target.py finds it);
-tested with zig 0.17.1. Run the result with `wasmtime run -W exceptions=y` (wasmtime 50.0.1; see WASMTIME_FLAGS).
+tested with zig 0.17.1. Run the result with `wasmtime run` and WASMTIME_FLAGS (wasmtime 50.0.1): `-W exceptions=y`
+for try/except and `-W max-wasm-stack=268435456`, without which a deep recursion traps instead of raising
+RecursionError.
 Prints one JSON line: output path, bytes, and the native binary. A failing step exits 1 with the first error line.
 """
 import argparse
@@ -31,7 +33,12 @@ ZIG_FLAGS = ['-target', 'wasm32-wasi', '-O2', '-fno-tree-slp-vectorize', '-ffp-c
              # The general path's stack check reserves AIL_STACK_UNLIMITED (256 MiB on 32-bit) when getrlimit is
              # absent, so the real stack must be that large or a runaway recursion would trap before RecursionError.
              '-Wl,-z,stack-size=268435456', '-s']
-WASMTIME_FLAGS = ['-W', 'exceptions=y']     # try/except runs on the exception-handling proposal
+# try/except runs on the exception-handling proposal. max-wasm-stack is wasmtime's NATIVE execution stack, separate
+# from the module's linear-memory stack set by -z stack-size. Its default is under 1 MiB, which traps with "call stack
+# exhausted" before a runaway recursion reaches AIL's own depth check (typed: AIL_MAX_RECURSION_DEPTH; general path:
+# the real-stack check against a 256 MiB budget). Raise it to the same 256 MiB so the program reports RecursionError
+# instead of a bare trap. Without this flag a deep recursion has no message; see RESULTS.md.
+WASMTIME_FLAGS = ['-W', 'exceptions=y', '-W', 'max-wasm-stack=268435456']
 
 # Modules whose Python implementations cannot exist on wasm32-wasi. proclib.py and threadlib.py refuse
 # them in the compiler when AIL_TARGET_OS is wasi; this scan covers the same imports up front (and the

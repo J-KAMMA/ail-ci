@@ -28,9 +28,14 @@ def _wasmtime():
 @unittest.skipUnless(wasm_build.zig(), 'zig is not installed')
 @unittest.skipUnless(_wasmtime(), 'wasmtime is not installed')
 class WasmTests(unittest.TestCase):
-    def build(self, work, src):
+    def build(self, work, src, force_general=False):
         out = work / (src.stem + '.wasm')
-        ok, msg = wasm_build.build(src, out, work / ('w-' + src.parent.name + '-' + src.stem))
+        if force_general:
+            os.environ['AIL_UNIFIED_FORCE'] = '1'
+        try:
+            ok, msg = wasm_build.build(src, out, work / ('w-' + src.parent.name + '-' + src.stem))
+        finally:
+            os.environ.pop('AIL_UNIFIED_FORCE', None)
         self.assertTrue(ok, msg)
         return out
 
@@ -91,12 +96,14 @@ class WasmTests(unittest.TestCase):
     def test_deep_recursion_is_loud(self):
         typed = 'def f(n: int) -> int:\n    if n <= 0:\n        return 0\n    return f(n - 1) + 1\n'
         untyped = 'def f(n):\n    if n <= 0:\n        return 0\n    return f(n - 1) + 1\n'
-        for name, defs in (('typed', typed), ('untyped', untyped)):
+        # The general path stops on a real-stack check against a 256 MiB budget (AIL_STACK_UNLIMITED), so it needs
+        # AIL_UNIFIED_FORCE=1 to be exercised at all; the typed path stops on AIL_MAX_RECURSION_DEPTH.
+        for name, defs, forced in (('typed', typed, False), ('untyped', untyped, False), ('general', untyped, True)):
             with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
                 work = Path(tmp)
                 src = work / ('deep-' + name + '.py')
                 src.write_text(defs + '\nprint(f(50000000))\n')
-                r = self.run_wasm(self.build(work, src))
+                r = self.run_wasm(self.build(work, src, force_general=forced))
                 self.assertNotEqual(r.returncode, 0)
                 err = r.stderr.decode('utf-8', 'replace')
                 self.assertIn('RecursionError', err)

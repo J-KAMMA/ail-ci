@@ -2,32 +2,63 @@
 
 ## ffwasm2 (2026-11-08): WASI refusals, remaining tasks, sizes
 
-This runner has no `zig`, `wasmtime` or `wasm-strip`, and fetches are blocked, so no wasm measurement could be
-repeated here. The ffwasm1 table below is still the current measurement (10/10 build, 10/10 match on every public,
-hidden and perf case). The new refusal checks and the deep-recursion test are either pure compiler tests or skipped
-by the same `@skipUnless` as the rest of `AIL_CURRENT/test_ail_wasm.py`.
+This run re-fetched the pinned toolchain from the official sources and re-measured everything. Both archives match the
+sha256 recorded under ffwasm1 (zig 0.17.1 `3581863e...b17a`, wasmtime 50.0.1 `68546645...98a5`), so the numbers below
+were produced on this runner, not copied from ffwasm1.
 
-Refusals by name (no linker error), each with a `write instead:` line:
+Refusals by name (no linker error), each with a `write instead:` line, checked with `AIL_TARGET=wasi`:
 - `import subprocess` -> `subprocess is not available on wasm32-wasi: WASI has no process creation (no fork/exec)`
-  (proclib.py; `AIL_TARGET=wasi`, or `AIL_TARGET_OS=wasi`).
+  (proclib.py; `AIL_TARGET=wasi`, or `AIL_TARGET_OS=wasi`). Exit 3, `not in the subset:` prefix.
 - `import threading` / `queue` / `concurrent.futures` -> `... is not available on wasm32-wasi: WASI has no threads`
-  (threadlib.py).
-- `import socket` / `signal` -> the same shape from `tools/wasm_build.py` (`WASI_REFUSED`), which also catches the
-  threaded patterns `typedpar.py` lowers before threadlib.py sees the import. There is no socklib.py or siglib.py in
-  this tree, so the build script is the refusing layer for those two.
+  (threadlib.py). Exit 2.
+- `import socket` / `signal` -> the same shape from `tools/wasm_build.py` (`WASI_REFUSED`), checked before the
+  toolchain so the build fails with the name even when zig is missing. It also catches the threaded patterns
+  `typedpar.py` lowers before threadlib.py sees the import. There is no socklib.py or siglib.py in this tree, so the
+  build script is the refusing layer for those two; without it `ail_chatgpt.py compile` falls back to the general path
+  and the failure would only appear at link time.
 - `tools/wasm_build.py` runs the host compiler with `AIL_TARGET_OS=wasi`, not `AIL_TARGET=wasi`: the latter would make
   `sys.platform` unknown in `ail_modules.py` until `TARGETS['wasi']` exists.
 
-Remaining tasks: none. The ffwasm1 table already reports 10/10; the build already carries
-`-D_WASI_EMULATED_PROCESS_CLOCKS` and the test's `--dir D::D` preopens. The stack is now
-`-Wl,-z,stack-size=268435456` (256 MiB), not ffwasm1's 8 MiB: without getrlimit on wasi the general path's
-`AIL_STACK_UNLIMITED` budget is 256 MiB, so an 8 MiB real stack would trap before its RecursionError check fires. The
-new `test_deep_recursion_is_loud` builds both a typed and an untyped `f(50000000)` and requires a nonzero exit whose
-stderr says `RecursionError` and is not a bare wasm trap.
+Remaining tasks: none. The ffwasm1 table's 10/10 is re-verified below. The build carries
+`-D_WASI_EMULATED_PROCESS_CLOCKS` and the test's `--dir D::D` preopens; `clock_gettime` and file preopens work (the
+tasks read files and stdin).
 
-Size table: the AIL `.wasm` bytes are the unstripped ffwasm1 column below. `wasm-strip` is not installed, so there are
-no stripped numbers. `rustup target list --installed` has only `x86_64-unknown-linux-gnu` (no `wasm32-wasip1`), so
-per the task the Rust side is not measured.
+Deep recursion (the one real bug found by running the new test): AIL's typed path stops at
+`AIL_MAX_RECURSION_DEPTH` (50000 frames) and the general path at a real-stack check against a 256 MiB
+`AIL_STACK_UNLIMITED` budget, so the module needs a 256 MiB stack (`-Wl,-z,stack-size=268435456`). But wasmtime's
+**native** execution stack (`-W max-wasm-stack`, default under 1 MiB) is separate from that linear-memory stack, and it
+trapped with `wasm trap: call stack exhausted` before either check fired. `WASMTIME_FLAGS` now sets
+`-W max-wasm-stack=268435456`, matching the linear budget, so the program reports `RecursionError` instead. Verified
+(typed, auto-typed, and `AIL_UNIFIED_FORCE=1` general path): `f(50000000)` exits nonzero with
+`RecursionError: maximum recursion depth exceeded` on stderr and no "call stack exhausted"; `f(49000)` still computes.
+`test_deep_recursion_is_loud` covers all three paths.
+
+**Run with `-W max-wasm-stack=268435456` (part of `WASMTIME_FLAGS`)** or a deep recursion traps without a message.
+
+## Size table (ffwasm2, this run)
+
+`.wasm` bytes per compare-lab task, standard build (`zig cc ... -O2 ... -s`). `-s` already strips: the same program is
+921,159 bytes without it and 7,424 with it, so these numbers are stripped. `wasm-strip` is not installed, and is not
+needed. The Rust side is **not measured**: `rustup target list --installed` lists only `x86_64-unknown-linux-gnu`, no
+`wasm32-wasip1`, and the task says to record that and stop rather than install the target.
+
+| task | cases matching | `.wasm` bytes |
+|---|---|---|
+| berth_sim | 27/27 | 75,658 |
+| chain_relax | 33/33 | 47,310 |
+| echo_pack | 58/58 | 47,087 |
+| ledger_bin | 56/56 | 76,029 |
+| rail_transfer | 25/25 | 78,854 |
+| scar_life | 54/54 | 53,841 |
+| tally_lang | 76/76 | 114,989 |
+| term_rank | 44/44 | 92,043 |
+| ticket_audit | 92/92 | 217,375 |
+| tree_fold | 56/56 | 76,584 |
+
+**10/10 build, 10/10 match** on every public, hidden and perf case (stdout and exit status vs
+`tasks/<task>/reference.py` under CPython 3.12). Geomean size 79,097 bytes; total 879,770 bytes. Sizes differ a few
+percent from the ffwasm1 column because the runtime changed between snapshots; the match counts are unchanged.
+No linker error and no trap without a message remains.
 
 ## ffwasm1
 
