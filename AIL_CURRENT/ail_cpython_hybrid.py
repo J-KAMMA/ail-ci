@@ -241,12 +241,32 @@ def _provably_float(node, float_names):
     return False
 
 
+def _native_call_ok(node, natives, kinds):
+    """obs4: a call of another selected native `g` (or of the function itself, assumed
+    optimistically) is as safe as `g`'s own native entry when every argument is passed
+    positionally, none is defaulted, and each has exactly the CPython kind `g`'s entry checks.
+    `kinds` is the caller's exact-kind pass; the run-time guard re-checks that the global `g`
+    is still that def (section 5.2 of OBSERVED_TYPES.md)."""
+    func = node.func
+    if not natives or kinds is None or not isinstance(func, ast.Name) or node.keywords:
+        return False
+    sig = natives.get(func.id)
+    if sig is None or func.id in kinds.local_names:
+        return False
+    params = sig['params']
+    if len(node.args) != len(params) or any(isinstance(a, ast.Starred) for a in node.args):
+        return False
+    return all(kinds.kind(a) == k for a, (_p, k) in zip(node.args, params))
+
+
 def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_names=(), ret=None,
-               bool_names=(), fresh=()):
+               bool_names=(), fresh=(), natives=None, kinds=None):
     """A call this pass can prove cannot raise and has no side effect.  Everything else stays a
     refusal: the hybrid must return CPython's value or fall back, never a partial answer.
     `fresh` names the list the function builds and returns (`_list_return_proof`): appending to
     it changes nothing any caller can see before the return."""
+    if _native_call_ok(node, natives, kinds):
+        return True
     func = node.func
     if isinstance(func, ast.Attribute):
         receiver = func.value
@@ -296,7 +316,7 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
     return False
 
 
-def _unsafe_body(fn, params=(), ret=None, fresh=()):
+def _unsafe_body(fn, params=(), ret=None, fresh=(), natives=None, kinds=None):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
     subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), an
@@ -310,6 +330,10 @@ def _unsafe_body(fn, params=(), ret=None, fresh=()):
     int_names = {p for p, kind in params if kind in ('int', 'bool')}
     bool_names = {p for p, kind in params if kind == 'bool'}
     float_names = {p for p, kind in params if kind == 'float'}
+    if kinds is not None:
+        # obs4: a local the exact-kind pass proves is always a CPython str (`ch = src[i]`,
+        # `for ch in src`) is as good a receiver for a pure str method as a str parameter.
+        str_names |= {n for n, k in kinds.env.items() if k == 'str'}
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript):
             if isinstance(node.slice, ast.Slice):
@@ -325,7 +349,7 @@ def _unsafe_body(fn, params=(), ret=None, fresh=()):
             return 'division or power can raise'
         if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names, num_names,
                                                           int_names, float_names, ret, bool_names,
-                                                          fresh):
+                                                          fresh, natives, kinds):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'
@@ -389,6 +413,124 @@ def _module_constants(tree):
     return out
 
 
+_INT64 = (-(1 << 63), (1 << 63) - 1)
+# A recursive typed function checks its depth against this macro (pyfunc).  The hybrid turns it
+# into a per-call thread-local bound derived from CPython's own remaining recursion budget.
+_RECURSION_CAP = re.compile(r'(?m)^#define AIL_MAX_RECURSION_DEPTH (\d+)[ \t]*$')
+
+
+def _guardable_constant(value):
+    """A module constant the C entry can re-check by exact type and value (section 5.1)."""
+    import math
+    if isinstance(value, bool):
+        return False                      # to_c refuses a bool module constant (whole slice)
+    if isinstance(value, int):
+        return _INT64[0] <= value <= _INT64[1]
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, str):
+        try:
+            value.encode('utf-8')
+        except UnicodeEncodeError:
+            return False
+        return True
+    return False
+
+
+def _module_constant_values(tree):
+    """{name: value} for `_module_constants`."""
+    kinds = _module_constants(tree)
+    out = {}
+    for node in getattr(tree, 'body', ()):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1                 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in kinds:
+            out[node.targets[0].id] = node.value.value
+    return out
+
+
+def _bound_names(fn):
+    """A function's own local names: parameters and every name it stores."""
+    names = {a.arg for a in fn.args.args + fn.args.posonlyargs + fn.args.kwonlyargs}
+    for extra in (fn.args.vararg, fn.args.kwarg):
+        if extra is not None:
+            names.add(extra.arg)
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+    return names
+
+
+def _link_natives(chosen, rejected, funcs, consts, values, csrcs=None):
+    """obs4: settle the call graph between selected natives and the guards each unit needs.
+
+    A unit is the entry plus every native it reaches; `to_c` compiled them all into it.  Refused
+    (with the callers that reach them): mutual recursion and more than one recursive function in
+    a unit (the depth bound of section 5.2 needs one recursive chain), and a module constant whose
+    value the entry cannot re-check.  Each remaining item gets `callees` (guarded functions, the
+    entry itself when it recurses), `consts` (guarded constants), `nfuncs` (frames bound) and
+    `recursive`."""
+    def calls_of(name):
+        fn = funcs[name]
+        local = _bound_names(fn)
+        return {n.func.id for n in _own_nodes(fn) if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name) and n.func.id not in local
+                and n.func.id in funcs}
+
+    def consts_of(name):
+        fn = funcs[name]
+        local = _bound_names(fn)
+        return {n.id for n in _own_nodes(fn) if isinstance(n, ast.Name)
+                and isinstance(n.ctx, ast.Load) and n.id in consts and n.id not in local}
+
+    while True:
+        calls = {n: calls_of(n) for n in chosen}
+        closure = {}
+        for n in chosen:
+            seen, todo = set(), list(calls[n])
+            while todo:
+                m = todo.pop()
+                if m in seen:
+                    continue
+                seen.add(m)
+                todo.extend(calls.get(m, ()))
+            closure[n] = seen
+        drop = {}
+        for n in chosen:
+            unit = closure[n] | {n}
+            missing = sorted(m for m in closure[n] if m not in chosen)
+            if missing:
+                drop[n] = 'calls %s, which stays in CPython' % missing[0]
+                continue
+            if any(m != k and m in closure.get(k, ()) and k in closure.get(m, ())
+                   for k in unit for m in unit):
+                drop[n] = 'mutual recursion stays in CPython'
+                continue
+            if sum(1 for m in unit if m in calls.get(m, ())) > 1:
+                drop[n] = 'more than one recursive function in one unit stays in CPython'
+                continue
+            if any(m in calls.get(m, ()) for m in unit) and csrcs is not None                     and not _RECURSION_CAP.search(csrcs.get(n, '')):
+                drop[n] = 'recursion without a depth check in the typed clone'
+                continue
+            bad = sorted(c for m in unit for c in consts_of(m)
+                         if not _guardable_constant(values.get(c)))
+            if bad:
+                drop[n] = 'module constant %s cannot be guarded, stays in CPython' % bad[0]
+        if not drop:
+            break
+        for n, why in drop.items():
+            del chosen[n]
+            rejected[n] = why
+    for n, item in chosen.items():
+        unit = closure[n] | {n}
+        recursive = any(m in calls[m] for m in unit)
+        item['callees'] = sorted(closure[n])
+        item['consts'] = sorted({c for m in unit for c in consts_of(m)})
+        item['const_values'] = {c: values[c] for c in item['consts']}
+        item['nfuncs'] = len(unit)
+        item['recursive'] = recursive
+        if item['callees'] or recursive:
+            item['trap'] = True
+
+
 # ---- exact CPython result types (obs3) ---------------------------------------------------------
 #
 # `pymix` kinds are hypotheses: `_merge` turns int+bool evidence into `int` and int+float into
@@ -445,9 +587,12 @@ def _binop_kind(op, left, right):
 class _Kinds:
     """Exact kinds of one function's names (see the section comment above)."""
 
-    def __init__(self, fn, params, shadowed=frozenset(), skip=frozenset(), consts=None):
+    def __init__(self, fn, params, shadowed=frozenset(), skip=frozenset(), consts=None,
+                 calls=None):
         self.shadowed = set(shadowed)
         self.consts = dict(consts or {})
+        # obs4: {name: exact result kind} of the selected natives this body may call.
+        self.calls = dict(calls or {})
         self.env = {}
         sources = {}
         for p, k in params:
@@ -615,6 +760,9 @@ class _Kinds:
                 if self.kind(func.value) == 'str':
                     return _STR_METHOD_RESULT.get(func.attr)
                 return None
+            if isinstance(func, ast.Name) and func.id in self.calls \
+                    and func.id not in self.local_names:
+                return self.calls[func.id]
             if not isinstance(func, ast.Name) or not self.builtin(func.id):
                 return None
             name = func.id
@@ -654,7 +802,7 @@ def _parents(fn):
     return out
 
 
-def _list_return_proof(fn, params, shadowed=frozenset(), consts=None):
+def _list_return_proof(fn, params, shadowed=frozenset(), consts=None, calls=None):
     """(kind, name) when `fn` returns a list it built itself whose elements are all CPython
     `int` (never bool) or all `float`; otherwise (None, reason).
 
@@ -737,7 +885,7 @@ def _list_return_proof(fn, params, shadowed=frozenset(), consts=None):
             return None, 'an unsupported list creation'
     if any(isinstance(e, ast.Starred) for e in elements):
         return None, 'a starred element'
-    kinds = _Kinds(fn, params, shadowed, skip={var}, consts=consts)
+    kinds = _Kinds(fn, params, shadowed, skip={var}, consts=consts, calls=calls)
     elem = None
     for _ in range(8):
         found = set()
@@ -765,10 +913,10 @@ def _list_return_proof(fn, params, shadowed=frozenset(), consts=None):
     return 'list[%s]' % elem, var
 
 
-def _return_kinds(fn, params, shadowed=frozenset(), consts=None):
+def _return_kinds(fn, params, shadowed=frozenset(), consts=None, calls=None):
     """The exact kind of every `return` value (None where unknown, 'none' for a bare return or
     falling off the end)."""
-    kinds = _Kinds(fn, params, shadowed, consts=consts)
+    kinds = _Kinds(fn, params, shadowed, consts=consts, calls=calls)
     out = []
     for node in _own_nodes(fn):
         if isinstance(node, ast.Return):
@@ -778,7 +926,7 @@ def _return_kinds(fn, params, shadowed=frozenset(), consts=None):
     return out
 
 
-def _list_param_mutated(fn, list_params, shadowed=frozenset()):
+def _list_param_mutated(fn, list_params, shadowed=frozenset(), natives=None):
     """A list argument is copied into the typed call, so a function that mutates it must stay in
     CPython (mutation would otherwise not be visible to the caller).  This also refuses passing a
     list parameter on to another user function, which may mutate it one step away."""
@@ -828,6 +976,9 @@ def _list_param_mutated(fn, list_params, shadowed=frozenset()):
                     and not node.keywords \
                     and not any(isinstance(a, ast.Starred) for a in node.args):
                 continue                  # len(xs), sum(xs), ...: a read, not a mutation
+            if natives and isinstance(node.func, ast.Name) and node.func.id in natives \
+                    and node.func.id not in local_bound:
+                continue                  # obs4: a selected native never mutates a list param
             for arg in list(node.args) + [kw.value for kw in node.keywords]:
                 if isinstance(arg, ast.Name) and arg.id in aliases:
                     return True
@@ -874,6 +1025,24 @@ try:
     import ail_cpython_hybrid as _hy
 except Exception:
     _hy = None
+# obs4: module constants (`NAME = <literal>`, bound once) are part of the typed slice, so `to_c`
+# emits them as `static const` instead of refusing "read before it is assigned".  The hybrid's C
+# entry re-checks every constant a unit reads in the module's globals before each call.
+def _with_constants(old):
+    def _defs_only(tree):
+        text = old(tree)
+        if _hy is None:
+            return text
+        try:
+            values = _hy._module_constant_values(tree)
+            lines = [name + ' = ' + repr(value) for name, value in values.items()
+                     if _hy._guardable_constant(value)]
+        except Exception:
+            return text
+        return '\n'.join(lines) + '\n' + text if lines else text
+    return _defs_only
+pyboxed2._mix_defs_only_source = _with_constants(pyboxed2._mix_defs_only_source)
+pymix._defs_only_source = _with_constants(pymix._defs_only_source)
 # obs3: the IR lowers `xs[i] op= v` as a checked get and then an UNCHECKED set at the same raw
 # index.  The checked get accepts a negative index (it normalises it internally), so `out[-1] += 1`
 # then writes before the buffer (heap corruption: found with a list result, reproduced in the
@@ -1236,69 +1405,69 @@ def _select(src, tree, report, facts):
     seeded = report.get('seeded') or {}
     chosen = {}
     rejected = {}
-    for mangled, pyname, csrc in report.get('mix_units') or []:
-        if pyname not in funcs:
-            continue
+    dup_defs = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and sum(1 for m in tree.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                                               ast.ClassDef))
+                        and m.name == n.name) > 1}
+    units = [u for u in report.get('mix_units') or []
+             if u[1] in funcs and facts.get(u[1]) is not None]
+
+    def consider(mangled, pyname, csrc, natives):
         info = facts.get(pyname)
-        if info is None:
-            continue
         params = [(p, k) for p, k in info.get('params') or []]
         ret = info.get('ret')
+        if pyname in dup_defs:
+            return None, 'the module defines this name more than once'
+        # obs4: the natives this body may call, itself included (self-recursion is assumed
+        # optimistically: if the body is safe given that its own calls are, it is safe).
+        natives = dict(natives)
+        natives[pyname] = {'params': params, 'ret': ret}
+        calls = {n: sig['ret'] for n, sig in natives.items()}
+        kinds = _Kinds(funcs[pyname], params, shadowed, consts=consts, calls=calls)
         fresh = ()
         if ret in _LIST:
             # obs3: a returned list becomes a new CPython list of exact ints or floats; the
             # body must prove that element type itself (pymix's own kind may merge int/bool).
-            kind, why = _list_return_proof(funcs[pyname], params, shadowed, consts)
+            kind, why = _list_return_proof(funcs[pyname], params, shadowed, consts, calls)
             if kind != ret:
-                rejected[pyname] = 'list result: %s' % (why if kind is None else
+                return None, 'list result: %s' % (why if kind is None else
                                                         'elements are %s, not %s' % (kind, ret))
-                continue
             fresh = (why,)
         elif ret not in _SCALAR:
-            rejected[pyname] = 'result kind %s stays in CPython' % ret
-            continue
+            return None, 'result kind %s stays in CPython' % ret
         elif pyname in seeded or any(isinstance(n, ast.Return) and isinstance(n.value, ast.BoolOp)
                                      for n in _own_nodes(funcs[pyname])):
             # obs3 task 2: `a and b` returns an operand, not a bool; the result kind (seeded
             # from an annotation, or pymix's own) must be every return value's exact type.
-            kinds = _return_kinds(funcs[pyname], params, shadowed, consts)
-            if not kinds or any(k != ret for k in kinds):
-                rejected[pyname] = 'a return value is not always %s (%s)' % (
-                    ret, ', '.join(sorted(set(str(k) for k in kinds))))
-                continue
+            rkinds = _return_kinds(funcs[pyname], params, shadowed, consts, calls)
+            if not rkinds or any(k != ret for k in rkinds):
+                return None, 'a return value is not always %s (%s)' % (
+                    ret, ', '.join(sorted(set(str(k) for k in rkinds))))
         abi = _unit_abi(csrc, mangled, params, ret)
         if abi is None:
-            rejected[pyname] = "the typed clone's C signature is not one the hybrid calls"
-            continue
+            return None, "the typed clone's C signature is not one the hybrid calls"
         if pyname in big_hard:
-            rejected[pyname] = 'needs an int beyond int64'
-            continue
+            return None, 'needs an int beyond int64'
         if pyname in big_local and ret not in ('int', 'bool'):
-            rejected[pyname] = 'may overflow but does not return an int'
-            continue
+            return None, 'may overflow but does not return an int'
         if ret in ('int', 'bool') and pyname in big_local \
                 and ('%s__mix_overflow' % mangled) not in csrc:
-            rejected[pyname] = 'may overflow and has no overflow signal'
-            continue
+            return None, 'may overflow and has no overflow signal'
         if id_any and (pyname in id_reach or any(k == 'float' for _, k in params) or ret == 'float'):
-            rejected[pyname] = 'the program compares numbers with `is`'
-            continue
+            return None, 'the program compares numbers with `is`'
         bad = [k for _, k in params if k not in _SCALAR and k not in _LIST]
         if bad:
-            rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
-            continue
-        unsafe = _unsafe_body(funcs[pyname], params, ret, fresh)
+            return None, 'parameter kind %s stays in CPython' % bad[0]
+        unsafe = _unsafe_body(funcs[pyname], params, ret, fresh, natives, kinds)
         if unsafe:
-            rejected[pyname] = unsafe
-            continue
+            return None, unsafe
         list_params = {p for p, k in params if k in _LIST}
-        if _list_param_mutated(funcs[pyname], list_params, shadowed):
-            rejected[pyname] = 'the list parameter is mutated'
-            continue
+        if _list_param_mutated(funcs[pyname], list_params, shadowed, natives):
+            return None, 'the list parameter is mutated'
         indexes = any(isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice)
                       for n in _own_nodes(funcs[pyname]))
         mix_ovf = ('int %s__mix_overflow = 0;' % mangled) in csrc
-        chosen[pyname] = {
+        return {
             'name': pyname, 'mangled': mangled, 'params': params,
             'ret': ret, 'is_bool_ret': bool(info.get('is_bool_ret')),
             'indexes': indexes, 'abi': abi, 'mix_ovf': mix_ovf,
@@ -1308,7 +1477,28 @@ def _select(src, tree, report, facts):
             # int64 overflow stop into "run the original in CPython".  An int result with the
             # mixed-mode overflow signal already handles its overflow stops.
             'trap': bool(indexes or ret in _LIST or _overflow_stop_reachable(csrc, mangled)),
-        }
+        }, None
+
+    # obs4: a body that calls other natives is selectable only once they are, so selection runs
+    # to a fixed point.  A refusal that names a callee may be lifted in a later round.
+    while True:
+        natives = {n: {'params': it['params'], 'ret': it['ret']} for n, it in chosen.items()}
+        grew = False
+        for mangled, pyname, csrc in units:
+            if pyname in chosen:
+                continue
+            item, why = consider(mangled, pyname, csrc, natives)
+            if item is None:
+                rejected[pyname] = why
+            else:
+                rejected.pop(pyname, None)
+                chosen[pyname] = item
+                grew = True
+                natives[pyname] = {'params': item['params'], 'ret': item['ret']}
+        if not grew:
+            break
+    _link_natives(chosen, rejected, funcs, consts, _module_constant_values(tree),
+                  {u[1]: u[2] for u in units})
     # wedge1: a function refused before it reaches _select (pymix or the emitter) used to leave
     # no trace, so most refusals were silent.  Name every remaining top-level function too.
     pymix_rejected = report.get('pymix_rejected') or {}
@@ -1332,7 +1522,7 @@ _TRAP_DIES = re.compile(
     r'ail_die\("(?:list index out of range|list assignment index out of range|'
     r'pop index out of range|pop from empty list|key error|string index out of range|'
     r'bytes index out of range|grid row index out of range|grid column index out of range|'
-    r'MemoryError|OverflowError: integer overflow[^"\\]*)"\)')
+    r'maximum recursion depth exceeded|MemoryError|OverflowError: integer overflow[^"\\]*)"\)')
 # A checked int64 operation (`ck_mul`, `ck_add`, ...) stops the process with this message.  In a
 # hybrid unit that would kill the CPython process (obs3: found for list results; a float or str
 # result with int arithmetic inside had the same hole), so the trap pad turns it into a fallback.
@@ -1628,14 +1818,172 @@ static PyObject *ail_fill_defaults(PyObject *func, PyObject *const *args, Py_ssi
 '''
 
 
-def _vectorcall_entry(name, n):
-    """The METH_FASTCALL-style vectorcall entry installed on the original function (3.12+)."""
+def _guarded(item):
+    """obs4: the entry depends on module globals (constants, callees) or on CPython's recursion
+    budget; only the 3.12+ vectorcall entry can check those, the Python wrapper path falls back."""
+    return bool(item.get('consts') or item.get('callees') or item.get('rlimit'))
+
+
+def _c_string(text):
+    data = text.encode('utf-8')
+    return ('"%s"' % '""'.join('\\x%02x' % b for b in data)) if data else '""', len(data)
+
+
+def _guard_names(items):
+    names = {}
+    for item in items:
+        for c in item.get('consts') or ():
+            names[c] = ('const', item['const_values'][c])
+        for g in item.get('callees') or ():
+            names[g] = ('func', None)
+    return sorted(names.items())
+
+
+def _guard_source(items):
+    """The guarded-globals table (section 5.1/5.2): names, expected values, a dict watcher on the
+    functions' globals that clears a name's "verified" flag when it is stored or deleted, and the
+    verification itself.  3.12+ only, like the vectorcall entries that use it."""
+    names = _guard_names(items)
+    if not names:
+        return []
+    kinds = []
+    for _n, (tag, value) in names:
+        if tag == 'func':
+            kinds.append(0)
+        elif isinstance(value, bool):
+            kinds.append(3)
+        elif isinstance(value, int):
+            kinds.append(1)
+        elif isinstance(value, float):
+            kinds.append(2)
+        else:
+            kinds.append(4)
     return [
         '#if PY_VERSION_HEX >= 0x030C0000',
-        'static PyObject *ail_code_%s[AIL_CODES];' % name,
-        'static PyObject *ail_v_%s(PyObject *func, PyObject *const *args, size_t nargsf, '
-        'PyObject *kwnames) {' % name,
-        '    if (kwnames == NULL && ail_known_code(ail_code_%s, PyFunction_GET_CODE(func))) {' % name,
+        '#define AIL_NG %d' % len(names),
+        'static const char *const ail_gname_s[AIL_NG] = {%s};'
+        % ', '.join('"%s"' % n for n, _v in names),
+        '/* 0 function (a native def), 1 int, 2 float, 3 bool, 4 str */',
+        'static const int ail_gkind[AIL_NG] = {%s};' % ', '.join(str(k) for k in kinds),
+        'static PyObject *ail_gname[AIL_NG], *ail_gval[AIL_NG], *ail_gfunc[AIL_NG];',
+        'static vectorcallfunc ail_gentry[AIL_NG];',
+        'static PyObject **ail_gcodes[AIL_NG];',
+        'static char ail_gok[AIL_NG];',
+        '/* The watched globals (borrowed; forgotten when the watcher reports its deallocation). */',
+        'static PyObject *ail_gdict;',
+        'static int ail_gwid = -1, ail_gwatched;',
+        'static int ail_gcb(PyDict_WatchEvent ev, PyObject *d, PyObject *key, PyObject *nv) {',
+        '    (void)nv;',
+        '    if (d != ail_gdict) return 0;',
+        '    if (ev == PyDict_EVENT_DEALLOCATED) { ail_gdict = NULL; ail_gwatched = 0; }',
+        '    if (key == NULL || !PyUnicode_CheckExact(key)) { memset(ail_gok, 0, sizeof ail_gok); return 0; }',
+        '    for (int i = 0; i < AIL_NG; i++)',
+        '        if (ail_gok[i] && (key == ail_gname[i] || PyUnicode_Compare(key, ail_gname[i]) == 0))',
+        '            ail_gok[i] = 0;',
+        '    return 0;',
+        '}',
+        '/* The first globals seen are watched; any other globals dict is verified on every call. */',
+        'static void ail_gadopt(PyObject *g) {',
+        '    ail_gdict = g; ail_gwatched = 0; memset(ail_gok, 0, sizeof ail_gok);',
+        '    if (ail_gwid == -1) { ail_gwid = PyDict_AddWatcher(ail_gcb); if (ail_gwid < 0) { PyErr_Clear(); ail_gwid = -2; } }',
+        '    if (ail_gwid >= 0) { if (PyDict_Watch(ail_gwid, g) == 0) ail_gwatched = 1; else PyErr_Clear(); }',
+        '}',
+        '/* Is globals[name i] what the unit was compiled against?  A constant: exact type and value.',
+        '   A callee: a function of these globals running this module\'s native entry for that def',
+        '   (its code is then checked on every call by the caller). */',
+        'static int ail_gverify(int i, PyObject *g, PyObject **fout) {',
+        '    PyObject *v = PyDict_GetItemWithError(g, ail_gname[i]);',
+        '    if (!v) { PyErr_Clear(); return 0; }',
+        '    switch (ail_gkind[i]) {',
+        '    case 0:',
+        '        if (!PyFunction_Check(v) || ((PyFunctionObject *)v)->vectorcall != ail_gentry[i]',
+        '                || PyFunction_GET_GLOBALS(v) != g) return 0;',
+        '        *fout = v;',
+        '        return 1;',
+        '    case 1: {',
+        '        if (!PyLong_CheckExact(v)) return 0;',
+        '        int r = PyObject_RichCompareBool(v, ail_gval[i], Py_EQ);',
+        '        if (r < 0) { PyErr_Clear(); return 0; }',
+        '        return r;',
+        '    }',
+        '    case 2: {',
+        '        if (!PyFloat_CheckExact(v)) return 0;',
+        '        double a = PyFloat_AS_DOUBLE(v), b = PyFloat_AS_DOUBLE(ail_gval[i]);',
+        '        return memcmp(&a, &b, sizeof a) == 0;',
+        '    }',
+        '    case 3: return v == ail_gval[i];',
+        '    case 4: return PyUnicode_CheckExact(v) && PyUnicode_Compare(v, ail_gval[i]) == 0;',
+        '    }',
+        '    return 0;',
+        '}',
+        'static int ail_gcheck(PyObject *func, const int *idx, int n) {',
+        '    PyObject *g = PyFunction_GET_GLOBALS(func);',
+        '    if (!ail_gdict) ail_gadopt(g);',
+        '    int cache = g == ail_gdict && ail_gwatched;',
+        '    for (int k = 0; k < n; k++) {',
+        '        int i = idx[k];',
+        '        PyObject *f = NULL;',
+        '        if (cache && ail_gok[i]) f = ail_gfunc[i];',
+        '        else {',
+        '            if (!ail_gverify(i, g, &f)) return 0;',
+        '            if (cache) { Py_XINCREF(f); Py_XSETREF(ail_gfunc[i], f); ail_gok[i] = 1; }',
+        '        }',
+        '        if (ail_gkind[i] == 0 && !ail_known_code(ail_gcodes[i], PyFunction_GET_CODE(f))) return 0;',
+        '    }',
+        '    return 1;',
+        '}',
+        '#endif',
+    ]
+
+
+def _guard_init(items):
+    names = _guard_names(items)
+    if not names:
+        return []
+    out = ['#if PY_VERSION_HEX >= 0x030C0000']
+    for i, (n, (tag, value)) in enumerate(names):
+        out.append('    ail_gname[%d] = PyUnicode_InternFromString(ail_gname_s[%d]);' % (i, i))
+        if tag == 'func':
+            out.append('    ail_gentry[%d] = ail_v_%s; ail_gcodes[%d] = ail_code_%s;' % (i, n, i, n))
+            continue
+        if isinstance(value, bool):
+            out.append('    ail_gval[%d] = Py_NewRef(%s);' % (i, 'Py_True' if value else 'Py_False'))
+        elif isinstance(value, int):
+            lit = '(-9223372036854775807LL - 1)' if value == _INT64[0] else '%dLL' % value
+            out.append('    ail_gval[%d] = PyLong_FromLongLong(%s);' % (i, lit))
+        elif isinstance(value, float):
+            out.append('    ail_gval[%d] = PyFloat_FromDouble(%s);' % (i, value.hex()))
+        else:
+            lit, size = _c_string(value)
+            out.append('    ail_gval[%d] = PyUnicode_DecodeUTF8(%s, %d, NULL);' % (i, lit, size))
+    out.append('    for (int i = 0; i < AIL_NG; i++)')
+    out.append('        if (!ail_gname[i] || (ail_gkind[i] && !ail_gval[i])) { Py_DECREF(m); return NULL; }')
+    out.append('#endif')
+    return out
+
+
+def _vectorcall_entry(item):
+    """The METH_FASTCALL-style vectorcall entry installed on the original function (3.12+).
+
+    obs4: CPython raises RecursionError when it pushes a frame with no recursion budget left; the
+    entry needs one frame per function the unit may stack (`nfuncs`) or runs the original, and a
+    recursive unit's depth bound is set from the same budget.  Guarded globals are checked last."""
+    name, n = item['name'], len(item['params'])
+    frames = int(item.get('nfuncs') or 1)
+    out = ['#if PY_VERSION_HEX >= 0x030C0000',
+           'static PyObject *ail_v_%s(PyObject *func, PyObject *const *args, size_t nargsf, '
+           'PyObject *kwnames) {' % name]
+    cond = ['kwnames == NULL', 'ail_known_code(ail_code_%s, PyFunction_GET_CODE(func))' % name,
+            'PyThreadState_GET()->py_recursion_remaining >= %d' % frames]
+    if _guard_names([item]):
+        cond.append('ail_guard_%s(func)' % name)
+    out.append('    if (%s) {' % '\n            && '.join(cond))
+    if item.get('rlimit'):
+        out.append('        int64_t budget = (int64_t)PyThreadState_GET()->py_recursion_remaining - %d;'
+                   % (frames - 1))
+        out.append('        %s__hybrid_rlimit = budget < %d ? budget : %d;'
+                   % (item['mangled'], item['rlimit'], item['rlimit']))
+    out.extend([
         '        Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);',
         '        PyObject *r;',
         '        if (nargs == %d) {' % n,
@@ -1653,7 +2001,20 @@ def _vectorcall_entry(name, n):
         '    return _PyFunction_Vectorcall(func, args, nargsf, kwnames);',
         '}',
         '#endif',
-    ]
+    ])
+    return out
+
+
+def _guard_fn(item, index):
+    names = [g for g, _v in _guard_names([item])]
+    if not names:
+        return []
+    return ['#if PY_VERSION_HEX >= 0x030C0000',
+            'static int ail_guard_%s(PyObject *func) {' % item['name'],
+            '    static const int idx[] = {%s};' % ', '.join(str(index[g]) for g in names),
+            '    return ail_gcheck(func, idx, %d);' % len(names),
+            '}',
+            '#endif']
 
 
 def _install_source(items):
@@ -1727,9 +2088,21 @@ def _wrapper_source(module, items):
         '}',
         _VECTORCALL_HELPERS,
     ]
+    out.append('#if PY_VERSION_HEX >= 0x030C0000')
+    for item in items:
+        out.append('static PyObject *ail_code_%s[AIL_CODES];' % item['name'])
+        out.append('static PyObject *ail_v_%s(PyObject *, PyObject *const *, size_t, PyObject *);'
+                   % item['name'])
+    out.append('#endif')
+    out.extend(_guard_source(items))
+    gindex = {g: i for i, (g, _v) in enumerate(_guard_names(items))}
+    for item in items:
+        out.extend(_guard_fn(item, gindex))
     for item in items:
         callee = item['mangled'] + '__hybrid_call' if item.get('trap') else item['mangled']
         out.append('extern %s;' % _c_proto(item, callee))
+        if item.get('rlimit'):
+            out.append('extern __thread int64_t %s__hybrid_rlimit;' % item['mangled'])
         if item['ret'] in _LIST:
             elem = 'int64_t' if item['ret'] == 'list[int]' else 'double'
             out.append('extern int64_t %s__hybrid_spill(const %s **p);' % (item['mangled'], elem))
@@ -1750,19 +2123,26 @@ def _wrapper_source(module, items):
         # obs3: a body without a loop finishes in well under the ~40 ns a GIL release and
         # re-acquire costs (tokenizer's one-line `is_ident_char` got slower than CPython), so it
         # keeps the GIL as well.
+        # obs4: a unit that reads guarded globals keeps the GIL, so no other thread can rebind a
+        # constant or a callee while the native body runs on what it verified.
         hold = any(kind in _LIST for _p, kind in params) or ret in _LIST \
-            or not item.get('loops', True)
+            or not item.get('loops', True) or _guarded(item)
         begin = [] if hold else ['    Py_BEGIN_ALLOW_THREADS']
         end = [] if hold else ['    Py_END_ALLOW_THREADS']
         n = len(params)
         # The METH_VARARGS entry (`_ail_hybrid_native.<name>`) is kept for the Python-wrapper
         # path (CPython < 3.12, or a signature `_ail_install` refuses); it raises Fallback.
         out.append('static PyObject *ail_w_%s(PyObject *self, PyObject *args) {' % name)
-        out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % n)
-        out.append('    PyObject *r = ail_core_%s(((PyTupleObject *)args)->ob_item);' % name)
-        out.append('    if (!r && !PyErr_Occurred()) return ail_hybrid_fallback();')
-        out.append('    return r;')
-        out.append('}')
+        if _guarded(item):
+            out.append('    (void)args;')
+            out.append('    return ail_hybrid_fallback();')
+            out.append('}')
+        else:
+            out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % n)
+            out.append('    PyObject *r = ail_core_%s(((PyTupleObject *)args)->ob_item);' % name)
+            out.append('    if (!r && !PyErr_Occurred()) return ail_hybrid_fallback();')
+            out.append('    return r;')
+            out.append('}')
         # The core: argument checks, conversion and the native call.  It returns the result, or
         # NULL with no exception set when the call must run in CPython instead (a guard failed,
         # an int64 overflow, an index/key trap), or NULL with an exception (MemoryError only).
@@ -1938,7 +2318,7 @@ def _wrapper_source(module, items):
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    return NULL;')
         out.append('}')
-        out.extend(_vectorcall_entry(name, n))
+        out.extend(_vectorcall_entry(item))
         out.append('')
     out.extend(_install_source(items))
     out.append('static PyMethodDef ail_methods[] = {')
@@ -1956,6 +2336,7 @@ def _wrapper_source(module, items):
     out.append('    if (!AilHybridFallback) { Py_DECREF(m); return NULL; }')
     out.append('    Py_INCREF(AilHybridFallback);')
     out.append('    PyModule_AddObject(m, "Fallback", AilHybridFallback);')
+    out.extend(_guard_init(items))
     out.append('    return m;')
     out.append('}')
     return '\n'.join(out) + '\n'
@@ -2150,6 +2531,17 @@ def _compile(items, units, module, out_dir):
                      'void %s__hybrid_spill_free(void) { free(%s_p); %s_p = NULL; %s_n = 0; }\n'
                      % (item['mangled'], elem, spill, spill, item['mangled'], spill, spill,
                         spill))
+        cap = _RECURSION_CAP.search(csrc)
+        if cap:
+            # obs4: the depth bound becomes a thread-local the C entry sets before every call
+            # to min(cap, CPython's remaining frames - other functions in the unit); exceeding
+            # it traps, and CPython re-runs the call (and raises RecursionError if it must).
+            item['rlimit'] = int(cap.group(1))
+            item['trap'] = True
+            var = item['mangled'] + '__hybrid_rlimit'
+            csrc = (csrc[:cap.start()]
+                    + '__thread int64_t %s = 0;\n#define AIL_MAX_RECURSION_DEPTH (%s)' % (var, var)
+                    + csrc[cap.end():])
         if item.get('trap'):
             csrc = _trap_patch(csrc, item['mangled'])
         # The mixed-mode overflow signal is a per-function global.  The hybrid releases the GIL

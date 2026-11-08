@@ -271,6 +271,19 @@ and its "maximum recursion depth exceeded" stop becomes a trap: CPython then re-
 (or succeeds, if the bound was only conservative). The 50000 cap keeps the C stack bounded when a
 program raises `sys.setrecursionlimit`.
 
+**obs4 task 2 (done; constants + calls).** As designed above, plus: a bool module constant is not
+added (`to_c` refuses one for the whole slice, which would have cost every other function), and a
+local the exact-kind pass proves is a `str` now counts as a str-method receiver (`for ch in src:
+ch.isdigit()`). Measured (`obs4_task2.json`, instructions vs CPython, `hand`; `bare+obs` equal to
+0.002): natives 47 -> 57, corpus 0.697 -> 0.638 (1.57x vs CPython); `tokenizer` 0.715 -> 0.066
+(`count_idents`, `longest_ident`, `digit_count`, `token_weight` now native), `csv_parse` 0.933 ->
+0.548 (`COMMA`), `field_valid` 0.387 -> 0.319 (`valid_len`, `score_ok`), `json_parse` 0.882 ->
+0.845 (`digits_in`); other modules within noise; all 30 builds byte-identical to the oracle and
+live CPython. `test_ail_hybrid_calls.py` covers rebinding, deleting and retyping constants,
+reading one before it is assigned, rebinding a callee or its `__code__`, rebinding a recursive
+function's own name, and both sides of the recursion limit (with a native at the bottom of a
+Python recursion too).
+
 ### 5.3 Methods (step a: read-only)
 
 Instances stay CPython objects; nothing about their layout changes. A method goes native by being
