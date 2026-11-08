@@ -1,3 +1,26 @@
+## 2026-11-08 -- re-apply err3 on the current tree (job-rberr3-11082308)
+
+Re-applied the accepted `err3` change (`job-err3-11081940`) on top of the current tree. It has
+two parts.  `AIL_CURRENT/python/pkg-v12/pyfunc.py`: the `AIL0102` row-arity note now names the
+user's own row variable and every heap it was popped from, never the lowering temporary
+`_ail_l1l`; `_row_alias_group`/`_row_pop_sites` follow `a = b` links and report the first user
+pop site, the `_ail_l1r = X[0]` companion no longer widens a heap, and a read wider than the heap
+is reported after the fixed point settles.  `AIL_CURRENT/ail_agent_errors.py` and
+`AIL_CURRENT/ail_chatgpt.py`: the prelude note picks the user's call that actually reaches the
+definition.  `_prelude_origin` recognizes any definition a shipped prelude added
+(`fractions`/`decimal`/`unicodedata`/`ipaddress`), and `_prelude_call_site` follows the prelude
+type through assignments, aliases, list/dict items, attributes, returns and call arguments, so a
+later `float(3)` or `f"{1.5:.1f}"` is not chosen.  `AIL0102` is now authoritative (its locator
+renames the first conflicting binding).
+
+Tests: `test_ail_pre133.py` and `test_ail_agent_errors.py` gain the row-arity message check, the
+renamed `poprow_renamed` variant and the prelude call-site cases; `tests.d/test_ail_pre133.txt`
+registers the module (the tuple is untouched).  `lab/err/RESULTS.md` records the re-measure and
+`lab/err/fixrate_err3.json` the raw replies.  `tools/diff_ids.py` is not present on this tree, so
+only `tools/update_manifest.py` ran (and `--check` passes).  The final tests are
+`test_ail_pre133`, `test_ail_agent_errors`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` -- 5 modules, 0 failed.
+
 ## 2026-11-08 -- wedge2: hybrid-native functions index lists and dicts (job-wedge2-11081603)
 
 `_unsafe_body` now allows a non-slice `Subscript` (slices, attribute stores, list-parameter mutation and
