@@ -1,3 +1,11 @@
+## 2026-11-08 -- fz241: tuple-key list sort and str ordering already match CPython (job-fz241-11082359)
+
+The daily fuzzer (seed 2076514981) reported `DIFF|exit code cpython=0 ail=1; line 15: cpython='False' ail='<end>'`: AIL stopped after `print((7.0 / 18), 0.5)` with `TypeError: '<' not supported between instances of 'object' and 'object'`, before the first `False` from `print((len(al7) <= (i13 // -3)))`.  The trigger is `al8.sort(key=lambda q: (-q, q))` on a `list[int]` aliased through two names, with `'abc'.lstrip() < '日本'[:-1]` in the same program.
+
+The difference does not reproduce on this tree.  `bash ~/tools/cmp.sh /tmp/probes/fz241.py $PWD` says `g same stdout` and `d same stdout`, and `lab/fuzz/run.py --start 2076514981 --count 1 --jobs 1` classes both modes as `same` (1/1, default and `AIL_IR=1`).  No compiler change was made.
+
+Minimized to the tuple-key sort on an aliased list; the string ordering comparison also matches.  Probes (`/tmp/probes/fz241{,_min,_tuples,_types,_routes,_routes2,_str,_loop,_alias}.py`, `cmp.sh` g/d plus an explicit `AIL_IR=1` build) all match CPython.  Added `test_ail_fz241.py` (registered in `tests.d`): the minimized seed, tuple-key sorts over int/float/bool/str and list-of-tuple elements, direct tuple comparison, `sorted`/`min`/`max` with tuple keys, str ordering, and values reaching a sort through an argument, a list item, an attribute and a dict value, on the default and `AIL_IR=1` builds.
+
 ## 2026-11-08 -- wedge2: hybrid-native functions index lists and dicts (job-wedge2-11081603)
 
 `_unsafe_body` now allows a non-slice `Subscript` (slices, attribute stores, list-parameter mutation and
