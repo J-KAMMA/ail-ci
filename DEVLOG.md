@@ -124,6 +124,18 @@ from `measure.json` (`_inorder` 2.15 s of 5.80 s, not the stale 1.8/3.9 s); the 
 instead of the raw 21 MB lists (42 MB -> 4 KB, report byte-identical); and the ratio convention is
 `hybrid / CPython` everywhere (the earlier 1.017x was the inverse of the table column, and "AIL
 wins 1.0x-1.2x" is at most 1.004x in the table's own convention).
+## 2026-11-08 -- fbnarrow3 fix: `AIL_NARROW_INT` keys the compile server (job-fbnarrow3-11081820)
+
+`python/pkg-v12/ir/narrowint.py` registers the `ail_ilist` runtime by calling `register()` at import,
+and `register()` reads `AIL_NARROW_INT`.  The compile server's template therefore freezes whether
+that runtime is in `cruntime.SOURCE`, but the variable was not in `ail_server.IMPORT_ENV`: a request
+with a different value could reuse a server built with/without it, emitting narrowed C without the
+runtime or adding the runtime to a build that must be byte-identical to the default.  Added
+`AIL_NARROW_INT` to `IMPORT_ENV` beside the other import-time reads, so a different value starts a
+different server.  No compiler or runtime behaviour changes; `test_ail_server` passes again.
+
+Tests on the final commit, `-j 2`: `test_ail_server`, `test_ail_narrow_int`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`.
 
 ## 2026-11-07 -- layout1: flat-layout measurement and ranking (job-layout1-11080009)
 
