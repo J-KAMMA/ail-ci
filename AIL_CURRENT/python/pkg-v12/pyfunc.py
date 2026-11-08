@@ -4784,7 +4784,36 @@ def _row_alias_group(fn):
 
 
 def _row_pop_sites(fn):
-    """`target name -> [(source list, line, column)]` for every `target = source.pop()`."""
+    """`target name -> [(source list, line, column, user name)]` for every `target = source.pop()`.
+
+    `user name` is the source-level name the popped row lands in: the target itself, or -- for a
+    private temporary the heap lowering introduced (`_ail_l1l = h1.pop()`, `_ail_l1r = _ail_l1l`,
+    `entry = _ail_l1r`) -- the name its chain of `a = b` assignments ends at.  Following the chain
+    forward (value -> target) keeps two different user names apart even when the source aliases
+    them (`y = x`); a union-find would merge them."""
+    forward = {}
+    links = [node for node in ast.walk(fn)
+             if ((isinstance(node, ast.Assign) and len(node.targets) == 1
+                  and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name))
+                 or (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                     and isinstance(node.value, ast.Name)))]
+    links.sort(key=lambda node: (node.lineno, node.col_offset))
+    for node in links:
+        if isinstance(node, ast.Assign):
+            forward.setdefault(node.value.id, node.targets[0].id)
+        else:
+            forward.setdefault(node.value.id, node.target.id)
+
+    def user_name(name):
+        seen = set()
+        while _row_internal(name) and name not in seen:
+            seen.add(name)
+            following = forward.get(name)
+            if following is None:
+                break
+            name = following
+        return name
+
     sites = {}
     for node in ast.walk(fn):
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -4793,8 +4822,9 @@ def _row_pop_sites(fn):
                 and isinstance(node.value.func, ast.Attribute)
                 and node.value.func.attr == 'pop'
                 and isinstance(node.value.func.value, ast.Name)):
-            sites.setdefault(node.targets[0].id, []).append(
-                (node.value.func.value.id, node.lineno, node.col_offset))
+            target = node.targets[0].id
+            sites.setdefault(target, []).append(
+                (node.value.func.value.id, node.lineno, node.col_offset, user_name(target)))
     return sites
 
 
@@ -4802,36 +4832,40 @@ def _row_conflict_note(alias_group, pop_sites, target, src, line):
     """(cause, source line) for a row-arity conflict in the user's own names, or (None, None).
 
     `target` may be a lowering temporary.  Every pop of a name in its alias group is a user pop
-    site; the note names the user's row variable and each heap it was popped from, and points the
-    position at the first of those sites.
+    site; the note names the user's row variable and each list it was popped from, and points the
+    position at the first of those sites.  It never spells a call the user did not write: the same
+    note covers `x = h.pop()` and `x = heapq.heappop(h)`, and the lowering cannot tell them apart.
     """
     group = alias_group(target)
-    display = sorted(name for name in group if not _row_internal(name))
     related = []
     for name in group:
-        for source, lineno, column in pop_sites.get(name, ()):
+        for source, lineno, column, user in pop_sites.get(name, ()):
             if not _row_internal(source):
-                related.append((lineno, column, source))
+                related.append((lineno, column, source, user))
     if not related and not _row_internal(src):
-        related.append((line, 0, src))
+        related.append((line, 0, src, target))
     related.sort()
     sites = []
-    for lineno, _column, source in related:
-        if all(source != seen for _at, seen in sites):
-            sites.append((lineno, source))
+    for lineno, _column, source, user in related:
+        if all(source != seen for _at, seen, _u in sites):
+            sites.append((lineno, source, user))
     if not sites:
         return None, None
-    sources = [source for _at, source in sites]
-    user = display[0] if display else sources[0]
-    shown = []
-    for _lineno, source in sites[:2]:
-        shown.append('`%s = heappop(%s)`' % (user, source))
-    if len(sources) > 2:
-        shown.append(' and '.join('`heappop(%s)`' % source for source in sources[2:]))
+    # The name bound at the last pop is the one whose own row disagrees; when every site lands in
+    # the same name (the `entry`/`r` cases) that is the same answer either way.
+    user = sites[-1][2]
+    if _row_internal(user):
+        user = sites[0][2]
+    parts = []
+    for _lineno, source, site_user in sites:
+        text = "'%s'" % source
+        if site_user != user and not _row_internal(site_user):
+            text += ", popped into '%s'" % site_user
+        parts.append(text)
     cause = ("'%s' is bound from popping rows of different widths: %s; a captured row has one "
              "arity, the same rule an ordinary list of records already follows. Give the rows "
-             "popped from '%s' a name of their own"
-             % (user, ', '.join(shown), sources[0]))
+             "popped from one of those lists a name of their own"
+             % (user, ', '.join(parts)))
     return cause, related[0][0]
 
 
@@ -5039,7 +5073,7 @@ def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
                             # read is evidence about the heap's rows, not a disagreement.
                             seen = []
                             for name in _alias_group(target):
-                                for other, _line, _column in _pop_sites.get(name, ()):
+                                for other, _line, _column, _user in _pop_sites.get(name, ()):
                                     if not _row_internal(other) and other not in seen:
                                         seen.append(other)
                             if len(seen) <= 1 and widen(src, arity[synth], 'read'):

@@ -4973,7 +4973,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched
                 text = ffi.lower(path, text)
-            if entry and path.suffix.lower() == '.py':
+            if entry and syntax == 'python':
+                # Every Python-syntax entry, `.py` or a `.ail` file in the Python surface: the
+                # prelude-unit table is what lets a note raised inside a shipped prelude point at
+                # the user's call instead of a prelude line.
                 try:
                     entry_defs = {n.name for n in ast.walk(ast.parse(text))
                                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
