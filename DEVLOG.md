@@ -1,3 +1,46 @@
+## 2026-11-08 -- err3: row-arity note names the user's rows, prelude notes reach the user's call (job-err3-11081516)
+
+Step 2 of `docs/design/AGENT_ERRORS.md`.
+
+`AIL_CURRENT/python/pkg-v12/pyfunc.py`: the AIL0102 note no longer prints the lowering temporary
+`_ail_l1l`. `_row_alias_group` follows `name = name` assignments back to the user's binding, so
+the message says `'entry' is bound from popping rows of different widths: entry = heappop(departures),
+entry = heappop(wait1), heappop(wait2) and heappop(wait3)` and `source_line` points at the first
+user pop site (line 78 in the trigger). The same pass stops the `_ail_l1r = X[0]` companion
+temporary from widening the heap past its appended rows, and reports a read wider than the heap
+after the fixed point settles -- by the user's name, never a `_ail_*` or `_poprow_*` name.
+
+`AIL_CURRENT/ail_chatgpt.py` (`_fallback_notes`): a note whose position is past the end of the
+user's file and whose reason names a definition the shipped prelude added (`Fraction`, `Decimal`,
+...) is moved to the user's call and gains `(this note comes from the standard library's <module>
+module)`.  The `Fraction.__float__` note now reads `...py:3:7` (was `:235:5`) and the `Decimal`
+format note `...py:3:7` (was `:1687:1`).
+
+Fix-rate (`lab/err/measure.py`, same model path, 5 replies, jobs 2, the text the compiler now
+emits): 02 0.20 -> **1.00** (5/5, target >= 0.60); 11 0.00 -> 0.00 (5/5 still blocked: the
+position is the user's, but the replies keep `from fractions import Fraction`, which prints the
+note by itself; the `Replace:`/`With:` block that made 1.00 in err1 lives in `--json`'s `fix`,
+not in the human note).  Raw: `lab/err/fixrate_err3.json`, recorded in `lab/err/RESULTS.md`.
+
+Tests: `test_ail_pre133.py` gains the row-arity message check (no `_ail_`, user names, position
+inside the file) and the prelude position check (line 3, module named, no 235/1687);
+`test_ail_agent_errors.py` updates the 02/11/12 message expectations, adds the renamed
+`poprow_renamed` variant (AIL0102's edit now builds and removes the note) and the prelude call
+site test.  `test_ail_pre133` was already in `MODULES`; a `tests.d/test_ail_pre133.txt`
+registration is added (the tuple is untouched).
+
+Counts on the final commit: `tools/par_check.py -j 2 test_ail_pre133 test_ail_agent_errors
+test_ail_safetynet test_ail_files test_ail_corpus_findings3` -> 5/5 modules, 0 failed (766 s).
+`tools/update_manifest.py` and `--check` pass.
+
+Probes (`/tmp/probes`, all `bash ~/tools/cmp.sh <p> $PWD`, general and default builds): the
+trimmed 02 trigger (row-conflict note names `entry` and all four heaps, both builds same stdout),
+its `alias = entry` variant (names `alias`, no `_ail_`; same stdout), two non-conflict heapq
+programs (same stdout), and `fractions`/`decimal` programs with the call at a top-level
+statement, a list item, an attribute, a dict value, a function argument and a negative value
+(all same stdout; notes at the user's line with the module named).  `pre_import_only` (Fraction
+arithmetic, no `float`) also matches and its note stays in the user's file.
+
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 
 `test_ail_sdk` was green before err2 and its

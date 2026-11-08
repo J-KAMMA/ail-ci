@@ -179,3 +179,30 @@ the note survives; it is reported as such, not as a working fix. 11's edit repla
   2 of the design changes the emitter. 11 is not a wording dead end: 0/5 original, 5/5
   rewritten, because the new text points at the user's 3-line file instead of line 235 of the
   prelude.
+
+## 6. Re-measure after the emitter fix (err3, step 2)
+
+Step 2 changes what the compiler prints for two messages, so the same harness was re-run on
+the text the compiler now emits (not the err1 rewritten text):
+
+- **02** -- the row-arity note names the user's variable and every heap it was popped from,
+  at the user's first pop site (`...:78:13`), with no `_ail_l1l`.
+- **11** -- the `Fraction.__float__` note points at line 3 of the 3-line program and adds
+  `(this note comes from the standard library's fractions module)`; the prelude line 235 is gone.
+
+`python3 lab/err/measure.py --messages <current messages> --only 02_poprow_arity,11_fraction_dunder
+--jobs 2`, 5 replies each, same model path as section 2.
+
+| # | message | old rate | step-2 rate |
+|---|---|---|---|
+| 02 | row arity (`_ail_l1l` -> user names) | 0.20 | **1.00** (5/5) |
+| 11 | `Fraction.__float__` position | 0.00 | 0.00 (0/5) |
+
+02 clears its target (>= 0.60): every reply named the two heaps and rebuilt, keeping CPython's
+output.  11 still reads as a dunder the user must supply; five replies kept `from fractions
+import Fraction`, which prints the note by itself, so the position alone does not tell the model
+to remove the import.  The 1.00 in section 3 came from the rewritten message that also carries
+the `Replace:`/`With:` block; the human note does not carry it (the `--json` `fix` for AIL0111
+does, and applying it removes the note).
+
+Raw records: `lab/err/fixrate_err3.json`.

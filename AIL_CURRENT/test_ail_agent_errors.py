@@ -19,6 +19,7 @@ edit flipped, and a `.get` default that replaced a real `None`.  A failed build 
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -85,6 +86,10 @@ if s == 1:
     print("two")
 print("end")
 """, 'AIL0103', 2),
+    # implementation step 2: the same user name popped from heaps of two widths, renamed.  The
+    # diagnostic must name `job` and its first pop site, never the compiler's `_ail_l1l`.
+    'poprow_renamed': ((TRIGGERS / '02_poprow_arity.py').read_text(encoding='utf-8')
+                       .replace('entry', 'job'), 'AIL0102', 78),
 }
 
 ASYNC = """import asyncio
@@ -238,7 +243,25 @@ class AgentErrors(unittest.TestCase):
                 self.assertTrue(item['cause'])
                 self.assertNotIn('_ail_', item['cause'])
                 self.assertNotIn('-line file', item['cause'])
-                self.assertEqual(item['message'], self.original[stem])
+                if code == 'AIL0102':
+                    # implementation step 2: the row-arity note no longer names a compiler
+                    # temporary; it names the user's row variable and every heap it was popped from.
+                    self.assertNotEqual(item['message'], self.original[stem])
+                    self.assertNotIn('_ail_', item['message'])
+                    self.assertIn("'entry'", item['message'])
+                    for heap in ('departures', 'wait1', 'wait2', 'wait3'):
+                        self.assertIn(heap, item['message'])
+                elif code in ('AIL0111', 'AIL0112'):
+                    # step 2: a note raised inside a shipped prelude now points at the user's call
+                    # and says which module it came from instead of a prelude line.
+                    module = 'fractions' if code == 'AIL0111' else 'decimal'
+                    self.assertNotEqual(item['message'], self.original[stem])
+                    self.assertIn("standard library's %s module" % module, item['message'])
+                    self.assertNotIn(':235:', item['message'])
+                    self.assertNotIn(':1687:', item['message'])
+                    self.assertEqual(item['line'], 3, item)
+                else:
+                    self.assertEqual(item['message'], self.original[stem])
 
                 text = (REPO / source).read_text(encoding='utf-8')
                 lines = text.split('\n')
@@ -256,12 +279,7 @@ class AgentErrors(unittest.TestCase):
                 rebuilt = self.compile(fixed_path, stem + '_fixed')
                 self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
                 after = [entry['code'] for entry in json.loads(rebuilt.stdout).get('agent_diagnostics', [])]
-                if code == 'AIL0102':
-                    # the note comes from a compiler temporary (implementation step 2): the literal
-                    # edit builds and keeps the output, but no source edit can rename that temporary
-                    self.assertIn(code, after, 'AIL0102 needs the compiler-side row-arity fix')
-                else:
-                    self.assertNotIn(code, after, after)
+                self.assertNotIn(code, after, after)
 
     def test_fixed_program_prints_what_cpython_prints(self):
         for stem in CODES:
@@ -298,6 +316,31 @@ class AgentErrors(unittest.TestCase):
                 self.assertEqual(item['line'], line, item)
                 self.assertIn('fix', item, item)
                 self.check_fix(source, item, code, name)
+
+    def test_prelude_notes_point_at_the_users_call(self):
+        # A refusal raised while loading a shipped prelude is reported on the merged text, so the
+        # compiler used to name a line of the prelude (235 in `fractions`, 1687 in `decimal`).
+        # The note now names the user's call and says which module it came from.
+        cases = (
+            ('fraction_call', 'from fractions import Fraction\nx = Fraction(1, 2)\nprint(float(x))\n',
+             'fractions', 'dunder'),
+            ('decimal_format', 'from decimal import Decimal\nd = Decimal("1.234")\nprint(f"{d:.2f}")\n',
+             'decimal', 'format spec'),
+        )
+        for name, text, module, marker in cases:
+            with self.subTest(name=name):
+                source = self.tmp / (name + '.py')
+                source.write_text(text, encoding='utf-8')
+                built = self.compile(source, name, as_json=False)
+                self.assertEqual(built.returncode, 0, built.stderr)
+                note = next(line for line in built.stderr.splitlines()
+                            if marker in line and 'built on the general path' in line)
+                self.assertIn("standard library's %s module" % module, note)
+                where = re.search(r':(\d+):(\d+): built on the general path', note)
+                self.assertIsNotNone(where, note)
+                self.assertEqual(int(where.group(1)), 3, note)
+                self.assertNotIn(':235:', note)
+                self.assertNotIn(':1687:', note)
 
     def assert_applied_output(self, name, text, code, expected, dropped):
         source = self.tmp / (name + '.py')

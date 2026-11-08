@@ -17,7 +17,7 @@ import re
 FAMILIES = (
     dict(code='AIL0101', pattern='sys.stdin.buffer.readline', cause="`sys.stdin.buffer.readline` is saved in `read`, but this compiler accepts `sys.stdin.buffer.readline()` only as a direct call; the saved method fails at run time with `'...' object has no attribute 'readline'`.", replace='read = sys.stdin.buffer.readline\nprint(read().decode().strip())',
          **{'with': 'print(sys.stdin.readline().strip())'}),
-    dict(code='AIL0102', pattern='_ail_l1l', cause='`b = heapq.heappop(fh)` pops a berth number from a 1-field free list, while `entry = heapq.heappop(wait1)` pops a 5-field job row; the compiler captures both pops in one temporary and a captured row must have one width.', replace='                b = heapq.heappop(fh)',
+    dict(code='AIL0102', pattern='is bound from popping rows of', cause='one name is bound from popping rows of two lists of different widths; a captured row has one arity. Give the rows popped from one of the heaps a name of their own.', replace='                b = heapq.heappop(fh)',
          **{'with': '                fh.sort()\n                b = fh.pop(0)'}),
     dict(code='AIL0103', pattern='comparing a str with a number', cause='this compares a str with a number; a str is never equal to a number, so the branch is always taken or never taken.', replace='if s == 1:',
          **{'with': 'if s == "1":'}),
@@ -942,8 +942,92 @@ def _loc_container_dict(text, lines, tree, item):
     return None
 
 
+def _heappop_sites(tree):
+    """[(target, heap, node)] for every `target = heapq.heappop(heap)` in source order."""
+    sites = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if value is None or len(targets) != 1 or not isinstance(targets[0], ast.Name):
+            continue
+        if not isinstance(value, ast.Call) or len(value.args) != 1:
+            continue
+        function = value.func
+        name = (function.id if isinstance(function, ast.Name)
+                else function.attr if isinstance(function, ast.Attribute) else None)
+        if name != 'heappop' or not isinstance(value.args[0], ast.Name):
+            continue
+        sites.append((targets[0].id, value.args[0].id, node))
+    sites.sort(key=lambda site: (site[2].lineno, site[2].col_offset))
+    return sites
+
+
+def _loc_poprow(text, lines, tree, item):
+    """Rename the first binding whose heap rows disagree in width with a later binding of the name.
+
+    `entry = heapq.heappop(departures)` and `entry = heapq.heappop(wait1)` put two widths in one
+    name; the compiler captures both in one temporary.  Renaming the first binding (and every use
+    before the next assignment) lets both survive as separate names, with no output change.
+    """
+    if tree is None:
+        return None
+    sites = _heappop_sites(tree)
+    if not sites:
+        return None
+    by_target = {}
+    for target, source, node in sites:
+        by_target.setdefault(target, []).append((source, node))
+    conflict = None
+    for target, values in by_target.items():
+        sources = []
+        for source, _node in values:
+            if source not in sources:
+                sources.append(source)
+        if len(sources) > 1:
+            conflict = (target, values, sources)
+            break
+    if conflict is None:
+        target, source, node = sites[0]
+        return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=None,
+                    force_position=True)
+    target, values, sources = conflict
+    source, node = values[0]
+    later = sorted(inner.lineno for inner in ast.walk(tree)
+                   if isinstance(inner, (ast.Assign, ast.AnnAssign))
+                   and any(isinstance(part, ast.Name) and part.id == target
+                           for part in (inner.targets if isinstance(inner, ast.Assign)
+                                        else [inner.target])))
+    following = next((lineno for lineno in later if lineno > node.lineno), len(lines) + 1)
+    uses = [inner for inner in ast.walk(tree)
+            if isinstance(inner, ast.Name) and inner.id == target
+            and node.lineno <= inner.lineno < following]
+    if not uses:
+        return dict(line=node.lineno, col=node.col_offset + 1, fix=None, cause=None,
+                    force_position=True)
+    last = max(inner.end_lineno or inner.lineno for inner in uses)
+    name = target + '_' + source
+    used = {inner.id for inner in ast.walk(tree) if isinstance(inner, ast.Name)}
+    while name in used:
+        name += '_'
+    edits = {}
+    for inner in uses:
+        edits.setdefault(inner.lineno, []).append((inner.col_offset, inner.end_col_offset, name))
+    with_text = _apply(lines, node.lineno, last, edits)
+    cause = ("'%s' is bound from popping rows of %s; a captured row has one arity, the same rule "
+             "an ordinary list of records already follows. The rows popped from '%s' get the "
+             "name '%s'."
+             % (target, ', '.join("'%s'" % source for source in sources), source, name))
+    return _fix(node.lineno, last, with_text, line=node.lineno, col=node.col_offset + 1,
+                cause=cause, force_position=True)
+
+
 _LOCATORS = {
     'AIL0101': _loc_stdin_buffer,
+    'AIL0102': _loc_poprow,
     'AIL0103': _loc_str_number,
     'AIL0104': _loc_dict_get,
     'AIL0105': _loc_container_dict,
@@ -963,7 +1047,7 @@ _LOCATORS = {
 #: Families whose edit is a claim about the user's values, not just about the construct: the table's
 #: literal block is safe only for the trigger program it was copied from, so a source that parses and
 #: that the locator cannot vouch for gets the position and the cause and no edit at all.
-_AUTHORITATIVE = frozenset(('AIL0101', 'AIL0103', 'AIL0104', 'AIL0111'))
+_AUTHORITATIVE = frozenset(('AIL0101', 'AIL0102', 'AIL0103', 'AIL0104', 'AIL0111'))
 
 
 def _locate(item, source_text, lines):

@@ -5480,6 +5480,97 @@ _FALLBACK_NOTE = 'note: built on the general path'
 _FALLBACK_HINT = '; run with --strict to see why'
 _LINE_MARKER = re.compile(r'^ail-source-line: (\d+)\r?\n?', re.M)
 
+# Prelude definitions whose line in the merged text is past the end of the user's file: the note is
+# really about the user's call that reaches them.  Only these shipped modules are named; a name the
+# user wrote themselves is not a prelude unit (`_PRELUDE_UNITS` records what the preludes added).
+_PRELUDE_MODULES = (
+    ('Fraction', 'fractions'),
+    ('Decimal', 'decimal'),
+    ('DecimalException', 'decimal'),
+    ('UnicodeData', 'unicodedata'),
+    ('IPv4Address', 'ipaddress'),
+    ('IPv4Network', 'ipaddress'),
+)
+
+# The builtin (or expression) that reaches a dunder in a prelude: the old position was the
+# prelude's `def __float__`, the actionable one is the user's `float(...)` call.
+_PRELUDE_DUNDER_CALLS = {
+    '__float__': r'\bfloat\s*\(',
+    '__int__': r'\bint\s*\(',
+    '__index__': r'\b(?:int|range|len)\s*\(',
+    '__len__': r'\blen\s*\(',
+    '__str__': r'\b(?:str|print)\s*\(',
+    '__format__': r'\bformat\s*\(|\bf[ruRU]?[\'"]',
+    '__iter__': r'\b(?:list|tuple|for)\b',
+    '__eq__': r'==|!=',
+    '__lt__': r'[<>]=?',
+    '__add__': r'\+',
+    '__sub__': r'-',
+    '__mul__': r'\*',
+}
+
+
+def _prelude_origin(source, reason):
+    """(module, unit) when `reason` is about a definition a shipped prelude added, else (None, None)."""
+    units = _PRELUDE_UNITS.get(str(source), ())
+    if not units:
+        return None, None
+    for unit, module in _PRELUDE_MODULES:
+        if unit in units and re.search(r'\b%s\b' % re.escape(unit), reason):
+            return module, unit
+    return None, None
+
+
+def _prelude_call_site(source, reason, unit):
+    """(line, column) of the user's call that reaches the prelude definition, 1-based."""
+    try:
+        lines = source.read_text(encoding='utf-8').splitlines()
+    except (OSError, UnicodeError):
+        return None
+    patterns = []
+    dunder = re.search(r'__(\w+)__', reason)
+    if dunder is not None:
+        call = _PRELUDE_DUNDER_CALLS.get('__%s__' % dunder.group(1))
+        if call:
+            patterns.append(call)
+    if 'format spec' in reason:
+        patterns.append(r'\bformat\s*\(|\bf[ruRU]?[\'"]')
+    patterns.append(r'\b%s\b' % re.escape(unit))
+    for pattern in patterns:
+        found = [(number, match.start()) for number, line in enumerate(lines, 1)
+                 if (match := re.search(pattern, line))]
+        # the import and the construction name the type too; the call that fails is after them
+        calls = [(number, column) for number, column in found
+                 if not lines[number - 1].lstrip().startswith(('import ', 'from '))]
+        if calls:
+            return calls[-1]
+        if found:
+            return found[-1]
+    return None
+
+
+def _prelude_where(source, reason, where):
+    """(where, module): map a diagnostic line past the user's file back to the user's call site.
+
+    A prelude is appended to the merged text, so the compiler names a line of `prelude_*.py`; the
+    file length is what tells those lines apart.  Nothing outside a shipped prelude is moved."""
+    module, unit = _prelude_origin(source, reason)
+    if module is None:
+        return where, None
+    try:
+        count = len(source.read_text(encoding='utf-8').splitlines())
+    except (OSError, UnicodeError):
+        return where, module
+    located = re.match(r'^(?P<path>.*?):(?P<line>\d+)(?::(?P<col>\d+))?$', where or '')
+    line = int(located.group('line')) if located else None
+    if line is not None and line <= count:
+        return where, None
+    call = _prelude_call_site(source, reason, unit)
+    if call is None:
+        return where, module
+    path = located.group('path') if located else _relpath(source)
+    return '%s:%d:%d' % (path, call[0], call[1] + 1), module
+
 
 def _split_line_marker(text):
     """(text without the compiler's `ail-source-line: N` line, N or None)."""
@@ -5523,8 +5614,12 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
                     where = located[:-len(reason)].rstrip(': ')
                 else:
                     where = _marker_where(source_map or {}, marked)
+                where, prelude = _prelude_where(source, reason, where)
                 if where:
                     line = 'note: %s: built on the general path%s' % (where, line[len(_FALLBACK_NOTE):])
+                if prelude:
+                    line += (" (this note comes from the standard library's %s module)"
+                             % prelude)
             notes.append(line + hint)
     except Exception:
         return notes
