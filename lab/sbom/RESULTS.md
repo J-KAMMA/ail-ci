@@ -19,6 +19,13 @@ outside int64 or CPython-only set ordering are refused by design and are not in 
 | `examples/crate/*/main.py` | 7 | 7 | **7** |
 | **total** | **22** | **22** | **22** |
 
+Re-ran all 22 builds on the job runner (gcc 13.3.0, Rust 1.99.1) before reporting: every binary
+produced eight empty check lists. The crate rows were built in-tree with `ail_cargo.py` into a
+temporary `out/` directory, which was removed afterwards. The checker itself was exercised by
+deleting a shared library, a bundled source and the crates from real BOMs: `missing`,
+`bundled_missing` and `crate_missing` each fired, and an invalid `specVersion` was rejected by
+`validate_bom`.
+
 There is no standalone libcurl example checked into the repository, so the urllib row used the
 `urllib.request.urlopen` + `urllib.parse.quote` shape from `test_ail_http.py`, compiled from a
 temporary source. It links `libcurl.so.4` and embeds `ailhttp_core.h` and `ailurl_core.h`.
