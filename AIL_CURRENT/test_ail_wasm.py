@@ -53,6 +53,16 @@ class WasmTests(unittest.TestCase):
             r = self.run_wasm(self.build(work, src))
             self.assertEqual((r.returncode, r.stdout), (0, b'hello 42 4242\n'))
 
+    def test_a_local_module_shadows_a_refused_name(self):
+        # `import signal` with a sibling signal.py is an ordinary local module, not the standard one
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / 'signal.py').write_text('def v():\n    return 41\n')
+            src = work / 'main.py'
+            src.write_text('import signal\nprint(signal.v())\n')
+            r = self.run_wasm(self.build(work, src))
+            self.assertEqual((r.returncode, r.stdout), (0, b'41\n'))
+
     def test_try_except(self):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
@@ -151,6 +161,19 @@ class WasiRefusalTests(unittest.TestCase):
             self.assertIn('write instead:', msg)
         self.assertIsNone(wasm_build.wasi_refusal('print(1)\n'))
         self.assertIn('threading', wasm_build.wasi_refusal('def f():\n    import threading\n'))
+
+    def test_a_local_module_is_not_refused(self):
+        # the compiler resolves `import signal` to a sibling signal.py; the refusal must not pre-empt that
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / 'main.py'
+            src.write_text('import signal\nprint(signal.v())\n')
+            self.assertIsNotNone(wasm_build.wasi_refusal('import signal\nprint(1)\n', src))
+            (Path(tmp) / 'signal.py').write_text('def v():\n    return 41\n')
+            self.assertIsNone(wasm_build.wasi_refusal('import signal\nprint(1)\n', src))
+            self.assertIsNone(wasm_build.wasi_refusal('import signal as s\nprint(s.v())\n', src))
+            self.assertIsNone(wasm_build.wasi_refusal('from signal import v\nprint(v())\n', src))
+            (Path(tmp) / 'threading.py').write_text('def f():\n    return 1\n')
+            self.assertIsNone(wasm_build.wasi_refusal('import threading\nprint(threading.f())\n', src))
 
     def test_build_refuses_before_needing_zig(self):
         with tempfile.TemporaryDirectory() as tmp:

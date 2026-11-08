@@ -16,6 +16,9 @@ Refusals by name (no linker error), each with a `write instead:` line, checked w
   `typedpar.py` lowers before threadlib.py sees the import. There is no socklib.py or siglib.py in this tree, so the
   build script is the refusing layer for those two; without it `ail_chatgpt.py compile` falls back to the general path
   and the failure would only appear at link time.
+- The `WASI_REFUSED` scan resolves each import through `ail_modules.Program.local_top`, so an `import signal` that
+  names a sibling `signal.py`, a package directory, an `AIL_PATH` module or a bundled module is left to the compiler:
+  it is an ordinary local module, not the standard one, and still builds. Only the standard module is refused.
 - `tools/wasm_build.py` runs the host compiler with `AIL_TARGET_OS=wasi`, not `AIL_TARGET=wasi`: the latter would make
   `sys.platform` unknown in `ail_modules.py` until `TARGETS['wasi']` exists.
 

@@ -24,6 +24,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPILER = ROOT / 'AIL_CURRENT' / 'ail_chatgpt.py'
+if str(ROOT / 'AIL_CURRENT') not in sys.path:
+    sys.path.insert(0, str(ROOT / 'AIL_CURRENT'))
+import ail_modules      # the compiler's own local-module test: a sibling module shadows the standard one
 SHIM = Path(__file__).resolve().parent / 'wasm_shim.h'
 ZIG_FLAGS = ['-target', 'wasm32-wasi', '-O2', '-fno-tree-slp-vectorize', '-ffp-contract=off',
              '-Werror=implicit-function-declaration', '-Werror=implicit-int', '-Werror=incompatible-pointer-types',
@@ -55,12 +58,15 @@ WASI_REFUSED = {
 }
 
 
-def wasi_refusal(text):
-    """The WASI refusal for the first import of a module wasm32-wasi cannot support, or None."""
+def wasi_refusal(text, src=None):
+    """The WASI refusal for the first import of a module wasm32-wasi cannot support, or None. An import that
+    resolves to a local module (`signal.py` beside the entry, an AIL_PATH module, a package) is not the standard
+    module the compiler would refuse for, so it is left to the compiler's own resolution."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
+    found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
@@ -69,11 +75,19 @@ def wasi_refusal(text):
         else:
             continue
         for name in names:
-            base = name.split('.')[0]
-            if base in WASI_REFUSED:
-                return ('%s is not available on wasm32-wasi: %s.\n'
-                        '  write instead: run the program on the host target, or keep %s out of the wasm build'
-                        % (base, WASI_REFUSED[base], base))
+            if name.split('.')[0] in WASI_REFUSED:
+                found.append(name)
+    if not found:
+        return None
+    program = None
+    if src is not None:                 # without the path the search path is unknown, so no import is local
+        program = ail_modules.Program(src, lambda p: Path(p).read_bytes().decode('utf-8', 'surrogateescape'))
+    for name in found:
+        base = name.split('.')[0]
+        if program is None or not program.local_top(base):
+            return ('%s is not available on wasm32-wasi: %s.\n'
+                    '  write instead: run the program on the host target, or keep %s out of the wasm build'
+                    % (base, WASI_REFUSED[base], base))
     return None
 
 
@@ -126,7 +140,7 @@ def build(src, out, work, extra=()):
     """Builds WORK/native and OUT; WORK/c must not exist yet. Returns (ok, message): the first compiler or
     linker error on failure."""
     try:
-        refusal = wasi_refusal(Path(src).read_text(encoding='utf-8', errors='surrogateescape'))
+        refusal = wasi_refusal(Path(src).read_text(encoding='utf-8', errors='surrogateescape'), Path(src).resolve())
     except OSError:
         refusal = None
     if refusal:
