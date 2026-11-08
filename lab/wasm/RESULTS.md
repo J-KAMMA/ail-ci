@@ -1,4 +1,33 @@
-# AIL on wasm32-wasi (ffwasm1, 2026-11-06)
+# AIL on wasm32-wasi (ffwasm1, 2026-11-06; ffwasm2, 2026-11-08)
+
+## ffwasm2 (2026-11-08): WASI refusals, remaining tasks, sizes
+
+This runner has no `zig`, `wasmtime` or `wasm-strip`, and fetches are blocked, so no wasm measurement could be
+repeated here. The ffwasm1 table below is still the current measurement (10/10 build, 10/10 match on every public,
+hidden and perf case). The new refusal checks and the deep-recursion test are either pure compiler tests or skipped
+by the same `@skipUnless` as the rest of `AIL_CURRENT/test_ail_wasm.py`.
+
+Refusals by name (no linker error), each with a `write instead:` line:
+- `import subprocess` -> `subprocess is not available on wasm32-wasi: WASI has no process creation (no fork/exec)`
+  (proclib.py; `AIL_TARGET=wasi`, or `AIL_TARGET_OS=wasi`).
+- `import threading` / `queue` / `concurrent.futures` -> `... is not available on wasm32-wasi: WASI has no threads`
+  (threadlib.py).
+- `import socket` / `signal` -> the same shape from `tools/wasm_build.py` (`WASI_REFUSED`), which also catches the
+  threaded patterns `typedpar.py` lowers before threadlib.py sees the import. There is no socklib.py or siglib.py in
+  this tree, so the build script is the refusing layer for those two.
+- `tools/wasm_build.py` runs the host compiler with `AIL_TARGET_OS=wasi`, not `AIL_TARGET=wasi`: the latter would make
+  `sys.platform` unknown in `ail_modules.py` until `TARGETS['wasi']` exists.
+
+Remaining tasks: none. The ffwasm1 table already reports 10/10; the shim/build already carries
+`-Wl,-z,stack-size=8388608`, `-D_WASI_EMULATED_PROCESS_CLOCKS` and the test's `--dir D::D` preopens. The new
+`test_deep_recursion_is_loud` builds `f(1000000)` and requires a nonzero exit whose stderr says `RecursionError` and
+is not a bare wasm trap.
+
+Size table: the AIL `.wasm` bytes are the unstripped ffwasm1 column below. `wasm-strip` is not installed, so there are
+no stripped numbers. `rustup target list --installed` has only `x86_64-unknown-linux-gnu` (no `wasm32-wasip1`), so
+per the task the Rust side is not measured.
+
+## ffwasm1
 
 `tools/wasm_build.py SRC -o OUT.wasm` runs the host compile (`ail_chatgpt.py compile SRC --debug-dir WORK/c`), takes
 `WORK/c/program.c` and builds it with `zig cc -target wasm32-wasi -O2`, force-including `tools/wasm_shim.h`. Run it

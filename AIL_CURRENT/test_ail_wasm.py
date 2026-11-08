@@ -88,6 +88,18 @@ class WasmTests(unittest.TestCase):
         # read_stdin_bytes(1 << 40): needs wasm_build.patch_c's saturation for wasm32's 32-bit size_t
         self.check_task('tree_fold')
 
+    def test_deep_recursion_is_loud(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            src = work / 'deep.py'
+            src.write_text('def f(n: int) -> int:\n    if n <= 0:\n        return 0\n'
+                           '    return f(n - 1) + 1\n\nprint(f(1000000))\n')
+            r = self.run_wasm(self.build(work, src))
+            self.assertNotEqual(r.returncode, 0)
+            err = r.stderr.decode('utf-8', 'replace')
+            self.assertIn('RecursionError', err)
+            self.assertNotIn('wasm trap', err.lower())
+
     def test_patch_c_refuses_a_changed_reader(self):
         text = 'static unsigned char *ail_stdin_fill_bytes(unsigned char *buf, size_t *capp) {}\n'
         self.assertIn('changed shape', wasm_build.patch_c(text)[1])
