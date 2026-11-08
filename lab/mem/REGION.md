@@ -235,7 +235,7 @@ callee whose parameter is not borrowed" (`Node(...)` in `linkedlist.build`). The
 The `dynamic` column is a **program/family aggregate** (the C allocation for a `str`/`bytes` expression is
 made inside a runtime helper, not in the user function, so a per-function join would be fiction); a dash
 means the site is not in a loop, so a region does not apply, and the pairs column is then left at 0.
-`lab/mem/REGION.json` carries all 115 C sites and 179 joined rows.
+`lab/mem/REGION.json` carries all 115 C sites and 115 joined rows.
 
 The 7 static yes sites and what the dynamic side says:
 
@@ -307,4 +307,4 @@ opt-in; the expected halved instruction gain is <= 1.013x, below the 1.03x bar.
     python3 -B lab/mem/region_census.py --price
 
 `REGION.json` carries `programs` (per-program totals and kinds), `dynamic_sites` (115 C sites),
-`static_sites` (64 Python sites), `sites` (179 joined rows) and `price`.
+`static_sites` (64 Python sites), `sites` (115 joined rows) and `price`.
