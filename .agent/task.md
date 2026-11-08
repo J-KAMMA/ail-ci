@@ -1,3 +1,57 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+Here's my review.
+
+## What the change really does
+
+Measurement-only: adds a PyPy arm to `lab/compare_rival/run.py` (row, `warm5` via new `pypy_warm.py`, pins in `toolchains.env`, workflow steps), a PyPy arm to `lab/wedge/measure.py` + report columns, and a new test module. It also adds an **unrequested** `--base` / `--warm-only` result-merging layer (`layer_base`, `warm_only`) and `toolchain_missing`. No compiler/runtime file under `AIL_CURRENT/` changed (only a test, `tests.d/`, `manifest.d/`), so programs that do not use the feature compile identically by construction; `cmp.sh` probes do not apply.
+
+## Verified claims (no worker report was supplied — it is empty)
+
+- `toolchains.env` sha256 matches the real tarball: `16f9f56e…1453a`. **Verified.**
+- PyPy 7.3.23 / Python 3.11.15, output identical on 15/15 wedge modules (5 runs each) and 10/10 compare_rival tasks incl. warm runs. **Verified** from the JSONs.
+- Headlines reproduce exactly: AIL typed/main vs PyPy 9/10 wins, 0.313x; wedge PyPy/CPython 0.159x, hybrid/PyPy 6.197x (0/15), standalone/PyPy 0.829x (8/13). **Verified.**
+- `test_ail_pypy_lab` 20 tests OK, `test_ail_safetynet` 5 tests OK (run directly; see defect 1 for why `par_check` cannot run them).
+
+## Defects
+
+1. **Stale manifest blocks the required test runner.** `python3 tools/update_manifest.py --check` → exit 1, `stale test_ail_pypy_lab.py`; `AIL_CURRENT/ail_check.py` preflight raises `ValueError: hash mismatch: test_ail_pypy_lab.py`, so `par_check.py` cannot run any module. The manifest hash (`53f7f8…`) is from commit `2454bd4`; later commits changed the test without re-running `update_manifest.py`.
+
+2. **`lab/compare_rival/RESULTS.md` tables are malformed.** Probe `/tmp/rprobes/tablecheck.py`, `/tmp/rprobes/probe_edge.py` (A):
+   - with PyPy: header 11 cols, separator 12, every `build refused` row 12 → expected all 11, actual 11/12/12.
+   - without PyPy: header 10, separator 11 → expected 10/10, actual 10/11.
+   The base `work` version was 10/10, so this is introduced by the new `L.append` in `render()`.
+
+3. **`--base` loses a measured PyPy row when PyPy is absent.** `TOOLCHAIN` has no `'pypy'` entry, so `toolchain_missing()` is False and `layer_base()` overwrites the base row with the failed build. Probe `/tmp/rprobes/probe_base.py`: base `wall_ms=2000` → expected kept, actual `build_ok=False`, `wall_ms=None`, and `tool_runs.pypy` wrongly says `source: 'this run'`. The function's own docstring promises the opposite.
+
+4. **`_first_diff` returns `None` for a trailing-newline-only difference.** Probe `/tmp/rprobes/probe_edge.py` (B): `_first_diff(b'ok\n', b'ok')` → expected a line description, actual `None`; `_timeit_pypy` then records `pypy_match=False` with `pypy_diff: null`, and `report.py` prints "`module`: None."
+
+5. **No `DEVLOG.md` entry** for `job-pypy1-11090337`, required by the job rules (top entry is still aiknow1).
+   Caveat (not a numbered defect): the headline uses PyPy's cold time; against `warm5` AIL is faster on 8/10, geomean 0.430x, not 9/10 / 0.313x.
+
+## Pre-existing
+None relevant: no compiler code changed, so no `cmp.sh` difference is attributable.
+
+## Unverified
+`--warm-only` end-to-end (would re-run the corpus), `test_ail_files` and `test_ail_corpus_findings3` (not run per review instructions; `par_check` is blocked), speed/icount (no compiler change).
+
+VERDICT: FIX
+1. Manifest stale: `update_manifest.py --check` exits 1 (`stale test_ail_pypy_lab.py`) and `par_check.py` preflight raises `ValueError: hash mismatch: test_ail_pypy_lab.py`; expected clean check and runnable tests.
+2. `render()` table columns: with PyPy header 11 / separator 12 / refused rows 12 (expected 11/11/11); without PyPy header 10 / separator 11 (expected 10/10). Probe `/tmp/rprobes/probe_edge.py` A.
+3. `layer_base` with PyPy missing: base row `wall_ms=2000` expected kept; actual `build_ok=False, wall_ms=None`, `tool_runs.pypy.source='this run'`. Probe `/tmp/rprobes/probe_base.py`.
+4. `_first_diff(b'ok\n', b'ok')` expected a diff line, actual `None`, yielding `pypy_diff: null` with `pypy_match=False`.
+5. Missing `DEVLOG.md` entry for this job.
+[commandcode stop=end_turn turns=26 out_tokens=29100]
+
+
+--- ORIGINAL TASK ---
 # pypy1: add PyPy to the rival table and the wedge benchmark
 
 Lane: rival
