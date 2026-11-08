@@ -127,3 +127,63 @@ literal out of range). All the changes are gated on AIL_DEBUG=1
    tests.yml, which this lane may not edit.
 6. A running `ail_server.py` keeps the compiler modules it loaded. A build sent to it after a source edit uses the
    old emitter, so linecov.py sets AIL_SERVER=0.
+
+# fddbg2: gdb pretty-printers for AIL values
+
+Measured 2026-11-08 on the same Ubuntu 24.04 runner, GNU gdb 15.1 (`gdb` is not in the
+image; this run used the Ubuntu `gdb` 15.1 package), gcc 13.3.0, CPython 3.12.3. Base:
+`origin/integ` with fddbg1 integrated.
+
+    python3 AIL_CURRENT/test_ail_debug_printers.py
+
+`AIL_CURRENT/tools_gdb/ail_gdb.py` is a gdb Python script (`gdb -x`). It registers printers
+by C type name: `ail_str`, `ail_bytes`, `ail_list`, `ail_flist`, `ail_slist`, `ail_sdict`,
+`ail_stab`, `ail_obj`, the generated tuple structs `ail_obj__AilT_*`, and `double`/`_Bool`.
+It reads memory only (it never calls a function in the program), bounds every loop by the
+value's own length field, prints `<unreadable>` for a bad pointer, and prints the first 100
+elements of a longer container followed by `...`.
+
+## The 12 kinds
+
+Each row is one program in `lab/debug/printers/`, built with `--debug`, stopped on its
+`# repr:` line, and printed with gdb. `typed` is `--strict`; `general` is
+`AIL_UNIFIED_FORCE=1`.
+
+| kind | path | gdb expression | gdb print | CPython `repr` |
+| --- | --- | --- | --- | --- |
+| int | typed | `print x` | `42` | `42` |
+| float | typed | `print x` | `1.5` | `1.5` |
+| bool | general | `print f.slots[2]` | `True` | `True` |
+| None | general | `print f.slots[1]` | `None` | `None` |
+| str | typed | `print v_x` | `'héllo'` | `'héllo'` |
+| bytes | typed | `print v_x` | `b'hi\n'` | `b'hi\n'` |
+| list[int] | typed | `print v_x` | `[1, 2, 3]` | `[1, 2, 3]` |
+| list[float] | typed | `print v_x` | `[1.5, 2.0]` | `[1.5, 2.0]` |
+| list[str] | typed | `print v_x` | `['a', 'b']` | `['a', 'b']` |
+| dict[str, int] | typed | `print v_x` | `{'a': 1, 'b': 2}` | `{'a': 1, 'b': 2}` |
+| tuple | typed | `print v_x` | `(1, 'x')` | `(1, 'x')` |
+| general boxed object | general | `print f.slots[2]` | `[1, 2, 3]` | `[1, 2, 3]` |
+
+**12/12 equal to `repr`.** The test also runs a 150-element `list[int]`: gdb prints the
+first 100 elements and `...`; after `set var v_x.p = 0` and `set var v_x.n = -1` it prints
+`<unreadable>` both times. The general-path dict, set, tuple, str and float printers were
+also checked by hand on a general-path program (`'héllo'`, `{'a': 1, 'b': 2}`,
+`(1, 'x')`, `{1, 2}`, `2.0`).
+
+## What the printer does not change, and the remaining gaps
+
+* No generated C changes. All the work is the new gdb script plus `lab/debug/printers/`,
+  the test and the docs.
+* Typed `bool` is an `int64_t` 0/1 at run time. gdb cannot tell it from the int 1, so the
+  printer shows `1`; the bool row above uses the general path, where `ail_obj` has an
+  `AIL_T_BOOL` tag. This is the one kind that is not printable as `repr` on the typed path.
+* Typed `None` is a compile-time "unset" flag (`v_x=0`, `v_x__set=0`), not a C value; the
+  None row uses the general path (`AIL_T_NONE`).
+* Only typed int/float locals get Python-named C variables (fddbg1). Other typed values are
+  printed by their C name (`v_x`), and a general-path value lives in the frame array
+  (`f.slots[N]`, the index named in the generated C). `print x` by a Python name is not
+  available for those.
+* A general-path class instance prints as `<Class object>` rather than CPython's
+  `<__main__.Class object at 0x...>` (the address is not a value worth reproducing).
+  General-path `bytes` is an instance object (`<bytes object>`).
+* The three fddbg1 `next`/`finish` gaps are unchanged (see above and `docs/DEBUGGING.md`).
