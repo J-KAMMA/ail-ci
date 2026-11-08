@@ -1,3 +1,19 @@
+## 2026-11-08 -- wedge4 review fix: method calls keep CPython dispatch (job-wedge4-11081958)
+
+The hybrid was lifting `self.m(...)` inside a method to a direct call of `m`'s kernel. CPython
+resolves that attribute dynamically, so a subclass override, an instance attribute (`obj.m = ...`)
+or a monkeypatched class attribute changed nothing under the hybrid: `Base(5).twice()` printed
+`15 15` where CPython prints `15 315`, and an override that raises was never called.  A method that
+contains any `self.m(...)` call is now refused by name (`a call to another method 'm' stays in
+CPython`) before the field-only kernel is built; the `_MethodBody` call rewrite and the
+callee-field plumbing are gone.  Field-only methods still lift, and `self.<field>` reads/writes
+still use `PyObject_GetAttrString`/`PyObject_SetAttrString`, so inherited field access keeps the
+subclass's own attribute protocol.  `test_ail_cpython_hybrid.py` gains
+`test_method_dispatch_is_not_bypassed` (subclass override, raising override, instance shadow,
+class patch) and its method/parameter tests now assert the named refusal.  Probes: `w4_*` plus new
+`w5_dispatch*.py`, all matching CPython; `bash ~/tools/cmp.sh` default and general builds unchanged.
+
+
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
 Re-applied the accepted `job-fclist1-op1106` change (`8c2c99c1`..`FETCH_HEAD`, 3 commits) on this

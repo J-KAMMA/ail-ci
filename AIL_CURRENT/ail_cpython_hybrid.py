@@ -59,8 +59,10 @@ def _top_level_functions(tree):
 # ordinary parameters of the field's kind.  The C wrapper below reads those fields from the
 # CPython object before the call and writes the changed numeric fields back afterwards, so the
 # method body itself needs no CPython object model and runs on the same typed ABI as a top-level
-# function.  A method that calls a read-only method of the same class passes the fields it needs
-# explicitly.  Everything this pass cannot prove stays in CPython with a named reason.
+# function.  A method that calls another method (`self.m(...)`) stays in CPython: CPython resolves
+# that call dynamically, so a subclass override, an instance attribute or a monkeypatched class
+# attribute would change which function runs and a direct kernel call would ignore it.  Everything
+# this pass cannot prove stays in CPython with a named reason.
 
 _METHOD_PREFIX = '__ail_hybrid_method_'
 _FIELD_PREFIX = '__ail_hybrid_field_'
@@ -339,12 +341,15 @@ class _MethodRefused(Exception):
 
 
 class _MethodBody(ast.NodeTransformer):
-    """Rewrite `self.x` to a field parameter and `self.m(...)` to the method's kernel."""
+    """Rewrite `self.x` to a field parameter.
 
-    def __init__(self, fields, callee_reads, callee_kernels):
+    A `self.m(...)` call is never rewritten: CPython resolves it dynamically, so an override in a
+    subclass, an instance attribute or a monkeypatched class attribute would be ignored by a direct
+    kernel call.  Such a method is refused before this pass runs; the call check here is a guard.
+    """
+
+    def __init__(self, fields):
         self.fields = fields                  # field name -> (kernel index, kind)
-        self.callee_reads = callee_reads      # method name -> [field, ...] it reads
-        self.callee_kernels = callee_kernels  # method name -> kernel function name
 
     def visit_FunctionDef(self, node):
         raise _MethodRefused('a nested function captures this method scope')
@@ -372,17 +377,7 @@ class _MethodBody(ast.NodeTransformer):
         func = node.func
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
                 and func.value.id == 'self':
-            callee = func.attr
-            if callee not in self.callee_kernels:
-                raise _MethodRefused('a call to an unaccelerated method %r' % callee)
-            args = [ast.Name(id=_FIELD_PREFIX + str(self.fields[f][0]), ctx=ast.Load())
-                    for f in self.callee_reads[callee]]
-            args.extend(self.visit(arg) for arg in node.args)
-            keywords = [ast.keyword(arg=k.arg, value=self.visit(k.value))
-                        for k in node.keywords]
-            return ast.copy_location(
-                ast.Call(func=ast.Name(id=self.callee_kernels[callee], ctx=ast.Load()),
-                         args=args, keywords=keywords), node)
+            raise _MethodRefused('a call to another method stays in CPython')
         return self.generic_visit(node)
 
     def visit_Name(self, node):
@@ -524,6 +519,14 @@ def _method_kernels(tree):
                     if use.reason:
                         methods[stmt.name] = {'reason': use.reason}
                         continue
+                    if use.calls:
+                        # `self.m(...)` must keep CPython's dynamic dispatch: a subclass override,
+                        # an instance attribute or a monkeypatched class attribute can change which
+                        # function runs, and a direct kernel call would ignore all three.
+                        methods[stmt.name] = {
+                            'reason': 'a call to another method %r stays in CPython'
+                                      % sorted(use.calls)[0]}
+                        continue
                     unknown = [a for a in use.reads | use.writes if a not in field_kinds]
                     if unknown:
                         methods[stmt.name] = {'reason': 'unknown field %r' % sorted(unknown)[0]}
@@ -539,40 +542,18 @@ def _method_kernels(tree):
                                                         % field_kinds[bad_write[0]]}
                         continue
                     methods[stmt.name] = {'fn': stmt, 'reads': set(use.reads),
-                                          'writes': set(use.writes), 'calls': set(use.calls),
+                                          'writes': set(use.writes),
                                           'arg_kinds': method_kinds.get((classdef.name, stmt.name))}
-                # A call is only safe when the callee is a read-only method of this same class.
-                changed = True
-                while changed:
-                    changed = False
-                    for name, info in list(methods.items()):
-                        if 'reason' in info:
-                            continue
-                        bad = [c for c in info['calls']
-                               if c == name or c not in methods
-                               or 'reason' in methods[c] or methods[c]['writes']]
-                        if bad:
-                            info['reason'] = 'a call to an unaccelerated method %r' % bad[0]
-                            changed = True
-                # Transitive read set (read-only callees only) for the kernel signature.  Compute
-                # every method's set first: a caller needs its callee's fully-resolved list, and
-                # declaration order is not call order.
                 for name, info in methods.items():
                     if 'reason' in info:
                         continue
-                    needed, stack = set(info['reads']), list(info['calls'])
-                    while stack:
-                        callee = stack.pop()
-                        if callee in methods and 'reason' not in methods[callee]:
-                            needed |= methods[callee]['reads']
-                            stack.extend(methods[callee]['calls'])
-                    needed |= info['writes']
+                    needed = info['reads'] | info['writes']
                     info['needed'] = [f for f, _k in fields if f in needed]
                 for name, info in methods.items():
                     if 'reason' in info:
                         continue
                     try:
-                        _make_method_kernels(classdef.name, name, info, field_kinds, methods)
+                        _make_method_kernels(classdef.name, name, info, field_kinds)
                     except (KeyError, _MethodRefused, IndexError, TypeError):
                         info['reason'] = 'the method body is not a plain field/self-method body'
                 plan[classdef.name] = {'class': classdef, 'fields': fields,
@@ -586,18 +567,12 @@ def _method_kernels(tree):
     return plan
 
 
-def _make_method_kernels(class_name, method_name, info, field_kinds, methods):
+def _make_method_kernels(class_name, method_name, info, field_kinds):
     needed = info['needed']
     index_of = {f: i for i, f in enumerate(needed)}
     fields_map = {f: (index_of[f], field_kinds[f]) for f in needed}
-    # The callee kernel's signature lists ITS needed fields in class-declaration order, which is a
-    # prefix-consistent subset of the caller's `needed` list; passing the caller's set order would
-    # silently swap two same-typed fields.
-    callee_reads = {c: [f for f in methods[c]['needed'] if f in index_of]
-                    for c in info['calls']}
-    callee_kernels = {c: _method_kernel_name(class_name, c) for c in info['calls']}
     method_fn = info['fn']
-    rewriter = _MethodBody(fields_map, callee_reads, callee_kernels)
+    rewriter = _MethodBody(fields_map)
     body = [rewriter.visit(copy.deepcopy(stmt)) for stmt in method_fn.body]
     field_args = [ast.arg(arg=_FIELD_PREFIX + str(index_of[f]),
                           annotation=_kind_ast(field_kinds[f]))

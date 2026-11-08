@@ -396,10 +396,11 @@ print(f(1))
     def test_methods_read_write_call_and_raise(self):
         """A plain class method goes native: `self.<field>` reads/writes cross the C wrapper.
 
-        Covers an int field store (`add`), a read-only method called by another method
-        (`twice` -> `get`), two same-typed fields whose argument order must not be swapped
-        (`Pair`), a `list[int]` field read through `len` (`Cols`), and a method that raises: it
-        stays in CPython so the caller sees CPython's own exception.
+        Covers an int field store (`add`), a `list[int]` field read through `len` (`Cols`), and a
+        method that raises: `boom` stays in CPython so the caller sees CPython's own exception.
+        A method that calls another method (`Counter.twice`, `Pair.both`) stays in CPython by
+        name: `self.m(...)` keeps CPython's dynamic dispatch (subclass/instance/class-attribute
+        overrides), which a direct kernel call would bypass.
         """
         text = '''
 class Counter:
@@ -467,9 +468,11 @@ print('get', native.__ail_hybrid_method_Counter_get(c))
         with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
             src, out, report = self.build(tmp, 'methods', text)
             accelerated = set(report['accelerated'])
-            for name in ('Counter.add', 'Counter.get', 'Counter.twice',
-                         'Pair.only_b', 'Pair.both', 'Cols.size'):
+            for name in ('Counter.add', 'Counter.get', 'Pair.only_b', 'Cols.size'):
                 self.assertIn(name, accelerated, report)
+            for name in ('Counter.twice', 'Pair.both'):
+                self.assertNotIn(name, accelerated, report)
+                self.assertIn('another method', report['rejected'][name], report)
             self.assertIn('Counter.boom', report['rejected'])
             self.assertTrue(report['rejected']['Counter.boom'])
             want = run([sys.executable, str(src)], tmp)
@@ -484,6 +487,78 @@ print('get', native.__ail_hybrid_method_Counter_get(c))
             self.assertEqual(direct.returncode, 0, direct.stderr[-2000:])
             self.assertIn(b'native True', direct.stdout)
             self.assertIn(b'direct 7 7 int', direct.stdout)
+
+    def test_method_dispatch_is_not_bypassed(self):
+        """`self.m(...)` keeps CPython's dynamic dispatch under the hybrid.
+
+        A method that calls another method is refused by name, so a subclass override, an
+        instance attribute and a monkeypatched class attribute all change the answer exactly as in
+        CPython.  A field-only method (`get`) is still lifted, and the refused caller falls back
+        to its original Python body.
+        """
+        text = '''
+class Base:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def get(self) -> int:
+        return self.n
+
+    def twice(self) -> int:
+        return self.get() * 2 + self.get()
+
+
+class Sub(Base):
+    def get(self) -> int:
+        return self.n + 100
+
+
+class Raiser(Base):
+    def get(self) -> int:
+        raise ValueError("override")
+
+
+class Patch:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def get(self) -> int:
+        return self.n
+
+    def twice(self) -> int:
+        return self.get() * 2 + self.get()
+
+
+print('base', Base(5).twice())
+print('sub', Sub(5).twice())
+try:
+    print(Raiser(5).twice())
+except ValueError as e:
+    print('raiser', type(e).__name__, e)
+inst = Base(5)
+inst.get = lambda: 99
+print('inst', inst.twice())
+patched = Patch(3)
+Patch.get = lambda self: 7 + self.n
+print('patch', patched.twice())
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'dispatch', text)
+            accelerated = set(report['accelerated'])
+            self.assertIn('Base.get', accelerated, report)
+            self.assertIn('Patch.get', accelerated, report)
+            for name in ('Base.twice', 'Patch.twice'):
+                self.assertNotIn(name, accelerated, report)
+                self.assertIn('another method', report['rejected'][name], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'dispatch')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'base 15', got.stdout)
+            self.assertIn(b'sub 315', got.stdout)
+            self.assertIn(b'raiser ValueError override', got.stdout)
+            self.assertIn(b'inst 297', got.stdout)
+            self.assertIn(b'patch 30', got.stdout)
 
     def test_return_kinds_agree_or_refuse(self):
         """A return kind is inferred from every `return` when they all agree; mixed stays CPython.
@@ -532,7 +607,8 @@ except Exception as e:
         An unannotated top-level parameter with consistent int call sites resolves; conflicting
         call sites (int and str) leave it unresolved and the function in CPython.  A class whose
         `__init__` and one method parameter are unannotated resolves them from `Q(1)` and from the
-        `self.plus(k)` call site inside the class.
+        `self.plus(k)` call site inside the class.  `Q.step` itself stays in CPython because it
+        calls another method, but that call site still seeds `Q.plus`'s parameter.
         """
         text = '''
 class Q:
@@ -571,8 +647,10 @@ print('q', q.step(2), q.plus(10))
 '''
         with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
             src, out, report = self.build(tmp, 'params', text)
-            for name in ('annotated', 'unannotated', 'agreement', 'Q.step', 'Q.plus'):
+            for name in ('annotated', 'unannotated', 'agreement', 'Q.plus'):
                 self.assertIn(name, report['accelerated'], report)
+            self.assertNotIn('Q.step', report['accelerated'], report)
+            self.assertIn('another method', report['rejected']['Q.step'], report)
             self.assertIn('disagreement', report['rejected'])
             want = run([sys.executable, str(src)], tmp)
             got = run([str(out / 'params')], tmp)
