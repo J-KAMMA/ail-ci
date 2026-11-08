@@ -22,13 +22,17 @@ The unit is one top-level function. Selection reuses the existing mixed-mode mac
 * `pyboxed2`'s mixed-mode `_setup_mix` rechecks every candidate by actually calling `pyfunc.to_c`; a
   function participates only if the real typed emitter accepts it.
 * `bigcap` marks functions whose ints may leave int64; the mixed-mode overflow wrapper is reused.
-* the existing exception rule keeps a function boxed when a typed exception could escape past a
-  CPython `try`. The prototype adds no second exception mechanism.
-* the prototype additionally refuses a body with any operation that can trap in the typed runtime:
-  subscripting (index/key errors), division or power (zero division, complex results), a call (an
-  arbitrary side effect or exception), `raise`/`assert`, `try`/`with`/import, `global`/`nonlocal`,
-  deletes and attribute/index stores. Those bodies stay in CPython, so a trap cannot bypass the
-  caller's `try/except`. This is conservative by design: a missed speed-up is safe.
+* a non-slice subscript is allowed. The hybrid patches the clone's own index/key runtime stops
+  (`list index out of range`, `key error`, ...) to a per-function trap; the wrapper abandons the
+  call and re-runs the original Python function, so CPython supplies the exact `IndexError` or
+  `KeyError`, message and caller `try/except` behavior. Slice subscripts are still refused.
+* the prototype additionally refuses a body with any other operation that can trap in the typed
+  runtime: division or power (zero division, complex results), a call (an arbitrary side effect or
+  exception), `raise`/`assert`, `try`/`with`/import, `global`/`nonlocal`, deletes and attribute
+  stores. Those bodies stay in CPython, so a trap cannot bypass the caller's `try/except`. This is
+  conservative by design: a missed speed-up is safe.
+* a top-level function that stays in CPython is named with its reason in `build.json` and on the
+  build's stderr, including functions refused before selection by `pymix` or the typed emitter.
 
 The analysis runs the real CLI general path in a temporary subprocess and captures the mixed-mode
 units it already emits. If the CLI refuses the program, a direct `pyboxed2.build` on the original
@@ -108,12 +112,12 @@ falls back to Python. Thus an argument value, a list item, an attribute or a dic
 the function through any route produces CPython's exact answer. A value that fits int64 prints what
 CPython prints.
 
-**Exceptions.** The typed exception rule from mixed mode is unchanged, and the hybrid adds the
-body gate above. A function whose typed closure could raise an exception that would escape a CPython
-handler is not accelerated; a function with indexing, division, a call or an explicit raise stays in
-CPython (for example `a // b` with a zero divisor and `xs[0]` on an empty list). The same exception
-class, message, traceback shape and caller `try/except` behavior are therefore observed. Conversions
-never leak a partial result: the wrapper either returns a value or re-enters Python.
+**Exceptions.** A function with division, a call, an explicit raise or another unhandled trap stays
+in CPython (for example `a // b` with a zero divisor). An index or key failure inside an accelerated
+function takes the patched per-call trap described above and re-runs the original, so `xs[0]` on an
+empty list raises CPython's `IndexError` and a missing dict key raises CPython's `KeyError`: same
+class, message, traceback shape and caller `try/except` behavior. Conversions never leak a partial
+result: the wrapper either returns a value or re-enters Python.
 
 **Mutation.** A list parameter is copied into the native call. A function that mutates a list
 parameter (item/store/delete, `append`/`extend`/`pop`/..., or passing the list to another program

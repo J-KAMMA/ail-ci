@@ -6701,6 +6701,8 @@ def main(argv=None):
             print('built %s: %d function(s) accelerated%s' % (
                 args.out, len(report.get('accelerated') or []),
                 '' if report.get('accelerated') else ' (the program runs in CPython)'))
+            for _name, _why in sorted((report.get('rejected') or {}).items()):
+                print('  %s stays in CPython: %s' % (_name, _why), file=sys.stderr)
         else:
             print(json.dumps(report, ensure_ascii=False))
         return 0

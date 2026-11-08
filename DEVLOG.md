@@ -1,3 +1,44 @@
+## 2026-11-08 -- wedge2: hybrid-native functions index lists and dicts (job-wedge2-11081603)
+
+`_unsafe_body` now allows a non-slice `Subscript` (slices, attribute stores, list-parameter mutation and
+simple list aliases still stay in CPython).  The clone's own index/key runtime stop is rewritten to a
+per-call thread-local trap, and a generated setjmp wrapper longjmps back to the Python wrapper, which
+re-runs the original function; a successful index stays native, while an out-of-range index or missing
+key gets CPython's own `IndexError`/`KeyError`, message and caller `try/except` behaviour.  This also
+applies to int, float, str and bool results; the int overflow wrapper is unchanged.  Wedge1's silent
+refusals are closed in the same hybrid selection: `build.json` and the build stderr now name every
+top-level function that stays in CPython, including functions refused before `_select` by `pymix` or the
+typed emitter.  No default build path changed; `measure.py` already prints `hybrid/cpython`.
+
+Measurements under `ulimit -v 2500000`, `-j 2` (fresh baseline from `HEAD` in `/tmp`, then this tree):
+native 24/97 (24.7%) -> 29/97 (29.9%).  The five additions are `edit_dist.bigram_overlap`,
+`edit_dist.common_prefix`, `edit_dist.hamming`, `matrix.trace` and `tokenizer.count_keywords`.
+Hybrid/CPython wall-time geomean is 0.980x before and 0.985x after, so the change adds coverage at
+parity, not a measurable speed-up.  After ratios (hybrid/CPython): ast_lint 0.989, bitset_bloom
+0.939, csv_parse 0.983, dataframe_group 0.931, edit_dist 0.997, field_valid 1.155, float_loops 1.033,
+graph_search 1.004, hashing 1.008, json_parse 0.906, matrix 0.995, rolling_stats 0.905, sort_rank
+1.019, tokenizer 0.992, tree_build 0.943.  Top remaining refusal reasons by profiled self-time share:
+not-a-top-level-function 20.9%, unresolved-return 20.4%, call-can-raise 13.0%, unresolved-param
+`node` 10.6%, `adj` 10.3%, `words` 5.0%, `data` 3.0%, module-constant 3.1%, typed-clone ABI 2.5%,
+tuple-parameter 2.3%, division 2.3%, list-parameter-mutated 1.3%; indexing-can-raise is gone.  After
+the change 0 of 97 top-level refusals are silent (wedge1: 54 of 73).
+
+Probes, all `/tmp/probes/`, run with `bash ~/tools/cmp.sh <probe> $PWD` (general and default builds)
+and through the hybrid build: `hybrid_index.py` (in-range, negative, out-of-range, empty list;
+`first/last/local/put` native), `hybrid_dict.py` (dict hit, missing key, local store;
+`hit/missing/store` native), `hybrid_nested.py` (`a[i][j]` native), `hybrid_strindex.py` and
+`hybrid_types.py` (native float/str results from local lists; `list[float]`/`list[str]` parameters
+refused by ABI name), `hybrid_values.py` (values through an argument, list item and list-of-int dict
+value; attribute and dict-of-list values refused by name), `hybrid_alias.py` (list-parameter alias and
+direct mutation refused by name), `hybrid_dictkinds.py` (native str-key dict; float/list-valued dicts
+refused by name), `hybrid_reasons.py` (every refusal named), `hybrid_uncaught_index.py` (uncaught
+`IndexError: list index out of range`) and `hybrid_keyerror.py` (caught `KeyError` type and message).
+All stdout/exit status match CPython; the hybrid build also matches the last stderr line.
+
+Tests on the final tree, `-j 2`: `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` -- 4 modules, 0 failed, 214 s.  `python3 tools/update_manifest.py` ran and
+`--check` passes.
+
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 
 `test_ail_sdk` was green before err2 and its
