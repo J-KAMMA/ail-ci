@@ -5,15 +5,15 @@ Generic (shallow and deep) copying operations.
 AIL source rewrite of CPython 3.12's copy.py.  The dispatch tables and the
 `type(x)` lookups are replaced by isinstance() chains because this compiler
 cannot use a type object as a plain value or as a dict key.  The copy/deepcopy
-messages, the memo protocol and the sharing rules are CPython's.  A class
-instance is copied through its `__dict__` into a plain shell object (the
-compiler has no way to call `cls.__new__`); every program in
-lab/stdlib/copy/ only reads the copied fields.
+messages, the memo protocol and the sharing rules are CPython's for the types
+this compiler builds: None, bool, int, float, str, bytes, bytearray, list,
+tuple (of any length), dict, set and frozenset.
 
-The `__copy__`/`__deepcopy__` hooks are not dispatched: on a value of unknown
-static kind the compiler refuses the dunder call, so a class that defines them
-is copied through its `__dict__` instead (see
-lab/stdlib/copy/03_user_class_hooks.py and lab/stdlib/stdfall2/RESULTS.md).
+A class instance cannot be rebuilt here: the compiler has no `object.__new__`,
+no `cls.__new__` and no `type(x)` as a value, so a copy would not have the
+class of the original.  Such a value (and the `__copy__`/`__deepcopy__` hooks,
+which need the same dunder dispatch) is refused by name, naming its type,
+instead of returning a look-alike of another class.
 """
 
 class Error(Exception):
@@ -23,11 +23,6 @@ class Error(Exception):
 error = Error
 
 __all__ = ["Error", "copy", "deepcopy"]
-
-
-class _Shell:
-    def __init__(self):
-        pass
 
 
 def _is_atomic(x):
@@ -40,6 +35,12 @@ def _is_atomic(x):
     if isinstance(x, range):
         return True
     return False
+
+
+def _same(a, b):
+    if isinstance(a, int) and isinstance(b, int):
+        return a == b
+    return a is b
 
 
 def _copy_list(x):
@@ -67,18 +68,61 @@ def _copy_bytearray(x):
     return bytearray(x)
 
 
+_memo_links = []
+
+
+class _KeepAlive:
+    pass
+
+
+_KEEPALIVE = _KeepAlive()
+
+
+def _memo_keepalive(d, obj):
+    for link in _memo_links:
+        if link[0] is d and link[1] is _KEEPALIVE:
+            link[2].append(obj)
+            return
+    value = []
+    d[len(d)] = value
+    _memo_links.append([d, _KEEPALIVE, value, True])
+    value.append(obj)
+
+
+def _memo_get(d, obj):
+    for link in _memo_links:
+        if link[0] is d and _same(link[1], obj):
+            return link[2]
+    return _NOT_FOUND
+
+
+def _memo_put(d, obj, val):
+    key = len(d)
+    d[key] = val
+    _memo_links.append([d, obj, val])
+
+
 class _Memo:
-    def __init__(self):
+    def __init__(self, d=None):
+        self.d = d
         self.pairs = []
 
     def get(self, obj):
         for pair in self.pairs:
-            if pair[0] is obj:
+            if _same(pair[0], obj):
                 return pair[1]
+        if self.d is not None:
+            return _memo_get(self.d, obj)
         return _NOT_FOUND
 
     def put(self, obj, val):
+        for pair in self.pairs:
+            if _same(pair[0], obj):
+                return
         self.pairs.append((obj, val))
+        if self.d is not None:
+            _memo_put(self.d, obj, val)
+            _memo_keepalive(self.d, obj)
 
 
 class _NotFound:
@@ -88,17 +132,10 @@ class _NotFound:
 _NOT_FOUND = _NotFound()
 
 
-def _shell(x, deep, memo):
-    y = _Shell()
-    if deep:
-        memo.put(x, y)
-    attrs = vars(x)
-    for key in attrs:
-        if deep:
-            setattr(y, key, deepcopy(attrs[key], memo))
-        else:
-            setattr(y, key, attrs[key])
-    return y
+def _refuse(x, deep):
+    kind = "deep" if deep else "shallow"
+    raise Error("un(%s)copyable object of type %s (class instances have no "
+                "instance constructor in this compiler)" % (kind, type(x).__name__))
 
 
 def _attrs(x):
@@ -106,21 +143,6 @@ def _attrs(x):
         return vars(x)
     except TypeError:
         return None
-
-
-def _tuple_of(items):
-    n = len(items)
-    if n == 0:
-        return ()
-    if n == 1:
-        return (items[0],)
-    if n == 2:
-        return (items[0], items[1])
-    if n == 3:
-        return (items[0], items[1], items[2])
-    if n == 4:
-        return (items[0], items[1], items[2], items[3])
-    raise Error("un(deep)copyable tuple of length %d" % (n,))
 
 
 def copy(x):
@@ -143,7 +165,7 @@ def copy(x):
     else:
         attrs = _attrs(x)
         if isinstance(attrs, dict):
-            return _shell(x, False, None)
+            _refuse(x, False)
         raise Error("un(shallow)copyable object of type %s" % (type(x).__name__,))
 
 
@@ -152,8 +174,12 @@ def deepcopy(x, memo=None, _nil=[]):
 
     See the module's __doc__ string for more info.
     """
-    if memo is None or not isinstance(memo, _Memo):
+    if memo is None:
         memo = _Memo()
+    elif not isinstance(memo, _Memo):
+        if not isinstance(memo, dict):
+            raise TypeError("memo must be a dict")
+        memo = _Memo(memo)
     y = memo.get(x)
     if y is not _NOT_FOUND:
         return y
@@ -162,7 +188,18 @@ def deepcopy(x, memo=None, _nil=[]):
         items = []
         for item in x:
             items.append(deepcopy(item, memo))
-        return frozenset(items)
+        same = True
+        i = 0
+        for item in x:
+            if item is not items[i]:
+                same = False
+                break
+            i = i + 1
+        if same:
+            return x
+        y = frozenset(items)
+        memo.put(x, y)
+        return y
 
     if _is_atomic(x):
         return x
@@ -184,6 +221,10 @@ def deepcopy(x, memo=None, _nil=[]):
         for item in x:
             y.add(deepcopy(item, memo))
         return y
+    elif isinstance(x, bytearray):
+        y = bytearray(x)
+        memo.put(x, y)
+        return y
     elif isinstance(x, tuple):
         items = []
         for item in x:
@@ -200,9 +241,11 @@ def deepcopy(x, memo=None, _nil=[]):
             i = i + 1
         if same:
             return x
-        return _tuple_of(items)
+        y = tuple(items)
+        memo.put(x, y)
+        return y
     else:
         attrs = _attrs(x)
         if isinstance(attrs, dict):
-            return _shell(x, True, memo)
+            _refuse(x, True)
         raise Error("un(deep)copyable object of type %s" % (type(x).__name__,))

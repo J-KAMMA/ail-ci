@@ -11,6 +11,6 @@ values = [
     -1e100,
 ]
 for x in values:
-    raw = marshal.dumps(x)
+    raw = marshal.dumps(x, 2)
     back = marshal.loads(raw)
     print(type(back).__name__, back == x, raw.hex())

@@ -5,9 +5,10 @@ Tool for measuring execution time of small code snippets.
 This AIL source keeps the callable form of `Timer`: the statement and the
 setup are functions, and `timeit(number=...)`, `repeat(repeat=...,
 number=...)` and the module-level `timeit()` / `repeat()` call them.  The
-string form needs `exec`/`compile`, which this compiler does not build, so a
-`str` statement or setup is refused with `TypeError` naming that requirement
-instead of being run a different way.  The command-line `main()`, the
+string form needs `exec`/`compile`, which this compiler does not build.  A
+program that uses one calls `exec` and is refused by name at build time; a
+`str` that still reaches `Timer` is refused with `TypeError` naming that
+requirement instead of being run a different way.  The command-line `main()`, the
 `autorange()` helper and `print_exc()` (which imports `linecache` and
 `traceback`) are left out for the same reason; behaviour of the callable
 path, including `default_timer`, is CPython's.
@@ -68,8 +69,6 @@ class Timer:
 
     def timeit(self, number=default_number):
         """Time 'number' executions of the main statement."""
-        if number < 0:
-            raise ValueError("number must be non-negative")
         self.setup()
         t0 = self.timer()
         for _i in range(number):

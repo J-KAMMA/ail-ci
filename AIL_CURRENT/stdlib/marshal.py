@@ -3,19 +3,25 @@
 Internal Python object serialization, as AIL source.
 
 PyPy's `_marshal.py` writes the historical version-0 layout (text floats, no
-object references).  CPython 3.12 is the oracle here, so the writer below
-produces CPython's version-4 layout instead: binary floats (`g`), the ASCII
-string codes (`z`/`Z` short, `a`/`A` long), base-2**15 longs (`l`) and the
-`FLAG_REF` bit on exact ints, floats, strings, bytes, tuples and on shared
-lists/dicts.  The reader accepts that layout, including `r` references.
+object references).  CPython 3.12 is the oracle here.  The writer below covers
+CPython's versions 0-2 exactly: text floats (`f`) for 0/1, binary floats (`g`)
+for 2, base-2**15 longs (`l`), the Unicode string code (`u`) and the long tuple
+form.  Those versions have no `FLAG_REF` bit and no interned-string codes, so
+their bytes are fixed by the value alone.
+
+Versions 3/4 choose `FLAG_REF` and the ASCII/interned string codes from each
+object's CPython refcount and interned bit.  This compiler has neither (an int
+is a value and a string has no interned flag), so `dumps` refuses versions 3
+and 4 by name instead of writing different bytes.  The reader accepts both the
+version-2 layout and CPython's version-4 layout, including `r` references,
+`z`/`Z` short ASCII, `a`/`A` long ASCII and `t` interned strings.
 
 The values the lab programs use are covered: None, True/False, ints (the
-32-bit `i` form and the `l` long form, including the int64 boundaries),
-binary floats, str (ASCII and UTF-8), bytes, tuples, lists and dicts.  Shared
-lists and tuples use CPython's `r` reference form.  A set, frozenset or a user
-class is refused by name with `ValueError`.  The integer arithmetic is AIL's
-int64, so `dumps`/`loads` stop loudly at the int64 boundary; ints beyond it
-cannot be literals in the default build in any case.
+32-bit `i` form and the `l` long form, including the int64 boundaries), binary
+floats, str (ASCII and UTF-8), bytes, tuples, lists and dicts.  A set,
+frozenset or a user class is refused by name with `ValueError`.  The integer
+arithmetic is AIL's int64, so `dumps`/`loads` stop loudly at the int64
+boundary; ints beyond it cannot be literals in the default build in any case.
 """
 
 __all__ = ["dump", "dumps", "load", "loads", "version"]
@@ -161,9 +167,19 @@ def _is_ascii(s):
     return True
 
 
+def _same(a, b):
+    """Identity, as CPython's marshal ref table uses, but an int here is a
+    value: two equal ints must not reach the runtime `is` stop (C114)."""
+    if isinstance(a, int) and isinstance(b, int):
+        return a == b
+    return a is b
+
+
 class _Writer:
-    def __init__(self, top):
+    def __init__(self, top, version=4):
         self.top = top
+        self.version = version
+        self.use_refs = version >= 3
         self.out = []
         self.refs = []
         self.ids = []
@@ -171,7 +187,7 @@ class _Writer:
 
     def _count(self, x):
         for i in range(len(self.ids)):
-            if self.ids[i] is x:
+            if _same(self.ids[i], x):
                 self.counts[i] = self.counts[i] + 1
                 return
         self.ids.append(x)
@@ -186,33 +202,19 @@ class _Writer:
 
     def _shared(self, x):
         for i in range(len(self.ids)):
-            if self.ids[i] is x:
+            if _same(self.ids[i], x):
                 return self.counts[i] > 1
         return False
 
     def _find_ref(self, x):
         for i in range(len(self.refs)):
-            if self.refs[i] is x:
+            if _same(self.refs[i], x):
                 return i
-        if isinstance(x, int):
-            for i in range(len(self.refs)):
-                if isinstance(self.refs[i], int) and self.refs[i] == x:
-                    return i
-        elif isinstance(x, float):
-            for i in range(len(self.refs)):
-                if isinstance(self.refs[i], float) and self.refs[i] == x:
-                    return i
-        elif isinstance(x, str):
-            for i in range(len(self.refs)):
-                if isinstance(self.refs[i], str) and self.refs[i] == x:
-                    return i
-        elif isinstance(x, bytes):
-            for i in range(len(self.refs)):
-                if isinstance(self.refs[i], bytes) and self.refs[i] == x:
-                    return i
         return -1
 
     def _start(self, x):
+        if not self.use_refs:
+            return 0
         idx = self._find_ref(x)
         if idx >= 0:
             self.out.append(_byte(_TYPE_REF))
@@ -299,8 +301,14 @@ class _Writer:
         f = self._start(x)
         if f < 0:
             return
-        self.out.append(_byte(_TYPE_BINARY_FLOAT | f))
-        self.out.append(_float_bytes(x))
+        if self.version > 1:
+            self.out.append(_byte(_TYPE_BINARY_FLOAT | f))
+            self.out.append(_float_bytes(x))
+        else:
+            raw = ("%.17g" % x).encode("ascii")
+            self.out.append(_byte(_TYPE_FLOAT | f))
+            self.out.append(_byte(len(raw)))
+            self.out.append(raw)
 
     def _write_bytes(self, x):
         f = self._start(x)
@@ -316,6 +324,14 @@ class _Writer:
             return
         raw = x.encode("utf-8")
         interned = _is_name_chars(x)
+        if self.version < 4:
+            if self.version >= 3 and interned:
+                self.out.append(_byte(_TYPE_INTERNED | f))
+            else:
+                self.out.append(_byte(_TYPE_UNICODE | f))
+            self.out.append(_u32(len(raw)))
+            self.out.append(raw)
+            return
         if _is_ascii(x):
             if len(raw) < 256:
                 if interned:
@@ -341,7 +357,7 @@ class _Writer:
         f = self._start(x)
         if f < 0:
             return
-        if len(x) < 256:
+        if self.version >= 4 and len(x) < 256:
             self.out.append(_byte(_TYPE_SMALL_TUPLE | f))
             self.out.append(_byte(len(x)))
         else:
@@ -498,9 +514,32 @@ class _Reader:
         raise ValueError("bad marshal code: %d" % code)
 
 
-def dumps(x, version_arg=None):
-    """dumps(value) -> bytes: the value in CPython 3.12's marshal version-4 layout."""
-    w = _Writer(x)
+def _version(v):
+    if v is None:
+        return 4
+    if not isinstance(v, int):
+        raise TypeError("an integer is required")
+    if v > 4:
+        return 4
+    if v < 0:
+        return 0
+    return v
+
+
+def dumps(x, version=4):
+    """dumps(value[, version]) -> bytes: CPython's marshal layout, versions 0-2.
+
+    Versions 3 and 4 write FLAG_REF and interned-string codes chosen from each
+    object's CPython refcount and interned bit.  This compiler has neither (a
+    string is a value, not an interned object; there is no refcount), so those
+    versions cannot be byte-exact and are refused by name instead.
+    """
+    v = _version(version)
+    if v >= 3:
+        raise ValueError("marshal.dumps: version %d needs CPython's per-object refcount "
+                         "and interned bit, which this compiler does not keep; pass "
+                         "version=2 for the exact version-2 layout" % v)
+    w = _Writer(x, v)
     w._count(x)
     w.write(x)
     return b"".join(w.out)
@@ -508,12 +547,15 @@ def dumps(x, version_arg=None):
 
 def loads(data):
     """loads(bytes) -> value: read one value written by dumps()/CPython's marshal."""
-    return _Reader(bytes(data)).load()
+    value = _Reader(bytes(data)).load()
+    if value is _NULL:
+        raise TypeError("NULL object in marshal data for object")
+    return value
 
 
-def dump(x, f, version_arg=None):
+def dump(x, f, version=4):
     """dump(value, file): write the value to a binary file object."""
-    f.write(dumps(x))
+    f.write(dumps(x, version))
 
 
 def load(f):
