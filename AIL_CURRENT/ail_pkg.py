@@ -24,6 +24,7 @@ import argparse
 import email.parser
 import email.policy
 import hashlib
+import itertools
 import json
 import os
 import platform
@@ -163,58 +164,271 @@ def _download(url, destination, index=None):
 
 # ---------------------------------------------------------------- versions and markers
 
+# PEP 440 parsing.  The standard library has no version parser, so keep a small
+# faithful one here: the ordering below is exactly packaging.version's ``_cmpkey``.
+_VERSION_RE = re.compile(r"""
+    ^\s*v?
+    (?:(?P<epoch>[0-9]+)!)?
+    (?P<release>[0-9]+(?:\.[0-9]+)*)
+    (?P<pre>[-_.]?(?P<pre_l>alpha|a|beta|b|preview|pre|c|rc)[-_.]?(?P<pre_n>[0-9]+)?)?
+    (?P<post>(?:-(?P<post_n1>[0-9]+))|(?:[-_.]?(?P<post_l>post|rev|r)[-_.]?(?P<post_n2>[0-9]+)?))?
+    (?P<dev>[-_.]?(?P<dev_l>dev)[-_.]?(?P<dev_n>[0-9]+)?)?
+    (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
+    \s*$
+""", re.VERBOSE | re.IGNORECASE)
+_LOCAL_SEPARATORS_RE = re.compile(r"[._-]")
+_VERSION_PREFIX_RE = re.compile(r"^([0-9]+)((?:a|b|c|rc)[0-9]+)$")
+
+
+class _ParsedVersion:
+    __slots__ = ("text", "epoch", "release", "pre", "post", "dev", "local", "is_prerelease", "key")
+
+    def __init__(self, text, epoch, release, pre, post, dev, local):
+        self.text = text
+        self.epoch = epoch
+        self.release = release
+        self.pre = pre
+        self.post = post
+        self.dev = dev
+        self.local = local
+        self.is_prerelease = pre is not None or dev is not None
+        self.key = _cmpkey(epoch, release, pre, post, dev, local)
+
+
+def _parse_letter_version(letter, number):
+    if letter:
+        if number is None:
+            number = 0
+        letter = letter.lower()
+        if letter == "alpha":
+            letter = "a"
+        elif letter == "beta":
+            letter = "b"
+        elif letter in ("c", "pre", "preview"):
+            letter = "rc"
+        elif letter in ("rev", "r"):
+            letter = "post"
+        return letter, int(number)
+    if number:
+        return "post", int(number)
+    return None
+
+
+def _parse_local_version(local):
+    if local is None:
+        return None
+    return tuple(part.lower() if not part.isdigit() else int(part)
+                 for part in _LOCAL_SEPARATORS_RE.split(local))
+
+
+def _cmpkey(epoch, release, pre, post, dev, local):
+    _release = tuple(reversed(list(itertools.dropwhile(lambda part: part == 0, reversed(release)))))
+    if pre is None and post is None and dev is not None:
+        pre_key = (-1,)
+    elif pre is None:
+        pre_key = (1,)
+    else:
+        pre_key = (0,) + pre
+    post_key = (-1,) if post is None else (0,) + post
+    dev_key = (1,) if dev is None else (0,) + dev
+    if local is None:
+        local_key = ((-1, 0),)
+    else:
+        local_key = tuple((1, part) if isinstance(part, int) else (0, part) for part in local)
+    return epoch, _release, pre_key, post_key, dev_key, local_key
+
+
+def _parse_version(version):
+    match = _VERSION_RE.match(version)
+    if not match:
+        return None
+    release = tuple(int(part) for part in match.group("release").split("."))
+    pre = _parse_letter_version(match.group("pre_l"), match.group("pre_n"))
+    post = _parse_letter_version(match.group("post_l"), match.group("post_n1") or match.group("post_n2"))
+    dev = _parse_letter_version(match.group("dev_l"), match.group("dev_n"))
+    local = _parse_local_version(match.group("local"))
+    epoch = int(match.group("epoch") or 0)
+    return _ParsedVersion(version, epoch, release, pre, post, dev, local)
+
+
 def _version_key(version):
-    parts = re.findall(r"\d+|[A-Za-z]+", version)
-    key = []
-    for part in parts:
-        key.append((0, int(part)) if part.isdigit() else (1, part.lower()))
-    return tuple(key)
+    parsed = _parse_version(version)
+    if parsed is None:
+        raise PackageError("invalid version %r" % version)
+    return parsed.key
 
 
 def _is_stable(version):
-    # PEP 440 puts a pre-release suffix directly after the release segment
-    # (``1.0.0rc1``) or after a separator, so accept either boundary.
-    return not re.search(r"(?:^|[._-]|\d)(?:alpha|beta|preview|pre|rc|a|b|c|dev)\d*",
-                         version, re.IGNORECASE)
-
-
-def _version_tuple(version):
-    match = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?", version)
-    if not match:
-        return ()
-    return tuple(int(part or 0) for part in match.groups())
+    parsed = _parse_version(version)
+    return parsed is not None and not parsed.is_prerelease
 
 
 def _compare(left, right, versioned=False):
     if versioned:
-        left_key, right_key = _version_key(left), _version_key(right)
-        return (left_key > right_key) - (left_key < right_key)
+        left_version, right_version = _parse_version(left), _parse_version(right)
+        if left_version is not None and right_version is not None:
+            left_key, right_key = left_version.key, right_version.key
+            return (left_key > right_key) - (left_key < right_key)
     return (left > right) - (left < right)
 
 
+def _public_text(parsed):
+    return parsed.text.split("+", 1)[0]
+
+
+def _base_key(parsed):
+    release = list(parsed.release)
+    while release and release[-1] == 0:
+        release.pop()
+    return parsed.epoch, tuple(release)
+
+
+def _canonicalize(parsed, strip_trailing_zero=True):
+    parts = []
+    if parsed.epoch != 0:
+        parts.append("%d!" % parsed.epoch)
+    segment = ".".join(str(part) for part in parsed.release)
+    if strip_trailing_zero:
+        segment = re.sub(r"(\.0)+$", "", segment)
+    parts.append(segment)
+    if parsed.pre is not None:
+        parts.append("%s%d" % (parsed.pre[0], parsed.pre[1]))
+    if parsed.post is not None:
+        parts.append(".post%d" % parsed.post[1])
+    if parsed.dev is not None:
+        parts.append(".dev%d" % parsed.dev[1])
+    if parsed.local is not None:
+        parts.append("+" + ".".join(str(part) for part in parsed.local))
+    return "".join(parts)
+
+
+def _version_split(version):
+    result = []
+    epoch, _, rest = version.rpartition("!")
+    result.append(epoch or "0")
+    for item in rest.split("."):
+        match = _VERSION_PREFIX_RE.search(item)
+        if match:
+            result.extend(match.groups())
+        else:
+            result.append(item)
+    return result
+
+
+def _version_join(components):
+    epoch, *rest = components
+    return "%s!%s" % (epoch, ".".join(rest))
+
+
+def _is_not_suffix(segment):
+    return not any(segment.startswith(prefix) for prefix in ("dev", "a", "b", "rc", "post"))
+
+
+def _pad_version(left, right):
+    left_split, right_split = [], []
+    left_split.append(list(itertools.takewhile(lambda part: part.isdigit(), left)))
+    right_split.append(list(itertools.takewhile(lambda part: part.isdigit(), right)))
+    left_split.append(left[len(left_split[0]):])
+    right_split.append(right[len(right_split[0]):])
+    left_split.insert(1, ["0"] * max(0, len(right_split[0]) - len(left_split[0])))
+    right_split.insert(1, ["0"] * max(0, len(left_split[0]) - len(right_split[0])))
+    return (list(itertools.chain.from_iterable(left_split)),
+            list(itertools.chain.from_iterable(right_split)))
+
+
+def _prefix_match(prospective, wanted_text):
+    wanted = _parse_version(wanted_text)
+    if wanted is None:
+        raise PackageError("unknown Requires-Python clause %r" % wanted_text)
+    split_spec = _version_split(_canonicalize(wanted, strip_trailing_zero=False))
+    split_prospective = _version_split(_canonicalize(prospective, strip_trailing_zero=False))
+    padded_prospective, _ = _pad_version(split_prospective, split_spec)
+    return padded_prospective[:len(split_spec)] == split_spec
+
+
+def _specifier_allows_prerelease(operator, wanted):
+    if operator not in ("==", ">=", "<=", "~=", "==="):
+        return False
+    text = wanted[:-2] if operator == "==" and wanted.endswith(".*") else wanted
+    parsed = _parse_version(text)
+    return parsed is not None and parsed.is_prerelease
+
+
+def _clause_accepts(operator, wanted, prospective):
+    if operator == "===":
+        return prospective.text.strip().lower() == wanted.lower()
+    if operator == "==":
+        if wanted.endswith(".*"):
+            return _prefix_match(prospective, wanted[:-2])
+        spec = _parse_version(wanted)
+        if spec is None:
+            raise PackageError("unknown Requires-Python clause %r" % wanted)
+        if spec.local is None:
+            public = _parse_version(_public_text(prospective))
+            return public is not None and public.key == spec.key
+        return prospective.key == spec.key
+    if operator == "!=":
+        return not _clause_accepts("==", wanted, prospective)
+    if operator == "~=":
+        components = list(itertools.takewhile(_is_not_suffix, _version_split(wanted)))
+        prefix = _version_join(components[:-1]) + ".*"
+        return (_clause_accepts(">=", wanted, prospective)
+                and _clause_accepts("==", prefix, prospective))
+    spec = _parse_version(wanted)
+    if spec is None:
+        raise PackageError("unknown Requires-Python clause %r" % wanted)
+    if operator in ("<=", ">="):
+        public = _parse_version(_public_text(prospective))
+        if public is None:
+            return False
+        if operator == "<=":
+            return public.key <= spec.key
+        return public.key >= spec.key
+    if operator == "<":
+        if not prospective.key < spec.key:
+            return False
+        if not spec.is_prerelease and prospective.is_prerelease:
+            if _base_key(prospective) == _base_key(spec):
+                return False
+        return True
+    if operator == ">":
+        if not prospective.key > spec.key:
+            return False
+        if spec.post is None and prospective.post is not None:
+            if _base_key(prospective) == _base_key(spec):
+                return False
+        if prospective.local is not None and _base_key(prospective) == _base_key(spec):
+            return False
+        return True
+    raise PackageError("unknown Requires-Python clause %r" % operator)
+
+
+def _specifier_clause(clause):
+    clause = clause.strip()
+    if clause.startswith("(") and clause.endswith(")"):
+        clause = clause[1:-1].strip()
+    match = re.match(r"^(~=|===|==|!=|<=|>=|<|>)\s*(.*?)\s*$", clause)
+    if not match or not match.group(2):
+        raise PackageError("unknown Requires-Python clause %r" % clause)
+    return match.group(1), match.group(2)
+
+
 def _accepts_python(spec, version):
-    """True when a ``Requires-Python`` style specifier accepts `version`."""
+    """True when a PEP 440 specifier (``Requires-Python`` or a requirement) accepts `version`."""
     if not spec:
         return True
-    for clause in spec.split(","):
-        clause = clause.strip()
-        if not clause:
-            continue
-        match = re.match(r"^(~=|==|!=|<=|>=|<|>)\s*([0-9A-Za-z._+*-]+)$", clause)
-        if not match:
-            raise PackageError("unknown Requires-Python clause %r" % clause)
-        operator, wanted = match.groups()
-        if operator == "~=":
-            prefix = wanted.rsplit(".", 1)[0]
-            if not (version == wanted or version.startswith(prefix + ".")):
-                return False
-            continue
-        comparison = _compare(version, wanted, versioned=True)
-        accepted = {"==": comparison == 0, "!=": comparison != 0, "<": comparison < 0,
-                    "<=": comparison <= 0, ">": comparison > 0, ">=": comparison >= 0}[operator]
-        if not accepted:
-            return False
-    return True
+    text = spec.strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1].strip()
+    clauses = [_specifier_clause(clause) for clause in text.split(",") if clause.strip()]
+    if not clauses:
+        return True
+    parsed = _parse_version(version)
+    if parsed is None:
+        raise PackageError("unknown version %r" % version)
+    if parsed.is_prerelease and not any(_specifier_allows_prerelease(*clause) for clause in clauses):
+        return False
+    return all(_clause_accepts(operator, wanted, parsed) for operator, wanted in clauses)
 
 
 _VERSION_VARS = {"python_version", "python_full_version"}

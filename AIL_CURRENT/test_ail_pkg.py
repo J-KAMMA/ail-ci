@@ -415,5 +415,23 @@ class Sync(Base):
         self.assertIn("no ail.lock", done.stderr)
 
 
+class VersionRules(unittest.TestCase):
+    def test_pep440_zero_padding_and_wildcards(self):
+        self.assertFalse(ail_pkg._accepts_python(">1.0", "1.0.0"))
+        self.assertTrue(ail_pkg._accepts_python("==1.0", "1.0.0"))
+        self.assertTrue(ail_pkg._accepts_python("==1.0.*", "1.0.0"))
+        self.assertTrue(ail_pkg._accepts_python("(>=1.0)", "1.0.0"))
+
+    def test_prerelease_needs_an_explicit_prerelease(self):
+        self.assertFalse(ail_pkg._accepts_python(">=2.0", "2.0.0rc1"))
+        self.assertTrue(ail_pkg._accepts_python(">=2.0rc1", "2.0.0rc1"))
+
+    def test_local_version_is_stable(self):
+        self.assertTrue(ail_pkg._is_stable("1.0.0+1abc"))
+        self.assertFalse(ail_pkg._is_stable("1.0.0rc1"))
+        self.assertGreater(ail_pkg._version_key("1.0.0"), ail_pkg._version_key("1.0.0rc1"))
+        self.assertEqual(ail_pkg._version_key("1.0"), ail_pkg._version_key("1.0.0"))
+
+
 if __name__ == "__main__":
     unittest.main()
