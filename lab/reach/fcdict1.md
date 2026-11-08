@@ -21,11 +21,15 @@ The dict-of-records lowering is `ail_syntax.lower_dict_of_records` (helpers:
 `_RecordTransformer`, `_lower_record_dict`).  It has **one** call site in the source pass:
 `python_surface`, `AIL_CURRENT/ail_syntax.py:5897`.  `optlib.rewrite` never calls it.
 
-This branch adds a second, *unconditional* call from `pyfunc.to_c` for the Python surface
+This branch adds a second call from `pyfunc.to_c` for the Python surface
 (`_fc_lower_dict_records`), after `python_surface` has run.  It finishes the shapes the source
 pass skipped and lowers module-level statements through a synthetic `__ail_module__` function.
-It is not gated on a particular print shape, and it does not swallow errors: an exception there
-is a compiler bug and surfaces (review defect 3).
+The call is *additive and safe*: the lowered source is compiled first, and if the typed path
+refuses a shape the lowering introduced, `to_c` recompiles the program **as written**.  A
+program whose lowered form types keeps it; a program that does not type anywhere keeps exactly
+its base refusal, so a diagnostic names the program's own construct (`events[ev] = [vc, cents,
+set()]`) and never an internal `_rkey`/`_rval` temp from a partial lowering.  An exception other
+than `Unsupported` (a compiler bug) still surfaces.
 
 ## What was built
 
@@ -47,36 +51,42 @@ is a compiler bug and surfaces (review defect 3).
 - `_fc_lower_dict_records`: lowers every function and the module body, appending the box class
   only when the lowered code uses it.  A program that does not use the shape is returned byte for
   byte unchanged.
+- `_FcRecordMixin._store_row`: a key or value that is already a plain name or constant is emitted
+  in place, with no `_rkey`/`_rval` temp.  A temp was default-bound to `int` by `_promote_floats`
+  before its bytes assignment, so a lowered store reported an internal name (the review's
+  `'_rkey__' is an int ...` diagnostic) instead of the source construct; the in-place form has the
+  same evaluation order CPython uses because a plain read has no side effect.
 
 Result: the task's reproducer (`p01`) and probes `p05`, `p07`, `p10`, `p11` build typed and match
 CPython; `p08` builds typed and stops loudly at the int64 boundary (see below).  `p07` prints
 `['x', 6, True] 0 False`, a str/int/bool row.
 
-## Real blockers (measured; each is outside this lane's allowed files)
+## Real blockers (measured, and corrected from the first report)
 
-The +2 program target is **not** reachable from `pyfunc.py`/`optlib.py`/`unified.py`.  Two of the
-blockers are not about dicts at all:
+The +2 program target is **not** reachable from `pyfunc.py`/`optlib.py`/`unified.py` alone, and
+the first report was wrong to say every blocker sat outside this lane's files: two of them are in
+`pyfunc.py`.  They are separate features, not the dict-of-containers bucket this task names.
 
-- **ledger_bin** — `parse()` has mixed tuple returns.  A four-line program shows the typed path
-  refuses it before any dict is involved:
-  `def parse(x): return None, 'bad', 0` on one path and `return (True, [1, 2]), None, 0` on
-  another gives `parse returns a tuple on one path and a single value on another`.  Behind that,
-  `def rv()` inside a `try` inside a `while` uses `nonlocal pos`; the lifter in `pyfunc.py`
-  (`_collect_direct_nested_defs` / `_lift_in_function`) refuses both the `try` placement and
-  `nonlocal` write-back.
-- **ticket_audit** — the base lowering always boxes a set position as `_AilRowSet`, whose
-  parameter is annotated `set[int]`; the seats are `bytes`, and this compiler accepts
-  `set[int]`/`set[str]` as a parameter type but not `set[bytes]` (a *local* `set[bytes]` is
-  fine).  The same pass only annotates an empty dict as `dict[int, int]` / `dict[str, int]`, so
-  a bytes-keyed `events = {}` stays unannotated and the key temp is inferred `int`.  Both are in
-  `ail_syntax._lower_record_dict` / `_RecordTransformer`, which this lane may not edit.
+- **ledger_bin** — `parse()` has `def rv()` inside a `try` inside a `while`, using `nonlocal pos`.
+  The nested-function lifter in `pyfunc.py` (`_collect_direct_nested_defs` /
+  `_lift_in_function`, the refusal at `pyfunc.py:37459`) accepts a `def` that is a direct
+  statement of a loop body, but refuses a `def` one level deeper (in a `try`) and has no
+  `nonlocal` write-back.  Behind that, `parse()` returns tuples whose shapes differ by path
+  (`None, 'header', 0` vs `(strict, recs), None, 0`), which the typed return-kind join refuses in
+  `pyfunc.py` (`_join_return`, the refusal at `pyfunc.py:33555`).
+- **ticket_audit** — the bytes set box (`_AilRowSetBytes`, added here) and the bytes-keyed empty
+  dict annotation are now handled, but the typed path still stops on two pre-existing items: the
+  name `cents` holds an `int` in the `E` branch and `bytes` in the `END` branch (one function,
+  two kinds; `rebinding.py` can split branch-scoped names but is not reached because of the next
+  item), and the regex helper `_ail_re_testB(s: bytes)` is called at one site with a value the
+  typed path reads as `int`.  With `cents` manually renamed, `--strict` still stops on
+  `_ail_re_testB` with the lowering switched off too, so this is not caused by the dict pass.
 - **pyperf/run.py** — not a dict problem: `statistics.median`, `json.dumps`, an unannotated
   `Path` parameter and `preexec_fn=` are stdlib/codegen gaps; the dict blocker is one of several.
 
-Needed to finish: `AIL_CURRENT/ail_syntax.py` (bytes set box kind and bytes-keyed empty-dict
-annotation), `AIL_CURRENT/python/pkg-v12/nestfn.py` (nonlocal nested defs in a loop / `try`), and
-the typed path's mixed tuple returns.  None is in this task's allow-list, so the target programs
-keep their previous classification and their named refusals.
+Because none of these can be made exact here, the target programs keep their named compile-time
+refusals (never a crash or a silent difference).  The lowered-source fallback above guarantees
+each refusal names the program's own construct.
 
 ## Probes
 
@@ -107,6 +117,13 @@ name.
 ## After
 
 Typed probes: 6 of 14 (p01, p05, p07, p08, p10, p11) were 2 (p05, p08).  Programs: no move.
-`ledger_bin` and `ticket_audit` stay general, `lab/pyperf/run.py` stays refused, and no program
-typed at the base lost the typed path; every probe still matches CPython on the default and
-unified builds (p08 excepted, by design).
+`ledger_bin` and `ticket_audit` stay general, `lab/pyperf/run.py` stays refused.  Under `--strict`
+both programs now refuse exactly as at the base: `ledger_bin` names `a nested def inside a loop
+('rv')`, `ticket_audit` names `events[ev] = [vc, cents, set()]` -- not an internal `_rkey` temp.
+No program typed at the base lost the typed path; every probe still matches CPython on the default
+and unified builds (p08 excepted, by design).  `test_ail_fcdict1` passes (7 tests), and the
+manifest is regenerated.
+
+The +2 target is not delivered; the reasons are the two pre-existing features listed under "Real
+blockers", both of which this lane either may not or cannot finish exactly.  They are left as
+named refusals rather than crashes or silent differences.

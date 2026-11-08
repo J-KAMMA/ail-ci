@@ -39753,10 +39753,21 @@ class _FcRecordMixin:
     def _store_row(self, key, listnode):
         syntax = self._s
         values = [self.visit(elt) for elt in listnode.elts]
-        temps = [self.fresh('_rval') for _ in values]
-        keytemp = self.fresh('_rkey')
+        # A key or element that is already a plain name or constant needs no temp: a temp was
+        # pre-bound to `int` by `_promote_floats`' default and then refused when a bytes value
+        # was assigned to it, which made a lowered program report an internal `_rkey`/`_rval`
+        # name instead of the construct it came from (`events[ev] = [...]`).  A plain read has no
+        # side effect, so emitting it once, in place, is the same evaluation order CPython uses.
+        simple = [index not in self.set_positions and isinstance(elt, (ast.Name, ast.Constant))
+                  for index, elt in enumerate(listnode.elts)]
+        temps = [None if simple[index] else self.fresh('_rval') for index in range(len(values))]
+        simple_key = isinstance(key, (ast.Name, ast.Constant))
+        keytemp = None if simple_key else self.fresh('_rkey')
+        key_ref = None
         out = []
         for index, (temp, value) in enumerate(zip(temps, values)):
+            if temp is None:
+                continue
             if index in self.set_positions:
                 out.append(syntax._r_ann(
                     syntax._r_store(temp),
@@ -39765,11 +39776,16 @@ class _FcRecordMixin:
                     value))
             else:
                 out.append(syntax._r_assign(syntax._r_store(temp), value))
-        out.append(syntax._r_assign(syntax._r_store(keytemp), self.visit(key)))
+        if simple_key:
+            key_ref = self.visit(key)
+        else:
+            out.append(syntax._r_assign(syntax._r_store(keytemp), self.visit(key)))
+            key_ref = syntax._r_load(keytemp)
         for index, temp in enumerate(temps):
-            out.append(self._append_field(index, syntax._r_load(temp)))
+            out.append(self._append_field(index, values[index] if temp is None
+                                          else syntax._r_load(temp)))
         out.append(syntax._r_assign(
-            syntax._r_sub(syntax._r_load(self.d), syntax._r_load(keytemp), store=True),
+            syntax._r_sub(syntax._r_load(self.d), key_ref, store=True),
             ast.BinOp(left=syntax._r_call(syntax._r_load('len'), [syntax._r_load(self.fields[0])]),
                       op=ast.Sub(), right=syntax._r_const(1))))
         return out
@@ -40286,18 +40302,36 @@ def _dict_view_escape(source):
 def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None):
     """Compile `source` (see `_to_c_unshadowed`) after renaming every module-level definition
     that shadows a built-in name (`fn abs`, `fn heappush`, `const max`, ...) together with every
-    reference Python resolves to it (shadowing.py), so no name-keyed built-in dispatch anywhere in
-    the compiler can capture a call that belongs to the user. Refusals and the per-function unit
+    reference Python resolves to it (shadowing.py), so no name-keyed built-in dispatch anywhere
+    in the compiler can capture a call that belongs to the user. Refusals and the per-function unit
     names in `info` are reported under the user's own spelling."""
-    global _ACTIVE_SITE_LINES
-    _ACTIVE_SITE_LINES = _REWRITE_SITE_LINES.get(source.strip(), {})
     if os.environ.get('AIL_SURFACE') == 'python':
         # fcdict1: the source pass only lowers dicts inside functions; finish the module-level
         # shapes and the ones it skipped here, in the one compiler file this lane owns.  Run
         # before the dict-view escape: printing a whole dict of rows is a supported shape now.
-        # A failure here is a compiler bug, not an unsupported program: let it surface instead of
-        # silently restoring the general path (review: the old blanket `except` hid one).
-        source = _fc_lower_dict_records(source)
+        lowered = _fc_lower_dict_records(source)
+        if lowered != source:
+            snapshot = dict(info) if info is not None else None
+            try:
+                return _to_c_after_lowering(lowered, name, strict, info, entry, sig,
+                                             library, external)
+            except Unsupported:
+                # This second pass only ever ADDS typed shapes.  When the typed path cannot
+                # finish one it introduced, compile the program as written instead, so a refusal
+                # names the program's own construct (`events[ev] = [vc, cents, set()]`) and never
+                # an internal `_rkey`/`_rval` temp left by a partial lowering -- and a program
+                # that already built and matched is never lost.
+                if info is not None:
+                    info.clear()
+                    if snapshot is not None:
+                        info.update(snapshot)
+    return _to_c_after_lowering(source, name, strict, info, entry, sig, library, external)
+
+
+def _to_c_after_lowering(source, name=None, strict=True, info=None, entry=None, sig=None,
+                         library=False, external=None):
+    global _ACTIVE_SITE_LINES
+    _ACTIVE_SITE_LINES = _REWRITE_SITE_LINES.get(source.strip(), {})
     _view = _dict_view_escape(source)
     if _view is not None:
         raise Unsupported(_view)
