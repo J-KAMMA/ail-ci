@@ -28456,7 +28456,9 @@ def _par_decls(decls, sig):
         text = re.sub(r'\s+', ' ', text).strip().replace(' *', ' *')
         text = re.sub(r'\*\s+const\b', '*', text)
         text = re.sub(r'^(?:volatile|_Atomic)\s+', '', text)
-        return re.sub(r'^const\s+', '', text)
+        if '*' not in text:
+            text = re.sub(r'^const\s+', '', text)
+        return text
     local = {}
     for line in decls.splitlines():
         m = re.match(r'\s+((?:volatile\s+|_Atomic\s+)?(?:const\s+)?[A-Za-z_]\w*(?:\s*\*+\s*(?:const\s+)?|\s+))(v_\w+)(\s*=[^;]*)?;\s*$', line)

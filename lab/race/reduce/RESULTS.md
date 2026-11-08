@@ -144,6 +144,19 @@ loudly there (the Python surface keeps an int64 overflow uncatchable), so the pr
 genuinely catchable conversion overflow and the re-run's accumulator pointer, which is what makes
 the caught value the sequential prefix.
 
+### Reviewer fixes (fbred4 follow-up)
+
+* `parallel.py` `_transform` now refuses a parallel for inside an `except` handler by name
+  (`parallel for cannot be inside try; ...`) instead of crashing with
+  `AttributeError: 'For' object has no attribute 'par'`: `_transform` never recursed into
+  `ast.Try.handlers`, so the loop never got its `.par` facts before `_flow` read them. This
+  restores the base diagnostic; a reduction in the try body stays allowed.
+* `pyfunc._par_decls._type` no longer strips a leading `const` from pointer types. A `list[int]`
+  function parameter is declared `const int64_t *`, so stripping `const` produced `int64_t *`,
+  which is not a capturable kind; the parameter was refused where the base built and matched. The
+  `const int64_t *` / `const double *` entries are reachable again.
+* Both are covered by `test_ail_par_reduce.py` (a `list parameter` case and a refusal case).
+
 ### A pre-existing sequential finding (not this job)
 
 A `try` around a **sequential** `range` loop loses the accumulator when the body raises

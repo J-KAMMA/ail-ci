@@ -17,12 +17,11 @@ The program computes the terms with 4 workers (threads or goroutines) over conti
 computed exactly once and the worker count never changes the result.
 
 Input guarantees: `0 <= N <= 20000000`. Ints are signed 64-bit. For every input in range the exact
-sum fits int64 (the largest runnable sums are about 5e4 at `N = 1e5` and -1.2e5 at `N = 1e6`), so
-the sum never leaves the range on any case this task runs. A case whose exact sum would exceed
-int64 needs `N` around 1e16, which the task cannot iterate; `gen.py` records that boundary as
-`OVERFLOW_N` and does not emit it as a runnable case. This task is therefore excluded from the
-timing of that boundary. An implementation that does leave int64 must stop loudly (an empty stdout
-and exit status 1) rather than wrap:
+sum fits int64 (the largest runnable sums are about 5e4 at `N = 1e5` and -1.1e6 at `N = 2e7`), so
+the sum never leaves the range on any case this task runs. No runnable `N` makes it overflow: the
+first such `N` is far beyond the input range, so the task has no overflow case and none is timed.
+An implementation that does leave int64 must stop loudly (an empty stdout and exit status 1) rather
+than wrap:
 
     OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)
 

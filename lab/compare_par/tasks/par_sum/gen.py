@@ -3,17 +3,16 @@
 Input: `N` on standard input. THREADS is the perf input's worker count; run_task.py reads it and
 sets AIL_THREADS from it.
 
-The exact sum over 1..N grows far slower than N (about 5e4 at N = 1e5 and -1.2e5 at N = 1e6), so no
-runnable N makes it leave int64: the smallest N whose exact sum overflows is around 1e16, which the
-task cannot iterate. `OVERFLOW_N` records that boundary for spec.md; it is not a runnable case.
+The exact sum over 1..N stays far inside int64 for every input in range (about -1.1e6 at
+N = 2e7): no runnable N overflows, and the N that first would is far beyond the input range.
+spec.md states that the task therefore has no overflow case and excludes it from the timing.
 """
 import importlib.util
 from pathlib import Path
 
 STDIN = True
 THREADS = 4
-PERF_N = 7000000
-OVERFLOW_N = 10 ** 16
+PERF_N = 10000000
 HERE = Path(__file__).resolve().parent
 
 
