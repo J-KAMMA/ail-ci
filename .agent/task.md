@@ -1,3 +1,75 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: fbnarrow3 (`AIL_NARROW_INT=1` → `ail_ilist`)
+
+**What the change really does.** Adds `ir/narrowint.py` (runtime + `_Generic` op macros + a per-function local analysis and a per-program field analysis) and 61 lines in `pyfunc.py` that store chosen `list[int]` locals and class fields as an int32 buffer, widening to an int64 buffer at run time; with the variable unset `enabled()` is false everywhere and the emitted C is unchanged.
+
+**Probes** (`/tmp/rprobes`, own runner = CPython vs default vs `AIL_NARROW_INT=1`; `cmp.sh` equivalent; base = `/tmp/base` from `work`).
+
+| probe | covers | HEAD default vs CPython | narrow vs CPython |
+|---|---|---|---|
+| p01 local append/index/aug/pop/del/clear in a method | narrowed local ops | same | same |
+| p02 field→local, local→field, field→field, alias kept | ownership | same (pre-existing) | same |
+| p03 append/clear during `for in` | mutation in iteration | differs (pre-existing) | same as its base |
+| p04 field copy/pop/reverse/while/`=[]`/`=[1,2,3]` | field ops | same | same |
+| p05 `append(1.5)` into `list[int]` | type boundary | same | same |
+| p06 int32/int64 bounds via local | widths | same | same |
+| p07 `t.w.sort()` at module level | blocked op in entry | same | same (field not narrowed) |
+| p08 `del`/slice on field | blocked ops | same | same |
+| p09 lambda over local/field | blocked capture | same | same |
+| p10 `w[i] += v`, `w[-1] -= v` | augmented index | same | same |
+| p11 field widened by `=`/`append`, then read/reverse/pop | wide field | same | same |
+| p12 values via param, dict value, field element | value sources | same | same |
+| p13 subclass method over inherited field | inheritance | same | same |
+| p14 ctor local stored into field | ctor path | same | same |
+| p15 wide local reverse/del/clear/for | wide local | same | same |
+| p16 set-overflow, clear+append, self/store copy, error texts | edges | same | same |
+| **p19 try + `for v in xs`** | exc-frame locals | **same** | **BUILD FAILS** |
+
+Default-build C identity: p02/p04/p11/p15 `program.c` byte-identical HEAD vs `/tmp/base` (`--debug-dir`, `AIL_NO_CACHE=1`, `PYTHONHASHSEED=0`).
+
+**Tests.** `test_ail_narrow_int.py` 9/9 OK; `test_ail_safetynet.py` 5/5 OK (run directly — `par_check.py` cannot start, see defect 2).
+
+### Defects
+1. **Invalid C when a narrowed local is also a `try`-frame cell.** In `_one_function_numeric_impl` the frame-cell declaration still hardcodes `'ail_list' if t == LIST` (`pyfunc.py:42863`); the narrow declaration was only added to the plain-automatic branch (`:42892`). Any function that owns a `try` and mentions the local in it keeps the cell as `ail_list`, while `_iter_plan`/`_for_inner_impl` emit the non-macro call `ail_ilist_get(&local, i)` on it.
+   Probe `/tmp/rprobes/p19_try_for.py` (class with field `w`, `xs=[]`, `w.append`, `try: xs.append(5)`, then `for v in xs`): default build prints `5\n1 1` = CPython; with `AIL_NARROW_INT=1` the build ends `exit 4` — `the C compiler rejected this: ... ail_ilist_get from incompatible pointer type [-Werror=incompatible-pointer-types] ... ail_list *`. If the build did not use `-Werror`, the 24-byte `ail_list` cell would be read through the 40-byte `ail_ilist` layout (silent wrong values), so this is not just a diagnostic.
+2. **Manifest is stale on HEAD.** `python3 tools/update_manifest.py --check` → `stale python/pkg-v12/ir/narrowint.py`; `tools/par_check.py -j 2 test_ail_narrow_int test_ail_safetynet` aborts with `ValueError: hash mismatch: python/pkg-v12/ir/narrowint.py`. The recorded hash matches commit `76efe810`; commit `6ea45c48` edited `narrowint.py` afterwards without re-running `update_manifest.py`. CI preflight will fail on this branch.
+3. **The instruction-count target is missed.** The task: tree_fold's run instructions "not worse by more than 1%". The worker's own number (also measured in the previous review) is 954.2M Ir vs 856.9M default = **+11.35%**, driven by the per-access `p` test and the int32 range test on push/set. The remedy in the brief (drop the operation / leave the list int64) was not applied; `NARROW_RESULTS.md` only documents the miss.
+
+### Pre-existing (identical on base, not blocking)
+- Iterating a list field while appending to it visits different elements than CPython (p03; identical on `/tmp/base`).
+- `pop` error texts: AIL prints `list index out of range` for `pop(9)` / empty `pop()` where CPython says `pop index out of range` / `pop from empty list` (p16, identical on base).
+- `ys = self.w` copies rather than aliases (p02), and the resulting `IndexError` text differs identically on base.
+
+### Claims vs observation
+1. "61 lines in `pyfunc.py`" — verified (`git diff --stat`: 61).
+2. "peak RSS 332,100 vs 367,216 KiB (−9.57%)" — unverified by me; direction is consistent with review 0.
+3. "+11.35% Ir over default" — verified (worker's own figure, plus review 0's independent measurement).
+4. "10 tasks, 511 cases, 0 differences" — unverified (only my own programs checked).
+5. "108/110 `program.c` identical without the variable" — partially verified: 4/4 list-heavy probes byte-identical; base behaves as described elsewhere.
+6. "manifest updated, `--check` clean" — **false** (defect 2).
+7. "or a pass to a list that is itself narrowed" / "fixpoint over the call graph" — **false**: `_local_use_ok` returns False for any call argument, parameters are excluded by `name in ctx.kind`, and the analysis is intra-function; there is no call-graph fixpoint (p01's callee argument never narrows). Conservative, but not what the doc says.
+8. "only field-touching functions leave IR" — verified in code (`narrowint.blocks_ir`) and in the C (`v_xs` is `ail_list` in an IR-stayed function).
+9. "Tests: 9/9 OK; safetynet passes" — verified.
+
+### Unverified
+The 511-case matrix on the other nine tasks, their per-task RSS/instruction numbers, the fbnarrow1 emulated comparison, `test_ail_files`/`test_ail_corpus_findings3` (blocked by the stale manifest), and a `--library` build with the variable set (the `prepare([], classes, …)` early path marks every list field narrow with no function scan).
+
+VERDICT: FIX
+1. Narrowed local + `try` frame cell emits invalid C. Probe `/tmp/rprobes/p19_try_for.py`; expected `5` then `1 1` (CPython and the default build agree), actual `AIL_NARROW_INT=1` build exits 4 with `ail_ilist_get ... from incompatible pointer type` at `v_v = ail_ilist_get(&(*v_xs), v__k2)`; fix the frame-cell type at `pyfunc.py:42863` to use the narrowed type.
+2. Manifest stale for `python/pkg-v12/ir/narrowint.py` on HEAD (`update_manifest.py --check` reports stale; `par_check.py` aborts with `hash mismatch`); re-run `tools/update_manifest.py` after the final edit.
+3. tree_fold instructions are +11.35% over the default build against a ≤1% requirement; keep the offending lists `ail_list` or drop the per-call widening test, per the brief's stop rule.
+[commandcode stop=end_turn turns=56 out_tokens=66089]
+
+
+--- ORIGINAL TASK ---
 Lane: fb-narrow
 
 # fbnarrow3: the typed path stores `list[int]` locals and fields as `ail_ilist` where every use is supported (opt-in `AIL_NARROW_INT=1`)
