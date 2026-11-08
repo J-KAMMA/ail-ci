@@ -5,9 +5,10 @@ CPython byte for byte, including the cases that must abandon the native call: an
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
 (default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
 (indexing, division by a variable, arbitrary calls, raise/try) stay in CPython; that includes
-`first` and `divide` here.  A division by a literal nonzero constant (`half`, `x / 2`) and a
-proved pure str method call cannot raise and are eligible.  A program the compiler cannot analyse at all still runs unchanged in CPython with no
-extension.
+`divide` here; `first` indexes `xs[0]`, but an out-of-range index is detected and the Python
+wrapper re-runs the original, so it is native too.  A division by a literal nonzero constant
+(`half`, `x / 2`) and a proved pure str method call cannot raise and are eligible.  A program the
+compiler cannot analyse at all still runs unchanged in CPython with no extension.
 """
 import json
 import os
@@ -117,9 +118,8 @@ class CPythonHybrid(unittest.TestCase):
             src, out, report = self.build(tmp, 'prog', PROGRAM)
             self.assertTrue(report['extension'], report)
             accelerated = set(report['accelerated'])
-            for name in ('add1', 'mul', 'isbig', 'half', 'join', 'total', 'dflt', 'echo'):
+            for name in ('add1', 'mul', 'isbig', 'half', 'join', 'total', 'first', 'dflt', 'echo'):
                 self.assertIn(name, accelerated)
-            self.assertNotIn('first', accelerated)         # indexing can raise IndexError
             self.assertNotIn('push', accelerated)          # a list parameter that is mutated
             self.assertNotIn('divide', accelerated)        # floor division can raise
             want = run([sys.executable, str(src)], tmp)
@@ -177,6 +177,99 @@ print(f([1], [2]))
             got = run([str(out / 'twolists')], tmp)
             self.assertEqual(got.stdout, want.stdout)
             self.assertEqual(got.returncode, want.returncode)
+
+    def test_index_and_dict_fallbacks(self):
+        """A successful index is native; an IndexError/KeyError re-runs CPython's original.
+
+        Covers an in-range list index, a negative index, an out-of-range read caught by the
+        caller, a local list store, a dict hit, a missing key, and nested `a[i][j]`.
+        """
+        text = '''
+def at(xs: list[int], i: int) -> int:
+    return xs[i]
+
+def last(xs: list[int]) -> int:
+    return xs[-1]
+
+def local(n: int) -> int:
+    a = [10, 20, 30]
+    return a[n]
+
+def put(n: int) -> int:
+    a = [1, 2, 3]
+    a[1] = n
+    return a[0] + a[1] + a[2]
+
+def lookup(k: int) -> int:
+    d = {1: 10, 2: 20}
+    return d[k]
+
+def nested(n: int, m: int) -> int:
+    a = [[1, 2], [3, 4]]
+    return a[n][m]
+
+print('range', at([7, 8, 9], 0), at([7, 8, 9], 2), last([7, 8, 9]))
+print('local', local(0), local(2), local(-1))
+print('put', put(40), put(-5))
+print('dict', lookup(1), lookup(2))
+print('nested', nested(0, 0), nested(1, 1), nested(-1, -1))
+for i in (3, -4, 99):
+    try:
+        print('index-exc', at([1, 2, 3], i))
+    except IndexError as e:
+        print('index-exc', type(e).__name__, str(e))
+for k in (3, -1):
+    try:
+        print('key-exc', lookup(k))
+    except KeyError as e:
+        print('key-exc', type(e).__name__, str(e))
+for n, m in ((2, 0), (0, 2), (-3, 0)):
+    try:
+        print('nested-exc', nested(n, m))
+    except IndexError as e:
+        print('nested-exc', type(e).__name__, str(e))
+for empty in (lambda: at([], 0), lambda: last([])):
+    try:
+        empty()
+    except IndexError as e:
+        print('empty', type(e).__name__, str(e))
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'indexing', text)
+            for name in ('at', 'last', 'local', 'put', 'lookup', 'nested'):
+                self.assertIn(name, report['accelerated'], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'indexing')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.stderr, want.stderr)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'index-exc IndexError list index out of range', got.stdout)
+            self.assertIn(b'key-exc KeyError 3', got.stdout)
+            self.assertIn(b'nested-exc IndexError list index out of range', got.stdout)
+
+    def test_rejected_reasons_are_named(self):
+        """Every top-level function that stays in CPython carries a visible reason (wedge1 W0)."""
+        text = '''
+def keep(xs: list[int], i: int) -> int:
+    return xs[i]
+
+def divide(a: int, b: int) -> int:
+    return a // b
+
+def push(xs: list[int]) -> int:
+    xs.append(9)
+    return len(xs)
+
+def nope(x: tuple) -> int:
+    return len(x)
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'reasons', text)
+            self.assertIn('keep', report['accelerated'])
+            rejected = report['rejected']
+            for name in ('divide', 'push', 'nope'):
+                self.assertIn(name, rejected)
+                self.assertTrue(rejected[name], 'empty reason for %s' % name)
 
     def compare_imported(self, tmp, out, runner_text):
         runner = Path(tmp) / 'runner.py'

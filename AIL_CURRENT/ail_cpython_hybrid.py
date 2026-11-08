@@ -307,7 +307,12 @@ def _unsafe_body(fn, params=(), ret=None):
     float_names = {p for p, kind in params if kind == 'float'}
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript):
-            return 'indexing can raise'
+            if isinstance(node.slice, ast.Slice):
+                return 'slice indexing can raise'
+            # A non-slice index is allowed: the clone's own IndexError/KeyError stop is
+            # turned into a per-call fallback (see _trap_patch), so the Python wrapper
+            # re-runs the original function and CPython's exception is the one observed.
+            continue
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
             if (isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod))
                     and _nonzero_constant(node.right)):
@@ -324,8 +329,8 @@ def _unsafe_body(fn, params=(), ret=None):
             return 'a global assignment is not safe to clone'
         if isinstance(node, ast.Delete):
             return 'delete is not safe to clone'
-        if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            return 'attribute or index assignment is not safe to clone'
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return 'attribute assignment is not safe to clone'
         if isinstance(node, (ast.Await, ast.Yield, ast.YieldFrom)):
             return 'coroutine/generator code stays in CPython'
     return None
@@ -337,27 +342,45 @@ def _list_param_mutated(fn, list_params):
     list parameter on to another user function, which may mutate it one step away."""
     if not list_params:
         return False
-    for node in _own_nodes(fn):
+    # A local assigned straight from a list parameter aliases it in CPython, so mutating the
+    # local is mutating the caller's list.  Follow that simple assignment closure before the
+    # mutation scan; the typed clone copies the parameter into a C buffer, so such a write would
+    # not be visible to the caller.
+    aliases = set(list_params)
+    nodes = list(_own_nodes(fn))
+    changed = True
+    while changed:
+        changed = False
+        for node in nodes:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                value = getattr(node, 'value', None)
+                if isinstance(value, ast.Name) and value.id in aliases:
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in aliases:
+                            aliases.add(target.id)
+                            changed = True
+    for node in nodes:
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
-                and node.func.value.id in list_params and node.func.attr in _MUTATORS):
+                and node.func.value.id in aliases and node.func.attr in _MUTATORS):
             return True
         if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
-                and node.value.id in list_params
+                and node.value.id in aliases
                 and isinstance(node.ctx, (ast.Store, ast.Del))):
             return True
         if isinstance(node, ast.AugAssign):
-            if isinstance(node.target, ast.Name) and node.target.id in list_params:
+            if isinstance(node.target, ast.Name) and node.target.id in aliases:
                 return True
             if (isinstance(node.target, ast.Subscript) and isinstance(node.target.value, ast.Name)
-                    and node.target.value.id in list_params):
+                    and node.target.value.id in aliases):
                 return True
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             return True
-    for node in _own_nodes(fn):
+    for node in nodes:
         if isinstance(node, ast.Call):
             for arg in list(node.args) + [kw.value for kw in node.keywords]:
-                if isinstance(arg, ast.Name) and arg.id in list_params:
+                if isinstance(arg, ast.Name) and arg.id in aliases:
                     return True
     return False
 
@@ -431,6 +454,58 @@ def _fn_init(self, node):
         if kind is not None:
             self.params[arg.arg] = kind
 pymix._FnFacts.__init__ = _fn_init
+# A local dict/list literal has a resolvable element kind even though pymix's base vocabulary
+# stops at one container level.  Keep this inference in the hybrid's own analysis process so the
+# default (non-hybrid) build path is byte-for-byte unchanged.
+_old_expr_kind = pymix._expr_kind
+_DICT_PREFIX = '__ail_hybrid_dict__'
+def _hybrid_expr_kind(e, facts, rets):
+    if isinstance(e, ast.Dict):
+        vk = None
+        for v in e.values:
+            k = _hybrid_expr_kind(v, facts, rets)
+            if k is None:
+                return None
+            vk = k if vk is None else pymix._merge(vk, k)
+            if vk is None:
+                return None
+        return None if vk is None else _DICT_PREFIX + vk
+    if isinstance(e, ast.List):
+        ek = None
+        for el in e.elts:
+            k = _hybrid_expr_kind(el, facts, rets)
+            if k is None:
+                return None
+            ek = k if ek is None else pymix._merge(ek, k)
+            if ek is None:
+                return None
+        if ek is None:
+            return None
+        if ek in (pymix.INT, pymix.FLOAT, pymix.STR):
+            return pymix.LIST_OF.get(ek)
+        if ek.startswith('list[') or ek.startswith(_DICT_PREFIX):
+            return 'list[' + ek + ']'
+        return None
+    if isinstance(e, ast.Subscript) and not isinstance(e.slice, ast.Slice):
+        base = _hybrid_expr_kind(e.value, facts, rets)
+        if isinstance(base, str):
+            if base.startswith(_DICT_PREFIX):
+                return base[len(_DICT_PREFIX):]
+            if base.startswith('list[') and base.endswith(']'):
+                inner = base[5:-1]
+                if inner.startswith(_DICT_PREFIX):
+                    inner = inner[len(_DICT_PREFIX):]
+                return inner
+    return _old_expr_kind(e, facts, rets)
+pymix._expr_kind = _hybrid_expr_kind
+# A subscript's IndexError/KeyError is now reproduced by the wrapper re-running the original
+# Python function, so it no longer needs pymix's exception-escape rejection in the hybrid.
+_old_raise_site = pymix._raise_site_exc
+def _raise_site_exc(node):
+    if isinstance(node, ast.Subscript):
+        return None
+    return _old_raise_site(node)
+pymix._raise_site_exc = _raise_site_exc
 _old_extract = pyboxed2._mix_extract_signature
 _old_validate = pyboxed2._mix_validate_signature
 _old_build = pyboxed2.build
@@ -458,11 +533,21 @@ def _facts():
         except Exception:
             pass
     return facts
+def _pymix_rejected():
+    analysis = _last.get('analysis')
+    if analysis is None:
+        return {}
+    try:
+        return {str(name): [str(part) for part in why]
+                for name, why in (analysis.rejected or {}).items()}
+    except Exception:
+        return {}
 def _dump(report):
     try:
         data = {'mix_units': [list(u) for u in (report.get('mix_units') or [])],
                 'typed_inline': list(report.get('typed_inline') or []),
-                'facts': _facts(), 'note': str(report.get('note') or '')}
+                'facts': _facts(), 'pymix_rejected': _pymix_rejected(),
+                'note': str(report.get('note') or '')}
         with open(os.environ['AIL_HYBRID_CAPTURE'], 'w', encoding='utf-8') as handle:
             json.dump(data, handle)
     except Exception:
@@ -528,6 +613,7 @@ pymix.analyze = _analyze
             source_path.unlink(missing_ok=True)
     facts = data.get('facts') or {}
     report = {'mix_units': data.get('mix_units') or [], 'typed_inline': data.get('typed_inline') or [],
+              'pymix_rejected': data.get('pymix_rejected') or {},
               'note': data.get('note') or ''}
     return report, facts
 
@@ -579,11 +665,125 @@ def _select(src, tree, report, facts):
         chosen[pyname] = {
             'name': pyname, 'mangled': mangled, 'params': params,
             'ret': ret, 'is_bool_ret': bool(info.get('is_bool_ret')),
+            'indexes': any(isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice)
+                           for n in _own_nodes(funcs[pyname])),
         }
+    # wedge1: a function refused before it reaches _select (pymix or the emitter) used to leave
+    # no trace, so most refusals were silent.  Name every remaining top-level function too.
+    pymix_rejected = report.get('pymix_rejected') or {}
+    for pyname in sorted(funcs):
+        if pyname in chosen or pyname in rejected:
+            continue
+        info = facts.get(pyname)
+        why = pymix_rejected.get(pyname)
+        if info is None:
+            if why:
+                detail = ': %s' % why[1] if len(why) > 1 and why[1] else ''
+                rejected[pyname] = '%s%s stays in CPython' % (why[0], detail)
+            else:
+                rejected[pyname] = 'not a typed candidate, stays in CPython'
+        else:
+            rejected[pyname] = ('the typed clone is not wired to the hybrid ABI, stays in CPython')
     return chosen, rejected
 
 
-def _c_proto(item):
+_TRAP_DIES = re.compile(
+    r'ail_die\("(?:list index out of range|list assignment index out of range|'
+    r'pop index out of range|pop from empty list|key error|string index out of range|'
+    r'bytes index out of range|grid row index out of range|grid column index out of range)"\)')
+
+
+def _trap_patch(csrc, mangled):
+    """Turn a clone's index/key runtime stops into a per-call fallback.
+
+    The mixed-mode overflow mechanism already has a `setjmp` landing pad for an int result; this
+    adds an independent one (its own flag and jump buffer) for every result kind, so an
+    out-of-range list index or a missing dict key abandons the clone and the Python wrapper runs
+    the original function.  CPython then supplies the exact IndexError/KeyError, message and
+    caller-visible `try/except` behaviour.  Only the unit's own text is changed; no global build
+    path is touched.  Returns the patched source, or the original when no prototype is found.
+    """
+    marker = '#include <stdint.h>\n'
+    if marker not in csrc:
+        return csrc
+    base = mangled + '__hybrid'
+    flag, jmp = base + '_trap', base + '_jmp'
+    save, savep, hit, call = base + '_save', base + '_savep', base + '_hit', base + '_call'
+    match = re.search(r'^([A-Za-z_][\w ]*\*?\s*\b' + re.escape(mangled) +
+                      r'\s*\([^\n{;]*\))\s*\{', csrc, re.MULTILINE)
+    if match is None:
+        return csrc
+    proto = match.group(1)
+    name_at = re.search(r'\b' + re.escape(mangled) + r'\s*\(', proto).start()
+    rtype = re.sub(r'^(?:(?:static|inline|extern)\s+)+', '', proto[:name_at].strip())
+    inside = proto[proto.index('(') + 1:proto.rindex(')')]
+    args = []
+    for arg in inside.split(','):
+        arg = arg.strip()
+        if arg:
+            args.append(re.split(r'[\s*]+', arg)[-1])
+
+    state = {}
+    for name in ('ail_depth', 'ail_cleanup_top', 'ail_exc_top'):
+        state[name] = bool(re.search(r'^AIL_LINK_STATE\([^;\n]*\b' + name + r'\b', csrc, re.M))
+    fields, inits, restores = [], [], []
+    if state['ail_depth']:
+        fields.append('int64_t depth;')
+        inits.append('ail_depth')
+        restores.append('        ail_depth = s->depth;')
+    if state['ail_cleanup_top']:
+        fields.append('ail_cleanup_frame *cleanup;')
+        inits.append('ail_cleanup_top')
+        restores.extend((
+            '        while (ail_cleanup_top && ail_cleanup_top != s->cleanup) {',
+            '            ail_cleanup_frame *f = ail_cleanup_top;',
+            '            ail_cleanup_top = f->previous;',
+            '            f->release(f->resources);',
+            '        }',
+            '        ail_cleanup_top = s->cleanup;'))
+    if state['ail_exc_top']:
+        fields.append('int exc_top;')
+        inits.append('ail_exc_top')
+        restores.append('        ail_exc_top = s->exc_top;')
+
+    decl = ('\n#include <setjmp.h>\n'
+            'static __thread int %s = 0;\n'
+            'static __thread jmp_buf %s;\n'
+            'static inline void %s(void);\n' % (flag, jmp, hit))
+    if fields:
+        helper = ('\ntypedef struct { %s } %s;\n'
+                  'static __thread %s *%s;\n'
+                  'static inline void %s(void) {\n'
+                  '    %s *s = %s;\n'
+                  '    if (s) {\n'
+                  '%s\n'
+                  '    }\n'
+                  '    %s = 1;\n'
+                  '    longjmp(%s, 1);\n'
+                  '}\n' % (' '.join(fields), save, save, savep, hit, save, savep,
+                            '\n'.join(restores), flag, jmp))
+    else:
+        helper = ('\nstatic inline void %s(void) { %s = 1; longjmp(%s, 1); }\n'
+                  % (hit, flag, jmp))
+    body = [proto.replace(mangled, call, 1) + ' {\n', '    %s = 0;\n' % flag]
+    if fields:
+        body.extend((
+            '    %s saved = {%s};\n' % (save, ', '.join(inits)),
+            '    %s *previous = %s;\n' % (save, savep),
+            '    %s = &saved;\n' % savep,
+            '    if (setjmp(%s) != 0) { %s = previous; return 0; }\n' % (jmp, savep)))
+    else:
+        body.append('    if (setjmp(%s) != 0) return 0;\n' % jmp)
+    body.append('    %s result = %s(%s);\n' % (rtype, mangled, ', '.join(args)))
+    if fields:
+        body.append('    %s = previous;\n' % savep)
+    body.extend(('    return result;\n', '}\n'))
+    csrc = _TRAP_DIES.sub(hit + '()', csrc)
+    csrc = csrc.replace(marker, marker + decl, 1)
+    return csrc + helper + ''.join(body)
+
+
+def _c_proto(item, symbol=None):
     args = []
     for p, kind in item['params']:
         cn = 'v_' + p
@@ -600,7 +800,7 @@ def _c_proto(item):
     if item['ret'] == 'str':
         args.extend(['uint8_t *_out', 'int64_t _cap'])
     rtype = 'double' if item['ret'] == 'float' else 'int64_t'
-    return '%s %s(%s)' % (rtype, item['mangled'], ', '.join(args))
+    return '%s %s(%s)' % (rtype, symbol or item['mangled'], ', '.join(args))
 
 
 def _wrapper_source(module, items):
@@ -620,12 +820,15 @@ def _wrapper_source(module, items):
         '',
     ]
     for item in items:
-        out.append('extern %s;' % _c_proto(item))
+        callee = item['mangled'] + '__hybrid_call' if item.get('indexes') else item['mangled']
+        out.append('extern %s;' % _c_proto(item, callee))
     out.append('')
     for item in items:
         name = item['name']
         params = item['params']
         ret = item['ret']
+        callee = item['mangled'] + '__hybrid_call' if item.get('indexes') else item['mangled']
+        trap = item['mangled'] + '__hybrid_trap'
         # Owner decision D4 (2026-11-05): a call whose arguments include a container keeps the GIL.
         # The list is copied into a C buffer first, but the safe default is not to release while
         # other CPython threads may hold and mutate a container.  Scalar-only calls still release.
@@ -635,6 +838,8 @@ def _wrapper_source(module, items):
         out.append('static PyObject *ail_w_%s(PyObject *self, PyObject *args) {' % name)
         out.append('    PyObject *o[%d];' % max(1, len(params)))
         out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % len(params))
+        if item.get('indexes'):
+            out.append('    extern __thread int %s;' % trap)
         # Every conversion failure after the declarations below must free whatever buffers an
         # earlier list argument already filled; `fallback:` does that.  When there are no buffers
         # the label is not emitted, so keep the direct return in that case.
@@ -709,8 +914,10 @@ def _wrapper_source(module, items):
         if ret == 'str':
             out.append('    int64_t need;')
             out.extend(begin)
-            out.append('    need = %s(%s%sNULL, 0);' % (item['mangled'], cargs, ', ' if cargs else ''))
+            out.append('    need = %s(%s%sNULL, 0);' % (callee, cargs, ', ' if cargs else ''))
             out.extend(end)
+            if item.get('indexes'):
+                out.append('    if (%s) %s;' % (trap, fail))
             out.append('    if (need < 0) %s;' % fail)
             out.append('    uint8_t *sb = (uint8_t *)PyMem_Malloc((size_t)(need > 0 ? need : 1));')
             out.append('    if (!sb) {')
@@ -719,8 +926,10 @@ def _wrapper_source(module, items):
             out.append('        return PyErr_NoMemory();')
             out.append('    }')
             out.extend(begin)
-            out.append('    if (need > 0) %s(%s%s(void *)sb, need);' % (item['mangled'], cargs, ', ' if cargs else ''))
+            out.append('    if (need > 0) %s(%s%s(void *)sb, need);' % (callee, cargs, ', ' if cargs else ''))
             out.extend(end)
+            if item.get('indexes'):
+                out.append('    if (%s) { PyMem_Free(sb); %s; }' % (trap, fail))
             out.append('    PyObject *res = PyUnicode_DecodeUTF8((const char *)sb, (Py_ssize_t)need, NULL);')
             out.append('    PyMem_Free(sb);')
             for b in bufs:
@@ -730,8 +939,10 @@ def _wrapper_source(module, items):
         elif ret == 'float':
             out.append('    double r;')
             out.extend(begin)
-            out.append('    r = %s(%s);' % (item['mangled'], cargs))
+            out.append('    r = %s(%s);' % (callee, cargs))
             out.extend(end)
+            if item.get('indexes'):
+                out.append('    if (%s) %s;' % (trap, fail))
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    return PyFloat_FromDouble(r);')
@@ -739,9 +950,11 @@ def _wrapper_source(module, items):
             out.append('    extern __thread int %s__mix_overflow;' % item['mangled'])
             out.append('    int64_t r; int ovf;')
             out.extend(begin)
-            out.append('    r = %s(%s);' % (item['mangled'], cargs))
+            out.append('    r = %s(%s);' % (callee, cargs))
             out.append('    ovf = %s__mix_overflow;' % item['mangled'])
             out.extend(end)
+            if item.get('indexes'):
+                out.append('    if (%s) %s;' % (trap, fail))
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    if (ovf) return ail_hybrid_fallback();')
@@ -937,6 +1150,8 @@ def _compile(items, units, module, out_dir):
     objects = []
     for i, item in enumerate(items):
         csrc = next(u[2] for u in units if u[1] == item['name'])
+        if item.get('indexes'):
+            csrc = _trap_patch(csrc, item['mangled'])
         # The mixed-mode overflow signal is a per-function global.  The hybrid releases the GIL
         # around every native call, so two threads can otherwise reset/read each other's flag and
         # a truncated int could escape.  Give the hybrid's copy of the unit a thread-local flag;
