@@ -21,6 +21,7 @@ S6  empty set / frozenset displays print and walk as CPython does
 S8  pop's table finger survives a rebuild, a growth and a clear
 S9  a - b / difference / difference_update use CPython's copy-and-delete heuristic
 S10 a set of frozensets (or of tuples holding them) walks in CPython's order
+S11 symmetric_difference_update / ^= mutate in place from the other operand's order
 """
 import os
 import subprocess
@@ -247,6 +248,48 @@ TYPED_DIFF = '''def main() -> None:
 main()
 '''
 
+# a ^= b / a.symmetric_difference_update(b): CPython mutates a in place, walking the other
+# operand's table order (it does not compute `a ^ b`, which copies b and walks a). A dict
+# argument follows the dict's insertion order; any other iterable is first built into a set.
+SDU_ORDER = '''def main():
+    c = {8, 16, 24, 32, 40}
+    c.symmetric_difference_update({16})
+    print(list(c))
+    q = set(range(0, 240, 8))
+    q.symmetric_difference_update({8, 16, 240})
+    print(list(q))
+    a = {32, 0, 24}
+    a ^= {8, 56, 40, 16, 0}
+    print(list(a))
+    b = {32, 0, 24}
+    b.symmetric_difference_update({24: 1, 8: 1, 56: 1, 40: 1, 16: 1})
+    print(list(b))
+    c2 = {24}
+    c2.symmetric_difference_update([16, 56, 24])
+    print(list(c2), list({24}.symmetric_difference([16, 56, 24])))
+    d = {8, 16, 24, 32, 40}
+    d.symmetric_difference_update(d)
+    print(list(d))
+main()
+'''
+
+TYPED_SDU = '''def main() -> None:
+    q: set[int] = set(range(0, 240, 8))
+    t: set[int] = {8, 16, 240}
+    q ^= t
+    print(list(q))
+    r: set[int] = set(range(0, 40, 8))
+    r.symmetric_difference_update({8, 16, 64})
+    print(list(r))
+    f: set[int] = set()
+    f.symmetric_difference_update({24, 8, 16})
+    print(list(f))
+    g: set[int] = set(range(0, 40, 8))
+    g ^= g
+    print(list(g))
+main()
+'''
+
 # A frozenset of deterministic keys has a deterministic CPython hash, so a set of frozensets
 # (or of tuples holding them) must walk in CPython's table order too.
 FROZEN_KEYS = '''def main():
@@ -373,6 +416,10 @@ class SetOrderTests(unittest.TestCase):
 
     def test_s10_set_of_frozensets_walks_in_cpython_order(self):
         self._same('frozenkeys', FROZEN_KEYS, ('general', 'default'))
+
+    def test_s11_symmetric_difference_update_matches_cpython(self):
+        self._same('sduorder', SDU_ORDER, ('general', 'default'))
+        self._same('typedsdu', TYPED_SDU, ALL_MODES)
 
     def test_s7_mutation_during_iteration_still_fails(self):
         text = ('def f():\n'

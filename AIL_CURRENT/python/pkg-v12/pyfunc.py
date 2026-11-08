@@ -14815,8 +14815,11 @@ def _expr(node, ctx):
         kind = _map_kind(node, ctx)
         left, right = _map_pointer(node.left, ctx, kind), _map_pointer(node.right, ctx, kind)
         temporary, _ = ctx.temp(kind)
+        fn = SET_OPS[type(node.op)]
+        if getattr(node, '_ail_iset_update', False):
+            fn = 'xor_update'
         return ('({ const ail_%s *_a = %s; const ail_%s *_b = %s; ail_%s_replace(&%s, ail_%s_%s(_a, _b)); %s; })'
-                % (kind, left, kind, right, kind, temporary, kind, SET_OPS[type(node.op)], temporary))
+                % (kind, left, kind, right, kind, temporary, kind, fn, temporary))
     if isinstance(node, ast.BinOp) and any(_is_map_expr(e, ctx) for e in (node.left, node.right)):
         if any(_map_kind(e, ctx) in SETS for e in (node.left, node.right)):
             raise Unsupported('a typed set\'s | & - ^ (also union/intersection/difference/'
@@ -24854,6 +24857,8 @@ def _stmt_inner(node, ctx, ind):
                                  else ast.Attribute(value=node.target.value, attr=node.target.attr, ctx=ast.Load()),
                                  node.target)
         value = ast.copy_location(ast.BinOp(left=load, op=node.op, right=node.value), node)
+        if isinstance(node.op, ast.BitXor) and _map_kind(node.target, ctx) == ISET:
+            value._ail_iset_update = True
         return _stmt(ast.copy_location(ast.Assign(targets=[node.target], value=value), node), ctx, ind)
     if isinstance(node, ast.AugAssign):
         if isinstance(node.target, ast.Name):

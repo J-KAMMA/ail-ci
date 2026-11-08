@@ -16959,8 +16959,16 @@ static inline void ail_setx_difference_update_set(ail_ctx *cx, ail_setobj *so, a
         ail_setx_ct_resize(cx, so, so->cu > 50000 ? so->cu * 2 : so->cu * 4);
 }
 static inline void ail_setx_symmetric_difference_update_set(ail_ctx *cx, ail_setobj *so, ail_obj soo, ail_obj otheri) {
-    ail_obj tmp; ail_setx_symmetric_difference(cx, &tmp, soo, otheri);
-    ail_setx_swap_bodies(so, AIL_SETOBJ(tmp));
+    /* set_symmetric_difference_update: mutate `so` in place, walking `other`'s own table order and
+       adding/discarding each key there (there is no `a ^ b` copy). */
+    (void)soo;
+    ail_setobj *other = AIL_SETOBJ(otheri);
+    if (other == so) { ail_setx_clear(cx, so); return; }
+    int64_t pos = 0; ail_setentry *e;
+    while (ail_setx_next(other, &pos, &e)) {
+        if (ail_setx_discard_entry(so, e->key, e->hash)) continue;
+        ail_setx_add_entry(cx, so, e->key, e->hash);
+    }
 }
 static inline int ail_setx_issubset_set(const ail_setobj *a, const ail_setobj *b) {
     if (a->used > b->used) return 0;
@@ -21279,6 +21287,22 @@ static inline ail_st ail_meth_set_symmetric_difference_update(ail_ctx *cx, ail_o
     ail_st st = ail_setm_need_mut(cx, a, "symmetric_difference_update"); if (st != AIL_OK) return st;
     ail_setobj *so = AIL_SETOBJ(a);
     if (AIL_IS_ANYSET(other.tag)) { ail_setx_symmetric_difference_update_set(cx, so, a, other); return AIL_OK; }
+    if (other.tag == AIL_T_DICT) {
+        /* CPython's dict fast path toggles each key in the dict's insertion order */
+        AIL_FRAME_ENTER(cx, fr, 1);
+        st = ail_iter(cx, &fr.slots[0], other);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+        for (;;) {
+            ail_obj x; st = ail_it_next(cx, &x, fr.slots[0]);
+            if (st == AIL_STOP) { st = AIL_OK; break; }
+            if (st != AIL_OK) break;
+            int found; st = ail_setx_discard_key(cx, &found, so, x);
+            if (st != AIL_OK) break;
+            if (!found) { st = ail_setx_add_key(cx, so, x); if (st != AIL_OK) break; }
+        }
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
+    }
     ail_obj tmp = ail_set_new(cx);
     AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = tmp;
     st = ail_setx_update_any(cx, AIL_SETOBJ(tmp), other);
@@ -26838,6 +26862,29 @@ static ail_iset ail_iset_xor(const ail_iset *a, const ail_iset *b) {
     } else {
         const int64_t *order = ail_tab_order(&a->table);
         for (int64_t j = 0; j < a->table.n; j++) {
+            int64_t key = order[j];
+            if (ail_tab_has(&r.table, key)) ail_iset_discard(&r, key);
+            else ail_iset_add(&r, key);
+        }
+    }
+    return r;
+}
+/* CPython's in-place `a ^= b` / a.symmetric_difference_update(b): start from a and toggle each
+   key of b in b's own table order (not `a ^ b`, which copies b and walks a). */
+static ail_iset ail_iset_xor_update(const ail_iset *a, const ail_iset *b) {
+    ail_iset_check(a); ail_iset_check(b);
+    ail_iset r = ail_idict_copy(a);
+    ail_iset_arm(&r);
+    if (b->con) {
+        for (int64_t s = 0; s <= b->cmask; s++) {
+            if (b->ckind[s] != AIL_IS_LIVE) continue;
+            int64_t key = b->ckey[s];
+            if (ail_tab_has(&r.table, key)) ail_iset_discard(&r, key);
+            else ail_iset_add(&r, key);
+        }
+    } else {
+        const int64_t *order = ail_tab_order(&b->table);
+        for (int64_t j = 0; j < b->table.n; j++) {
             int64_t key = order[j];
             if (ail_tab_has(&r.table, key)) ail_iset_discard(&r, key);
             else ail_iset_add(&r, key);
