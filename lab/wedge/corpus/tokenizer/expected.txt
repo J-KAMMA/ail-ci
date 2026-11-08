@@ -1,0 +1,6 @@
+idents 320000
+longest 10
+defs 40000
+digits 160000
+weight 4480000
+starts 125005

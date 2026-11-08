@@ -4,11 +4,11 @@ Measurement only; the compiler is not changed.  Branch `job-wedge1-11080724`, ru
 
 ## The answer, in one paragraph
 
-Across 15 small hot-path modules of the kind real projects moved to Rust through PyO3, **24 of 97 top-level functions (24.7%) go native in the CPython hybrid**.  Because the hybrid only accelerates a *top-level function*, and because the hot function of a real module is very often a method, a nested helper or a list-returning builder, the functions that do go native carry only **5.0%** of the corpus's CPython self-time, and the hybrid is **1.017x** CPython wall time overall (geomean, median of 5).  The largest single unlock is **not-a-top-level-function** (19.3% of the kept time): the hybrid's unit is a top-level function, so class methods and nested defs are refused before any type is looked at.  The largest unlock *inside* a function is **list-return-kind** (15.8%): `pymix` cannot track a `tuple`, `bytes` or a list return kind, so the whole function is dropped.  See the ranked table in section 4.
+Across 15 small hot-path modules of the kind real projects moved to Rust through PyO3, **24 of 97 top-level functions (24.7%) go native in the CPython hybrid**.  Because the hybrid only accelerates a *top-level function*, and because the hot function of a real module is very often a method, a nested helper or a list-returning builder, the functions that do go native carry only **5.0%** of the corpus's CPython self-time, and the hybrid runs at **0.983x** CPython wall time overall (geomean of hybrid/CPython, median of 5; below 1.0 is faster).  The largest single unlock is **not-a-top-level-function** (19.3% of the kept time): the hybrid's unit is a top-level function, so class methods and nested defs are refused before any type is looked at.  The largest unlock *inside* a function is **list-return-kind** (15.8%): `pymix` cannot track a `tuple`, `bytes` or a list return kind, so the whole function is dropped.  See the ranked table in section 4.
 
 ## 1. The corpus
 
-Fifteen small modules under `lab/wedge/corpus/<kind>/`, each a `<kind>.py` of plain typed Python and a `run.py` driver on a fixed input sized for 1-5 s under CPython.  No third-party code.
+Fifteen small modules under `lab/wedge/corpus/<kind>/`, each a `<kind>.py` of plain typed Python and a `run.py` driver on a fixed input sized for 1-5 s under CPython.  Each directory also has an `expected.txt`, the CPython oracle: `python3 run.py > expected.txt`, committed so the byte-identical check is reproducible without re-running CPython.  No third-party code.
 
 | module | what it stands for | functions |
 | --- | --- | ---: |
@@ -31,31 +31,31 @@ Fifteen small modules under `lab/wedge/corpus/<kind>/`, each a `<kind>.py` of pl
 
 ## 2. Per-module results
 
-`native` is the functions the hybrid build actually wrapped (from `build.json`).  `match` is byte-identical stdout, exit status and last stderr line against `python3 run.py`.  Wall time is the median of 5 runs.  `standalone` is the binary from `ail compile run.py --syntax python`; `(+exact)` means the default build stopped loudly on int64 overflow and `--exact-int` then built a matching binary.
+`native` is the functions the hybrid build actually wrapped (from `build.json`).  `match` is byte-identical stdout, exit status and last stderr line against `python3 run.py`.  `oracle` is the committed `expected.txt` matching the live CPython run byte for byte.  Wall time is the median of 5 runs.  `standalone` is the binary from `ail compile run.py --syntax python`; `(+exact)` means the default build stopped loudly on int64 overflow and `--exact-int` then built a matching binary.
 
-| module | funcs | native | native share | hybrid match | standalone | CPython s | hybrid s | hybrid / CPython | standalone s |
-| --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
-| `ast_lint` | 7 | 0 | 0% | yes | match | 1.739 | 1.842 | 1.060x | 0.706 |
-| `bitset_bloom` | 7 | 2 | 29% | yes | match (+exact) | 1.809 | 1.806 | 0.999x | n/a |
-| `csv_parse` | 6 | 1 | 17% | yes | match | 2.04 | 1.884 | 0.923x | 0.14 |
-| `dataframe_group` | 7 | 3 | 43% | yes | match | 0.972 | 0.899 | 0.924x | 0.023 |
-| `edit_dist` | 6 | 0 | 0% | yes | match | 2.232 | 2.232 | 1.000x | 1.945 |
-| `field_valid` | 7 | 4 | 57% | yes | match | 2.11 | 2.183 | 1.035x | 0.11 |
-| `float_loops` | 8 | 0 | 0% | yes | match | 2.198 | 2.206 | 1.003x | 0.153 |
-| `graph_search` | 6 | 0 | 0% | yes | match | 2.076 | 2.023 | 0.974x | 1.963 |
-| `hashing` | 7 | 0 | 0% | yes | match (+exact) | 1.665 | 1.666 | 1.001x | n/a |
-| `json_parse` | 4 | 3 | 75% | yes | match | 1.415 | 1.275 | 0.901x | 1.423 |
-| `matrix` | 8 | 4 | 50% | yes | match | 2.894 | 2.905 | 1.004x | 0.023 |
-| `rolling_stats` | 8 | 4 | 50% | yes | match | 2.664 | 2.424 | 0.910x | 0.12 |
-| `sort_rank` | 7 | 3 | 43% | yes | match | 1.504 | 1.531 | 1.018x | 1.609 |
-| `tokenizer` | 7 | 0 | 0% | yes | match | 0.885 | 0.883 | 0.998x | 0.093 |
-| `tree_build` | 2 | 0 | 0% | yes | match | 1.97 | 1.987 | 1.009x | 0.177 |
+| module | funcs | native | native share | oracle | hybrid match | standalone | CPython s | hybrid s | hybrid / CPython | standalone s |
+| --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: | ---: | ---: |
+| `ast_lint` | 7 | 0 | 0% | yes | yes | match | 1.739 | 1.842 | 1.060x | 0.706 |
+| `bitset_bloom` | 7 | 2 | 29% | yes | yes | match (+exact) | 1.809 | 1.806 | 0.999x | n/a |
+| `csv_parse` | 6 | 1 | 17% | yes | yes | match | 2.04 | 1.884 | 0.923x | 0.14 |
+| `dataframe_group` | 7 | 3 | 43% | yes | yes | match | 0.972 | 0.899 | 0.924x | 0.023 |
+| `edit_dist` | 6 | 0 | 0% | yes | yes | match | 2.232 | 2.232 | 1.000x | 1.945 |
+| `field_valid` | 7 | 4 | 57% | yes | yes | match | 2.11 | 2.183 | 1.035x | 0.11 |
+| `float_loops` | 8 | 0 | 0% | yes | yes | match | 2.198 | 2.206 | 1.003x | 0.153 |
+| `graph_search` | 6 | 0 | 0% | yes | yes | match | 2.076 | 2.023 | 0.974x | 1.963 |
+| `hashing` | 7 | 0 | 0% | yes | yes | match (+exact) | 1.665 | 1.666 | 1.001x | n/a |
+| `json_parse` | 4 | 3 | 75% | yes | yes | match | 1.415 | 1.275 | 0.901x | 1.423 |
+| `matrix` | 8 | 4 | 50% | yes | yes | match | 2.894 | 2.905 | 1.004x | 0.023 |
+| `rolling_stats` | 8 | 4 | 50% | yes | yes | match | 2.664 | 2.424 | 0.910x | 0.12 |
+| `sort_rank` | 7 | 3 | 43% | yes | yes | match | 1.504 | 1.531 | 1.018x | 1.609 |
+| `tokenizer` | 7 | 0 | 0% | yes | yes | match | 0.885 | 0.883 | 0.998x | 0.093 |
+| `tree_build` | 2 | 0 | 0% | yes | yes | match | 1.97 | 1.987 | 1.009x | 0.177 |
 
 **Silent differences: zero.**  Every hybrid build matched CPython on every module; the standalone build matched on 13 of 15 by default and all 15 with `--exact-int`.  The two default-build stops are loud (`OverflowError: integer overflow in * ... --exact-int gives exact ints`), never a wrong answer.
 
 ### What the wall-time columns say
 
-The hybrid is **1.017x** CPython (geomean over 15 modules, range 0.944x-1.11x).  It is not faster in the aggregate because the functions that went native carry only 5.0% of the self time; the rest is still interpreted.  The standalone binary is much faster where the whole program types (matrix 2.89 s vs 0.023 s, dataframe_group 0.97 s vs 0.023 s, rolling_stats 2.66 s vs 0.12 s, field_valid 2.11 s vs 0.11 s), so the boundary is not the C quality -- it is the *selection*.
+The hybrid runs at **0.983x** CPython (`hybrid / CPython` below 1.0 means faster; geomean over 15 modules, range 0.901x-1.06x -- the same convention as the table column).  It is not faster in the aggregate because the functions that went native carry only 5.0% of the self time; the rest is still interpreted.  The standalone binary is much faster where the whole program types (matrix 2.89 s vs 0.023 s, dataframe_group 0.97 s vs 0.023 s, rolling_stats 2.66 s vs 0.12 s, field_valid 2.11 s vs 0.11 s), so the boundary is not the C quality -- it is the *selection*.
 
 ## 3. The Rust bar
 
@@ -72,7 +72,7 @@ The hybrid is **1.017x** CPython (geomean over 15 modules, range 0.944x-1.11x). 
 | `rolling_stats` | `window_sums` | 388.205 | 139.356 | 2.8x | 2.648 | 1.854 | 1.43x | yes |
 | `tokenizer` | `count_idents` | 237.543 | 3.103 | 76.6x | 0.866 | 0.636 | 1.36x | yes |
 
-Rewriting one function in Rust is worth **2x-204x** on that function, but only **1.07x-45.8x** on the program, because the rest of the program is still Python.  AIL's hybrid, on the same five modules, is edit_dist 1x, float_loops 1x, matrix 1x, rolling_stats 1.1x, tokenizer 1x.  That is the size of the gap the boundary opens: the Rust rewrite wins 1.4x-46x whole-program, AIL wins 1.0x-1.2x.
+Rewriting one function in Rust is worth **2x-204x** on that function, but only **1.07x-45.8x** on the program, because the rest of the program is still Python.  AIL's hybrid on the same five modules takes **0.91x-1.004x** of CPython time in the table's `hybrid / CPython` convention: it is at best 1.1x faster (`rolling_stats`), and parity or slower on the rest.  That is the size of the gap the boundary opens: the Rust rewrite wins **1.07x-45.8x** whole-program, AIL wins at most **1.1x**.
 
 ## 4. Refusal reasons, ranked by the hot-path time each keeps on CPython
 
@@ -100,7 +100,7 @@ Method: cProfile on each `run.py` gives the self-time (`tottime`) of every funct
 
 ### The five reasons that matter, spelled out
 
-1. **not-a-top-level-function** -- the hybrid's unit is a top-level `def`, so a class method, a nested helper or a constructor is refused before any typing happens.  This is the largest single bucket because the hottest code in a real module is often a method (`Tree._inorder` 1.8 s of `tree_build`'s 3.9 s).
+1. **not-a-top-level-function** -- the hybrid's unit is a top-level `def`, so a class method, a nested helper or a constructor is refused before any typing happens.  This is the largest single bucket because the hottest code in a real module is often a method (`Tree._inorder` 2.15 s of `tree_build`'s 5.8 s of function self time; the three tree methods alone are 5.69 s).
 2. **list-return-kind** -- `-> list[int]` / `-> list[str]` / `-> list[float]`.  `pymix` has no return kind for a container, and the boundary has no ABI for one, so `group_sum`, `mat_mul`, `window_sums`, `make_samples`, `bloom_set`, `split_lines` and `identity` all stay in Python.
 3. **tuple-parameter** -- a `tuple` parameter (`node: tuple`) is not a tracked kind.  `ast_lint`'s recursive walk is 5.7 s of the corpus and every function in it is refused this way.
 4. **indexing-can-raise** -- `_unsafe_body` refuses any subscript, because the typed clone cannot reproduce `IndexError` back into the caller's `try`.  This is the single biggest *body* rule: `levenshtein` alone is 3.6 s.  A clone that returns a sentinel and lets the Python wrapper re-run the original on `IndexError` would unlock it.
@@ -120,7 +120,15 @@ The information exists: `lab/wedge/boundary.py` recovers it by re-running `pymix
 
 ## 5. Ready-to-queue tasks, each 2 hours or less
 
-Ordered by measured gain.  Each names the reason, the test that guards it, and the gain this corpus measured.
+Ordered W0 first (it unlocks the rest), then W1-W6 by measured hot-path gain.  Each names the reason, the test that guards it, and the gain this corpus measured.
+
+### W0 -- silent-refusal (unlocks the other tasks; moves no time itself)
+
+Surface the refusal reason in `build.json` for a function that never reaches a unit.  Today `_select` records a reason only for a function it saw and dropped; a function that `pymix.analyze` or `to_c` refuses gets no unit, so `rejected` has no key and the build is silent (54 of 73 refusals here).  `lab/wedge/boundary.py` already recovers the reason by re-running `pymix.analyze` and `to_c`; move that call into the same place `_analysis` runs, and write `{function: {gate, reason}}` under `rejected` even when `_select` never produced a unit.  This is a reporting change, not a compiler change: no function goes native.  Its gain is that the other tasks below become queueable -- without it 54 of 73 refusals cannot be acted on.
+
+**Guard:** `build.json` for `ast_lint`, `float_loops`, `graph_search` and `tokenizer` lists a `gate` and `reason` for every function that stayed on CPython.  Guard: a new `test_ail_cpython_hybrid` case whose module has one pymix-refused and one emitter-refused function, asserting both appear in `rejected`; plus `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
+**Gain:** measured: makes 54 of 73 refusals (74.0%) name their gate and fix; 0 s moves native by itself.
 
 ### W1 -- not-a-top-level-function (measured ceiling 19.3% of the corpus self time)
 
@@ -173,7 +181,8 @@ Fix the `ail_flist` prototype mismatch (section 4).  Either teach `_mix_validate
 ## 6. Reproduce
 
 ```sh
-python3 lab/wedge/census.py -j 2      # builds, native counts, byte-identical check
+for d in lab/wedge/corpus/*/; do (cd "$d" && python3 -B run.py > expected.txt); done  # oracles
+python3 lab/wedge/census.py -j 2      # builds, native counts, byte-identical + oracle check
 python3 lab/wedge/boundary.py          # which gate refused each function, and why
 python3 lab/wedge/measure.py -j 2      # wall time, median of 5, plus cProfile
 python3 lab/wedge/rust_bar.py          # cargo build + the PyO3 bar
@@ -186,6 +195,6 @@ python3 lab/wedge/report.py            # renders this file
 ## 7. What is not measured
 
 * Instruction counts: `perf_event_open` is denied on this runner, and callgrind was not used because the job is a wall-time question.
-* The Rust bar covers 5 of 15 modules, as the task allows; the rest have no hand-written PyO3 twin.
+* The Rust bar covers 5 of 15 modules, as the task allows; the rest have no hand-written PyO3 twin.  `rust_bar.json` stores a length and SHA-256 digest of each function's return value, not the value itself (`rolling_stats` returns a 21 MB list); the `outputs agree` column is the live in-process `MATCH` comparison.
 * The hybrid analysis runs under `--exact-int`, so a module whose values exceed int64 can still be analysed; the *standalone* column needs `--exact-int` explicitly and is marked `(+exact)` when it does.
 * The two `--exact-int` rows are real: `bitset_bloom` and `hashing` multiply past 2**63 in the driver, so the default 64-bit build stops loudly.  That is the documented int64 stop, not a silent difference.

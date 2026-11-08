@@ -91,6 +91,12 @@ def census_one(kind_dir):
         rc0, out0, err0 = _run([sys.executable, '-B', 'run.py'], work)
         rec['cpython'] = {'rc': rc0, 'stdout': out0.decode('utf-8', 'replace'),
                           'last_err': _last(err0)}
+        # the committed CPython oracle must be exactly what CPython prints now
+        oracle = kind_dir / 'expected.txt'
+        rec['oracle'] = {
+            'present': oracle.is_file(),
+            'match': bool(oracle.is_file() and oracle.read_bytes() == out0),
+        }
         # hybrid
         hdir = work / 'hybrid'
         t0 = time.monotonic()

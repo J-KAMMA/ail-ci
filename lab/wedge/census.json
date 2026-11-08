@@ -2,7 +2,7 @@
  {
   "module": "ast_lint",
   "hybrid": {
-   "build_s": 1.63,
+   "build_s": 1.72,
    "build_rc": 0,
    "accelerated": [],
    "rejected": {},
@@ -11,7 +11,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 2.53,
+   "build_s": 2.57,
    "build_rc": 0,
    "path_note": "note: ast_lint.py:4:1: built on the general path (about 20x slower) because 'node' is annotated tuple, which this compiler has no rule for. write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, int], set[int], set[str], or a class name (no generics such as list[T]",
    "general": true,
@@ -41,12 +41,16 @@
    "rc": 0,
    "stdout": "nodes 955710\ndepth 14\ntags 573440\nints 1338015\nsum 2395363355\nleaves 2676030\nfound 18\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "bitset_bloom",
   "hybrid": {
-   "build_s": 4.51,
+   "build_s": 2.57,
    "build_rc": 0,
    "accelerated": [
     "popcount",
@@ -62,7 +66,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 0.79,
+   "build_s": 0.8,
    "build_rc": 0,
    "path_note": "",
    "general": false,
@@ -91,12 +95,16 @@
    "rc": 0,
    "stdout": "bits 262144\nset 256883\nhits 5351904\nhits_expected 2700000\nxor 2170266837\nmultiples 128148\nintersect 251938\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "csv_parse",
   "hybrid": {
-   "build_s": 2.63,
+   "build_s": 2.52,
    "build_rc": 0,
    "accelerated": [
     "quote_count"
@@ -107,7 +115,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 0.89,
+   "build_s": 0.88,
    "build_rc": 0,
    "path_note": "",
    "general": false,
@@ -132,6 +140,10 @@
    "rc": 0,
    "stdout": "lines 350000\nfields 2800000\nchars 5600000\ncolumn2 1050000\nmaxlen 11\nquotes 700000\nsum 0\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
@@ -153,7 +165,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 0.79,
+   "build_s": 0.81,
    "build_rc": 0,
    "path_note": "",
    "general": false,
@@ -179,12 +191,16 @@
    "rc": 0,
    "stdout": "rows 2500000\ngroups 64\ntotal 1248750000\nfilter 999000000\nweighted 3866249259\nbiggest 39063\nscaled 84638646\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "edit_dist",
   "hybrid": {
-   "build_s": 3.19,
+   "build_s": 3.21,
    "build_rc": 0,
    "accelerated": [],
    "rejected": {
@@ -198,7 +214,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 3.0,
+   "build_s": 2.94,
    "build_rc": 0,
    "path_note": "note: edit_dist.py:83:9: built on the general path (about 20x slower) because passing a number where edit_dist.levenshtein() wants a str; run with --strict to see why",
    "general": true,
@@ -227,12 +243,16 @@
    "rc": 0,
    "stdout": "length 130\ndistance 4800\nprefix 80000\nbigrams 95200\nhamming 4800\nbest 4000\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "field_valid",
   "hybrid": {
-   "build_s": 4.17,
+   "build_s": 2.28,
    "build_rc": 0,
    "accelerated": [
     "field_weight",
@@ -272,12 +292,16 @@
    "rc": 0,
    "stdout": "good 700000\nupper 0\nemail_ok 700000\nversion_ok 466667\nweight 82422830\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "float_loops",
   "hybrid": {
-   "build_s": 5.07,
+   "build_s": 4.98,
    "build_rc": 0,
    "accelerated": [],
    "rejected": {},
@@ -286,7 +310,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 0.75,
+   "build_s": 0.76,
    "build_rc": 0,
    "path_note": "",
    "general": false,
@@ -313,12 +337,16 @@
    "rc": 0,
    "stdout": "dot 69062807677.59375\nmean 250.0\nvar 20833.3125\nnorm 645497.143681\nmaxabs 499.75\nsqsum 416666562500.0\nblend 568368619.4125\nscaled_len 5000000\nscaled_tail 1249.375\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "graph_search",
   "hybrid": {
-   "build_s": 1.62,
+   "build_s": 1.58,
    "build_rc": 0,
    "accelerated": [],
    "rejected": {},
@@ -327,7 +355,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 2.82,
+   "build_s": 2.8,
    "build_rc": 0,
    "path_note": "note: run.py:14:9: built on the general path (about 20x slower) because a matching list[int] list is required; run with --strict to see why",
    "general": true,
@@ -356,12 +384,16 @@
    "rc": 0,
    "stdout": "nodes 60000\nedges 480000\nmax_degree 8\nabove 240000\nreach 1320000\nvisited 1320000\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "hashing",
   "hybrid": {
-   "build_s": 4.14,
+   "build_s": 3.9,
    "build_rc": 0,
    "accelerated": [],
    "rejected": {
@@ -372,7 +404,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 8.01,
+   "build_s": 7.87,
    "build_rc": 0,
    "path_note": "note: run.py:9:5: built on the general path (about 20x slower) because a generator expression used as a value. write instead: consume it in place (`sum(x * x for x in xs)`, `any(...)`, `all(...)`), or fill a list with a loop; run with --strict to see why",
    "general": true,
@@ -401,12 +433,16 @@
    "rc": 0,
    "stdout": "bytes 200000\nfnv1a 1357944\nfnv1a_64 588360\nadler 297504\nsum 612001536\nxor 4608\ndjb2 1166712\nlow 3840\ncrc 2306776710\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "json_parse",
   "hybrid": {
-   "build_s": 3.99,
+   "build_s": 4.06,
    "build_rc": 0,
    "accelerated": [
     "count_tokens",
@@ -421,7 +457,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 4.64,
+   "build_s": 4.67,
    "build_rc": 0,
    "path_note": "note: run.py:9:5: built on the general path (about 20x slower) because concatenating a number with a str; `+` joins two strs and nothing else. str and bytes are separate types here and never mix -- CPython raises TypeError for exactly this. write instead: convert one side first, `data.decode()` (byt",
    "general": true,
@@ -444,12 +480,16 @@
    "rc": 0,
    "stdout": "bytes 3120001\ntokens 640001\ndepth 3\ndigits 240000\nobjects 120000\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "matrix",
   "hybrid": {
-   "build_s": 2.93,
+   "build_s": 3.66,
    "build_rc": 0,
    "accelerated": [
     "apply_threshold",
@@ -465,7 +505,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 0.88,
+   "build_s": 0.93,
    "build_rc": 0,
    "path_note": "",
    "general": false,
@@ -492,12 +532,16 @@
    "rc": 0,
    "stdout": "n 300\ntrace_a 9\ntrace_c -7729\nrows 300\nrow0 106\nmax 1863\nthresh -10585100\nscale -9\nnegatives 47646\nident 90000 300\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "rolling_stats",
   "hybrid": {
-   "build_s": 2.92,
+   "build_s": 3.54,
    "build_rc": 0,
    "accelerated": [
     "count_over",
@@ -514,7 +558,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 0.8,
+   "build_s": 0.99,
    "build_rc": 0,
    "path_note": "",
    "general": false,
@@ -541,12 +585,16 @@
    "rc": 0,
    "stdout": "n 3000000\nwindows 2999873\ntotal 1499083576\nmoment 999130850736\nmean_scaled 1499\nruns 20\nover 595196\nacc 135776\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "sort_rank",
   "hybrid": {
-   "build_s": 2.69,
+   "build_s": 3.38,
    "build_rc": 0,
    "accelerated": [
     "count_above",
@@ -559,7 +607,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 3.99,
+   "build_s": 5.23,
    "build_rc": 0,
    "path_note": "note: sort_rank.py:32:5: built on the general path (about 20x slower) because returning Subscript as a list; run with --strict to see why",
    "general": true,
@@ -589,12 +637,16 @@
    "rc": 0,
    "stdout": "words 1600000\ntotal 1600000\nmax 68037\nabove 26\ntop [4, 5, 6, 2, 3, 1, 10, 7]\ntopscore 1487629\nspread 16\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "tokenizer",
   "hybrid": {
-   "build_s": 2.61,
+   "build_s": 3.48,
    "build_rc": 0,
    "accelerated": [],
    "rejected": {
@@ -609,7 +661,7 @@
    "detail": ""
   },
   "standalone": {
-   "build_s": 0.78,
+   "build_s": 0.79,
    "build_rc": 0,
    "path_note": "",
    "general": false,
@@ -635,12 +687,16 @@
    "rc": 0,
    "stdout": "idents 320000\nlongest 10\ndefs 40000\ndigits 160000\nweight 4480000\nstarts 125005\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  },
  {
   "module": "tree_build",
   "hybrid": {
-   "build_s": 1.75,
+   "build_s": 1.74,
    "build_rc": 0,
    "accelerated": [],
    "rejected": {},
@@ -670,6 +726,10 @@
    "rc": 0,
    "stdout": "nodes 60000\nheight 63\nsum 30000050832\ndepth 2014045\nmin 0\nmax 999959\ntotal 2400245191920\n",
    "last_err": ""
+  },
+  "oracle": {
+   "present": true,
+   "match": true
   }
  }
 ]

@@ -78,7 +78,9 @@ def main():
       'hybrid only accelerates a *top-level function*, and because the hot function of a real '
       'module is very often a method, a nested helper or a list-returning builder, the functions '
       'that do go native carry only **%s%%** of the corpus\'s CPython self-time, and the hybrid '
-      'is **%sx** CPython wall time overall (geomean, median of 5).  The largest single unlock is '
+      'runs at **%sx** CPython wall time overall (geomean of hybrid/CPython, median of 5; below '
+      '1.0 is faster).  The '
+      'largest single unlock is '
       '**%s** (%s%% of the kept time): the hybrid\'s unit is a top-level function, so class '
       'methods and nested defs are refused before any type is looked at.  The largest unlock '
       '*inside* a function is **%s** (%s%%): `pymix` cannot track a `tuple`, `bytes` or a list '
@@ -86,7 +88,7 @@ def main():
       % (len(modules), total_native, total_funcs, fmt(native_share, 1),
          pct(100 * analysis['native_share_of_self']),
          fmt(statistics.geometric_mean(
-             [measure[m]['cpython_s'] / measure[m]['hybrid_s'] for m in modules
+             [measure[m]['hybrid_s'] / measure[m]['cpython_s'] for m in modules
               if measure[m].get('hybrid_s')]), 3),
          analysis['reasons'][0]['family'],
          pct(100 * analysis['reasons'][0]['share_of_kept']),
@@ -96,7 +98,9 @@ def main():
     A('## 1. The corpus')
     A('')
     A('Fifteen small modules under `lab/wedge/corpus/<kind>/`, each a `<kind>.py` of plain typed '
-      'Python and a `run.py` driver on a fixed input sized for 1-5 s under CPython.  No '
+      'Python and a `run.py` driver on a fixed input sized for 1-5 s under CPython.  Each '
+      'directory also has an `expected.txt`, the CPython oracle: `python3 run.py > expected.txt`, '
+      'committed so the byte-identical check is reproducible without re-running CPython.  No '
       'third-party code.')
     A('')
     A('| module | what it stands for | functions |')
@@ -126,12 +130,13 @@ def main():
     A('')
     A('`native` is the functions the hybrid build actually wrapped (from `build.json`).  '
       '`match` is byte-identical stdout, exit status and last stderr line against `python3 run.py`.  '
+      '`oracle` is the committed `expected.txt` matching the live CPython run byte for byte.  '
       'Wall time is the median of 5 runs.  `standalone` is the binary from '
       '`ail compile run.py --syntax python`; `(+exact)` means the default build stopped loudly on '
       'int64 overflow and `--exact-int` then built a matching binary.')
     A('')
-    A('| module | funcs | native | native share | hybrid match | standalone | CPython s | hybrid s | hybrid / CPython | standalone s |')
-    A('| --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |')
+    A('| module | funcs | native | native share | oracle | hybrid match | standalone | CPython s | hybrid s | hybrid / CPython | standalone s |')
+    A('| --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: | ---: | ---: |')
     for m in modules:
         c, b, w = census[m], boundary[m], measure[m]
         n = len(b['native'])
@@ -145,8 +150,11 @@ def main():
         elif c['match'].get('standalone') is False:
             st = 'differs'
         ratio = ('%.3fx' % (hy / py)) if py and hy else 'n/a'
-        A('| `%s` | %d | %d | %s%% | %s | %s | %s | %s | %s | %s |'
-          % (m, f, n, pct(100.0 * n / f, 0), 'yes' if c['match'].get('hybrid') else 'NO',
+        ora = c.get('oracle') or {}
+        ora_st = ('yes' if ora.get('match') else 'NO') if ora.get('present') else 'missing'
+        A('| `%s` | %d | %d | %s%% | %s | %s | %s | %s | %s | %s | %s |'
+          % (m, f, n, pct(100.0 * n / f, 0), ora_st,
+             'yes' if c['match'].get('hybrid') else 'NO',
              st, fmt(py), fmt(hy), ratio, fmt(se)))
     A('')
     A('**Silent differences: zero.**  Every hybrid build matched CPython on every module; the '
@@ -157,14 +165,15 @@ def main():
     A('### What the wall-time columns say')
     A('')
     ok = [m for m in modules if measure[m].get('cpython_s') and measure[m].get('hybrid_s')]
-    A('The hybrid is **%sx** CPython (geomean over %d modules, range %sx-%sx).  It is not faster '
+    A('The hybrid runs at **%sx** CPython (`hybrid / CPython` below 1.0 means faster; geomean over '
+      '%d modules, range %sx-%sx -- the same convention as the table column).  It is not faster '
       'in the aggregate because the functions that went native carry only %s%% of the self time; '
       'the rest is still interpreted.  The standalone binary is much faster where the whole '
       'program types (%s), so the boundary is not the C quality -- it is the *selection*.'
-      % (fmt(statistics.geometric_mean([measure[m]['cpython_s'] / measure[m]['hybrid_s']
+      % (fmt(statistics.geometric_mean([measure[m]['hybrid_s'] / measure[m]['cpython_s']
                                         for m in ok]), 3), len(ok),
-         fmt(min(measure[m]['cpython_s'] / measure[m]['hybrid_s'] for m in ok), 3),
-         fmt(max(measure[m]['cpython_s'] / measure[m]['hybrid_s'] for m in ok), 3),
+         fmt(min(measure[m]['hybrid_s'] / measure[m]['cpython_s'] for m in ok), 3),
+         fmt(max(measure[m]['hybrid_s'] / measure[m]['cpython_s'] for m in ok), 3),
          pct(100 * analysis['native_share_of_self']),
          ', '.join('%s %s s vs %s s' % (m, fmt(measure[m]['cpython_s'], 2),
                                         fmt(measure[m]['standalone_s'], 3))
@@ -194,16 +203,23 @@ def main():
              fmt(r.get('speedup'), 1), fmt(w.get('cpython_s')), fmt(w.get('rust_s')),
              fmt(w.get('speedup'), 2), 'yes' if w.get('match') else 'NO'))
     A('')
+    whole_speedups = [r['whole']['speedup'] for r in rust.values() if (r.get('whole') or {}).get('speedup')]
+    ail_time = {m: measure[m]['hybrid_s'] / measure[m]['cpython_s'] for m in rust}
+    ail_speed = {m: 1.0 / v for m, v in ail_time.items()}
+    best_ail = max(ail_speed, key=ail_speed.get)
     A('Rewriting one function in Rust is worth **%sx-%sx** on that function, but only '
       '**%sx-%sx** on the program, because the rest of the program is still Python.  AIL\'s '
-      'hybrid, on the same five modules, is %s.  That is the size of the gap the boundary opens: '
-      'the Rust rewrite wins 1.4x-46x whole-program, AIL wins 1.0x-1.2x.'
+      'hybrid on the same five modules takes **%sx-%sx** of CPython time in the table\'s '
+      '`hybrid / CPython` convention: it is at best %sx faster (`%s`), and parity or slower on '
+      'the rest.  That is the size of the gap the boundary opens: the Rust rewrite wins '
+      '**%sx-%sx** whole-program, AIL wins at most **%sx**.'
       % (fmt(min(r['speedup'] for r in rust.values()), 0),
          fmt(max(r['speedup'] for r in rust.values()), 0),
-         fmt(min((r['whole'] or {}).get('speedup') or 0 for r in rust.values()), 2),
-         fmt(max((r['whole'] or {}).get('speedup') or 0 for r in rust.values()), 2),
-         ', '.join('%s %sx' % (m, fmt(measure[m]['cpython_s'] / measure[m]['hybrid_s'], 2))
-                   for m in sorted(rust))))
+         fmt(min(whole_speedups), 2), fmt(max(whole_speedups), 2),
+         fmt(min(ail_time.values()), 3), fmt(max(ail_time.values()), 3),
+         fmt(max(ail_speed.values()), 2), best_ail,
+         fmt(min(whole_speedups), 2), fmt(max(whole_speedups), 2),
+         fmt(max(ail_speed.values()), 2)))
     A('')
     A('## 4. Refusal reasons, ranked by the hot-path time each keeps on CPython')
     A('')
@@ -231,10 +247,15 @@ def main():
     A('')
     A('### The five reasons that matter, spelled out')
     A('')
+    tb = measure.get('tree_build', {}).get('profile') or {}
+    tb_total = sum(v['tottime'] for v in tb.values())
+    tb_methods = sum(tb[k]['tottime'] for k in ('_inorder', '_depth', '_height') if k in tb)
     A('1. **not-a-top-level-function** -- the hybrid\'s unit is a top-level `def`, so a class '
       'method, a nested helper or a constructor is refused before any typing happens.  This is '
       'the largest single bucket because the hottest code in a real module is often a method '
-      '(`Tree._inorder` 1.8 s of `tree_build`\'s 3.9 s).')
+      '(`Tree._inorder` %s s of `tree_build`\'s %s s of function self time; the three tree '
+      'methods alone are %s s).'
+      % (fmt(tb.get('_inorder', {}).get('tottime'), 2), fmt(tb_total, 2), fmt(tb_methods, 2)))
     A('2. **list-return-kind** -- `-> list[int]` / `-> list[str]` / `-> list[float]`.  `pymix` '
       'has no return kind for a container, and the boundary has no ABI for one, so '
       '`group_sum`, `mat_mul`, `window_sums`, `make_samples`, `bloom_set`, `split_lines` and '
@@ -296,6 +317,28 @@ def main():
     A('## 5. Ready-to-queue tasks, each 2 hours or less')
     A('')
     tasks = [
+        ('W0', 'silent-refusal', 'no time of its own',
+         'Surface the refusal reason in `build.json` for a function that never reaches a unit.  '
+         'Today `_select` records a reason only for a function it saw and dropped; a function '
+         'that `pymix.analyze` or `to_c` refuses gets no unit, so `rejected` has no key and the '
+         'build is silent (%d of %d refusals here).  `lab/wedge/boundary.py` already recovers '
+         'the reason by re-running `pymix.analyze` and `to_c`; move that call into the same '
+         'place `_analysis` runs, and write `{function: {gate, reason}}` under `rejected` even '
+         'when `_select` never produced a unit.  This is a reporting change, not a compiler '
+         'change: no function goes native.  Its gain is that the other tasks below become '
+         'queueable -- without it %d of %d refusals cannot be acted on.'
+         % (analysis['silent_refusals'], analysis['refused_functions'],
+            analysis['silent_refusals'], analysis['refused_functions']),
+         '`build.json` for `ast_lint`, `float_loops`, `graph_search` and `tokenizer` lists a '
+         '`gate` and `reason` for every function that stayed on CPython.  Guard: a new '
+         '`test_ail_cpython_hybrid` case whose module has one pymix-refused and one '
+         'emitter-refused function, asserting both appear in `rejected`; plus '
+         '`test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, '
+         '`test_ail_corpus_findings3`.',
+         'measured: makes %d of %d refusals (%s%%) name their gate and fix; 0 s moves native '
+         'by itself.'
+         % (analysis['silent_refusals'], analysis['refused_functions'],
+            pct(100.0 * analysis['silent_refusals'] / max(1, analysis['refused_functions'])))),
         ('W1', 'not-a-top-level-function', '19.3%',
          'Accelerate a method and a nested def, not only a top-level `def`.  Today '
          '`ail_cpython_hybrid._select` looks functions up in `_top_level_functions(tree)` and '
@@ -382,11 +425,14 @@ def main():
          'measured: 1.26 s of 44.2 s self time, 2.8%, but it is the only reason `float_loops` '
          'gets nothing at all.'),
     ]
-    A('Ordered by measured gain.  Each names the reason, the test that guards it, and the gain '
-      'this corpus measured.')
+    A('Ordered W0 first (it unlocks the rest), then W1-W6 by measured hot-path gain.  Each names '
+      'the reason, the test that guards it, and the gain this corpus measured.')
     A('')
     for tid, fam, gain, body, test, gain_detail in tasks:
-        A('### %s -- %s (measured ceiling %s of the corpus self time)' % (tid, fam, gain))
+        if tid == 'W0':
+            A('### %s -- %s (unlocks the other tasks; moves no time itself)' % (tid, fam))
+        else:
+            A('### %s -- %s (measured ceiling %s of the corpus self time)' % (tid, fam, gain))
         A('')
         A(body)
         A('')
@@ -397,7 +443,8 @@ def main():
     A('## 6. Reproduce')
     A('')
     A('```sh')
-    A('python3 lab/wedge/census.py -j 2      # builds, native counts, byte-identical check')
+    A('for d in lab/wedge/corpus/*/; do (cd "$d" && python3 -B run.py > expected.txt); done  # oracles')
+    A('python3 lab/wedge/census.py -j 2      # builds, native counts, byte-identical + oracle check')
     A('python3 lab/wedge/boundary.py          # which gate refused each function, and why')
     A('python3 lab/wedge/measure.py -j 2      # wall time, median of 5, plus cProfile')
     A('python3 lab/wedge/rust_bar.py          # cargo build + the PyO3 bar')
@@ -413,7 +460,9 @@ def main():
     A('* Instruction counts: `perf_event_open` is denied on this runner, and callgrind was not '
       'used because the job is a wall-time question.')
     A('* The Rust bar covers 5 of 15 modules, as the task allows; the rest have no hand-written '
-      'PyO3 twin.')
+      'PyO3 twin.  `rust_bar.json` stores a length and SHA-256 digest of each function\'s return '
+      'value, not the value itself (`rolling_stats` returns a 21 MB list); the `outputs agree` '
+      'column is the live in-process `MATCH` comparison.')
     A('* The hybrid analysis runs under `--exact-int`, so a module whose values exceed int64 can '
       'still be analysed; the *standalone* column needs `--exact-int` explicitly and is marked '
       '`(+exact)` when it does.')

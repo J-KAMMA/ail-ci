@@ -1,3 +1,29 @@
+## 2026-11-08 -- wedge1: what share of a Rust-rewrite hot path AIL compiles (job-wedge1-11080724)
+
+Measurement only; no compiler, runtime or test change.  `lab/wedge/` now has `RESULTS.md` (the
+required output), `corpus/` with 15 hand-written modules, each a `<kind>.py`, a `run.py` driver and
+a committed CPython `expected.txt` oracle, five measurement scripts (`census.py`, `boundary.py`,
+`measure.py`, `analyse.py`, `rust_bar.py`) with their JSON caches, and a PyO3 `rust/` crate for the
+"rewrite it in Rust" bar.  The headline: **24 of 97 top-level functions (24.7%) go native**, and
+those carry only **5.0%** of the corpus's CPython self time; the hybrid runs at **0.983x** CPython
+wall time (geomean of hybrid/CPython over 15 modules, median of 5), so it is at parity, not faster.
+The standalone binary builds and matches CPython on **13 of 15**, all 15 with `--exact-int`, and
+runs 28.17 s of CPython as 8.49 s.  The largest refusal is **not-a-top-level-function** (19.3% of
+the kept time), then list-return-kind (15.8%), tuple-parameter (12.8%), indexing-can-raise (12.6%)
+and nested-list-annotation (8.9%).  **54 of the 73 refusals (74.0%) are silent**: `build.json`
+records no reason at all, so `docs/STRATEGY.md`'s "build says why" loop cannot close; W0 surfaces
+it, W1-W6 are the graded fixes.  A defect found on the way: `list[float]` cannot be wrapped at all
+(`ail_flist` vs pointer+len ABI mismatch), so `float_loops` gets 0 of 8.
+
+Review fixes on the same branch: all 15 modules now carry a committed `expected.txt` and
+`census.py` checks it byte-for-byte; this DEVLOG entry; a W0 section for the silent-refusal fix
+(the report referenced one that did not exist); the `tree_build` self-time sentence is now read
+from `measure.json` (`_inorder` 2.15 s of 5.80 s, not the stale 1.8/3.9 s); the 69 MB
+`rust/target/` and `hotrust.so` are untracked and ignored; `rust_bar.json` stores value digests
+instead of the raw 21 MB lists (42 MB -> 4 KB, report byte-identical); and the ratio convention is
+`hybrid / CPython` everywhere (the earlier 1.017x was the inverse of the table column, and "AIL
+wins 1.0x-1.2x" is at most 1.004x in the table's own convention).
+
 ## 2026-11-07 -- layout1: flat-layout measurement and ranking (job-layout1-11080009)
 
 Measurement and design only; no compiler, runtime, test or bench change. `lab/layout/` now has

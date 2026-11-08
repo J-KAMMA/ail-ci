@@ -1,0 +1,6 @@
+nodes 60000
+edges 480000
+max_degree 8
+above 240000
+reach 1320000
+visited 1320000

@@ -1,0 +1,7 @@
+nodes 955710
+depth 14
+tags 573440
+ints 1338015
+sum 2395363355
+leaves 2676030
+found 18

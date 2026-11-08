@@ -13,6 +13,7 @@ each the median of 5 runs in a fresh subprocess.  Outputs are compared first, so
 only recorded when the two agree.
 """
 import json
+import hashlib
 import os
 import shutil
 import statistics
@@ -174,16 +175,24 @@ def main():
         row = {'module': module, 'function': pyfn}
         lines = proc.stdout.splitlines()
         vals = {}
+        raw_py = raw_rs = None
         for line in lines:
             if line.startswith('PY '):
-                row['py_value'] = line[3:]
+                raw_py = line[3:]
             elif line.startswith('RS '):
-                row['rs_value'] = line[3:]
+                raw_rs = line[3:]
             elif line.startswith('MATCH '):
                 row['match'] = line.split()[1] == 'True'
             elif line.startswith('T '):
                 _, name, v = line.split()
                 vals[name] = float(v)
+        # Keep a digest, not the value: rolling_stats returns a 21 MB list and nothing reads it.
+        if raw_py is not None:
+            row['py_len'] = len(raw_py)
+            row['py_sha256'] = hashlib.sha256(raw_py.encode()).hexdigest()
+        if raw_rs is not None:
+            row['rs_len'] = len(raw_rs)
+            row['rs_sha256'] = hashlib.sha256(raw_rs.encode()).hexdigest()
         row.update({'python_s': vals.get('py'), 'rust_s': vals.get('rs')})
         if row.get('python_s') and row.get('rust_s'):
             row['speedup'] = round(row['python_s'] / row['rust_s'], 3)
