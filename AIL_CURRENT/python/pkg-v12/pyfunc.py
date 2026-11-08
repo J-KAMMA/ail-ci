@@ -37,6 +37,12 @@ import textwrap
 import callable_types
 
 import cruntime
+# fcdict1: cruntime's BTAB block defines the str-value helpers (`ail_btab_put_s`/`get_s`) that name
+# `ail_str`, but its REQUIRES list does not pull in the STR block, so a bytes-keyed dict with int
+# values (no other str in the program) failed in gcc with an unknown `ail_str`. cruntime.py is not
+# this lane's file; ask for STR alongside BTAB here instead.
+if 'STR' not in cruntime.REQUIRES.get('BTAB', ()):
+    cruntime.REQUIRES.setdefault('BTAB', []).append('STR')
 import filelib
 import exctext
 import userexc
@@ -39388,6 +39394,695 @@ def _dict_of_containers_sites(tree):
     return sites
 
 
+# --- fcdict1: typed dicts of record rows, sets and nested dicts -------------------------------
+# `lower_dict_of_records` in ail_syntax.py owns the record/set lowering, but it only looks at
+# function bodies and its role scan misses a `top = sorted(d.items(), ...)[:n]` slice.  The task
+# fixes the remaining shapes in this file (the only compiler file the lane owns): module-level
+# programs, rows whose set position holds bytes, one-argument `d.get(k)` tested with `is None`,
+# and printing a whole row or the whole dict the way CPython prints a list/dict of lists.
+
+_FC_BOX_INT = '_AilRowSet'
+_FC_BOX_BYTES = '_AilRowSetBytes'
+
+
+def _fc_syntax():
+    # `ail_syntax` lives two levels up (AIL_CURRENT); a unit-compile worker may import pyfunc
+    # without that directory on sys.path, so add it before the import.  Already-imported
+    # (`ail_chatgpt` loads it) is the common case.
+    module = sys.modules.get('ail_syntax')
+    if module is not None:
+        return module
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if root not in sys.path:
+        sys.path.append(root)
+    import ail_syntax
+    return ail_syntax
+
+
+def _fc_hint(fn, node, assigned, tuple_exprs, seen=None):
+    """`_record_hint` plus the small steps that reach a bytes value through input parsing.
+
+    `parts = line.split(b'|')`, `data = f.read()`, `ev, vc, ... = parts[1:]` and
+    `seat = parts[1]` are how a bytes value reaches a set position or a dict key; the base
+    hint only follows plain assignments, so those names used to look unknown and the set box
+    fell back to `set[int]` (which cannot hold a seat)."""
+    syntax = _fc_syntax()
+    base = getattr(syntax, '_fc_base_hint', syntax._record_hint)
+    found = base(fn, node, assigned, seen)
+    if found:
+        return found
+    seen = set() if seen is None else seen
+    if isinstance(node, ast.Subscript):
+        return _fc_hint(fn, node.value, assigned, tuple_exprs, seen)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        attr = node.func.attr
+        if attr in ('read', 'readline', 'readlines'):
+            return {'bytes'}
+        if attr in ('split', 'splitlines') and not node.args:
+            return {'bytes'} if attr == 'splitlines' else set()
+        if attr == 'split' and node.args:
+            first = node.args[0]
+            if isinstance(first, ast.Constant):
+                if isinstance(first.value, bytes):
+                    return {'bytes'}
+                if isinstance(first.value, str):
+                    return {'str'}
+    if isinstance(node, ast.Name) and node.id not in seen:
+        inner = tuple_exprs.get(node.id)
+        if inner is not None:
+            return _fc_hint(fn, inner, assigned, tuple_exprs, seen | {node.id})
+        found = set()
+        for value in assigned.get(node.id, ()):
+            found |= _fc_hint(fn, value, assigned, tuple_exprs, seen | {node.id})
+        return found
+    return set()
+
+
+def _fc_record_roles(fn, name, kind):
+    """`_record_roles` with two fixes: a sorted items slice (`top = sorted(d.items(), ...)[:n]`)
+    is still the items list, and a sorted generator over `d.items()` makes its lambda argument an
+    item (so `x[1][1]` reads a field of the row, not a field of an int)."""
+    syntax = _fc_syntax()
+    roles = {}
+    recognized = {}
+
+    def role(nm, value, node_id):
+        recognized.setdefault(nm, set()).add(node_id)
+        if nm in roles and roles[nm] != value:
+            roles[nm] = 'conflict'
+        else:
+            roles[nm] = value
+
+    def is_items(node):
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+                and node.func.attr == 'items' and not node.args and not node.keywords)
+
+    def is_values(node):
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == name
+                and node.func.attr == 'values' and not node.args and not node.keywords)
+
+    def unwrap(node):
+        while (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
+               and node.slice.lower is None and node.slice.step is None):
+            node = node.value
+        return node
+
+    def items_generator(node):
+        node = unwrap(node)
+        return (isinstance(node, ast.GeneratorExp) and node.generators
+                and is_items(node.generators[0].iter))
+
+    for _ in range(4):
+        before = dict(roles)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                target, value = node.targets[0].id, node.value
+                if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                        and isinstance(value.func.value, ast.Name) and value.func.value.id == name
+                        and value.func.attr in ('get', 'setdefault')):
+                    role(target, 'row' if kind == 'record' else 'set', id(node.targets[0]))
+                elif (isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name)
+                      and value.value.id == name):
+                    role(target, 'row' if kind == 'record' else 'set', id(node.targets[0]))
+                elif (isinstance(unwrap(value), ast.Call)
+                      and isinstance(unwrap(value).func, ast.Name)
+                      and unwrap(value).func.id == 'sorted' and unwrap(value).args
+                      and (is_items(unwrap(unwrap(value).args[0]))
+                           or items_generator(unwrap(value).args[0]))):
+                    role(target, 'items', id(node.targets[0]))
+                elif isinstance(value, ast.Name) and value.id in roles and roles[value.id] in ('row', 'item', 'items'):
+                    role(target, roles[value.id], id(node.targets[0]))
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                it = node.iter
+                if is_values(it) and isinstance(node.target, ast.Name):
+                    role(node.target.id, 'row' if kind == 'record' else 'set', id(node.target))
+                elif is_items(it):
+                    if isinstance(node.target, ast.Name):
+                        role(node.target.id, 'item', id(node.target))
+                    elif (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
+                          and isinstance(node.target.elts[0], ast.Name)
+                          and isinstance(node.target.elts[1], ast.Name)):
+                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set',
+                             id(node.target.elts[1]))
+                elif isinstance(it, ast.Name) and roles.get(it.id) == 'items':
+                    if (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
+                            and isinstance(node.target.elts[0], ast.Name)
+                            and isinstance(node.target.elts[1], ast.Name)):
+                        role(node.target.elts[1].id, 'row' if kind == 'record' else 'set',
+                             id(node.target.elts[1]))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted':
+                first = unwrap(node.args[0]) if node.args else None
+                if first is not None and (is_items(first) or items_generator(first)):
+                    for kw in node.keywords:
+                        if kw.arg == 'key' and isinstance(kw.value, ast.Lambda):
+                            for arg in kw.value.args.args:
+                                role(arg.arg, 'item', id(arg))
+            if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+                for gen in node.generators:
+                    if is_values(gen.iter) and isinstance(gen.target, ast.Name):
+                        role(gen.target.id, 'row' if kind == 'record' else 'set', id(gen.target))
+                    elif is_items(gen.iter):
+                        if isinstance(gen.target, ast.Name):
+                            role(gen.target.id, 'item', id(gen.target))
+                        elif (isinstance(gen.target, ast.Tuple) and len(gen.target.elts) == 2
+                              and isinstance(gen.target.elts[1], ast.Name)):
+                            role(gen.target.elts[1].id, 'row' if kind == 'record' else 'set',
+                                 id(gen.target.elts[1]))
+        if roles == before:
+            break
+    return roles, recognized
+
+
+def _fc_bound_names(fn):
+    """`_record_bound_names` without the `with ... as name` target.
+
+    `with open(path) as f:` binds `f` only inside the with block; a later `f = d.get(k)` in the
+    same function is a fresh binding, not a second use of the row name.  The with target is
+    renamed before lowering (see `_fc_rename_with_targets`), so it must not count as a role
+    binding here."""
+    syntax = _fc_syntax()
+    bound = {}
+
+    def add(node):
+        bound.setdefault(node.id, set()).add(id(node))
+
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name_node in syntax._target_name_nodes(target):
+                    add(name_node)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            for name_node in syntax._target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, ast.AugAssign):
+            for name_node in syntax._target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            for name_node in syntax._target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, ast.NamedExpr):
+            for name_node in syntax._target_name_nodes(node.target):
+                add(name_node)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.setdefault(node.name, set()).add(id(node))
+        elif isinstance(node, ast.Lambda):
+            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                bound.setdefault(arg.arg, set()).add(id(arg))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                bound.setdefault(arg.arg, set()).add(id(arg))
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for gen in node.generators:
+                for name_node in syntax._target_name_nodes(gen.target):
+                    add(name_node)
+    return bound
+
+
+def _fc_rename_with_targets(fn, taken):
+    """Rename each `with ... as name` target and its loads in that with block.
+
+    The record lowering treats a role name as a row everywhere in the function; a `with` target
+    reusing that name (`with open(...) as f:` then `f = acc.get(k)`) would otherwise look like a
+    row read.  The with block is rewritten as a whole, so the rename cannot leak to later code."""
+    fresh = set(taken)
+
+    def new_name(old):
+        name = old + '_with'
+        while name in fresh:
+            name += '_'
+        fresh.add(name)
+        return name
+
+    class _Rename(ast.NodeTransformer):
+        def __init__(self, old, new):
+            self.old = old
+            self.new = new
+
+        def visit_Name(self, node):
+            if node.id == self.old:
+                return ast.Name(id=self.new, ctx=node.ctx)
+            return node
+
+    class _Withs(ast.NodeTransformer):
+        def visit_With(self, node):
+            self.generic_visit(node)
+            for item in node.items:
+                if isinstance(item.optional_vars, ast.Name):
+                    old = item.optional_vars.id
+                    new = new_name(old)
+                    item.optional_vars = ast.Name(id=new, ctx=ast.Store())
+                    for index, stmt in enumerate(node.body):
+                        node.body[index] = _Rename(old, new).visit(stmt)
+            return node
+
+        visit_AsyncWith = visit_With
+
+    return _Withs().visit(fn)
+
+
+class _FcRecordMixin:
+    """The record transformer with bytes set boxes, optional one-argument `get`, and printing."""
+
+    box_int = _FC_BOX_INT
+    box_bytes = _FC_BOX_BYTES
+
+    def __init__(self, fn, name, kind, arity, roles, box, taken, box_needed):
+        super().__init__(fn, name, kind, arity, roles, box, taken, box_needed)
+        syntax = _fc_syntax()
+        self._s = syntax
+        self._tuple_exprs = {}
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if isinstance(target, (ast.Tuple, ast.List)):
+                    for elt in target.elts:
+                        if isinstance(elt, ast.Name):
+                            self._tuple_exprs[elt.id] = node.value
+            elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, (ast.Tuple, ast.List)):
+                for elt in node.target.elts:
+                    if isinstance(elt, ast.Name):
+                        self._tuple_exprs.setdefault(elt.id, node.iter)
+        self.field_cats = [set() for _ in range(arity)]
+        self.set_elem = [set() for _ in range(arity)]
+        self.optional_rows = set()
+        self._row_value_ok = set()
+        self._scan_categories()
+
+    def _hint(self, node):
+        return _fc_hint(self.fn, node, self.assigned, self._tuple_exprs)
+
+    def _scan_categories(self):
+        syntax = self._s
+        for node in ast.walk(self.fn):
+            value = None
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Subscript)
+                    and isinstance(node.targets[0].value, ast.Name)
+                    and node.targets[0].value.id == self.d):
+                value = node.value
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and isinstance(node.func.value, ast.Name) and node.func.value.id == self.d
+                  and node.func.attr in ('get', 'setdefault') and len(node.args) == 2):
+                value = node.args[1]
+            if isinstance(value, ast.List):
+                for index, elt in enumerate(value.elts):
+                    if index < len(self.field_cats):
+                        self.field_cats[index] |= self._hint(elt)
+            elif syntax._is_set_value(value):
+                self.field_cats[0].add('set')
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ('add', 'discard', 'remove')
+                    and isinstance(node.func.value, ast.Subscript)
+                    and isinstance(node.func.value.slice, ast.Constant)
+                    and isinstance(node.func.value.slice.value, int)
+                    and not isinstance(node.func.value.slice.value, bool)
+                    and node.args):
+                index = node.func.value.slice.value
+                if 0 <= index < len(self.set_elem):
+                    self.set_elem[index] |= self._hint(node.args[0])
+        cats = set()
+        for element in self.set_elem:
+            cats |= element
+        if 'bytes' in cats:
+            if any('int' in element or 'str' in element for element in self.set_elem):
+                raise syntax._RecordUnsupported()
+            self.box = self.box_bytes
+        elif any(element for element in self.set_elem):
+            self.box = self.box_int
+
+    def _box_for(self, index):
+        return self.box
+
+    def _set_type(self, index):
+        elements = self.set_elem[index]
+        for element in ('bytes', 'str', 'float'):
+            if element in elements:
+                return element
+        return 'int'
+
+    def visit_Assign(self, node):
+        syntax = self._s
+        if (self.key_kind == 'bytes' and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == self.d and syntax._is_empty_dict(node.value)):
+            init = ast.AnnAssign(
+                target=node.targets[0],
+                annotation=ast.Subscript(value=syntax._r_load('dict'),
+                                         slice=ast.Tuple(elts=[syntax._r_load('bytes'),
+                                                               syntax._r_load('int')],
+                                                         ctx=ast.Load()),
+                                         ctx=ast.Load()),
+                value=node.value, simple=1)
+            out = [init]
+            for index, field in enumerate(self.fields):
+                value = ast.List(elts=[], ctx=ast.Load())
+                if index in self.set_positions:
+                    out.append(ast.AnnAssign(
+                        target=syntax._r_store(field),
+                        annotation=ast.Subscript(value=syntax._r_load('list'),
+                                                 slice=syntax._r_load(self.box),
+                                                 ctx=ast.Load()),
+                        value=value, simple=1))
+                else:
+                    out.append(syntax._r_assign(syntax._r_store(field), value))
+            return out
+        return super().visit_Assign(node)
+
+    def _store_row(self, key, listnode):
+        syntax = self._s
+        values = [self.visit(elt) for elt in listnode.elts]
+        temps = [self.fresh('_rval') for _ in values]
+        keytemp = self.fresh('_rkey')
+        out = []
+        for index, (temp, value) in enumerate(zip(temps, values)):
+            if index in self.set_positions:
+                out.append(syntax._r_ann(
+                    syntax._r_store(temp),
+                    syntax._r_sub(syntax._r_load('set'),
+                                  syntax._r_load(self._set_type(index))),
+                    value))
+            else:
+                out.append(syntax._r_assign(syntax._r_store(temp), value))
+        out.append(syntax._r_assign(syntax._r_store(keytemp), self.visit(key)))
+        for index, temp in enumerate(temps):
+            out.append(self._append_field(index, syntax._r_load(temp)))
+        out.append(syntax._r_assign(
+            syntax._r_sub(syntax._r_load(self.d), syntax._r_load(keytemp), store=True),
+            ast.BinOp(left=syntax._r_call(syntax._r_load('len'), [syntax._r_load(self.fields[0])]),
+                      op=ast.Sub(), right=syntax._r_const(1))))
+        return out
+
+    def _whole_row(self, node):
+        if isinstance(node, ast.Name) and self.roles.get(node.id) == 'row':
+            return node
+        if isinstance(node, ast.Subscript) and self.kind == 'record':
+            return self._row_of(node)
+        return None
+
+    def _field_text(self, slot, index):
+        syntax = self._s
+        field = self._field(slot, index)
+        return syntax._r_call(syntax._r_load('repr'), [field])
+
+    def _row_text(self, row):
+        syntax = self._s
+        if self.set_positions:
+            # A set's repr order is not CPython's, so printing a row (or the dict) that holds one
+            # would be a silent difference; leave the dict to the general path, which already has
+            # that limitation, and refuse by name under --strict.
+            raise syntax._RecordUnsupported()
+        slot = self._row_slot(row)
+        parts = [self._field_text(slot, index) for index in range(self.arity)]
+        joined = syntax._r_call(syntax._r_attr(syntax._r_const(', '), 'join'),
+                                [ast.List(elts=parts, ctx=ast.Load())])
+        return ast.BinOp(
+            left=ast.BinOp(left=syntax._r_const('['), op=ast.Add(), right=joined),
+            op=ast.Add(), right=syntax._r_const(']'))
+
+    def _key_text(self, key, category):
+        syntax = self._s
+        return syntax._r_call(syntax._r_load('repr'), [key])
+
+    def _dict_text(self):
+        syntax = self._s
+        key = self.fresh('_rdictkey')
+        category = set()
+        for node in ast.walk(self.fn):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Subscript)
+                    and isinstance(node.targets[0].value, ast.Name)
+                    and node.targets[0].value.id == self.d):
+                category |= self._hint(node.targets[0].slice)
+        slot = syntax._r_sub(syntax._r_load(self.d), syntax._r_load(key))
+        row = self._row_text(slot)
+        element = ast.BinOp(
+            left=ast.BinOp(left=self._key_text(syntax._r_load(key), category),
+                           op=ast.Add(), right=syntax._r_const(': ')),
+            op=ast.Add(), right=row)
+        comp = ast.ListComp(
+            elt=element,
+            generators=[ast.comprehension(target=syntax._r_store(key),
+                                          iter=syntax._r_load(self.d), ifs=[], is_async=0)])
+        joined = syntax._r_call(syntax._r_attr(syntax._r_const(', '), 'join'), [comp])
+        return ast.BinOp(
+            left=ast.BinOp(left=syntax._r_const('{'), op=ast.Add(), right=joined),
+            op=ast.Add(), right=syntax._r_const('}'))
+
+    def _special_assign(self, target, value, stmt):
+        syntax = self._s
+        if (self.kind == 'record' and isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute)
+                and isinstance(value.func.value, ast.Name) and value.func.value.id == self.d
+                and value.func.attr == 'get' and len(value.args) == 1 and not value.keywords):
+            text = syntax._record_key_text(value.args[0])
+            guard_at = self.guarded.get(id(stmt), {}).get(text) if text is not None else None
+            guarded = (guard_at is not None
+                       and self._key_stable(value.args[0], guard_at, syntax._pos(value.args[0])))
+            proven = self._proven(value.args[0], syntax._pos(value.args[0]))
+            none_tested = isinstance(target, ast.Name) and self._none_tested(target.id)
+            if not guarded and not proven and not none_tested:
+                raise syntax._RecordUnsupported()
+            if isinstance(target, ast.Name) and none_tested and not proven:
+                self.optional_rows.add(target.id)
+            key = self.visit(value.args[0])
+            return [syntax._r_assign(target, syntax._r_call(
+                syntax._r_attr(syntax._r_load(self.d), 'get'), [key, syntax._r_const(-1)]))]
+        return super()._special_assign(target, value, stmt)
+
+    def visit_Compare(self, node):
+        syntax = self._s
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot)):
+            other = None
+            if isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None:
+                other = node.left
+            elif isinstance(node.left, ast.Constant) and node.left.value is None:
+                other = node.comparators[0]
+            if isinstance(other, ast.Name) and other.id in self.optional_rows:
+                op = ast.Lt() if isinstance(node.ops[0], ast.Is) else ast.GtE()
+                return syntax._r_cmp(syntax._r_load(other.id), op, syntax._r_const(0))
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)):
+            comparator = node.comparators[0]
+            if (isinstance(comparator, ast.Subscript)
+                    and isinstance(comparator.slice, ast.Constant)
+                    and isinstance(comparator.slice.value, int)
+                    and not isinstance(comparator.slice.value, bool)):
+                index = comparator.slice.value
+                row = self._row_of(comparator.value)
+                if row is not None and index in self.set_positions:
+                    return syntax._r_cmp(self.visit(node.left), node.ops[0],
+                                         self._field(self._row_slot(row), index))
+        return super().visit_Compare(node)
+
+    def _print_dict_statements(self):
+        syntax = self._s
+        text = self.fresh('_rtext')
+        sep = self.fresh('_rsep')
+        key = self.fresh('_rk')
+        key_text = self._key_text(syntax._r_load(key), set())
+        row = self._row_text(syntax._r_sub(syntax._r_load(self.d), syntax._r_load(key)))
+        piece = ast.BinOp(
+            left=ast.BinOp(left=syntax._r_load(sep), op=ast.Add(),
+                           right=ast.BinOp(left=key_text, op=ast.Add(),
+                                           right=syntax._r_const(': '))),
+            op=ast.Add(), right=row)
+        loop = ast.For(
+            target=syntax._r_store(key), iter=syntax._r_load(self.d),
+            body=[syntax._r_assign(syntax._r_load(text),
+                                   ast.BinOp(left=syntax._r_load(text), op=ast.Add(), right=piece)),
+                  syntax._r_assign(syntax._r_load(sep), syntax._r_const(', '))],
+            orelse=[])
+        return [syntax._r_assign(syntax._r_load(text), syntax._r_const('{')),
+                syntax._r_assign(syntax._r_load(sep), syntax._r_const('')),
+                loop,
+                syntax._r_assign(syntax._r_load(text),
+                                 ast.BinOp(left=syntax._r_load(text), op=ast.Add(),
+                                           right=syntax._r_const('}'))),
+                syntax._r_expr(syntax._r_call(syntax._r_load('print'),
+                                              [syntax._r_load(text)]))]
+
+    def _for_iter(self, it, target, inject=True):
+        # fcdict1: `for i in sorted(d)` walks the keys, which the lowered dict still holds.
+        if (isinstance(it, ast.Call) and isinstance(it.func, ast.Name)
+                and it.func.id == 'sorted' and it.args
+                and isinstance(it.args[0], ast.Name) and it.args[0].id == self.d):
+            return it, target, [], []
+        return super()._for_iter(it, target, inject)
+
+    def _comp(self, node):
+        # fcdict1: a comprehension that yields `(key, row)` over `d.items()` (ledger's
+        # `sorted(((i, a) for i, a in acc.items() ...))`) yields the row's slot index once lowered.
+        # Only those exact Name nodes are allowed as values; any other row-name load stays a
+        # refusal so a row compared or printed as a list is never silently turned into an index.
+        allowed = []
+        elt = getattr(node, 'elt', None)
+        if isinstance(elt, (ast.Tuple, ast.List)):
+            for element in elt.elts:
+                if (isinstance(element, ast.Name) and isinstance(element.ctx, ast.Load)
+                        and self.roles.get(element.id) == 'row'):
+                    allowed.append(id(element))
+        self._row_value_ok.update(allowed)
+        try:
+            return super()._comp(node)
+        finally:
+            self._row_value_ok.difference_update(allowed)
+
+    def visit_Name(self, node):
+        # fcdict1: see `_comp` -- only a row yielded as part of an items tuple is its slot index.
+        if isinstance(node.ctx, ast.Load) and id(node) in self._row_value_ok:
+            return node
+        return super().visit_Name(node)
+
+    def visit_Expr(self, node):
+        value = node.value
+        if (self.kind == 'record' and isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name) and value.func.id == 'print'
+                and not value.keywords and len(value.args) == 1
+                and isinstance(value.args[0], ast.Name) and value.args[0].id == self.d):
+            return self._print_dict_statements()
+        return super().visit_Expr(node)
+
+    def visit_Call(self, node):
+        syntax = self._s
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == 'print' and not node.keywords:
+            args = []
+            for arg in node.args:
+                if isinstance(arg, ast.Name) and arg.id == self.d:
+                    args.append(self._dict_text())
+                else:
+                    row = self._whole_row(arg)
+                    if row is not None:
+                        args.append(self._row_text(row))
+                    else:
+                        args.append(self.visit(arg))
+            node.args = args
+            return node
+        if isinstance(func, ast.Name) and func.id == 'len' and len(node.args) == 1:
+            arg = node.args[0]
+            if (isinstance(arg, ast.Subscript)
+                    and isinstance(arg.slice, ast.Constant)
+                    and isinstance(arg.slice.value, int)
+                    and not isinstance(arg.slice.value, bool)):
+                index = arg.slice.value
+                row = self._row_of(arg.value)
+                if row is not None and index in self.set_positions:
+                    return syntax._r_call(syntax._r_load('len'),
+                                          [self._field(self._row_slot(row), index)])
+        return super().visit_Call(node)
+
+
+def _fc_transformer_class():
+    """Build the transformer class once `ail_syntax` is importable (it is not on the path when
+    some unit tests import this module directly).  The mixin's methods are first in the MRO, so
+    its `super()` calls reach the real `_RecordTransformer`."""
+    syntax = _fc_syntax()
+    return type('_FcRecordTransformer', (_FcRecordMixin, syntax._RecordTransformer), {})
+
+
+def _fc_lower_one(fn, taken):
+    syntax = _fc_syntax()
+    current = fn
+    for name in syntax._record_candidate_names(fn):
+        clone = copy.deepcopy(current)
+        clone = _fc_rename_with_targets(clone, taken)
+        try:
+            current = syntax._lower_record_dict(clone, name, _FC_BOX_INT, taken, [False])
+        except (syntax._RecordUnsupported, RecursionError):
+            continue
+    return current
+
+
+def _fc_box_class(name, element):
+    if element == 'int':
+        text = ('class %s:\n'
+                '    def __init__(self, s: set[int]):\n'
+                '        self.s: set[int] = s\n' % name)
+    else:
+        text = ('class %s:\n'
+                '    def __init__(self, s):\n'
+                '        self.s = s\n' % name)
+    return ast.parse(text).body[0]
+
+
+def _fc_lower_dict_records(source):
+    """Lower the remaining dicts of records/sets on the Python surface: functions the source pass
+    skipped, and module-level statements.  Only used when at least one dict is actually lowered,
+    so a program that does not use the shape is returned byte for byte unchanged."""
+    if '{}' not in source and 'dict()' not in source:
+        return source
+    syntax = _fc_syntax()
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    taken = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    taken |= {node.name for node in ast.walk(tree)
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    saved = (syntax._record_roles, syntax._record_bound_names, syntax._RecordTransformer,
+             syntax._record_hint)
+    syntax._record_roles = _fc_record_roles
+    syntax._record_bound_names = _fc_bound_names
+    syntax._RecordTransformer = _fc_transformer_class()
+    syntax._fc_base_hint = syntax._record_hint
+
+    def _fc_key_hint(fn, node, assigned, seen=None):
+        tuple_exprs = {}
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], (ast.Tuple, ast.List))):
+                for elt in n.targets[0].elts:
+                    if isinstance(elt, ast.Name):
+                        tuple_exprs[elt.id] = n.value
+            elif (isinstance(n, (ast.For, ast.AsyncFor))
+                  and isinstance(n.target, (ast.Tuple, ast.List))):
+                for elt in n.target.elts:
+                    if isinstance(elt, ast.Name):
+                        tuple_exprs.setdefault(elt.id, n.iter)
+        return _fc_hint(fn, node, assigned, tuple_exprs, seen)
+
+    syntax._record_hint = _fc_key_hint
+
+    def arguments():
+        return ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[],
+                             kw_defaults=[], kwarg=None, defaults=[])
+
+    changed = False
+    try:
+        for index, stmt in enumerate(list(tree.body)):
+            if isinstance(stmt, ast.FunctionDef) and not stmt.decorator_list:
+                current = _fc_lower_one(stmt, taken)
+                if current is not stmt:
+                    tree.body[index] = current
+                    changed = True
+        module = ast.FunctionDef(name='__ail_module__', args=arguments(),
+                                 body=list(tree.body), decorator_list=[], returns=None,
+                                 type_comment=None, lineno=1, col_offset=0)
+        current = _fc_lower_one(module, taken)
+        if current is not module:
+            tree.body = current.body
+            changed = True
+    finally:
+        (syntax._record_roles, syntax._record_bound_names, syntax._RecordTransformer,
+         syntax._record_hint) = saved
+        del syntax._fc_base_hint
+    if not changed:
+        return source
+    used = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    head = []
+    if _FC_BOX_INT in used:
+        head.append(_fc_box_class(_FC_BOX_INT, 'int'))
+    if _FC_BOX_BYTES in used:
+        head.append(_fc_box_class(_FC_BOX_BYTES, 'bytes'))
+    tree.body = head + tree.body
+    ast.fix_missing_locations(tree)
+    try:
+        return ast.unparse(tree)
+    except Exception:
+        return source
+
+
 def _explain_dict_of_containers(source, error):
     """Name the unsupported dict-of-lists shape when a refusal comes from a function using it.
 
@@ -39588,256 +40283,6 @@ def _dict_view_escape(source):
     return None if node is None else dictviews.refusal(node)
 
 
-def _own_scope_nodes(scope):
-    """Nodes of `scope`'s own statements, not those inside a nested def or class."""
-    found = []
-    stack = list(scope.body)
-    while stack:
-        node = stack.pop()
-        found.append(node)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        stack.extend(ast.iter_child_nodes(node))
-    return found
-
-
-def _literal_row_kinds(node):
-    """The CPython kind at each position of a list display of scalar constants, or None."""
-    if not isinstance(node, ast.List) or not node.elts:
-        return None
-    kinds = []
-    for elt in node.elts:
-        if isinstance(elt, ast.UnaryOp) and isinstance(elt.op, ast.USub):
-            elt = elt.operand
-        if not isinstance(elt, ast.Constant):
-            return None
-        if isinstance(elt.value, bool):
-            kinds.append('bool')
-        elif isinstance(elt.value, int):
-            kinds.append('int')
-        elif isinstance(elt.value, str):
-            kinds.append('str')
-        else:
-            return None
-    return tuple(kinds)
-
-
-def _int_constant(node):
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-        node = node.operand
-    return (isinstance(node, ast.Constant) and isinstance(node.value, int)
-            and not isinstance(node.value, bool))
-
-
-def _int_index_store(subscript, parents):
-    """True when `subscript` is stored an int value by a plain or augmented assignment."""
-    grand = parents.get(id(subscript))
-    if isinstance(grand, ast.AugAssign) and grand.target is subscript:
-        return not isinstance(grand.op, ast.Div) and _int_constant(grand.value)
-    if isinstance(grand, ast.Assign) and subscript in grand.targets:
-        return _int_constant(grand.value)
-    return False
-
-
-def _record_dict_aliases(scope):
-    """`(dict name, kinds, alias names)` for a local record dict that can be printed whole.
-
-    The record lowering (`ail_syntax.lower_dict_of_records`) models reads by constant index and
-    field stores, but not a value list printed as a whole (`print(v)` where `v = d[k]`).  This
-    finds the shapes where that print can be written from the row's fields without changing what
-    CPython prints: every store is a list display of scalar constants with the same kind at each
-    position, every fetch binds a name used only by constant indexes, `len`, membership or a
-    direct `print` argument, and no length-changing operation touches the row.  A non-int
-    position is only read, or stored an int value (which keeps it an int)."""
-    nodes = _own_scope_nodes(scope)
-    parents = {}
-    for node in nodes:
-        for child in ast.iter_child_nodes(node):
-            parents.setdefault(id(child), node)
-    dicts = set()
-    for node in nodes:
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and (isinstance(node.value, ast.Dict) and not node.value.keys
-                     or isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
-                     and node.value.func.id == 'dict' and not node.value.args
-                     and not node.value.keywords)):
-            dicts.add(node.targets[0].id)
-    found = []
-    for name in sorted(dicts):
-        rows = []
-        aliases = set()
-        bad = False
-        for node in nodes:
-            if not isinstance(node, ast.Name) or node.id != name:
-                continue
-            parent = parents.get(id(node))
-            if isinstance(parent, ast.Assign) and parent.targets == [node]:
-                continue                         # the `{}` / `dict()` initialiser
-            if isinstance(parent, ast.Subscript) and parent.value is node:
-                grand = parents.get(id(parent))
-                if (isinstance(grand, ast.Assign) and len(grand.targets) == 1
-                        and grand.targets[0] is parent and _literal_row_kinds(grand.value) is not None):
-                    rows.append(grand)
-                    continue
-                if (isinstance(grand, ast.Assign) and len(grand.targets) == 1
-                        and isinstance(grand.targets[0], ast.Name)):
-                    aliases.add(grand.targets[0].id)
-                    continue
-                if isinstance(grand, ast.Delete):
-                    continue                     # `del d[k]`
-                bad = True
-                break
-            if isinstance(parent, ast.Attribute) and parent.value is node:
-                call = parents.get(id(parent))
-                if (isinstance(call, ast.Call) and call.func is parent
-                        and parent.attr in ('get', 'setdefault') and len(call.args) in (1, 2)
-                        and not call.keywords
-                        and (len(call.args) == 1
-                             or _literal_row_kinds(call.args[1]) is not None)):
-                    grand = parents.get(id(call))
-                    if (isinstance(grand, ast.Assign) and len(grand.targets) == 1
-                            and isinstance(grand.targets[0], ast.Name)):
-                        aliases.add(grand.targets[0].id)
-                    continue
-                bad = True
-                break
-            if (isinstance(parent, ast.Compare) and node in parent.comparators
-                    and len(parent.ops) == 1 and isinstance(parent.ops[0], (ast.In, ast.NotIn))):
-                continue
-            if (isinstance(parent, ast.Call) and node in parent.args
-                    and isinstance(parent.func, ast.Name) and parent.func.id == 'len'
-                    and len(parent.args) == 1):
-                continue
-            bad = True
-            break
-        if bad or not rows or not aliases:
-            continue
-        kind_tuples = {_literal_row_kinds(row.value) for row in rows}
-        if len(kind_tuples) != 1:
-            continue
-        kinds = next(iter(kind_tuples))
-        all_int = all(kind == 'int' for kind in kinds)
-        ok = True
-        for alias in aliases:
-            binds = [n for n in nodes
-                     if isinstance(n, ast.Name) and n.id == alias and isinstance(n.ctx, ast.Store)]
-            if len(binds) != 1:
-                ok = False
-                break
-            for node in nodes:
-                if not isinstance(node, ast.Name) or node.id != alias or isinstance(node.ctx, ast.Store):
-                    continue
-                parent = parents.get(id(node))
-                if isinstance(parent, ast.Subscript) and parent.value is node:
-                    if not (isinstance(parent.slice, ast.Constant)
-                            and isinstance(parent.slice.value, int)
-                            and not isinstance(parent.slice.value, bool)):
-                        ok = False
-                        break
-                    index = parent.slice.value
-                    if (0 <= index < len(kinds) and isinstance(parent.ctx, ast.Store)
-                            and not all_int and not (kinds[index] == 'int'
-                                                     and _int_index_store(parent, parents))):
-                        ok = False
-                        break
-                    continue
-                if isinstance(parent, ast.Call) and node in parent.args and isinstance(parent.func, ast.Name):
-                    if parent.func.id in ('len', 'print'):
-                        continue
-                if isinstance(parent, ast.Compare) and node in parent.comparators:
-                    continue
-                ok = False
-                break
-            if not ok:
-                break
-        if ok:
-            found.append((name, kinds, aliases))
-    return found
-
-
-def _row_print_text(alias, kinds):
-    """Source text that prints the row `alias` exactly as CPython prints the list."""
-    if all(kind == 'int' for kind in kinds):
-        return '[' + ', '.join('%s[%d]' % (alias, index) for index in range(len(kinds))) + ']'
-    text = "'['"
-    for index, _kind in enumerate(kinds):
-        text += " + %srepr(%s[%d])" % ("', ' + " if index else '', alias, index)
-    return text + " + ']'"
-
-
-def _byte_line_starts(text):
-    """The UTF-8 byte offset of every line start in `text`."""
-    starts = []
-    offset = 0
-    for line in text.split('\n'):
-        starts.append(offset)
-        offset += len(line.encode('utf8')) + 1
-    return starts
-
-
-def _expand_record_row_prints(source):
-    """`(source, dict names)` with `print(v)` written from the fields of a record row alias `v`;
-    `(source, set())` when no such print exists."""
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
-        return source, set()
-    scopes = [tree] + [n for n in ast.walk(tree)
-                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    edits = []
-    names = set()
-    for scope in scopes:
-        for name, kinds, aliases in _record_dict_aliases(scope):
-            for node in _own_scope_nodes(scope):
-                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                        and node.func.id == 'print' and getattr(node, 'end_col_offset', None) is not None):
-                    continue
-                for arg in node.args:
-                    if isinstance(arg, ast.Name) and arg.id in aliases and getattr(arg, 'end_col_offset', None) is not None:
-                        text = _row_print_text(arg.id, kinds)
-                        edit = (arg.lineno, arg.col_offset, arg.end_lineno, arg.end_col_offset, text)
-                        if edit not in edits:
-                            edits.append(edit)
-                        names.add(name)
-    if not edits:
-        return source, set()
-    starts = _byte_line_starts(source)
-    data = source.encode('utf8')
-    for line0, col0, line1, col1, text in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
-        a = starts[line0 - 1] + col0
-        b = starts[line1 - 1] + col1
-        data = data[:a] + text.encode('utf8') + data[b:]
-    return data.decode('utf8'), names
-
-
-def _apply_record_row_prints(source):
-    """Expand whole-row prints and re-run the record lowering only when it lowers every dict this
-    expansion touched.  When the lowering does not apply the source is returned unchanged, so a
-    program the lowering cannot model keeps its exact old behaviour (general path included)."""
-    expanded, names = _expand_record_row_prints(source)
-    if not names:
-        return source
-    try:
-        import ail_syntax
-        lowered = ail_syntax.lower_dict_of_records(expanded)
-    except Exception:                 # not importable here, or the lowering gave up: leave the source
-        return source
-    if lowered == expanded:
-        return source
-    try:
-        tree = ast.parse(lowered)
-    except (SyntaxError, ValueError):
-        return source
-    for node in ast.walk(tree):
-        if (isinstance(node, ast.Assign) and node.targets
-                and isinstance(node.targets[0], ast.Subscript)
-                and isinstance(node.targets[0].value, ast.Name)
-                and node.targets[0].value.id in names and isinstance(node.value, ast.List)):
-            return source
-    return lowered
-
-
 def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None):
     """Compile `source` (see `_to_c_unshadowed`) after renaming every module-level definition
     that shadows a built-in name (`fn abs`, `fn heappush`, `const max`, ...) together with every
@@ -39846,6 +40291,13 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     names in `info` are reported under the user's own spelling."""
     global _ACTIVE_SITE_LINES
     _ACTIVE_SITE_LINES = _REWRITE_SITE_LINES.get(source.strip(), {})
+    if os.environ.get('AIL_SURFACE') == 'python':
+        # fcdict1: the source pass only lowers dicts inside functions; finish the module-level
+        # shapes and the ones it skipped here, in the one compiler file this lane owns.  Run
+        # before the dict-view escape: printing a whole dict of rows is a supported shape now.
+        # A failure here is a compiler bug, not an unsupported program: let it surface instead of
+        # silently restoring the general path (review: the old blanket `except` hid one).
+        source = _fc_lower_dict_records(source)
     _view = _dict_view_escape(source)
     if _view is not None:
         raise Unsupported(_view)
@@ -39865,8 +40317,6 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
             for section in ('exports', 'constants'):
                 if section in external:
                     external[section] = {fresh.get(key, key): value for key, value in external[section].items()}
-    if os.environ.get('AIL_SURFACE') == 'python':
-        source = _apply_record_row_prints(source)
     _info0 = dict(info) if info is not None else None
     try:
         try:

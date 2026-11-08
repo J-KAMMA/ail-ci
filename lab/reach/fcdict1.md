@@ -1,117 +1,112 @@
 # fcdict1: a dict whose values are lists, sets or dicts stays on the typed path
 
-Base: `origin/integ` (this branch's only commit is the export of `integ` + the task).
+Base: `origin/integ` (export `be77484`, tree equivalent to integ `eb8b28cf` for
+`AIL_CURRENT/ail_syntax.py`; `lab/pyproof/results.jsonl` rows carry `integ_sha ff1dcc26`).
 
 ## Before
 
-| program | pyproof (integ ff1dcc26) | `--strict` blockers (measured on this branch) |
+| program | pyproof (integ ff1dcc26) | first `--strict` blocker on this branch |
 |---|---|---|
-| lab/compare/src/ledger_bin/main.py | general | 15 blockers: 9x `a nested def inside a loop ('rv') is not available` (lines 46-75), `acc[r[1]] = [r[2], r[3], True]` (116), `acc.get(r[1])` (118, 132, 140), `acc.get(r[2])` (119) |
-| lab/compare/src/ticket_audit/main.py | general | `events[ev] = [vc, cents, set()]` (98), `events.get(ev)` (111, 133) |
-| lab/pyperf/run.py --help | refused | `info['wall_cpython'] = [round(expected['wall'],...` -- `info` used as a dict of containers |
+| lab/compare/src/ledger_bin/main.py | general, matches | `a nested def inside a loop ('rv') is not available`; then `parse` returning a tuple on one path and a single value on another (see "Real blockers") |
+| lab/compare/src/ticket_audit/main.py | general, matches | one-argument `events.get(ev)` / `events[ev] = [vc, cents, set()]`; the strict build exceeds the 120 s pyproof budget |
+| lab/pyperf/run.py --help | refused | `info['wall_cpython'] = [...]` dict of containers; the general path also rejects `statistics.median`, an unannotated `Path` parameter and `preexec_fn=` |
 
-The pyproof rows come from `lab/pyproof/results.jsonl` (integ ff1dcc26); the strict blocklists were
-rebuilt here with `python3 -B AIL_CURRENT/ail_chatgpt.py compile <src> -o /tmp/x --strict`.
+The pyproof rows come from `lab/pyproof/results.jsonl`; the strict blocklists were rebuilt with
+`python3 -B AIL_CURRENT/ail_chatgpt.py compile <src> -o /tmp/x --strict`.
 
 ## The lowering and where it is called
 
-The dict-of-records lowering is `ail_syntax.lower_dict_of_records` (its helpers:
+The dict-of-records lowering is `ail_syntax.lower_dict_of_records` (helpers:
 `_record_candidate_names`, `_record_classify`, `_record_roles`, `_record_bound_names`,
-`_RecordTransformer`, `_lower_record_dict`).  It has **one** call site: `python_surface`, at
-`AIL_CURRENT/ail_syntax.py:5897`, before the surface rewrite.  It is *not* reached from
-`pyfunc.to_c` and `optlib.rewrite` never calls it; an earlier note on this branch claimed that and
-was wrong.  A dict the lowering cannot model is left exactly as written, and the typed path then
-refuses it by name through `pyfunc._explain_dict_of_containers`.
+`_RecordTransformer`, `_lower_record_dict`).  It has **one** call site in the source pass:
+`python_surface`, `AIL_CURRENT/ail_syntax.py:5897`.  `optlib.rewrite` never calls it.
 
-This branch adds a second, *gated* call from `pyfunc.to_c` (see "What was built"): it runs only
-after a successful `print(v)` -> `print([v[0], ..., v[n-1]])` expansion and only accepts the
-lowering's result when every dict that expansion touched was actually lowered.
+This branch adds a second, *unconditional* call from `pyfunc.to_c` for the Python surface
+(`_fc_lower_dict_records`), after `python_surface` has run.  It finishes the shapes the source
+pass skipped and lowers module-level statements through a synthetic `__ail_module__` function.
+It is not gated on a particular print shape, and it does not swallow errors: an exception there
+is a compiler bug and surfaces (review defect 3).
 
 ## What was built
 
 `AIL_CURRENT/python/pkg-v12/pyfunc.py`:
 
-- `_record_dict_aliases` / `_expand_record_row_prints`: find a local dict initialised `{}` /
-  `dict()` whose every store is a list display of scalar constants with the same kind at each
-  position, whose fetched row names are bound once and used only by constant indexes, `len`,
-  membership tests and direct `print` arguments, and with no length-changing operation on any of
-  them (a non-int position is only read, or stored an int value).  For those, `print(v)` is
-  rewritten to the code that prints exactly CPython's list text: `print([v[0], ..., v[n-1]])`
-  for an all-int row, and `print('[' + repr(v[0]) + ', ' + ... + ']')` for a mixed row.
-- `_apply_record_row_prints`: runs that expansion, then calls
-  `ail_syntax.lower_dict_of_records` and keeps the result only when the lowering actually lowered
-  every touched dict (no `d[k] = [...]` store survives).  Otherwise the original source is
-  returned unchanged, so a program the lowering cannot model keeps its exact old behaviour on
-  both paths.  Called from `to_c` only for the Python surface.
+- `_fc_syntax`: imports `ail_syntax` whether or not `AIL_CURRENT` is already on `sys.path`.
+- `_fc_hint` / `_fc_record_roles` / `_fc_bound_names`: the record pass's own helpers with the
+  steps that reach a bytes value through input parsing (`parts = line.split(b'|')`,
+  `ev, vc, ... = parts[1:]`, `f.read()`), a `sorted(d.items(), ...)[:n]` slice recognised as the
+  items list, and a `with ... as f` target renamed so it is not mistaken for a row name.  The key
+  hint is patched during the lowering so a bytes-keyed `d = {}` is annotated.
+- `_FcRecordMixin`: the record transformer with
+  - a bytes set box (`_AilRowSetBytes`) when a set position holds bytes, `_AilRowSet` otherwise;
+  - a one-argument `d.get(k)` whose result is tested `is None`: the row is `d.get(k, -1)` and
+    `r is None` becomes `r < 0`, so a missing row is still distinguishable without Optional
+    values;
+  - `print(row)` and `print(d)` written as CPython's list/dict text;
+  - `sorted(d)` walking the keys, and a `(key, row)` comprehension yielding the slot.
+- `_fc_lower_dict_records`: lowers every function and the module body, appending the box class
+  only when the lowered code uses it.  A program that does not use the shape is returned byte for
+  byte unchanged.
 
-Result: the task's reproducer (`lab/pyproof/repro/a-dict-of-containers-lists-sets-or-dicts-as-values.py`,
-`p01`) and probes `p07`, `p10`, `p11` now build on the typed path and match CPython (`p07` prints
-`['x', 6, True] 0 False`, a str/int/bool row).  `p05` and `p08` were already typed at the base
-(p05 no record store printed whole; p08 a record read by index).
+Result: the task's reproducer (`p01`) and probes `p05`, `p07`, `p10`, `p11` build typed and match
+CPython; `p08` builds typed and stops loudly at the int64 boundary (see below).  `p07` prints
+`['x', 6, True] 0 False`, a str/int/bool row.
 
-`lab/reach/fcdict1/p08_int64_record.py` was vacuous: it read `sys.argv[1]`, but `cmp.sh` passes no
-argument, so both builds exited 1 with `IndexError` and the boundary was never exercised.  It now
-falls back to `9223372036854775807 + len(sys.argv)` when no argument is given, so the default
-build reaches the boundary at runtime: it builds on the typed path, prints the value, and stops
-loudly with `OverflowError: integer overflow in +`; with an argument beyond int64 it stops loudly
-in `int()`.  `--exact-int` refuses the shape by name (`dict of containers`) before that.
+## Real blockers (measured; each is outside this lane's allowed files)
 
-## Remaining blockers (measured after this change)
+The +2 program target is **not** reachable from `pyfunc.py`/`optlib.py`/`unified.py`.  Two of the
+blockers are not about dicts at all:
 
-| program | result | first `--strict` blocker |
-|---|---|---|
-| lab/compare/src/ledger_bin/main.py | general (unchanged) | `a nested def inside a loop ('rv') is not available` |
-| lab/compare/src/ticket_audit/main.py | general (unchanged) | `events[ev] = [vc, cents, set()]` uses `events` as a dict of containers |
-| lab/pyperf/run.py --help | refused (unchanged) | `info['wall_cpython'] = [...]` dict of containers; the general path independently rejects `statistics.median` and an unannotated `Path` parameter |
+- **ledger_bin** — `parse()` has mixed tuple returns.  A four-line program shows the typed path
+  refuses it before any dict is involved:
+  `def parse(x): return None, 'bad', 0` on one path and `return (True, [1, 2]), None, 0` on
+  another gives `parse returns a tuple on one path and a single value on another`.  Behind that,
+  `def rv()` inside a `try` inside a `while` uses `nonlocal pos`; the lifter in `pyfunc.py`
+  (`_collect_direct_nested_defs` / `_lift_in_function`) refuses both the `try` placement and
+  `nonlocal` write-back.
+- **ticket_audit** — the base lowering always boxes a set position as `_AilRowSet`, whose
+  parameter is annotated `set[int]`; the seats are `bytes`, and this compiler accepts
+  `set[int]`/`set[str]` as a parameter type but not `set[bytes]` (a *local* `set[bytes]` is
+  fine).  The same pass only annotates an empty dict as `dict[int, int]` / `dict[str, int]`, so
+  a bytes-keyed `events = {}` stays unannotated and the key temp is inferred `int`.  Both are in
+  `ail_syntax._lower_record_dict` / `_RecordTransformer`, which this lane may not edit.
+- **pyperf/run.py** — not a dict problem: `statistics.median`, `json.dumps`, an unannotated
+  `Path` parameter and `preexec_fn=` are stdlib/codegen gaps; the dict blocker is one of several.
 
-The exact reasons the two programs still do not lower, found by instrumenting
-`_lower_record_dict`:
-
-- `ticket_audit`: (1) `e = events.get(ev)` with one argument, whose result is tested with
-  `is None`, is refused (`_RecordUnsupported`) because the lowering needs Optional values (s8);
-  (2) `top = sorted(events.items(), key=...)[:3]` then `for ev, e in top:` binds the row name over
-  a *sliced* sorted items list, which `_record_roles` does not recognize, so the row name has more
-  bindings than recognized roles; (3) the record's position 2 is a set of **bytes** seats, but the
-  injected row-set box is annotated `set[int]` (`_AilRowSet.__init__(self, s: set[int])`).
-- `ledger_bin`: `acc`'s lowering is refused because `with open(...) as f:` binds `f` again before
-  `f = acc.get(r[1])`, and `for i, a in top:` binds `a` over a sorted generator that `_record_roles`
-  does not track.  Behind it, `parse()` contains `def rv()` inside a `try` inside a `while` with
-  `nonlocal pos`, refused by `pyfunc._collect_direct_nested_defs` / `_lift_in_function`.
-
-Finishing these needs files this task does not allow: `AIL_CURRENT/ail_syntax.py` (the record
-lowering: whole-row and whole-dict printing, sliced/generator `sorted(items())` roles, Optional
-one-argument `get`, and a set box whose element kind is the hint's) and, for `ledger_bin`, the
-nested-def lifter in `pyfunc.py` extended to `try`-nested defs with `nonlocal` write-back.  The
-`pyperf` refusal is not a dict problem: its general path rejects unrelated constructs.
+Needed to finish: `AIL_CURRENT/ail_syntax.py` (bytes set box kind and bytes-keyed empty-dict
+annotation), `AIL_CURRENT/python/pkg-v12/nestfn.py` (nonlocal nested defs in a loop / `try`), and
+the typed path's mixed tuple returns.  None is in this task's allow-list, so the target programs
+keep their previous classification and their named refusals.
 
 ## Probes
 
-`lab/reach/fcdict1/*.py` (14). Strict build result after this change:
+`lab/reach/fcdict1/*.py` (14).  Results after this change (default build and
+`AIL_UNIFIED_FORCE=1` compared with CPython; `--strict` classified):
 
-| probe | after `--strict` |
-|---|---|
-| p01_repro | typed |
-| p02_alias_append | refused: `d['a'] = [1, 2]` uses `d` as a dict of containers (the list grows: stays refused) |
-| p03_set_add | refused: `d.setdefault('a', set())` |
-| p04_dictdict_counter | refused: `d.setdefault('a', {})` |
-| p05_setdefault_record | typed |
-| p06_print_record | refused: `d['a'] = ['alice', 100, True]` (the whole dict is printed too (`print(d)`)) |
-| p07_del_alias | typed |
-| p08_int64_record | typed; default build stops loudly at the int64 boundary, `--exact-int` refuses by name |
-| p09_record_grow | refused (the list grows: stays refused) |
-| p10_alias_write | typed |
-| p11_get_default | typed |
-| p12_set_store | refused: `d['a'] = set()` |
-| p13_dict_store | refused: `d['a'] = {}` |
-| p14_var_index_record | refused (variable index over mixed kinds: stays refused) |
+| probe | default | `--strict` |
+|---|---|---|
+| p01_repro | matches | typed |
+| p02_alias_append | matches | refused (the list grows) |
+| p03_set_add | matches | refused |
+| p04_dictdict_counter | matches | refused |
+| p05_setdefault_record | matches | typed |
+| p06_print_record | matches | refused (prints the whole dict) |
+| p07_del_alias | matches | typed |
+| p08_int64_record | loud `OverflowError` | typed |
+| p09_record_grow | matches | refused (the list grows) |
+| p10_alias_write | matches | typed |
+| p11_get_default | matches | typed |
+| p12_set_store | matches | refused |
+| p13_dict_store | matches | refused |
+| p14_var_index_record | matches | refused (variable index over mixed kinds) |
 
-Every probe was run in both builds with `bash ~/tools/cmp.sh`: the typed ones match CPython's
-stdout and exit status; the refused ones are refused by name under `--strict` and match CPython on
-the default (general) build.  p08 is the only one whose default build stops loudly; that is the
-documented int64 boundary, and it is what the probe must show.
+`p08` is intentionally loud on the default build: it adds to `INT64_MAX` and must stop rather
+than wrap; with an argument beyond int64 it stops in `int()`.  `--exact-int` refuses the shape by
+name.
 
 ## After
 
-Typed count: 6 of 14 probes (was 2: p05 and p08).  Programs: no move.  ledger_bin and ticket_audit
-stay general, `lab/pyperf/run.py` stays refused, and no program typed at the base lost the typed
-path.
+Typed probes: 6 of 14 (p01, p05, p07, p08, p10, p11) were 2 (p05, p08).  Programs: no move.
+`ledger_bin` and `ticket_audit` stay general, `lab/pyperf/run.py` stays refused, and no program
+typed at the base lost the typed path; every probe still matches CPython on the default and
+unified builds (p08 excepted, by design).
