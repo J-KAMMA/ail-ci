@@ -42,7 +42,7 @@ Built with `python3 -B AIL_CURRENT/ail_chatgpt.py compile <p> --syntax python -o
 | `p05_overflow_last` | refused | empty, rc 1, `OverflowError: ... +` — matches |
 | `p06_exception_before_overflow` | refused | empty, rc 1, `ZeroDivisionError: integer division or modulo by zero` — matches |
 | `p07_exception_after_overflow` | refused | empty, rc 1, `OverflowError: ... +` — matches (the stop beats the later exception) |
-| `p08_try_catches_overflow` | refused (`try`) | **still refused**, by name: `parallel for: parallel for cannot be inside try; write instead: put the loop in its own fn` |
+| `p08_try_catches_overflow` | refused (`try`) | built, matched: empty, rc 1, `OverflowError: ... +` (an int64 overflow stays uncatchable, as in the twin) |
 | `p09_two_accumulators` | refused | `4950 -4950`, rc 0 — matches |
 | `p10_sum_map_exception_after_overflow` | built, matched | unchanged: `caught ZeroDivisionError 0` / `0` — matches |
 | `p11_n_zero` | refused | `7`, rc 0 — matches |
@@ -53,9 +53,10 @@ Built with `python3 -B AIL_CURRENT/ail_chatgpt.py compile <p> --syntax python -o
 | `p16_min_overflow` | refused | empty, rc 1, `OverflowError: ... +` — matches |
 
 So 12 probes move from refused to exactly their twin: 12 probes x 4 thread counts x 3 runs = 144
-probe runs, all matching. The 3 `sum(map)` probes were already matching and still do. `p08` is
-outside v1 (a `try` around the loop; the accumulator lives in the `try` frame struct, not a plain
-local) and is refused by name with a `write instead:` line.
+probe runs, all matching. The 3 `sum(map)` probes were already matching and still do. `p08` (a `try`
+around the loop) moves in fbred4: the reduction is allowed there, and the accumulator is written
+back through a pointer into the enclosing local, so a handler that catches the body's exception
+reads the sequential prefix. An int64 overflow itself stays a loud stop, exactly as in the twin.
 
 ## Additional probes (self-check, in /tmp)
 
@@ -115,3 +116,30 @@ emission and the call site), and the `_red_stmt` text rewriter (`acc += e` -> `_
 update or checked add, 19 lines including its docstring). That is over the 40-line note in the
 brief; the extra is the rewriter and the second worker's declarations, and nothing outside
 `_par_for`/`_par_outline` changed. `parallel.py` is +31/-1, no other compiler file changed.
+
+## fbred4: the edge probes (`edge_*.py`, 12 pairs)
+
+Each `edge_*.py` is a reduction at an int64 edge; `edge_*_twin.py` is the same program with
+`par_range` replaced by `range`. Built with
+`python3 -B AIL_CURRENT/ail_chatgpt.py compile <p> --syntax python -o <exe>` and compared at
+`AIL_THREADS` 1, 2, 4 and 16: stdout and exit status equal the twin's measured output, 48/48 runs.
+
+| probe | shape | result (all 4 thread counts) |
+|---|---|---|
+| `edge_max_plus_min` | `acc = INT64_MAX`, add `INT64_MIN` then 0s | `-1`, rc 0 — matches |
+| `edge_max_then_one` | `acc = INT64_MAX`, add 0s then 1 | empty, rc 1, loud `OverflowError: ... +` — matches |
+| `edge_min_then_subtract` | `acc = INT64_MIN`, subtract 0s then 1 | empty, rc 1, loud `OverflowError: ... -` — matches |
+| `edge_min_sub_max` | `acc = INT64_MIN`, `acc -= INT64_MAX`, n = 1 | empty, rc 1, loud `OverflowError: ... -` — matches |
+| `edge_sub_min_term` | `acc -= xs[i]` where one `xs[i]` is `INT64_MIN` (negation overflows) | empty, rc 1, loud `OverflowError: ... -` — matches |
+| `edge_probe_prefix_overflow` | overflow inside the doubling probe prefix (200 items, all 2^62) | empty, rc 1, loud `OverflowError: ... +` — matches |
+| `edge_last_chunk_overflow` | 2000 items, the two 2^62 terms are at 1998/1999 (last chunk) | empty, rc 1, loud `OverflowError: ... +` — matches |
+| `edge_n_equals_threads` | 16 items at 16 threads (one item per chunk) | `120`, rc 0 — matches |
+| `edge_three_items_sixteen_threads` | 3 items, 16 threads, overflow on the last add | empty, rc 1, loud `OverflowError: ... +` — matches |
+| `edge_exception_in_term` | a function called by `e` raises `ZeroDivisionError` at i = 3 of 200 | empty, rc 1, `ZeroDivisionError: integer division or modulo by zero` — matches |
+| `edge_acc_after_catch` | `try` around the loop; `term(3)` raises a catchable `OverflowError` (`int(x*x)`, x = 1e308); the handler prints `acc` | `caught 3` / `10`, rc 0 — matches (the caught partial is the sequential prefix) |
+| `edge_called_twice` | the reduction is a function called twice with different bases | `4950 5950`, rc 0 — matches |
+
+`edge_acc_after_catch` first used an int64 `+` overflow inside `try`; the sequential twin stops
+loudly there (the Python surface keeps an int64 overflow uncatchable), so the probe now uses the
+genuinely catchable conversion overflow and the re-run's accumulator pointer, which is what makes
+the caught value the sequential prefix.

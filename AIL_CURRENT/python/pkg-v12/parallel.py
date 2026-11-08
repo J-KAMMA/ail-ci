@@ -543,8 +543,6 @@ def _transform(stmts, funcs, counter, U):
         if is_par(s):
             out.extend(_make(s, funcs, counter, U))
             continue
-        if isinstance(s, ast.Try) and any(is_par(n) for n in ast.walk(s)):
-            raise _refuse(U, s, 'parallel for cannot be inside try; write instead: put the loop in its own fn')
         for field in ('body', 'orelse', 'finalbody'):
             if isinstance(getattr(s, field, None), list):
                 setattr(s, field, _transform(getattr(s, field), funcs, counter, U))
