@@ -98,3 +98,38 @@ Rust and Go as int64 (56 MB).
   `lab/compare_par` (D5). Running it needs either a workflow input for a second directory or the
   task moved into `lab/compare/src` — which would add the 11th row the owner deferred. The numbers
   above come from this 4-vCPU runner with the same build commands `run_task.py` uses.
+
+## fbred4: par_sum, the same measurement for the map+sum task
+
+Task: `lab/compare_par/tasks/par_sum`; sources `lab/compare_par/src/par_sum/`. Perf input
+`N = 10,000,000` (`gen.py` `PERF_N`), which is about 0.9 s per C thread at 4 threads. One line of
+output: the sum over `1..N` of `steps(n) * (n % 7 - 3)`. `typed.py`/`main.py` write
+`total = sum(ex.map(term, range(1, N + 1)))` (also valid CPython); C uses pthreads, Rust scoped
+threads, Go goroutines, each with 4 contiguous chunks and per-thread partial sums.
+
+Measured on this 4-vCPU GitHub runner, median of 3 runs, `AIL_THREADS` 1 and 4. Peak RSS is
+`/usr/bin/time` "Maximum resident set size", median of 3. Wall time here is noisy (the runner is
+shared; RC1 measured up to 3x swings on the laptop).
+
+| language | threads | wall ms | peak RSS KiB | binary bytes |
+|---|---:|---:|---:|---:|
+| AIL (`typed.py`) | 1 | 2080 | 157,488 | 36,552 |
+| AIL (`typed.py`) | 4 | **970** | 157,760 | 36,552 |
+| AIL sequential twin | 1 | 2030 | 1,324 | 26,512 |
+| C (pthreads) | 4 | 890 | 1,956 | 16,536 |
+| Go (goroutines) | 4 | 1450 | 2,012 | 2,378,555 |
+| Rust (scoped threads) | 4 | not run | - | - |
+
+* **4-thread speedup, AIL: 2.14x** (2080 -> 970 ms). This is below the 2.5x target on this runner.
+  The serial remainder is the materialised result list and its left-to-right `sum` (about 29% of
+  the 1-thread time by Amdahl); the map itself scales. `par_collatz` measured 2.11x for the same
+  reason, so the map+sum shape, not the task, sets the ceiling.
+* **AIL 4 threads vs C 4 threads: 1.09x** (970 / 890 ms), inside the 1.5x target.
+* **AIL 1 thread vs the sequential twin: 1.02x** (2080 / 2030 ms), inside the 1.15x target.
+* **Rust ratio: not measured.** No Rust toolchain is installed in this sandbox (`rustup` has no
+  toolchain), so `main.rs` was neither built nor timed; its wall/ratio and binary size are absent.
+* **Instruction counts: not measured.** `perf_event_open` is denied here (no PMU) and `valgrind`
+  is not installed, so the 4-thread vs 1-thread instruction ratio (target <= 1.05x) has no number
+  from this run; the workflow's `--icount` pass is the place it is produced.
+* Peak RSS at 10M is 157 MiB for AIL because `ex.map` materialises the 10M entries; the twin is
+  1.3 MiB and C is 1.9 MiB.
