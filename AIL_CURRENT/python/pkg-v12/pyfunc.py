@@ -12299,9 +12299,11 @@ def _untyped_set_table(node, ctx, what):
         element = 'str' if node.id in ctx.skeys else 'bytes'
         if element == 'bytes':
             raise Unsupported('%s on %r, an unannotated set of bytes, is not built; key the set by '
-                              'str (`let %s: set[str] = set();` with `.decode()`)' % (what, node.id, node.id))
+                              'str (`let %s: set[str] = set();` with `.decode()`)\n'
+                              '  write instead: `sorted(s)` for a fixed order' % (what, node.id, node.id))
         raise Unsupported('%s on %r, an unannotated set of str, is not built; annotate it: '
-                          '`let %s: set[str] = set();`' % (what, node.id, node.id))
+                          '`let %s: set[str] = set();`\n'
+                          '  write instead: `sorted(s)` for a fixed order' % (what, node.id, node.id))
     if isinstance(node, ast.Set):
         # `{3, 7}` beside an unannotated int set: a table built here, once.
         ctx.parts.add('TAB')
