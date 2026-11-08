@@ -11,19 +11,22 @@
    "plain_bytes": 2246,
    "totals": {
     "referenced": 3001253,
-    "same_iter": 1249,
-    "peak_bytes": 103,
+    "same_iter": 1188,
+    "peak_bytes": 98,
     "overflow": 0,
-    "heap_same_iter": 1186
+    "heap_same_iter": 1186,
+    "same_bytes_peak": 65,
+    "same_heap_peak": 64
    },
    "kinds": {
     "blk": {
      "allocs": 3000066,
-     "frees": 3000066,
-     "same_iter": 63,
-     "peak_bytes": 45,
+     "frees": 3000065,
+     "same_iter": 2,
+     "peak_bytes": 34,
      "heap_allocs": 4,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 5
     },
     "alloc": {
      "allocs": 1186,
@@ -31,19 +34,21 @@
      "same_iter": 1186,
      "peak_bytes": 64,
      "heap_allocs": 1186,
-     "heap_same_iter": 1186
+     "heap_same_iter": 1186,
+     "same_bytes_peak": 64
     },
     "obj_pool": {
      "allocs": 1,
-     "frees": 1,
+     "frees": 0,
      "same_iter": 0,
-     "peak_bytes": 80,
+     "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 80935887,
-   "seconds": 31.3
+   "seconds": 31.5
   },
   {
    "program": "chain_relax",
@@ -55,10 +60,12 @@
    "plain_bytes": 130,
    "totals": {
     "referenced": 38,
-    "same_iter": 12,
-    "peak_bytes": 574,
+    "same_iter": 0,
+    "peak_bytes": 0,
     "overflow": 0,
-    "heap_same_iter": 7
+    "heap_same_iter": 0,
+    "same_bytes_peak": 0,
+    "same_heap_peak": 0
    },
    "kinds": {
     "str": {
@@ -67,27 +74,30 @@
      "same_iter": 0,
      "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "blk": {
      "allocs": 17,
-     "frees": 16,
-     "same_iter": 9,
-     "peak_bytes": 37,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 11,
-     "heap_same_iter": 4
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "alloc": {
      "allocs": 14,
-     "frees": 14,
-     "same_iter": 3,
-     "peak_bytes": 545,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 14,
-     "heap_same_iter": 3
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 0,
-   "seconds": 5.8
+   "seconds": 8.0
   },
   {
    "program": "echo_pack",
@@ -99,10 +109,12 @@
    "plain_bytes": 17538876,
    "totals": {
     "referenced": 41,
-    "same_iter": 2,
-    "peak_bytes": 35651680,
+    "same_iter": 0,
+    "peak_bytes": 35651584,
     "overflow": 0,
-    "heap_same_iter": 2
+    "heap_same_iter": 0,
+    "same_bytes_peak": 0,
+    "same_heap_peak": 0
    },
    "kinds": {
     "blk": {
@@ -111,19 +123,21 @@
      "same_iter": 0,
      "peak_bytes": 0,
      "heap_allocs": 1,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "alloc": {
      "allocs": 40,
-     "frees": 40,
-     "same_iter": 2,
-     "peak_bytes": 35651680,
+     "frees": 38,
+     "same_iter": 0,
+     "peak_bytes": 35651584,
      "heap_allocs": 40,
-     "heap_same_iter": 2
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 32000000,
-   "seconds": 12.0
+   "seconds": 21.0
   },
   {
    "program": "ledger_bin",
@@ -135,39 +149,44 @@
    "plain_bytes": 326,
    "totals": {
     "referenced": 374015,
-    "same_iter": 4,
-    "peak_bytes": 68011230,
+    "same_iter": 0,
+    "peak_bytes": 8912896,
     "overflow": 0,
-    "heap_same_iter": 3
+    "heap_same_iter": 0,
+    "same_bytes_peak": 0,
+    "same_heap_peak": 0
    },
    "kinds": {
     "blk": {
      "allocs": 373946,
      "frees": 373945,
-     "same_iter": 1,
+     "same_iter": 0,
      "peak_bytes": 12,
      "heap_allocs": 373946,
-     "heap_same_iter": 1
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "alloc": {
      "allocs": 68,
-     "frees": 68,
-     "same_iter": 2,
-     "peak_bytes": 68011185,
+     "frees": 66,
+     "same_iter": 0,
+     "peak_bytes": 8912896,
      "heap_allocs": 68,
-     "heap_same_iter": 2
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "obj_pool": {
      "allocs": 1,
-     "frees": 1,
-     "same_iter": 1,
-     "peak_bytes": 40,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 59098225,
-   "seconds": 25.9
+   "seconds": 67.9
   },
   {
    "program": "rail_transfer",
@@ -179,47 +198,53 @@
    "plain_bytes": 170,
    "totals": {
     "referenced": 284923,
-    "same_iter": 187480,
-    "peak_bytes": 833366,
+    "same_iter": 2561,
+    "peak_bytes": 524288,
     "overflow": 0,
-    "heap_same_iter": 131
+    "heap_same_iter": 105,
+    "same_bytes_peak": 524288,
+    "same_heap_peak": 524288
    },
    "kinds": {
     "blk": {
      "allocs": 184946,
-     "frees": 184946,
-     "same_iter": 184924,
-     "peak_bytes": 309100,
+     "frees": 184944,
+     "same_iter": 20,
+     "peak_bytes": 40,
      "heap_allocs": 5,
-     "heap_same_iter": 1
+     "heap_same_iter": 1,
+     "same_bytes_peak": 20
     },
     "obj": {
      "allocs": 1,
-     "frees": 1,
-     "same_iter": 1,
-     "peak_bytes": 320,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 1,
-     "heap_same_iter": 1
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "alloc": {
      "allocs": 132,
-     "frees": 132,
-     "same_iter": 129,
+     "frees": 131,
+     "same_iter": 104,
      "peak_bytes": 524288,
      "heap_allocs": 132,
-     "heap_same_iter": 129
+     "heap_same_iter": 104,
+     "same_bytes_peak": 524288
     },
     "obj_pool": {
      "allocs": 99844,
      "frees": 99844,
-     "same_iter": 2426,
+     "same_iter": 2437,
      "peak_bytes": 160,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 64
     }
    },
    "input_bytes": 4163139,
-   "seconds": 6.1
+   "seconds": 14.7
   },
   {
    "program": "scar_life",
@@ -231,27 +256,31 @@
    "plain_bytes": 4215245,
    "totals": {
     "referenced": 1009,
-    "same_iter": 1007,
-    "peak_bytes": 8388794,
+    "same_iter": 1,
+    "peak_bytes": 21,
     "overflow": 0,
-    "heap_same_iter": 8
+    "heap_same_iter": 0,
+    "same_bytes_peak": 21,
+    "same_heap_peak": 0
    },
    "kinds": {
     "blk": {
      "allocs": 1002,
-     "frees": 1001,
-     "same_iter": 1001,
-     "peak_bytes": 26,
+     "frees": 1000,
+     "same_iter": 1,
+     "peak_bytes": 21,
      "heap_allocs": 3,
-     "heap_same_iter": 2
+     "heap_same_iter": 0,
+     "same_bytes_peak": 21
     },
     "alloc": {
      "allocs": 6,
-     "frees": 6,
-     "same_iter": 6,
-     "peak_bytes": 8388768,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 6,
-     "heap_same_iter": 6
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "obj_pool": {
      "allocs": 1,
@@ -259,11 +288,12 @@
      "same_iter": 0,
      "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 4196362,
-   "seconds": 91.8
+   "seconds": 135.2
   },
   {
    "program": "tally_lang",
@@ -275,10 +305,12 @@
    "plain_bytes": 481,
    "totals": {
     "referenced": 79,
-    "same_iter": 26,
-    "peak_bytes": 1057,
+    "same_iter": 11,
+    "peak_bytes": 513,
     "overflow": 0,
-    "heap_same_iter": 25
+    "heap_same_iter": 11,
+    "same_bytes_peak": 11,
+    "same_heap_peak": 11
    },
    "kinds": {
     "blk": {
@@ -287,35 +319,39 @@
      "same_iter": 0,
      "peak_bytes": 0,
      "heap_allocs": 1,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "obj": {
      "allocs": 1,
-     "frees": 1,
-     "same_iter": 1,
-     "peak_bytes": 408,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 1,
-     "heap_same_iter": 1
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "alloc": {
      "allocs": 76,
-     "frees": 76,
-     "same_iter": 24,
-     "peak_bytes": 577,
+     "frees": 75,
+     "same_iter": 11,
+     "peak_bytes": 513,
      "heap_allocs": 76,
-     "heap_same_iter": 24
+     "heap_same_iter": 11,
+     "same_bytes_peak": 11
     },
     "obj_pool": {
      "allocs": 1,
-     "frees": 1,
-     "same_iter": 1,
-     "peak_bytes": 72,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 421,
-   "seconds": 9.7
+   "seconds": 10.0
   },
   {
    "program": "term_rank",
@@ -327,39 +363,44 @@
    "plain_bytes": 4998709,
    "totals": {
     "referenced": 26512925,
-    "same_iter": 23979744,
-    "peak_bytes": 8389059,
+    "same_iter": 25275827,
+    "peak_bytes": 8388680,
     "overflow": 0,
-    "heap_same_iter": 16194761
+    "heap_same_iter": 15594725,
+    "same_bytes_peak": 154,
+    "same_heap_peak": 114
    },
    "kinds": {
     "blk": {
      "allocs": 9993181,
      "frees": 9993180,
-     "same_iter": 8084999,
-     "peak_bytes": 48,
+     "same_iter": 9681110,
+     "peak_bytes": 81,
      "heap_allocs": 312054,
-     "heap_same_iter": 300016
+     "heap_same_iter": 8,
+     "same_bytes_peak": 72
     },
     "obj": {
      "allocs": 1,
-     "frees": 1,
-     "same_iter": 1,
-     "peak_bytes": 384,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 1,
-     "heap_same_iter": 1
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "alloc": {
      "allocs": 16519743,
-     "frees": 16519738,
-     "same_iter": 15894744,
-     "peak_bytes": 8388650,
+     "frees": 16519737,
+     "same_iter": 15594717,
+     "peak_bytes": 8388644,
      "heap_allocs": 16519743,
-     "heap_same_iter": 15894744
+     "heap_same_iter": 15594717,
+     "same_bytes_peak": 83
     }
    },
    "input_bytes": 64561670,
-   "seconds": 18.7
+   "seconds": 22.6
   },
   {
    "program": "ticket_audit",
@@ -371,10 +412,12 @@
    "plain_bytes": 36921,
    "totals": {
     "referenced": 30943951,
-    "same_iter": 5723217,
-    "peak_bytes": 2228909,
+    "same_iter": 8462404,
+    "peak_bytes": 2228242,
     "overflow": 0,
-    "heap_same_iter": 813
+    "heap_same_iter": 5,
+    "same_bytes_peak": 26,
+    "same_heap_peak": 17
    },
    "kinds": {
     "str": {
@@ -383,43 +426,48 @@
      "same_iter": 0,
      "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "bpay": {
      "allocs": 19874065,
      "frees": 19874065,
-     "same_iter": 2860802,
+     "same_iter": 2,
      "peak_bytes": 24,
      "heap_allocs": 16,
-     "heap_same_iter": 1
+     "heap_same_iter": 0,
+     "same_bytes_peak": 12
     },
     "blk": {
      "allocs": 8462406,
-     "frees": 8462405,
-     "same_iter": 2861606,
+     "frees": 8462403,
+     "same_iter": 8462400,
      "peak_bytes": 24,
      "heap_allocs": 4,
-     "heap_same_iter": 3
+     "heap_same_iter": 3,
+     "same_bytes_peak": 24
     },
     "obj": {
      "allocs": 1,
-     "frees": 1,
-     "same_iter": 1,
-     "peak_bytes": 600,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 1,
-     "heap_same_iter": 1
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     },
     "alloc": {
      "allocs": 2606675,
-     "frees": 2606668,
-     "same_iter": 808,
-     "peak_bytes": 2228291,
+     "frees": 2606662,
+     "same_iter": 2,
+     "peak_bytes": 2228224,
      "heap_allocs": 2606675,
-     "heap_same_iter": 808
+     "heap_same_iter": 2,
+     "same_bytes_peak": 13
     }
    },
    "input_bytes": 61998673,
-   "seconds": 27.6
+   "seconds": 40.5
   },
   {
    "program": "tree_fold",
@@ -431,39 +479,44 @@
    "plain_bytes": 22555652,
    "totals": {
     "referenced": 1768097,
-    "same_iter": 1768065,
-    "peak_bytes": 24000280,
+    "same_iter": 10,
+    "peak_bytes": 24000006,
     "overflow": 0,
-    "heap_same_iter": 1768062
+    "heap_same_iter": 9,
+    "same_bytes_peak": 24000000,
+    "same_heap_peak": 24000000
    },
    "kinds": {
     "blk": {
      "allocs": 30,
      "frees": 30,
-     "same_iter": 5,
-     "peak_bytes": 124,
+     "same_iter": 4,
+     "peak_bytes": 108,
      "heap_allocs": 26,
-     "heap_same_iter": 3
+     "heap_same_iter": 3,
+     "same_bytes_peak": 102
     },
     "alloc": {
      "allocs": 1768066,
-     "frees": 1768066,
-     "same_iter": 1768059,
-     "peak_bytes": 24000064,
+     "frees": 1768065,
+     "same_iter": 6,
+     "peak_bytes": 24000000,
      "heap_allocs": 1768066,
-     "heap_same_iter": 1768059
+     "heap_same_iter": 6,
+     "same_bytes_peak": 24000000
     },
     "obj_pool": {
      "allocs": 1,
-     "frees": 1,
-     "same_iter": 1,
-     "peak_bytes": 160,
+     "frees": 0,
+     "same_iter": 0,
+     "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 27859349,
-   "seconds": 24.2
+   "seconds": 40.1
   },
   {
    "program": "binarytrees",
@@ -478,7 +531,9 @@
     "same_iter": 16369,
     "peak_bytes": 262112,
     "overflow": 0,
-    "heap_same_iter": 0
+    "heap_same_iter": 0,
+    "same_bytes_peak": 262112,
+    "same_heap_peak": 0
    },
    "kinds": {
     "obj_pool": {
@@ -487,11 +542,12 @@
      "same_iter": 16369,
      "peak_bytes": 262112,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 262112
     }
    },
    "input_bytes": 0,
-   "seconds": 0.8
+   "seconds": 1.5
   },
   {
    "program": "cfold",
@@ -506,7 +562,9 @@
     "same_iter": 0,
     "peak_bytes": 0,
     "overflow": 0,
-    "heap_same_iter": 0
+    "heap_same_iter": 0,
+    "same_bytes_peak": 0,
+    "same_heap_peak": 0
    },
    "kinds": {
     "obj_pool": {
@@ -515,11 +573,12 @@
      "same_iter": 0,
      "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 0,
-   "seconds": 1.2
+   "seconds": 1.9
   },
   {
    "program": "deriv",
@@ -534,7 +593,9 @@
     "same_iter": 0,
     "peak_bytes": 0,
     "overflow": 0,
-    "heap_same_iter": 0
+    "heap_same_iter": 0,
+    "same_bytes_peak": 0,
+    "same_heap_peak": 0
    },
    "kinds": {
     "obj_pool": {
@@ -543,11 +604,12 @@
      "same_iter": 0,
      "peak_bytes": 0,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 0
     }
    },
    "input_bytes": 0,
-   "seconds": 1.1
+   "seconds": 1.7
   },
   {
    "program": "linkedlist",
@@ -562,7 +624,9 @@
     "same_iter": 1,
     "peak_bytes": 24,
     "overflow": 0,
-    "heap_same_iter": 0
+    "heap_same_iter": 0,
+    "same_bytes_peak": 24,
+    "same_heap_peak": 0
    },
    "kinds": {
     "obj_pool": {
@@ -571,11 +635,12 @@
      "same_iter": 1,
      "peak_bytes": 24,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 24
     }
    },
    "input_bytes": 0,
-   "seconds": 1.1
+   "seconds": 1.8
   },
   {
    "program": "objscan",
@@ -590,7 +655,9 @@
     "same_iter": 1,
     "peak_bytes": 24,
     "overflow": 0,
-    "heap_same_iter": 0
+    "heap_same_iter": 0,
+    "same_bytes_peak": 24,
+    "same_heap_peak": 0
    },
    "kinds": {
     "obj_pool": {
@@ -599,11 +666,12 @@
      "same_iter": 1,
      "peak_bytes": 24,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 24
     }
    },
    "input_bytes": 0,
-   "seconds": 1.1
+   "seconds": 1.3
   },
   {
    "program": "rbtree",
@@ -618,7 +686,9 @@
     "same_iter": 1,
     "peak_bytes": 40,
     "overflow": 0,
-    "heap_same_iter": 0
+    "heap_same_iter": 0,
+    "same_bytes_peak": 40,
+    "same_heap_peak": 0
    },
    "kinds": {
     "obj_pool": {
@@ -627,11 +697,12 @@
      "same_iter": 1,
      "peak_bytes": 40,
      "heap_allocs": 0,
-     "heap_same_iter": 0
+     "heap_same_iter": 0,
+     "same_bytes_peak": 40
     }
    },
    "input_bytes": 0,
-   "seconds": 2.2
+   "seconds": 3.0
   }
  ],
  "dynamic_sites": [
@@ -643,9 +714,9 @@
    "function": "ail_new_Fr",
    "line": 4379,
    "dynamic_kind": "obj_pool",
-   "loop": 106,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
+   "frees": 0,
    "same_iter": 0,
    "bytes_same_iter": 0,
    "heap_allocs": 0,
@@ -659,11 +730,11 @@
    "function": "ail_utf8_decode",
    "line": 2224,
    "dynamic_kind": "blk",
-   "loop": 9,
+   "loop": 129,
    "allocs": 1251,
-   "frees": 1251,
-   "same_iter": 63,
-   "bytes_same_iter": 311,
+   "frees": 1250,
+   "same_iter": 2,
+   "bytes_same_iter": 6,
    "heap_allocs": 2,
    "heap_same_iter": 0
   },
@@ -675,7 +746,7 @@
    "function": "ail_stdin_readline",
    "line": 2323,
    "dynamic_kind": "blk",
-   "loop": 9,
+   "loop": 129,
    "allocs": 2998815,
    "frees": 2998815,
    "same_iter": 0,
@@ -691,7 +762,7 @@
    "function": "ail_stdin_read_raw",
    "line": 2084,
    "dynamic_kind": "alloc",
-   "loop": 45,
+   "loop": 129,
    "allocs": 1186,
    "frees": 1186,
    "same_iter": 1186,
@@ -739,7 +810,7 @@
    "function": "ail__fmt_pad",
    "line": 3475,
    "dynamic_kind": "str",
-   "loop": 12,
+   "loop": 0,
    "allocs": 7,
    "frees": 0,
    "same_iter": 0,
@@ -755,13 +826,13 @@
    "function": "ail_sarena_alloc",
    "line": 1149,
    "dynamic_kind": "blk",
-   "loop": 12,
+   "loop": 0,
    "allocs": 7,
-   "frees": 7,
-   "same_iter": 7,
-   "bytes_same_iter": 86,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 2,
-   "heap_same_iter": 2
+   "heap_same_iter": 0
   },
   {
    "program": "chain_relax",
@@ -771,13 +842,13 @@
    "function": "ail__str_cat_slow",
    "line": 1381,
    "dynamic_kind": "blk",
-   "loop": 12,
+   "loop": 0,
    "allocs": 7,
-   "frees": 7,
-   "same_iter": 1,
-   "bytes_same_iter": 18,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 6,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "chain_relax",
@@ -787,13 +858,13 @@
    "function": "ail_utf8_decode",
    "line": 2409,
    "dynamic_kind": "blk",
-   "loop": 57,
+   "loop": 0,
    "allocs": 3,
-   "frees": 2,
-   "same_iter": 1,
-   "bytes_same_iter": 9,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 3,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "chain_relax",
@@ -803,9 +874,9 @@
    "function": "ail_sarena_pushn",
    "line": 1120,
    "dynamic_kind": "alloc",
-   "loop": 80,
+   "loop": 0,
    "allocs": 2,
-   "frees": 2,
+   "frees": 0,
    "same_iter": 0,
    "bytes_same_iter": 0,
    "heap_allocs": 2,
@@ -819,9 +890,9 @@
    "function": "ail_sarena_pushn",
    "line": 1122,
    "dynamic_kind": "alloc",
-   "loop": 80,
+   "loop": 0,
    "allocs": 2,
-   "frees": 2,
+   "frees": 0,
    "same_iter": 0,
    "bytes_same_iter": 0,
    "heap_allocs": 2,
@@ -835,13 +906,13 @@
    "function": "ail_str_return_owned",
    "line": 3052,
    "dynamic_kind": "alloc",
-   "loop": 80,
+   "loop": 0,
    "allocs": 10,
-   "frees": 10,
-   "same_iter": 3,
-   "bytes_same_iter": 33,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 10,
-   "heap_same_iter": 3
+   "heap_same_iter": 0
   },
   {
    "program": "deriv",
@@ -883,7 +954,7 @@
    "function": "ail_tab_hgrow",
    "line": 3276,
    "dynamic_kind": "alloc",
-   "loop": 115,
+   "loop": 114,
    "allocs": 17,
    "frees": 17,
    "same_iter": 0,
@@ -899,7 +970,7 @@
    "function": "ail_tab_hgrow",
    "line": 3277,
    "dynamic_kind": "alloc",
-   "loop": 115,
+   "loop": 114,
    "allocs": 17,
    "frees": 17,
    "same_iter": 0,
@@ -915,7 +986,7 @@
    "function": "ail_tab_arr_fresh",
    "line": 3421,
    "dynamic_kind": "alloc",
-   "loop": 115,
+   "loop": 114,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -931,7 +1002,7 @@
    "function": "ail_tab_arr_fresh",
    "line": 3422,
    "dynamic_kind": "alloc",
-   "loop": 115,
+   "loop": 114,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -947,7 +1018,7 @@
    "function": "ail_tab_arr_spill",
    "line": 3445,
    "dynamic_kind": "alloc",
-   "loop": 115,
+   "loop": 114,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -963,7 +1034,7 @@
    "function": "ail_tab_arr_spill",
    "line": 3446,
    "dynamic_kind": "alloc",
-   "loop": 115,
+   "loop": 114,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -979,13 +1050,13 @@
    "function": "ail_bytearray_new",
    "line": 4776,
    "dynamic_kind": "alloc",
-   "loop": 110,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 32,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "echo_pack",
@@ -995,13 +1066,13 @@
    "function": "ail_barena_push",
    "line": 4460,
    "dynamic_kind": "alloc",
-   "loop": 110,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 64,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ledger_bin",
@@ -1011,11 +1082,11 @@
    "function": "ail_new_Rd",
    "line": 5829,
    "dynamic_kind": "obj_pool",
-   "loop": 131,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 40,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 0,
    "heap_same_iter": 0
   },
@@ -1027,13 +1098,13 @@
    "function": "ail_utf8_decode_error",
    "line": 2191,
    "dynamic_kind": "blk",
-   "loop": 49,
+   "loop": 152,
    "allocs": 373945,
    "frees": 373945,
-   "same_iter": 1,
-   "bytes_same_iter": 5,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 373945,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ledger_bin",
@@ -1059,7 +1130,7 @@
    "function": "ail_sarena_pushn",
    "line": 934,
    "dynamic_kind": "alloc",
-   "loop": 49,
+   "loop": 152,
    "allocs": 16,
    "frees": 16,
    "same_iter": 0,
@@ -1075,7 +1146,7 @@
    "function": "ail_sarena_pushn",
    "line": 936,
    "dynamic_kind": "alloc",
-   "loop": 49,
+   "loop": 152,
    "allocs": 16,
    "frees": 16,
    "same_iter": 0,
@@ -1187,13 +1258,13 @@
    "function": "ail_bytes_return_owned",
    "line": 5345,
    "dynamic_kind": "alloc",
-   "loop": 131,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 59098225,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ledger_bin",
@@ -1203,13 +1274,13 @@
    "function": "ail_barena_push",
    "line": 4911,
    "dynamic_kind": "alloc",
-   "loop": 131,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 64,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "linkedlist",
@@ -1254,8 +1325,8 @@
    "loop": 114,
    "allocs": 99844,
    "frees": 99844,
-   "same_iter": 2426,
-   "bytes_same_iter": 77632,
+   "same_iter": 2437,
+   "bytes_same_iter": 77984,
    "heap_allocs": 0,
    "heap_same_iter": 0
   },
@@ -1267,13 +1338,13 @@
    "function": "ail_new_G",
    "line": 4208,
    "dynamic_kind": "obj",
-   "loop": 140,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 320,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "rail_transfer",
@@ -1283,7 +1354,7 @@
    "function": "ail_str_catn",
    "line": 1280,
    "dynamic_kind": "blk",
-   "loop": 9,
+   "loop": 141,
    "allocs": 18,
    "frees": 18,
    "same_iter": 18,
@@ -1299,11 +1370,11 @@
    "function": "ail_utf8_decode",
    "line": 2213,
    "dynamic_kind": "blk",
-   "loop": 9,
+   "loop": 141,
    "allocs": 184928,
-   "frees": 184928,
-   "same_iter": 184906,
-   "bytes_same_iter": 3853790,
+   "frees": 184926,
+   "same_iter": 2,
+   "bytes_same_iter": 32,
    "heap_allocs": 4,
    "heap_same_iter": 0
   },
@@ -1317,11 +1388,11 @@
    "dynamic_kind": "alloc",
    "loop": 120,
    "allocs": 53,
-   "frees": 53,
-   "same_iter": 53,
-   "bytes_same_iter": 3392,
+   "frees": 52,
+   "same_iter": 52,
+   "bytes_same_iter": 3328,
    "heap_allocs": 53,
-   "heap_same_iter": 53
+   "heap_same_iter": 52
   },
   {
    "program": "rail_transfer",
@@ -1347,7 +1418,7 @@
    "function": "ail_list_snapshot",
    "line": 3587,
    "dynamic_kind": "alloc",
-   "loop": 115,
+   "loop": 141,
    "allocs": 50,
    "frees": 50,
    "same_iter": 50,
@@ -1363,13 +1434,13 @@
    "function": "ail_str_return_owned",
    "line": 2787,
    "dynamic_kind": "alloc",
-   "loop": 22,
+   "loop": 141,
    "allocs": 25,
    "frees": 25,
-   "same_iter": 25,
-   "bytes_same_iter": 145,
+   "same_iter": 1,
+   "bytes_same_iter": 6,
    "heap_allocs": 25,
-   "heap_same_iter": 25
+   "heap_same_iter": 1
   },
   {
    "program": "rbtree",
@@ -1411,13 +1482,13 @@
    "function": "ail_str_catn",
    "line": 1618,
    "dynamic_kind": "blk",
-   "loop": 43,
+   "loop": 162,
    "allocs": 1000,
    "frees": 1000,
-   "same_iter": 1000,
-   "bytes_same_iter": 19893,
+   "same_iter": 1,
+   "bytes_same_iter": 21,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "scar_life",
@@ -1427,13 +1498,13 @@
    "function": "ail_utf8_decode",
    "line": 2551,
    "dynamic_kind": "blk",
-   "loop": 154,
+   "loop": 0,
    "allocs": 2,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 5,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 2,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "scar_life",
@@ -1443,13 +1514,13 @@
    "function": "ail_bytearray_new",
    "line": 5811,
    "dynamic_kind": "alloc",
-   "loop": 161,
+   "loop": 0,
    "allocs": 3,
-   "frees": 3,
-   "same_iter": 3,
-   "bytes_same_iter": 96,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 3,
-   "heap_same_iter": 3
+   "heap_same_iter": 0
   },
   {
    "program": "scar_life",
@@ -1459,13 +1530,13 @@
    "function": "ail_bytearray_new",
    "line": 5814,
    "dynamic_kind": "alloc",
-   "loop": 158,
+   "loop": 0,
    "allocs": 2,
-   "frees": 2,
-   "same_iter": 2,
-   "bytes_same_iter": 8388608,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 2,
-   "heap_same_iter": 2
+   "heap_same_iter": 0
   },
   {
    "program": "scar_life",
@@ -1475,13 +1546,13 @@
    "function": "ail_barena_push",
    "line": 5495,
    "dynamic_kind": "alloc",
-   "loop": 87,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 64,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "tally_lang",
@@ -1491,13 +1562,13 @@
    "function": "ail_new_Prog",
    "line": 5676,
    "dynamic_kind": "obj",
-   "loop": 126,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 408,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "tally_lang",
@@ -1507,11 +1578,11 @@
    "function": "ail_new_Lx",
    "line": 5714,
    "dynamic_kind": "obj_pool",
-   "loop": 126,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 72,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 0,
    "heap_same_iter": 0
   },
@@ -1539,7 +1610,7 @@
    "function": "ail_str_from_int",
    "line": 1333,
    "dynamic_kind": "alloc",
-   "loop": 23,
+   "loop": 149,
    "allocs": 55,
    "frees": 55,
    "same_iter": 11,
@@ -1555,13 +1626,13 @@
    "function": "ail_str_join",
    "line": 3379,
    "dynamic_kind": "alloc",
-   "loop": 93,
+   "loop": 148,
    "allocs": 11,
    "frees": 11,
-   "same_iter": 11,
-   "bytes_same_iter": 481,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 11,
-   "heap_same_iter": 11
+   "heap_same_iter": 0
   },
   {
    "program": "tally_lang",
@@ -1571,7 +1642,7 @@
    "function": "ail_stab_init",
    "line": 5052,
    "dynamic_kind": "alloc",
-   "loop": 49,
+   "loop": 142,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -1587,7 +1658,7 @@
    "function": "ail_stab_init",
    "line": 5054,
    "dynamic_kind": "alloc",
-   "loop": 49,
+   "loop": 142,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -1603,7 +1674,7 @@
    "function": "ail_stab_init",
    "line": 5055,
    "dynamic_kind": "alloc",
-   "loop": 49,
+   "loop": 142,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -1619,13 +1690,13 @@
    "function": "ail_barena_push",
    "line": 4478,
    "dynamic_kind": "alloc",
-   "loop": 126,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 64,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "tally_lang",
@@ -1635,13 +1706,13 @@
    "function": "ail_stab_key_dup",
    "line": 4957,
    "dynamic_kind": "alloc",
-   "loop": 130,
+   "loop": 142,
    "allocs": 6,
    "frees": 6,
-   "same_iter": 1,
-   "bytes_same_iter": 1,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 6,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "term_rank",
@@ -1651,13 +1722,13 @@
    "function": "ail_new_St",
    "line": 6559,
    "dynamic_kind": "obj",
-   "loop": 140,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 384,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "term_rank",
@@ -1667,13 +1738,13 @@
    "function": "ail__str_cat_slow",
    "line": 1185,
    "dynamic_kind": "blk",
-   "loop": 9,
+   "loop": 184,
    "allocs": 347243,
    "frees": 347243,
-   "same_iter": 300025,
-   "bytes_same_iter": 4800400,
+   "same_iter": 47218,
+   "bytes_same_iter": 755488,
    "heap_allocs": 300009,
-   "heap_same_iter": 300009
+   "heap_same_iter": 0
   },
   {
    "program": "term_rank",
@@ -1683,13 +1754,13 @@
    "function": "ail_str_catn",
    "line": 1280,
    "dynamic_kind": "blk",
-   "loop": 9,
+   "loop": 175,
    "allocs": 12000,
    "frees": 12000,
-   "same_iter": 0,
-   "bytes_same_iter": 0,
+   "same_iter": 1,
+   "bytes_same_iter": 11,
    "heap_allocs": 11991,
-   "heap_same_iter": 0
+   "heap_same_iter": 1
   },
   {
    "program": "term_rank",
@@ -1715,11 +1786,11 @@
    "function": "ail_bytes_hex",
    "line": 5115,
    "dynamic_kind": "blk",
-   "loop": 9,
+   "loop": 168,
    "allocs": 9633937,
    "frees": 9633937,
-   "same_iter": 7784974,
-   "bytes_same_iter": 100755856,
+   "same_iter": 9633891,
+   "bytes_same_iter": 130767435,
    "heap_allocs": 53,
    "heap_same_iter": 7
   },
@@ -1731,7 +1802,7 @@
    "function": "ail_sarena_pushn",
    "line": 924,
    "dynamic_kind": "alloc",
-   "loop": 134,
+   "loop": 173,
    "allocs": 3,
    "frees": 3,
    "same_iter": 0,
@@ -1747,7 +1818,7 @@
    "function": "ail_sarena_pushn",
    "line": 926,
    "dynamic_kind": "alloc",
-   "loop": 134,
+   "loop": 173,
    "allocs": 3,
    "frees": 3,
    "same_iter": 0,
@@ -1763,13 +1834,13 @@
    "function": "ail_str_from_int",
    "line": 1323,
    "dynamic_kind": "alloc",
-   "loop": 23,
+   "loop": 184,
    "allocs": 300025,
    "frees": 300025,
-   "same_iter": 300025,
-   "bytes_same_iter": 2086577,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 300025,
-   "heap_same_iter": 300025
+   "heap_same_iter": 0
   },
   {
    "program": "term_rank",
@@ -1779,13 +1850,13 @@
    "function": "ail_bytes_fromhex",
    "line": 5151,
    "dynamic_kind": "alloc",
-   "loop": 135,
+   "loop": 184,
    "allocs": 300025,
    "frees": 300025,
-   "same_iter": 1,
-   "bytes_same_iter": 5,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 300025,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "term_rank",
@@ -1811,7 +1882,7 @@
    "function": "ail_stab_init",
    "line": 5700,
    "dynamic_kind": "alloc",
-   "loop": 134,
+   "loop": 168,
    "allocs": 2,
    "frees": 2,
    "same_iter": 0,
@@ -1827,7 +1898,7 @@
    "function": "ail_stab_init",
    "line": 5702,
    "dynamic_kind": "alloc",
-   "loop": 134,
+   "loop": 168,
    "allocs": 2,
    "frees": 0,
    "same_iter": 0,
@@ -1843,7 +1914,7 @@
    "function": "ail_stab_init",
    "line": 5703,
    "dynamic_kind": "alloc",
-   "loop": 134,
+   "loop": 168,
    "allocs": 2,
    "frees": 0,
    "same_iter": 0,
@@ -1859,7 +1930,7 @@
    "function": "ail_str_return_owned",
    "line": 2850,
    "dynamic_kind": "alloc",
-   "loop": 14,
+   "loop": 184,
    "allocs": 300025,
    "frees": 300025,
    "same_iter": 0,
@@ -1875,13 +1946,13 @@
    "function": "ail_barena_push",
    "line": 4833,
    "dynamic_kind": "alloc",
-   "loop": 18,
+   "loop": 180,
    "allocs": 7797376,
-   "frees": 7797376,
-   "same_iter": 7797359,
-   "bytes_same_iter": 499030976,
+   "frees": 7797375,
+   "same_iter": 7797358,
+   "bytes_same_iter": 499030912,
    "heap_allocs": 7797376,
-   "heap_same_iter": 7797359
+   "heap_same_iter": 7797358
   },
   {
    "program": "term_rank",
@@ -1891,7 +1962,7 @@
    "function": "ail_bytearray_freeze",
    "line": 5416,
    "dynamic_kind": "alloc",
-   "loop": 169,
+   "loop": 168,
    "allocs": 7797358,
    "frees": 7797358,
    "same_iter": 7797358,
@@ -1907,11 +1978,11 @@
    "function": "ail_stab_key_dup",
    "line": 5605,
    "dynamic_kind": "alloc",
-   "loop": 144,
+   "loop": 168,
    "allocs": 24920,
    "frees": 24920,
    "same_iter": 1,
-   "bytes_same_iter": 14,
+   "bytes_same_iter": 8,
    "heap_allocs": 24920,
    "heap_same_iter": 1
   },
@@ -1923,13 +1994,13 @@
    "function": "ail_new_State",
    "line": 7925,
    "dynamic_kind": "obj",
-   "loop": 147,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 600,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ticket_audit",
@@ -1939,7 +2010,7 @@
    "function": "ail_fmt_spec_int",
    "line": 7368,
    "dynamic_kind": "str",
-   "loop": 12,
+   "loop": 231,
    "allocs": 725,
    "frees": 0,
    "same_iter": 0,
@@ -1955,7 +2026,7 @@
    "function": "ail_fmt_spec_int",
    "line": 7373,
    "dynamic_kind": "str",
-   "loop": 12,
+   "loop": 231,
    "allocs": 79,
    "frees": 0,
    "same_iter": 0,
@@ -1974,10 +2045,10 @@
    "loop": 210,
    "allocs": 19874065,
    "frees": 19874065,
-   "same_iter": 2860802,
-   "bytes_same_iter": 19381075,
+   "same_iter": 2,
+   "bytes_same_iter": 24,
    "heap_allocs": 16,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ticket_audit",
@@ -1987,11 +2058,11 @@
    "function": "ail_sarena_alloc",
    "line": 1110,
    "dynamic_kind": "blk",
-   "loop": 12,
+   "loop": 231,
    "allocs": 804,
-   "frees": 804,
-   "same_iter": 3,
-   "bytes_same_iter": 18,
+   "frees": 803,
+   "same_iter": 800,
+   "bytes_same_iter": 1600,
    "heap_allocs": 0,
    "heap_same_iter": 0
   },
@@ -2003,11 +2074,11 @@
    "function": "ail_str_catn",
    "line": 1437,
    "dynamic_kind": "blk",
-   "loop": 12,
+   "loop": 227,
    "allocs": 2800801,
-   "frees": 2800801,
-   "same_iter": 2800801,
-   "bytes_same_iter": 33306286,
+   "frees": 2800800,
+   "same_iter": 2800800,
+   "bytes_same_iter": 33306272,
    "heap_allocs": 1,
    "heap_same_iter": 1
   },
@@ -2019,11 +2090,11 @@
    "function": "ail_utf8_decode_error",
    "line": 2338,
    "dynamic_kind": "blk",
-   "loop": 12,
+   "loop": 203,
    "allocs": 5660800,
    "frees": 5660800,
-   "same_iter": 60802,
-   "bytes_same_iter": 243212,
+   "same_iter": 5660800,
+   "bytes_same_iter": 33540672,
    "heap_allocs": 2,
    "heap_same_iter": 2
   },
@@ -2051,13 +2122,13 @@
    "function": "ail_pslist_snapshot",
    "line": 3729,
    "dynamic_kind": "alloc",
-   "loop": 225,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 2400,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ticket_audit",
@@ -2067,13 +2138,13 @@
    "function": "ail_pslist_snapshot",
    "line": 3732,
    "dynamic_kind": "alloc",
-   "loop": 225,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 19200,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ticket_audit",
@@ -2083,13 +2154,13 @@
    "function": "ail_list_snapshot",
    "line": 4012,
    "dynamic_kind": "alloc",
-   "loop": 228,
+   "loop": 0,
    "allocs": 2,
-   "frees": 2,
-   "same_iter": 2,
-   "bytes_same_iter": 960000,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 2,
-   "heap_same_iter": 2
+   "heap_same_iter": 0
   },
   {
    "program": "ticket_audit",
@@ -2099,7 +2170,7 @@
    "function": "ail_tab_hgrow",
    "line": 4655,
    "dynamic_kind": "alloc",
-   "loop": 122,
+   "loop": 203,
    "allocs": 13,
    "frees": 13,
    "same_iter": 0,
@@ -2115,7 +2186,7 @@
    "function": "ail_tab_hgrow",
    "line": 4656,
    "dynamic_kind": "alloc",
-   "loop": 122,
+   "loop": 203,
    "allocs": 13,
    "frees": 13,
    "same_iter": 0,
@@ -2131,7 +2202,7 @@
    "function": "ail_tab_arr_fresh",
    "line": 4800,
    "dynamic_kind": "alloc",
-   "loop": 122,
+   "loop": 203,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -2147,7 +2218,7 @@
    "function": "ail_tab_arr_fresh",
    "line": 4801,
    "dynamic_kind": "alloc",
-   "loop": 122,
+   "loop": 203,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -2163,7 +2234,7 @@
    "function": "ail_tab_arr_spill",
    "line": 4824,
    "dynamic_kind": "alloc",
-   "loop": 122,
+   "loop": 203,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -2179,7 +2250,7 @@
    "function": "ail_tab_arr_spill",
    "line": 4825,
    "dynamic_kind": "alloc",
-   "loop": 122,
+   "loop": 203,
    "allocs": 1,
    "frees": 1,
    "same_iter": 0,
@@ -2195,7 +2266,7 @@
    "function": "ail_stab_init",
    "line": 6413,
    "dynamic_kind": "alloc",
-   "loop": 25,
+   "loop": 203,
    "allocs": 2,
    "frees": 2,
    "same_iter": 0,
@@ -2211,7 +2282,7 @@
    "function": "ail_stab_init",
    "line": 6415,
    "dynamic_kind": "alloc",
-   "loop": 25,
+   "loop": 203,
    "allocs": 2,
    "frees": 0,
    "same_iter": 0,
@@ -2227,7 +2298,7 @@
    "function": "ail_stab_init",
    "line": 6416,
    "dynamic_kind": "alloc",
-   "loop": 25,
+   "loop": 203,
    "allocs": 2,
    "frees": 0,
    "same_iter": 0,
@@ -2243,7 +2314,7 @@
    "function": "ail_blist_new",
    "line": 6982,
    "dynamic_kind": "alloc",
-   "loop": 204,
+   "loop": 203,
    "allocs": 3,
    "frees": 0,
    "same_iter": 0,
@@ -2259,13 +2330,13 @@
    "function": "ail_str_return_owned",
    "line": 3007,
    "dynamic_kind": "alloc",
-   "loop": 25,
+   "loop": 227,
    "allocs": 1601,
-   "frees": 1601,
-   "same_iter": 801,
-   "bytes_same_iter": 8003,
+   "frees": 1600,
+   "same_iter": 2,
+   "bytes_same_iter": 13,
    "heap_allocs": 1601,
-   "heap_same_iter": 801
+   "heap_same_iter": 2
   },
   {
    "program": "ticket_audit",
@@ -2275,13 +2346,13 @@
    "function": "ail_barena_push",
    "line": 5839,
    "dynamic_kind": "alloc",
-   "loop": 147,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 64,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   },
   {
    "program": "ticket_audit",
@@ -2291,13 +2362,13 @@
    "function": "ail_stab_key_dup",
    "line": 6318,
    "dynamic_kind": "alloc",
-   "loop": 151,
+   "loop": 203,
    "allocs": 2605030,
    "frees": 2605030,
-   "same_iter": 2,
-   "bytes_same_iter": 21,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 2605030,
-   "heap_same_iter": 2
+   "heap_same_iter": 0
   },
   {
    "program": "tree_fold",
@@ -2307,11 +2378,11 @@
    "function": "ail_new_T",
    "line": 7416,
    "dynamic_kind": "obj_pool",
-   "loop": 176,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 160,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 0,
    "heap_same_iter": 0
   },
@@ -2323,7 +2394,7 @@
    "function": "ail__str_cat_slow",
    "line": 1523,
    "dynamic_kind": "blk",
-   "loop": 43,
+   "loop": 233,
    "allocs": 3,
    "frees": 3,
    "same_iter": 3,
@@ -2339,11 +2410,11 @@
    "function": "ail_str_catn",
    "line": 1618,
    "dynamic_kind": "blk",
-   "loop": 43,
+   "loop": 233,
    "allocs": 6,
    "frees": 6,
-   "same_iter": 1,
-   "bytes_same_iter": 50,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 3,
    "heap_same_iter": 0
   },
@@ -2355,7 +2426,7 @@
    "function": "ail_utf8_decode_error",
    "line": 2519,
    "dynamic_kind": "blk",
-   "loop": 83,
+   "loop": 230,
    "allocs": 21,
    "frees": 21,
    "same_iter": 1,
@@ -2371,7 +2442,7 @@
    "function": "ail_sarena_pushn",
    "line": 1262,
    "dynamic_kind": "alloc",
-   "loop": 83,
+   "loop": 230,
    "allocs": 2,
    "frees": 2,
    "same_iter": 0,
@@ -2387,7 +2458,7 @@
    "function": "ail_sarena_pushn",
    "line": 1264,
    "dynamic_kind": "alloc",
-   "loop": 83,
+   "loop": 230,
    "allocs": 2,
    "frees": 2,
    "same_iter": 0,
@@ -2403,13 +2474,13 @@
    "function": "ail_str_from_int",
    "line": 1661,
    "dynamic_kind": "alloc",
-   "loop": 57,
+   "loop": 226,
    "allocs": 1768053,
    "frees": 1768053,
-   "same_iter": 1768052,
-   "bytes_same_iter": 7879863,
+   "same_iter": 1,
+   "bytes_same_iter": 4,
    "heap_allocs": 1768053,
-   "heap_same_iter": 1768052
+   "heap_same_iter": 1
   },
   {
    "program": "tree_fold",
@@ -2419,7 +2490,7 @@
    "function": "ail_str_join",
    "line": 5057,
    "dynamic_kind": "alloc",
-   "loop": 135,
+   "loop": 233,
    "allocs": 3,
    "frees": 3,
    "same_iter": 3,
@@ -2451,13 +2522,13 @@
    "function": "ail_str_return_owned",
    "line": 4508,
    "dynamic_kind": "alloc",
-   "loop": 228,
+   "loop": 233,
    "allocs": 4,
    "frees": 4,
-   "same_iter": 2,
-   "bytes_same_iter": 22555223,
+   "same_iter": 1,
+   "bytes_same_iter": 22555184,
    "heap_allocs": 4,
-   "heap_same_iter": 2
+   "heap_same_iter": 1
   },
   {
    "program": "tree_fold",
@@ -2467,13 +2538,13 @@
    "function": "ail_barena_push",
    "line": 6623,
    "dynamic_kind": "alloc",
-   "loop": 176,
+   "loop": 0,
    "allocs": 1,
-   "frees": 1,
-   "same_iter": 1,
-   "bytes_same_iter": 64,
+   "frees": 0,
+   "same_iter": 0,
+   "bytes_same_iter": 0,
    "heap_allocs": 1,
-   "heap_same_iter": 1
+   "heap_same_iter": 0
   }
  ],
  "static_sites": [
@@ -2637,7 +2708,7 @@
    "kind": "obj",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "passed to unknown callee Node (line 15)"
+   "blocked_by": "live across the loop back edge (read before it is rebound) (line 15)"
   },
   {
    "program": "objscan",
@@ -2646,7 +2717,7 @@
    "kind": "obj",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into append()"
+   "blocked_by": "stored into append() (line 15)"
   },
   {
    "program": "rail_transfer",
@@ -2700,7 +2771,7 @@
    "kind": "tuple",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "captured in a closure/comprehension (line 93)"
+   "blocked_by": "inside/captured by a closure or comprehension (line 93)"
   },
   {
    "program": "rail_transfer",
@@ -2709,7 +2780,7 @@
    "kind": "tuple",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "captured in a closure/comprehension (line 95)"
+   "blocked_by": "inside/captured by a closure or comprehension (line 95)"
   },
   {
    "program": "rail_transfer",
@@ -2790,7 +2861,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()"
+   "blocked_by": "stored into extend() (line 157)"
   },
   {
    "program": "tally_lang",
@@ -2799,7 +2870,7 @@
    "kind": "str",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into append()"
+   "blocked_by": "stored into append() (line 415)"
   },
   {
    "program": "tally_lang",
@@ -2898,7 +2969,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "used as the for-loop iterable (live across the back edge)"
+   "blocked_by": "used as the for-loop iterable (live across the back edge) (line 94)"
   },
   {
    "program": "term_rank",
@@ -2925,7 +2996,7 @@
    "kind": "str",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into add()"
+   "blocked_by": "stored into add() (line 105)"
   },
   {
    "program": "term_rank",
@@ -2942,8 +3013,8 @@
    "line": 138,
    "kind": "tuple",
    "in_loop": true,
-   "static_iteration_local": true,
-   "blocked_by": null
+   "static_iteration_local": false,
+   "blocked_by": "inside/captured by a closure or comprehension (line 138)"
   },
   {
    "program": "term_rank",
@@ -2952,7 +3023,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()"
+   "blocked_by": "stored into extend() (line 139)"
   },
   {
    "program": "term_rank",
@@ -2961,7 +3032,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()"
+   "blocked_by": "stored into extend() (line 146)"
   },
   {
    "program": "term_rank",
@@ -2988,7 +3059,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()"
+   "blocked_by": "stored into extend() (line 158)"
   },
   {
    "program": "ticket_audit",
@@ -3296,10 +3367,10 @@
     53
    ],
    "dynamic_allocs": 41,
-   "dynamic_same_iter": 2,
-   "dynamic_heap_same_iter": 2,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "echo_pack",
@@ -3321,10 +3392,10 @@
     53
    ],
    "dynamic_allocs": 41,
-   "dynamic_same_iter": 2,
-   "dynamic_heap_same_iter": 2,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "ledger_bin",
@@ -3338,7 +3409,7 @@
     1
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
+   "dynamic_same_iter": 0,
    "dynamic_heap_same_iter": 0,
    "dynamic_yes": false,
    "dynamic_note": "program/family aggregate"
@@ -3365,7 +3436,7 @@
    "kind": "obj",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "passed to unknown callee Node (line 15)",
+   "blocked_by": "live across the loop back edge (read before it is rebound) (line 15)",
    "dynamic_sites": [
     1
    ],
@@ -3382,7 +3453,7 @@
    "kind": "obj",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into append()",
+   "blocked_by": "stored into append() (line 15)",
    "dynamic_sites": [
     1
    ],
@@ -3405,10 +3476,10 @@
     2
    ],
    "dynamic_allocs": 99845,
-   "dynamic_same_iter": 2427,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 2437,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "rail_transfer",
@@ -3438,10 +3509,10 @@
     2
    ],
    "dynamic_allocs": 99845,
-   "dynamic_same_iter": 2427,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 2437,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "rail_transfer",
@@ -3471,10 +3542,10 @@
     2
    ],
    "dynamic_allocs": 99845,
-   "dynamic_same_iter": 2427,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate"
+   "dynamic_same_iter": 2437,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
   {
    "program": "rail_transfer",
@@ -3483,7 +3554,7 @@
    "kind": "tuple",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "captured in a closure/comprehension (line 93)",
+   "blocked_by": "inside/captured by a closure or comprehension (line 93)",
    "dynamic_sites": [],
    "dynamic_allocs": 0,
    "dynamic_same_iter": 0,
@@ -3498,7 +3569,7 @@
    "kind": "tuple",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "captured in a closure/comprehension (line 95)",
+   "blocked_by": "inside/captured by a closure or comprehension (line 95)",
    "dynamic_sites": [],
    "dynamic_allocs": 0,
    "dynamic_same_iter": 0,
@@ -3519,10 +3590,10 @@
     2
    ],
    "dynamic_allocs": 99845,
-   "dynamic_same_iter": 2427,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 2437,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "rbtree",
@@ -3574,10 +3645,10 @@
     44
    ],
    "dynamic_allocs": 1008,
-   "dynamic_same_iter": 1007,
-   "dynamic_heap_same_iter": 8,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 1,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "scar_life",
@@ -3595,10 +3666,10 @@
     44
    ],
    "dynamic_allocs": 1008,
-   "dynamic_same_iter": 1007,
-   "dynamic_heap_same_iter": 8,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 1,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "scar_life",
@@ -3616,10 +3687,10 @@
     44
    ],
    "dynamic_allocs": 1008,
-   "dynamic_same_iter": 1007,
-   "dynamic_heap_same_iter": 8,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 1,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "scar_life",
@@ -3637,10 +3708,10 @@
     44
    ],
    "dynamic_allocs": 1008,
-   "dynamic_same_iter": 1007,
-   "dynamic_heap_same_iter": 8,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 1,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "scar_life",
@@ -3658,10 +3729,10 @@
     44
    ],
    "dynamic_allocs": 1008,
-   "dynamic_same_iter": 1007,
-   "dynamic_heap_same_iter": 8,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 1,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "scar_life",
@@ -3670,7 +3741,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()",
+   "blocked_by": "stored into extend() (line 157)",
    "dynamic_sites": [
     12,
     14,
@@ -3679,10 +3750,10 @@
     44
    ],
    "dynamic_allocs": 1008,
-   "dynamic_same_iter": 1007,
-   "dynamic_heap_same_iter": 8,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 1,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "tally_lang",
@@ -3691,7 +3762,7 @@
    "kind": "str",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into append()",
+   "blocked_by": "stored into append() (line 415)",
    "dynamic_sites": [
     14,
     18,
@@ -3703,8 +3774,8 @@
     55
    ],
    "dynamic_allocs": 77,
-   "dynamic_same_iter": 24,
-   "dynamic_heap_same_iter": 24,
+   "dynamic_same_iter": 11,
+   "dynamic_heap_same_iter": 11,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -3727,8 +3798,8 @@
     55
    ],
    "dynamic_allocs": 77,
-   "dynamic_same_iter": 24,
-   "dynamic_heap_same_iter": 24,
+   "dynamic_same_iter": 11,
+   "dynamic_heap_same_iter": 11,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate"
   },
@@ -3745,10 +3816,10 @@
     2
    ],
    "dynamic_allocs": 2,
-   "dynamic_same_iter": 2,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "tally_lang",
@@ -3763,10 +3834,10 @@
     2
    ],
    "dynamic_allocs": 2,
-   "dynamic_same_iter": 2,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "term_rank",
@@ -3795,8 +3866,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -3827,8 +3898,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -3859,8 +3930,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -3891,8 +3962,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -3923,8 +3994,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -3955,8 +4026,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -3987,8 +4058,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate"
   },
@@ -3999,7 +4070,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "used as the for-loop iterable (live across the back edge)",
+   "blocked_by": "used as the for-loop iterable (live across the back edge) (line 94)",
    "dynamic_sites": [
     11,
     12,
@@ -4019,8 +4090,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4036,10 +4107,10 @@
     1
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "term_rank",
@@ -4068,8 +4139,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate"
   },
@@ -4080,7 +4151,7 @@
    "kind": "str",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into add()",
+   "blocked_by": "stored into add() (line 105)",
    "dynamic_sites": [
     11,
     12,
@@ -4100,8 +4171,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4132,8 +4203,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4143,8 +4214,8 @@
    "line": 138,
    "kind": "tuple",
    "in_loop": true,
-   "static_iteration_local": true,
-   "blocked_by": null,
+   "static_iteration_local": false,
+   "blocked_by": "inside/captured by a closure or comprehension (line 138)",
    "dynamic_sites": [],
    "dynamic_allocs": 0,
    "dynamic_same_iter": 0,
@@ -4159,7 +4230,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()",
+   "blocked_by": "stored into extend() (line 139)",
    "dynamic_sites": [
     11,
     12,
@@ -4179,8 +4250,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4191,7 +4262,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()",
+   "blocked_by": "stored into extend() (line 146)",
    "dynamic_sites": [
     11,
     12,
@@ -4211,8 +4282,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4258,8 +4329,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4270,7 +4341,7 @@
    "kind": "bpay",
    "in_loop": true,
    "static_iteration_local": false,
-   "blocked_by": "stored into extend()",
+   "blocked_by": "stored into extend() (line 158)",
    "dynamic_sites": [
     11,
     12,
@@ -4290,8 +4361,8 @@
     70
    ],
    "dynamic_allocs": 26512924,
-   "dynamic_same_iter": 23979743,
-   "dynamic_heap_same_iter": 16194760,
+   "dynamic_same_iter": 25275827,
+   "dynamic_heap_same_iter": 15594725,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4307,10 +4378,10 @@
     1
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
-   "dynamic_note": "program/family aggregate; static and dynamic disagree"
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
+   "dynamic_note": "program/family aggregate"
   },
   {
    "program": "ticket_audit",
@@ -4363,8 +4434,8 @@
     57
    ],
    "dynamic_allocs": 1768096,
-   "dynamic_same_iter": 1768064,
-   "dynamic_heap_same_iter": 1768062,
+   "dynamic_same_iter": 10,
+   "dynamic_heap_same_iter": 9,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate"
   },
@@ -4389,8 +4460,8 @@
     57
    ],
    "dynamic_allocs": 1768096,
-   "dynamic_same_iter": 1768064,
-   "dynamic_heap_same_iter": 1768062,
+   "dynamic_same_iter": 10,
+   "dynamic_heap_same_iter": 9,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate; static and dynamic disagree"
   },
@@ -4406,7 +4477,7 @@
     1
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
+   "dynamic_same_iter": 0,
    "dynamic_heap_same_iter": 0,
    "dynamic_yes": false,
    "dynamic_note": "program/family aggregate"
@@ -4432,8 +4503,8 @@
     57
    ],
    "dynamic_allocs": 1768096,
-   "dynamic_same_iter": 1768064,
-   "dynamic_heap_same_iter": 1768062,
+   "dynamic_same_iter": 10,
+   "dynamic_heap_same_iter": 9,
    "dynamic_yes": true,
    "dynamic_note": "program/family aggregate"
   },
@@ -4449,7 +4520,7 @@
     12
    ],
    "dynamic_allocs": 1251,
-   "dynamic_same_iter": 63,
+   "dynamic_same_iter": 2,
    "dynamic_heap_same_iter": 0,
    "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
@@ -4493,7 +4564,7 @@
    "function": "ail__fmt_pad",
    "line": 3475,
    "kind": "str",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
@@ -4510,16 +4581,16 @@
    "function": "ail_sarena_alloc",
    "line": 1149,
    "kind": "blk",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     13
    ],
    "dynamic_allocs": 7,
-   "dynamic_same_iter": 7,
-   "dynamic_heap_same_iter": 2,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4527,16 +4598,16 @@
    "function": "ail__str_cat_slow",
    "line": 1381,
    "kind": "blk",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     14
    ],
    "dynamic_allocs": 7,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4544,16 +4615,16 @@
    "function": "ail_utf8_decode",
    "line": 2409,
    "kind": "blk",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     17
    ],
    "dynamic_allocs": 3,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4561,7 +4632,7 @@
    "function": "ail_sarena_pushn",
    "line": 1120,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
@@ -4578,7 +4649,7 @@
    "function": "ail_sarena_pushn",
    "line": 1122,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
@@ -4595,16 +4666,16 @@
    "function": "ail_str_return_owned",
    "line": 3052,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     30
    ],
    "dynamic_allocs": 10,
-   "dynamic_same_iter": 3,
-   "dynamic_heap_same_iter": 3,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4619,9 +4690,9 @@
     12
    ],
    "dynamic_allocs": 373945,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4782,16 +4853,16 @@
    "function": "ail_bytes_return_owned",
    "line": 5345,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     57
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4799,16 +4870,16 @@
    "function": "ail_barena_push",
    "line": 4911,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     59
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4840,7 +4911,7 @@
     14
    ],
    "dynamic_allocs": 184928,
-   "dynamic_same_iter": 184906,
+   "dynamic_same_iter": 2,
    "dynamic_heap_same_iter": 0,
    "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
@@ -4857,8 +4928,8 @@
     19
    ],
    "dynamic_allocs": 53,
-   "dynamic_same_iter": 53,
-   "dynamic_heap_same_iter": 53,
+   "dynamic_same_iter": 52,
+   "dynamic_heap_same_iter": 52,
    "dynamic_yes": true,
    "dynamic_note": "C site only (runtime helper)"
   },
@@ -4908,8 +4979,8 @@
     33
    ],
    "dynamic_allocs": 25,
-   "dynamic_same_iter": 25,
-   "dynamic_heap_same_iter": 25,
+   "dynamic_same_iter": 1,
+   "dynamic_heap_same_iter": 1,
    "dynamic_yes": true,
    "dynamic_note": "C site only (runtime helper)"
   },
@@ -4959,9 +5030,9 @@
     17
    ],
    "dynamic_allocs": 19874065,
-   "dynamic_same_iter": 2860802,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 2,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -4976,7 +5047,7 @@
     18
    ],
    "dynamic_allocs": 804,
-   "dynamic_same_iter": 3,
+   "dynamic_same_iter": 800,
    "dynamic_heap_same_iter": 0,
    "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
@@ -4993,7 +5064,7 @@
     20
    ],
    "dynamic_allocs": 2800801,
-   "dynamic_same_iter": 2800801,
+   "dynamic_same_iter": 2800800,
    "dynamic_heap_same_iter": 1,
    "dynamic_yes": true,
    "dynamic_note": "C site only (runtime helper)"
@@ -5010,7 +5081,7 @@
     21
    ],
    "dynamic_allocs": 5660800,
-   "dynamic_same_iter": 60802,
+   "dynamic_same_iter": 5660800,
    "dynamic_heap_same_iter": 2,
    "dynamic_yes": true,
    "dynamic_note": "C site only (runtime helper)"
@@ -5037,16 +5108,16 @@
    "function": "ail_pslist_snapshot",
    "line": 3729,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     38
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -5054,16 +5125,16 @@
    "function": "ail_pslist_snapshot",
    "line": 3732,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     39
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -5071,16 +5142,16 @@
    "function": "ail_list_snapshot",
    "line": 4012,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     40
    ],
    "dynamic_allocs": 2,
-   "dynamic_same_iter": 2,
-   "dynamic_heap_same_iter": 2,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -5265,8 +5336,8 @@
     86
    ],
    "dynamic_allocs": 1601,
-   "dynamic_same_iter": 801,
-   "dynamic_heap_same_iter": 801,
+   "dynamic_same_iter": 2,
+   "dynamic_heap_same_iter": 2,
    "dynamic_yes": true,
    "dynamic_note": "C site only (runtime helper)"
   },
@@ -5275,16 +5346,16 @@
    "function": "ail_barena_push",
    "line": 5839,
    "kind": "alloc",
-   "in_loop": true,
+   "in_loop": false,
    "static_iteration_local": null,
    "blocked_by": null,
    "dynamic_sites": [
     89
    ],
    "dynamic_allocs": 1,
-   "dynamic_same_iter": 1,
-   "dynamic_heap_same_iter": 1,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   },
   {
@@ -5299,14 +5370,15 @@
     91
    ],
    "dynamic_allocs": 2605030,
-   "dynamic_same_iter": 2,
-   "dynamic_heap_same_iter": 2,
-   "dynamic_yes": true,
+   "dynamic_same_iter": 0,
+   "dynamic_heap_same_iter": 0,
+   "dynamic_yes": false,
    "dynamic_note": "C site only (runtime helper)"
   }
  ],
  "price": {
-  "method": "heap_same_iter pairs x 170 instructions vs rc1 est_total_instructions (gcov-based estimate); no PMU and no valgrind on this runner, so the instruction denominator is not a calibrated count",
+  "method": "pairs x 170 instructions vs rc1 est_total_instructions (gcov-based ESTIMATE, not a calibrated count). No CPU PMU and no valgrind on this runner, so the instruction route is NOT COMPUTABLE; share/amdahl/roof/halved are estimates only. The go/no-go uses the RSS route: same-iteration bytes at peak >= 5% of peak RSS, excluding one-shot bulk peaks, on >= 2 programs.",
+  "instruction_route": "not computable (no PMU, no valgrind)",
   "rows": [
    {
     "program": "berth_sim",
@@ -5321,50 +5393,59 @@
     "amdahl": 1.0000027654852688,
     "roof60": 1.0000016592893257,
     "halved_projection": 1.0000008296446627,
-    "heap_peak_bytes": 109,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 64,
     "peak_rss_kib": 245604,
-    "rss_share": 4.334021941825052e-07,
-    "go_instructions": false,
+    "rss_share": 2.544746828227553e-07,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
      "blk": {
       "allocs": 3000066,
-      "same_iter": 63,
+      "same_iter": 2,
       "heap_same_iter": 0,
-      "peak_bytes": 45
+      "same_bytes_peak": 5,
+      "peak_bytes": 34
      },
      "alloc": {
       "allocs": 1186,
       "same_iter": 1186,
       "heap_same_iter": 1186,
+      "same_bytes_peak": 64,
       "peak_bytes": 64
      },
      "obj_pool": {
       "allocs": 1,
       "same_iter": 0,
       "heap_same_iter": 0,
-      "peak_bytes": 80
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      }
     }
    },
    {
     "program": "chain_relax",
-    "heap_same_iter_pairs": 7,
-    "max_same_iter_site_bytes": 18.0,
+    "heap_same_iter_pairs": 0,
+    "max_same_iter_site_bytes": 0,
     "bulk_peak": false,
     "go_rss_churn": false,
     "heap_allocs": 25,
     "allocator_share_all": 2.162489105761501e-06,
     "est_total_instructions": 1965327820,
-    "share": 6.054969496132202e-07,
-    "amdahl": 1.0000006054973163,
-    "roof60": 1.0000003632983017,
-    "halved_projection": 1.0000001816491508,
-    "heap_peak_bytes": 582,
+    "share": 0.0,
+    "amdahl": 1.0,
+    "roof60": 1.0,
+    "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 0,
     "peak_rss_kib": 3764,
-    "rss_share": 0.00015099877125398514,
-    "go_instructions": false,
+    "rss_share": 0.0,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5372,199 +5453,229 @@
       "allocs": 7,
       "same_iter": 0,
       "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 0
      },
      "blk": {
       "allocs": 17,
-      "same_iter": 9,
-      "heap_same_iter": 4,
-      "peak_bytes": 37
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      },
      "alloc": {
       "allocs": 14,
-      "same_iter": 3,
-      "heap_same_iter": 3,
-      "peak_bytes": 545
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      }
     }
    },
    {
     "program": "echo_pack",
-    "heap_same_iter_pairs": 2,
-    "max_same_iter_site_bytes": 64.0,
+    "heap_same_iter_pairs": 0,
+    "max_same_iter_site_bytes": 0,
     "bulk_peak": false,
     "go_rss_churn": false,
     "heap_allocs": 41,
     "allocator_share_all": 1.6884420177507412e-07,
     "est_total_instructions": 41280659488,
-    "share": 8.236302525613372e-09,
-    "amdahl": 1.0000000082363025,
-    "roof60": 1.0000000049417817,
-    "halved_projection": 1.0000000024708908,
-    "heap_peak_bytes": 35651680,
+    "share": 0.0,
+    "amdahl": 1.0,
+    "roof60": 1.0,
+    "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 0,
     "peak_rss_kib": 356040,
-    "rss_share": 0.09778702884507359,
-    "go_instructions": false,
-    "go_rss": true,
+    "rss_share": 0.0,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
+    "go_rss": false,
     "go": false,
     "kinds": {
      "blk": {
       "allocs": 1,
       "same_iter": 0,
       "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 0
      },
      "alloc": {
       "allocs": 40,
-      "same_iter": 2,
-      "heap_same_iter": 2,
-      "peak_bytes": 35651680
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 35651584
      }
     }
    },
    {
     "program": "ledger_bin",
-    "heap_same_iter_pairs": 3,
-    "max_same_iter_site_bytes": 59098225.0,
-    "bulk_peak": true,
+    "heap_same_iter_pairs": 0,
+    "max_same_iter_site_bytes": 0,
+    "bulk_peak": false,
     "go_rss_churn": false,
     "heap_allocs": 374014,
     "allocator_share_all": 0.0016481277664552178,
     "est_total_instructions": 38578550337,
-    "share": 1.3219781343387289e-08,
-    "amdahl": 1.0000000132197815,
-    "roof60": 1.000000007931869,
-    "halved_projection": 1.0000000039659345,
-    "heap_peak_bytes": 68011197,
+    "share": 0.0,
+    "amdahl": 1.0,
+    "roof60": 1.0,
+    "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 0,
     "peak_rss_kib": 345980,
-    "rss_share": 0.19196827727126567,
-    "go_instructions": false,
-    "go_rss": true,
+    "rss_share": 0.0,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
+    "go_rss": false,
     "go": false,
     "kinds": {
      "blk": {
       "allocs": 373946,
-      "same_iter": 1,
-      "heap_same_iter": 1,
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 12
      },
      "alloc": {
       "allocs": 68,
-      "same_iter": 2,
-      "heap_same_iter": 2,
-      "peak_bytes": 68011185
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 8912896
      },
      "obj_pool": {
       "allocs": 1,
-      "same_iter": 1,
+      "same_iter": 0,
       "heap_same_iter": 0,
-      "peak_bytes": 40
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      }
     }
    },
    {
     "program": "rail_transfer",
-    "heap_same_iter_pairs": 131,
+    "heap_same_iter_pairs": 105,
     "max_same_iter_site_bytes": 524288.0,
     "bulk_peak": false,
     "go_rss_churn": false,
     "heap_allocs": 138,
     "allocator_share_all": 6.934838821059936e-06,
     "est_total_instructions": 3382919287,
-    "share": 6.5830716344844325e-06,
-    "amdahl": 1.0000065831149716,
-    "roof60": 1.000003949858582,
-    "halved_projection": 1.000001974929291,
-    "heap_peak_bytes": 833388,
+    "share": 5.27650779863256e-06,
+    "amdahl": 1.0000052765356402,
+    "roof60": 1.0000031659147022,
+    "halved_projection": 1.000001582957351,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 524288,
     "peak_rss_kib": 28936,
-    "rss_share": 0.028126052970348356,
-    "go_instructions": false,
+    "rss_share": 0.017694221730716064,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
      "blk": {
       "allocs": 184946,
-      "same_iter": 184924,
+      "same_iter": 20,
       "heap_same_iter": 1,
-      "peak_bytes": 309100
+      "same_bytes_peak": 20,
+      "peak_bytes": 40
      },
      "obj": {
       "allocs": 1,
-      "same_iter": 1,
-      "heap_same_iter": 1,
-      "peak_bytes": 320
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      },
      "alloc": {
       "allocs": 132,
-      "same_iter": 129,
-      "heap_same_iter": 129,
+      "same_iter": 104,
+      "heap_same_iter": 104,
+      "same_bytes_peak": 524288,
       "peak_bytes": 524288
      },
      "obj_pool": {
       "allocs": 99844,
-      "same_iter": 2426,
+      "same_iter": 2437,
       "heap_same_iter": 0,
+      "same_bytes_peak": 64,
       "peak_bytes": 160
      }
     }
    },
    {
     "program": "scar_life",
-    "heap_same_iter_pairs": 8,
-    "max_same_iter_site_bytes": 4194304.0,
-    "bulk_peak": true,
+    "heap_same_iter_pairs": 0,
+    "max_same_iter_site_bytes": 21.0,
+    "bulk_peak": false,
     "go_rss_churn": false,
     "heap_allocs": 9,
     "allocator_share_all": 3.795364089446552e-09,
     "est_total_instructions": 403123379982,
-    "share": 3.3736569683969356e-09,
-    "amdahl": 1.0000000033736571,
-    "roof60": 1.0000000020241941,
-    "halved_projection": 1.000000001012097,
-    "heap_peak_bytes": 8388794,
+    "share": 0.0,
+    "amdahl": 1.0,
+    "roof60": 1.0,
+    "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 0,
     "peak_rss_kib": 17536,
-    "rss_share": 0.46716364282761175,
-    "go_instructions": false,
-    "go_rss": true,
+    "rss_share": 0.0,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
+    "go_rss": false,
     "go": false,
     "kinds": {
      "blk": {
       "allocs": 1002,
-      "same_iter": 1001,
-      "heap_same_iter": 2,
-      "peak_bytes": 26
+      "same_iter": 1,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 21,
+      "peak_bytes": 21
      },
      "alloc": {
       "allocs": 6,
-      "same_iter": 6,
-      "heap_same_iter": 6,
-      "peak_bytes": 8388768
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      },
      "obj_pool": {
       "allocs": 1,
       "same_iter": 0,
       "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 0
      }
     }
    },
    {
     "program": "tally_lang",
-    "heap_same_iter_pairs": 25,
-    "max_same_iter_site_bytes": 408.0,
+    "heap_same_iter_pairs": 11,
+    "max_same_iter_site_bytes": 10.090909090909092,
     "bulk_peak": false,
     "go_rss_churn": false,
     "heap_allocs": 78,
     "allocator_share_all": 1.0651587269428493e-07,
     "est_total_instructions": 124488488566,
-    "share": 3.413970278662978e-08,
-    "amdahl": 1.000000034139704,
-    "roof60": 1.000000020483822,
-    "halved_projection": 1.0000000102419109,
-    "heap_peak_bytes": 577,
+    "share": 1.5021469226117103e-08,
+    "amdahl": 1.0000000150214694,
+    "roof60": 1.0000000090128816,
+    "halved_projection": 1.0000000045064408,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 11,
     "peak_rss_kib": 1500,
-    "rss_share": 0.00037565104166666666,
-    "go_instructions": false,
+    "rss_share": 7.161458333333333e-06,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5572,85 +5683,98 @@
       "allocs": 1,
       "same_iter": 0,
       "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 0
      },
      "obj": {
       "allocs": 1,
-      "same_iter": 1,
-      "heap_same_iter": 1,
-      "peak_bytes": 408
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      },
      "alloc": {
       "allocs": 76,
-      "same_iter": 24,
-      "heap_same_iter": 24,
-      "peak_bytes": 577
+      "same_iter": 11,
+      "heap_same_iter": 11,
+      "same_bytes_peak": 11,
+      "peak_bytes": 513
      },
      "obj_pool": {
       "allocs": 1,
-      "same_iter": 1,
+      "same_iter": 0,
       "heap_same_iter": 0,
-      "peak_bytes": 72
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      }
     }
    },
    {
     "program": "term_rank",
-    "heap_same_iter_pairs": 16194761,
-    "max_same_iter_site_bytes": 384.0,
+    "heap_same_iter_pairs": 15594725,
+    "max_same_iter_site_bytes": 64.0,
     "bulk_peak": false,
-    "go_rss_churn": true,
+    "go_rss_churn": false,
     "heap_allocs": 16831798,
     "allocator_share_all": 0.04341805781943242,
     "est_total_instructions": 65903584907,
-    "share": 0.041774804418986566,
-    "amdahl": 1.043596019611712,
-    "roof60": 1.0257092828080265,
-    "halved_projection": 1.0128546414040134,
-    "heap_peak_bytes": 8388698,
+    "share": 0.040226996054025146,
+    "amdahl": 1.041913031402881,
+    "roof60": 1.024733162121453,
+    "halved_projection": 1.0123665810607265,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 114,
     "peak_rss_kib": 161768,
-    "rss_share": 0.05064096663508852,
-    "go_instructions": false,
-    "go_rss": true,
-    "go": true,
+    "rss_share": 6.88196213095297e-07,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
+    "go_rss": false,
+    "go": false,
     "kinds": {
      "blk": {
       "allocs": 9993181,
-      "same_iter": 8084999,
-      "heap_same_iter": 300016,
-      "peak_bytes": 48
+      "same_iter": 9681110,
+      "heap_same_iter": 8,
+      "same_bytes_peak": 72,
+      "peak_bytes": 81
      },
      "obj": {
       "allocs": 1,
-      "same_iter": 1,
-      "heap_same_iter": 1,
-      "peak_bytes": 384
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      },
      "alloc": {
       "allocs": 16519743,
-      "same_iter": 15894744,
-      "heap_same_iter": 15894744,
-      "peak_bytes": 8388650
+      "same_iter": 15594717,
+      "heap_same_iter": 15594717,
+      "same_bytes_peak": 83,
+      "peak_bytes": 8388644
      }
     }
    },
    {
     "program": "ticket_audit",
-    "heap_same_iter_pairs": 813,
-    "max_same_iter_site_bytes": 480000.0,
+    "heap_same_iter_pairs": 5,
+    "max_same_iter_site_bytes": 12.0,
     "bulk_peak": false,
     "go_rss_churn": false,
     "heap_allocs": 2606696,
     "allocator_share_all": 0.006095574644538077,
     "est_total_instructions": 72698366576,
-    "share": 1.9011431275489955e-06,
-    "amdahl": 1.000001901146742,
-    "roof60": 1.0000011406871776,
-    "halved_projection": 1.0000005703435888,
-    "heap_peak_bytes": 2228339,
+    "share": 1.1692147155897882e-08,
+    "amdahl": 1.0000000116921473,
+    "roof60": 1.0000000070152884,
+    "halved_projection": 1.0000000035076442,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 17,
     "peak_rss_kib": 254672,
-    "rss_share": 0.00854476465684292,
-    "go_instructions": false,
+    "rss_share": 6.518801635044292e-08,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5658,71 +5782,82 @@
       "allocs": 804,
       "same_iter": 0,
       "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 0
      },
      "bpay": {
       "allocs": 19874065,
-      "same_iter": 2860802,
-      "heap_same_iter": 1,
+      "same_iter": 2,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 12,
       "peak_bytes": 24
      },
      "blk": {
       "allocs": 8462406,
-      "same_iter": 2861606,
+      "same_iter": 8462400,
       "heap_same_iter": 3,
+      "same_bytes_peak": 24,
       "peak_bytes": 24
      },
      "obj": {
       "allocs": 1,
-      "same_iter": 1,
-      "heap_same_iter": 1,
-      "peak_bytes": 600
+      "same_iter": 0,
+      "heap_same_iter": 0,
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      },
      "alloc": {
       "allocs": 2606675,
-      "same_iter": 808,
-      "heap_same_iter": 808,
-      "peak_bytes": 2228291
+      "same_iter": 2,
+      "heap_same_iter": 2,
+      "same_bytes_peak": 13,
+      "peak_bytes": 2228224
      }
     }
    },
    {
     "program": "tree_fold",
-    "heap_same_iter_pairs": 1768062,
+    "heap_same_iter_pairs": 9,
     "max_same_iter_site_bytes": 24000000.0,
     "bulk_peak": true,
     "go_rss_churn": false,
     "heap_allocs": 1768092,
     "allocator_share_all": 0.003053061670886265,
     "est_total_instructions": 98450562878,
-    "share": 0.003053009868236784,
-    "amdahl": 1.0030623592813428,
-    "roof60": 1.0018351675918027,
-    "halved_projection": 1.0009175837959012,
-    "heap_peak_bytes": 24000188,
+    "share": 1.554079484437257e-08,
+    "amdahl": 1.000000015540795,
+    "roof60": 1.000000009324477,
+    "halved_projection": 1.0000000046622386,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
+    "heap_peak_bytes": 24000000,
     "peak_rss_kib": 414076,
-    "rss_share": 0.056602371530226334,
-    "go_instructions": false,
+    "rss_share": 0.05660192814845584,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": true,
     "go": false,
     "kinds": {
      "blk": {
       "allocs": 30,
-      "same_iter": 5,
+      "same_iter": 4,
       "heap_same_iter": 3,
-      "peak_bytes": 124
+      "same_bytes_peak": 102,
+      "peak_bytes": 108
      },
      "alloc": {
       "allocs": 1768066,
-      "same_iter": 1768059,
-      "heap_same_iter": 1768059,
-      "peak_bytes": 24000064
+      "same_iter": 6,
+      "heap_same_iter": 6,
+      "same_bytes_peak": 24000000,
+      "peak_bytes": 24000000
      },
      "obj_pool": {
       "allocs": 1,
-      "same_iter": 1,
+      "same_iter": 0,
       "heap_same_iter": 0,
-      "peak_bytes": 160
+      "same_bytes_peak": 0,
+      "peak_bytes": 0
      }
     }
    },
@@ -5739,10 +5874,13 @@
     "amdahl": 1.0,
     "roof60": 1.0,
     "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
     "heap_peak_bytes": 0,
     "peak_rss_kib": 1576,
     "rss_share": 0.0,
-    "go_instructions": false,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5750,6 +5888,7 @@
       "allocs": 16369,
       "same_iter": 16369,
       "heap_same_iter": 0,
+      "same_bytes_peak": 262112,
       "peak_bytes": 262112
      }
     }
@@ -5767,10 +5906,13 @@
     "amdahl": 1.0,
     "roof60": 1.0,
     "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
     "heap_peak_bytes": 0,
     "peak_rss_kib": 1964,
     "rss_share": 0.0,
-    "go_instructions": false,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5778,6 +5920,7 @@
       "allocs": 32766,
       "same_iter": 0,
       "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 0
      }
     }
@@ -5795,10 +5938,13 @@
     "amdahl": 1.0,
     "roof60": 1.0,
     "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
     "heap_peak_bytes": 0,
     "peak_rss_kib": 7724,
     "rss_share": 0.0,
-    "go_instructions": false,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5806,6 +5952,7 @@
       "allocs": 163838,
       "same_iter": 0,
       "heap_same_iter": 0,
+      "same_bytes_peak": 0,
       "peak_bytes": 0
      }
     }
@@ -5823,10 +5970,13 @@
     "amdahl": 1.0,
     "roof60": 1.0,
     "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
     "heap_peak_bytes": 0,
     "peak_rss_kib": 6056,
     "rss_share": 0.0,
-    "go_instructions": false,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5834,6 +5984,7 @@
       "allocs": 200000,
       "same_iter": 1,
       "heap_same_iter": 0,
+      "same_bytes_peak": 24,
       "peak_bytes": 24
      }
     }
@@ -5851,10 +6002,13 @@
     "amdahl": 1.0,
     "roof60": 1.0,
     "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
     "heap_peak_bytes": 0,
     "peak_rss_kib": 16936,
     "rss_share": 0.0,
-    "go_instructions": false,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5862,6 +6016,7 @@
       "allocs": 500000,
       "same_iter": 1,
       "heap_same_iter": 0,
+      "same_bytes_peak": 24,
       "peak_bytes": 24
      }
     }
@@ -5879,10 +6034,13 @@
     "amdahl": 1.0,
     "roof60": 1.0,
     "halved_projection": 1.0,
+    "estimate_only": true,
+    "estimate_go_instructions": false,
     "heap_peak_bytes": 0,
     "peak_rss_kib": 5300,
     "rss_share": 0.0,
-    "go_instructions": false,
+    "go_instructions": null,
+    "instruction_route": "not computable (no PMU, no valgrind)",
     "go_rss": false,
     "go": false,
     "kinds": {
@@ -5890,19 +6048,14 @@
       "allocs": 100000,
       "same_iter": 1,
       "heap_same_iter": 0,
+      "same_bytes_peak": 40,
       "peak_bytes": 40
      }
     }
    }
   ],
-  "go_programs": [
-   "term_rank"
-  ],
+  "go_programs": [],
   "mechanical_go_programs": [
-   "echo_pack",
-   "ledger_bin",
-   "scar_life",
-   "term_rank",
    "tree_fold"
   ],
   "go_decision": "NO-GO"

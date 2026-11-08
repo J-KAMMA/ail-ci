@@ -9,7 +9,10 @@ Dynamic side.  Each program is built through AIL's default path with `--debug-di
 *scratch copy* of `program.c` (never the compiler) gets:
 
   * a `rt_tick(id)` at the top of every `for`/`while` body, so each loop has its own
-    iteration counter;
+    iteration counter, and a `{ rt_enter(id); ... rt_leave(); }` bracket around the whole
+    loop, so `rt_cur` is the innermost loop that is actually executing at an allocation point
+    (`continue`/`break`/normal exit all restore; `rt_popn` is emitted before `return` and
+    out-of-loop `goto`, which jump past `rt_leave`);
   * a sequential site id at every call of the AIL allocators that matter here --
     `ail_sarena_alloc` (str payload), `ail__bpay_alloc` (bytes payload), `ail__blk_take`
     (arena block), `ail_obj_new` (class object / tuple) and `ail_alloc`/`ail_alloc_raw`
@@ -19,18 +22,30 @@ Dynamic side.  Each program is built through AIL's default path with `--debug-di
 
 The pointer table records, per allocation, (site, loop, iteration, bytes).  A free is
 *same-iteration* when the allocation's loop counter has not advanced since the alloc:
-that is exactly "died inside the iteration of its innermost loop".  The peak of the
-live bytes of same-iteration allocations is tracked per kind and per program.  The
-tracked build must print byte-identical stdout and the same exit status as the plain
-build; anything else stops the run.
+that is exactly "died inside the iteration of its innermost loop".  An allocation in a
+runtime helper (lexical loop 0, e.g. a `bytes`/`str` payload) is attributed to the loop that
+is executing at the call, which is the caller's loop; a helper's own loops are bracketed, so
+their exit restores the caller's loop.  The peak reported is the maximum, over iterations, of
+the bytes of same-iteration-freed allocations in that iteration (an upper bound on the live
+bytes a per-iteration region would have to hold), split into all allocations and heap-backed
+ones.  The tracked build must print byte-identical stdout and the same exit status as the
+plain build; anything else stops the run.
 
 Static side.  The same programs are read as Python.  The rule of the brief is applied:
 an allocation in a loop body is iteration-local when its value is never stored into a
 field, list, dict, set, global or closure, never returned, never yielded, never put into
 an exception, never passed to a parameter that `ir/borrow.py` does not mark borrowed,
-and not live across the loop's back edge.  `ir/borrow.py` is imported read-only for the
-borrowed-parameter set; `ir/ownership.py` and `ir/effects.py` are imported read-only as
-the ownership/effect references the rule names.  A `__del__` class never qualifies.
+and not live across the loop's back edge.  The value's uses are followed in source order
+from its binding to the next rebind; a use in the right-hand side of the binding, or in the
+loop body before it, can see the previous iteration's value and blocks as a back-edge read.
+An allocation lexically inside a lambda/comprehension is blocked (the closure can run after
+the iteration).  A temporary is followed through its expression context: a method receiver is
+read and dies at the call, an operand is consumed, an argument follows `borrow.analyze`, and a
+store/return/raise blocks.  `ir/borrow.py` is imported read-only and `analyze()` is called for
+the borrowed-parameter set; `ir/ownership.py` and `ir/effects.py` are imported read-only as the
+ownership/effect references the rule names (they operate on the lowered IR, which this
+source-level measurement does not build; the AST test above reproduces their escape/liveness
+predicate).  A `__del__` class never qualifies.
 """
 import argparse
 import ast
@@ -82,6 +97,14 @@ PROLOGUE = r'''
 static unsigned long long rt_iter[RT_LOOP];
 static unsigned long long rt_it_bytes[RT_LOOP];
 static int rt_cur;
+static int rt_stack[RT_LOOP];
+static int rt_sp;
+static unsigned long long rt_it_same[RT_LOOP];
+static unsigned long long rt_it_same_heap[RT_LOOP];
+static unsigned long long rt_it_same_k[RT_LOOP][RT_NK];
+static unsigned long long rt_same_peak;
+static unsigned long long rt_same_heap_peak;
+static unsigned long long rt_kind_same_peak[RT_NK];
 static unsigned long long rt_live_total, rt_live_peak;
 static unsigned long long rt_site_alloc[RT_SITE], rt_site_free[RT_SITE], rt_site_same[RT_SITE];
 static unsigned long long rt_site_heap[RT_SITE], rt_site_heap_same[RT_SITE];
@@ -174,6 +197,18 @@ static void rt_free_hook(void *p) {
         rt_same_total++;
         rt_site_same[e->site]++;
         rt_kind_same[rt_site_kind[e->site]]++;
+        rt_it_same[e->loop] += e->bytes;
+        if (rt_it_same[e->loop] > rt_same_peak) rt_same_peak = rt_it_same[e->loop];
+        if (e->heap) {
+            rt_it_same_heap[e->loop] += e->bytes;
+            if (rt_it_same_heap[e->loop] > rt_same_heap_peak)
+                rt_same_heap_peak = rt_it_same_heap[e->loop];
+        }
+        rt_it_same_k[e->loop][rt_site_kind[e->site]] += e->bytes;
+        if (rt_it_same_k[e->loop][rt_site_kind[e->site]] >
+            rt_kind_same_peak[rt_site_kind[e->site]])
+            rt_kind_same_peak[rt_site_kind[e->site]] =
+                rt_it_same_k[e->loop][rt_site_kind[e->site]];
         rt_site_freed_bytes[e->site] += e->bytes;
         if (e->heap) { rt_site_heap_same[e->site]++; rt_kind_heap_same[rt_site_kind[e->site]]++; }
         if (rt_it_bytes[e->loop] >= e->bytes) rt_it_bytes[e->loop] -= e->bytes;
@@ -191,9 +226,21 @@ static void rt_free_hook(void *p) {
     }
     rt_remove(e);
 }
+/* Enter/leave bracket the *whole* loop (`{ rt_enter(id); for (...) {...} rt_leave(); }`), so a
+   `continue` does not unbalance the stack and a `break`/normal exit always restores.  rt_cur is
+   therefore the innermost loop that is actually executing at an allocation point; a helper's own
+   loops push and pop around themselves, and the caller's loop is visible again after they exit.
+   `rt_popn` is emitted before a `return` or an out-of-loop `goto`, which jump past rt_leave. */
+static void rt_enter(int loop) {
+    if (rt_sp < RT_LOOP) rt_stack[rt_sp++] = rt_cur;
+    rt_cur = loop;
+}
+static void rt_leave(void) {
+    rt_cur = rt_sp > 0 ? rt_stack[--rt_sp] : 0;
+}
+static void rt_popn(int n) { while (n-- > 0) rt_leave(); }
 static void rt_tick(int loop) {
     if (loop <= 0 || loop >= RT_LOOP) return;
-    rt_cur = loop;
     if (rt_it_bytes[loop] <= rt_live_total) rt_live_total -= rt_it_bytes[loop];
     else rt_live_total = 0;
     rt_it_bytes[loop] = 0;
@@ -201,7 +248,10 @@ static void rt_tick(int loop) {
         if (rt_lk[loop][k] <= rt_kind_live[k]) rt_kind_live[k] -= rt_lk[loop][k];
         else rt_kind_live[k] = 0;
         rt_lk[loop][k] = 0;
+        rt_it_same_k[loop][k] = 0;
     }
+    rt_it_same[loop] = 0;
+    rt_it_same_heap[loop] = 0;
     rt_iter[loop]++;
 }
 extern void __real_free(void *);
@@ -220,14 +270,15 @@ static void rt_dump(void) {
     {
         unsigned long long hs = 0;
         for (int k = 0; k < RT_NK; k++) hs += rt_kind_heap_same[k];
-        fprintf(f, "TOT refer %llu same %llu peak %llu overflow %llu heapsame %llu\n",
-                rt_alloc_total, rt_same_total, rt_live_peak, rt_overflow, hs);
+        fprintf(f, "TOT refer %llu same %llu peak %llu overflow %llu heapsame %llu samepeak %llu sameheappeak %llu\n",
+                rt_alloc_total, rt_same_total, rt_live_peak, rt_overflow, hs, rt_same_peak,
+                rt_same_heap_peak);
     }
     for (int k = 0; k < RT_NK; k++)
         if (rt_kind_alloc[k] || rt_kind_free[k])
-            fprintf(f, "K %d %llu %llu %llu %llu %llu %llu %llu\n", k, rt_kind_alloc[k],
+            fprintf(f, "K %d %llu %llu %llu %llu %llu %llu %llu %llu\n", k, rt_kind_alloc[k],
                     rt_kind_free[k], rt_kind_same[k], rt_kind_peak[k], rt_kind_live[k],
-                    rt_kind_heap[k], rt_kind_heap_same[k]);
+                    rt_kind_heap[k], rt_kind_heap_same[k], rt_kind_same_peak[k]);
     for (s = 0; s < RT_SITE; s++)
         if (rt_site_alloc[s] || rt_site_free[s])
             fprintf(f, "S %d %d %d %llu %llu %llu %llu %llu %llu\n", s, rt_site_kind[s],
@@ -336,7 +387,7 @@ def perf_case(task, work):
 
 # --------------------------------------------------------------------------- dynamic
 def scan_c(text):
-    """Return loops [(id, open, close)] and function starts [(off, name)]."""
+    """Return loops [(id, kw, open, close)] and function starts [(off, name)]."""
     loops, funcs = [], []
     i, n = 0, len(text)
     while i < n:
@@ -394,7 +445,7 @@ def scan_c(text):
                                 if depth == 0:
                                     break
                             e += 1
-                        loops.append((len(loops) + 1, b, e))
+                        loops.append((len(loops) + 1, i, b, e))
                         i = b
                         continue
             i = j
@@ -408,7 +459,7 @@ def scan_c(text):
 def innermost(loops, off):
     best = 0
     best_open = -1
-    for lid, o, c in loops:
+    for lid, _kw, o, c in loops:
         if o < off < c and o > best_open:
             best, best_open = lid, o
     return best
@@ -468,13 +519,102 @@ def function_of(funcs, off):
     return name
 
 
+def _scan_words(text):
+    """(pos, word) for identifiers outside comments and string/char literals."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '/' and i + 1 < n and text[i + 1] == '*':
+            j = text.find('*/', i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c == '/' and i + 1 < n and text[i + 1] == '/':
+            j = text.find('\n', i + 2)
+            i = n if j < 0 else j + 1
+            continue
+        if c in '"\'':
+            q, i = c, i + 1
+            while i < n:
+                if text[i] == '\\':
+                    i += 2
+                    continue
+                if text[i] == q:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if c.isalpha() or c == '_':
+            j = i
+            while j < n and (text[j].isalnum() or text[j] == '_'):
+                j += 1
+            out.append((i, text[i:j]))
+            i = j
+            continue
+        i += 1
+    return out
+
+
+def _preprocessor(text, pos):
+    start = text.rfind('\n', 0, pos) + 1
+    while start < len(text) and text[start] in ' \t':
+        start += 1
+    return start < len(text) and text[start] == '#'
+
+
+def _stmt_end(text, pos):
+    """The `;` that ends the statement starting at `pos`, at bracket depth 0."""
+    depth = 0
+    i = pos
+    while i < len(text):
+        c = text[i]
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+        elif c == ';' and depth == 0:
+            return i + 1
+        i += 1
+    return len(text)
+
+
 def instrument(text):
     loops, funcs = scan_c(text)
     edits = []           # (start, end, replacement)
     labels = {}
     site = 0
-    for lid, o, c in loops:
+    for lid, kw, o, c in loops:
         edits.append((o + 1, o + 1, ' rt_tick(%d);' % lid))
+        # bracket the whole loop: continue cannot skip the exit, break/normal exit reach it
+        edits.append((kw, kw, '{ rt_enter(%d); ' % lid))
+        edits.append((c + 1, c + 1, ' rt_leave(); }'))
+    # returns and out-of-loop gotos jump past rt_leave; pop the loops they abandon
+    words = _scan_words(text)
+    label_pos = {}
+    for idx, (p, w) in enumerate(words):
+        k = p + len(w)
+        while k < len(text) and text[k] in ' \t\r':
+            k += 1
+        if k < len(text) and text[k] == ':' and not (k + 1 < len(text) and text[k + 1] == ':'):
+            label_pos.setdefault(w, []).append(p)
+    for idx, (p, w) in enumerate(words):
+        if _preprocessor(text, p):
+            continue
+        if w == 'return':
+            n = sum(1 for lid, kw, o, c in loops if o < p < c)
+            if n:
+                end = _stmt_end(text, p)
+                edits.append((p, end, '{ rt_popn(%d); %s }' % (n, text[p:end])))
+        elif w == 'goto' and idx + 1 < len(words):
+            tgt = words[idx + 1][1]
+            fn = function_of(funcs, p)
+            spots = [lp for lp in label_pos.get(tgt, []) if function_of(funcs, lp) == fn]
+            if not spots:
+                continue
+            n = sum(1 for lid, kw, o, c in loops if o < p < c
+                    and not any(o < lp < c for lp in spots))
+            if n:
+                end = _stmt_end(text, p)
+                edits.append((p, end, '{ rt_popn(%d); %s }' % (n, text[p:end])))
     for name, (kind, argi, own) in ALLOCS.items():
         needle = name + '('
         i = 0
@@ -569,13 +709,15 @@ def one_program(name, source, work, stdin_path, args, dyn_rows):
         f = line.split()
         if f[0] == 'TOT':
             tot = {'referenced': int(f[2]), 'same_iter': int(f[4]), 'peak_bytes': int(f[6]),
-                   'overflow': int(f[8]), 'heap_same_iter': int(f[10])}
+                   'overflow': int(f[8]), 'heap_same_iter': int(f[10]),
+                   'same_bytes_peak': int(f[12]), 'same_heap_peak': int(f[14])}
         elif f[0] == 'K':
             k = int(f[1])
             kinds[KINDNAME.get(k, str(k))] = {'allocs': int(f[2]), 'frees': int(f[3]),
                                               'same_iter': int(f[4]), 'peak_bytes': int(f[5]),
                                               'heap_allocs': int(f[7]),
-                                              'heap_same_iter': int(f[8])}
+                                              'heap_same_iter': int(f[8]),
+                                              'same_bytes_peak': int(f[9])}
         elif f[0] == 'S':
             sid = int(f[1])
             lab = dict(labels.get(sid, {'site': sid, 'kind': '?', 'static_loop': 0,
@@ -716,126 +858,228 @@ def _enclosing_function(tree, node):
     return best
 
 
-def _bind_target(tree, node):
-    """The name the allocation value is bound to, if any (climb to the assignment).
+SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ListComp, ast.SetComp,
+          ast.DictComp, ast.GeneratorExp)
 
-    Only a value that is the whole right-hand side binds: an operand of a binary
-    operation (`out += str(x)`) is a temporary consumed by that operation."""
+READ_ATTRS = frozenset(['get', 'keys', 'values', 'items', 'copy', 'hex', 'upper', 'lower',
+                        'strip', 'lstrip', 'rstrip', 'replace', 'join', 'format', 'find',
+                        'rfind', 'count', 'index', 'startswith', 'endswith', 'isdigit',
+                        'isalpha', 'isupper', 'islower', 'split', 'rsplit', 'decode', 'encode'])
+
+FALLBACK_READ = frozenset(['print', 'len', 'str', 'int', 'bytes', 'bytearray', 'list',
+                           'tuple', 'repr', 'sorted', 'min', 'max', 'sum', 'any', 'all',
+                           'ord', 'chr', 'format', 'hash', 'enumerate', 'range', 'zip'])
+
+PARENTS = {}
+
+
+def _parent(tree, node):
+    if not PARENTS:
+        for p in ast.walk(tree):
+            for c in ast.iter_child_nodes(p):
+                PARENTS[id(c)] = p
+    return PARENTS.get(id(node))
+
+
+def _pos(n):
+    return (n.lineno, n.col_offset)
+
+
+def _end(n):
+    return (getattr(n, 'end_lineno', n.lineno) or n.lineno,
+            getattr(n, 'end_col_offset', n.col_offset) or n.col_offset)
+
+
+def _nearest_scope(tree, node):
+    """The function/lambda/comprehension whose body lexically contains `node`."""
     cur = node
-    through = False
-    for _ in range(24):
+    for _ in range(400):
         p = _parent(tree, cur)
         if p is None:
             return None
-        if isinstance(p, ast.Assign):
-            if not through and len(p.targets) == 1 and isinstance(p.targets[0], ast.Name):
-                return p.targets[0].id
-            return None
-        if isinstance(p, ast.AnnAssign):
-            if not through and isinstance(p.target, ast.Name):
-                return p.target.id
-            return None
-        if isinstance(p, ast.AugAssign):
-            return None
-        if isinstance(p, (ast.BinOp, ast.BoolOp, ast.Compare, ast.IfExp, ast.UnaryOp,
-                          ast.JoinedStr, ast.FormattedValue, ast.Subscript)):
-            through = True
-        if isinstance(p, ast.stmt):
-            return None
+        if isinstance(p, SCOPES):
+            return p
         cur = p
     return None
 
 
-def _uses(tree, name, after_line):
-    """Loads of `name` at or after the allocation, stopping at its next rebind."""
-    loads, first_store = [], None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id == name:
-            line = node.lineno
-            if line < after_line:
+def _in_nested_scope(tree, node, loop):
+    """Whether a Lambda/comprehension sits between `node` and the loop body."""
+    cur = node
+    for _ in range(400):
+        p = _parent(tree, cur)
+        if p is None:
+            return False
+        if isinstance(p, SCOPES):
+            return True
+        if p is loop:
+            return False
+        cur = p
+    return False
+
+
+def _is_global(scope, name):
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for n in ast.walk(scope):
+            if isinstance(n, (ast.Global, ast.Nonlocal)) and name in n.names:
+                return True
+    return False
+
+
+def _binding(tree, alloc):
+    """`(name, target, stmt)` when the allocation is the whole RHS of a plain assignment.
+
+    An operand of a binary operation (`out += str(x)`), an argument or the receiver of a
+    call is a temporary and is analysed by its expression context instead."""
+    cur, through = alloc, False
+    for _ in range(60):
+        p = _parent(tree, cur)
+        if p is None or isinstance(p, SCOPES):
+            return None
+        if isinstance(p, ast.Assign):
+            if not through and len(p.targets) == 1 and isinstance(p.targets[0], ast.Name):
+                return p.targets[0].id, p.targets[0], p
+            return None
+        if isinstance(p, ast.AnnAssign):
+            if not through and p.value is not None and isinstance(p.target, ast.Name):
+                return p.target.id, p.target, p
+            return None
+        if isinstance(p, (ast.AugAssign, ast.NamedExpr)):
+            return None
+        if isinstance(p, ast.stmt):
+            return None
+        if isinstance(p, ast.expr) and not isinstance(p, ast.Name):
+            through = True
+        cur = p
+    return None
+
+
+def _uses_of(tree, name, scope, target, stmt, loop):
+    """`(pre_reads, later_loads)` of `name` in the binding's lexical scope.
+
+    `later_loads` stops at the next rebind of the name.  `pre_reads` are loads that can see the
+    *previous* iteration's value: a read earlier in the loop body, or one in the right-hand side
+    of the binding statement itself (`head = Node(i, head)`), which is the back-edge case."""
+    occ = [n for n in ast.walk(tree)
+           if isinstance(n, ast.Name) and n.id == name and _nearest_scope(tree, n) is scope]
+    occ.sort(key=lambda n: (n.lineno, n.col_offset, n.end_col_offset))
+    start, stmt_end = _pos(stmt), _end(stmt)
+    pre, subs = [], []
+    in_loop = (loop.lineno <= stmt.lineno <= (loop.end_lineno or loop.lineno))
+    for n in occ:
+        if n is target:
+            continue
+        p = _pos(n)
+        if p < start:
+            if in_loop and loop.lineno <= n.lineno <= (loop.end_lineno or loop.lineno):
+                pre.append(n)
+            continue
+        if p < stmt_end:
+            if isinstance(n.ctx, ast.Load):
+                pre.append(n)
+            continue
+        if isinstance(n.ctx, ast.Store):
+            break
+        subs.append(n)
+    return pre, subs
+
+
+def _escape(tree, node, borrowed, funcs, read_only):
+    """First way the value at `node` escapes or is retained, as `(why, line)`, else None."""
+    cur, through = node, False
+    for _ in range(200):
+        p = _parent(tree, cur)
+        if p is None:
+            return None
+        if isinstance(p, SCOPES):
+            return ('inside/captured by a closure or comprehension', p.lineno)
+        if isinstance(p, (ast.Return, ast.Yield, ast.YieldFrom)):
+            return ('returned', p.lineno)
+        if isinstance(p, ast.Raise):
+            return ('put into an exception', p.lineno)
+        if isinstance(p, (ast.For, ast.AsyncFor)) and p.iter is cur:
+            return ('used as the for-loop iterable (live across the back edge)', p.lineno)
+        if isinstance(p, ast.Subscript):
+            if isinstance(p.ctx, ast.Store):
+                return ('stored into a list/dict/set', p.lineno)
+            if p.value is cur:
+                through, cur = True, p
                 continue
-            if isinstance(node.ctx, ast.Store):
-                if first_store is None or line < first_store:
-                    first_store = line
-            else:
-                loads.append(node)
-    if first_store is not None:
-        loads = [n for n in loads if n.lineno <= first_store]
-    return loads
-
-
-def _blocking_use(tree, name, loop, borrowed, funcs, after_line):
-    """First use of `name` that stops the iteration-local proof, as (line, why)."""
-    globals_ = _declared_global(tree)
-    if name in globals_:
-        return (0, 'declared global/nonlocal')
-    hits = []
-    for node in _uses(tree, name, after_line):
-        line = node.lineno
-        parent = _parent(tree, node)
-        if isinstance(parent, (ast.Return, ast.Yield, ast.YieldFrom)):
-            hits.append((line, 'returned'))
+            return None                      # an index expression: the value is only read
+        if isinstance(p, ast.Attribute):
+            if isinstance(p.ctx, ast.Store):
+                return ('stored into a field %s' % p.attr, p.lineno)
+            gp = _parent(tree, p)
+            if isinstance(gp, ast.Call) and gp.func is p:
+                return None                  # receiver of a method: read, result is a new value
+            through, cur = True, p
             continue
-        if isinstance(parent, ast.Raise):
-            hits.append((line, 'put into an exception'))
-            continue
-        if isinstance(parent, ast.For) and parent.iter is node:
-            hits.append((line, 'used as the for-loop iterable (live across the back edge)'))
-            continue
-        if isinstance(parent, ast.Subscript) and isinstance(parent.ctx, ast.Store):
-            hits.append((line, 'stored into a list/dict/set'))
-            continue
-        if isinstance(parent, ast.Attribute) and isinstance(parent.ctx, ast.Store):
-            hits.append((line, 'stored into a field %s' % parent.attr))
-            continue
-        if isinstance(parent, ast.Assign) and node in parent.targets:
-            pass
-        elif isinstance(parent, ast.Assign) and isinstance(node, ast.Name):
-            tgt = parent.targets[0] if parent.targets else None
+        if isinstance(p, ast.Assign):
+            if p.value is not cur:
+                return None
+            tgt = p.targets[0] if len(p.targets) == 1 else None
             if isinstance(tgt, ast.Attribute):
-                hits.append((line, 'stored into a field %s' % tgt.attr))
-            elif isinstance(tgt, ast.Subscript):
-                hits.append((line, 'stored into a list/dict'))
-        elif isinstance(parent, ast.AnnAssign) and isinstance(parent.target, ast.Attribute):
-            hits.append((line, 'stored into a field %s' % parent.target.attr))
-        elif isinstance(parent, ast.Call):
-            fn = parent.func
-            if fn is node and isinstance(fn, ast.Attribute):
-                pass
-            elif isinstance(fn, ast.Attribute):
-                if fn.attr not in READ_ATTRS:
-                    hits.append((line, 'passed to method .%s' % fn.attr))
-            elif isinstance(fn, ast.Name):
-                if fn.id in ('print', 'len', 'str', 'int', 'bytes', 'bytearray', 'list',
-                             'tuple', 'repr', 'sorted', 'min', 'max', 'sum', 'any', 'all',
-                             'ord', 'chr', 'format', 'hash', 'enumerate', 'range', 'zip'):
-                    pass
-                else:
-                    params = borrowed.get(fn.id, frozenset())
-                    idx = parent.args.index(node) if node in parent.args else None
-                    fdef = next((f for f in funcs if f.name == fn.id), None)
-                    if fdef is not None and idx is not None and idx < len(fdef.args.args):
-                        pname = fdef.args.args[idx].arg
-                        if pname not in params:
-                            hits.append((line, 'passed to non-borrowed parameter %s.%s'
-                                         % (fn.id, pname)))
-                    else:
-                        hits.append((line, 'passed to unknown callee %s' % fn.id))
-        elif isinstance(parent, ast.keyword) and parent.value is node:
-            hits.append((line, 'passed as a keyword argument'))
-        # closure / comprehension capture
-        cur, depth = node, 0
-        while cur is not None and depth < 32:
-            cur = _parent(tree, cur)
-            depth += 1
-            if isinstance(cur, (ast.Lambda, ast.ListComp, ast.SetComp, ast.GeneratorExp,
-                                ast.DictComp)):
-                hits.append((line, 'captured in a closure/comprehension'))
-                break
-        # live across the loop's back edge
-        if loop is not None and not (loop.lineno <= line <= (loop.end_lineno or loop.lineno)):
-            hits.append((line, 'live across the loop back edge'))
-    return min(hits) if hits else None
+                return ('stored into a field %s' % tgt.attr, p.lineno)
+            if isinstance(tgt, (ast.Subscript, ast.Tuple, ast.List)):
+                return ('stored into a list/dict/set', p.lineno)
+            if isinstance(tgt, ast.Name) and not through:
+                return ('aliased into another name %s' % tgt.id, p.lineno)
+            return None
+        if isinstance(p, ast.AnnAssign):
+            if p.value is not cur:
+                return None
+            if isinstance(p.target, ast.Attribute):
+                return ('stored into a field %s' % p.target.attr, p.lineno)
+            if isinstance(p.target, (ast.Subscript, ast.Tuple, ast.List)):
+                return ('stored into a list/dict/set', p.lineno)
+            if isinstance(p.target, ast.Name) and not through:
+                return ('aliased into another name %s' % p.target.id, p.lineno)
+            return None
+        if isinstance(p, ast.AugAssign):
+            return None                      # the operand is consumed by the operation
+        if isinstance(p, ast.Call):
+            if p.func is cur:
+                return None
+            is_arg = cur in p.args or any(k.value is cur for k in p.keywords)
+            if not is_arg:
+                return None
+            fn = p.func
+            if isinstance(fn, ast.Attribute):
+                if fn.attr in READ_ATTRS:
+                    through, cur = True, p
+                    continue
+                return ('stored into %s()' % fn.attr, p.lineno)
+            if isinstance(fn, ast.Name):
+                if fn.id in read_only:
+                    through, cur = True, p
+                    continue
+                params = borrowed.get(fn.id)
+                if params is None:
+                    return ('passed to unknown callee %s' % fn.id, p.lineno)
+                idx = p.args.index(cur) if cur in p.args else None
+                fdef = next((f for f in funcs if f.name == fn.id), None)
+                pname = '?'
+                if fdef is not None and idx is not None:
+                    names = [a.arg for a in list(fdef.args.posonlyargs) + list(fdef.args.args)]
+                    if idx < len(names):
+                        pname = names[idx]
+                if pname in params:
+                    through, cur = True, p
+                    continue
+                return ('passed to non-borrowed parameter %s.%s' % (fn.id, pname), p.lineno)
+            through, cur = True, p
+            continue
+        if isinstance(p, ast.keyword):
+            through, cur = True, p
+            continue
+        if isinstance(p, (ast.BinOp, ast.BoolOp, ast.Compare, ast.UnaryOp, ast.IfExp,
+                          ast.JoinedStr, ast.FormattedValue, ast.NamedExpr)):
+            through, cur = True, p
+            continue
+        if isinstance(p, ast.stmt):
+            return None
+        through, cur = True, p
+    return None
 
 
 def static_sites(path, program=None):
@@ -845,6 +1089,7 @@ def static_sites(path, program=None):
     tree = ast.parse(src, filename=str(path))
     B, O, E = _load_ir()
     borrowed = _borrowed_for(tree, B) if B else {}
+    read_only = frozenset(getattr(B, 'READ_ONLY_CALLS', FALLBACK_READ)) if B else FALLBACK_READ
     classes = _classes(tree)
     funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
     loops = _loops(tree)
@@ -897,24 +1142,35 @@ def static_sites(path, program=None):
                           'blocked_by': 'class defines __del__'})
             sites.append(entry)
             continue
-        target = _bind_target(tree, node)
-        if target is None:
-            # a temporary: a direct store still blocks it, otherwise it dies in the expression
-            parent = _parent(tree, node)
-            why = None
-            if isinstance(parent, ast.Subscript) and isinstance(parent.ctx, ast.Store):
-                why = 'stored into a list/dict/set'
-            elif isinstance(parent, ast.For) and parent.iter is node:
-                why = 'used as the for-loop iterable (live across the back edge)'
-            elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
-                    and parent.func.attr not in READ_ATTRS:
-                why = 'stored into %s()' % parent.func.attr
-            entry.update({'static_iteration_local': why is None, 'blocked_by': why})
-            sites.append(entry)
-            continue
-        block = _blocking_use(tree, target, loop, borrowed, funcs, node.lineno)
+        scope = _nearest_scope(tree, node)
+        if _in_nested_scope(tree, node, loop):
+            block = ('inside/captured by a closure or comprehension', node.lineno)
+        else:
+            bind = _binding(tree, node)
+            if bind is None:
+                block = _escape(tree, node, borrowed, funcs, read_only)
+            else:
+                name, target, stmt = bind
+                if _is_global(scope, name):
+                    block = ('declared global/nonlocal', stmt.lineno)
+                else:
+                    pre, subs = _uses_of(tree, name, scope, target, stmt, loop)
+                    if pre:
+                        block = ('live across the loop back edge (read before it is rebound)',
+                                 pre[0].lineno)
+                    else:
+                        block = None
+                        for use in subs:
+                            if not (loop.lineno <= use.lineno <=
+                                    (loop.end_lineno or loop.lineno)):
+                                block = ('live past the loop back edge', use.lineno)
+                                break
+                            why = _escape(tree, use, borrowed, funcs, read_only)
+                            if why:
+                                block = why
+                                break
         entry['static_iteration_local'] = block is None
-        entry['blocked_by'] = None if block is None else '%s (line %d)' % (block[1], block[0])
+        entry['blocked_by'] = None if block is None else '%s (line %d)' % (block[0], block[1])
         sites.append(entry)
     return sites
 
@@ -1010,6 +1266,7 @@ def price(only=None):
             rss = rss[len(rss) // 2] if rss else None
         rss_kib = rss or None
         heap_same = p['totals'].get('heap_same_iter', 0)
+        same_peak = p['totals'].get('same_heap_peak', 0)
         heap_allocs = sum(v.get('heap_allocs', 0) for v in p.get('kinds', {}).values())
         s = (heap_same * 170.0 / total) if total else None
         s_all = (heap_allocs * 170.0 / total) if total else None
@@ -1020,10 +1277,12 @@ def price(only=None):
             roof = 1.0 / (1.0 - 0.6 * s)
             proj = 1.0 + (roof - 1.0) / 2.0
         kinds = p.get('kinds', {})
-        heap_peak = sum(kinds.get(k, {}).get('peak_bytes', 0)
-                        for k in ('alloc', 'bpay', 'blk'))
-        rss_share = (heap_peak / (rss_kib * 1024.0)) if rss_kib else None
-        go_insn = bool(proj is not None and proj >= 1.03)
+        rss_share = (same_peak / (rss_kib * 1024.0)) if rss_kib else None
+        # The instruction route is NOT computable on this runner: no CPU PMU and no valgrind.
+        # `share`, `amdahl`, `roof60` and `halved_projection` are ESTIMATES from rc1's gcov-based
+        # denominator and must not be used as the go/no-go instrument (the brief forbids it).
+        estimate_go_insn = bool(proj is not None and proj >= 1.03)
+        go_insn = None
         go_rss = bool(rss_share is not None and rss_share >= 0.05)
         # A peak made of one huge allocation (input/output/scratch read once) is not
         # per-iteration churn: a region changes its allocator, not its size.
@@ -1037,18 +1296,26 @@ def price(only=None):
                      'heap_allocs': heap_allocs, 'allocator_share_all': s_all,
                      'est_total_instructions': total, 'share': s,
                      'amdahl': amd, 'roof60': roof, 'halved_projection': proj,
-                     'heap_peak_bytes': heap_peak, 'peak_rss_kib': rss_kib,
-                     'rss_share': rss_share, 'go_instructions': go_insn, 'go_rss': go_rss,
-                     'go': go_insn or go_rss_churn,
+                     'estimate_only': True, 'estimate_go_instructions': estimate_go_insn,
+                     'heap_peak_bytes': same_peak, 'peak_rss_kib': rss_kib,
+                     'rss_share': rss_share,
+                     'go_instructions': go_insn,
+                     'instruction_route': 'not computable (no PMU, no valgrind)',
+                     'go_rss': go_rss,
+                     'go': go_rss_churn,
                      'kinds': {k: {'allocs': v['allocs'], 'same_iter': v['same_iter'],
                                     'heap_same_iter': v['heap_same_iter'],
+                                    'same_bytes_peak': v.get('same_bytes_peak', 0),
                                     'peak_bytes': v['peak_bytes']} for k, v in kinds.items()}})
     go_programs = [r['program'] for r in rows if r.get('go')]
-    mech = [r['program'] for r in rows if r.get('go_instructions') or r.get('go_rss')]
-    doc['price'] = {'method': 'heap_same_iter pairs x 170 instructions vs rc1 '
-                              'est_total_instructions (gcov-based estimate); no PMU and no '
-                              'valgrind on this runner, so the instruction denominator is not a '
-                              'calibrated count',
+    mech = [r['program'] for r in rows if r.get('go_rss')]
+    doc['price'] = {'method': 'pairs x 170 instructions vs rc1 est_total_instructions '
+                              '(gcov-based ESTIMATE, not a calibrated count). No CPU PMU and no '
+                              'valgrind on this runner, so the instruction route is NOT '
+                              'COMPUTABLE; share/amdahl/roof/halved are estimates only. The '
+                              'go/no-go uses the RSS route: same-iteration bytes at peak >= 5% '
+                              'of peak RSS, excluding one-shot bulk peaks, on >= 2 programs.',
+                    'instruction_route': 'not computable (no PMU, no valgrind)',
                     'rows': rows, 'go_programs': go_programs,
                     'mechanical_go_programs': mech,
                     'go_decision': 'GO' if len(go_programs) >= 2 else 'NO-GO'}
