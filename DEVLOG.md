@@ -1,3 +1,28 @@
+## 2026-11-08 -- rbsetord2 re-applied: CPython set order emulation on the current tree (job-rbsetord2_rr1-11081819)
+
+Re-applied the accepted `job-setord2-11080819` change (`fd0162e..c7a948e8`) on this tree; its diff no
+longer applied because setord1 had since been integrated. The setord2 branch `job-rbsetord2-11081135`
+had no work commits, only its export. The conflict between the setord1 refusal tests and setord2's
+emulation was resolved in favour of setord2 (the change removes the refusal path for deterministic-hash
+sets); the later `setord1` singleton pop fix was superseded by the table pop. The accepted code, test,
+DIFFERENCES and `docs/spec/DIFFERENCES.md` hunks are applied; newer unrelated rows and files on this
+tree are kept.
+
+- `cruntime.py`, `pyboxed2.py`, `pyfunc.py`: CPython 3.12 set table emulation (rehash placement from
+  the original slot) and tuple-display constant folding; unannotated int/str set pop and walk rules.
+- `test_ail_setorder.py` gains the 40 x 128 growth case and six-tuple display; `test_ail_sets_general`
+  test_s3 now compares the walk with CPython.
+- `tools/diff_ids.py` is not present on this tree, so only `tools/update_manifest.py` ran; pins for
+  `cruntime.py`, `pyboxed2.py`, `pyfunc.py`, `test_ail_setorder.py` and `test_ail_sets_general.py`
+  were regenerated and `--check` passes.
+
+Final commit tests (`tools/par_check.py -j 2`): `test_ail_setorder`, `test_ail_sets_general`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 5 modules, 0 failed.
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, general and default): `p_coll2` (40 x 128 growth, deletions,
+pop), `p_typed_dense` (annotated set[int]), `p_tuple` / `p_tuple_rt` (tuple displays, empty/nested/
+float/bool/None tuples, through an argument, list item, attribute, dict value and alias), `p_pop_empty`
+(empty/singleton/tuple pop), `p_frozen`, `p_str_order_free` and `p_set_display` -- all match CPython.
+
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 
 `test_ail_sdk` was green before err2 and its

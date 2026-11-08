@@ -12,7 +12,7 @@ Everything whose answer does not depend on the walk order keeps building and mat
 
 S1  order-free reads, operators and methods match CPython on every build
 S2  a set of str behaves the same way through sorted forms
-S3  the general path refuses an order-revealing walk by name
+S3  an order-revealing walk matches CPython's fixed int-set order
 S4  dict iteration still follows insertion order (CPython's own order) on every build
 """
 import os
@@ -287,14 +287,9 @@ class SetsGeneral(unittest.TestCase):
     def test_s2_a_set_of_str_through_sorted_forms_matches_cpython(self):
         self.same_as_cpython(PROG_STR, 'strs')
 
-    def test_s3_the_general_path_refuses_an_order_revealing_walk(self):
+    def test_s3_an_order_revealing_walk_matches_cpython(self):
         text = 'def f():\n    s = {40, 33, 26}\n    for x in s:\n        print(x)\nf()\n'
-        with tempfile.TemporaryDirectory() as directory:
-            for mode in GENERAL_MODES:
-                built, _exe = build(directory, text, 'walk', mode)
-                shown = built.stdout + built.stderr
-                self.assertNotEqual(built.returncode, 0, '%s: %s' % (mode, shown))
-                self.assertIn('sorted(', shown, '%s: %s' % (mode, shown))
+        self.same_as_cpython(text, 'walk')
 
     def test_s4_dict_iteration_keeps_insertion_order(self):
         self.same_as_cpython(PROG_DICT, 'dict')
