@@ -1,3 +1,43 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I've finished checking. I verified the oracles, the JSON-derived numbers, the live census/boundary for sampled modules, the Rust bar, report regeneration, the tests, and the manifest.
+
+**What the change really does:** measurement-only; adds `lab/wedge/` (15 corpus modules + `expected.txt`, census/boundary/measure/analyse/rust_bar scripts, JSON caches, PyO3 `rust/` crate) and a `RESULTS.md`; no compiler/runtime/test change. That matches the task and the report except as noted below.
+
+**Claims**
+- 15 modules, 97 top-level defs, 24 native (24.7%): **verified** (JSON + live census of float_loops/json_parse/matrix: 8/4/8 defs, 0/3/4 native, all match).
+- Committed `expected.txt` oracles: **verified** — all 15 match a fresh `python3 run.py`, byte for byte.
+- `report.py` regenerates `RESULTS.md` byte-identically: **verified**.
+- Table ratios/geomean 0.983x (range 0.901–1.060), §3 Rust-bar numbers (62.3x/2x/204.2x/2.8x/76.6x; whole 18.19/1.07/45.8/1.43/1.36x): **verified**; re-ran `rust_bar.py` — PY/RS digests identical to the committed ones, MATCH true on all five.
+- Build artifacts untracked, `.gitignore` correct, `rust_bar.json` 2.6 KB digests: **verified**.
+- tree_build `_inorder` 2.15 s of 5.80 s, methods 5.69 s: **verified** against measure.json.
+- 54 of 73 refusals silent (74.0%), `list[float]` ABI mismatch, W0 text: **verified** (live boundary for float_loops/matrix, JSON for the rest).
+- Tests on HEAD: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` all ok (282 s); `update_manifest.py --check` exit 0: **verified**. `test_ail_cpython_hybrid` not re-run (not touched).
+- Worker's five `/tmp/probes` probes: **unverified** (files not in the tree).
+- "Ratio convention is hybrid/CPython everywhere": **false** — `measure.py` still prints `cpython/hybrid` = 1.017 as "hybrid/cpython speedup".
+- "No wrong number left": **false** — see defects.
+
+**Pre-existing:** none (no compiler/runtime change; nothing to compare against `/tmp/base`).
+
+Checks: oracle diff for 15 modules; `census.py --only float_loops,json_parse,matrix`; live `boundary.census_one` for float_loops/matrix; `rust_bar.py` rebuild; `report.py` diff; AST scan of corpus functions against `_select`/`_unsafe_body`; tests; `icount` not run (no hot-code change).
+
+VERDICT: FIX
+1. The W-task "gain"/guards treat the first-gate attribution as an achievable unlock, but `_select` applies a second gate: `_unsafe_body` returns `indexing can raise` for **any** `Subscript` (AIL_CURRENT/ail_cpython_hybrid.py:309, called at :571). By AST scan of the committed corpus, bodies with a subscript: list-return-kind 8/11, tuple-parameter 7/7, nested-list-annotation 2/6, list-float-abi 2/7. Concretely, every W2 guard function indexes (`bloom_set`, `group_sum`, `mat_mul`, `window_sums`, `identity`), so after a list-return fix they are all still refused for indexing — proven by `matrix.trace` (list[int] param, int return, `m[i*n+i]`), which boundary.py reports as gate `select`, reason `indexing can raise`. W3's 7 ast_lint functions all index and call, so W3 alone accelerates none. Expected (report): "are listed as accelerated". Actual: 0 of 5, 0 of 7; W4 (indexing-can-raise) is the prerequisite, so the "which boundary fix unlocks the most" ranking/order (W1..W6) is not the achievable one.
+2. W6's `float_loops` claim is wrong: `scale_into` is refused by pymix (`unresolved-return`, family list-return-kind), and the report's own table row 11 gives list-float-abi only 7 functions. With the ABI spelling fixed only `max_abs` and `sq_sum` have no other gate (`dot`/`blend` index; `mean`/`variance` divide by a non-constant; `norm` uses `**`). Expected: "goes from 0 to 8 accelerated"; actual: at most 2, and `scale_into` needs W2. Also "typed emitter accepts all 8" and "the only reason float_loops gets nothing" are false.
+3. `measure.py` prints the inverse: `statistics.geometric_mean([cpython_s/hybrid_s])` labelled "hybrid/cpython speedup" → 1.017x, contradicting the report's 0.983x. Expected: reproduce the report's convention; actual: 1.017x under the report's label.
+4. DEVLOG says "runs 28.17 s of CPython as 8.49 s": 28.17 s is all 15 modules, 8.49 s is only the 13 with a timed standalone binary; like-for-like is 24.70 s → 8.49 s (2.91x, not 3.32x).
+5. The refusal ranking's time base is cProfile `tottime`, which is profiler-inflated: §4's total "44.2 s across 15 modules" exceeds the report's own total CPython wall time (28.17 s); e.g. ast_lint is 5.67 s of self time for a 1.739 s program, tree_build 5.80 s for 1.97 s. The headline "5.0% of the corpus's CPython self-time" and the reason shares are therefore not shares of real time; the report should say so or compute shares from wall time.
+[commandcode stop=end_turn turns=45 out_tokens=47294]
+
+
+--- ORIGINAL TASK ---
 # wedge1: benchmark for "do not rewrite it in Rust, compile it", plus the boundary census
 
 Lane: hybrid
