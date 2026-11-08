@@ -39,8 +39,11 @@ Hover shows a type when it is certain:
   `double` -> `float`, the list, str and dict structs), and only where the C type maps to one
   Python type. A name the compiler boxes because it is assigned two different types, a numeric
   sum (`sum(...)`, which is an int or a float at run time), and an unannotated name whose C
-  `int64_t` could be either `int` or `bool` show nothing. The build is cached per document
-  version and runs only after `didSave` or 1 s idle, never on every keystroke.
+  `int64_t` could be either `int` or `bool` show nothing. The `int64_t` disambiguation reads the
+  source, so it trusts a list or dict literal's items only while nothing mutates that container:
+  an item store, `del`, a method call such as `append` or `update`, a call that receives the name,
+  or an alias assignment makes the item type unknown. The build is cached per document version and
+  runs only after `didSave` or 1 s idle, never on every keystroke.
 
 Every other name shows nothing, including a name on the general path (for example the `int | None`
 review function), `b"a b".split()`, `range(3)`, an attribute (`obj.x`) or a keyword label

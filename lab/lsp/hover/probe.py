@@ -42,11 +42,20 @@ def probe() -> None:
     replaced = text.replace("l", "L")
     count = text.count("l")
     ratio = i / 2
+    mutated_list = [True, False]
+    mutated_list[0] = 1
+    mutated_item = mutated_list[0]
+    mutated_dict = {"a": True}
+    mutated_dict["a"] = 1
+    mutated_dict_item = mutated_dict["a"]
+    appended_list = [True, False]
+    appended_list.append(1)
+    appended_item = appended_list[2]
     mixed = 1
     mixed = 2.5
     print(a, b, c, n, i, j, k, p, q, r, s, t, u, v, w, total, idx, first,
           second, word, value, text, upper, pieces, stripped, replaced,
-          count, ratio, mixed)
+          count, ratio, mutated_item, mutated_dict_item, appended_item, mixed)
 
 
 def main() -> None:

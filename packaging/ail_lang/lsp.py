@@ -295,7 +295,7 @@ def _new_scope_info():
             "globals": set(), "nonlocals": set(),
             "global_literals": {}, "global_uncertain": set(),
             "nonlocal_literals": {}, "nonlocal_uncertain": set(),
-            "sites": {}}
+            "sites": {}, "mutated": set()}
 
 
 def _add_site(info, name, node, kind, **extra):
@@ -335,6 +335,48 @@ def _bind_target(target, info, for_iter=None):
             _bind_target(item, info, for_iter)
     elif isinstance(target, ast.Starred):
         _bind_target(target.value, info, for_iter)
+
+
+def _mark_mutated_target(target, mutated):
+    """Record the base name of a subscript or attribute store, which mutates that container."""
+    if isinstance(target, (ast.Subscript, ast.Attribute)) and isinstance(target.value, ast.Name):
+        mutated.add(target.value.id)
+
+
+def _mutated_names(nodes):
+    """Names whose bound value the scope can change, so a literal's elements cannot be trusted.
+
+    A list or dict literal is only evidence for the type of its items while no code mutates it.
+    Anything that can change a container — an item or attribute store, `del`, a method call, a
+    call that receives it, or an alias assignment — marks the name: the analysis then shows nothing
+    rather than a possibly wrong type.
+    """
+    mutated = set()
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets, value = [node.target], getattr(node, "value", None)
+        else:
+            targets, value = [], None
+        for target in targets:
+            _mark_mutated_target(target, mutated)
+        if isinstance(node, ast.Delete):
+            for target in node.targets:
+                _mark_mutated_target(target, mutated)
+        if isinstance(node, ast.Call):
+            function = node.func
+            if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
+                mutated.add(function.value.id)
+            for argument in node.args:
+                if isinstance(argument, ast.Name):
+                    mutated.add(argument.id)
+            for keyword in node.keywords:
+                if isinstance(keyword.value, ast.Name):
+                    mutated.add(keyword.value.id)
+        if isinstance(value, ast.Name):
+            mutated.add(value.id)
+    return mutated
 
 
 def _pattern_bindings(pattern):
@@ -383,6 +425,7 @@ def _scope_info(scope):
             _bind_target(target, info)
 
     nodes = list(_scope_nodes(scope))
+    info["mutated"] = _mutated_names(nodes)
     for node in nodes:
         if isinstance(node, ast.Global):
             info["globals"].update(node.names)
@@ -561,6 +604,8 @@ def _for_iter_kind(iterable, info, returns, seen):
     if isinstance(iterable, (ast.List, ast.Tuple, ast.Set)):
         return _combine_bool([_bool_kind(item, info, returns, seen) for item in iterable.elts])
     if isinstance(iterable, ast.Name):
+        if iterable.id in info["mutated"]:
+            return "unknown"
         return _bool_kind(iterable, info, returns, seen)
     return "unknown"
 
@@ -572,6 +617,8 @@ def _subscript_kind(value, info, returns, seen):
     if isinstance(container, ast.Dict):
         return _combine_bool([_bool_kind(item, info, returns, seen) for item in container.values])
     if isinstance(container, ast.Name):
+        if container.id in info["mutated"]:
+            return "unknown"
         kinds = []
         for bound, for_iter in _binding_values(info, container.id):
             if for_iter is not None:

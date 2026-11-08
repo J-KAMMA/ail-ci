@@ -271,12 +271,39 @@
     },
     {
       "file": "probe.py",
-      "line": 45,
+      "line": 54,
       "character": 4,
       "name": "mixed",
       "expected": null,
       "oracle": "float",
       "why": "the name is assigned an int and then a float; the compiler boxes it"
+    },
+    {
+      "file": "probe.py",
+      "line": 46,
+      "character": 4,
+      "name": "mutated_item",
+      "expected": null,
+      "oracle": "int",
+      "why": "the list literal holds bools but an item store replaces one with an int"
+    },
+    {
+      "file": "probe.py",
+      "line": 49,
+      "character": 4,
+      "name": "mutated_dict_item",
+      "expected": null,
+      "oracle": "int",
+      "why": "the dict literal holds a bool but an item store replaces it with an int"
+    },
+    {
+      "file": "probe.py",
+      "line": 52,
+      "character": 4,
+      "name": "appended_item",
+      "expected": null,
+      "oracle": "int",
+      "why": "append may add an int to the bool list, so the item type is not certain"
     },
     {
       "file": "general.py",
