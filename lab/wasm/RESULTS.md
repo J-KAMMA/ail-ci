@@ -18,10 +18,12 @@ Refusals by name (no linker error), each with a `write instead:` line:
 - `tools/wasm_build.py` runs the host compiler with `AIL_TARGET_OS=wasi`, not `AIL_TARGET=wasi`: the latter would make
   `sys.platform` unknown in `ail_modules.py` until `TARGETS['wasi']` exists.
 
-Remaining tasks: none. The ffwasm1 table already reports 10/10; the shim/build already carries
-`-Wl,-z,stack-size=8388608`, `-D_WASI_EMULATED_PROCESS_CLOCKS` and the test's `--dir D::D` preopens. The new
-`test_deep_recursion_is_loud` builds `f(1000000)` and requires a nonzero exit whose stderr says `RecursionError` and
-is not a bare wasm trap.
+Remaining tasks: none. The ffwasm1 table already reports 10/10; the build already carries
+`-D_WASI_EMULATED_PROCESS_CLOCKS` and the test's `--dir D::D` preopens. The stack is now
+`-Wl,-z,stack-size=268435456` (256 MiB), not ffwasm1's 8 MiB: without getrlimit on wasi the general path's
+`AIL_STACK_UNLIMITED` budget is 256 MiB, so an 8 MiB real stack would trap before its RecursionError check fires. The
+new `test_deep_recursion_is_loud` builds both a typed and an untyped `f(50000000)` and requires a nonzero exit whose
+stderr says `RecursionError` and is not a bare wasm trap.
 
 Size table: the AIL `.wasm` bytes are the unstripped ffwasm1 column below. `wasm-strip` is not installed, so there are
 no stripped numbers. `rustup target list --installed` has only `x86_64-unknown-linux-gnu` (no `wasm32-wasip1`), so

@@ -27,7 +27,10 @@ ZIG_FLAGS = ['-target', 'wasm32-wasi', '-O2', '-fno-tree-slp-vectorize', '-ffp-c
              '-Werror=implicit-function-declaration', '-Werror=implicit-int', '-Werror=incompatible-pointer-types',
              '-mexception-handling', '-mllvm', '-wasm-enable-sjlj', '-mllvm', '-wasm-use-legacy-eh=false',
              '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-D_WASI_EMULATED_MMAN', '-lwasi-emulated-mman',
-             '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '-s']
+             '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks',
+             # The general path's stack check reserves AIL_STACK_UNLIMITED (256 MiB on 32-bit) when getrlimit is
+             # absent, so the real stack must be that large or a runaway recursion would trap before RecursionError.
+             '-Wl,-z,stack-size=268435456', '-s']
 WASMTIME_FLAGS = ['-W', 'exceptions=y']     # try/except runs on the exception-handling proposal
 
 # Modules whose Python implementations cannot exist on wasm32-wasi. proclib.py and threadlib.py refuse

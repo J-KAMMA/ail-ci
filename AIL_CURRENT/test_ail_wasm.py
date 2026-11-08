@@ -89,16 +89,18 @@ class WasmTests(unittest.TestCase):
         self.check_task('tree_fold')
 
     def test_deep_recursion_is_loud(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            work = Path(tmp)
-            src = work / 'deep.py'
-            src.write_text('def f(n: int) -> int:\n    if n <= 0:\n        return 0\n'
-                           '    return f(n - 1) + 1\n\nprint(f(1000000))\n')
-            r = self.run_wasm(self.build(work, src))
-            self.assertNotEqual(r.returncode, 0)
-            err = r.stderr.decode('utf-8', 'replace')
-            self.assertIn('RecursionError', err)
-            self.assertNotIn('wasm trap', err.lower())
+        typed = 'def f(n: int) -> int:\n    if n <= 0:\n        return 0\n    return f(n - 1) + 1\n'
+        untyped = 'def f(n):\n    if n <= 0:\n        return 0\n    return f(n - 1) + 1\n'
+        for name, defs in (('typed', typed), ('untyped', untyped)):
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                src = work / ('deep-' + name + '.py')
+                src.write_text(defs + '\nprint(f(50000000))\n')
+                r = self.run_wasm(self.build(work, src))
+                self.assertNotEqual(r.returncode, 0)
+                err = r.stderr.decode('utf-8', 'replace')
+                self.assertIn('RecursionError', err)
+                self.assertNotIn('wasm trap', err.lower())
 
     def test_patch_c_refuses_a_changed_reader(self):
         text = 'static unsigned char *ail_stdin_fill_bytes(unsigned char *buf, size_t *capp) {}\n'
