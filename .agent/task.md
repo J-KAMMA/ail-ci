@@ -1,3 +1,49 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+Time's up on probes; I'm writing the report from what I verified.
+
+## What the change really does
+
+`pyfunc.py`: adds alias/forward analysis over `a = b` assignments so the row-arity refusal (`AIL0102`) names the user's variable and its heaps, points `source_line` at the first pop, and refuses only by names the user wrote (`_ail_*` never printed); also stops the `_ail_l1r = X[0]` companion temp from widening a heap capture. `ail_chatgpt.py`: records `_PRELUDE_UNITS` for every Python-syntax entry (not just `.py`), and in `_fallback_notes` remaps a note whose position is past the user's file and whose reason names a shipped-prelude definition to the user's call, appending `(this note comes from the standard library's <module> module)`. Tests/DEVLOG/DIFFERENCES/RESULTS updated. This matches the report's description.
+
+## Verified
+
+- Trigger `02_poprow_arity.py`: `note: p.py:78:13 ... 'entry' is bound from popping rows of different widths: 'departures', 'wait1', 'wait2', 'wait3'` — no `_ail_l1l`, position is the real first pop site (line 78, col 13). Base: `_ail_l1l ... 1 fields ... 5` with no position.
+- `--json` AIL0102 `fix` `{replace_range:[78,79], with: entry_departures...}`; applying it rebuilds, removes the note, and prints the same output (verified by hand, not only by test).
+- `fractions`/`decimal` notes: `pre_frac_float`, `pre_frac_neg`, `pre_frac_attr` → line 3/8 with module note; `pre_dec_fmt`, `pre_dec_dict`, `pre_dec_list` → line 3/4 with module note. Base said `:235:5` / `:1687:1` with no module.
+- All 18 probes match CPython on both builds (`cmp.sh`); heap programs `row_bigger`, `row_one_heap`, `nofeature`, `pre_frac_float` produce **byte-identical `--debug-dir` `program.c`** to base.
+- `test_ail_pre133` + `test_ail_agent_errors` run directly: 15 tests, OK (821 s). (Ran directly because `par_check` cannot start — see defect 1.)
+- `tools/update_manifest.py --check`: **fails** (rc=1, "stale ail_chatgpt.py", "stale python/pkg-v12/pyfunc.py"); `par_check.py` dies in preflight: `ValueError: hash mismatch: ail_chatgpt.py`. Commit `c7a4a9d` edited both files after the manifest hashes were written.
+
+## Defects
+
+1. **Stale manifest breaks the required test path / CI.** `python3 tools/update_manifest.py --check` → exit 1, `stale ail_chatgpt.py`, `stale python/pkg-v12/pyfunc.py`; `python3 tools/par_check.py -j 2 test_ail_pre133 test_ail_agent_errors ...` → `ValueError: hash mismatch: ail_chatgpt.py` before any test runs. The report's "update_manifest and --check pass" and "5/5 modules, 0 failed" are therefore **false**.
+2. **Prelude note points at the wrong user line when more than one candidate call exists** (`_prelude_call_site` returns the *last* regex match, not the failing one).
+   - `/tmp/rprobes/pre_frac_wrongline.py` (fail is `float(a)` on line 3; `print(float(3))` on line 4): expected `p.py:3:7`, actual `note: p.py:4:7` — editing line 4 does not remove the note.
+   - `/tmp/rprobes/pre_dec_last_fstr.py` (fail is `f"{d:.1f}"` line 3; `f"{1.5:.1f}"` line 4): expected line 3, actual `note: p.py:4:7`.
+3. **Task-scope gap (unchanged from base): a prelude note whose reason does not contain the unit name is still reported at a prelude line.** `/tmp/rprobes/pre_dec_plain.py` (`d = Decimal("2.5"); print(d + d)`): expected the user's call line 3 plus the decimal module note; actual `note: p.py:318:9: ... parameter 'bn' of _dec_cmp_parts() ...`, no module note — line 318 is prelude code, exactly what rule 1 of `docs/design/AGENT_ERRORS.md` forbids. Base prints the same line, so this is an incomplete implementation rather than a regression.
+
+## Unverified
+
+- `test_ail_safetynet` (could not be started: preflight hash failure).
+- fix-rate numbers (1.00 / 0.00) — requires model runs; not reproducible here.
+- compile-time cost / `icount` of gdev programs: the change is compile-time only (no runtime/C diff seen), so I did not measure.
+
+VERDICT: FIX
+1. Stale `MANIFEST.json`/`manifest.d` hashes for `ail_chatgpt.py` and `python/pkg-v12/pyfunc.py`: `update_manifest.py --check` exits 1 and `par_check.py` aborts with `ValueError: hash mismatch: ail_chatgpt.py`, so no required test module can run. Re-run `git add` + `tools/update_manifest.py` on the final commit.
+2. `_prelude_call_site` selects the last matching call, not the failing one: `pre_frac_wrongline.py` expected `p.py:3:7` (got `p.py:4:7`), `pre_dec_last_fstr.py` expected line 3 (got line 4). The note then points at a statement that does not need to change.
+3. `pre_dec_plain.py` (Decimal arithmetic) still reports `p.py:318:9 ... _dec_cmp_parts() ...` with no module note; expected the user's call line 3 and `standard library's decimal module` (same as base, but required by the task).
+[commandcode stop=end_turn turns=61 out_tokens=30535]
+
+
+--- ORIGINAL TASK ---
 Lane: err
 Needs: err2
 
