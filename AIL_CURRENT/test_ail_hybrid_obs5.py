@@ -5,6 +5,11 @@ are int/bool/float (a str `%` formats and stays in CPython).  The typed clone co
 floor division and modulo for ints and floats and a correctly rounded int `/`; a zero divisor or an
 int64 overflow (`INT64_MIN // -1`) abandons the native call and CPython re-runs it, so the exact
 ZeroDivisionError (message included) or the big int is what the caller sees.
+
+Local lists: a list the body creates and keeps to itself (only appended to, indexed, stored into,
+measured, iterated without being changed in that loop, or aliased by another such local) may be
+appended to; a reference never leaves the call, so no caller can see the difference.  Aliases
+share the object as in CPython (`b = a; b.append(x)` changes `len(a)`).
 """
 import json
 import os
@@ -218,6 +223,143 @@ DIVIDE_NATIVE = ('probe', 'mean', 'variance', 'true_div', 'floor_int', 'mod_int'
 DIVIDE_REFUSED = ('fmt', 'power', 'guarded')
 
 
+LISTS = '''
+def levenshtein(a: str, b: str) -> int:
+    n = len(a)
+    m = len(b)
+    if n == 0:
+        return m
+    if m == 0:
+        return n
+    prev = []
+    i = 0
+    while i <= m:
+        prev.append(i)
+        i += 1
+    j = 1
+    while j <= n:
+        cur = [j]
+        k = 1
+        while k <= m:
+            if a[j - 1] == b[k - 1]:
+                cur.append(prev[k - 1])
+            else:
+                best = prev[k]
+                if prev[k - 1] < best:
+                    best = prev[k - 1]
+                if cur[k - 1] < best:
+                    best = cur[k - 1]
+                cur.append(best + 1)
+            k += 1
+        prev = cur
+        j += 1
+    return prev[m]
+
+
+def alias_append(n: int) -> int:
+    a = [1]
+    b = a
+    i = 0
+    while i < n:
+        b.append(i)
+        i += 1
+    return len(a) * 100 + a[len(a) - 1]
+
+
+def alias_store(n: int) -> int:
+    a = [0] * 3
+    b = a
+    b[0] = n
+    b[1] += n
+    return a[0] + a[1]
+
+
+def running(xs: list[float]) -> float:
+    sums = []
+    acc = 0.0
+    for x in xs:
+        acc += x
+        sums.append(acc)
+    t = 0.0
+    for s in sums:
+        t += s
+    return t
+
+
+def prefix(xs: list[int]) -> list[int]:
+    tmp = []
+    out = []
+    for x in xs:
+        tmp.append(x * 2)
+        out.append(len(tmp) + tmp[len(tmp) - 1])
+    return out
+
+
+def pick(n: int) -> int:
+    vals = [10, 20]
+    vals.append(n)
+    return vals[n]
+
+
+def grow_while_iter(n: int) -> int:
+    vals = [1, 2]
+    for v in vals:
+        if len(vals) < n:
+            vals.append(v)
+    return len(vals)
+
+
+def bools(n: int) -> int:
+    flags = [True]
+    flags.append(n > 0)
+    return len(flags)
+
+
+def escapes(n: int) -> int:
+    vals = [n]
+    vals.append(n)
+    return sum(vals)
+'''
+
+LISTS_RUNNER = r'''
+import lists as m
+
+
+def show(label, f, *args):
+    try:
+        r = f(*args)
+        print(label, type(r).__name__, repr(r))
+    except Exception as e:
+        print(label, 'raised', type(e).__name__, str(e))
+
+
+for a, b in [('kitten', 'sitting'), ('', 'abc'), ('abc', ''), ('flaw', 'lawn'),
+             ('abcdefghijklmnopqrstuvwxyz', 'bacdefghijklmnopqrstuvwxzz'), ('東京', '東')]:
+    show('lev %r %r' % (a, b), m.levenshtein, a, b)
+show('lev_bad', m.levenshtein, b'abc', 'abc')
+for n in (0, 1, 5, 2 ** 40, 2 ** 70):
+    show('alias_append %r' % n, m.alias_append, min(n, 50))
+    show('alias_store %r' % n, m.alias_store, n)
+show('alias_store_ovf', m.alias_store, 2 ** 62)
+show('running', m.running, [0.5, 1.25, -3.0])
+show('running_empty', m.running, [])
+show('prefix', m.prefix, [3, -1, 2 ** 40])
+show('prefix_big', m.prefix, [2 ** 62])
+for n in (0, 1, 2, 3, -1, -3, -4):
+    show('pick %r' % n, m.pick, n)
+show('grow', m.grow_while_iter, 6)
+show('bools', m.bools, 3)
+show('escapes', m.escapes, 4)
+for _ in range(2000):
+    m.levenshtein('abc', 'abd')
+print('loops-ok')
+'''
+
+# (`alias_store` is refused by pymix itself, before the hybrid sees it; it is compared anyway.)
+LISTS_NATIVE = ('levenshtein', 'alias_append', 'running', 'prefix', 'pick')
+LISTS_REFUSED = ('grow_while_iter', 'bools', 'escapes')
+
+
 def run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, timeout=600)
 
@@ -264,6 +406,11 @@ class Runs(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-div-') as tmp:
             out, report = self.build(tmp, 'divide', DIVIDE)
             self.compare(tmp, out, DIVIDE_RUNNER, DIVIDE_NATIVE, DIVIDE_REFUSED, report, 'divide')
+
+    def test_local_lists_match_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-lists-') as tmp:
+            out, report = self.build(tmp, 'lists', LISTS)
+            self.compare(tmp, out, LISTS_RUNNER, LISTS_NATIVE, LISTS_REFUSED, report, 'lists')
 
 
 if __name__ == '__main__':

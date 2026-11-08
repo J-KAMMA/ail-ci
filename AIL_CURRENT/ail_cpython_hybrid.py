@@ -1218,7 +1218,11 @@ def _list_return_proof(fn, params, shadowed=frozenset(), consts=None, calls=None
             return None, 'an unsupported list creation'
     if any(isinstance(e, ast.Starred) for e in elements):
         return None, 'a starred element'
-    kinds = _Kinds(fn, params, shadowed, skip={var}, consts=consts, calls=calls)
+    # obs5: other local lists the body keeps to itself have proven element kinds too
+    local = _local_lists(fn, params, shadowed, consts, calls, exclude=(var,))
+    kinds = _Kinds(fn, params, shadowed, skip={var} | set(local), consts=consts, calls=calls)
+    kinds.extra = dict(local)
+    kinds.solve()
     elem = None
     for _ in range(8):
         found = set()
@@ -1239,11 +1243,206 @@ def _list_return_proof(fn, params, shadowed=frozenset(), consts=None, calls=None
         if new == elem:
             break
         elem = new
-        kinds.extra = {var: 'list[%s]' % elem}
+        kinds.extra = dict(local, **{var: 'list[%s]' % elem})
         kinds.solve()
     else:
         return None, 'the element type does not settle'
     return 'list[%s]' % elem, var
+
+
+def _list_creation(value):
+    """`[...]` or `[c] * n` / `n * [c]`: an expression that always makes a new list."""
+    if isinstance(value, ast.List):
+        return not any(isinstance(e, ast.Starred) for e in value.elts)
+    if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Mult):
+        lst, count = ((value.left, value.right) if isinstance(value.left, ast.List)
+                      else (value.right, value.left))
+        return isinstance(lst, ast.List) and len(lst.elts) == 1 \
+            and not isinstance(lst.elts[0], ast.Starred) and not isinstance(count, ast.List)
+    return False
+
+
+def _local_lists(fn, params, shadowed=frozenset(), consts=None, calls=None, exclude=()):
+    """obs5: {name: 'list[int]' | 'list[float]'} for the local lists a body builds and keeps to
+    itself, so that appending to one (`prev.append(i)` in `levenshtein`) has no effect any caller
+    can see.
+
+    A name qualifies when every binding is `name = <new list>` (`[]`, a literal, `[c] * n`) or
+    `name = other` with `other` qualifying too (the names then share objects and are solved as one
+    group), and every use is `name.append(e)` as a statement, `name[i]` (load, `=` or `op=`
+    store), `len(name)`, `for x in name` (with no append or store into the group inside that
+    loop: CPython would see the list change under the iteration) or such an alias assignment.
+    Nothing else -- a return, a call argument, a slice, a nested function, truth testing --
+    may touch it, so no reference ever leaves the call.  The elements must all be exact `int`
+    (never bool) or all `float` by the exact-kind pass."""
+    pk = {p for p, _k in params}
+    own = set(id(n) for n in _own_nodes(fn))
+    parents = _parents(fn)
+    cands = set()
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) \
+                and (_list_creation(node.value) or isinstance(node.value, ast.Name)):
+            cands.add(node.targets[0].id)
+    cands -= pk
+    cands -= set(exclude)
+    if 'len' in shadowed:
+        return {}
+
+    def uses(name):
+        """(ok, elements, aug_holders, alias_sources, loops, mutations) for one name."""
+        elements, augs, aliases, loops, muts, created = [], [], [], [], [], []
+        for node in ast.walk(fn):
+            if not (isinstance(node, ast.Name) and node.id == name):
+                continue
+            if id(node) not in own:
+                return None
+            parent = parents.get(id(node))
+            if isinstance(node.ctx, ast.Del):
+                return None
+            if isinstance(node.ctx, ast.Store):
+                if not (isinstance(parent, ast.Assign) and len(parent.targets) == 1
+                        and parent.targets[0] is node):
+                    return None
+                value = parent.value
+                if _list_creation(value):
+                    created.append(parent)
+                    if isinstance(value, ast.List):
+                        elements.extend(value.elts)
+                    else:
+                        lst, count = ((value.left, value.right) if isinstance(value.left, ast.List)
+                                      else (value.right, value.left))
+                        elements.append(lst.elts[0])
+                        augs.append(('count', count))
+                    continue
+                if isinstance(value, ast.Name) and value.id in cands:
+                    aliases.append(value.id)
+                    continue
+                return None
+            if isinstance(parent, ast.Attribute) and parent.attr == 'append':
+                call = parents.get(id(parent))
+                stmt = parents.get(id(call))
+                if isinstance(call, ast.Call) and call.func is parent and len(call.args) == 1 \
+                        and not call.keywords and isinstance(stmt, ast.Expr) \
+                        and not isinstance(call.args[0], ast.Starred):
+                    elements.append(call.args[0])
+                    muts.append(stmt)
+                    continue
+                return None
+            if isinstance(parent, ast.Subscript) and parent.value is node \
+                    and not isinstance(parent.slice, ast.Slice):
+                if isinstance(parent.ctx, ast.Load):
+                    continue
+                holder = parents.get(id(parent))
+                if isinstance(parent.ctx, ast.Store) and isinstance(holder, ast.Assign) \
+                        and len(holder.targets) == 1 and holder.targets[0] is parent:
+                    elements.append(holder.value)
+                    muts.append(holder)
+                    continue
+                if isinstance(holder, ast.AugAssign) and holder.target is parent:
+                    augs.append(holder)
+                    muts.append(holder)
+                    continue
+                return None
+            if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) \
+                    and parent.func.id == 'len' and parent.args == [node] and not parent.keywords:
+                continue
+            if isinstance(parent, (ast.For,)) and parent.iter is node:
+                loops.append(parent)
+                continue
+            if isinstance(parent, ast.Assign) and parent.value is node and len(parent.targets) == 1 \
+                    and isinstance(parent.targets[0], ast.Name) and parent.targets[0].id in cands:
+                continue
+            return None
+        return elements, augs, aliases, loops, muts, created
+
+    info = {}
+    while True:
+        info, bad = {}, None
+        for name in sorted(cands):
+            got = uses(name)
+            if got is None:
+                bad = name
+                break
+            info[name] = got
+        if bad is not None:
+            cands.discard(bad)
+            continue
+        # an alias source that left the set takes its target with it (`uses` already refuses an
+        # alias assignment whose target is not a candidate)
+        drop = {n for n in cands if any(a not in cands for a in info[n][2])}
+        if not drop:
+            break
+        cands -= drop
+    if not cands:
+        return {}
+    group = {n: n for n in cands}
+
+    def find(n):
+        while group[n] != n:
+            group[n] = group[group[n]]
+            n = group[n]
+        return n
+    for n in cands:
+        for a in info[n][2]:
+            group[find(n)] = find(a)
+    groups = {}
+    for n in sorted(cands):
+        groups.setdefault(find(n), set()).add(n)
+    todo = []
+    for members in groups.values():
+        muts = [m for n in members for m in info[n][4]]
+        if not any(info[n][5] for n in members):
+            continue                       # never created here (only aliases)
+        loops = [lp for n in members for lp in info[n][3]]
+        if any(id(m) in set(id(x) for stmt in lp.body + lp.orelse for x in ast.walk(stmt))
+               for lp in loops for m in muts):
+            continue
+        todo.append(members)
+    out = {}
+    for _round in range(3):
+        grew = False
+        for members in todo:
+            if members <= set(out):
+                continue
+            elements = [e for n in members for e in info[n][0]]
+            augs = [a for n in members for a in info[n][1]]
+            kinds = _Kinds(fn, params, shadowed, skip=cands, consts=consts, calls=calls)
+            # Optimistic: guess the element kind from what is known so far, re-solve, and accept
+            # only a guess under which every element has exactly that kind (an invariant).
+            guess = _TOP
+            ok = None
+            for _ in range(8):
+                kinds.extra = dict(out, **{n: (_TOP if guess == _TOP else 'list[%s]' % guess)
+                                           for n in members})
+                kinds.solve()
+                found = set(kinds.kind(e) for e in elements)
+                for holder in augs:
+                    if isinstance(holder, tuple):
+                        found.add('int' if kinds.kind(holder[1]) in ('int', 'bool') else None)
+                    else:
+                        found.add(_binop_kind(holder.op, guess, kinds.kind(holder.value)))
+                found.discard(_TOP)
+                if guess != _TOP and found == {guess}:
+                    ok = guess
+                    break
+                if guess == _TOP and not found:
+                    break
+                known = {k for k in found if k in ('int', 'float')}
+                if len(known) != 1 or (found - known - {None}):
+                    break
+                new = known.pop()
+                if new == guess:
+                    break              # still None somewhere under the settled guess
+                guess = new
+            if ok is None:
+                continue
+            for n in members:
+                out[n] = 'list[%s]' % ok
+            grew = True
+        if not grew:
+            break
+    return out
 
 
 def _return_kinds(fn, params, shadowed=frozenset(), consts=None, calls=None):
@@ -1780,6 +1979,15 @@ def _select(src, tree, report, facts, methods=None):
             if not rkinds or any(k != ret for k in rkinds):
                 return None, 'a return value is not always %s (%s)' % (
                     ret, ', '.join(sorted(set(str(k) for k in rkinds))))
+        # obs5: local lists the body builds and keeps to itself may be appended to, and their
+        # proven element kinds are known to the exact-kind pass from here on.
+        local = _local_lists(funcs[pyname], params, shadowed, consts, calls, exclude=fresh)
+        if local:
+            fresh = tuple(fresh) + tuple(sorted(local))
+            kinds = _Kinds(funcs[pyname], params, shadowed, skip=set(local), consts=consts,
+                           calls=calls)
+            kinds.extra = dict(local)
+            kinds.solve()
         abi = _unit_abi(csrc, mangled, params, ret)
         if abi is None:
             return None, "the typed clone's C signature is not one the hybrid calls"

@@ -385,3 +385,15 @@ try/except" refusal is lifted in the hybrid's analysis like the subscript one: C
 call and raises its own exception, message included. Measured (`obs5_task1.json`, `hand`,
 instructions vs CPython): `bitset_bloom` 0.919 -> 0.242, `float_loops` 0.626 -> 0.492,
 `dataframe_group` 0.510 -> 0.413, `rolling_stats` 0.171 -> 0.128; all outputs byte-identical.
+
+**obs5 task 2 (local lists).** `_local_lists` finds the lists a body creates (`[]`, a literal,
+`[c] * n`) and keeps to itself: every binding is a creation or an alias of another such local
+(aliases are solved as one group, sharing the object exactly as CPython does), and every use is
+`name.append(e)` as a statement, `name[i]` (load, `=`, `op=`), `len(name)`, `for x in name` with
+no append or store into the group inside that loop, or an alias assignment. A return, a call
+argument, a slice, truth testing or a nested scope disqualifies the name, so no reference leaves
+the call and appending to it is invisible to every caller; a trap (index, overflow) re-runs the
+original. The elements must be all exact `int` or all `float` (optimistic guess, accepted only when
+every element has that kind under it), and the proven kinds feed the exact-kind pass and the list
+return proof. Measured (`obs5_task2.json`): `edit_dist` 0.962 -> 0.068 (`levenshtein`); other
+modules unchanged; all outputs byte-identical.
