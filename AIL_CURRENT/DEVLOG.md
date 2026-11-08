@@ -1,3 +1,16 @@
+## 2026-11-08 -- wedge4 review fix: field-overriding subclasses keep methods in CPython (job-wedge4-11082211)
+
+The method wrapper reads each needed field once and writes each changed field once, while CPython
+re-evaluates every `self.<field>` occurrence.  A subclass that rebinds a field name in its class
+body (for example a `property`) or defines an attribute-protocol hook makes each access observable,
+so a lifted parent method could answer differently: `/tmp/rprobes/m16_readvalue.py` printed
+`twice 12 calls 1` where CPython prints `twice 13 calls 2`.  `_field_override_subclass` now walks
+this module's subclass graph (including mixins on the subclasses' MRO) and refuses every method of
+a class whose fields can be observed that way, with the reason `subclass 'Sub' can change field
+access, so a batched wrapper would differ`.  Subclasses that only override methods still let the
+parent's field-only methods lift.  `test_subclass_field_override_prevents_batching` covers a
+property-rebound field and the matching CPython output.
+
 ## 2026-11-08 -- wedge4 review fix: method calls keep CPython dispatch (job-wedge4-11081958)
 
 The hybrid was lifting `self.m(...)` inside a method to a direct call of `m`'s kernel. CPython

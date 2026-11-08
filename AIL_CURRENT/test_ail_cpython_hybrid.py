@@ -560,6 +560,53 @@ print('patch', patched.twice())
             self.assertIn(b'inst 297', got.stdout)
             self.assertIn(b'patch 30', got.stdout)
 
+    def test_subclass_field_override_prevents_batching(self):
+        """A subclass that rebinds a field name keeps the parent's methods in CPython.
+
+        The wrapper reads each field once and re-executes the body, while CPython evaluates every
+        `self.n` occurrence.  A property (or other class-body binding of `n`) makes each access
+        observable, so the parent's method must not be lifted.
+        """
+        text = '''
+class Base:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def twice(self) -> int:
+        return self.n + self.n
+
+
+class Sub(Base):
+    def __init__(self) -> None:
+        self.i = 5
+        self.calls = 0
+
+    @property
+    def n(self):
+        self.calls += 1
+        return self.i + self.calls
+
+
+class Plain(Base):
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+
+s = Sub()
+print('sub', s.twice(), s.calls)
+print('base', Base(3).twice())
+print('plain', Plain(4).twice())
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'fieldbatch', text)
+            self.assertNotIn('Base.twice', report['accelerated'], report)
+            self.assertIn('subclass', report['rejected']['Base.twice'], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'fieldbatch')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'sub 13 2', got.stdout)
+
     def test_return_kinds_agree_or_refuse(self):
         """A return kind is inferred from every `return` when they all agree; mixed stays CPython.
 

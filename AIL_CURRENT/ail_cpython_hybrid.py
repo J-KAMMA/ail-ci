@@ -214,6 +214,80 @@ def _plain_method(fn):
     return True
 
 
+def _class_base_names(node):
+    names = []
+    for base in node.bases:
+        if isinstance(base, ast.Name):
+            names.append(base.id)
+        elif isinstance(base, ast.Attribute):
+            names.append(base.attr)
+    return names
+
+
+def _bound_class_names(stmt):
+    """Names a statement binds in the class body (its own namespace, not a nested scope)."""
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {stmt.name}
+    if isinstance(stmt, ast.Assign):
+        out = set()
+        for target in stmt.targets:
+            for node in ast.walk(target):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    out.add(node.id)
+        return out
+    if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+        return {stmt.target.id}
+    if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+        return {(alias.asname or alias.name).split('.')[0] for alias in stmt.names}
+    return set()
+
+
+_ATTR_HAZARDS = frozenset({
+    '__getattr__', '__getattribute__', '__setattr__', '__delattr__', '__slots__',
+})
+
+
+def _field_override_subclass(classdef, classes, field_names):
+    """The first related class that can change `self.<field>` access, or None.
+
+    The wrapper reads each needed field once and writes each changed field once, while CPython
+    re-evaluates every occurrence.  That is only invisible for an ordinary instance-dict field.
+    A subclass (or a mixin on its MRO) that binds a field name in its class body -- a `property`,
+    a method, a slot, ... -- or defines an attribute protocol hook makes each access observable,
+    so the batched wrapper could answer differently.  Refuse the parent's methods by name.
+    """
+    parent = classdef.name
+    descendants = set()
+    changed = True
+    while changed:
+        changed = False
+        for name, cdef in classes.items():
+            if name == parent or name in descendants:
+                continue
+            if any(base == parent or base in descendants
+                   for base in _class_base_names(cdef)):
+                descendants.add(name)
+                changed = True
+    related = set(descendants)
+    for name in descendants:
+        stack = list(_class_base_names(classes[name]))
+        seen = set()
+        while stack:
+            base = stack.pop()
+            if base in seen or base == parent:
+                continue
+            seen.add(base)
+            related.add(base)
+            if base in classes:
+                stack.extend(_class_base_names(classes[base]))
+    for name in sorted(related):
+        for stmt in classes[name].body:
+            bound = _bound_class_names(stmt)
+            if bound & field_names or bound & _ATTR_HAZARDS:
+                return name
+    return None
+
+
 def _class_fields(classdef, init_kinds=None):
     """[(field, kind)] from the class's own __init__, or (None, reason).
 
@@ -500,6 +574,7 @@ def _write_kinds_ok(body_nodes, field_params, param_kinds):
 def _method_kernels(tree):
     """Plan every plain-class method: its fields, kernels and refusals.  Pure planning only."""
     ctor_kinds, method_kinds = _infer_call_kinds(tree)
+    classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     plan = {}
     for classdef in tree.body:
         if not isinstance(classdef, ast.ClassDef):
@@ -509,6 +584,16 @@ def _method_kernels(tree):
             fields, why = _class_fields(classdef, ctor_kinds.get(classdef.name))
             if fields is not None:
                 field_kinds = dict(fields)
+                hazard = _field_override_subclass(classdef, classes, set(field_kinds))
+                if hazard is not None:
+                    reason = ('subclass %r can change field access, so a batched wrapper '
+                              'would differ' % hazard)
+                    for stmt in classdef.body:
+                        if isinstance(stmt, ast.FunctionDef) and stmt.name != '__init__':
+                            methods[stmt.name] = {'reason': reason}
+                    plan[classdef.name] = {'class': classdef, 'fields': fields,
+                                           'methods': methods, 'reason': None}
+                    continue
                 for stmt in classdef.body:
                     if not isinstance(stmt, ast.FunctionDef) or stmt.name == '__init__':
                         continue
