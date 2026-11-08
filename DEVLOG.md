@@ -1,3 +1,17 @@
+## 2026-11-08 -- shparse1 suite gate again: the five flagged modules still pass (job-shparse1-11090009)
+
+The gate repeated the same five modules (`test_ail_obj_refs`, `test_ail_safetynet`,
+`test_ail_selfhost_parse`, `test_ail_unified`, `test_ail_virtual_dispatch`) as failing on today's
+integ.  They still do not reproduce.  On this branch (`71c7a03`) each one passes individually, and
+`tools/par_check.py -j 2` over the five plus `test_ail_files` and `test_ail_corpus_findings3`
+is 7/7 modules, 0 failed.  Applied alone on today's `origin/integ` (`e4335ec`, fetched fresh) in a
+worktree with the feature diff (`5e98aa2b..HEAD`, `.agent` and `DEVLOG.md` excluded) the same five
+also pass.  No compiler or parser behaviour is wrong: these are the fixed smoke modules that the
+change's `selfhost/*` paths select, and the module that passed (`test_ail_files`) is simply absent
+from the report, exactly as the `11082103` entry above describes.  The defensive S376 widening is
+already present in `test_ail_selfhost_parse.py`, so this round needs no source edit.  No behaviour
+changed, so there are no new probes; `tools/update_manifest.py --check` is clean.
+
 ## 2026-11-08 -- shparse1 suite gate: the five flagged modules pass; harden the S376 sample (job-shparse1-11082103)
 
 The gate reported `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_selfhost_parse`, `test_ail_unified`
