@@ -1,3 +1,47 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: fbnarrow4
+
+**What the change really does.** Adds narrow (`ail_ilist`) slice/copy/concat/sort support: a width-aware slice helper + `_Generic` dispatch, `ail_ilist_sort` (qsort), a `sorted(x)` narrow path, narrow receivers in `.copy()`/`list()`/`+` analysis (`_carry_ok`), allows slice/`copy`/`list`/`sorted`/`sort` on narrowed class fields in `_field_use_ok`, and makes any function with a narrowed local skip the IR backend. Default stays opt-in. The report file (`NARROW_RESULTS.md`) matches this, except it overstates `x.sort()` (field case below) and its RSS table is unverifiable.
+
+**Tests run on HEAD** (after regenerating the manifest in a throwaway worktree): `test_ail_narrow_int` ok 64.2s, `test_ail_safetynet` ok 139.0s, 0 failed.
+
+**Probes** (`/tmp/rprobes/`, run with `AIL_NARROW_INT=1` vs CPython, and on `/tmp/base`):
+- slice_rebind, slice_more, slice_huge, slice_self_wide, sorted_slice, sorted_loop, copy_concat, copy_narrow_mixed, concat_mixed, concat_loop, concat_wrongtype, widen_after_copy, sort_wide, self_copy, mixed, arg_slice, method_local_sort, field_ops, field_sort_method, field_sort_just, ks (key sort).
+- All matched CPython except `field_sort_just.py` and `field_sort_method.py` (below); those two match on base. No pre-existing differences found.
+- Default build C unchanged: `sort_wide.py` `--debug-dir` program.c hash identical on base and HEAD (`8557f5e9…`).
+
+**Defects**
+
+1. `.sort()` on a narrowed class field does not compile (hard C error, not a named refusal). The change lets `_field_use_ok` accept `sort`, so the field becomes `ail_ilist`, but `_method` only special-cases `name in ctx.narrow_int` (locals), so it emits `ail_list_sort(&field)`.
+   Probe `/tmp/rprobes/field_sort_just.py`:
+   ```
+   class T: __init__: self.w: list[int] = []
+   t.w.append(3); t.w.append(1); t.w.append(2); t.w.sort(); print(t.w[0], t.w[1], t.w[2])
+   ```
+   Expected: `1 2 3`; actual: build exit 4 — `error: passing argument 1 of 'ail_list_sort' from incompatible pointer type [-Werror=incompatible-pointer-types] ... ail_ilist *`. Base (narrow) prints `1 2 3`. Same with `self.w.sort()` inside a method (`field_sort_method.py`).
+
+2. Manifest is stale, so the mandatory integrity gate and all tests abort. `python3 tools/update_manifest.py --check` on a clean HEAD worktree reports `stale python/pkg-v12/ir/narrowint.py`, `stale python/pkg-v12/pyfunc.py`, `stale test_ail_narrow_int.py` (manifest.d/45,79,cf need updating). `tools/par_check.py` dies with `ValueError: hash mismatch: python/pkg-v12/ir/narrowint.py` before running anything.
+
+3. Required behaviour missing: the key-sort column is not narrowed (report admits it). Probe `/tmp/rprobes/ks/p.py` emits `ail_list v__ail_sk1_c0` and leaves `key` int64 — the task asked for that column to be narrow. Also sub-steps 2–3 are incomplete/dishonest in scope: the gate rows (instructions, RSS on 9 tasks/6 rc programs, 55-case sweep, first-100 corpus, 20 shards) and compare-lab (AIL vs Rust RSS) were not run. The "default 367,240 KiB" row is implausible for an unflipped flag whose emitted C is byte-identical to base (base peak was 405 MiB); mark unverified.
+
+**Report claims:** slices/copies/`list`/`+`/`sorted(x)`/`sorted(x)[a:b]` — verified; `x.sort()` — false for narrowed class fields; key column not narrowed — verified (and is a missed requirement); tree_fold RSS/binary-size table and "`w` now narrows" — unverified; default stays opt-in — verified. Speed not re-measured because the default build is unchanged.
+
+VERDICT: FIX
+1. `.sort()` on a narrowed class field fails to build: probe `/tmp/rprobes/field_sort_just.py` (and `field_sort_method.py`), expected `1 2 3`, actual C build error `incompatible pointer type` (exit 4); base narrow build prints `1 2 3`. Either emit `ail_ilist_sort` for narrow fields or keep `sort` in `_FIELD_BLOCK_METHODS`.
+2. Stale manifest blocks the gate: `tools/update_manifest.py --check` reports narrowint.py, pyfunc.py, test_ail_narrow_int.py stale, and `par_check.py` aborts with `hash mismatch: python/pkg-v12/ir/narrowint.py`; run `tools/update_manifest.py` and re-check.
+3. Key-sort key column (`_ail_sk1_*`) is still `ail_list` (probe `/tmp/rprobes/ks/p.py`), which the task required to be narrow; the gate table and compare-lab numbers in `NARROW_RESULTS.md` are also incomplete/unverified.
+[commandcode stop=end_turn turns=51 out_tokens=37673]
+
+
+--- ORIGINAL TASK ---
 Lane: fb-narrow
 Needs: fbnarrow3
 
