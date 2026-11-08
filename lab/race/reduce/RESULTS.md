@@ -143,3 +143,14 @@ Each `edge_*.py` is a reduction at an int64 edge; `edge_*_twin.py` is the same p
 loudly there (the Python surface keeps an int64 overflow uncatchable), so the probe now uses the
 genuinely catchable conversion overflow and the re-run's accumulator pointer, which is what makes
 the caught value the sequential prefix.
+
+### A pre-existing sequential finding (not this job)
+
+A `try` around a **sequential** `range` loop loses the accumulator when the body raises
+`ZeroDivisionError`: `acc = 0; try: for i in range(0, 20): acc += term(i)` with `term(3) = 10 // 0`
+prints `caught 0`, where CPython prints `caught 3`. The same program with a catchable
+`OverflowError` (`int(1e308 * 1e308)`) prints `caught 3`, as CPython does. Reproduced on
+`origin/integ` (`git archive origin/integ AIL_CURRENT`, same two probes), so this job did not
+introduce it; the parallel re-run now writes the accumulator through a pointer and prints `3` in
+both forms. It is recorded here because it is a silent wrong output in the sequential path and
+needs its own job.
