@@ -186,8 +186,9 @@ class SequenceMatcher:
             for elt in list(b2j.keys()):
                 if isjunk(elt):
                     junk.add(elt)
-            for elt in junk:
-                del b2j[elt]
+            for elt in list(b2j.keys()):
+                if elt in junk:
+                    del b2j[elt]
         self.bjunk = junk
         popular = set()
         n = len(b)
@@ -196,8 +197,9 @@ class SequenceMatcher:
             for elt in list(b2j.keys()):
                 if len(b2j[elt]) > ntest:
                     popular.add(elt)
-            for elt in popular:
-                del b2j[elt]
+            for elt in list(b2j.keys()):
+                if elt in popular:
+                    del b2j[elt]
         self.bpopular = popular
 
     def find_longest_match(self, alo=0, ahi=None, blo=0, bhi=None):

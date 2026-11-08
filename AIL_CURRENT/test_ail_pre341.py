@@ -45,7 +45,7 @@ READ_PROGRAMS = (
     'ps = [(1, 2), (3, 4), (5, 6)]\nfor p in ps:\n    print(p)\n',
     'ps = [(1, 2), (3, 4)]\nprint(ps, len(ps), ps[0], ps[-1], (3, 4) in ps)\n',
     'ps = [(1, 2), (3, 4)]\nprint(ps)\ndel ps[-1]\nprint(ps)\n',
-    'ps = [(1, 2), (3, 4)]\nprint(sorted(ps), list(ps), set(ps))\n',
+    'ps = [(1, 2), (3, 4)]\nprint(sorted(ps), list(ps), sorted(set(ps)))\n',
 )
 
 

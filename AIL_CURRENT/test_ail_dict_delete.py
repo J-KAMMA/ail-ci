@@ -85,13 +85,13 @@ fn churn_fdict(n: int) -> float {
 }
 
 fn churn_sset(n: int) -> int {
-    let s = set();
+    let s: set[str] = set();
     for i in range(0, n) {
         s.add(str(i % 53));
         if i % 2 == 1 { s.discard(str((i * 11) % 53)); }
     }
     let t = 0;
-    for k in s { t = t * 17 % 1000003 + int(k); }
+    for k in sorted(s) { t = t * 17 % 1000003 + int(k); }
     return t * 100 + len(s);
 }
 
@@ -121,7 +121,7 @@ fn run_int(seed: int, n: int, span: int) -> int {
             s.discard(k);
         } elif op == 7 {
             for kk in d { acc = (acc * 3 + kk) % 1000003; }
-            for kk in s { acc = (acc * 5 + kk) % 1000003; }
+            for kk in sorted(s) { acc = (acc * 5 + kk) % 1000003; }
         } elif op == 8 {
             if k in d { acc = (acc + d.pop(k)) % 1000003; d[k] = acc; }
         } else {
@@ -130,9 +130,9 @@ fn run_int(seed: int, n: int, span: int) -> int {
     }
     let u = set();
     for i in range(0, 1500) { u.add(i * 2); }
-    for kk in s & u { acc = (acc * 3 + kk) % 1000003; }
-    for kk in s - u { acc = (acc * 5 + kk) % 1000003; }
-    for kk in s | u { acc = (acc * 7 + kk) % 1000003; }
+    for kk in sorted(s & u) { acc = (acc * 3 + kk) % 1000003; }
+    for kk in sorted(s - u) { acc = (acc * 5 + kk) % 1000003; }
+    for kk in sorted(s | u) { acc = (acc * 7 + kk) % 1000003; }
     for kk in d { acc = (acc * 3 + kk) % 1000003; }
     return acc * 10000 + len(d) * 10 + len(s) % 10;
 }
@@ -254,7 +254,7 @@ def churn_sset(n):
         s.add(str(i % 53))
         if i % 2 == 1: s.discard(str((i * 11) % 53))
     t = 0
-    for k in s: t = t * 17 % 1000003 + int(k)
+    for k in sorted(s): t = t * 17 % 1000003 + int(k)
     return t * 100 + len(s)
 
 def churn_bmap(n):
@@ -279,16 +279,16 @@ def run_int(seed, n, span):
             d.pop(k, None); s.discard(k)
         elif op == 7:
             for kk in d: acc = (acc * 3 + kk) % 1000003
-            for kk in s: acc = (acc * 5 + kk) % 1000003
+            for kk in sorted(s): acc = (acc * 5 + kk) % 1000003
         elif op == 8:
             if k in d:
                 acc = (acc + d.pop(k)) % 1000003; d[k] = acc
         else:
             for kk, vv in d.items(): acc = (acc * 7 + kk + vv) % 1000003
     u = OSet(i * 2 for i in range(1500))
-    for kk in s & u: acc = (acc * 3 + kk) % 1000003
-    for kk in s - u: acc = (acc * 5 + kk) % 1000003
-    for kk in s | u: acc = (acc * 7 + kk) % 1000003
+    for kk in sorted(s & u): acc = (acc * 3 + kk) % 1000003
+    for kk in sorted(s - u): acc = (acc * 5 + kk) % 1000003
+    for kk in sorted(s | u): acc = (acc * 7 + kk) % 1000003
     for kk in d: acc = (acc * 3 + kk) % 1000003
     return acc * 10000 + len(d) * 10 + len(s) % 10
 
@@ -351,7 +351,7 @@ fn main() {
     for ks in d { t = (t + len(ks)) % 1000003; }
     for ks, vs in m.items() { t = (t + len(ks) + len(vs)) % 1000003; }
     for ki in e { t = (t * 3 + ki) % 1000003; }
-    for ki in s { t = (t * 5 + ki) % 1000003; }
+    for ki in sorted(s) { t = (t * 5 + ki) % 1000003; }
     print(t, len(d), len(m), len(e), len(s));
 }
 """

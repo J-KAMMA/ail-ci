@@ -472,6 +472,158 @@ per family. The new `test_ail_agent_errors.py` compiles each with `--json`, pars
 the edit and rebuilds: every family builds and matches CPython; 14/15 lose their message, while
 AIL0102 still needs the compiler-side row-arity fix from implementation step 2. No program output
 changes; the field is additive and `--json` still prints one report object.
+## 2026-11-07 -- setord1 review fix 2: a one-element set whose element shows an order is refused
+
+The reviewer found a regression from the singleton exemption: a one-element display (or a name proven
+small) was let through at compile time without looking at its element, and the run-time guard checked
+only the top-level length. So `print({frozenset([3, 1, 2])})` printed AIL's insertion order for the
+inner set with exit 0, where base refused it by name. Fix (general path only): the run-time guard
+`ail2_refuse_set_order` now uses `ail2_set_order_hidden`, which descends through the single element of
+a set/frozenset and through tuples (the only containers a set can hold, since its elements must be
+hashable), and refuses when any reachable set/frozenset has more than one element. A top-level tuple
+or list is still not descended (pre-existing behaviour). This covers the display, a name, an argument,
+a list item, an attribute and a dict value, and the print/str/repr/f-string/iteration paths that call
+the guard. `test_ail_setorder.py` gains `s7`: `{frozenset([1])}` and `{(1, frozenset([2]))}` match
+CPython, and `print({frozenset([3, 1, 2])})` is refused by name at run time on the general and default
+builds.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`), both builds: `n1`-`n5` (nested multi-element set in a
+one-element display, a name, str/repr/f-string, a tuple element and a frozenset element) are refused
+by name; `p1` (`{frozenset([1])}`, `{(1, 2)}`, `{frozenset()}`, `{(1, frozenset([2]))}`), `p4`
+(singleton/empty print, pop, walk, f-string, list/tuple) and `p7` (order-free `len`/`in` on a nested
+singleton) match CPython; `p2` (argument), `p3` (attribute/dict value/list item) and `n6`/`n7`
+(`list`/`tuple` of the nested singleton) are refused by name; `p6` (`frozenset([9])`) stays refused
+at compile time as on base.
+
+## 2026-11-07 -- setord1 suite fix 3: a set of 0 or 1 elements is order-free (singleton print/walk/pop)
+
+The integration branch's new `test_ail_re_value` (its ALIAS program) does `s = {7}`, `sp = s.pop`,
+then prints `s` after the pop; both builds refused the print (and the typed path the pop), although a
+set of 0 or 1 elements has only one possible order. Fix, general path only:
+`pyboxed2._small_set_names` scans the current body (nested defs/classes/lambdas excluded) for names
+whose every binding is an empty `set()`/`frozenset()` or a one-element display and that nothing grows
+with `add`/`update`/`intersection_update`/`symmetric_difference_update`; `_refuse_set_walk` now lets
+those names and one-element displays through (any larger value reaching the name is still refused by
+the run-time guard). `ail2_refuse_set_order` refuses only `len > 1`, and `ail_meth_set_pop` returns
+the only element of a one-element set (empty stays CPython's `KeyError('pop from an empty set')`; two
+or more elements are still refused). The typed path is unchanged and still refuses a set print/pop,
+so the default build falls back to the general path. `test_ail_setorder.py` gains `s6` (singleton
+print, print after pop, singleton walk and an empty name walk match CPython on the general and
+default builds). No other source change.
+
+`test_ail_re_value` does not exist on this older base; it was fetched from `origin/integ` (which has
+the `re` pos/endpos feature this base lacks) and the whole job diff plus this fix applied there:
+5/5 pass, and the ALIAS program matches CPython (`exit 3`) on both builds.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`), both builds, on this tree: `p01`-`p14`, `e1`-`e4`, `s3`-`s5`,
+`t1` and `t2` match CPython (empty and singleton set print/str/repr/list/tuple/f-string/iteration,
+len/sorted/sum, singleton `pop`, order-free operators, keyed sort, unhashable display, alias);
+`p03`-`p07` (non-empty literal, argument, list item, attribute and dict-value walk) and `p13`
+(non-empty `pop`) are refused by name; `s4` (two elements) is refused at build; `s2`'s
+`frozenset([9])` (a one-element set built from a list argument, not a proven-small display) stays
+refused; `s1`'s `s.pop` bound-method alias is unsupported on this base (AttributeError) though it
+matches on the integ worktree.
+
+Tests on the final commit, `-j 2`: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_setorder` (6 tests) and `test_ail_sets_general` (5/5); earlier on the same code,
+`test_ail_int_dict_set`, `test_ail_collections`, `test_ail_gaps_api1`, `test_ail_gaps_api2`,
+`test_ail_lang_gaps`, `test_ail_refusal_messages` and `test_ail_dict_delete` (7/7).
+`tools/update_manifest.py --check` passes.
+
+## 2026-11-07 -- setord1 review fix: drop the non-empty pprint set branch
+
+The reviewer found that `prelude_genlib._safe_repr`'s new non-empty set/frozenset branch printed a
+sorted order and applied `depth` truncation, neither of which CPython's `_safe_repr` does (it has no
+set branch at all): `pformat({-1, 0, 1})` gave `{-1, 0, 1}` where CPython gives `{0, 1, -1}`, and
+`pformat({"k": {1, 2}}, depth=1)` gave `{'k': {...}}` where CPython gives `{'k': {1, 2}}` (on both
+builds). The branch is removed: an empty set/frozenset falls through to `repr`, which prints
+`set()`/`frozenset()` (order-free, matching CPython), and a non-empty set again reaches `repr(s)`,
+which is refused by name exactly as on the base tree. The pprint lab programs only use
+`pformat(set())`/`pformat(frozenset())`, so nothing that was passing regresses. The rest of the fix
+(empty-set walk/print/pop, difflib's deletion loops, the two order-free programs) is unchanged.
+
+Probes in `/tmp/probes/`, both builds: e1/e2 empty set via literal, argument, list item, attribute
+and dict value (print/str/repr/list/tuple/f-string/iteration/len/sorted/sum) match CPython; e3 empty
+`pop()` raises CPython's `KeyError('pop from an empty set')`; n1-n6 non-empty literal/arg/list
+item/attribute/dict-value walk, repr, f-string, tuple and `pop()` are refused by name; p1_pprint_empty
+matches; p2_pprint_nonempty and p3_pprint_depth are refused by name (base refused them too);
+p4_difflib (isjunk + autojunk) matches.
+
+## 2026-11-07 -- setord1 suite fix 2: empty sets are order-free, difflib's deletion loops and two order-free programs
+
+The full suite after the setord1 refusal also broke `test_ail_bigint` (b2_keyargs), `test_ail_examples_algos`
+(life.py), `test_ail_fuzz81`, `test_ail_pyreach_dictrows`, `test_ail_std_difflib` and `test_ail_std_pprint`
+(`test_ail_re_value` is not a module on this tree; it does not exist under `AIL_CURRENT/`). Two code
+refinements and three program rewrites:
+
+- An EMPTY set has no order to reveal. `pyboxed2.ail2_refuse_set_order` now lets a zero-length set through
+  (walk, `print`, `str`/`repr`, f-string), and `cruntime.ail_meth_set_pop` raises CPython's
+  `KeyError('pop from an empty set')` for an empty set instead of the order refusal; a non-empty `pop()`
+  and a non-empty walk are still refused by name. The general path also lets an immediately-constructed
+  `set()` / `frozenset()` (no arguments, so statically empty) be walked (`pyboxed2._refuse_set_walk`).
+  This fixes `pprint`'s `pformat(set())`/`frozenset()`, `pprint.saferepr`, and the empty-pop probes.
+- `prelude_genlib._safe_repr` had no set branch, so `pprint`'s `_repr` fell through to `repr(set)`, which is
+  refused for a non-empty set; it now formats a set/frozenset the way CPython does, in sorted order
+  (`sorted(object, key=_ail_safe_key)`), so `pformat({3, 1, 2})` matches CPython too.
+- `stdlib/difflib.py` built its `junk`/`popular` sets and then walked them to delete `b2j` keys. That
+  deletion is order-free, so both loops now walk `list(b2j.keys())` and delete the members (`elt in junk` /
+  `elt in popular`), which keeps arbitrary hashable elements working (no `sorted` on user elements).
+- `examples/algos/life.py` and the `SETS` program in `test_ail_pyreach_dictrows.py` walked a non-empty set
+  for an order-free sum/checksum; both now walk `sorted(...)`, so their output is unchanged and no longer
+  depends on the walk order.
+
+Tests on the final commit, `-j 2`: `test_ail_bigint`, `test_ail_examples_algos`, `test_ail_fuzz81`,
+`test_ail_pyreach_dictrows`, `test_ail_std_difflib`, `test_ail_std_pprint`, `test_ail_setorder`,
+`test_ail_sets_general` (8/8, 418 s); `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_int_dict_set`, `test_ail_collections`, `test_ail_refusal_messages` (6/6, 297 s).
+`tools/update_manifest.py --check` passes. Probes in `/tmp/probes/`: p1 empty set through a literal, an
+argument, a list item, an attribute and a dict value (walk/print/repr/str/list/tuple/f-string, empty pop)
+matches CPython on both builds; p2 non-empty walk/print/pop is refused by name on both; p3 difflib with
+`isjunk` and autojunk matches CPython; p4 pprint of empty and non-empty sets matches; p5 an order-free
+life-style checksum matches.
+
+## 2026-11-07 -- setord1 suite fix: order-free aggregates over a set build, and the set-order census reaches the old tests
+
+The full suite after the setord1 refusal found 16 modules walking, printing or popping a set
+where AIL's insertion order happened to equal CPython's for their small ints, or where the walk
+was order-free. Two were real over-refusals in the general path, now fixed in `pyboxed2.py`:
+`sorted`/`sum`/`min`/`max` (and `any`/`all`) of a generator/iterable over a set are order-free,
+so a compile-time `order_free` flag lets their walk lower to `ail_iter` instead of
+`ail2_iter_visible` (`sorted`/`min`/`max` only without `key=`); and `print({[1, 2]})` now
+evaluates the display before the set-order guard, so the unhashable element raises CPython's
+own error instead of the named refusal. `print(<a set name>)` still refuses at compile time,
+and the run-time `ail2_do_print` guard covers display arguments.
+
+The other modules exercised `set.pop()` or a direct set walk on purpose; that behaviour is
+gone, so their programs now use `sorted(s)`, `min`/`discard`, or assert the named refusal:
+test_ail_corpus_findings, test_ail_dict_delete (both the AIL program and its `OSet` model),
+test_ail_exc_str, test_ail_fuzz27 (contents after a body swap), test_ail_fuzz28, test_ail_fuzz36,
+test_ail_fuzz70 (a set is no longer an assert-message case), test_ail_fuzz_findings (the dict
+size-change cases remain), test_ail_gaps_api1/api2 (the set receiver is out of the pop-arity
+matrix; `set.pop()` is asserted refused), test_ail_lang_gaps, test_ail_modconst, test_ail_pre133,
+test_ail_pre245, test_ail_pre341 and test_ail_silent5 (a `sorted(genexpr)` walk, fixed in code).
+`test_ail_setorder.py` is unchanged and still refuses every order-revealing shape. All 16 modules,
+plus test_ail_setorder, test_ail_sets_general, test_ail_int_dict_set, test_ail_collections and
+test_ail_safetynet, pass; `tools/update_manifest.py --check` is clean.
+
+## 2026-11-07 -- setord1: set/frozenset iteration order is refused by name, never silently reordered
+
+AIL's sets keep insertion order; CPython walks its hash table (fixed for ints, per-run random
+for str). `for x in frozenset(range(40, 0, -7))` printed a different order on both builds, a
+silent wrong result found by pyreach11. Exact order cannot be reproduced for a str set, so the
+order-revealing constructs are now refused by name with the rewrite `sorted(s)`: `for` / a
+comprehension / generator over a set, `list(s)`, `tuple(s)`, `print(s)`, `str(s)`, `repr(s)`, an
+f-string of one, and `s.pop()`. The typed path refuses at compile time (`pyfunc._walk_set_refusal`,
+`_set_pop`); the general path refuses at compile time when it can prove the value is a set
+(`pyboxed2._refuse_set_walk`) and raises the same named error at run time for a set that arrives
+through an argument, a list item, an attribute or a dict value (`ail2_refuse_set_order` /
+`ail2_iter_visible`, `ail_meth_set_pop`). Order-free uses -- `in`, `len`, `sorted(s)` (with or
+without `key`/`reverse` on the general path), `min`, `max`, `sum`, the comparisons, the operators
+and the mutators -- keep building and match CPython 3.12 on the typed, default and general
+builds. `test_ail_setorder.py` (new, registered in `tests.d/`) holds the rule; the old order
+tests in `test_ail_sets_general.py`, `test_ail_int_dict_set.py` and `test_ail_collections.py`
+now read sets in sorted form. Census over `lab/` and `corpus/`: 22 files match a set bound to a
+name and then walked/printed/converted/popped; they now refuse rather than reorder.
 
 ## 2026-11-07 -- rundiff1 re-applied: `ail run --diff` (job-rbrundiff1_rr1-11071140)
 

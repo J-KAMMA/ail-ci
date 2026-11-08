@@ -197,23 +197,21 @@ fn main() {
     u.symmetric_difference_update({2, 8});
     print(shows(u));
     let one: set[int] = {42};
-    print(one.pop(), len(one));
-    try { one.pop(); print("no"); } except KeyError { print("empty pop"); }
+    print(42, len(one));
+    one.discard(42);
+    print(len(one));
+    try { one.remove(42); print("no"); } except KeyError { print("empty pop"); }
     let many: set[int] = {4, 8, 15, 16};
-    let popped: list[int] = [];
-    while len(many) > 0 { popped.append(many.pop()); }
-    popped.sort();
+    let popped: list[int] = sorted(many);
     print(show(popped));
-    let l = list(a);
-    l.sort();
-    print(show(l), len(list(e)));
+    let l = sorted(a);
+    print(show(l), len(e));
     let s1: set[str] = {"b", "a"};
     let s2: set[str] = {"a", "c"};
     print(showt(s1.union(s2)), showt(s1 & s2), s1 == {"a", "b"}, s1 <= s2, s1.isdisjoint({"z"}), s1.issuperset({"a"}));
     let sone: set[str] = {"zz"};
-    print(sone.pop(), len(sone));
-    let words = list(s1);
-    words.sort();
+    print("zz", len(sone));
+    let words = sorted(s1);
     print(",".join(words));
     let d: dict[int, int] = {3: 30, 1: 10, 2: 20};
     let dk = list(d);
@@ -233,11 +231,12 @@ fn main() {
     print(bag.s == {2, 1}, bag.s.issubset(a), bag.t.isdisjoint(s1), shows(bag.s | a));
     print(field_hits(bag, 5, "a"), field_hits(bag, 9, "z"));
     let ok12: set[int] = {1, 2};
-    print(bag.s.pop() in ok12, len(bag.s));
+    print(min(bag.s) in ok12, len(bag.s));
     let un = {7, 3};
     let un2 = {3, 7};
     print(un == un2, un != un2, un <= un2, un.isdisjoint({1}), len(un.union(un2)));
-    let k = un.pop();
+    let k = min(un);
+    un.discard(k);
     print(k == 3 or k == 7, len(un));
     let r = list(range(3));
     print(show(r), show(list(r)));
@@ -282,28 +281,25 @@ def main():
     u.symmetric_difference_update({2, 8})
     print(shows(u))
     one = {42}
-    print(one.pop(), len(one))
+    print(42, len(one))
+    one.discard(42)
+    print(len(one))
     try:
-        one.pop()
+        one.remove(42)
         print("no")
     except KeyError:
         print("empty pop")
     many = {4, 8, 15, 16}
-    popped = []
-    while len(many) > 0:
-        popped.append(many.pop())
-    popped.sort()
+    popped = sorted(many)
     print(show(popped))
-    l = list(a)
-    l.sort()
-    print(show(l), len(list(e)))
+    l = sorted(a)
+    print(show(l), len(e))
     s1 = {"b", "a"}
     s2 = {"a", "c"}
     print(showt(s1.union(s2)), showt(s1 & s2), s1 == {"a", "b"}, s1 <= s2, s1.isdisjoint({"z"}), s1.issuperset({"a"}))
     sone = {"zz"}
-    print(sone.pop(), len(sone))
-    words = list(s1)
-    words.sort()
+    print("zz", len(sone))
+    words = sorted(s1)
     print(",".join(words))
     d = {3: 30, 1: 10, 2: 20}
     print(show(list(d)), show(list(d.keys())), show(list(d.values())), d.get(1, -1), d.get(9, -1))
@@ -320,11 +316,12 @@ def main():
     print(bag.s == {2, 1}, bag.s.issubset(a), bag.t.isdisjoint(s1), shows(bag.s | a))
     print(field_hits(bag, 5, "a"), field_hits(bag, 9, "z"))
     ok12 = {1, 2}
-    print(bag.s.pop() in ok12, len(bag.s))
+    print(min(bag.s) in ok12, len(bag.s))
     un = {7, 3}
     un2 = {3, 7}
     print(un == un2, un != un2, un <= un2, un.isdisjoint({1}), len(un.union(un2)))
-    k = un.pop()
+    k = min(un)
+    un.discard(k)
     print(k == 3 or k == 7, len(un))
     r = list(range(3))
     print(show(r), show(list(r)))
@@ -353,13 +350,13 @@ fn main() {
     let xs = [1, 2, 3];
     print(g(xs, xs.pop()), len(xs));
     let s: set[int] = {7};
-    print(h(s, s.pop()), len(s));
+    print(h(s, min(s)), len(s));
     let ws = ["a", "bb"];
     print(w(ws, ws.pop()), len(ws));
     let e: dict[str, int] = {"a": 1, "b": 2};
     print(sd(e, e.pop("a")));
     let bx = Box({1: 1, 2: 2}, [1, 2, 3], ["x", "yy"], [1.5, 2.5], {"q"});
-    print(f(bx.d, bx.d.pop(1)), g(bx.xs, bx.xs.pop()), w(bx.ws, bx.ws.pop()), fl(bx.fs, bx.fs.pop()), ss(bx.s, bx.s.pop()));
+    print(f(bx.d, bx.d.pop(1)), g(bx.xs, bx.xs.pop()), w(bx.ws, bx.ws.pop()), fl(bx.fs, bx.fs.pop()), ss(bx.s, "q"));
     print(f(bx.d, reset(bx)), len(bx.d));
     print(order_local());
     return 0;
@@ -398,13 +395,13 @@ def main():
     xs = [1, 2, 3]
     print(g(xs, xs.pop()), len(xs))
     s = {7}
-    print(h(s, s.pop()), len(s))
+    print(h(s, min(s)), len(s))
     ws = ["a", "bb"]
     print(w(ws, ws.pop()), len(ws))
     e = {"a": 1, "b": 2}
     print(sd(e, e.pop("a")))
     bx = Box({1: 1, 2: 2}, [1, 2, 3], ["x", "yy"], [1.5, 2.5], {"q"})
-    print(f(bx.d, bx.d.pop(1)), g(bx.xs, bx.xs.pop()), w(bx.ws, bx.ws.pop()), fl(bx.fs, bx.fs.pop()), ss(bx.s, bx.s.pop()))
+    print(f(bx.d, bx.d.pop(1)), g(bx.xs, bx.xs.pop()), w(bx.ws, bx.ws.pop()), fl(bx.fs, bx.fs.pop()), ss(bx.s, "q"))
     print(f(bx.d, reset(bx)), len(bx.d))
     print(order_local())
 
@@ -604,7 +601,7 @@ REFUSED = [
     ('fn main() {\n    let s: set[int] = {1};\n    let xs = [1];\n    print(s == xs);\n}', 'prog.ail:4:', 'compare two sets'),
     ('fn main() {\n    let s: set[int] = {1};\n    let xs = [1, 2];\n    let u = s.union(xs);\n    print(len(u));\n}',
      'prog.ail:4:', 'set(xs)'),
-    ('fn main() {\n    let s = set();\n    s.add("a");\n    print(s.pop());\n}', 'prog.ail:4:', 'let s: set[str] = set();'),
+    ('fn main() {\n    let s = set();\n    s.add("a");\n    print(s.pop());\n}', 'prog.ail:4:', 'sorted(s)'),
     ('fn main() {\n    let s: set[int] = {1};\n    print(s.pop(1));\n}', 'prog.ail:3:', 's.remove(x)'),
     ('fn main() {\n    let a: set[int] = {1};\n    print(a <= a <= a);\n}', 'prog.ail:3:', 'a <= b and b <= c'),
     ('fn main() {\n    let xs = [1];\n    xs.frob();\n    print(1);\n}', 'prog.ail:3:', 'a list has append'),

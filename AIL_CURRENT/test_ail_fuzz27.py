@@ -1,15 +1,11 @@
-"""Differential round 27: a set's pop cursor must move with the body it indexes.
+"""Differential round 27: a set's body swap must keep its contents consistent.
 
-The general (boxed) runtime keeps a set's elements in insertion order and a `fin`
-cursor for `pop()`. `symmetric_difference_update`, `intersection_update`, `^=` and
-`&=` replace the body through `ail_setx_swap_bodies`, which swapped the entries,
-sizes and index but not `fin`. A set that had already popped something kept the old
-cursor into the new body, so the next `pop()` skipped the first remaining element
-and could then walk past the live entries (`{1,2,3}.pop(); s.symmetric_difference_update(set());
-s.pop()` printed 3 instead of CPython's 2). The typed path was unaffected.
-
-The programs below keep that shape for a literal set and for a set reached through a
-function argument, a list item, an attribute and a dict value, on both builds.
+The general (boxed) runtime replaces a set's body in `symmetric_difference_update`,
+`intersection_update`, `^=` and `&=`. A pop cursor that was not moved with the body made a
+later `pop()` skip an element; `set.pop()` is now refused by name because its answer shows the
+iteration order, so these programs check the contents after such a swap in order-free ways
+(`sorted(s)`, `len`, `in`) for a literal set and for a set reached through a function
+argument, a list item, an attribute and a dict value, on both builds.
 """
 import os
 import subprocess
@@ -22,15 +18,13 @@ ROOT = Path(__file__).resolve().parent
 
 BASIC = r'''def main() -> None:
     s: set[int] = {1, 2, 3}
-    print(s.pop())
+    s.discard(1)
     s.symmetric_difference_update(set())
-    print(s.pop())
-    print(len(s), 2 in s, 3 in s)
+    print(sorted(s), len(s), 2 in s, 3 in s)
     t: set[int] = {10, 20, 30}
-    print(t.pop())
+    t.discard(10)
     t.intersection_update({20, 30, 40})
-    print(t.pop())
-    print(len(t), 20 in t, 30 in t)
+    print(sorted(t), len(t), 20 in t, 30 in t)
 
 
 main()
@@ -38,31 +32,27 @@ main()
 
 OPERATORS = r'''def main() -> None:
     s: set[int] = {1, 2, 3, 4}
-    print(s.pop())
+    s.discard(1)
     s ^= {4, 5}
-    print(s.pop(), len(s), 2 in s, 3 in s, 4 in s, 5 in s)
+    print(sorted(s), len(s), 2 in s, 3 in s, 4 in s, 5 in s)
     t: set[int] = {1, 2, 3, 4}
-    print(t.pop())
+    t.discard(1)
     t &= {2, 3, 4, 9}
-    print(t.pop(), len(t), 2 in t, 3 in t, 4 in t, 9 in t)
+    print(sorted(t), len(t), 2 in t, 3 in t, 4 in t, 9 in t)
     u: set[int] = {1, 2, 3, 4}
-    print(u.pop())
+    u.discard(1)
     u.intersection_update([2, 3])
-    out: list[int] = []
-    while len(u) > 0:
-        out.append(u.pop())
-    out.sort()
-    print(out, len(u))
+    print(sorted(u), len(u))
     v: set[int] = {1}
-    print(v.pop(), len(v))
+    v.discard(1)
     v.symmetric_difference_update({7})
-    print(v.pop(), len(v))
+    print(sorted(v), len(v))
     w: set[int] = {1, 2}
-    print(w.pop())
+    w.discard(1)
     w.intersection_update(set())
-    print(len(w))
+    print(sorted(w), len(w))
     try:
-        w.pop()
+        w.remove(2)
     except KeyError as e:
         print("empty", e)
 
@@ -76,29 +66,29 @@ SOURCES = r'''class Box:
 
 def mutate(s: set[int]) -> None:
     s.symmetric_difference_update(set())
-    print(s.pop(), len(s), 2 in s, 3 in s)
+    print(sorted(s), len(s), 2 in s, 3 in s)
 
 
 def main() -> None:
     b = Box()
     b.s = {1, 2, 3}
-    print(b.s.pop())
+    b.s.discard(1)
     b.s.symmetric_difference_update(set())
-    print(b.s.pop(), len(b.s), 2 in b.s, 3 in b.s)
+    print(sorted(b.s), len(b.s), 2 in b.s, 3 in b.s)
     b.s.intersection_update({3, 4})
-    print(b.s.pop(), len(b.s))
+    print(sorted(b.s), len(b.s))
     xs: list = [{1, 2, 3}]
     s = xs[0]
-    print(s.pop())
+    s.discard(1)
     s.symmetric_difference_update(set())
-    print(s.pop(), len(s), 2 in s, 3 in s, len(xs[0]), 2 in xs[0])
+    print(sorted(s), len(s), 2 in s, 3 in s, len(xs[0]), 2 in xs[0])
     d: dict = {"s": {10, 20, 30}}
     q = d["s"]
-    print(q.pop())
+    q.discard(10)
     q.symmetric_difference_update(set())
-    print(q.pop(), len(q), 20 in q, 30 in q, len(d["s"]), 20 in d["s"])
+    print(sorted(q), len(q), 20 in q, 30 in q, len(d["s"]), 20 in d["s"])
     r: set[int] = {4, 5, 6}
-    print(r.pop())
+    r.discard(4)
     mutate(r)
     print(len(r))
 
@@ -113,36 +103,15 @@ LARGE = r'''def main() -> None:
     for i in range(5):
         s.discard(i)
         s.add(i - 100)
-    first: int = 0
-    total: int = 0
-    for i in range(3):
-        first += 1
-        total += s.pop()
     s.symmetric_difference_update(set())
-    rest: int = 0
-    lo: int = 1000
-    hi: int = -1000
-    while len(s) > 0:
-        v: int = s.pop()
-        rest += 1
-        total += v
-        if v < lo:
-            lo = v
-        if v > hi:
-            hi = v
-    print(first + rest, total, lo, hi)
+    print(len(s), sum(s), min(s), max(s))
     t: set[int] = set()
     for i in range(20):
         t.add(i)
     for i in range(5):
-        t.pop()
+        t.discard(i)
     t.intersection_update({i for i in range(5, 20)})
-    n: int = 0
-    tot: int = 0
-    while len(t) > 0:
-        tot += t.pop()
-        n += 1
-    print(n, tot)
+    print(len(t), sum(t))
 
 
 main()
