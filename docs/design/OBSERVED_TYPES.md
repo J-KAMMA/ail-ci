@@ -446,3 +446,14 @@ Found while measuring it: the str parameter conversion scanned every UTF-8 byte 
 flag on each call, O(len); a method reading a 3 MB `self.text` 4M times did not finish in 900 s.
 The flag is now `PyUnicode_IS_ASCII` (identical meaning, O(1)): `field_valid` 0.319 -> 0.306,
 `tokenizer` 0.066 -> 0.061.
+
+**obs5 result** (`obs5.json`, all 15 modules, instructions vs CPython): corpus 0.594 -> 0.331
+(1.68x -> 3.02x vs CPython), natives 65 -> 84 (`hand`; `bare+obs` 0.331 with 86); `bitset_bloom`
+0.919 -> 0.240, `csv_parse` 0.547 -> 0.213, `dataframe_group` 0.510 -> 0.413, `edit_dist`
+0.962 -> 0.068, `field_valid` 0.319 -> 0.308, `float_loops` 0.626 -> 0.489, `hashing` 1.000 -> 0.276,
+`json_parse` 0.843 -> 0.840, `rolling_stats` 0.171 -> 0.127, `sort_rank` 0.995 -> 0.181,
+`tokenizer` 0.066 -> 0.061; `ast_lint`, `graph_search`, `matrix`, `tree_build` unchanged; all 30
+builds byte-identical to the oracle and live CPython. Remaining refusals (same weighting):
+`graph_search` nested-list parameters 4.5% (core `to_c` work), `json_parse` field stores 4.7%
+(opt-in subset loses; value-returning and calling methods not covered), `ast_lint` tuple trees
+6.9%, `split_lines` 0.9%, `norm` (`**`) 0.5%.
