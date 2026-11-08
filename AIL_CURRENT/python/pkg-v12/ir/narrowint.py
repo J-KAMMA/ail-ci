@@ -415,7 +415,7 @@ def _local_use_ok(node, name, parents):
 
 
 def locals(fn, ctx, classes=None):
-    if not enabled():
+    if not enabled() or os.environ.get('AIL_NARROW_LOCALS','1')=='0':
         return frozenset()
     register()
     excluded = set()
@@ -524,7 +524,7 @@ def prepare(fns, classes, classdefs):
     if not enabled():
         return
     register()
-    if not classes:
+    if not classes or os.environ.get('AIL_NARROW_FIELDS','1')=='0':
         return
     names = set()
     for info in classes.values():
