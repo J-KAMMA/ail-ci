@@ -58,6 +58,33 @@ class AstTest(unittest.TestCase):
                 self.assertEqual(ailast.dump(nodes, True, False, 2), ast.dump(tree, indent=2))
                 self.assertEqual(ailast.dump(nodes, True, True, "\t"), ast.dump(tree, include_attributes=True, indent="\t"))
 
+    def test_end_positions_none_are_omitted(self):
+        tree = ast.parse("x = 7\n")
+        for node in ast.walk(tree):
+            if hasattr(node, "end_lineno"):
+                node.end_lineno = None
+                node.end_col_offset = None
+        nodes = from_cpython.convert(tree)
+        for include in (False, True):
+            self.assertEqual(ailast.dump(nodes, include_attributes=include),
+                             ast.dump(tree, include_attributes=include))
+        direct = ailast.Name("x", ailast.Load(), 1, 0)
+        self.assertEqual(ailast.dump(direct, include_attributes=True),
+                         ast.dump(ast.Name("x", ast.Load(), lineno=1, col_offset=0),
+                                  include_attributes=True))
+        zeros = ailast.Name("x", ailast.Load(), 1, 0, 0, 0)
+        self.assertEqual(ailast.dump(zeros, include_attributes=True),
+                         ast.dump(ast.Name("x", ast.Load(), lineno=1, col_offset=0,
+                                           end_lineno=0, end_col_offset=0),
+                                  include_attributes=True))
+        mixed = ast.parse("y = 2\n")
+        for node in ast.walk(mixed):
+            if hasattr(node, "end_col_offset"):
+                node.end_col_offset = None
+        mixed_nodes = from_cpython.convert(mixed)
+        self.assertEqual(ailast.dump(mixed_nodes, include_attributes=True),
+                         ast.dump(mixed, include_attributes=True))
+
     def test_walk_and_child_order(self):
         for path in fixed_files():
             with self.subTest(path=path):

@@ -118,6 +118,12 @@ from that probe are avoided:
 - `_fields` / `_attributes` are tuples of strings and `_optional` is a tuple of strings; `repr`,
   `isinstance`, `getattr` by a name read from a tuple, generators, nested functions and tuple returns
   all work on the general path (probed).
+- The end positions are optional attributes, as in CPython 3.12: every class that has positions in
+  `_attributes` also lists `'end_lineno'` and `'end_col_offset'` in `_optional`, carries class
+  attributes `end_lineno = None` / `end_col_offset = None`, and defaults the constructor arguments to
+  `None`.  `dump(include_attributes=True)` therefore omits an end position whose value is `None`, and
+  prints an explicit `0` as CPython does; `lineno` / `col_offset` are not optional and print even when
+  `None`.
 
 ## Stage 1
 
@@ -160,12 +166,15 @@ non-ASCII text (`héllo 日本`), quoted text and `b"\x00b\xff"`.
 - **An Ellipsis constant.**  `x = ...` is refused by name (`not in the subset: a constant of type
   ellipsis`), so a stage-2 tree cannot hold `Constant(value=Ellipsis)`.  Stage 1 handles the one
   Ellipsis constant that occurs in S376.  The 40-tree stage-2 self-test does not use Ellipsis.
+- **A complex constant.**  `x = 1j` is refused by name (`not in the subset: a constant of type
+  complex`), so a stage-2 tree cannot hold `Constant(value=1j)` either.  Stage 1 dumps a complex
+  `Constant` exactly as `ast.dump` does; the 40-tree stage-2 self-test does not use complex.
 - The general-path note above is the only build note; it is not a semantic difference.
 
 ## Test
 
 `AIL_CURRENT/test_ail_selfhost_ast.py` (registered by `AIL_CURRENT/tests.d/test_ail_selfhost_ast.txt`)
 runs 30 fixed S376 files through stage 1 with both attribute settings and the dump arguments, checks
-`walk` / `iter_child_nodes` order, checks the big-int and Ellipsis stage-1 dumps and the default-build
-big-int refusal, and builds `ast_selftest.py` for stage 2 (skipped without a C compiler).  It passes
-in about 15 s.
+`walk` / `iter_child_nodes` order, checks that a `None` end position is omitted while an explicit `0`
+is printed, checks the big-int and Ellipsis stage-1 dumps and the default-build big-int refusal, and
+builds `ast_selftest.py` for stage 2 (skipped without a C compiler).  It passes in about 15 s.

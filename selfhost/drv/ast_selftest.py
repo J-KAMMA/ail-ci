@@ -84,7 +84,8 @@ def eh(t, s, body, ln, col):
 
 
 def tree1():
-    return Module([ex(cs(1, 1, 0), 1, 0)], [])
+    no_end = Expr(Name("n", Load(), 2, 0), 2, 0)
+    return Module([ex(cs(1, 1, 0), 1, 0), no_end], [])
 
 
 def tree2():

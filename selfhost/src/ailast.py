@@ -1,4 +1,4 @@
-"""ailast: CPython 3.12's AST node classes written in AIL (plain Python that CPython and AIL both run).
+"""ailast: the CPython 3.12 AST node classes S376 uses, written in AIL (plain Python both run).
 
 A node holds exactly the fields and attributes CPython's ``ast`` gives it, in CPython's order.
 ``dump`` is CPython 3.12's ``ast.dump`` (``Lib/ast.py``), ``walk`` is breadth first in the order of
@@ -41,9 +41,11 @@ class AnnAssign(AST):
     _typename = "AnnAssign"
     _fields = ('target', 'annotation', 'value', 'simple')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('value',)
+    _optional = ('value', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     value = None
-    def __init__(self, target, annotation, value, simple, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, target, annotation, value, simple, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.target = target
         self.annotation = annotation
         self.value = value
@@ -57,9 +59,11 @@ class Assert(AST):
     _typename = "Assert"
     _fields = ('test', 'msg')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('msg',)
+    _optional = ('msg', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     msg = None
-    def __init__(self, test, msg, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, test, msg, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.test = test
         self.msg = msg
         self.lineno = lineno
@@ -71,9 +75,11 @@ class Assign(AST):
     _typename = "Assign"
     _fields = ('targets', 'value', 'type_comment')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('type_comment',)
+    _optional = ('type_comment', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     type_comment = None
-    def __init__(self, targets, value, type_comment, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, targets, value, type_comment, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.targets = targets
         self.value = value
         self.type_comment = type_comment
@@ -86,8 +92,10 @@ class Attribute(AST):
     _typename = "Attribute"
     _fields = ('value', 'attr', 'ctx')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, value, attr, ctx, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, value, attr, ctx, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.attr = attr
         self.ctx = ctx
@@ -100,8 +108,10 @@ class AugAssign(AST):
     _typename = "AugAssign"
     _fields = ('target', 'op', 'value')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, target, op, value, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, target, op, value, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.target = target
         self.op = op
         self.value = value
@@ -130,8 +140,10 @@ class BinOp(AST):
     _typename = "BinOp"
     _fields = ('left', 'op', 'right')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, left, op, right, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, left, op, right, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.left = left
         self.op = op
         self.right = right
@@ -168,8 +180,10 @@ class BoolOp(AST):
     _typename = "BoolOp"
     _fields = ('op', 'values')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, op, values, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, op, values, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.op = op
         self.values = values
         self.lineno = lineno
@@ -181,8 +195,10 @@ class Break(AST):
     _typename = "Break"
     _fields = ()
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.lineno = lineno
         self.col_offset = col_offset
         self.end_lineno = end_lineno
@@ -192,8 +208,10 @@ class Call(AST):
     _typename = "Call"
     _fields = ('func', 'args', 'keywords')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, func, args, keywords, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, func, args, keywords, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.func = func
         self.args = args
         self.keywords = keywords
@@ -206,8 +224,10 @@ class ClassDef(AST):
     _typename = "ClassDef"
     _fields = ('name', 'bases', 'keywords', 'body', 'decorator_list', 'type_params')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, name, bases, keywords, body, decorator_list, type_params, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, name, bases, keywords, body, decorator_list, type_params, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.name = name
         self.bases = bases
         self.keywords = keywords
@@ -223,8 +243,10 @@ class Compare(AST):
     _typename = "Compare"
     _fields = ('left', 'ops', 'comparators')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, left, ops, comparators, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, left, ops, comparators, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.left = left
         self.ops = ops
         self.comparators = comparators
@@ -237,9 +259,11 @@ class Constant(AST):
     _typename = "Constant"
     _fields = ('value', 'kind')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('kind',)
+    _optional = ('kind', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     kind = None
-    def __init__(self, value, kind, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, value, kind, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.kind = kind
         self.lineno = lineno
@@ -251,8 +275,10 @@ class Continue(AST):
     _typename = "Continue"
     _fields = ()
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.lineno = lineno
         self.col_offset = col_offset
         self.end_lineno = end_lineno
@@ -270,8 +296,10 @@ class Delete(AST):
     _typename = "Delete"
     _fields = ('targets',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, targets, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, targets, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.targets = targets
         self.lineno = lineno
         self.col_offset = col_offset
@@ -282,8 +310,10 @@ class Dict(AST):
     _typename = "Dict"
     _fields = ('keys', 'values')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, keys, values, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, keys, values, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.keys = keys
         self.values = values
         self.lineno = lineno
@@ -295,8 +325,10 @@ class DictComp(AST):
     _typename = "DictComp"
     _fields = ('key', 'value', 'generators')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, key, value, generators, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, key, value, generators, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.key = key
         self.value = value
         self.generators = generators
@@ -325,10 +357,12 @@ class ExceptHandler(AST):
     _typename = "ExceptHandler"
     _fields = ('type', 'name', 'body')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('type', 'name')
+    _optional = ('type', 'name', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     type = None
     name = None
-    def __init__(self, type, name, body, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, type, name, body, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.type = type
         self.name = name
         self.body = body
@@ -341,8 +375,10 @@ class Expr(AST):
     _typename = "Expr"
     _fields = ('value',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, value, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, value, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.lineno = lineno
         self.col_offset = col_offset
@@ -361,9 +397,11 @@ class For(AST):
     _typename = "For"
     _fields = ('target', 'iter', 'body', 'orelse', 'type_comment')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('type_comment',)
+    _optional = ('type_comment', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     type_comment = None
-    def __init__(self, target, iter, body, orelse, type_comment, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, target, iter, body, orelse, type_comment, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.target = target
         self.iter = iter
         self.body = body
@@ -378,9 +416,11 @@ class FormattedValue(AST):
     _typename = "FormattedValue"
     _fields = ('value', 'conversion', 'format_spec')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('format_spec',)
+    _optional = ('format_spec', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     format_spec = None
-    def __init__(self, value, conversion, format_spec, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, value, conversion, format_spec, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.conversion = conversion
         self.format_spec = format_spec
@@ -393,10 +433,12 @@ class FunctionDef(AST):
     _typename = "FunctionDef"
     _fields = ('name', 'args', 'body', 'decorator_list', 'returns', 'type_comment', 'type_params')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('returns', 'type_comment')
+    _optional = ('returns', 'type_comment', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     returns = None
     type_comment = None
-    def __init__(self, name, args, body, decorator_list, returns, type_comment, type_params, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, name, args, body, decorator_list, returns, type_comment, type_params, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.name = name
         self.args = args
         self.body = body
@@ -413,8 +455,10 @@ class GeneratorExp(AST):
     _typename = "GeneratorExp"
     _fields = ('elt', 'generators')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, elt, generators, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, elt, generators, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.elt = elt
         self.generators = generators
         self.lineno = lineno
@@ -426,8 +470,10 @@ class Global(AST):
     _typename = "Global"
     _fields = ('names',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, names, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, names, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.names = names
         self.lineno = lineno
         self.col_offset = col_offset
@@ -454,8 +500,10 @@ class If(AST):
     _typename = "If"
     _fields = ('test', 'body', 'orelse')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, test, body, orelse, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, test, body, orelse, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.test = test
         self.body = body
         self.orelse = orelse
@@ -468,8 +516,10 @@ class IfExp(AST):
     _typename = "IfExp"
     _fields = ('test', 'body', 'orelse')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, test, body, orelse, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, test, body, orelse, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.test = test
         self.body = body
         self.orelse = orelse
@@ -482,8 +532,10 @@ class Import(AST):
     _typename = "Import"
     _fields = ('names',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, names, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, names, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.names = names
         self.lineno = lineno
         self.col_offset = col_offset
@@ -494,10 +546,12 @@ class ImportFrom(AST):
     _typename = "ImportFrom"
     _fields = ('module', 'names', 'level')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('module', 'level')
+    _optional = ('module', 'level', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     module = None
     level = None
-    def __init__(self, module, names, level, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, module, names, level, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.module = module
         self.names = names
         self.level = level
@@ -542,8 +596,10 @@ class JoinedStr(AST):
     _typename = "JoinedStr"
     _fields = ('values',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, values, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, values, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.values = values
         self.lineno = lineno
         self.col_offset = col_offset
@@ -562,8 +618,10 @@ class Lambda(AST):
     _typename = "Lambda"
     _fields = ('args', 'body')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, args, body, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, args, body, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.args = args
         self.body = body
         self.lineno = lineno
@@ -575,8 +633,10 @@ class List(AST):
     _typename = "List"
     _fields = ('elts', 'ctx')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, elts, ctx, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, elts, ctx, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.elts = elts
         self.ctx = ctx
         self.lineno = lineno
@@ -588,8 +648,10 @@ class ListComp(AST):
     _typename = "ListComp"
     _fields = ('elt', 'generators')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, elt, generators, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, elt, generators, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.elt = elt
         self.generators = generators
         self.lineno = lineno
@@ -658,8 +720,10 @@ class Name(AST):
     _typename = "Name"
     _fields = ('id', 'ctx')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, id, ctx, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, id, ctx, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.id = id
         self.ctx = ctx
         self.lineno = lineno
@@ -671,8 +735,10 @@ class NamedExpr(AST):
     _typename = "NamedExpr"
     _fields = ('target', 'value')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, target, value, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, target, value, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.target = target
         self.value = value
         self.lineno = lineno
@@ -684,8 +750,10 @@ class Nonlocal(AST):
     _typename = "Nonlocal"
     _fields = ('names',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, names, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, names, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.names = names
         self.lineno = lineno
         self.col_offset = col_offset
@@ -728,8 +796,10 @@ class Pass(AST):
     _typename = "Pass"
     _fields = ()
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.lineno = lineno
         self.col_offset = col_offset
         self.end_lineno = end_lineno
@@ -755,10 +825,12 @@ class Raise(AST):
     _typename = "Raise"
     _fields = ('exc', 'cause')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('exc', 'cause')
+    _optional = ('exc', 'cause', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     exc = None
     cause = None
-    def __init__(self, exc, cause, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, exc, cause, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.exc = exc
         self.cause = cause
         self.lineno = lineno
@@ -770,9 +842,11 @@ class Return(AST):
     _typename = "Return"
     _fields = ('value',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('value',)
+    _optional = ('value', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     value = None
-    def __init__(self, value, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, value, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.lineno = lineno
         self.col_offset = col_offset
@@ -783,8 +857,10 @@ class Set(AST):
     _typename = "Set"
     _fields = ('elts',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, elts, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, elts, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.elts = elts
         self.lineno = lineno
         self.col_offset = col_offset
@@ -795,8 +871,10 @@ class SetComp(AST):
     _typename = "SetComp"
     _fields = ('elt', 'generators')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, elt, generators, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, elt, generators, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.elt = elt
         self.generators = generators
         self.lineno = lineno
@@ -808,11 +886,13 @@ class Slice(AST):
     _typename = "Slice"
     _fields = ('lower', 'upper', 'step')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('lower', 'upper', 'step')
+    _optional = ('lower', 'upper', 'step', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     lower = None
     upper = None
     step = None
-    def __init__(self, lower, upper, step, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, lower, upper, step, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.lower = lower
         self.upper = upper
         self.step = step
@@ -825,8 +905,10 @@ class Starred(AST):
     _typename = "Starred"
     _fields = ('value', 'ctx')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, value, ctx, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, value, ctx, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.ctx = ctx
         self.lineno = lineno
@@ -854,8 +936,10 @@ class Subscript(AST):
     _typename = "Subscript"
     _fields = ('value', 'slice', 'ctx')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, value, slice, ctx, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, value, slice, ctx, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.slice = slice
         self.ctx = ctx
@@ -868,8 +952,10 @@ class Try(AST):
     _typename = "Try"
     _fields = ('body', 'handlers', 'orelse', 'finalbody')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, body, handlers, orelse, finalbody, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, body, handlers, orelse, finalbody, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.body = body
         self.handlers = handlers
         self.orelse = orelse
@@ -883,8 +969,10 @@ class Tuple(AST):
     _typename = "Tuple"
     _fields = ('elts', 'ctx')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, elts, ctx, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, elts, ctx, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.elts = elts
         self.ctx = ctx
         self.lineno = lineno
@@ -912,8 +1000,10 @@ class UnaryOp(AST):
     _typename = "UnaryOp"
     _fields = ('op', 'operand')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, op, operand, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, op, operand, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.op = op
         self.operand = operand
         self.lineno = lineno
@@ -925,8 +1015,10 @@ class While(AST):
     _typename = "While"
     _fields = ('test', 'body', 'orelse')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, test, body, orelse, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, test, body, orelse, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.test = test
         self.body = body
         self.orelse = orelse
@@ -939,9 +1031,11 @@ class With(AST):
     _typename = "With"
     _fields = ('items', 'body', 'type_comment')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('type_comment',)
+    _optional = ('type_comment', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     type_comment = None
-    def __init__(self, items, body, type_comment, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, items, body, type_comment, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.items = items
         self.body = body
         self.type_comment = type_comment
@@ -954,9 +1048,11 @@ class Yield(AST):
     _typename = "Yield"
     _fields = ('value',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('value',)
+    _optional = ('value', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     value = None
-    def __init__(self, value, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, value, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.lineno = lineno
         self.col_offset = col_offset
@@ -967,8 +1063,10 @@ class YieldFrom(AST):
     _typename = "YieldFrom"
     _fields = ('value',)
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ()
-    def __init__(self, value, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    _optional = ('end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
+    def __init__(self, value, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.value = value
         self.lineno = lineno
         self.col_offset = col_offset
@@ -979,9 +1077,11 @@ class alias(AST):
     _typename = "alias"
     _fields = ('name', 'asname')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('asname',)
+    _optional = ('asname', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     asname = None
-    def __init__(self, name, asname, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, name, asname, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.name = name
         self.asname = asname
         self.lineno = lineno
@@ -993,10 +1093,12 @@ class arg(AST):
     _typename = "arg"
     _fields = ('arg', 'annotation', 'type_comment')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('annotation', 'type_comment')
+    _optional = ('annotation', 'type_comment', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     annotation = None
     type_comment = None
-    def __init__(self, arg, annotation, type_comment, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, arg, annotation, type_comment, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.arg = arg
         self.annotation = annotation
         self.type_comment = type_comment
@@ -1036,9 +1138,11 @@ class keyword(AST):
     _typename = "keyword"
     _fields = ('arg', 'value')
     _attributes = ('lineno', 'col_offset', 'end_lineno', 'end_col_offset')
-    _optional = ('arg',)
+    _optional = ('arg', 'end_lineno', 'end_col_offset')
+    end_lineno = None
+    end_col_offset = None
     arg = None
-    def __init__(self, arg, value, lineno=0, col_offset=0, end_lineno=0, end_col_offset=0):
+    def __init__(self, arg, value, lineno=0, col_offset=0, end_lineno=None, end_col_offset=None):
         self.arg = arg
         self.value = value
         self.lineno = lineno

@@ -5,7 +5,8 @@
 CPython only: it imports ``ast`` to read the tree, which AIL does not build.  ``convert`` copies each
 node's fields in CPython's order and its four position attributes (lineno, col_offset, end_lineno,
 end_col_offset) when the node has them.  The result dumps with ``ailast.dump`` exactly as the CPython
-tree dumps with ``ast.dump``.
+tree dumps with ``ast.dump``.  It covers the 87 node types S376 uses (the classes defined in
+``ailast``); a node type outside that set has no ``ailast`` class and raises ``AttributeError``.
 """
 import ast
 import sys
