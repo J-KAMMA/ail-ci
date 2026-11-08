@@ -1,3 +1,31 @@
+## 2026-11-08 -- shparse1 gate reproduced: CPython 3.12.16 f-string AST, not a parser bug (job-shparse1-11090331)
+
+The gate was right this time, and the earlier two rounds missed why.  CI's `actions/setup-python`
+`python-version: '3.12'` installs **3.12.16**, while the runner's `/usr/bin/python3` is **3.12.3**;
+the two CPython patch releases build *different* `ast` trees for a format spec.  3.12.0-3.12.3 (the
+reference `lab/selfhost/PARSE.md` was measured on) gives a spec an empty `Constant(value='')` before
+each `{{` group and after a spec that ends in a replacement field; 3.12.4+ dropped some of those and
+moved an escaped `{{` out of the spec into literal text of the enclosing f-string.  So
+`f'{x:{{}}}'` is `[Constant(''), FormattedValue(Dict()), Constant('')]` on 3.12.3 and
+`[FormattedValue(Dict())]` on 3.12.16, and `f'{x:{{}}{{}}}'` keeps a literal `'}'` on 3.12.16, while
+`f'{x:{{}}{{}}{{}}}'` is a `SyntaxError` there.  `ailparse` was right all along: on 3.12.16 it
+reproduces the pinned 3.12.3 dump for all 13 divergent edge expressions.  The earlier rounds ran on
+3.12.3 and so saw nothing.
+
+`test_ail_selfhost_parse.py` now compares against a spelling-independent expectation instead of the
+running interpreter's: `_strip_empty_constants` removes CPython's empty `Constant(value='')`
+placeholders (and the comma that joins them) from both sides, and `REF_PINS` writes out the
+documented 3.12.3 dump for the six specs whose *structure* differs rather than just the empty nodes.
+Both spellings evaluate to the same string on every version.  No compiler or parser file changed.
+
+Counts, `python3 -m unittest -q test_ail_selfhost_parse`: **3.12.3 5/5 pass, 3.12.16 5/5 pass**
+(3.12.16 was 12 failures + 1 error before).  The other four flagged modules pass on both (obj_refs
+3/3, safetynet 5/5, unified 14/14, virtual_dispatch 6/6).  Full S376 (164,185 parseable segments)
+compares clean after the same normalization on both versions.  Probes
+`/tmp/probes/p1_fstring_specs.py` and `/tmp/probes/p2_braces_runtime.py` match CPython on the
+default and `AIL_UNIFIED_FORCE=1` builds, and print byte-identically on 3.12.3 and 3.12.16.  No
+DIFFERENCES row: this is a test-expectation fix, not an output difference.
+
 ## 2026-11-08 -- shparse1 suite gate again: the five flagged modules still pass (job-shparse1-11090009)
 
 The gate repeated the same five modules (`test_ail_obj_refs`, `test_ail_safetynet`,

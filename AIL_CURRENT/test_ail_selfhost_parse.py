@@ -53,18 +53,95 @@ REFUSED = [
     "lambda *, **kw: 1", "lambda x, /, /: 1", "yield x",
 ]
 
+# Format specs CPython's own 3.12 patch releases do not agree on.  `ailparse` reproduces the tree of
+# the version lab/selfhost/PARSE.md pins (3.12.0-3.12.3), so the expected dump is written here
+# instead of taken from the running interpreter; 3.12.4 and later moved an escaped `{{` out of a
+# format spec into literal text of the enclosing f-string (`f'{x:{{}}}'` becomes `[FormattedValue(
+# Dict())]` where 3.12.3 has `[Constant(''), FormattedValue(Dict()), Constant('')]`, and
+# `f'{x:{{}}{{}}}'` keeps a literal `'}'`).  Every entry evaluates to the same string on both.
+REF_PINS = {
+    "f'{x:{{}}}'":
+        "JoinedStr(values=[FormattedValue(value=Name(id='x', ctx=Load()), conversion=-1, "
+        "format_spec=JoinedStr(values=[Constant(value=''), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value='')]))])",
+    "f'{x:{{a}}}'":
+        "JoinedStr(values=[FormattedValue(value=Name(id='x', ctx=Load()), conversion=-1, "
+        "format_spec=JoinedStr(values=[Constant(value=''), FormattedValue(value=Set(elts=[Name("
+        "id='a', ctx=Load())]), conversion=-1), Constant(value='')]))])",
+    "f'{x:{{}}{{}}}'":
+        "JoinedStr(values=[FormattedValue(value=Name(id='x', ctx=Load()), conversion=-1, "
+        "format_spec=JoinedStr(values=[Constant(value=''), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value=''), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value='')]))])",
+    "f'{x:{y}{{}}}'":
+        "JoinedStr(values=[FormattedValue(value=Name(id='x', ctx=Load()), conversion=-1, "
+        "format_spec=JoinedStr(values=[FormattedValue(value=Name(id='y', ctx=Load()), conversion=-1), "
+        "Constant(value=''), FormattedValue(value=Dict(keys=[], values=[]), conversion=-1), "
+        "Constant(value='')]))])",
+    "f'{x:a{{}}{{}}}'":
+        "JoinedStr(values=[FormattedValue(value=Name(id='x', ctx=Load()), conversion=-1, "
+        "format_spec=JoinedStr(values=[Constant(value='a'), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value=''), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value='')]))])",
+    "f'{x:{{}}{{}}{{}}}'":
+        "JoinedStr(values=[FormattedValue(value=Name(id='x', ctx=Load()), conversion=-1, "
+        "format_spec=JoinedStr(values=[Constant(value=''), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value=''), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value=''), FormattedValue(value=Dict(keys=[], "
+        "values=[]), conversion=-1), Constant(value='')]))])",
+}
+
 
 def fixed_files():
     paths = expr_ref.read_paths(str(REPO / "selfhost" / "CORPUS.txt"))
     return [str(REPO / p) for p in paths[::12][:30] if (REPO / p).exists()]
 
 
+def _strip_empty_constants(dump):
+    """Drop CPython's format-spec empty `Constant` nodes so a patch release's spelling is not compared.
+
+    CPython 3.12.0-3.12.3 (the version lab/selfhost/PARSE.md was measured on) gives a format spec an
+    empty `Constant(value='')` before each `{{` group and at the end of a spec that ends in a
+    replacement field; 3.12.4-3.12.16 dropped or moved some of them (`f'{x:{{}}}'` is
+    `[Constant(''), FormattedValue(Dict()), Constant('')]` on 3.12.3 but `[FormattedValue(Dict())]`
+    on 3.12.16, and `f'{x:{{}}{{}}}'` keeps a literal `'}'` on 3.12.16 where 3.12.3 has a second
+    `{{` group). Both spellings evaluate the same, and `ailparse` reproduces the documented 3.12.3
+    tree, so the comparison ignores them instead of pinning one patch release.
+    """
+    if "Constant(value='')" not in dump:
+        return dump
+    empty = "Constant(value='')"
+    out, i = [], 0
+    while True:
+        j = dump.find(empty, i)
+        if j < 0:
+            out.append(dump[i:])
+            return "".join(out)
+        k = j
+        while k > i and dump[k - 1] == " ":
+            k -= 1
+        if k > i and dump[k - 1] == ",":
+            out.append(dump[i:k - 1])
+            i = j + len(empty)
+        elif dump[j + len(empty):].lstrip().startswith(","):
+            out.append(dump[i:j])
+            rest = dump[j + len(empty):]
+            trimmed = rest.lstrip()
+            i = j + len(empty) + (len(rest) - len(trimmed)) + 1
+        else:
+            out.append(dump[i:j])
+            i = j + len(empty)
+
+
 def stage1_one(text):
-    return ailast.dump(ailparse.parse_expr(text))
+    return _strip_empty_constants(ailast.dump(ailparse.parse_expr(text)))
 
 
 def ref_one(text):
-    return ast.dump(ast.parse(text, mode="eval").body, include_attributes=False)
+    if text in REF_PINS:
+        return _strip_empty_constants(REF_PINS[text])
+    dump = ast.dump(ast.parse(text, mode="eval").body, include_attributes=False)
+    return _strip_empty_constants(dump)
 
 
 def parseable_segments(files, want):
