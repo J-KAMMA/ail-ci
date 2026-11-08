@@ -7,37 +7,37 @@
 --- LAST REVIEW ---
 ## review 1
 [model commandcode/deepseek-v4.1-flash]
-I have enough evidence. Timing: started 17:45, now ~18:02.
+## Review: fcdict1 (branch `job-fcdict1b_rr2-11090308`)
 
-## Review: fcdict1 (branch `job-fcdict1b_rr2-11090017`)
+Started 20:04, now 20:21.
 
-**What the diff really does:** it adds only `lab/reach/fcdict1/*.py` (14 probes) and `lab/reach/fcdict1.md`. No compiler, runtime or test file changes. The worker's own notes say so ("Nothing that survives"); the report has no final text.
+**What the diff really does:** adds a second, unconditional dict-of-records lowering pass to `pyfunc.to_c` (`_fc_lower_dict_records`, 700 lines) that AST-parses and `ast.unparse`s the whole Python-surface source, monkey-patches `cruntime.REQUIRES['BTAB'] += 'STR'`, and adds the test module, manifest entries and notes. Nothing else changed (no `bench/apps`, no `language_examples`).
 
-**Task result:** not delivered. Base (`origin/integ` ff1dcc26) records in `lab/pyproof/results.jsonl`: ledger_bin = general, ticket_audit = general, `lab/pyperf/run.py --help` = refused. On HEAD nothing changed, so those are still the values. `--strict` on ledger_bin still stops at `a nested def inside a loop ('rv') is not available`; ticket_audit's strict build times out (also timed out at the base, pyproof: "build timed out after 120 s"); pyperf still refused. Target was typed +2 and run.py built/matching.
+**Defects**
+
+1. **Done-check unmet: typed +2 not delivered, and the stated reason is false.** `ledger_bin --strict` → rc 3 `a nested def inside a loop ('rv') is not available`; `ticket_audit --strict` → rc 3 `'_rkey__' is an int and is being assigned a bytes`; `lab/pyperf/run.py` → rc 3, still refused. Expected per task: both programs typed, `run.py --help` built and matching. The notes claim every blocker is "outside this lane's allowed files", but the nested-def refusal is `pyfunc.py:37459` and the mixed-tuple-return refusal is `pyfunc.py:33555` — both in the lane's own file.
+2. **Manifest stale; the harness cannot run any test.** `python3 tools/update_manifest.py --check` → `stale python/pkg-v12/pyfunc.py` (manifest has `c14708…`, file is `e1a767…`). Consequently `tools/par_check.py -j 2 test_ail_fcdict1 test_ail_safetynet` dies in preflight with `ValueError: hash mismatch: python/pkg-v12/pyfunc.py`. Expected: check passes. (Run directly with `python3 -m unittest`, both pass: 7 tests and 5 tests OK.)
+3. **Strict diagnostics regressed for ticket_audit.** HEAD: `main.py:101`, code `ev, seat, buyer = parts[1:]`, construct `'_rkey__' is an int and is being assigned a bytes`. Base: the real construct `events[ev] = [vc, cents, set()]`. Expected the base's named property, not an internal temp from partial lowering.
 
 **Claims checked**
-- Base classifications (all three) — **verified** (`results.jsonl`, `integ_sha ff1dcc26`).
-- ledger_bin strict blockers (nested def; dict-of-containers at 116/118) — **partially verified** (first reason and `acc.get(r[1])` general-path note reproduced; "9x nested def" count not verified).
-- ticket_audit blockers at lines 98/111 — **unverified** (strict compile exceeds 200 s here).
-- "No change to pyfunc.py/optlib.py/unified.py" — **verified** (diff has only `lab/reach/` files).
-- p05 / p08 "already typed at base" — p05 **verified** (strict compile succeeds, matches CPython); p08 compiles and matches, but `cmp.sh` passes no argv, so the probe exits 1 with `IndexError` and never exercises a value beyond int64 — **vacuous, not the required boundary probe**.
-- p01, p09, p14 refusals — **verified** (all refused; p01 with the dict-of-containers message).
-- "dict-of-records lowering reached again from `pyfunc.to_c` via `optlib.rewrite`" — **FALSE**. `lower_dict_of_records` has one call site, `ail_syntax.py:5897` (inside `python_surface`); `optlib.rewrite` never calls it. The idempotency hazard described in the notes does not exist as stated, and would misguide the next attempt.
-- Required new test module / `tests.d` line — **absent** (verified).
-- 4a: no `bench/apps` or `language_examples` edits — verified.
+- 14-probe table — **verified exactly**: p01/p05/p07/p08/p10/p11 typed, the other eight refused, all match CPython in both builds (p08 by design stops loudly).
+- p07 prints `['x', 6, True] 0 False` — **verified**. p08 OverflowError for no arg and for a >int64 arg — **verified**.
+- `lower_dict_of_records` single call site `ail_syntax.py:5897` — **verified** (docs fix correct).
+- Test module present and registered — **verified**; passes directly.
+- "C unchanged for programs not using the shape" — **verified** (`j_plain_hello`, `i_bytes_dict_int`, `g00_000/010/020`: `program.c` byte-identical to base).
+- "not reachable from pyfunc/optlib/unified" — **false in part** (defect 1).
 
-**Pre-existing:** p08's `IndexError` and the ticket_audit strict-build timeout reproduce at the base and are not caused by this change.
+**Probes (all in /tmp/rprobes, `bash ~/tools/cmp.sh … $PWD`):** `a_modlevel` (module-level dict), `c_del_then_write`, `d_two_keys` (print whole dict), `e_float_pos`, `g_bytes_key`, `o_iter_mutate`, `u_missing_get`, `v_reinsert_order`, `w_setdefault_return`, `x_items_slice`, `z_file_selfcontained` (file overwritten after read), `ad_augassign`, `ae_int_key` — all typed on HEAD and match CPython on both builds. `b_pass_arg`, `f_grow`, `k_int_into_bool`, `l_int_into_str`, `m_bool_into_int`, `n_neg_index`, `q_len_row`, `r_row_to_func`, `s_alias_store`, `t_dict_alias`, `ab_list_item_alias`, `ac_two_dicts` — refused (named) and match on the general path. No wrong output or crash found in the new typed shapes.
 
-**Not checked:** manifest (no test module to register), speed (no hot code touched, so inapplicable), remaining probes p02–p04, p06–p07, p10–p13, and the compare-lab case check for the two tasks (no implementation to run it against).
+**Pre-existing:** none found; every probe above behaves the same on `/tmp/base`.
 
-```
+**Unverified:** full pyproof rerun (other programs' typed status), `test_ail_files` / `test_ail_corpus_findings3`, and compare-lab hidden cases. Speed: `program.c` identical on three gdev programs, so no icount change; icount itself not run.
+
 VERDICT: FIX
-1. Feature not implemented — diff adds only probes and notes. Repro: `python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/compare/src/ledger_bin/main.py -o /tmp/o --strict`; expected typed path (task target), actual refusal `a nested def inside a loop ('rv') is not available`, and `results.jsonl` still records `default_path: general` for ledger_bin and ticket_audit and `result: refused` for lab/pyperf/run.py. Typed +2 target unmet.
-2. Required test module missing: `AIL_CURRENT/test_ail_fcdict1.py` and `AIL_CURRENT/tests.d/test_ail_fcdict1.txt` were named deliverables and do not exist.
-3. `lab/reach/fcdict1.md` states a false mechanism: lowering is called from `pyfunc.to_c` via `optlib.rewrite` — actual single call site is `ail_syntax.py:5897` (`python_surface`).
-4. Required int64-boundary probe is vacuous: `lab/reach/fcdict1/p08_int64_record.py` reads `sys.argv[1]` but `cmp.sh` passes no argument, so it exits 1 with `IndexError` on both CPython and AIL (matches, but the "beyond int64" case is never exercised).
-```
-[commandcode stop=end_turn turns=19 out_tokens=8431]
+1. Typed +2 not delivered — `python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/compare/src/ledger_bin/main.py --syntax python --strict -o /tmp/lb` → rc 3 `a nested def inside a loop ('rv') is not available`; expected a typed build. Same for `ticket_audit` (`'_rkey__' is an int and is being assigned a bytes`) and `lab/pyperf/run.py` (refused). Two of those blockers (`pyfunc.py:37459`, `pyfunc.py:33555`) are in the lane's own file, contrary to the report.
+2. `python3 tools/update_manifest.py --check` → `stale python/pkg-v12/pyfunc.py`; expected no output. Effect: `tools/par_check.py` preflight raises `hash mismatch: python/pkg-v12/pyfunc.py`, so the job's tests cannot run under the harness.
+3. `ticket_audit --strict` now reports the internal temp `'_rkey__'` at line 101 instead of the base's named construct `events[ev] = [vc, cents, set()]`; expected the program-level refusal.
+[commandcode stop=end_turn turns=52 out_tokens=31362]
 
 
 --- ORIGINAL TASK ---
