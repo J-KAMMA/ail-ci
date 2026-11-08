@@ -39756,34 +39756,34 @@ class _FcRecordMixin:
         # A key or element that is already a plain name or constant needs no temp: a temp was
         # pre-bound to `int` by `_promote_floats`' default and then refused when a bytes value
         # was assigned to it, which made a lowered program report an internal `_rkey`/`_rval`
-        # name instead of the construct it came from (`events[ev] = [...]`).  A plain read has no
-        # side effect, so emitting it once, in place, is the same evaluation order CPython uses.
-        simple = [index not in self.set_positions and isinstance(elt, (ast.Name, ast.Constant))
-                  for index, elt in enumerate(listnode.elts)]
-        temps = [None if simple[index] else self.fresh('_rval') for index in range(len(values))]
+        # name instead of the construct it came from (`events[ev] = [...]`).  The key and every
+        # element are still emitted strictly left to right (a store's key before the list
+        # display, then each element at its own position), so a call that mutates a name read
+        # earlier in the display sees CPython's order; interleaving the appends is safe because
+        # the row's field lists are private until the final slot assignment.
         simple_key = isinstance(key, (ast.Name, ast.Constant))
-        keytemp = None if simple_key else self.fresh('_rkey')
-        key_ref = None
         out = []
-        for index, (temp, value) in enumerate(zip(temps, values)):
-            if temp is None:
-                continue
-            if index in self.set_positions:
+        if simple_key:
+            key_ref = self.visit(key)
+        else:
+            keytemp = self.fresh('_rkey')
+            out.append(syntax._r_assign(syntax._r_store(keytemp), self.visit(key)))
+            key_ref = syntax._r_load(keytemp)
+        for index, (elt, value) in enumerate(zip(listnode.elts, values)):
+            if index not in self.set_positions and isinstance(elt, (ast.Name, ast.Constant)):
+                out.append(self._append_field(index, value))
+            elif index in self.set_positions:
+                temp = self.fresh('_rval')
                 out.append(syntax._r_ann(
                     syntax._r_store(temp),
                     syntax._r_sub(syntax._r_load('set'),
                                   syntax._r_load(self._set_type(index))),
                     value))
+                out.append(self._append_field(index, syntax._r_load(temp)))
             else:
+                temp = self.fresh('_rval')
                 out.append(syntax._r_assign(syntax._r_store(temp), value))
-        if simple_key:
-            key_ref = self.visit(key)
-        else:
-            out.append(syntax._r_assign(syntax._r_store(keytemp), self.visit(key)))
-            key_ref = syntax._r_load(keytemp)
-        for index, temp in enumerate(temps):
-            out.append(self._append_field(index, values[index] if temp is None
-                                          else syntax._r_load(temp)))
+                out.append(self._append_field(index, syntax._r_load(temp)))
         out.append(syntax._r_assign(
             syntax._r_sub(syntax._r_load(self.d), key_ref, store=True),
             ast.BinOp(left=syntax._r_call(syntax._r_load('len'), [syntax._r_load(self.fields[0])]),

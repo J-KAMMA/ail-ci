@@ -54,8 +54,11 @@ than `Unsupported` (a compiler bug) still surfaces.
 - `_FcRecordMixin._store_row`: a key or value that is already a plain name or constant is emitted
   in place, with no `_rkey`/`_rval` temp.  A temp was default-bound to `int` by `_promote_floats`
   before its bytes assignment, so a lowered store reported an internal name (the review's
-  `'_rkey__' is an int ...` diagnostic) instead of the source construct; the in-place form has the
-  same evaluation order CPython uses because a plain read has no side effect.
+  `'_rkey__' is an int ...` diagnostic) instead of the source construct.  The key and every
+  element are still emitted strictly left to right -- the key before the list display, then each
+  element (plain read in place, or its temp) at its own position -- so a later call that mutates
+  a name read earlier sees CPython's order.  Interleaving the row appends is safe because the
+  field lists are private until the final slot assignment.
 
 Result: the task's reproducer (`p01`) and probes `p05`, `p07`, `p10`, `p11` build typed and match
 CPython; `p08` builds typed and stops loudly at the int64 boundary (see below).  `p07` prints
@@ -109,6 +112,7 @@ each refusal names the program's own construct.
 | p12_set_store | matches | refused |
 | p13_dict_store | matches | refused |
 | p14_var_index_record | matches | refused (variable index over mixed kinds) |
+| p15_order | matches | typed |
 
 `p08` is intentionally loud on the default build: it adds to `INT64_MAX` and must stop rather
 than wrap; with an argument beyond int64 it stops in `int()`.  `--exact-int` refuses the shape by

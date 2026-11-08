@@ -6,9 +6,11 @@ P1  the task's reproducer
     (`lab/pyproof/repro/a-dict-of-containers-lists-sets-or-dicts-as-values.py`) builds on
     the typed path and prints CPython's list text: `v = d[k]` aliases the stored row, so
     `v[0] = v[1]` changes `d[k]` too;
-P2  probes p01, p05, p07, p10 and p11 build typed and match CPython in the default and the
-    `AIL_UNIFIED_FORCE=1` build; p07's row mixes str, int and bool and is printed through
-    CPython's `repr` of each field;
+P2  probes p01, p05, p07, p10, p11 and p15 build typed and match CPython in the default and
+    the `AIL_UNIFIED_FORCE=1` build; p07's row mixes str, int and bool and is printed through
+    CPython's `repr` of each field; p15 pins the store's evaluation order -- a call later in
+    the list display must not run before an earlier plain read, and the key is evaluated
+    before the display;
 P3  the shapes the record lowering does not model -- a growing value list, a set value, a
     dict-of-dict, a record printed together with the whole dict, a variable index over mixed
     kinds -- match CPython in the default build and are refused by name at compile time
@@ -41,7 +43,7 @@ COMPARE = REPO / 'lab' / 'compare'
 HAVE_CC = shutil.which('gcc') is not None
 
 TYPED_PROBES = ('p01_repro', 'p05_setdefault_record', 'p07_del_alias', 'p10_alias_write',
-                'p11_get_default')
+                'p11_get_default', 'p15_order')
 REFUSED_PROBES = ('p02_alias_append', 'p03_set_add', 'p04_dictdict_counter', 'p06_print_record',
                   'p09_record_grow', 'p12_set_store', 'p13_dict_store',
                   'p14_var_index_record')
