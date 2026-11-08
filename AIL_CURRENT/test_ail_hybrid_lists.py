@@ -262,6 +262,17 @@ class Proofs(unittest.TestCase):
         self.assertNotIn('Py_BEGIN_ALLOW_THREADS', src[src.index('ail_core_mk(PyObject *const *o) {'):])
         self.assertIn('mk__typed__hybrid_spill(&lp)', src)
 
+    def test_loop_free_body_keeps_the_gil(self):
+        items = [{'name': 'short', 'mangled': 'short__typed', 'params': [('s', 'str')],
+                  'ret': 'bool', 'is_bool_ret': True, 'loops': False},
+                 {'name': 'longer', 'mangled': 'longer__typed', 'params': [('n', 'int')],
+                  'ret': 'int', 'is_bool_ret': False, 'loops': True}]
+        src = hybrid._wrapper_source('m', items)
+        short = src[src.index('ail_core_short(PyObject *const *o) {'):src.index('ail_w_longer')]
+        longer = src[src.index('ail_core_longer(PyObject *const *o) {'):]
+        self.assertNotIn('Py_BEGIN_ALLOW_THREADS', short)
+        self.assertIn('Py_BEGIN_ALLOW_THREADS', longer)
+
 
 @unittest.skipUnless(HAVE_CC and HAVE_HEADERS, 'needs a C compiler and the CPython headers')
 class ListResults(unittest.TestCase):
@@ -291,6 +302,90 @@ class ListResults(unittest.TestCase):
             got = run([sys.executable, '-B', '-c', probe], str(out),
                       env=dict(os.environ, PYTHONPATH=str(out)))
             self.assertEqual(got.stdout.strip(), repr([True] * len(NATIVE)).encode(),
+                             got.stderr[-2000:])
+
+
+BOOLS = '''
+LIMIT = 9
+
+
+def is_ident_start(ch: str) -> bool:
+    return ch.isalpha() or ch == "_"
+
+
+def in_range(n: int) -> bool:
+    return n > 0 and n <= 9
+
+
+def in_limit(n: int) -> bool:
+    return n > 0 and n <= LIMIT
+
+
+def either(a: int, b: int) -> int:
+    return a and b
+
+
+def lies(a: int, b: int) -> bool:
+    return a and b
+
+
+def count(s: str) -> int:
+    n = 0
+    for ch in s:
+        if is_ident_start(ch):
+            n += 1
+    return n
+'''
+
+BOOL_RUNNER = '''
+import bools as m
+for args in (('a',), ('_',), ('1',), ('',), ('\\u6771',)):
+    print('start', args, repr(m.is_ident_start(*args)))
+for n in (-1, 0, 1, 9, 10, 2 ** 70, True):
+    print('range', n, repr(m.in_range(n)), repr(m.in_limit(n)))
+for a, b in ((0, 5), (3, 5), (3, 0), (2 ** 70, 1), (True, 2)):
+    print('either', repr(m.either(a, b)), 'lies', repr(m.lies(a, b)))
+print('count', m.count('ab_1 c\\u67719'))
+try:
+    m.is_ident_start(5)
+except AttributeError as e:
+    print('AttributeError', e)
+'''
+
+
+@unittest.skipUnless(HAVE_CC and HAVE_HEADERS, 'needs a C compiler and the CPython headers')
+class SeededReturns(unittest.TestCase):
+    """Task 2: a `-> bool` (or other scalar) annotation seeds the result kind only when the body
+    proves every return value has that exact type; `return a and b` with int operands returns an
+    int whatever the annotation says, so `lies` stays in CPython."""
+
+    def test_bool_results_match_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-hybrid-bools-') as tmp:
+            src = Path(tmp) / 'bools.py'
+            src.write_text(BOOLS, encoding='utf-8')
+            out = Path(tmp) / 'out'
+            built = run([sys.executable, '-B', CLI, 'build', '--cpython', str(src), '-o', str(out)],
+                        tmp, env=dict(os.environ, AIL_NO_CACHE='1'))
+            self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+            report = json.loads((out / 'build.json').read_text(encoding='utf-8'))
+            # `count` calls a user function, which the body gate still refuses, and `in_limit`
+            # reads a module constant, which `to_c` refuses in a defs-only slice; both are here
+            # for the output comparison.
+            for name in ('is_ident_start', 'in_range', 'either'):
+                self.assertIn(name, report['accelerated'], report['rejected'].get(name))
+            self.assertNotIn('lies', report['accelerated'])
+            runner = Path(tmp) / 'runner.py'
+            runner.write_text(BOOL_RUNNER, encoding='utf-8')
+            want = run([sys.executable, str(runner)], tmp, env=dict(os.environ, PYTHONPATH=tmp))
+            got = run([sys.executable, str(runner)], tmp, env=dict(os.environ, PYTHONPATH=str(out)))
+            self.assertEqual(got.stdout, want.stdout, got.stderr[-2000:])
+            self.assertEqual(got.returncode, want.returncode)
+            probe = ('import bools as m\nnat = m._ail_hybrid_native\n'
+                     'print([nat._ail_is_native(getattr(m, n)) for n in '
+                     '("is_ident_start", "in_range", "either", "lies")])\n')
+            got = run([sys.executable, '-B', '-c', probe], str(out),
+                      env=dict(os.environ, PYTHONPATH=str(out)))
+            self.assertEqual(got.stdout.strip(), b'[True, True, True, False]',
                              got.stderr[-2000:])
 
 

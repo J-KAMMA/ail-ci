@@ -365,6 +365,30 @@ def _module_bindings(tree):
     return names
 
 
+def _module_constants(tree):
+    """{name: kind} for a module-level name bound exactly once, by `NAME = <int/float/str/bool
+    literal>`, and never declared `global` anywhere: the typed emitter reads such a name as that
+    constant, so its kind is the literal's."""
+    counts = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            counts[node.id] = counts.get(node.id, 0) + 1
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                counts[name] = counts.get(name, 0) + 2
+    out = {}
+    for node in getattr(tree, 'body', ()):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Constant) \
+                and counts.get(node.targets[0].id) == 1:
+            v = node.value.value
+            kind = ('bool' if isinstance(v, bool) else 'int' if isinstance(v, int) else
+                    'float' if isinstance(v, float) else 'str' if isinstance(v, str) else None)
+            if kind:
+                out[node.targets[0].id] = kind
+    return out
+
+
 # ---- exact CPython result types (obs3) ---------------------------------------------------------
 #
 # `pymix` kinds are hypotheses: `_merge` turns int+bool evidence into `int` and int+float into
@@ -421,8 +445,9 @@ def _binop_kind(op, left, right):
 class _Kinds:
     """Exact kinds of one function's names (see the section comment above)."""
 
-    def __init__(self, fn, params, shadowed=frozenset(), skip=frozenset()):
+    def __init__(self, fn, params, shadowed=frozenset(), skip=frozenset(), consts=None):
         self.shadowed = set(shadowed)
+        self.consts = dict(consts or {})
         self.env = {}
         sources = {}
         for p, k in params:
@@ -542,7 +567,9 @@ class _Kinds:
                 return 'str'
             return None
         if isinstance(e, ast.Name):
-            return env.get(e.id)
+            if e.id in env:
+                return env[e.id]
+            return self.consts.get(e.id)
         if isinstance(e, ast.BinOp):
             return _binop_kind(e.op, self.kind(e.left), self.kind(e.right))
         if isinstance(e, ast.UnaryOp):
@@ -627,7 +654,7 @@ def _parents(fn):
     return out
 
 
-def _list_return_proof(fn, params, shadowed=frozenset()):
+def _list_return_proof(fn, params, shadowed=frozenset(), consts=None):
     """(kind, name) when `fn` returns a list it built itself whose elements are all CPython
     `int` (never bool) or all `float`; otherwise (None, reason).
 
@@ -710,7 +737,7 @@ def _list_return_proof(fn, params, shadowed=frozenset()):
             return None, 'an unsupported list creation'
     if any(isinstance(e, ast.Starred) for e in elements):
         return None, 'a starred element'
-    kinds = _Kinds(fn, params, shadowed, skip={var})
+    kinds = _Kinds(fn, params, shadowed, skip={var}, consts=consts)
     elem = None
     for _ in range(8):
         found = set()
@@ -738,10 +765,10 @@ def _list_return_proof(fn, params, shadowed=frozenset()):
     return 'list[%s]' % elem, var
 
 
-def _return_kinds(fn, params, shadowed=frozenset()):
+def _return_kinds(fn, params, shadowed=frozenset(), consts=None):
     """The exact kind of every `return` value (None where unknown, 'none' for a bare return or
     falling off the end)."""
-    kinds = _Kinds(fn, params, shadowed)
+    kinds = _Kinds(fn, params, shadowed, consts=consts)
     out = []
     for node in _own_nodes(fn):
         if isinstance(node, ast.Return):
@@ -976,17 +1003,30 @@ _seeded_names = {}
 _old_fixed_point = pymix._fixed_point
 def _seed_returns(tree, fn_facts):
     shadowed = _hy._module_bindings(tree)
+    consts = _hy._module_constants(tree)
     seeded = {}
     for name, f in fn_facts.items():
         if name == pymix.MODULE_SCOPE or f.ret is not None:
             continue
         if any(k is None for k in f.params.values()):
             continue
-        kind, var = _hy._list_return_proof(f.node, list(f.params.items()), shadowed)
+        kind, var = _hy._list_return_proof(f.node, list(f.params.items()), shadowed, consts)
         if kind is None:
-            continue
+            # obs3 task 2: a scalar return annotation (hand-written, or written by
+            # `ail_observe annotate` from the observed kinds) seeds the result kind only when
+            # every return value has exactly that CPython type, e.g. `return a and b` with two
+            # bool operands.  The annotation itself is never trusted.
+            want = _ann_kind(f.node.returns) if f.node.returns is not None else None
+            if want not in (pymix.INT, pymix.FLOAT, pymix.BOOL, pymix.STR):
+                continue
+            kinds = _hy._return_kinds(f.node, list(f.params.items()), shadowed, consts)
+            if not kinds or any(k != want for k in kinds):
+                continue
+            kind = want
+            f.is_bool_ret = want == pymix.BOOL
+        else:
+            f.locals[var] = kind
         f.ret = kind
-        f.locals[var] = kind
         for node in ast.walk(f.node):
             if isinstance(node, ast.Return) and node.value is not None:
                 _SEEDED[id(node.value)] = (node.value, kind)
@@ -1192,6 +1232,8 @@ def _select(src, tree, report, facts):
     big_local = bigcap.marked(tree)
     id_reach, id_any = pyboxed2._mix_identity_unsafe(tree)
     shadowed = _module_bindings(tree)
+    consts = _module_constants(tree)
+    seeded = report.get('seeded') or {}
     chosen = {}
     rejected = {}
     for mangled, pyname, csrc in report.get('mix_units') or []:
@@ -1206,7 +1248,7 @@ def _select(src, tree, report, facts):
         if ret in _LIST:
             # obs3: a returned list becomes a new CPython list of exact ints or floats; the
             # body must prove that element type itself (pymix's own kind may merge int/bool).
-            kind, why = _list_return_proof(funcs[pyname], params, shadowed)
+            kind, why = _list_return_proof(funcs[pyname], params, shadowed, consts)
             if kind != ret:
                 rejected[pyname] = 'list result: %s' % (why if kind is None else
                                                         'elements are %s, not %s' % (kind, ret))
@@ -1215,6 +1257,15 @@ def _select(src, tree, report, facts):
         elif ret not in _SCALAR:
             rejected[pyname] = 'result kind %s stays in CPython' % ret
             continue
+        elif pyname in seeded or any(isinstance(n, ast.Return) and isinstance(n.value, ast.BoolOp)
+                                     for n in _own_nodes(funcs[pyname])):
+            # obs3 task 2: `a and b` returns an operand, not a bool; the result kind (seeded
+            # from an annotation, or pymix's own) must be every return value's exact type.
+            kinds = _return_kinds(funcs[pyname], params, shadowed, consts)
+            if not kinds or any(k != ret for k in kinds):
+                rejected[pyname] = 'a return value is not always %s (%s)' % (
+                    ret, ', '.join(sorted(set(str(k) for k in kinds))))
+                continue
         abi = _unit_abi(csrc, mangled, params, ret)
         if abi is None:
             rejected[pyname] = "the typed clone's C signature is not one the hybrid calls"
@@ -1251,6 +1302,8 @@ def _select(src, tree, report, facts):
             'name': pyname, 'mangled': mangled, 'params': params,
             'ret': ret, 'is_bool_ret': bool(info.get('is_bool_ret')),
             'indexes': indexes, 'abi': abi, 'mix_ovf': mix_ovf,
+            'loops': any(isinstance(n, (ast.For, ast.While, ast.comprehension))
+                         for n in _own_nodes(funcs[pyname])),
             # The trap landing pad turns an index/key stop, an uncaught AIL exception and an
             # int64 overflow stop into "run the original in CPython".  An int result with the
             # mixed-mode overflow signal already handles its overflow stops.
@@ -1694,7 +1747,11 @@ def _wrapper_source(module, items):
         # The list is copied into a C buffer first, but the safe default is not to release while
         # other CPython threads may hold and mutate a container.  Scalar-only calls still release.
         # A list result keeps it too: the unit's one spill slot for a long result is shared.
-        hold = any(kind in _LIST for _p, kind in params) or ret in _LIST
+        # obs3: a body without a loop finishes in well under the ~40 ns a GIL release and
+        # re-acquire costs (tokenizer's one-line `is_ident_char` got slower than CPython), so it
+        # keeps the GIL as well.
+        hold = any(kind in _LIST for _p, kind in params) or ret in _LIST \
+            or not item.get('loops', True)
         begin = [] if hold else ['    Py_BEGIN_ALLOW_THREADS']
         end = [] if hold else ['    Py_END_ALLOW_THREADS']
         n = len(params)

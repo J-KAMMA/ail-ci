@@ -159,6 +159,21 @@ byte-identical to the oracle and live CPython. Sampled native share 19.2% (bound
 what was achieved: the 1 ms sampler under-counts these long-running loop bodies, so the share is a
 ranking, not a bound, here.
 
+**obs3 task 2 (seeded return kinds).** A scalar return annotation (hand-written, or written by
+`ail_observe annotate` from the observed kinds) seeds `pymix`'s result kind only when every return
+value has exactly that CPython type by the same exact-kind pass; the annotation alone is never
+trusted. `return a and b` returns an operand, so it is `bool` only when both operands are exact
+bools (`lies(a: int, b: int) -> bool: return a and b` stays in CPython); selection re-checks every
+seeded result and every `and`/`or` result on the original source. Since the operands are proven
+from guarded parameters, no run-time mismatch is possible; a non-fitting argument falls back as
+before. A loop-free body now keeps the GIL (a release/re-acquire costs more than the body:
+`tokenizer` went 0.767 -> 0.942 with the release, 0.715 without). Still refused: a body that
+calls a user function (`count_idents`), and one that reads a module constant (`valid_len`,
+`score_ok`, `csv_parse`'s `COMMA`: `to_c` refuses the name in its defs-only slice). Measured
+(`obs3_task2.json`, `hand` = `bare+obs`): natives 44 -> 47, corpus 0.719 -> 0.697 (1.43x vs
+CPython; sampled share 30.7%, bound 1.444x); `field_valid` 0.657 -> 0.387 (`is_simple_email`),
+`tokenizer` 0.767 -> 0.715; other modules within noise; all outputs byte-identical.
+
 ## 4. Step 3 split into tasks of at most 2 hours, ranked by measured gain
 
 0. **Load the trap units** (minutes): drop `static` from the trap flag in `_trap_patch`, and make
