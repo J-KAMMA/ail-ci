@@ -18,6 +18,7 @@ Design and the wider semantics are in docs/design/CPYTHON_HYBRID.md (AIL_CURRENT
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import os
 import re
@@ -50,6 +51,607 @@ def _module_name(stem):
 
 def _top_level_functions(tree):
     return {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+# ---- method kernels -----------------------------------------------------------------------------
+#
+# A plain class method is lifted to a top-level kernel whose `self.<field>` reads and writes are
+# ordinary parameters of the field's kind.  The C wrapper below reads those fields from the
+# CPython object before the call and writes the changed numeric fields back afterwards, so the
+# method body itself needs no CPython object model and runs on the same typed ABI as a top-level
+# function.  A method that calls a read-only method of the same class passes the fields it needs
+# explicitly.  Everything this pass cannot prove stays in CPython with a named reason.
+
+_METHOD_PREFIX = '__ail_hybrid_method_'
+_FIELD_PREFIX = '__ail_hybrid_field_'
+_METHOD_KINDS = frozenset({'int', 'float', 'bool', 'str', 'list[int]', 'list[float]'})
+_METHOD_WRITE_KINDS = frozenset({'int', 'float', 'bool'})
+
+_STR_METHOD_KIND = {
+    'upper': 'str', 'lower': 'str', 'casefold': 'str', 'strip': 'str', 'lstrip': 'str',
+    'rstrip': 'str', 'capitalize': 'str', 'title': 'str', 'swapcase': 'str',
+    'replace': 'str', 'removeprefix': 'str', 'removesuffix': 'str', 'join': 'str',
+    'find': 'int', 'rfind': 'int', 'count': 'int',
+    'startswith': 'bool', 'endswith': 'bool', 'isdigit': 'bool', 'isalpha': 'bool',
+    'isalnum': 'bool', 'isspace': 'bool', 'isupper': 'bool', 'islower': 'bool',
+    'istitle': 'bool', 'isdecimal': 'bool', 'isnumeric': 'bool', 'isidentifier': 'bool',
+    'isprintable': 'bool', 'isascii': 'bool',
+}
+
+
+def _ann_kind_text(node):
+    """The simplest typed kind an annotation spells, or None.  Mirrors the analysis seed."""
+    if isinstance(node, ast.Name):
+        return node.id if node.id in ('int', 'float', 'str', 'bool') else None
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
+            and node.value.id == 'list':
+        item = node.slice
+        if isinstance(item, ast.Name) and item.id in ('int', 'float'):
+            return 'list[%s]' % item.id
+    return None
+
+
+def _kind_ast(kind):
+    if kind.startswith('list['):
+        return ast.Subscript(value=ast.Name(id='list', ctx=ast.Load()),
+                             slice=ast.Name(id=kind[5:-1], ctx=ast.Load()), ctx=ast.Load())
+    return ast.Name(id=kind, ctx=ast.Load())
+
+
+def _merge_method_kind(a, b):
+    """Field evidence is exact: CPython distinguishes a bool from an int and an int from a
+    float, and a write back through the typed ABI can only reproduce one of them.  Disagreement
+    therefore stays unresolved instead of being promoted."""
+    if a is None or b is None:
+        return None
+    return a if a == b else None
+
+
+def _field_expr_kind(expr, param_kinds):
+    if isinstance(expr, ast.Constant):
+        value = expr.value
+        if isinstance(value, bool):
+            return 'bool'
+        if isinstance(value, int):
+            return 'int'
+        if isinstance(value, float):
+            return 'float'
+        if isinstance(value, str):
+            return 'str'
+        return None
+    if isinstance(expr, ast.Name):
+        return param_kinds.get(expr.id)
+    if isinstance(expr, ast.List):
+        kind = None
+        for element in expr.elts:
+            kind = _merge_method_kind(kind, _field_expr_kind(element, param_kinds)) \
+                if kind is not None else _field_expr_kind(element, param_kinds)
+            if kind is None:
+                return None
+        if kind in ('int', 'float', 'str'):
+            return 'list[%s]' % kind
+        return None
+    if isinstance(expr, ast.BinOp):
+        left = _field_expr_kind(expr.left, param_kinds)
+        right = _field_expr_kind(expr.right, param_kinds)
+        if isinstance(expr.op, ast.Add) and left == right == 'str':
+            return 'str'
+        if left in ('int', 'float', 'bool') and right in ('int', 'float', 'bool'):
+            if isinstance(expr.op, ast.Div):
+                return 'float'
+            return _merge_method_kind(left, right)
+        return None
+    if isinstance(expr, ast.UnaryOp):
+        if isinstance(expr.op, ast.Not):
+            return 'bool'
+        return _field_expr_kind(expr.operand, param_kinds)
+    if isinstance(expr, ast.Compare):
+        return 'bool'
+    if isinstance(expr, ast.BoolOp):
+        # `a or b` evaluates to one of its operands, so the result kind is theirs only when they
+        # agree; `x or 0` is an int and `x or True` can be either.
+        kinds = [_field_expr_kind(v, param_kinds) for v in expr.values]
+        first = kinds[0]
+        return first if first is not None and all(k == first for k in kinds) else None
+    if isinstance(expr, ast.IfExp):
+        return _merge_method_kind(_field_expr_kind(expr.body, param_kinds),
+                                  _field_expr_kind(expr.orelse, param_kinds))
+    if isinstance(expr, ast.Call):
+        func = expr.func
+        if isinstance(func, ast.Name):
+            if func.id == 'len':
+                return 'int'
+            if func.id == 'int':
+                return 'int'
+            if func.id == 'float':
+                return 'float'
+            if func.id == 'str':
+                return 'str'
+            if func.id == 'bool':
+                return 'bool'
+            if func.id == 'abs' and len(expr.args) == 1:
+                return _field_expr_kind(expr.args[0], param_kinds)
+            return None
+        if isinstance(func, ast.Attribute):
+            return _STR_METHOD_KIND.get(func.attr)
+    return None
+
+
+_CLASS_REFUSED_NAMES = frozenset({
+    '__slots__', '__getattr__', '__getattribute__', '__setattr__', '__delattr__',
+    '__dict__', '__weakref__', '__metaclass__',
+})
+
+
+def _plain_class(node):
+    """A class this pass is willing to look at: no bases/metaclass/decorators, methods only, and
+    no attribute protocol of its own.  `self.<field>` must be an ordinary instance-dict lookup and
+    store, or the C wrapper's `PyObject_GetAttrString`/`PyObject_SetAttrString` would observe
+    different behaviour than CPython's bytecode."""
+    if node.decorator_list or node.bases or node.keywords:
+        return False
+    for stmt in node.body:
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) \
+                and isinstance(stmt.value.value, str):
+            continue
+        if isinstance(stmt, ast.Pass):
+            continue
+        if not isinstance(stmt, ast.FunctionDef) or stmt.decorator_list:
+            return False
+        if stmt.name in _CLASS_REFUSED_NAMES:
+            return False
+    return True
+
+
+def _plain_method(fn):
+    args = fn.args
+    if args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg or args.defaults:
+        return False
+    if not args.args or args.args[0].arg != 'self':
+        return False
+    return True
+
+
+def _class_fields(classdef, init_kinds=None):
+    """[(field, kind)] from the class's own __init__, or (None, reason).
+
+    `init_kinds` maps a positional `__init__` argument index (self excluded) to a kind proved from
+    the module's own `ClassName(...)` call sites; an annotation always wins because it is the
+    stronger source.  The value still crosses the C wrapper's exact-type check, so a wrong guess
+    falls back to the original method rather than changing an answer."""
+    init = None
+    for stmt in classdef.body:
+        if isinstance(stmt, ast.FunctionDef) and stmt.name == '__init__':
+            init = stmt
+            break
+    if init is None or not _plain_method(init):
+        return None, 'the class has no plain __init__'
+    init_kinds = init_kinds or {}
+    params = {a.arg: (_ann_kind_text(a.annotation)
+                      or init_kinds.get(i))
+              for i, a in enumerate(init.args.args[1:])}
+    fields, order = {}, []
+    for node in _own_nodes(init):
+        if isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+            ann_kind = _ann_kind_text(node.annotation)
+        elif isinstance(node, ast.Assign):
+            if len(node.targets) != 1:
+                continue
+            target, value = node.targets[0], node.value
+            ann_kind = None
+        else:
+            continue
+        if not (isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name) and target.value.id == 'self'):
+            continue
+        kind = ann_kind or (_field_expr_kind(value, params) if value is not None else None)
+        if target.attr in fields:
+            merged = _merge_method_kind(fields[target.attr], kind)
+            if merged is None:
+                return None, 'field %r has more than one kind' % target.attr
+            fields[target.attr] = merged
+        else:
+            fields[target.attr] = kind
+            order.append(target.attr)
+    if not fields:
+        return None, 'the class has no fields'
+    return [(name, fields[name]) for name in order], None
+
+
+def _self_attr(node, selfname):
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+            and node.value.id == selfname:
+        return node.attr
+    return None
+
+
+class _SelfUse(ast.NodeVisitor):
+    """Reads, writes and `self.method` calls of one method, refusing any other use of self."""
+
+    def __init__(self, selfname):
+        self.selfname = selfname
+        self.reads, self.writes, self.calls = set(), set(), set()
+        self.reason = None
+
+    def fail(self, reason):
+        if self.reason is None:
+            self.reason = reason
+
+    def visit_FunctionDef(self, node):
+        self.fail('a nested function captures this method scope')
+
+    def visit_AsyncFunctionDef(self, node):
+        self.fail('a nested function captures this method scope')
+
+    def visit_Lambda(self, node):
+        self.fail('a lambda captures this method scope')
+
+    def visit_AugAssign(self, node):
+        attr = _self_attr(node.target, self.selfname)
+        if attr is not None:
+            self.reads.add(attr)
+            self.writes.add(attr)
+            self.visit(node.value)
+            return
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        attr = _self_attr(node, self.selfname)
+        if attr is not None:
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                self.writes.add(attr)
+            else:
+                self.reads.add(attr)
+            return
+        if any(isinstance(n, ast.Name) and n.id == self.selfname
+               for n in ast.walk(node.value)):
+            self.fail('self is used other than as `self.<field>`')
+            return
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+                and func.value.id == self.selfname:
+            self.calls.add(func.attr)
+            for arg in node.args:
+                self.visit(arg)
+            for keyword in node.keywords:
+                self.visit(keyword.value)
+            return
+        self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if node.id == self.selfname:
+            self.fail('self is used other than as `self.<field>`')
+
+
+def _collect_self_use(fn):
+    use = _SelfUse('self')
+    for stmt in fn.body:
+        use.visit(stmt)
+    return use
+
+
+class _MethodRefused(Exception):
+    pass
+
+
+class _MethodBody(ast.NodeTransformer):
+    """Rewrite `self.x` to a field parameter and `self.m(...)` to the method's kernel."""
+
+    def __init__(self, fields, callee_reads, callee_kernels):
+        self.fields = fields                  # field name -> (kernel index, kind)
+        self.callee_reads = callee_reads      # method name -> [field, ...] it reads
+        self.callee_kernels = callee_kernels  # method name -> kernel function name
+
+    def visit_FunctionDef(self, node):
+        raise _MethodRefused('a nested function captures this method scope')
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_Lambda = visit_FunctionDef
+
+    def visit_Attribute(self, node):
+        if isinstance(node.value, ast.Name) and node.value.id == 'self':
+            if node.attr not in self.fields:
+                raise _MethodRefused('unknown field %r' % node.attr)
+            index, kind = self.fields[node.attr]
+            if isinstance(node.ctx, (ast.Store, ast.Del)) and kind not in _METHOD_WRITE_KINDS:
+                raise _MethodRefused('a write to a %s field' % kind)
+            if isinstance(node.ctx, ast.Del):
+                raise _MethodRefused('delete of a field')
+            ctx = ast.Store() if isinstance(node.ctx, ast.Store) else ast.Load()
+            return ast.copy_location(
+                ast.Name(id=_FIELD_PREFIX + str(index), ctx=ctx), node)
+        if any(isinstance(n, ast.Name) and n.id == 'self' for n in ast.walk(node.value)):
+            raise _MethodRefused('self is used other than as `self.<field>`')
+        return self.generic_visit(node)
+
+    def visit_Call(self, node):
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+                and func.value.id == 'self':
+            callee = func.attr
+            if callee not in self.callee_kernels:
+                raise _MethodRefused('a call to an unaccelerated method %r' % callee)
+            args = [ast.Name(id=_FIELD_PREFIX + str(self.fields[f][0]), ctx=ast.Load())
+                    for f in self.callee_reads[callee]]
+            args.extend(self.visit(arg) for arg in node.args)
+            keywords = [ast.keyword(arg=k.arg, value=self.visit(k.value))
+                        for k in node.keywords]
+            return ast.copy_location(
+                ast.Call(func=ast.Name(id=self.callee_kernels[callee], ctx=ast.Load()),
+                         args=args, keywords=keywords), node)
+        return self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if node.id == 'self':
+            raise _MethodRefused('self is used other than as `self.<field>`')
+        return node
+
+
+class _ReturnField(ast.NodeTransformer):
+    def __init__(self, name):
+        self.name = name
+
+    def visit_Return(self, node):
+        return ast.copy_location(ast.Return(value=ast.Name(id=self.name, ctx=ast.Load())), node)
+
+
+def _method_kernel_name(class_name, method_name):
+    return _METHOD_PREFIX + class_name + '_' + method_name
+
+
+def _walk_stmts(nodes):
+    """Every node of a statement list, without entering a nested def (which is its own scope)."""
+    stack = list(nodes)
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def _infer_call_kinds(tree):
+    """Kinds proved at this module's own call sites, for constructor and `self.m(...)` arguments.
+
+    The value is only a *hint*: every lifted kernel argument crosses the C wrapper's exact-type
+    check, so a hint that the runtime contradicts falls back to the original Python method.  Only
+    literals, annotated parameters and `self.<field>` reads of already-typed fields contribute, so
+    nothing is guessed from an unrelated scope.
+    """
+    classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
+    ctor, methods = {}, {}
+
+    def add(table, key, args, names, fields):
+        slot = table.setdefault(key, {})
+        for i, arg in enumerate(args):
+            if isinstance(arg, ast.Starred):
+                slot[i] = None
+                continue
+            kind = _field_expr_kind(arg, names)
+            if kind is None and isinstance(arg, ast.Attribute) \
+                    and isinstance(arg.value, ast.Name) and arg.value.id == 'self' and fields:
+                kind = fields.get(arg.attr)
+            if kind is None:
+                slot[i] = None
+            elif slot.get(i, kind) != kind:
+                slot[i] = None
+            else:
+                slot[i] = kind
+
+    def scan(nodes, names, fields, cls):
+        for node in nodes:
+            for n in ast.walk(node):
+                if not isinstance(n, ast.Call) or n.keywords:
+                    continue
+                func = n.func
+                if isinstance(func, ast.Name) and func.id in classes:
+                    add(ctor, func.id, n.args, names, None)
+                elif cls is not None and isinstance(func, ast.Attribute) \
+                        and isinstance(func.value, ast.Name) and func.value.id == 'self':
+                    add(methods, (cls, func.attr), n.args, names, fields)
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.ClassDef):
+            continue
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names = {a.arg: _ann_kind_text(a.annotation) for a in stmt.args.args}
+            scan([stmt], names, None, None)
+        else:
+            scan([stmt], {}, None, None)
+    for cname, cdef in classes.items():
+        init = next((s for s in cdef.body
+                     if isinstance(s, ast.FunctionDef) and s.name == '__init__'), None)
+        if init is None or not _plain_method(init):
+            continue
+        fields, _why = _class_fields(cdef)
+        fields = dict(fields or [])
+        for stmt in cdef.body:
+            if not isinstance(stmt, ast.FunctionDef) or stmt.name == '__init__':
+                continue
+            names = {a.arg: _ann_kind_text(a.annotation) for a in stmt.args.args}
+            scan([stmt], names, fields, cname)
+    return ctor, methods
+
+
+def _write_kinds_ok(body_nodes, field_params, param_kinds):
+    """A write back through the C wrapper serialises the field as its declared kind.  A CPython
+    assignment can store a different type (`self.n = True` into an int field), so every field
+    store must be proved to carry exactly the field's own kind; otherwise the method stays in
+    CPython and keeps CPython's object identity."""
+    for node in _walk_stmts(body_nodes):
+        if isinstance(node, ast.Assign):
+            kind = _field_expr_kind(node.value, param_kinds)
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in field_params:
+                    if kind != field_params[target.id]:
+                        return False
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name) and node.target.id in field_params:
+                kind = _field_expr_kind(node.value, param_kinds)
+                cur = field_params[node.target.id]
+                if kind is None or _merge_method_kind(cur, kind) != cur:
+                    return False
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.target.id in field_params \
+                    and node.value is not None:
+                if _field_expr_kind(node.value, param_kinds) != field_params[node.target.id]:
+                    return False
+    return True
+
+
+def _method_kernels(tree):
+    """Plan every plain-class method: its fields, kernels and refusals.  Pure planning only."""
+    ctor_kinds, method_kinds = _infer_call_kinds(tree)
+    plan = {}
+    for classdef in tree.body:
+        if not isinstance(classdef, ast.ClassDef):
+            continue
+        methods = {}
+        if _plain_class(classdef):
+            fields, why = _class_fields(classdef, ctor_kinds.get(classdef.name))
+            if fields is not None:
+                field_kinds = dict(fields)
+                for stmt in classdef.body:
+                    if not isinstance(stmt, ast.FunctionDef) or stmt.name == '__init__':
+                        continue
+                    if not _plain_method(stmt):
+                        methods[stmt.name] = {'reason': 'the method has defaults, *args or **kwargs'}
+                        continue
+                    use = _collect_self_use(stmt)
+                    if use.reason:
+                        methods[stmt.name] = {'reason': use.reason}
+                        continue
+                    unknown = [a for a in use.reads | use.writes if a not in field_kinds]
+                    if unknown:
+                        methods[stmt.name] = {'reason': 'unknown field %r' % sorted(unknown)[0]}
+                        continue
+                    unsupported = [a for a in use.reads if field_kinds[a] not in _METHOD_KINDS]
+                    if unsupported:
+                        methods[stmt.name] = {'reason': 'field %r has no typed kind' % unsupported[0]}
+                        continue
+                    bad_write = [a for a in use.writes
+                                 if field_kinds[a] not in _METHOD_WRITE_KINDS]
+                    if bad_write:
+                        methods[stmt.name] = {'reason': 'a write to a %s field'
+                                                        % field_kinds[bad_write[0]]}
+                        continue
+                    methods[stmt.name] = {'fn': stmt, 'reads': set(use.reads),
+                                          'writes': set(use.writes), 'calls': set(use.calls),
+                                          'arg_kinds': method_kinds.get((classdef.name, stmt.name))}
+                # A call is only safe when the callee is a read-only method of this same class.
+                changed = True
+                while changed:
+                    changed = False
+                    for name, info in list(methods.items()):
+                        if 'reason' in info:
+                            continue
+                        bad = [c for c in info['calls']
+                               if c == name or c not in methods
+                               or 'reason' in methods[c] or methods[c]['writes']]
+                        if bad:
+                            info['reason'] = 'a call to an unaccelerated method %r' % bad[0]
+                            changed = True
+                # Transitive read set (read-only callees only) for the kernel signature.  Compute
+                # every method's set first: a caller needs its callee's fully-resolved list, and
+                # declaration order is not call order.
+                for name, info in methods.items():
+                    if 'reason' in info:
+                        continue
+                    needed, stack = set(info['reads']), list(info['calls'])
+                    while stack:
+                        callee = stack.pop()
+                        if callee in methods and 'reason' not in methods[callee]:
+                            needed |= methods[callee]['reads']
+                            stack.extend(methods[callee]['calls'])
+                    needed |= info['writes']
+                    info['needed'] = [f for f, _k in fields if f in needed]
+                for name, info in methods.items():
+                    if 'reason' in info:
+                        continue
+                    try:
+                        _make_method_kernels(classdef.name, name, info, field_kinds, methods)
+                    except (KeyError, _MethodRefused, IndexError, TypeError):
+                        info['reason'] = 'the method body is not a plain field/self-method body'
+                plan[classdef.name] = {'class': classdef, 'fields': fields,
+                                       'methods': methods, 'reason': None}
+            else:
+                plan[classdef.name] = {'class': classdef, 'fields': [], 'methods': {},
+                                       'reason': why}
+        else:
+            plan[classdef.name] = {'class': classdef, 'fields': [], 'methods': {},
+                                   'reason': 'not a plain class'}
+    return plan
+
+
+def _make_method_kernels(class_name, method_name, info, field_kinds, methods):
+    needed = info['needed']
+    index_of = {f: i for i, f in enumerate(needed)}
+    fields_map = {f: (index_of[f], field_kinds[f]) for f in needed}
+    # The callee kernel's signature lists ITS needed fields in class-declaration order, which is a
+    # prefix-consistent subset of the caller's `needed` list; passing the caller's set order would
+    # silently swap two same-typed fields.
+    callee_reads = {c: [f for f in methods[c]['needed'] if f in index_of]
+                    for c in info['calls']}
+    callee_kernels = {c: _method_kernel_name(class_name, c) for c in info['calls']}
+    method_fn = info['fn']
+    rewriter = _MethodBody(fields_map, callee_reads, callee_kernels)
+    body = [rewriter.visit(copy.deepcopy(stmt)) for stmt in method_fn.body]
+    field_args = [ast.arg(arg=_FIELD_PREFIX + str(index_of[f]),
+                          annotation=_kind_ast(field_kinds[f]))
+                  for f in needed]
+    arg_kinds = info.get('arg_kinds') or {}
+    method_args = []
+    for i, arg in enumerate(method_fn.args.args[1:]):
+        arg = copy.deepcopy(arg)
+        if arg.annotation is None and arg_kinds.get(i) is not None:
+            arg.annotation = _kind_ast(arg_kinds[i])
+        method_args.append(arg)
+    param_kinds = {_FIELD_PREFIX + str(index_of[f]): field_kinds[f] for f in needed}
+    param_kinds.update({arg.arg: _ann_kind_text(arg.annotation) for arg in method_args})
+    if not _write_kinds_ok(body, {_FIELD_PREFIX + str(index_of[f]): field_kinds[f]
+                                  for f in info['writes']}, param_kinds):
+        raise _MethodRefused('a field store is not proved to carry the field kind')
+    base = _method_kernel_name(class_name, method_name)
+    result = ast.FunctionDef(
+        name=base,
+        args=ast.arguments(posonlyargs=[], args=field_args + method_args, vararg=None,
+                           kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+        body=body, decorator_list=[], returns=copy.deepcopy(method_fn.returns),
+        type_params=[])
+    ast.fix_missing_locations(result)
+    info['kernel'] = result
+    info['kernel_name'] = base
+    info['field_kernels'] = {}
+    for field in sorted(info['writes']):
+        field_body = copy.deepcopy(body)
+        field_body = [_ReturnField(_FIELD_PREFIX + str(index_of[field])).visit(stmt)
+                      for stmt in field_body]
+        field_body.append(ast.Return(value=ast.Name(id=_FIELD_PREFIX + str(index_of[field]),
+                                                    ctx=ast.Load())))
+        fk = ast.FunctionDef(
+            name=base + '__get_' + field,
+            args=ast.arguments(posonlyargs=[], args=copy.deepcopy(field_args + method_args),
+                               vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None,
+                               defaults=[]),
+            body=field_body, decorator_list=[], returns=_kind_ast(field_kinds[field]),
+            type_params=[])
+        ast.fix_missing_locations(fk)
+        info['field_kernels'][field] = fk
+
+
+def _method_kernel_nodes(plan):
+    """Every kernel FunctionDef this plan would add to the analysis source."""
+    out = []
+    for class_plan in plan.values():
+        for info in class_plan['methods'].values():
+            if 'reason' in info:
+                continue
+            out.append(info['kernel'])
+            out.extend(info['field_kernels'][f] for f in sorted(info['field_kernels']))
+    return out
 
 
 def _own_nodes(fn):
@@ -242,10 +844,14 @@ def _provably_float(node, float_names):
 
 
 def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_names=(), ret=None,
-               bool_names=()):
+               bool_names=(), allowed_calls=()):
     """A call this pass can prove cannot raise and has no side effect.  Everything else stays a
     refusal: the hybrid must return CPython's value or fall back, never a partial answer."""
     func = node.func
+    if isinstance(func, ast.Name) and func.id in allowed_calls:
+        # A read-only method kernel: its own body passed the same gate, and its arguments are
+        # visited independently by `_unsafe_body`.
+        return True
     if isinstance(func, ast.Attribute):
         receiver = func.value
         if _provably_str(receiver, str_names):
@@ -291,7 +897,7 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
     return False
 
 
-def _unsafe_body(fn, params=(), ret=None):
+def _unsafe_body(fn, params=(), ret=None, allowed_calls=()):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
     subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), an
@@ -319,7 +925,8 @@ def _unsafe_body(fn, params=(), ret=None):
                 continue
             return 'division or power can raise'
         if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names, num_names,
-                                                          int_names, float_names, ret, bool_names):
+                                                          int_names, float_names, ret, bool_names,
+                                                          allowed_calls):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'
@@ -336,7 +943,7 @@ def _unsafe_body(fn, params=(), ret=None):
     return None
 
 
-def _list_param_mutated(fn, list_params):
+def _list_param_mutated(fn, list_params, allowed_calls=()):
     """A list argument is copied into the typed call, so a function that mutates it must stay in
     CPython (mutation would otherwise not be visible to the caller).  This also refuses passing a
     list parameter on to another user function, which may mutate it one step away."""
@@ -377,8 +984,13 @@ def _list_param_mutated(fn, list_params):
                 return True
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             return True
+    # Passing a list to an arbitrary call may let the callee mutate it.  These builtins only read
+    # the sequence, so they do not make the caller's copy unsafe.
+    nonmutating = frozenset({'len', 'reversed', 'sorted', 'min', 'max', 'sum', 'any', 'all'})
     for node in nodes:
-        if isinstance(node, ast.Call):
+        if isinstance(node, ast.Call) and not (
+                isinstance(node.func, ast.Name)
+                and (node.func.id in allowed_calls or node.func.id in nonmutating)):
             for arg in list(node.args) + [kw.value for kw in node.keywords]:
                 if isinstance(arg, ast.Name) and arg.id in aliases:
                     return True
@@ -496,6 +1108,16 @@ def _hybrid_expr_kind(e, facts, rets):
                 if inner.startswith(_DICT_PREFIX):
                     inner = inner[len(_DICT_PREFIX):]
                 return inner
+    if isinstance(e, ast.BoolOp):
+        # `a and b` / `a or b` evaluates to one of its operands, so the result kind is known only
+        # when every operand has the same scalar kind.  `x or 0` is an int, `x or True` may be
+        # either, so a mixed kind is not guessed (pymix's `ast.Compare` rule stays unchanged).
+        kinds = [_hybrid_expr_kind(v, facts, rets) for v in e.values]
+        first = kinds[0]
+        if first in (pymix.INT, pymix.FLOAT, pymix.BOOL, pymix.STR) \
+                and all(k == first for k in kinds):
+            return first
+        return None
     return _old_expr_kind(e, facts, rets)
 pymix._expr_kind = _hybrid_expr_kind
 # A subscript's IndexError/KeyError is now reproduced by the wrapper re-running the original
@@ -625,6 +1247,7 @@ def _select(src, tree, report, facts):
     import unified
 
     funcs = _top_level_functions(tree)
+    allowed_calls = {name for name in funcs if name.startswith(_METHOD_PREFIX)}
     big_hard = bigcap.marked(tree, local=False)
     big_local = bigcap.marked(tree)
     id_reach, id_any = pyboxed2._mix_identity_unsafe(tree)
@@ -654,12 +1277,12 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname], params, ret)
+        unsafe = _unsafe_body(funcs[pyname], params, ret, allowed_calls)
         if unsafe:
             rejected[pyname] = unsafe
             continue
         list_params = {p for p, k in params if k in _LIST}
-        if _list_param_mutated(funcs[pyname], list_params):
+        if _list_param_mutated(funcs[pyname], list_params, allowed_calls):
             rejected[pyname] = 'the list parameter is mutated'
             continue
         chosen[pyname] = {
@@ -690,7 +1313,10 @@ def _select(src, tree, report, facts):
 _TRAP_DIES = re.compile(
     r'ail_die\("(?:list index out of range|list assignment index out of range|'
     r'pop index out of range|pop from empty list|key error|string index out of range|'
-    r'bytes index out of range|grid row index out of range|grid column index out of range)"\)')
+    r'bytes index out of range|grid row index out of range|grid column index out of range)"\)'
+    # list-of-objects (nested lists, struct lists) and str/list element helpers report an index
+    # trap through the named-exception path instead of `ail_die`.
+    r'|ail_raise_named\(AIL_EXC_INDEX\)')
 
 
 def _trap_patch(csrc, mangled):
@@ -747,7 +1373,7 @@ def _trap_patch(csrc, mangled):
         restores.append('        ail_exc_top = s->exc_top;')
 
     decl = ('\n#include <setjmp.h>\n'
-            'static __thread int %s = 0;\n'
+            '__thread int %s = 0;\n'
             'static __thread jmp_buf %s;\n'
             'static inline void %s(void);\n' % (flag, jmp, hit))
     if fields:
@@ -803,6 +1429,223 @@ def _c_proto(item, symbol=None):
     return '%s %s(%s)' % (rtype, symbol or item['mangled'], ', '.join(args))
 
 
+def _method_wrapper_lines(item):
+    """The C wrapper for one lifted method: read fields from the CPython object, call the result
+    kernel, call each written field's kernel, write the new values back, and return the result."""
+    name = item['name']
+    params = item['params']
+    ret = item['ret']
+    meta = item['method']
+    fields = meta['fields']              # [(index, field, kind)]
+    nfields = len(fields)
+    method_args = len(params) - nfields
+    callee = item['mangled'] + '__hybrid_call' if item.get('indexes') else item['mangled']
+    out = ['static PyObject *ail_w_%s(PyObject *module, PyObject *args) {' % name,
+           '    PyObject *o[%d];' % max(1, method_args),
+           '    PyObject *obj;',
+           '    /* METH_VARARGS passes the module as `self`; the Python-level instance is the first'
+           ' tuple item (the generated closure passes the bound self positionally). */',
+           '    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % (method_args + 1),
+           '    obj = PyTuple_GET_ITEM(args, 0);']
+    if item.get('indexes'):
+        out.append('    extern __thread int %s__hybrid_trap;' % item['mangled'])
+    bufs = []
+    field_objs = []
+    for i, (_index, field, kind) in enumerate(fields):
+        field_objs.append('fo%d' % i)
+        out.append('    PyObject *fo%d = NULL;' % i)
+        if kind == 'list[int]':
+            out.append('    int64_t *b%d = NULL;' % i)
+            bufs.append('b%d' % i)
+        elif kind == 'list[float]':
+            out.append('    double *b%d = NULL;' % i)
+            bufs.append('b%d' % i)
+    for j in range(method_args):
+        i = nfields + j
+        kind = params[i][1]
+        if kind == 'list[int]':
+            out.append('    int64_t *b%d = NULL;' % i)
+            bufs.append('b%d' % i)
+        elif kind == 'list[float]':
+            out.append('    double *b%d = NULL;' % i)
+            bufs.append('b%d' % i)
+    fail = 'goto fallback'
+    call = []
+    for i, (_index, field, kind) in enumerate(fields):
+        out.append('    fo%d = PyObject_GetAttrString(obj, %s);' % (i, json.dumps(field)))
+        out.append('    if (!fo%d) { PyErr_Clear(); %s; }' % (i, fail))
+        src = 'fo%d' % i
+        if kind in ('int', 'bool'):
+            if kind == 'bool':
+                out.append('    if (!PyBool_Check(%s)) %s;' % (src, fail))
+                out.append('    int64_t a%d = PyObject_IsTrue(%s) ? 1 : 0;' % (i, src))
+            else:
+                out.append('    if (!PyLong_CheckExact(%s)) %s;' % (src, fail))
+                out.append('    int ovf%d = 0; long long a%d = PyLong_AsLongLongAndOverflow(%s, &ovf%d);'
+                           % (i, i, src, i))
+                out.append('    if (ovf%d) %s;' % (i, fail))
+                out.append('    if (a%d == -1 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
+                out.append('    a%d = (int64_t)a%d;' % (i, i))
+        elif kind == 'float':
+            out.append('    if (!PyFloat_CheckExact(%s)) %s;' % (src, fail))
+            out.append('    double a%d = PyFloat_AsDouble(%s);' % (i, src))
+            out.append('    if (a%d == -1.0 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
+        elif kind == 'str':
+            out.append('    if (!PyUnicode_CheckExact(%s)) %s;' % (src, fail))
+            out.append('    Py_ssize_t n%d = 0; const char *p%d = PyUnicode_AsUTF8AndSize(%s, &n%d);'
+                       % (i, i, src, i))
+            out.append('    if (!p%d) { PyErr_Clear(); %s; }' % (i, fail))
+            out.append('    ail_str a%d; a%d.p = (const uint8_t *)p%d; a%d.n = (int64_t)n%d; a%d.bytes = (PyUnicode_IS_ASCII(%s) ? 1 : 0);'
+                       % (i, i, i, i, i, i, src))
+        elif kind == 'list[int]':
+            out.append('    if (!PyList_CheckExact(%s)) %s;' % (src, fail))
+            out.append('    Py_ssize_t n%d = PyList_GET_SIZE(%s);' % (i, src))
+            out.append('    b%d = n%d ? (int64_t *)PyMem_Malloc((size_t)n%d * sizeof(int64_t)) : NULL;'
+                       % (i, i, i))
+            out.append('    if (n%d && !b%d) %s;' % (i, i, fail))
+            out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) {' % (i, i, i, i))
+            out.append('        PyObject *e%d = PyList_GET_ITEM(%s, k%d);' % (i, src, i))
+            out.append('        if (!PyLong_CheckExact(e%d)) %s;' % (i, fail))
+            out.append('        int ovf%d = 0; long long v%d = PyLong_AsLongLongAndOverflow(e%d, &ovf%d);'
+                       % (i, i, i, i))
+            out.append('        if (ovf%d) %s;' % (i, fail))
+            out.append('        if (v%d == -1 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
+            out.append('        b%d[k%d] = (int64_t)v%d;' % (i, i, i))
+            out.append('    }')
+            call.append('b%d' % i)
+            call.append('(int64_t)n%d' % i)
+            continue
+        elif kind == 'list[float]':
+            out.append('    if (!PyList_CheckExact(%s)) %s;' % (src, fail))
+            out.append('    Py_ssize_t n%d = PyList_GET_SIZE(%s);' % (i, src))
+            out.append('    b%d = n%d ? (double *)PyMem_Malloc((size_t)n%d * sizeof(double)) : NULL;'
+                       % (i, i, i))
+            out.append('    if (n%d && !b%d) %s;' % (i, i, fail))
+            out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) {' % (i, i, i, i))
+            out.append('        PyObject *e%d = PyList_GET_ITEM(%s, k%d);' % (i, src, i))
+            out.append('        if (!PyFloat_CheckExact(e%d)) %s;' % (i, fail))
+            out.append('        double v%d = PyFloat_AsDouble(e%d);' % (i, i))
+            out.append('        if (v%d == -1.0 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
+            out.append('        b%d[k%d] = v%d;' % (i, i, i))
+            out.append('    }')
+            call.append('b%d' % i)
+            call.append('(int64_t)n%d' % i)
+            continue
+        call.append('a%d' % i)
+    for j in range(method_args):
+        i = nfields + j
+        kind = params[i][1]
+        out.append('    o[%d] = PyTuple_GET_ITEM(args, %d);' % (j, j + 1))
+        src = 'o[%d]' % j
+        if kind in ('int', 'bool'):
+            if kind == 'bool':
+                out.append('    if (!PyBool_Check(%s)) %s;' % (src, fail))
+                out.append('    int64_t a%d = PyObject_IsTrue(%s) ? 1 : 0;' % (i, src))
+            else:
+                out.append('    if (!PyLong_CheckExact(%s)) %s;' % (src, fail))
+                out.append('    int ovf%d = 0; long long a%d = PyLong_AsLongLongAndOverflow(%s, &ovf%d);'
+                           % (i, i, src, i))
+                out.append('    if (ovf%d) %s;' % (i, fail))
+                out.append('    if (a%d == -1 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
+                out.append('    a%d = (int64_t)a%d;' % (i, i))
+        elif kind == 'float':
+            out.append('    if (!PyFloat_CheckExact(%s)) %s;' % (src, fail))
+            out.append('    double a%d = PyFloat_AsDouble(%s);' % (i, src))
+            out.append('    if (a%d == -1.0 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
+        elif kind == 'str':
+            out.append('    if (!PyUnicode_CheckExact(%s)) %s;' % (src, fail))
+            out.append('    Py_ssize_t n%d = 0; const char *p%d = PyUnicode_AsUTF8AndSize(%s, &n%d);'
+                       % (i, i, src, i))
+            out.append('    if (!p%d) { PyErr_Clear(); %s; }' % (i, fail))
+            out.append('    ail_str a%d; a%d.p = (const uint8_t *)p%d; a%d.n = (int64_t)n%d; a%d.bytes = (PyUnicode_IS_ASCII(%s) ? 1 : 0);'
+                       % (i, i, i, i, i, i, src))
+        call.append('a%d' % i)
+    cargs = ', '.join(call)
+    out.append('    PyObject *res = NULL;')
+    # Field write kernels run on the ORIGINAL field values (a method read-only callee cannot
+    # change them, and each kernel is pure in its arguments).
+    updates = []
+    for w in meta['writes']:
+        i = w['index']
+        wm = w['mangled']
+        wcallee = wm + '__hybrid_call' if w.get('indexes') else wm
+        if w.get('indexes'):
+            out.append('    extern __thread int %s__hybrid_trap;' % wm)
+        if w['kind'] == 'float':
+            out.append('    double u%d = %s(%s);' % (i, wcallee, cargs))
+        else:
+            out.append('    extern __thread int %s__mix_overflow;' % wm)
+            out.append('    %s__mix_overflow = 0;' % wm)
+            out.append('    int64_t u%d = %s(%s);' % (i, wcallee, cargs))
+        if w.get('indexes'):
+            out.append('    if (%s__hybrid_trap) %s;' % (wm, fail))
+        if w['kind'] != 'float':
+            out.append('    if (%s__mix_overflow) %s;' % (wm, fail))
+        updates.append((i, w))
+    if ret == 'str':
+        out.append('    int64_t need;')
+        out.append('    need = %s(%s%sNULL, 0);' % (callee, cargs, ', ' if cargs else ''))
+        if item.get('indexes'):
+            out.append('    if (%s__hybrid_trap) %s;' % (item['mangled'], fail))
+        out.append('    if (need < 0) %s;' % fail)
+        out.append('    uint8_t *sb = (uint8_t *)PyMem_Malloc((size_t)(need > 0 ? need : 1));')
+        out.append('    if (!sb) %s;' % fail)
+        out.append('    if (need > 0) %s(%s%s(void *)sb, need);'
+                   % (callee, cargs, ', ' if cargs else ''))
+        if item.get('indexes'):
+            out.append('    if (%s__hybrid_trap) { PyMem_Free(sb); %s; }' % (item['mangled'], fail))
+        out.append('    res = PyUnicode_DecodeUTF8((const char *)sb, (Py_ssize_t)need, NULL);')
+        out.append('    PyMem_Free(sb);')
+        out.append('    if (!res) { PyErr_Clear(); %s; }' % fail)
+    elif ret == 'float':
+        out.append('    double r = %s(%s);' % (callee, cargs))
+        if item.get('indexes'):
+            out.append('    if (%s__hybrid_trap) %s;' % (item['mangled'], fail))
+        out.append('    res = PyFloat_FromDouble(r);')
+        out.append('    if (!res) %s;' % fail)
+    else:
+        out.append('    extern __thread int %s__mix_overflow;' % item['mangled'])
+        out.append('    %s__mix_overflow = 0;' % item['mangled'])
+        out.append('    int64_t r = %s(%s);' % (callee, cargs))
+        if item.get('indexes'):
+            out.append('    if (%s__hybrid_trap) %s;' % (item['mangled'], fail))
+        out.append('    if (%s__mix_overflow) %s;' % (item['mangled'], fail))
+        if ret == 'bool':
+            out.append('    res = PyBool_FromLong((long)r);')
+        else:
+            out.append('    res = PyLong_FromLongLong((long long)r);')
+        out.append('    if (!res) %s;' % fail)
+    for i, w in updates:
+        field = w['field']
+        newval = 'u%d' % i
+        if w['kind'] == 'bool':
+            out.append('    PyObject *nv%d = PyBool_FromLong((long)%s);' % (i, newval))
+        elif w['kind'] == 'float':
+            out.append('    PyObject *nv%d = PyFloat_FromDouble(%s);' % (i, newval))
+        else:
+            out.append('    PyObject *nv%d = PyLong_FromLongLong((long long)%s);' % (i, newval))
+        out.append('    if (!nv%d) { PyErr_Clear(); %s; }' % (i, fail))
+        out.append('    if (PyObject_SetAttrString(obj, %s, nv%d) != 0) {' % (json.dumps(field), i))
+        out.append('        Py_DECREF(nv%d); PyErr_Clear(); %s;' % (i, fail))
+        out.append('    }')
+        out.append('    Py_DECREF(nv%d);' % i)
+    for fo in field_objs:
+        out.append('    Py_XDECREF(%s);' % fo)
+    for b in bufs:
+        out.append('    PyMem_Free(%s);' % b)
+    out.append('    return res;')
+    out.append('fallback:')
+    out.append('    PyErr_Clear();')
+    for fo in field_objs:
+        out.append('    Py_XDECREF(%s);' % fo)
+    for b in bufs:
+        out.append('    PyMem_Free(%s);' % b)
+    out.append('    return ail_hybrid_fallback();')
+    out.append('}')
+    out.append('')
+    return out
+
+
 def _wrapper_source(module, items):
     out = [
         '#include <Python.h>',
@@ -824,6 +1667,11 @@ def _wrapper_source(module, items):
         out.append('extern %s;' % _c_proto(item, callee))
     out.append('')
     for item in items:
+        if item.get('method'):
+            out.extend(_method_wrapper_lines(item))
+            continue
+        if not item.get('expose', True):
+            continue
         name = item['name']
         params = item['params']
         ret = item['ret']
@@ -878,8 +1726,7 @@ def _wrapper_source(module, items):
                 out.append('    if (!PyUnicode_CheckExact(%s)) %s;' % (o, fail))
                 out.append('    Py_ssize_t n%d = 0; const char *p%d = PyUnicode_AsUTF8AndSize(%s, &n%d);' % (i, i, o, i))
                 out.append('    if (!p%d) { PyErr_Clear(); %s; }' % (i, fail))
-                out.append('    ail_str a%d; a%d.p = (const uint8_t *)p%d; a%d.n = (int64_t)n%d; a%d.bytes = 1;' % (i, i, i, i, i, i))
-                out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) if ((unsigned char)p%d[k%d] >= 0x80) { a%d.bytes = 0; break; }' % (i, i, i, i, i, i, i))
+                out.append('    ail_str a%d; a%d.p = (const uint8_t *)p%d; a%d.n = (int64_t)n%d; a%d.bytes = (PyUnicode_IS_ASCII(%s) ? 1 : 0);' % (i, i, i, i, i, i, o))
                 call.append('a%d' % i)
             elif kind == 'list[int]':
                 out.append('    if (!PyList_CheckExact(%s)) %s;' % (o, fail))
@@ -971,6 +1818,8 @@ def _wrapper_source(module, items):
         out.append('')
     out.append('static PyMethodDef ail_methods[] = {')
     for item in items:
+        if not item.get('expose', True):
+            continue
         out.append('    {"%s", ail_w_%s, METH_VARARGS, NULL},' % (item['name'], item['name']))
     out.append('    {NULL, NULL, 0, NULL}')
     out.append('};')
@@ -1117,7 +1966,7 @@ def _preamble(module, original_path):
     return _text.replace('__AIL_MODULE__', module).replace('__AIL_SOURCE__', repr(str(original_path)))
 
 
-def _hybrid_source(source, tree, module, names, original_path):
+def _hybrid_source(source, tree, module, names, original_path, method_rebinds=()):
     """Original text plus a preamble and one rebinding after each accelerated top-level def."""
     lines = source.splitlines(keepends=True)
     if lines and not lines[-1].endswith('\n'):
@@ -1134,6 +1983,13 @@ def _hybrid_source(source, tree, module, names, original_path):
                     'except Exception:\n'
                     '    pass\n' % (name, name, name))
             edits.append((fn.end_lineno, 0, text))
+    for class_name, method_name, kernel, end_lineno in method_rebinds:
+        text = ('try:\n'
+                '    %s.%s = _ail_hybrid_make(_ail_hybrid_native.%s, %s.%s)\n'
+                'except Exception:\n'
+                '    pass\n' % (class_name, method_name, kernel,
+                              class_name, method_name))
+        edits.append((end_lineno, 0, text))
     edits.sort(key=lambda e: e[0], reverse=True)
     for at, _off, text in edits:
         lines.insert(at, text)
@@ -1220,16 +2076,87 @@ def build(source_path, output_dir):
         'python_file': stem + '.py',
     }
     chosen = {}
+    method_rebinds = []
     try:
-        units_report, facts = _analysis(source)
-        chosen, report['rejected'] = _select(source, tree, units_report, facts)
+        plan = _method_kernels(tree)
+        kernel_nodes = _method_kernel_nodes(plan)
+        if kernel_nodes:
+            analysis_source = source.rstrip('\n') + '\n\n' + '\n\n'.join(
+                ast.unparse(node) for node in kernel_nodes) + '\n'
+            analysis_tree = ast.parse(analysis_source, filename=str(source_path))
+        else:
+            analysis_source, analysis_tree = source, tree
+        units_report, facts = _analysis(analysis_source)
+        chosen, rejected = _select(analysis_source, analysis_tree, units_report, facts)
         units = units_report.get('mix_units') or []
+        unit_names = {u[1] for u in units}
+        kernel_owner = {}
+        field_kernel_owner = {}
+        for class_name, class_plan in plan.items():
+            for method_name, info in class_plan['methods'].items():
+                if 'reason' in info:
+                    rejected['%s.%s' % (class_name, method_name)] = info['reason']
+                    continue
+                kernel_owner[info['kernel_name']] = (class_name, method_name, info)
+                for field, node in info['field_kernels'].items():
+                    field_kernel_owner[node.name] = (class_name, method_name, field)
+            if class_plan['reason'] is not None:
+                for stmt in class_plan['class'].body:
+                    if isinstance(stmt, ast.FunctionDef):
+                        rejected['%s.%s' % (class_name, stmt.name)] = class_plan['reason']
+        # The lifted kernels are not module functions of their own; they are wrapped below.
         items = [chosen[name] for name in sorted(chosen)
-                 if any(u[1] == name for u in units)]
+                 if name in unit_names and name not in kernel_owner
+                 and name not in field_kernel_owner]
+        accelerated = [item['name'] for item in items]
+        for class_name, class_plan in plan.items():
+            for method_name, info in class_plan['methods'].items():
+                if 'reason' in info:
+                    continue
+                kernel = info['kernel_name']
+                needed = [info['field_kernels'][f].name for f in sorted(info['field_kernels'])]
+                label = '%s.%s' % (class_name, method_name)
+                if kernel not in chosen or kernel not in unit_names:
+                    rejected[label] = rejected.get(kernel) or (
+                        'the typed clone is not wired to the hybrid ABI, stays in CPython')
+                    continue
+                if any(name not in chosen or name not in unit_names for name in needed):
+                    rejected[label] = 'a field value is not a typed clone, stays in CPython'
+                    continue
+                result = dict(chosen[kernel])
+                result['indexes'] = True
+                fields_meta = []
+                field_kind = dict(class_plan['fields'])
+                field_index = {field: i for i, field in enumerate(info['needed'])}
+                for field in info['needed']:
+                    fields_meta.append((field_index[field], field, field_kind[field]))
+                writes_meta = []
+                for field in sorted(info['writes']):
+                    fk = info['field_kernels'][field]
+                    writes_meta.append({'field': field, 'kind': field_kind[field],
+                                        'index': field_index[field],
+                                        'mangled': chosen[fk.name]['mangled'],
+                                        'indexes': True})
+                    field_item = dict(chosen[fk.name])
+                    field_item['indexes'] = True
+                    field_item['expose'] = False
+                    items.append(field_item)
+                result['method'] = {'class': class_name, 'method': method_name,
+                                    'fields': fields_meta, 'writes': writes_meta}
+                items.append(result)
+                accelerated.append(label)
+                method_rebinds.append((class_name, method_name, kernel,
+                                       class_plan['class'].end_lineno))
+                rejected.pop(kernel, None)
+                for name in needed:
+                    rejected.pop(name, None)
+        # Kernel-only names never appear in the report; their method names already carry them.
+        report['rejected'] = {k: v for k, v in rejected.items()
+                              if k not in kernel_owner and k not in field_kernel_owner}
         if items:
             so = _compile(items, units, module, output_dir)
             report['extension'] = so.name
-            report['accelerated'] = sorted(i['name'] for i in items)
+            report['accelerated'] = sorted(accelerated)
         elif units:
             report['note'] = 'the typed functions were not safe to wrap; the program runs in CPython'
     except Exception as error:
@@ -1238,7 +2165,8 @@ def build(source_path, output_dir):
     # Always keep an unmodified copy and a runnable hybrid copy.  `prog_run.py` is the file the
     # task names; the `<stem>.py` copy stays for callers of the earlier --cpython prototype.
     (output_dir / (stem + '.orig.py')).write_text(source, encoding='utf-8')
-    hybrid = _hybrid_source(source, tree, module, report['accelerated'], source_path)
+    hybrid = _hybrid_source(source, tree, module, report['accelerated'], source_path,
+                            method_rebinds)
     (output_dir / report['run_file']).write_text(hybrid, encoding='utf-8')
     legacy = output_dir / report['python_file']
     if legacy.resolve() != source_path:
