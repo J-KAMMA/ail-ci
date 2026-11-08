@@ -172,7 +172,9 @@ def _version_key(version):
 
 
 def _is_stable(version):
-    return not re.search(r"(?:^|[.\-])(?:a|b|c|rc|alpha|beta|pre|preview|dev)\d*(?:$|[.\-])",
+    # PEP 440 puts a pre-release suffix directly after the release segment
+    # (``1.0.0rc1``) or after a separator, so accept either boundary.
+    return not re.search(r"(?:^|[._-]|\d)(?:alpha|beta|preview|pre|rc|a|b|c|dev)\d*",
                          version, re.IGNORECASE)
 
 
@@ -359,6 +361,25 @@ def _file_is_pure_wheel(item):
     return item.get("packagetype") == "bdist_wheel" and str(item.get("filename", "")).endswith("-none-any.whl")
 
 
+def _wheel_python_tags(item):
+    """The interpreter tags of a wheel filename: ``py2.py3`` -> ``["py2", "py3"]``."""
+    filename = str(item.get("filename", ""))
+    if not filename.endswith(".whl"):
+        return []
+    parts = filename[:-4].split("-")
+    if len(parts) < 5:
+        return []
+    return [tag.lower() for tag in parts[-3].split(".")]
+
+
+def _python_tag_ok(tag):
+    return bool(re.match(r"^(?:py|cp|pp)3\d*$", tag))
+
+
+def _file_is_python3_wheel(item):
+    return _file_is_pure_wheel(item) and any(_python_tag_ok(tag) for tag in _wheel_python_tags(item))
+
+
 def _file_is_sdist(item):
     filename = str(item.get("filename", ""))
     return item.get("packagetype") == "sdist" or filename.endswith((".tar.gz", ".zip", ".tar.bz2"))
@@ -374,11 +395,15 @@ def _pick_file(name, version, files, python_version):
             continue
         compatible.append(item)
     for item in compatible:
-        if _file_is_pure_wheel(item):
+        if _file_is_python3_wheel(item):
             return item
-    if any(_file_is_pure_wheel(item) for item in files):
-        raise PackageError("%s==%s: no pure-Python wheel for Python %s (requires_python excludes it)"
-                           % (name, version, python_version))
+    pure = [item for item in files if _file_is_pure_wheel(item)]
+    if pure:
+        if any(_file_is_python3_wheel(item) for item in pure):
+            raise PackageError("%s==%s: no pure-Python wheel for Python %s (requires_python excludes it)"
+                               % (name, version, python_version))
+        raise PackageError("%s==%s: no pure-Python wheel for Python 3 (the wheel is for Python 2)"
+                           % (name, version))
     if any(_file_is_sdist(item) for item in files):
         raise PackageError("%s==%s: sdists run code at build time; AIL never does"
                            % (name, version))
@@ -485,21 +510,48 @@ def _license(metadata):
     return "unknown"
 
 
-def _requirements(metadata, name, locked_names):
-    requires = []
+def _requirements(metadata, name, locked_versions):
+    """(dependency names, requirement strings) for the requirements active here."""
+    requires, constraints = [], []
     for text in metadata.get_all("Requires-Dist") or []:
         dependency, extras, specifier, marker = _parse_requirement(text)
         if marker is not None and not _eval_marker(marker):
             continue
         if extras:
             raise PackageError("%s: extras in a requirement are not supported (%s)" % (name, text.strip()))
-        if dependency in locked_names:
-            if dependency not in requires:
-                requires.append(dependency)
+        specifier = re.sub(r"\s+", "", specifier)
+        if dependency not in locked_versions:
+            raise PackageError("%s requires %s%s; run `ail add %s` first"
+                               % (name, dependency, (" " + specifier) if specifier else "", dependency))
+        if specifier and not _accepts_python(specifier, locked_versions[dependency]):
+            raise PackageError("%s requires %s%s, but %s is locked at %s"
+                               % (name, dependency, specifier, dependency, locked_versions[dependency]))
+        if dependency not in requires:
+            requires.append(dependency)
+            constraints.append(dependency + specifier)
+    return requires, constraints
+
+
+def _entry_constraints(entry):
+    """The lock entry's requirement strings, falling back to bare names for old locks."""
+    constraints = entry.get("require_specs")
+    if isinstance(constraints, list) and constraints:
+        return constraints
+    return list(entry.get("requires", []))
+
+
+def _check_reverse_requirements(data, key, version):
+    """Refuse a version that an already locked package's specifier does not accept."""
+    for other, entry in data["package"].items():
+        if other == key:
             continue
-        raise PackageError("%s requires %s%s; run `ail add %s` first"
-                           % (name, dependency, (" " + specifier) if specifier else "", dependency))
-    return requires
+        for text in _entry_constraints(entry):
+            dependency, _extras, specifier, marker = _parse_requirement(text)
+            if marker is not None and not _eval_marker(marker):
+                continue
+            if dependency == key and specifier and not _accepts_python(specifier, version):
+                raise PackageError("%s is required by %s (%s), which does not accept %s"
+                                   % (key, other, text, version))
 
 
 # ---------------------------------------------------------------- lock
@@ -584,6 +636,9 @@ def load_lock(root, missing_ok=False):
         entry.setdefault("requires", [])
         if not isinstance(entry["requires"], list) or not all(isinstance(item, str) for item in entry["requires"]):
             raise PackageError("%s: package.%s.requires must be a list of names" % (LOCK, name))
+        entry.setdefault("require_specs", list(entry["requires"]))
+        if not isinstance(entry["require_specs"], list) or not all(isinstance(item, str) for item in entry["require_specs"]):
+            raise PackageError("%s: package.%s.require_specs must be a list of requirements" % (LOCK, name))
         entry.setdefault("license", "unknown")
         entry.setdefault("requires_python", "")
         try:
@@ -605,6 +660,7 @@ def _write_lock(root, data):
         lines.append("requires_python = %s" % _toml_string(entry.get("requires_python", "")))
         lines.append("license = %s" % _toml_string(entry.get("license", "unknown")))
         lines.append("requires = [%s]" % ", ".join(_toml_string(item) for item in entry.get("requires", [])))
+        lines.append("require_specs = [%s]" % ", ".join(_toml_string(item) for item in _entry_constraints(entry)))
         lines.append("tree_sha256 = %s" % _toml_string(entry["tree_sha256"]))
         lines.append("")
     path = _lock_path(root)
@@ -634,7 +690,11 @@ def _check_conflicts(name, tree, locked, data, tree_of):
     for other in locked:
         if other == name:
             continue
-        overlap = new_names & top_level_names(tree_of(other))
+        other_tree = tree_of(other)
+        if not other_tree.is_dir():
+            raise PackageError("%s: the vendored tree for %s is missing; run `ail sync` first"
+                               % (name, other))
+        overlap = new_names & top_level_names(other_tree)
         if overlap:
             raise PackageError("%s provides the top-level name %s, already provided by %s"
                                % (name, ", ".join(sorted(overlap)), other))
@@ -653,6 +713,8 @@ def _stage_wheel(root, name, version, index, expected_sha=None, filename=None):
     filename = filename or item.get("filename")
     if not filename or not filename.endswith("-none-any.whl"):
         raise PackageError("%s==%s: requires a C extension" % (name, selected_version))
+    if not any(_python_tag_ok(tag) for tag in _wheel_python_tags({"filename": filename})):
+        raise PackageError("%s==%s: the wheel %s is not for Python 3" % (name, selected_version, filename))
     digest = (item.get("digests") or {}).get("sha256")
     if not digest:
         raise PackageError("%s==%s: the index has no sha256 for %s" % (name, selected_version, filename))
@@ -716,8 +778,10 @@ def add(root, specs, index=None):
                 raise PackageError("%s==%s: requires_python %r does not accept Python %s"
                                    % (name, selected_version, required_python, python_version))
             locked = _existing_names(data)
-            requires = _requirements(metadata, name, locked)
+            locked_versions = {other: data["package"][other]["version"] for other in locked}
+            requires, constraints = _requirements(metadata, name, locked_versions)
             _check_conflicts(key, tree, locked, data, lambda other: _tree_of_locked(root, other, data["package"][other]))
+            _check_reverse_requirements(data, key, selected_version)
             old = data["package"].get(key)
             if old and old["sha256"].lower() != digest.lower():
                 raise PackageError("%s: lock already pins sha256 %s, the index has %s"
@@ -741,6 +805,7 @@ def add(root, specs, index=None):
                 "requires_python": required_python,
                 "license": _license(metadata),
                 "requires": requires,
+                "require_specs": constraints,
                 "tree_sha256": tree_digest(destination),
             }
             _write_lock(root, data)
@@ -781,11 +846,18 @@ def sync(root, index=None):
     data = load_lock(root)
     packages = data["package"]
     for name, entry in packages.items():
-        for dependency in entry.get("requires", []):
+        for text in _entry_constraints(entry):
+            dependency, _extras, specifier, marker = _parse_requirement(text)
+            if marker is not None and not _eval_marker(marker):
+                continue
             if dependency not in packages:
                 raise PackageError("%s requires %s, which is not in %s; run `ail add %s`"
                                    % (name, dependency, LOCK, dependency))
+            if specifier and not _accepts_python(specifier, packages[dependency]["version"]):
+                raise PackageError("%s requires %s%s, but %s is locked at %s"
+                                   % (name, dependency, specifier, dependency, packages[dependency]["version"]))
     work = Path(tempfile.mkdtemp(prefix=".ail-sync-", dir=root))
+    downloads = []
     staged = []
     try:
         for name in sorted(packages):
@@ -800,8 +872,11 @@ def sync(root, index=None):
             else:
                 source, _size, _digest, _version, download = _stage_wheel(
                     root, name, entry["version"], index, expected_sha=entry["sha256"], filename=entry["wheel"])
-                shutil.copy(source, _wheel_cache_path(root, entry["wheel"]))
-                shutil.rmtree(download, ignore_errors=True)
+                downloads.append(download)
+                cache = _wheel_cache_path(root, entry["wheel"])
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(source, cache)
+                source = cache
             tree = work / name
             _safe_extract(source, tree)
             metadata = _metadata(tree)
@@ -830,6 +905,8 @@ def sync(root, index=None):
         print("synced %d package%s" % (len(packages), "" if len(packages) == 1 else "s"))
     finally:
         shutil.rmtree(work, ignore_errors=True)
+        for download in downloads:
+            shutil.rmtree(download, ignore_errors=True)
     return 0
 
 

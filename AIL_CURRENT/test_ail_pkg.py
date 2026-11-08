@@ -90,11 +90,11 @@ class Base(unittest.TestCase):
         cls.tmp.cleanup()
 
     @classmethod
-    def publish(cls, name, version, wheel, *, yanked=False, digest=None, packagetype="bdist_wheel",
-                requires_python=">=3.8"):
+    def record_for(cls, wheel, *, yanked=False, digest=None, packagetype="bdist_wheel",
+                   requires_python=">=3.8"):
         copied = cls.index / "files" / wheel.name
         shutil.copyfile(wheel, copied)
-        record = {
+        return {
             "filename": wheel.name,
             "url": cls.base + "/files/" + wheel.name,
             "digests": {"sha256": digest or sha256(wheel)},
@@ -103,7 +103,10 @@ class Base(unittest.TestCase):
             "yanked": yanked,
             "requires_python": requires_python,
         }
-        cls.releases.setdefault(name, {})[version] = record
+
+    @classmethod
+    def publish(cls, name, version, wheel, **kwargs):
+        cls.releases.setdefault(name, {})[version] = cls.record_for(wheel, **kwargs)
 
     @classmethod
     def publish_fixtures(cls):
@@ -154,6 +157,35 @@ class Base(unittest.TestCase):
 
         dup = build_wheel(staging, "dup", "1.0.0", {"alpha/__init__.py": "DUP = True\n"})
         cls.publish("dup", "1.0.0", dup)
+
+        pre_stable = build_wheel(staging, "pre", "1.0.0", {"pre/__init__.py": "VALUE = 'stable'\n"})
+        pre_rc = build_wheel(staging, "pre", "1.0.0rc1", {"pre/__init__.py": "VALUE = 'rc'\n"})
+        cls.publish("pre", "1.0.0", pre_stable)
+        cls.publish("pre", "1.0.0rc1", pre_rc)
+
+        needsalpha2 = build_wheel(staging, "needsalpha2", "1.0.0", {
+            "needsalpha2/__init__.py": "VALUE = 'needsalpha2'\n",
+        }, requires=("alpha>=2.0",))
+        cls.publish("needsalpha2", "1.0.0", needsalpha2)
+
+        py2only = build_wheel(staging, "py2only", "1.0.0", {"py2only/__init__.py": "VALUE = 'py2'\n"},
+                              tag="py2-none-any", filename=wheel_name("py2only", "1.0.0", "py2-none-any"))
+        cls.publish("py2only", "1.0.0", py2only)
+
+        pytag_py2 = build_wheel(staging, "pytag", "1.0.0", {"pytag/__init__.py": "VALUE = 'py2'\n"},
+                                tag="py2-none-any", filename=wheel_name("pytag", "1.0.0", "py2-none-any"))
+        pytag_py3 = build_wheel(staging, "pytag", "1.0.0", {"pytag/__init__.py": "VALUE = 'py3'\n"},
+                                tag="py3-none-any", filename=wheel_name("pytag", "1.0.0", "py3-none-any"))
+        pytag_records = [cls.record_for(pytag_py2), cls.record_for(pytag_py3)]
+        cls.write_json("pytag/1.0.0/json", {
+            "info": {"name": "pytag", "version": "1.0.0"},
+            "urls": pytag_records,
+        })
+        cls.write_json("pytag/json", {
+            "info": {"name": "pytag", "version": "1.0.0"},
+            "urls": pytag_records,
+            "releases": {"1.0.0": pytag_records},
+        })
 
         for name, versions in cls.releases.items():
             for version, record in versions.items():
@@ -227,6 +259,18 @@ class AddRemoveList(Base):
         self.assertEqual(entry["version"], "3.0.0")
         self.assertIn("return 'gamma'", (self.vendor("gamma", "3.0.0") / "gamma" / "__init__.py").read_text(encoding="utf-8"))
 
+    def test_bare_name_skips_prereleases(self):
+        self.ok("add", "pre")
+        entry = self.lock()["package"]["pre"]
+        self.assertEqual(entry["version"], "1.0.0")
+        self.assertIn("VALUE = 'stable'", (self.vendor("pre", "1.0.0") / "pre" / "__init__.py").read_text(encoding="utf-8"))
+
+    def test_version_picks_the_python3_wheel(self):
+        self.ok("add", "pytag==1.0.0")
+        entry = self.lock()["package"]["pytag"]
+        self.assertEqual(entry["wheel"], "pytag-1.0.0-py3-none-any.whl")
+        self.assertIn("VALUE = 'py3'", (self.vendor("pytag", "1.0.0") / "pytag" / "__init__.py").read_text(encoding="utf-8"))
+
     def test_remove_deletes_tree_lock_and_cached_wheel(self):
         self.ok("add", "gamma==3.0.0")
         wheel = self.project / ail_pkg.WHEEL_CACHE / "gamma-3.0.0-py3-none-any.whl"
@@ -244,16 +288,30 @@ class AddRemoveList(Base):
         self.ok("add", "alpha==1.0.0")
         self.ok("add", "beta==2.0.0")
         self.assertEqual(self.lock()["package"]["beta"]["requires"], ["alpha"])
+        self.assertEqual(self.lock()["package"]["beta"]["require_specs"], ["alpha>=1.0"])
         blocked = self.refused("remove", "alpha")
         self.assertIn("required by beta", blocked.stderr)
         self.ok("remove", "beta")
         self.ok("remove", "alpha")
+
+    def test_dependency_specifier_enforced(self):
+        self.ok("add", "alpha==1.0.0")
+        done = self.refused("add", "needsalpha2==1.0.0")
+        self.assertIn("requires alpha>=2.0", done.stderr)
+        self.assertNotIn("needsalpha2", self.lock()["package"])
 
     def test_duplicate_top_level_name_refused(self):
         self.ok("add", "alpha==1.0.0")
         done = self.refused("add", "dup==1.0.0")
         self.assertIn("already provided by alpha", done.stderr)
         self.assertNotIn("dup", self.lock()["package"])
+
+    def test_add_after_locked_tree_removed_refuses_by_name(self):
+        self.ok("add", "alpha==1.0.0")
+        shutil.rmtree(self.project / ail_pkg.VENDOR / "alpha")
+        done = self.refused("add", "gamma==3.0.0")
+        self.assertIn("run `ail sync` first", done.stderr)
+        self.assertNotIn("gamma", self.lock()["package"])
 
 
 class Refusals(Base):
@@ -280,6 +338,11 @@ class Refusals(Base):
         done = self.refused("add", "cext==1.0.0")
         self.assertIn("requires a C extension", done.stderr)
         self.assert_not_locked("cext")
+
+    def test_python2_only_wheel_refused_by_name(self):
+        done = self.refused("add", "py2only==1.0.0")
+        self.assertIn("Python 2", done.stderr)
+        self.assert_not_locked("py2only")
 
     def test_parent_escape_refused(self):
         done = self.refused("add", "escape==1.0.0")
@@ -317,6 +380,26 @@ class Sync(Base):
         self.assertIn("synced 2 packages", done.stdout)
         self.assertEqual(self.snapshot(), before)
         self.assertFalse((self.project / ail_pkg.VENDOR / "stray").exists())
+
+    def test_sync_refetches_when_cache_and_tree_are_missing(self):
+        self.ok("add", "alpha==1.0.0")
+        before = self.snapshot()
+        shutil.rmtree(self.project / ail_pkg.WHEEL_CACHE)
+        shutil.rmtree(self.project / ail_pkg.VENDOR)
+        done = self.ok("sync")
+        self.assertIn("synced 1 package", done.stdout)
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue((self.project / ail_pkg.WHEEL_CACHE / "alpha-1.0.0-py3-none-any.whl").is_file())
+
+    def test_sync_refetches_one_missing_cached_wheel(self):
+        self.ok("add", "alpha==1.0.0")
+        self.ok("add", "gamma==3.0.0")
+        before = self.snapshot()
+        (self.project / ail_pkg.WHEEL_CACHE / "alpha-1.0.0-py3-none-any.whl").unlink()
+        shutil.rmtree(self.vendor("alpha", "1.0.0"))
+        done = self.ok("sync")
+        self.assertIn("synced 2 packages", done.stdout)
+        self.assertEqual(self.snapshot(), before)
 
     def test_tampered_cached_wheel_fails_loudly(self):
         self.ok("add", "alpha==1.0.0")

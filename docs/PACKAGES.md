@@ -40,13 +40,17 @@ tampered cached wheel stops with the two hashes in the message; it never install
 ## Refusals by name
 
 `add` refuses: an sdist ("sdists run code at build time; AIL never does"), a platform wheel or
-a wheel containing `.so`, `.pyd`, `.dll` or `.dylib` ("requires a C extension"), a SHA-256 that
-does not match the index or the existing lock, an absolute path, `..`, a symlink or a duplicate
-archive entry, a malformed marker or requirement, a missing direct dependency, and two
-distributions that provide the same top-level module.
+a wheel containing `.so`, `.pyd`, `.dll` or `.dylib` ("requires a C extension"), a pure wheel
+tagged for Python 2 only ("no pure-Python wheel for Python 3"), a SHA-256 that does not match
+the index or the existing lock, an absolute path, `..`, a symlink or a duplicate archive
+entry, a malformed marker or requirement, a missing direct dependency, a dependency whose
+version specifier the locked version does not satisfy, and two distributions that provide the
+same top-level module.
 
-Dependencies are direct-only: add a requirement before the package that needs it. Extras are
-not activated. Only `*.py`/`*.pyi` and `.dist-info` files are vendored, so a package that needs
+Dependencies are direct-only: add a requirement before the package that needs it. The lock
+records each requirement's specifier (`require_specs`) and both `add` and `sync` enforce it.
+Extras are not activated. When the vendored tree of a locked package is missing, `add` names
+it and asks for `sync` instead of crashing. Only `*.py`/`*.pyi` and `.dist-info` files are vendored, so a package that needs
 non-Python data files at runtime may be incomplete; this revision targets the compiler census,
 where every package is still refused at compile time.
 
