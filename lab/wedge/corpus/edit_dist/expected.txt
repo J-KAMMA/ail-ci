@@ -1,0 +1,6 @@
+length 130
+distance 4800
+prefix 80000
+bigrams 95200
+hamming 4800
+best 4000

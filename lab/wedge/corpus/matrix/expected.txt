@@ -1,0 +1,10 @@
+n 300
+trace_a 9
+trace_c -7729
+rows 300
+row0 106
+max 1863
+thresh -10585100
+scale -9
+negatives 47646
+ident 90000 300
