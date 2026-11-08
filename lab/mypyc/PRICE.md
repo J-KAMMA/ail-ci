@@ -27,8 +27,8 @@ full   = 1 / (1 - s * (1 - 1/1.5)) = 1 / (1 - s/3)
 halved = 1 + (full - 1) / 2          # repo rule: halve every projected gain
 ```
 
-A module clears 1.03x after halving only when `s >= 1 - 1/(1 + 0.06)` of the cold wall on at
-least one task, i.e. **s >= 17.0%**. The repo's earlier estimates overshot by 2-3x (2.5x
+A module clears 1.03x after halving only when `s/3 >= 1 - 1/(1 + 0.06)` on at least one task,
+i.e. **s >= 17.0%** of the cold wall. The repo's earlier estimates overshot by 2-3x (2.5x
 estimated / 0.88x measured; 1.83-1.92x estimated / 0.62-0.78x measured), which is why the gain is
 halved.
 
