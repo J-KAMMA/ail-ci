@@ -295,7 +295,7 @@ def _new_scope_info():
             "globals": set(), "nonlocals": set(),
             "global_literals": {}, "global_uncertain": set(),
             "nonlocal_literals": {}, "nonlocal_uncertain": set(),
-            "sites": {}, "mutated": set()}
+            "sites": {}, "mutated": set(), "classes": {}}
 
 
 def _add_site(info, name, node, kind, **extra):
@@ -361,6 +361,8 @@ def _mutated_names(nodes):
             targets, value = [], None
         for target in targets:
             _mark_mutated_target(target, mutated)
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            mutated.add(node.target.id)
         if isinstance(node, ast.Delete):
             for target in node.targets:
                 _mark_mutated_target(target, mutated)
@@ -390,7 +392,7 @@ def _pattern_bindings(pattern):
     return bindings
 
 
-def _scope_info(scope):
+def _scope_info(scope, classes=None):
     """Bindings of one scope.
 
     `annotations` maps a parameter or annotated name to its annotation text; `literals` maps a name
@@ -399,6 +401,7 @@ def _scope_info(scope):
     `nonlocal` declaration are kept apart so the scope they write can be resolved.
     """
     info = _new_scope_info()
+    info["classes"] = classes or {}
     annotations, literals, uncertain, functions = (info["annotations"], info["literals"],
                                                    info["uncertain"], info["functions"])
 
@@ -564,6 +567,93 @@ def _function_returns(tree):
     return result
 
 
+def _class_methods(tree):
+    """Class name -> {method name: return annotation text}, for method calls on an instance."""
+    result = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            methods = result.setdefault(node.name, {})
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    methods.setdefault(item.name, _annotation(item.returns))
+    return result
+
+
+def _annotation_type_name(text, classes):
+    """The Python type an annotation names, or None when it is not a type this can be sure of."""
+    if not text:
+        return None
+    text = text.strip()
+    if text in ("str", "bytes", "int", "float", "bool", "list", "dict", "set", "tuple"):
+        return text
+    for name in ("list", "dict", "set", "tuple"):
+        if text.startswith(name + "[") and text.endswith("]"):
+            return name
+    if text in classes:
+        return text
+    return None
+
+
+def _source_type(value, info, returns, seen):
+    """The Python type of a value expression this can name from the source, or None."""
+    if value is None or id(value) in seen:
+        return None
+    seen = set(seen)
+    seen.add(id(value))
+    classes = info.get("classes") or {}
+    if isinstance(value, ast.Constant):
+        item = value.value
+        if isinstance(item, bool):
+            return "bool"
+        if isinstance(item, int):
+            return "int"
+        if isinstance(item, float):
+            return "float"
+        if isinstance(item, str):
+            return "str"
+        if isinstance(item, bytes):
+            return "bytes"
+        if item is None:
+            return "NoneType"
+        return None
+    if isinstance(value, ast.List):
+        return "list"
+    if isinstance(value, ast.Dict):
+        return "dict"
+    if isinstance(value, ast.Set):
+        return "set"
+    if isinstance(value, ast.Tuple):
+        return "tuple"
+    if isinstance(value, ast.JoinedStr):
+        return "str"
+    if isinstance(value, ast.Call):
+        function = value.func
+        if isinstance(function, ast.Name):
+            if function.id in classes:
+                return function.id
+            if function.id in ("str", "bytes", "int", "float", "bool", "list", "dict",
+                               "set", "tuple"):
+                return function.id
+            if function.id in returns:
+                return _annotation_type_name(returns[function.id], classes)
+        return None
+    if isinstance(value, ast.Name):
+        text = info.get("annotations", {}).get(value.id)
+        if text:
+            annotation = _annotation_type_name(text, classes)
+            if annotation is not None:
+                return annotation
+        results = []
+        for bound, for_iter in _binding_values(info, value.id):
+            if for_iter is not None:
+                results.append(None)
+            else:
+                results.append(_source_type(bound, info, returns, seen))
+        if results and all(item == results[0] and item is not None for item in results):
+            return results[0]
+    return None
+
+
 def _binding_values(info, name):
     """(value node, for-iterable) pairs from the assignments of `name` in one scope."""
     result = []
@@ -664,6 +754,26 @@ def _subscript_kind(value, info, returns, seen):
     return "unknown"
 
 
+def _method_bool_kind(function, info, returns, seen):
+    """The kind of a method call, from the receiver's type, never from the method name alone."""
+    receiver = _source_type(function.value, info, returns, seen)
+    classes = info.get("classes") or {}
+    if receiver in classes:
+        methods = classes[receiver]
+        if function.attr in methods:
+            return _annotation_kind(methods[function.attr])
+        return "unknown"
+    if receiver in ("str", "bytes"):
+        if function.attr in _BOOL_METHODS:
+            return "bool"
+        if function.attr in _INT_METHODS or function.attr in _STR_METHODS:
+            return "not-bool"
+        return "unknown"
+    if receiver in ("list", "tuple") and function.attr == "count":
+        return "not-bool"
+    return "unknown"
+
+
 def _bool_kind(value, info, returns, seen):
     """`bool`, `not-bool` or `unknown` for the value of a binding."""
     if value is None:
@@ -703,11 +813,7 @@ def _bool_kind(value, info, returns, seen):
                 return "not-bool"
             return "unknown"
         if isinstance(function, ast.Attribute):
-            if function.attr in _BOOL_METHODS:
-                return "bool"
-            if function.attr in _INT_METHODS or function.attr in _STR_METHODS:
-                return "not-bool"
-            return "unknown"
+            return _method_bool_kind(function, info, returns, seen)
         return "unknown"
     if isinstance(value, ast.Name):
         kinds = []
@@ -1061,11 +1167,12 @@ def _hover_in_chain(tree, chain, name, compiler_types=None):
     infos = {}
     compiler_types = compiler_types or {}
     returns = _function_returns(tree)
+    classes = _class_methods(tree)
 
     def info_for(scope):
         key = id(scope)
         if key not in infos:
-            infos[key] = _scope_info(scope)
+            infos[key] = _scope_info(scope, classes)
         return infos[key]
 
     def compiler_type(scope):

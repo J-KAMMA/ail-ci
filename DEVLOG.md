@@ -1,3 +1,19 @@
+## 2026-11-08 -- fdlsp2 hover review fixes: receiver-type method calls, augmented mutation (job-rbfdlsp2-11082100)
+
+Fixed the two review defects in `packaging/ail_lang/lsp.py`. A method call is now typed from its
+receiver, never from the method name alone: a class instance uses the method's return annotation
+(`c.isalpha() -> int` is `int`, `c.count() -> bool` is `bool`, an unannotated method or an unknown
+receiver shows nothing), and only a receiver the source proves is `str`/`bytes` uses the
+character-method tables. `_mutated_names` now also marks a bare `AugAssign` target, so
+`xs = [True]; xs += [1]` makes the item type unknown instead of trusting the old literal.
+
+Hover probes in `/tmp/probes/hover_methods.py` (10/10): class method `-> int` and `-> bool`,
+unknown receiver `.isalpha()`/`.count()`, unannotated class method, annotated `str` receiver,
+bytes literal, list `+=`, subscript `+=`. Compilable probes `methodname2.py`, `methodname3.py`
+and `aug.py` match CPython stdout/exit in both builds with `bash ~/tools/cmp.sh`. Tests on the
+final commit, `-j 2`: `test_ail_lsp`, `test_ail_lsp_def`, `test_ail_lsp_hover`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 6 modules, 0 failed, 193 s.
+
 ## 2026-11-08 -- fdlsp2 re-applied: LSP hover shows compiler-inferred local types (job-rbfdlsp2-11082100)
 
 Re-applied the accepted `job-fdlsp2-11081741` change (`9d53b559`..`FETCH_HEAD`) on this tree. The
