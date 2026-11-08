@@ -1,3 +1,46 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+I have enough evidence. Timing: started 17:45, now ~18:02.
+
+## Review: fcdict1 (branch `job-fcdict1b_rr2-11090017`)
+
+**What the diff really does:** it adds only `lab/reach/fcdict1/*.py` (14 probes) and `lab/reach/fcdict1.md`. No compiler, runtime or test file changes. The worker's own notes say so ("Nothing that survives"); the report has no final text.
+
+**Task result:** not delivered. Base (`origin/integ` ff1dcc26) records in `lab/pyproof/results.jsonl`: ledger_bin = general, ticket_audit = general, `lab/pyperf/run.py --help` = refused. On HEAD nothing changed, so those are still the values. `--strict` on ledger_bin still stops at `a nested def inside a loop ('rv') is not available`; ticket_audit's strict build times out (also timed out at the base, pyproof: "build timed out after 120 s"); pyperf still refused. Target was typed +2 and run.py built/matching.
+
+**Claims checked**
+- Base classifications (all three) — **verified** (`results.jsonl`, `integ_sha ff1dcc26`).
+- ledger_bin strict blockers (nested def; dict-of-containers at 116/118) — **partially verified** (first reason and `acc.get(r[1])` general-path note reproduced; "9x nested def" count not verified).
+- ticket_audit blockers at lines 98/111 — **unverified** (strict compile exceeds 200 s here).
+- "No change to pyfunc.py/optlib.py/unified.py" — **verified** (diff has only `lab/reach/` files).
+- p05 / p08 "already typed at base" — p05 **verified** (strict compile succeeds, matches CPython); p08 compiles and matches, but `cmp.sh` passes no argv, so the probe exits 1 with `IndexError` and never exercises a value beyond int64 — **vacuous, not the required boundary probe**.
+- p01, p09, p14 refusals — **verified** (all refused; p01 with the dict-of-containers message).
+- "dict-of-records lowering reached again from `pyfunc.to_c` via `optlib.rewrite`" — **FALSE**. `lower_dict_of_records` has one call site, `ail_syntax.py:5897` (inside `python_surface`); `optlib.rewrite` never calls it. The idempotency hazard described in the notes does not exist as stated, and would misguide the next attempt.
+- Required new test module / `tests.d` line — **absent** (verified).
+- 4a: no `bench/apps` or `language_examples` edits — verified.
+
+**Pre-existing:** p08's `IndexError` and the ticket_audit strict-build timeout reproduce at the base and are not caused by this change.
+
+**Not checked:** manifest (no test module to register), speed (no hot code touched, so inapplicable), remaining probes p02–p04, p06–p07, p10–p13, and the compare-lab case check for the two tasks (no implementation to run it against).
+
+```
+VERDICT: FIX
+1. Feature not implemented — diff adds only probes and notes. Repro: `python3 -B AIL_CURRENT/ail_chatgpt.py compile lab/compare/src/ledger_bin/main.py -o /tmp/o --strict`; expected typed path (task target), actual refusal `a nested def inside a loop ('rv') is not available`, and `results.jsonl` still records `default_path: general` for ledger_bin and ticket_audit and `result: refused` for lab/pyperf/run.py. Typed +2 target unmet.
+2. Required test module missing: `AIL_CURRENT/test_ail_fcdict1.py` and `AIL_CURRENT/tests.d/test_ail_fcdict1.txt` were named deliverables and do not exist.
+3. `lab/reach/fcdict1.md` states a false mechanism: lowering is called from `pyfunc.to_c` via `optlib.rewrite` — actual single call site is `ail_syntax.py:5897` (`python_surface`).
+4. Required int64-boundary probe is vacuous: `lab/reach/fcdict1/p08_int64_record.py` reads `sys.argv[1]` but `cmp.sh` passes no argument, so it exits 1 with `IndexError` on both CPython and AIL (matches, but the "beyond int64" case is never exercised).
+```
+[commandcode stop=end_turn turns=19 out_tokens=8431]
+
+
+--- ORIGINAL TASK ---
 Lane: fc-reach
 
 > Re-run of fcdict1b_rr1, whose GitHub run was lost (no verdict 6.6 h after dispatch). If its branch job-fcdict1b_rr1-* has work commits, cherry-pick them first and continue; otherwise do the task from scratch on origin/integ. Commit and push after every sub-step, so a cancel does not lose the work again.
