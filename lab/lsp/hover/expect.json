@@ -1,0 +1,291 @@
+{
+  "files": [
+    "probe.py",
+    "general.py"
+  ],
+  "cases": [
+    {
+      "file": "probe.py",
+      "line": 9,
+      "character": 4,
+      "name": "a",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 10,
+      "character": 4,
+      "name": "b",
+      "expected": "bool",
+      "oracle": "bool"
+    },
+    {
+      "file": "probe.py",
+      "line": 11,
+      "character": 4,
+      "name": "c",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 12,
+      "character": 4,
+      "name": "d",
+      "expected": null,
+      "oracle": "float",
+      "why": "sum() has the numeric-sum C type ail_nsum, which is int or float at run time"
+    },
+    {
+      "file": "probe.py",
+      "line": 13,
+      "character": 4,
+      "name": "n",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 14,
+      "character": 4,
+      "name": "i",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 15,
+      "character": 4,
+      "name": "j",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 16,
+      "character": 4,
+      "name": "k",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 17,
+      "character": 4,
+      "name": "p",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 18,
+      "character": 4,
+      "name": "q",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 19,
+      "character": 4,
+      "name": "r",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 20,
+      "character": 4,
+      "name": "s",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 21,
+      "character": 4,
+      "name": "t",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 22,
+      "character": 4,
+      "name": "u",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 23,
+      "character": 4,
+      "name": "v",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 24,
+      "character": 4,
+      "name": "w",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 28,
+      "character": 8,
+      "name": "total",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 28,
+      "character": 24,
+      "name": "idx",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 29,
+      "character": 4,
+      "name": "nums",
+      "expected": "list",
+      "oracle": "list"
+    },
+    {
+      "file": "probe.py",
+      "line": 30,
+      "character": 4,
+      "name": "first",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 31,
+      "character": 4,
+      "name": "floats",
+      "expected": "list",
+      "oracle": "list"
+    },
+    {
+      "file": "probe.py",
+      "line": 32,
+      "character": 4,
+      "name": "second",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 33,
+      "character": 4,
+      "name": "words",
+      "expected": "list",
+      "oracle": "list"
+    },
+    {
+      "file": "probe.py",
+      "line": 34,
+      "character": 4,
+      "name": "word",
+      "expected": "str",
+      "oracle": "str"
+    },
+    {
+      "file": "probe.py",
+      "line": 35,
+      "character": 4,
+      "name": "mapping",
+      "expected": "dict",
+      "oracle": "dict"
+    },
+    {
+      "file": "probe.py",
+      "line": 36,
+      "character": 4,
+      "name": "value",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 37,
+      "character": 4,
+      "name": "text",
+      "expected": "str",
+      "oracle": "str"
+    },
+    {
+      "file": "probe.py",
+      "line": 38,
+      "character": 4,
+      "name": "upper",
+      "expected": "str",
+      "oracle": "str"
+    },
+    {
+      "file": "probe.py",
+      "line": 39,
+      "character": 4,
+      "name": "pieces",
+      "expected": "list",
+      "oracle": "list"
+    },
+    {
+      "file": "probe.py",
+      "line": 40,
+      "character": 4,
+      "name": "stripped",
+      "expected": "str",
+      "oracle": "str"
+    },
+    {
+      "file": "probe.py",
+      "line": 41,
+      "character": 4,
+      "name": "replaced",
+      "expected": "str",
+      "oracle": "str"
+    },
+    {
+      "file": "probe.py",
+      "line": 42,
+      "character": 4,
+      "name": "count",
+      "expected": "int",
+      "oracle": "int"
+    },
+    {
+      "file": "probe.py",
+      "line": 43,
+      "character": 4,
+      "name": "ratio",
+      "expected": "float",
+      "oracle": "float"
+    },
+    {
+      "file": "probe.py",
+      "line": 45,
+      "character": 4,
+      "name": "mixed",
+      "expected": null,
+      "oracle": "float",
+      "why": "the name is assigned an int and then a float; the compiler boxes it"
+    },
+    {
+      "file": "general.py",
+      "line": 5,
+      "character": 4,
+      "name": "picked",
+      "expected": null,
+      "oracle": "int",
+      "why": "the function is on the general path, so there is no typed C for it"
+    }
+  ]
+}
