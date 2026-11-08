@@ -2119,6 +2119,38 @@ def _compile(items, units, module, out_dir):
     return so
 
 
+_SEARCH_ATTRS = ('count', 'index', 'remove', 'get', 'pop', 'setdefault', 'discard')
+
+
+def _searches_a_container(tree):
+    """True when the program can find a value in a container, or compare containers, by identity.
+
+    CPython's container membership, dict lookup and container `==` take `a is b` as equal before
+    `==`, so a float that is the same object is found even when it is a NaN.  A lifted method reads
+    its float field into a C double and boxes every value it hands back afresh, so that object is
+    lost.  This is a syntactic superset of `unified.float_search_risk`; that pass scans a function
+    plan, and a program made only of classes and module-level statements has no such plan, so it
+    does not fire for the method case at all.
+    """
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Compare):
+            sides = [n.left] + list(n.comparators)
+            for i, op in enumerate(n.ops):
+                if isinstance(op, (ast.In, ast.NotIn)):
+                    return True
+                if isinstance(op, (ast.Eq, ast.NotEq)) \
+                        and not isinstance(sides[i], ast.Constant) \
+                        and not isinstance(sides[i + 1], ast.Constant):
+                    return True
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+                and n.func.attr in _SEARCH_ATTRS:
+            return True
+        elif isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice) \
+                and not isinstance(n.slice, ast.Constant):
+            return True
+    return False
+
+
 def build(source_path, output_dir):
     """Build a CPython hybrid for `source_path` into `output_dir`; return the report dict."""
     source_path = Path(source_path).resolve()
@@ -2157,6 +2189,7 @@ def build(source_path, output_dir):
         except Exception:
             id_any = False
             nan_possible = False
+        search_possible = _searches_a_container(tree)
         if id_any:
             for class_plan in plan.values():
                 for info in class_plan['methods'].values():
@@ -2206,16 +2239,22 @@ def build(source_path, output_dir):
                 # hands back afresh.  For a NaN that copy is a different object, and CPython's
                 # container `in` / `==` / dict lookup take `a is b` as equal before comparing, so
                 # membership can change.  The standalone path keeps every float boxed when the
-                # program can make a NaN (C117); the method kernels need the same refusal.
-                if nan_possible:
+                # program can make a NaN (C117) or searches a container with a value that may be a
+                # float (C118); a NaN made by arithmetic or parsed from data is not visible to the
+                # C117 scan, so the method kernels need the wider container-search refusal too.
+                if nan_possible or search_possible:
                     kinds = field_kinds_by_class[class_name]
                     float_field = any(kinds.get(f) == 'float' for f in info['reads'] | info['writes'])
                     pick = chosen.get(kernel)
                     float_sig = bool(pick and (pick['ret'] == 'float'
                                                or any(k == 'float' for _, k in pick['params'])))
                     if float_field or float_sig:
-                        rejected[label] = ('the program can make a NaN, so a float field '
-                                           'would lose its identity')
+                        if nan_possible:
+                            rejected[label] = ('the program can make a NaN, so a float field '
+                                               'would lose its identity')
+                        else:
+                            rejected[label] = ('the program searches a container, so a float '
+                                               "field would lose a NaN's identity")
                         continue
                 if kernel not in chosen or kernel not in unit_names:
                     rejected[label] = rejected.get(kernel) or (

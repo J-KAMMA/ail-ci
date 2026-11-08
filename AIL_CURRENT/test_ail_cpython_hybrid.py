@@ -533,6 +533,62 @@ print('int', D(9).get())
             self.assertIn(b'dict True', got.stdout)
             self.assertIn(b'set True', got.stdout)
 
+    def test_nan_made_by_arithmetic_keeps_float_methods_in_cpython(self):
+        """A NaN the C117 scan cannot see must still keep float-touching methods in CPython.
+
+        `x = 1e308 * 10.0; n = x - x` and `float('n' + 'an')` make a NaN without spelling one,
+        so `nan_capable` is False.  The program searches a container, and CPython finds the NaN
+        by identity; the lifted method would box a fresh one.  A program that searches a
+        container therefore refuses a float field/parameter/return by name, while an int method
+        is still lifted.
+        """
+        text = '''
+class C:
+    def __init__(self, f: float):
+        self.f = f
+
+    def get(self) -> float:
+        return self.f
+
+    def ident(self, x: float) -> float:
+        return x
+
+class D:
+    def __init__(self, n: int):
+        self.n = n
+
+    def get(self) -> int:
+        return self.n
+
+x = 1e308 * 10.0
+n = x - x
+c = C(n)
+print('arith_set', c.get() in {c.f})
+print('arith_list', c.get() in [c.f])
+print('arith_tuple', c.get() in (c.f,))
+print('arith_count', [c.f].count(c.get()))
+s = 'n' + 'an'
+m = float(s)
+c2 = C(m)
+d = {c2.f: 1}
+print('parsed_dict', c2.get() in d)
+print('parsed_sub', d[c2.get()])
+print('param', c.ident(n) in {n})
+print('int', D(9).get() in [9])
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'nanarith', text)
+            self.assertNotIn('C.get', report['accelerated'], report)
+            self.assertNotIn('C.ident', report['accelerated'], report)
+            self.assertIn('container', report['rejected']['C.get'], report)
+            self.assertIn('D.get', report['accelerated'], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'nanarith')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'arith_set True', got.stdout)
+            self.assertIn(b'parsed_dict True', got.stdout)
+
     def test_method_dispatch_is_not_bypassed(self):
         """`self.m(...)` keeps CPython's dynamic dispatch under the hybrid.
 

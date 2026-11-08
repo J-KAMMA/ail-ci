@@ -1,3 +1,24 @@
+## 2026-11-08 -- wedge4 review fix 2: container searches keep lifted float methods in CPython (job-rbwedge4-11090123)
+
+The C117 guard added last commit only fired when `unified.nan_capable` could see a NaN token.
+A NaN made by arithmetic on an overflow (`x = 1e308 * 10.0; n = x - x`) or parsed from data
+(`float('n' + 'an')`) is invisible to it, so `c.get() in {c.f}` printed `False` where CPython
+prints `True`; the same held for `[c.f]`, `(c.f,)`, a dict lookup and `.count`.  The standalone
+path's C118 `float_search_risk` cannot gate the method plan either: it scans a function plan, and
+a program made only of classes and module-level statements has no plan for its module code, so it
+reports no risk (verified with `AIL_UNIFIED_STATS`).  The method plan now also refuses a method
+that reads/writes a `float` field or takes/returns one whenever the program has a container
+search (`in`/`not in`, non-constant `==`/`!=`, `count`/`index`/`remove`/`get`/`pop`/`setdefault`/
+`discard`, a non-constant subscript), with the named reason `the program searches a container, so
+a float field would lose a NaN's identity`.  Int methods still accelerate.  Probes under
+`/tmp/probes/`: `p_nan_arith`, `p_nan_split`, `p_nan_subscript`, `p_nan_count`, `p_nan_argument`,
+`p_nan_alias`, `p_nan_empty`, `p_nan_negative`, `p_nan_container_eq`, `p_nan_listfield`,
+`p15_nan_containers`, `p13_nan_set`, `p_finite_search`, `p_intfield_search`, `p_nofeature` -- all
+match CPython on the hybrid build; `bash ~/tools/cmp.sh` default/general builds match, or refuse
+the numeric-`is` program by name (`C114`).  A pre-existing standalone limitation is untouched:
+a `tuple` comparison holding a NaN raises `ValueError` in the unified `tuplegen` path on both
+builds (not reached by the hybrid, which keeps the method in CPython).
+
 ## 2026-11-08 -- wedge4 review fix: lifted float fields keep a NaN's identity (job-rbwedge4-11090123)
 
 A lifted method reads its `float` fields into C doubles and boxes every value it hands back
