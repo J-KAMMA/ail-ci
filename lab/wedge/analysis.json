@@ -23,6 +23,15 @@
     "json_parse:parse_array",
     "json_parse:parse_value"
    ],
+   "body_blockers": {},
+   "solo_self_s": 0.0,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 0,
+   "solo_examples": [],
+   "with_w4_self_s": 0.0,
+   "with_w4_share_of_kept": 0.0,
+   "with_w4_functions": 0,
+   "with_w4_examples": [],
    "rank": 1,
    "module_count": 3
   },
@@ -47,6 +56,25 @@
     "float_loops:scale_into",
     "matrix:identity"
    ],
+   "body_blockers": {
+    "call": 6,
+    "division": 2,
+    "indexing": 8,
+    "store": 6
+   },
+   "solo_self_s": 0.0,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 0,
+   "solo_examples": [],
+   "with_w4_self_s": 3.2421,
+   "with_w4_share_of_kept": 0.0734,
+   "with_w4_functions": 4,
+   "with_w4_examples": [
+    "dataframe_group:group_count",
+    "dataframe_group:group_sum",
+    "matrix:identity",
+    "matrix:mat_mul"
+   ],
    "rank": 2,
    "module_count": 6
   },
@@ -66,6 +94,18 @@
     "ast_lint:max_depth",
     "ast_lint:node_count"
    ],
+   "body_blockers": {
+    "call": 7,
+    "indexing": 7
+   },
+   "solo_self_s": 0.0,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 0,
+   "solo_examples": [],
+   "with_w4_self_s": 0.0,
+   "with_w4_share_of_kept": 0.0,
+   "with_w4_functions": 0,
+   "with_w4_examples": [],
    "rank": 3,
    "module_count": 1
   },
@@ -90,6 +130,22 @@
     "edit_dist:common_prefix",
     "edit_dist:hamming"
    ],
+   "body_blockers": {
+    "call": 8,
+    "division": 1
+   },
+   "solo_self_s": 0.0001,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 1,
+   "solo_examples": [
+    "matrix:trace"
+   ],
+   "with_w4_self_s": 0.0001,
+   "with_w4_share_of_kept": 0.0,
+   "with_w4_functions": 1,
+   "with_w4_examples": [
+    "matrix:trace"
+   ],
    "rank": 4,
    "module_count": 6
   },
@@ -109,6 +165,24 @@
     "graph_search:edges_above",
     "graph_search:max_degree"
    ],
+   "body_blockers": {
+    "call": 5,
+    "division": 1,
+    "indexing": 2,
+    "store": 2
+   },
+   "solo_self_s": 0.0113,
+   "solo_share_of_kept": 0.0003,
+   "solo_functions": 1,
+   "solo_examples": [
+    "graph_search:edges_above"
+   ],
+   "with_w4_self_s": 0.0113,
+   "with_w4_share_of_kept": 0.0003,
+   "with_w4_functions": 1,
+   "with_w4_examples": [
+    "graph_search:edges_above"
+   ],
    "rank": 5,
    "module_count": 1
   },
@@ -126,6 +200,20 @@
     "sort_rank:count_terms",
     "sort_rank:hash_spread"
    ],
+   "body_blockers": {
+    "call": 3,
+    "division": 2,
+    "indexing": 2,
+    "store": 2
+   },
+   "solo_self_s": 0.0,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 0,
+   "solo_examples": [],
+   "with_w4_self_s": 0.0,
+   "with_w4_share_of_kept": 0.0,
+   "with_w4_functions": 0,
+   "with_w4_examples": [],
    "rank": 6,
    "module_count": 2
   },
@@ -140,6 +228,29 @@
     "tokenizer"
    ],
    "examples": [
+    "hashing:djb2",
+    "json_parse:digits_in",
+    "tokenizer:count_idents",
+    "tokenizer:digit_count",
+    "tokenizer:longest_ident",
+    "tokenizer:token_weight"
+   ],
+   "body_blockers": {
+    "indexing": 2
+   },
+   "solo_self_s": 1.3161,
+   "solo_share_of_kept": 0.0298,
+   "solo_functions": 4,
+   "solo_examples": [
+    "hashing:djb2",
+    "json_parse:digits_in",
+    "tokenizer:digit_count",
+    "tokenizer:token_weight"
+   ],
+   "with_w4_self_s": 2.2054,
+   "with_w4_share_of_kept": 0.0499,
+   "with_w4_functions": 6,
+   "with_w4_examples": [
     "hashing:djb2",
     "json_parse:digits_in",
     "tokenizer:count_idents",
@@ -166,6 +277,27 @@
     "tokenizer:is_ident_char",
     "tokenizer:is_ident_start"
    ],
+   "body_blockers": {},
+   "solo_self_s": 2.0133,
+   "solo_share_of_kept": 0.0456,
+   "solo_functions": 5,
+   "solo_examples": [
+    "field_valid:is_simple_email",
+    "field_valid:score_ok",
+    "field_valid:valid_len",
+    "tokenizer:is_ident_char",
+    "tokenizer:is_ident_start"
+   ],
+   "with_w4_self_s": 2.0133,
+   "with_w4_share_of_kept": 0.0456,
+   "with_w4_functions": 5,
+   "with_w4_examples": [
+    "field_valid:is_simple_email",
+    "field_valid:score_ok",
+    "field_valid:valid_len",
+    "tokenizer:is_ident_char",
+    "tokenizer:is_ident_start"
+   ],
    "rank": 8,
    "module_count": 2
   },
@@ -183,6 +315,26 @@
     "csv_parse:max_field_len",
     "csv_parse:sum_column"
    ],
+   "body_blockers": {
+    "call": 1,
+    "indexing": 1
+   },
+   "solo_self_s": 0.9327,
+   "solo_share_of_kept": 0.0211,
+   "solo_functions": 3,
+   "solo_examples": [
+    "csv_parse:count_fields",
+    "csv_parse:field_chars",
+    "csv_parse:max_field_len"
+   ],
+   "with_w4_self_s": 0.9327,
+   "with_w4_share_of_kept": 0.0211,
+   "with_w4_functions": 3,
+   "with_w4_examples": [
+    "csv_parse:count_fields",
+    "csv_parse:field_chars",
+    "csv_parse:max_field_len"
+   ],
    "rank": 9,
    "module_count": 1
   },
@@ -195,6 +347,29 @@
     "hashing"
    ],
    "examples": [
+    "hashing:adler32_simple",
+    "hashing:crc32_table_free",
+    "hashing:fnv1a",
+    "hashing:fnv1a_64",
+    "hashing:sum_bytes",
+    "hashing:xor_fold"
+   ],
+   "body_blockers": {},
+   "solo_self_s": 1.4832,
+   "solo_share_of_kept": 0.0336,
+   "solo_functions": 6,
+   "solo_examples": [
+    "hashing:adler32_simple",
+    "hashing:crc32_table_free",
+    "hashing:fnv1a",
+    "hashing:fnv1a_64",
+    "hashing:sum_bytes",
+    "hashing:xor_fold"
+   ],
+   "with_w4_self_s": 1.4832,
+   "with_w4_share_of_kept": 0.0336,
+   "with_w4_functions": 6,
+   "with_w4_examples": [
     "hashing:adler32_simple",
     "hashing:crc32_table_free",
     "hashing:fnv1a",
@@ -221,6 +396,27 @@
     "float_loops:norm",
     "float_loops:sq_sum"
    ],
+   "body_blockers": {
+    "call": 1,
+    "division": 3,
+    "indexing": 2
+   },
+   "solo_self_s": 0.2098,
+   "solo_share_of_kept": 0.0047,
+   "solo_functions": 2,
+   "solo_examples": [
+    "float_loops:max_abs",
+    "float_loops:sq_sum"
+   ],
+   "with_w4_self_s": 0.8251,
+   "with_w4_share_of_kept": 0.0187,
+   "with_w4_functions": 4,
+   "with_w4_examples": [
+    "float_loops:blend",
+    "float_loops:dot",
+    "float_loops:max_abs",
+    "float_loops:sq_sum"
+   ],
    "rank": 11,
    "module_count": 1
   },
@@ -239,6 +435,23 @@
     "dataframe_group:scaled_total",
     "rolling_stats:mean_scaled"
    ],
+   "body_blockers": {
+    "call": 1
+   },
+   "solo_self_s": 0.1256,
+   "solo_share_of_kept": 0.0028,
+   "solo_functions": 2,
+   "solo_examples": [
+    "bitset_bloom:multiples",
+    "dataframe_group:scaled_total"
+   ],
+   "with_w4_self_s": 0.1256,
+   "with_w4_share_of_kept": 0.0028,
+   "with_w4_functions": 2,
+   "with_w4_examples": [
+    "bitset_bloom:multiples",
+    "dataframe_group:scaled_total"
+   ],
    "rank": 12,
    "module_count": 3
   },
@@ -252,6 +465,21 @@
    ],
    "examples": [
     "tree_build:build_tree",
+    "tree_build:count_nodes"
+   ],
+   "body_blockers": {
+    "call": 1
+   },
+   "solo_self_s": 0.0,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 1,
+   "solo_examples": [
+    "tree_build:count_nodes"
+   ],
+   "with_w4_self_s": 0.0,
+   "with_w4_share_of_kept": 0.0,
+   "with_w4_functions": 1,
+   "with_w4_examples": [
     "tree_build:count_nodes"
    ],
    "rank": 13,
@@ -269,6 +497,17 @@
     "edit_dist:best_match",
     "edit_dist:total_length"
    ],
+   "body_blockers": {
+    "call": 2
+   },
+   "solo_self_s": 0.0,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 0,
+   "solo_examples": [],
+   "with_w4_self_s": 0.0,
+   "with_w4_share_of_kept": 0.0,
+   "with_w4_functions": 0,
+   "with_w4_examples": [],
    "rank": 14,
    "module_count": 1
   },
@@ -283,6 +522,18 @@
    "examples": [
     "sort_rank:top_score"
    ],
+   "body_blockers": {
+    "call": 1,
+    "indexing": 1
+   },
+   "solo_self_s": 0.0,
+   "solo_share_of_kept": 0.0,
+   "solo_functions": 0,
+   "solo_examples": [],
+   "with_w4_self_s": 0.0,
+   "with_w4_share_of_kept": 0.0,
+   "with_w4_functions": 0,
+   "with_w4_examples": [],
    "rank": 15,
    "module_count": 1
   }
@@ -297,43 +548,85 @@
      "family": "tuple-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: node",
-     "self_s": 1.0337
+     "self_s": 1.0337,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "count_tag": {
      "family": "tuple-parameter",
      "gate": "pymix",
      "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc",
-     "self_s": 1.0342
+     "self_s": 1.0342,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "has_tag": {
      "family": "tuple-parameter",
      "gate": "pymix",
      "reason": "to_c-refused: 'node' is annotated tuple in the source, but the caller also supplies str; refusing rather than silently choosing one.\n  write instead: make the annotation matc",
-     "self_s": 0.0005
+     "self_s": 0.0005,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "leaves": {
      "family": "tuple-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: node",
-     "self_s": 0.8609
+     "self_s": 0.8609,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "max_depth": {
      "family": "tuple-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: node",
-     "self_s": 0.8597
+     "self_s": 0.8597,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "node_count": {
      "family": "tuple-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: node",
-     "self_s": 0.8454
+     "self_s": 0.8454,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "sum_ints": {
      "family": "tuple-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: node",
-     "self_s": 1.0365
+     "self_s": 1.0365,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -358,31 +651,57 @@
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 1.0437
+     "self_s": 1.0437,
+     "body_blockers": [
+      "division"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "bloom_set": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.2776
+     "self_s": 0.2776,
+     "body_blockers": [
+      "division",
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "make_hashes": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.5034
+     "self_s": 0.5034,
+     "body_blockers": [
+      "call",
+      "division"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "multiples": {
      "family": "division-can-raise",
      "gate": "select",
      "reason": "division or power can raise",
-     "self_s": 0.0215
+     "self_s": 0.0215,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "set_intersect": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.0292
+     "self_s": 0.0292,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -406,31 +725,51 @@
      "family": "module-constant",
      "gate": "pymix",
      "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-     "self_s": 0.3065
+     "self_s": 0.3065,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "field_chars": {
      "family": "module-constant",
      "gate": "pymix",
      "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-     "self_s": 0.3149
+     "self_s": 0.3149,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "max_field_len": {
      "family": "module-constant",
      "gate": "pymix",
      "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-     "self_s": 0.3112
+     "self_s": 0.3112,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "split_lines": {
      "family": "list-str-parameter",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.3531
+     "self_s": 0.3531,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "sum_column": {
      "family": "module-constant",
      "gate": "pymix",
      "reason": "to_c-refused: 'COMMA' is read before it is assigned",
-     "self_s": 0.6934
+     "self_s": 0.6934,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -455,25 +794,45 @@
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.0853
+     "self_s": 0.0853,
+     "body_blockers": [
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "group_sum": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.158
+     "self_s": 0.158,
+     "body_blockers": [
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "scaled_total": {
      "family": "division-can-raise",
      "gate": "select",
      "reason": "division or power can raise",
-     "self_s": 0.1041
+     "self_s": 0.1041,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "weighted_sum": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.2065
+     "self_s": 0.2065,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "Frame": {
      "family": "not-a-top-level-function",
@@ -516,37 +875,67 @@
      "family": "unannotated-list-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: cands",
-     "self_s": 0.0058
+     "self_s": 0.0058,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "bigram_overlap": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.0843
+     "self_s": 0.0843,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "common_prefix": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.0051
+     "self_s": 0.0051,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "hamming": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.0063
+     "self_s": 0.0063,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "levenshtein": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 3.5725
+     "self_s": 3.5725,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "total_length": {
      "family": "unannotated-list-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: words",
-     "self_s": 0.0
+     "self_s": 0.0,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -572,19 +961,28 @@
      "family": "untyped-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.8243
+     "self_s": 0.8243,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "score_ok": {
      "family": "untyped-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.0554
+     "self_s": 0.0554,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "valid_len": {
      "family": "untyped-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.2193
+     "self_s": 0.2193,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     }
    },
    "self_s": {
@@ -606,49 +1004,86 @@
      "family": "list-float-abi",
      "gate": "abi-mismatch",
      "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b, double v_w'",
-     "self_s": 0.3467
+     "self_s": 0.3467,
+     "body_blockers": [
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "dot": {
      "family": "list-float-abi",
      "gate": "abi-mismatch",
      "reason": "the emitted prototype is 'ail_flist v_a, ail_flist v_b'",
-     "self_s": 0.2686
+     "self_s": 0.2686,
+     "body_blockers": [
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "max_abs": {
      "family": "list-float-abi",
      "gate": "abi-mismatch",
      "reason": "the emitted prototype is 'ail_flist v_xs'",
-     "self_s": 0.1031
+     "self_s": 0.1031,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "mean": {
      "family": "list-float-abi",
      "gate": "abi-mismatch",
      "reason": "the emitted prototype is 'ail_flist v_xs'",
-     "self_s": 0.1606
+     "self_s": 0.1606,
+     "body_blockers": [
+      "division"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "norm": {
      "family": "list-float-abi",
      "gate": "abi-mismatch",
      "reason": "the emitted prototype is 'ail_flist v_xs'",
-     "self_s": 0.1029
+     "self_s": 0.1029,
+     "body_blockers": [
+      "division"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "scale_into": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.5375
+     "self_s": 0.5375,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "sq_sum": {
      "family": "list-float-abi",
      "gate": "abi-mismatch",
      "reason": "the emitted prototype is 'ail_flist v_xs'",
-     "self_s": 0.1067
+     "self_s": 0.1067,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "variance": {
      "family": "list-float-abi",
      "gate": "abi-mismatch",
      "reason": "the emitted prototype is 'ail_flist v_xs'",
-     "self_s": 0.168
+     "self_s": 0.168,
+     "body_blockers": [
+      "call",
+      "division"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -671,37 +1106,70 @@
      "family": "nested-list-annotation",
      "gate": "pymix",
      "reason": "unresolved-param: adj",
-     "self_s": 1.8079
+     "self_s": 1.8079,
+     "body_blockers": [
+      "call",
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "build_graph": {
      "family": "nested-list-annotation",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.0982
+     "self_s": 0.0982,
+     "body_blockers": [
+      "call",
+      "division"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "degree_sum": {
      "family": "nested-list-annotation",
      "gate": "pymix",
      "reason": "unresolved-param: adj",
-     "self_s": 0.0044
+     "self_s": 0.0044,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "dfs_count": {
      "family": "nested-list-annotation",
      "gate": "pymix",
      "reason": "unresolved-param: adj",
-     "self_s": 1.9892
+     "self_s": 1.9892,
+     "body_blockers": [
+      "call",
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "edges_above": {
      "family": "nested-list-annotation",
      "gate": "pymix",
      "reason": "unresolved-param: adj",
-     "self_s": 0.0113
+     "self_s": 0.0113,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "max_degree": {
      "family": "nested-list-annotation",
      "gate": "pymix",
      "reason": "unresolved-param: adj",
-     "self_s": 0.0038
+     "self_s": 0.0038,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -722,43 +1190,64 @@
      "family": "bytes-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: data",
-     "self_s": 0.3394
+     "self_s": 0.3394,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "crc32_table_free": {
      "family": "bytes-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: data",
-     "self_s": 0.0136
+     "self_s": 0.0136,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "djb2": {
      "family": "call-can-raise",
      "gate": "select",
      "reason": "a call can raise or have side effects",
-     "self_s": 0.3102
+     "self_s": 0.3102,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "fnv1a": {
      "family": "bytes-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: data",
-     "self_s": 0.3818
+     "self_s": 0.3818,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "fnv1a_64": {
      "family": "bytes-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: data",
-     "self_s": 0.4163
+     "self_s": 0.4163,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "sum_bytes": {
      "family": "bytes-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: data",
-     "self_s": 0.2303
+     "self_s": 0.2303,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "xor_fold": {
      "family": "bytes-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: data",
-     "self_s": 0.102
+     "self_s": 0.102,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     }
    },
    "self_s": {
@@ -784,7 +1273,10 @@
      "family": "call-can-raise",
      "gate": "select",
      "reason": "a call can raise or have side effects",
-     "self_s": 0.2652
+     "self_s": 0.2652,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "parse_string": {
      "family": "not-a-top-level-function",
@@ -864,25 +1356,46 @@
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.0003
+     "self_s": 0.0003,
+     "body_blockers": [
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "mat_mul": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 2.9985
+     "self_s": 2.9985,
+     "body_blockers": [
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "row_sums": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.006
+     "self_s": 0.006,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "trace": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.0001
+     "self_s": 0.0001,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     }
    },
    "self_s": {
@@ -910,25 +1423,46 @@
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.6896
+     "self_s": 0.6896,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "mean_scaled": {
      "family": "division-can-raise",
      "gate": "select",
      "reason": "division or power can raise",
-     "self_s": 0.1123
+     "self_s": 0.1123,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "rising_streak": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.4089
+     "self_s": 0.4089,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "window_sums": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 1.7214
+     "self_s": 1.7214,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -955,25 +1489,54 @@
      "family": "list-str-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: words",
-     "self_s": 1.0646
+     "self_s": 1.0646,
+     "body_blockers": [
+      "call",
+      "division",
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "hash_spread": {
      "family": "list-str-parameter",
      "gate": "pymix",
      "reason": "unresolved-param: words",
-     "self_s": 1.0608
+     "self_s": 1.0608,
+     "body_blockers": [
+      "call",
+      "division",
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "top_indices": {
      "family": "list-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.0
+     "self_s": 0.0,
+     "body_blockers": [
+      "call",
+      "indexing",
+      "store"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "top_score": {
      "family": "list-return",
      "gate": "pymix",
      "reason": "to_c-refused: returning Subscript as a list",
-     "self_s": 0.0
+     "self_s": 0.0,
+     "body_blockers": [
+      "call",
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": false
     }
    },
    "self_s": {
@@ -995,43 +1558,70 @@
      "family": "call-can-raise",
      "gate": "select",
      "reason": "a call can raise or have side effects",
-     "self_s": 0.4475
+     "self_s": 0.4475,
+     "body_blockers": [
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "count_keywords": {
      "family": "indexing-can-raise",
      "gate": "select",
      "reason": "indexing can raise",
-     "self_s": 0.2225
+     "self_s": 0.2225,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "digit_count": {
      "family": "call-can-raise",
      "gate": "select",
      "reason": "a call can raise or have side effects",
-     "self_s": 0.2382
+     "self_s": 0.2382,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "is_ident_char": {
      "family": "untyped-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.5063
+     "self_s": 0.5063,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "is_ident_start": {
      "family": "untyped-return-kind",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.4081
+     "self_s": 0.4081,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "longest_ident": {
      "family": "call-can-raise",
      "gate": "select",
      "reason": "a call can raise or have side effects",
-     "self_s": 0.4418
+     "self_s": 0.4418,
+     "body_blockers": [
+      "indexing"
+     ],
+     "solo": false,
+     "with_w4": true
     },
     "token_weight": {
      "family": "call-can-raise",
      "gate": "select",
      "reason": "a call can raise or have side effects",
-     "self_s": 0.5025
+     "self_s": 0.5025,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     }
    },
    "self_s": {
@@ -1053,13 +1643,21 @@
      "family": "user-class-annotation",
      "gate": "pymix",
      "reason": "unresolved-return: no return, or contradictory returns",
-     "self_s": 0.0065
+     "self_s": 0.0065,
+     "body_blockers": [
+      "call"
+     ],
+     "solo": false,
+     "with_w4": false
     },
     "count_nodes": {
      "family": "user-class-annotation",
      "gate": "pymix",
      "reason": "unresolved-param: t",
-     "self_s": 0.0
+     "self_s": 0.0,
+     "body_blockers": [],
+     "solo": true,
+     "with_w4": true
     },
     "insert": {
      "family": "not-a-top-level-function",

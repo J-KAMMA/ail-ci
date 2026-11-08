@@ -7,7 +7,9 @@ Per corpus module:
   cpython      median of 5 `python3 run.py`
   hybrid       median of 5 `python3 run.py` in the hybrid build directory
   standalone   median of 5 of the AIL binary built from run.py, when it builds
-  profile      cProfile of `run.py`, used for the per-function share of CPython's wall time
+  profile      cProfile of `run.py`, used for the per-function share of CPython's profiled
+               self time (cProfile inflates wall time, so these shares rank functions but are
+               not shares of real wall time)
 
 The profile is the same program on the same input, so the shares are the hot-path split the
 report uses: a function that stays on CPython keeps its own share there.
@@ -142,8 +144,8 @@ def main():
     Path(args.out).write_text(json.dumps(rows, indent=1) + '\n')
     ok = [r for r in rows if r.get('cpython_s') and r.get('hybrid_s')]
     if ok:
-        print('hybrid/cpython speedup geomean %.3fx on %d modules' % (
-            statistics.geometric_mean([r['cpython_s'] / r['hybrid_s'] for r in ok]), len(ok)))
+        print('hybrid/cpython time ratio geomean %.3fx on %d modules (below 1.0 is faster)' % (
+            statistics.geometric_mean([r['hybrid_s'] / r['cpython_s'] for r in ok]), len(ok)))
     print('wrote %s' % args.out)
 
 

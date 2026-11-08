@@ -57,6 +57,7 @@ def main():
         for f, v in boundary[m['module']]['functions'].items()
         if not v['native'] and f in (census[m['module']]['hybrid'].get('rejected') or {}))
     rust = {r['module']: r for r in load('rust_bar.json')}
+    byfam = {r['family']: r for r in analysis['reasons']}
     modules = sorted(census)
 
     total_funcs = sum(len(boundary[m]['functions']) for m in modules)
@@ -231,19 +232,46 @@ def main():
       '(the no-trap body rule, parameter and result kinds, list mutation).  `lab/wedge/boundary.py` '
       'reports which gate stopped each function and with what message.')
     A('')
-    A('`share` is the percentage of the corpus\'s whole-function self time (%s s across %d '
-      'modules).  `native` time is %s s = %s%% of it.'
-      % (fmt(analysis['total_function_self_s'], 1), len(modules),
-         fmt(analysis['native_function_self_s'], 2),
-         pct(100 * analysis['native_share_of_self'])))
+    prof_total = analysis['total_function_self_s']
+    wall_total = sum(measure[m].get('cpython_s') or 0.0 for m in modules)
+    A('`share` is the percentage of the corpus\'s **profiled** whole-function self time (%s s '
+      'across %d modules).  `native` time is %s s = %s%% of it.  The profiled base is %sx the '
+      '%s s of CPython wall time in section 2, because cProfile adds per-call overhead; the '
+      'shares rank the refused functions but are **not shares of real wall time** (for example '
+      '`ast_lint` is 5.67 s of self time for a 1.739 s program, `tree_build` 5.80 s for 1.97 s).'
+      % (fmt(prof_total, 1), len(modules), fmt(analysis['native_function_self_s'], 2),
+         pct(100 * analysis['native_share_of_self']),
+         fmt(prof_total / wall_total, 2) if wall_total else 'n/a', fmt(wall_total, 2)))
     A('')
-    A('| # | reason | self time s | share | functions | modules | example functions |')
-    A('| ---: | --- | ---: | ---: | ---: | ---: | --- |')
+    A('A first gate is only a **ceiling**: `_select` applies a second, independent body rule '
+      '(`_unsafe_body`), so a function fixed at its first gate can still be refused for a '
+      'subscript, a call, an index store or a division.  Of the %d list-return functions %d pass '
+      'that body rule, of the %d tuple-parameter %d, of the %d nested-list %d, of the %d '
+      'list-float %d.  The `solo` column is the time of the functions with no other body gate; '
+      'the `W4` column adds the index/index-store fix (W4).'
+      % (byfam['list-return-kind']['functions'], byfam['list-return-kind']['solo_functions'],
+         byfam['tuple-parameter']['functions'], byfam['tuple-parameter']['solo_functions'],
+         byfam['nested-list-annotation']['functions'],
+         byfam['nested-list-annotation']['solo_functions'],
+         byfam['list-float-abi']['functions'], byfam['list-float-abi']['solo_functions']))
+    A('')
+    A('| # | reason | self time s | share | solo self s | solo funcs | +W4 self s | +W4 funcs | functions | modules | example functions |')
+    A('| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |')
     for r in analysis['reasons']:
-        A('| %d | %s | %s | %s%% | %d | %d | %s |'
+        A('| %d | %s | %s | %s%% | %s | %d | %s | %d | %d | %d | %s |'
           % (r['rank'], r['family'], fmt(r['self_s'], 2), pct(100 * r['share_of_kept']),
-             r['functions'], r['module_count'],
+             fmt(r['solo_self_s'], 2), r['solo_functions'], fmt(r['with_w4_self_s'], 2),
+             r['with_w4_functions'], r['functions'], r['module_count'],
              ', '.join('`%s`' % e.split(':')[1] for e in r['examples'][:3])))
+    A('')
+    solo_rank = sorted(analysis['reasons'], key=lambda r: -r['solo_self_s'])[:5]
+    A('Read the `solo` column, not the ceiling.  By solo-achievable time the five largest fixes '
+      'are %s.  The five first-gate reasons below are still the biggest when their prerequisites '
+      'are fixed, but **W4 (indexing-can-raise) is the prerequisite for W2/W3/W6**, and the '
+      'call-can-raise and index-assignment rules are additional gates; so the W1-W6 order is '
+      'dependency-aware, not the ceiling order.'
+      % ', '.join('%s (%s s)' % (r['family'], fmt(r['solo_self_s'], 2)) for r in solo_rank
+                  if r['solo_self_s'] > 0))
     A('')
     A('### The five reasons that matter, spelled out')
     A('')
@@ -254,21 +282,45 @@ def main():
       'method, a nested helper or a constructor is refused before any typing happens.  This is '
       'the largest single bucket because the hottest code in a real module is often a method '
       '(`Tree._inorder` %s s of `tree_build`\'s %s s of function self time; the three tree '
-      'methods alone are %s s).'
-      % (fmt(tb.get('_inorder', {}).get('tottime'), 2), fmt(tb_total, 2), fmt(tb_methods, 2)))
+      'methods alone are %s s).  The corpus\'s %s s is plain methods taking `self`, which the '
+      'two-hour W1 scope (staticmethods and closures) does not cover, so W1 measures 0 solo here.'
+      % (fmt(tb.get('_inorder', {}).get('tottime'), 2), fmt(tb_total, 2), fmt(tb_methods, 2),
+         fmt(byfam['not-a-top-level-function']['self_s'], 2)))
     A('2. **list-return-kind** -- `-> list[int]` / `-> list[str]` / `-> list[float]`.  `pymix` '
-      'has no return kind for a container, and the boundary has no ABI for one, so '
-      '`group_sum`, `mat_mul`, `window_sums`, `make_samples`, `bloom_set`, `split_lines` and '
-      '`identity` all stay in Python.')
+      'has no return kind for a container, and the boundary has no ABI for one.  The first gate '
+      'alone accelerates **0 of %d**: every body also indexes, calls or divides.  With W4 also '
+      'applied, %d of %d (`%s`, %s s) become reachable; the rest still need the call or division '
+      'rule.'
+      % (byfam['list-return-kind']['functions'],
+         byfam['list-return-kind']['with_w4_functions'],
+         byfam['list-return-kind']['functions'],
+         '`, `'.join(e.split(':')[1] for e in byfam['list-return-kind']['with_w4_examples']),
+         fmt(byfam['list-return-kind']['with_w4_self_s'], 2)))
     A('3. **tuple-parameter** -- a `tuple` parameter (`node: tuple`) is not a tracked kind.  '
-      '`ast_lint`\'s recursive walk is 5.7 s of the corpus and every function in it is refused '
-      'this way.')
+      '`ast_lint`\'s recursive walk is 5.7 s of the corpus, but all %d functions also index and '
+      'call, so W3 alone accelerates **0 of %d**; W4 and the call rule are additional '
+      'prerequisites for the whole 5.67 s.'
+      % (byfam['tuple-parameter']['functions'], byfam['tuple-parameter']['functions']))
     A('4. **indexing-can-raise** -- `_unsafe_body` refuses any subscript, because the typed clone '
-      'cannot reproduce `IndexError` back into the caller\'s `try`.  This is the single biggest '
-      '*body* rule: `levenshtein` alone is 3.6 s.  A clone that returns a sentinel and lets the '
-      'Python wrapper re-run the original on `IndexError` would unlock it.')
+      'cannot reproduce `IndexError` back into the caller\'s `try`.  It is the most common second '
+      'gate, but only %d of the %d indexing functions (`%s`) has no other body gate, because %d '
+      'also call and %d divides; `levenshtein` appends to a list as well, so it needs the call '
+      'rule too.  W4 alone moves %d function; its value is as the prerequisite for W2/W6.'
+      % (byfam['indexing-can-raise']['solo_functions'],
+         byfam['indexing-can-raise']['functions'],
+         '`, `'.join(e.split(':')[1] for e in byfam['indexing-can-raise']['solo_examples']),
+         byfam['indexing-can-raise']['body_blockers'].get('call', 0),
+         byfam['indexing-can-raise']['body_blockers'].get('division', 0),
+         byfam['indexing-can-raise']['solo_functions']))
     A('5. **nested-list-annotation** -- `list[list[int]]` (an adjacency list) is not a tracked '
-      'parameter kind; all of `graph_search` (3.9 s) is refused here.')
+      'parameter kind.  Only %d of %d (`%s`, %s s) has no other body gate; the other %d call, so '
+      'W5 alone accelerates %d and the 3.9 s is a ceiling.'
+      % (byfam['nested-list-annotation']['solo_functions'],
+         byfam['nested-list-annotation']['functions'],
+         '`, `'.join(e.split(':')[1] for e in byfam['nested-list-annotation']['solo_examples']),
+         fmt(byfam['nested-list-annotation']['solo_self_s'], 2),
+         byfam['nested-list-annotation']['body_blockers'].get('call', 0),
+         byfam['nested-list-annotation']['solo_functions']))
     A('')
     A('The rest, in order: `list-str-parameter` (`list[str]`, 2.5 s), `call-can-raise` '
       '(`_unsafe_body` refuses a call to a user function or a `str` method it cannot prove pure, '
@@ -281,8 +333,10 @@ def main():
     A('')
     A('### A defect found on the way: `list[float]` cannot be wrapped at all')
     A('')
-    A('`float_loops` is the one module where the typed emitter accepts all 8 functions and the '
-      'hybrid still wraps none.  `pyfunc.to_c` spells a `list[float]` parameter as a whole '
+    A('`float_loops` gets none of its 8 functions, but `list[float]` ABI is **not** the only '
+      'reason: the typed emitter accepts 7 of the 8, and `scale_into` is refused earlier by '
+      '`pymix` as `unresolved-return` (family list-return-kind), so it never reaches the ABI '
+      'gate.  For the 7 that do, `pyfunc.to_c` spells a `list[float]` parameter as a whole '
       '`ail_flist` value (`double dot(ail_flist v_a, ail_flist v_b)`); '
       '`pyboxed2._mix_validate_signature` demands the `const double *v_a, int64_t v_a_len` pair '
       'it demands for `list[int]`, and `ail_cpython_hybrid._c_proto` / `_wrapper_source` build '
@@ -291,7 +345,13 @@ def main():
       'build compiles the same module on the typed path (2.20 s -> 0.15 s), and the hybrid '
       'wrapper already allocates and fills the `double *` buffer -- it just hands it over in '
       'the wrong shape (`ail_flist` is `{double *p; int64_t n, cap}`, so a value can be built '
-      'in one line).  It is one prototype spelling, and it is the cheapest fix in the list.')
+      'in one line).  With the ABI spelling fixed only `max_abs` and `sq_sum` have no other '
+      'body gate (%s of the 7); `dot`/`blend` also index and need W4, `mean`/`variance`/`norm` '
+      'divide by a non-constant, and `scale_into` needs W2.  With W4 too, %d of the 7 become '
+      'reachable (%s s); the module does not go from 0 to 8.'
+      % (byfam['list-float-abi']['solo_functions'],
+         byfam['list-float-abi']['with_w4_functions'],
+         fmt(byfam['list-float-abi']['with_w4_self_s'], 2)))
     A('')
     A('### A second defect: %d of the %d refusals are silent'
       % (analysis['silent_refusals'], analysis['refused_functions']))
@@ -339,6 +399,116 @@ def main():
          'by itself.'
          % (analysis['silent_refusals'], analysis['refused_functions'],
             pct(100.0 * analysis['silent_refusals'] / max(1, analysis['refused_functions'])))),
+        ('W4', 'indexing-can-raise', '12.6%',
+         'Let a clone that may raise `IndexError` fall back instead of being refused.  '
+         '`_unsafe_body` refuses every `Subscript` outright, load or store.  The emitted typed clone already '
+         'has a trap path: make the index check set the per-function mix flag (the same '
+         '`extern int <mangled>__mix_overflow` the int64 path uses), return a zero, and let the '
+         'Python wrapper re-run the original function when the flag is set.  The wrapper already '
+         'catches `Fallback`, so the caller\'s `try/except IndexError` still sees CPython\'s '
+         'exception; a call that never indexes out of range pays one flag test.  This is the '
+         'prerequisite for W2/W3/W6, not a large solo unlock.',
+         '`matrix.trace` (list[int] parameter, int return, `m[i*n+i]`) is the one indexing '
+         'function whose body has no other gate; it is accelerated and its driver stays '
+         'byte-identical.  `edit_dist.levenshtein` (3.6 s) also appends to a list, so it needs '
+         'the call rule as well, not W4 alone.  Guard: a new `test_ail_cpython_hybrid` case with '
+         'an in-range index, an index exactly at `len`, a negative index and an empty list; '
+         'plus the four required modules.',
+         'measured: solo %s s (%d of %d functions, `%s`); W4 also unblocks %s s of list-return '
+         '(%d functions) and %s s of list-float (%d functions).  The 5.6 s first-gate ceiling '
+         'is reached only when the call and index-store rules are applied too.'
+         % (fmt(byfam['indexing-can-raise']['solo_self_s'], 2),
+            byfam['indexing-can-raise']['solo_functions'],
+            byfam['indexing-can-raise']['functions'],
+            '`, `'.join(e.split(':')[1] for e in byfam['indexing-can-raise']['solo_examples']),
+            fmt(byfam['list-return-kind']['with_w4_self_s'], 2),
+            byfam['list-return-kind']['with_w4_functions'],
+            fmt(byfam['list-float-abi']['with_w4_self_s'], 2),
+            byfam['list-float-abi']['with_w4_functions'])),
+        ('W2', 'list-return-kind', '15.8%',
+         'Give `pymix` and the boundary a `list[int]` / `list[float]` return kind.  `pymix` '
+         'reports `unresolved-return` for a body whose `return xs` is a list, and the hybrid '
+         '`_wrapper_source` has no C path for a returned list.  Add `pymix.LIST_INT` /'
+         '`LIST_FLOAT` to the return kinds it resolves from a `return <list literal or list '
+         'name>` and a list-append loop, and add a wrapper branch that returns '
+         '`PyList_New` filled from the emitted `(const int64_t *out, int64_t n)` out-parameter '
+         'pair the library ABI already uses (`compile-library`).',
+         'W2 alone accelerates **0 of %d** functions because every body also indexes or calls.  '
+         'With W4 also applied (covering subscript stores), `%s` (%s s) become native and their drivers stay byte-identical; '
+         '`window_sums`, `make_hashes` and `scale_into` still need the call rule, and '
+         '`bloom_set` also divides.  Guard: a new `test_ail_cpython_hybrid` case with an '
+         'empty list return, a one-element list return and a 100k-element list return; plus '
+         '`test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, '
+         '`test_ail_corpus_findings3`.'
+         % (byfam['list-return-kind']['functions'],
+            '`, `'.join(e.split(':')[1] for e in byfam['list-return-kind']['with_w4_examples']),
+            fmt(byfam['list-return-kind']['with_w4_self_s'], 2)),
+         'measured: solo 0.0 s; W2+W4 %s s of 44.2 s (%d of %d functions); the 7.0 s first-gate '
+         'ceiling is not reachable by this task alone.'
+         % (fmt(byfam['list-return-kind']['with_w4_self_s'], 2),
+            byfam['list-return-kind']['with_w4_functions'],
+            byfam['list-return-kind']['functions'])),
+        ('W3', 'tuple-parameter', '12.8%',
+         'Track a `tuple` parameter as an opaque homogeneous element stream.  `ast_lint` passes '
+         'nested tuples of str/int; a real project\'s AST walk passes a node object.  Two hours '
+         'buys the narrow case: a parameter annotated `tuple` whose body only calls '
+         '`isinstance(child, tuple)`, `len(node)` and `node[i]` for a `range()` index.  Lower it '
+         'to the existing `ail_list` of boxed values the general path already has, or refuse it '
+         'by name with a fix (`write instead: node: list[object]`) so the AI can act.',
+         'W3 alone accelerates **0 of %d**: each function both indexes and calls.  With W4 and '
+         'the call rule, all %d (`node_count`, `leaves`, `max_depth`, `sum_ints`, ...) can '
+         'become native and the driver\'s 7 printed lines stay byte-identical.  Guard: a new '
+         'case with an empty tuple, a one-element tuple, a nested tuple 8 deep, and an index '
+         'from a list item and from a dict value; plus the four required modules.'
+         % (byfam['tuple-parameter']['functions'], byfam['tuple-parameter']['functions']),
+         'measured: solo 0.0 s; needs W4+call; the 5.7 s first-gate time is the ceiling, not '
+         'this task\'s gain.'),
+        ('W6', 'list-float-abi', '2.8%',
+         'Fix the `ail_flist` prototype mismatch (section 4).  Either teach '
+         '`_mix_validate_signature` that `ail_flist v_x` is the same ABI as '
+         '`const double *v_x, int64_t v_x_len` (the call site already builds that pair), or make '
+         '`to_c` spell a mixed-mode `list[float]` parameter the pointer+len way.  This is the '
+         'cheapest task in the list: one prototype spelling.',
+         'With W6 alone `max_abs` and `sq_sum` become native (%d of %d, %s s); with W4 also '
+         '`dot` and `blend` become reachable (%d of %d, %s s).  `mean`/`variance`/`norm` divide '
+         'by a non-constant and `scale_into` is list-return-kind (W2), so `float_loops` does '
+         '**not** go from 0 to 8.  Its driver stays byte-identical on all 9 printed lines.  '
+         'Guard: a new `test_ail_cpython_hybrid` case with an empty `list[float]`, a NaN, '
+         '`-0.0`, and a value that arrives through an argument, a list item and a dict value; '
+         'plus the four required modules.'
+         % (byfam['list-float-abi']['solo_functions'], byfam['list-float-abi']['functions'],
+            fmt(byfam['list-float-abi']['solo_self_s'], 2),
+            byfam['list-float-abi']['with_w4_functions'], byfam['list-float-abi']['functions'],
+            fmt(byfam['list-float-abi']['with_w4_self_s'], 2)),
+         'measured: solo %s s (%d of %d); W6+W4 %s s (%d of %d); the 1.26 s ceiling needs W2 '
+         'for `scale_into` as well.'
+         % (fmt(byfam['list-float-abi']['solo_self_s'], 2),
+            byfam['list-float-abi']['solo_functions'], byfam['list-float-abi']['functions'],
+            fmt(byfam['list-float-abi']['with_w4_self_s'], 2),
+            byfam['list-float-abi']['with_w4_functions'],
+            byfam['list-float-abi']['functions'])),
+        ('W5', 'nested-list-annotation', '8.9%',
+         'Track `list[list[int]]`.  `pymix` has no kind for it, so every `graph_search` '
+         'function is refused at the candidate stage.  The typed path already lowers '
+         '`list[list[int]]` inside a whole-program build (the nested-lists test module exists); '
+         'the gap is the *boundary* ABI and `pymix`\'s kind fixed point.  Two hours: add '
+         "`pymix.LIST_LIST_INT`, resolve it from the annotation, and map it to the existing "
+         "`ail_list`-of-`ail_list` the typed emitter's nested-list path builds, with the "
+         "wrapper copying each inner list as one buffer.",
+         'Only `edges_above` (%s s) has no other body gate, so W5 alone accelerates %d of %d; '
+         'W4 does not change that, because the other %d call.  `bfs_reach`, `dfs_count`, '
+         '`degree_sum` and `max_degree` need the call rule too.  Guard: a new case with an '
+         'empty outer list, an outer list with one empty inner list, a ragged inner list, and an '
+         'inner list reached through an argument and through a dict value; plus the four '
+         'required modules.'
+         % (fmt(byfam['nested-list-annotation']['solo_self_s'], 2),
+            byfam['nested-list-annotation']['solo_functions'],
+            byfam['nested-list-annotation']['functions'],
+            byfam['nested-list-annotation']['body_blockers'].get('call', 0)),
+         'measured: solo %s s (%d of %d); the 3.9 s first-gate time is the ceiling.'
+         % (fmt(byfam['nested-list-annotation']['solo_self_s'], 2),
+            byfam['nested-list-annotation']['solo_functions'],
+            byfam['nested-list-annotation']['functions'])),
         ('W1', 'not-a-top-level-function', '19.3%',
          'Accelerate a method and a nested def, not only a top-level `def`.  Today '
          '`ail_cpython_hybrid._select` looks functions up in `_top_level_functions(tree)` and '
@@ -349,84 +519,20 @@ def main():
          'kind, so only an `@staticmethod` (and a nested def that closes over nothing) is in '
          'scope for two hours; a plain method takes `self` and needs a container ABI, which is '
          'a later task.',
-         "`tree_build`'s `Tree._inorder` / `_depth` / `_height` move from the refusal list "
-         "to `build.json`'s `accelerated`; `test_ail_cpython_hybrid` gains a module with an "
-         "`@staticmethod` hot helper and asserts it is listed and that its output is "
-         "byte-identical.  Guard: `test_ail_cpython_hybrid`, `test_ail_safetynet`, "
-         "`test_ail_files`, `test_ail_corpus_findings3`.",
-         'measured: up to 8.5 s of 44.2 s self time in this corpus, 19.3%; the reachable part '
-         '(staticmethods and closures) is smaller -- the corpus\'s 8.5 s is plain methods, so '
-         'treat this as the ceiling, not the gain.'),
-        ('W2', 'list-return-kind', '15.8%',
-         'Give `pymix` and the boundary a `list[int]` / `list[float]` return kind.  `pymix` '
-         'reports `unresolved-return` for a body whose `return xs` is a list, and the hybrid '
-         '`_wrapper_source` has no C path for a returned list.  Add `pymix.LIST_INT` /'
-         '`LIST_FLOAT` to the return kinds it resolves from a `return <list literal or list '
-         'name>` and a list-append loop, and add a wrapper branch that returns '
-         '`PyList_New` filled from the emitted `(const int64_t *out, int64_t n)` out-parameter '
-         'pair the library ABI already uses (`compile-library`).',
-         '`bitset_bloom.bloom_set`, `dataframe_group.group_sum`, `matrix.mat_mul`, '
-         '`rolling_stats.window_sums` and `matrix.identity` are listed as accelerated and their '
-         'drivers stay byte-identical.  Guard: a new `test_ail_cpython_hybrid` case with an '
-         'empty list return, a one-element list return and a 100k-element list return; plus '
+         'A module with an `@staticmethod` hot helper is listed as accelerated and its output '
+         'is byte-identical.  The corpus\'s `Tree._inorder` / `_depth` / `_height` are plain '
+         'methods taking `self`, so they are **not** expected to move under this scope; the '
+         '19.3% is the ceiling for the full method ABI, not this task.  Guard: '
          '`test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, '
          '`test_ail_corpus_findings3`.',
-         'measured: 7.0 s of 44.2 s self time, 15.8%, across 6 modules and 11 functions.'),
-        ('W3', 'tuple-parameter', '12.8%',
-         'Track a `tuple` parameter as an opaque homogeneous element stream.  `ast_lint` passes '
-         'nested tuples of str/int; a real project\'s AST walk passes a node object.  Two hours '
-         'buys the narrow case: a parameter annotated `tuple` whose body only calls '
-         '`isinstance(child, tuple)`, `len(node)` and `node[i]` for a `range()` index.  Lower it '
-         'to the existing `ail_list` of boxed values the general path already has, or refuse it '
-         'by name with a fix (`write instead: node: list[object]`) so the AI can act.',
-         '`ast_lint.node_count` / `leaves` / `max_depth` / `sum_ints` appear in `build.json`; '
-         'the driver\'s 7 printed lines are byte-identical.  Guard: a new case with an empty '
-         'tuple, a one-element tuple, a nested tuple 8 deep, and an index from a list item and '
-         'from a dict value; plus the four required modules.',
-         'measured: 5.7 s of 44.2 s self time, 12.8%; the whole of `ast_lint`.'),
-        ('W4', 'indexing-can-raise', '12.6%',
-         'Let a clone that may raise `IndexError` fall back instead of being refused.  '
-         '`_unsafe_body` refuses every `Subscript` outright.  The emitted typed clone already '
-         'has a trap path: make the index check set the per-function mix flag (the same '
-         '`extern int <mangled>__mix_overflow` the int64 path uses), return a zero, and let the '
-         'Python wrapper re-run the original function when the flag is set.  The wrapper already '
-         'catches `Fallback`, so the caller\'s `try/except IndexError` still sees CPython\'s '
-         'exception; a call that never indexes out of range pays one flag test.',
-         '`edit_dist.levenshtein` (3.6 s alone) is accelerated and matches CPython on 800 rounds '
-         'of 5 word pairs; a probe that indexes past the end still raises `IndexError` from the '
-         'Python fallback.  Guard: a new `test_ail_cpython_hybrid` case with an in-range index, '
-         'an index exactly at `len`, a negative index and an empty list; plus the four required '
-         'modules.',
-         'measured: 5.6 s of 44.2 s self time, 12.6%, across 6 modules and 10 functions.'),
-        ('W5', 'nested-list-annotation', '8.9%',
-         'Track `list[list[int]]`.  `pymix` has no kind for it, so every `graph_search` '
-         'function is refused at the candidate stage.  The typed path already lowers '
-         '`list[list[int]]` inside a whole-program build (the nested-lists test module exists); '
-         'the gap is the *boundary* ABI and `pymix`\'s kind fixed point.  Two hours: add '
-         "`pymix.LIST_LIST_INT`, resolve it from the annotation, and map it to the existing "
-         "`ail_list`-of-`ail_list` the typed emitter's nested-list path builds, with the "
-         "wrapper copying each inner list as one buffer.",
-         '`graph_search.bfs_reach` / `dfs_count` / `degree_sum` / `edges_above` / `max_degree` '
-         'appear in `build.json`; the driver prints the same 6 lines.  Guard: a new case with an '
-         'empty outer list, an outer list with one empty inner list, a ragged inner list, and an '
-         'inner list reached through an argument and through a dict value; plus the four '
-         'required modules.',
-         'measured: 3.9 s of 44.2 s self time, 8.9%; the whole of `graph_search`.'),
-        ('W6', 'list-float-abi', '2.8%',
-         'Fix the `ail_flist` prototype mismatch (section 4).  Either teach '
-         '`_mix_validate_signature` that `ail_flist v_x` is the same ABI as '
-         '`const double *v_x, int64_t v_x_len` (the call site already builds that pair), or make '
-         '`to_c` spell a mixed-mode `list[float]` parameter the pointer+len way.  This is the '
-         'cheapest task in the list: one prototype spelling.',
-         '`float_loops` goes from 0 to 8 accelerated functions and its driver stays '
-         'byte-identical on all 9 printed lines.  Guard: a new `test_ail_cpython_hybrid` case '
-         'with an empty `list[float]`, a NaN, `-0.0`, and a value that arrives through an '
-         'argument, a list item and a dict value; plus the four required modules.',
-         'measured: 1.26 s of 44.2 s self time, 2.8%, but it is the only reason `float_loops` '
-         'gets nothing at all.'),
+         'measured: solo 0 s on this corpus (the 8.5 s is plain methods); the reachable part '
+         '(staticmethods and closures) is not present here, so treat 19.3% as the ceiling.'),
     ]
-    A('Ordered W0 first (it unlocks the rest), then W1-W6 by measured hot-path gain.  Each names '
-      'the reason, the test that guards it, and the gain this corpus measured.')
+    A('Ordered W0 (reporting, no time), then W4 (the body prerequisite), then W2/W3/W6 that '
+      'depend on it, then W5 and W1.  Each names the reason, the test that guards it, and the '
+      'measured ceiling plus the solo gain.  By solo-achievable time the ranking is different '
+      '(section 4); this set is the five largest first-gate ceilings plus the prerequisite, '
+      'not the achievable order.')
     A('')
     for tid, fam, gain, body, test, gain_detail in tasks:
         if tid == 'W0':
