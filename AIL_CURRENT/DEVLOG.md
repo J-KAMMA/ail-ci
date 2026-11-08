@@ -1,3 +1,33 @@
+## 2026-11-08 -- fz244: keyed list.sort over int64 boundaries already matches CPython (job-fz244-11090611)
+
+The daily fuzzer (seed 2076520850, CPython 3.12, default and `AIL_IR=1`) reported
+`DIFF|cpython='True' ail='<end>'`: its program doubled `v3 = [min(v1, b), b]`
+(`b = 9223372036854775807`) twenty times and called `v3.sort(key=lambda q: (-q, q))`;
+stderr at that run was `TypeError: '<' not supported between instances of 'object' and
+'int'`, so the `True` of `h0(91, 4) >= 255` (stdout line 30) was missing.
+
+On this tree the difference does not reproduce, and nothing in the compiler changed.
+`python3 lab/fuzz/run.py --start 2076520850 --count 1 --modes default,ir` classes the
+seed `refused` in both modes: the unreachable `-9223372036854775807 << 1` constant in an
+`except ZeroDivisionError` arm is outside int64, refused by name (`a constant integer
+expression overflows int64`, exit 3). With `--exact-int` the whole program builds and
+matches CPython's 32 stdout lines and exit 1 on the default and IR builds.
+`test_ail_fz244.py` (7 tests) pins the refusal, the exact-int route, and the minimized
+sort: 20 doublings reduced to 8, int64 bounds, duplicates, a three-component tuple key,
+a `list[float]`, an untyped `list[object]`, and the same values reached through an
+argument, a list item, an attribute and a dict value, all on both builds.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD` for default and `AIL_UNIFIED_FORCE=1`; a direct
+default/IR loop for the rest) all match CPython: `fz244` (refused, exit 3, both modes),
+`fz244` with `--exact-int` (same stdout, exit 1), `p_full_ok` (the seed with the
+out-of-range constant replaced; default, unified and `pyc.py --general-only` same),
+`p_h0`, `p_h0b`, `p_h0c`, `p_sortkey`, `p_sortbig`, `p_sortbig2`, `p_sortneg`,
+`q_sort_tup3`, `q_sort_mixed`, `q_sort_arg`, `q_sort_attr`, `q_sort_dictval`,
+`q_sort_huge`, `q_sort_listitem`, `q_sort_float`, `q_sort_dup`, `q_sort_minabs`,
+`q_obj_mix`, `q_obj_neg`, `q_obj_bool`; `q_refuse_shift` is refused by name
+(load-time, exit 2). Added DIFFERENCES row `C?-job-fz244-11090611-1` and registered
+`test_ail_fz244` in `tests.d`.
+
 ## 2026-11-08 -- stdfall2c review 2: set/frozenset deepcopy copies each element (job-rbstdfall2c-11081827)
 
 Fixes the remaining stdfall2c defect.  `copy.deepcopy` of a `set`/`frozenset` used
