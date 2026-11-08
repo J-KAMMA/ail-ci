@@ -81,6 +81,15 @@ def parseable_segments(files, want):
     return out
 
 
+def corpus_segments(want):
+    """`want` fixed S376 segments; widen past the 30-file stride if a corpus edit made it short."""
+    texts = parseable_segments(fixed_files(), want)
+    if len(texts) < want:
+        paths = expr_ref.read_paths(str(REPO / "selfhost" / "CORPUS.txt"))
+        texts = parseable_segments([str(REPO / p) for p in paths if (REPO / p).exists()], want)
+    return texts
+
+
 def write_segments(outdir, texts):
     os.makedirs(outdir, exist_ok=True)
     listing = []
@@ -101,7 +110,7 @@ def run(cmd, env=None):
 
 class ParseTest(unittest.TestCase):
     def test_s376_200_expressions_stage1(self):
-        texts = parseable_segments(fixed_files(), 200)
+        texts = corpus_segments(200)
         self.assertEqual(len(texts), 200)
         for text in texts:
             with self.subTest(text=text[:80]):
@@ -127,7 +136,7 @@ class ParseTest(unittest.TestCase):
 
     @unittest.skipUnless(HAVE_CC, "no C compiler")
     def test_stage2_matches_stage1(self):
-        texts = parseable_segments(fixed_files(), 20)
+        texts = corpus_segments(20)
         self.assertEqual(len(texts), 20)
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)

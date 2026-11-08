@@ -1,3 +1,22 @@
+## 2026-11-08 -- shparse1 suite gate: the five flagged modules pass; harden the S376 sample (job-shparse1-11082103)
+
+The gate reported `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_selfhost_parse`, `test_ail_unified`
+and `test_ail_virtual_dispatch` as failing on today's integ.  They do not reproduce against any base
+tried.  On the branch (`1c7e4dc`) all five pass; on `origin/integ` (`f7bada0`) with the branch diff
+applied (`git apply --3way`, the culprit procedure's exclusions) all five pass; on `origin/integ` with
+only the earlier feature tip `b3f6344` (before `a59af76`) all five also pass; pure `origin/integ` runs
+the four non-selfhost modules green.  `tools/par_check.py -j 2` on the six smoke modules
+(`obj_refs`, `safetynet`, `selfhost_parse`, `unified`, `virtual_dispatch`, `files`) is 6/6 modules,
+0 failed in 339 s, and `tools/update_manifest.py --check` and `tools/ci_shards.py --check` are clean.
+`tools/ci_plan.py --files` explains the list: the branch carries `selfhost/*`, `.github/` and
+`corpus/`, which select the fixed smoke set plus `test_ail_selfhost_parse`; `test_ail_files` is the one
+fixed module that passed, so only the other five reached the report.  No parser or compiler change is
+needed.  The only edit is defensive: `test_ail_selfhost_parse.py` now widens the S376 scan past the
+30-file stride if a future corpus edit leaves fewer than 200 parseable segments, instead of failing on
+`len(texts) == 200`; on today's corpus the stride already yields 200, so the test is unchanged.
+Tests on the final commit: `test_ail_selfhost_parse` (5/5), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`; `python3 tools/update_manifest.py` then `--check`.
+
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 
 `test_ail_sdk` was green before err2 and its
