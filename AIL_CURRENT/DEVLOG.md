@@ -1,3 +1,14 @@
+## 2026-11-08 -- aiknow1: agent-facing AIL material (job-aiknow1-11081958)
+
+Adds `llms.txt`, `docs/AGENT_GUIDE.md`, the Claude Code skill and `AGENTS.md` snippet, and
+`integrations/mcp/` (a stdlib stdio MCP server with `ailc_check`, `ailc_build`, `ailc_explain` and
+three example files). No compiler or runtime code changed. The planned `ailc ext` command and
+`--why` flag do not exist in this build and are left out of the docs; the commands that do exist are
+checked by `test_ail_agent_integrations.py` (registered in `tests.d/`). The guide's AIL0103 fix
+produces a build that matches CPython at 28.9x (4.63 s vs 0.16 s, median of three). The strict
+refusal report is `ail.strict/1`; a successful build is `ail.build/1`. Probes under
+`/tmp/probes/` (eleven programs) match CPython on the general and default builds.
+
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
 Re-applied the accepted `job-fclist1-op1106` change (`8c2c99c1`..`FETCH_HEAD`, 3 commits) on this
