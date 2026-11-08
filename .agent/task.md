@@ -1,3 +1,54 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model commandcode/deepseek-v4.1-flash]
+## Review: stdfall2 (copy/timeit/marshal)
+
+**What the change really does:** adds bundled AIL-source `stdlib/copy.py`, `timeit.py`, `marshal.py` (PyPy-derived writer rewritten to CPython v4 layout), 18 lab programs + RESULTS, a test module, PSF/MIT notices and manifest entries. No compiler/runtime code is touched. The worker's report is empty (no text), so I checked RESULTS.md's numbers against the code.
+
+**Verified:** `test_ail_std_stdfall2` and `test_ail_safetynet` pass on HEAD 6ff1cca78; 15/18 programs match CPython in both builds (RESULTS claim true). A no-feature program's `--debug-dir` `program.c` and executable are byte-identical to `/tmp/base`.
+
+**Defects (all caused by the new modules; probes run on HEAD, both builds agree):**
+
+1. `marshal`: `-0.0` is conflated with `0.0` (value-based `_find_ref`). Probe `/tmp/rprobes/p_marshal_zero.py`: `dumps([0.0,-0.0])` → CPython `db02000000e70000000000000000e70000000000000080`, AIL `db02000000e70000000000000000**7201000000**`; `loads` then prints `0.0 0.0 0.0` vs CPython `0.0 -0.0 -0.0`. **Wrong value.**
+
+2. `marshal`: `dumps([2**40, 2**40])` dies at run time — `_find_ref` uses `is` on ints. Probe `/tmp/rprobes/m5_intcontainer.py`: CPython prints `twoeq db02000000ec030000000000000000047201000000`; AIL prints the first 3 lines then stderr `AIL internal error: is between two equal ints outside -5..256`, exit 1. **Crash.**
+
+3. `marshal` ref/intern bytes are not CPython's (identity vs value): `/tmp/rprobes/m1_refs.py` `x=[1]; dumps([x])` → CPython `db01000000**db**01000000e901000000`, AIL `db01000000**5b**01000000e901000000`; `/tmp/rprobes/m2_strings.py` computed `"".join(["a","b","c"])` → CPython `**fa**03616263`, AIL `**da**03616263`; `/tmp/rprobes/p_marshal_strref.py` `[a+b, a+b]` → CPython `**5b**…fa…fa…`, AIL `**db**…da…72…`.
+
+4. `copy.deepcopy(bytearray)` crashes. `/tmp/rprobes/p_copy_bytearray.py`: CPython `bytearray b'ab'`; AIL `TypeError: cannot convert '_Shell' object to bytes`, exit 1.
+
+5. `copy.deepcopy` refuses any tuple of >4 elements. `/tmp/rprobes/p_copy_tuple5.py`: CPython `([1], [2], [3], [4], [5])` / `False`; AIL `copy.Error: un(deep)copyable tuple of length 5`, exit 1.
+
+6. Plain-class copy returns a `_Shell`. `/tmp/rprobes/c2_copy_class.py`: CPython `P P / True True / True True / 2`; AIL `_Shell _Shell / False False / False False / method err AttributeError`.
+
+7. `copy.deepcopy(x, memo_dict)` silently ignores the caller's memo. `/tmp/rprobes/c5_copy_memo.py`: CPython `mlen 2`, AIL `mlen 0`.
+
+8. `timeit.Timer(...).timeit(number=-1)` raises; CPython returns a float. `/tmp/rprobes/t1_timeit_numbers.py`: CPython `neg 1.0`; AIL `neg err ValueError number must be non-negative`.
+
+9. Lower priority: `marshal.dumps(x, version)` ignores `version` (`/tmp/rprobes/m4_read.py`: CPython `v2 6901000000 5b…6901000000`, AIL `e9…db…e9…`), and `marshal.loads(b"0")` returns `<_Null object>` where CPython raises `TypeError`.
+
+10. Task miss: a string `stmt` is refused at **run** time (program 06 builds then exits 1), not at build time with a named refusal as step 2 required; results record it but the use is not refused. (`copy/03` likewise builds and prints wrong output rather than being refused; it is one of the 3 allowed failures.)
+
+**Pre-existing:** none. The base has no `copy`/`timeit`/`marshal` module, so every probe fails at build there; the non-feature program's C is identical, so nothing is attributed to the base.
+
+**Unverified:** `test_ail_third_party_notices` / `test_ail_std_stdfall1` (not run per reviewer scope), the PyPy license/commit pin (no network), the 20 CI shards. Speed is not applicable — no compiler, runtime or benchmark file is edited.
+
+VERDICT: FIX
+1. marshal `_find_ref` must use identity/type-correct semantics: `dumps([0.0,-0.0])` and `dumps([2**40,2**40])` must match CPython instead of aliasing `-0.0` and crashing with the internal `is` error.
+2. marshal reference/interned flags must follow CPython (per-object, refcount/identity), so `dumps([x])`, computed strings and `[a+b,a+b]` produce CPython's bytes.
+3. copy must handle `bytearray`, tuples of any length, real class instances (or refuse them by name), and the caller's memo dict as CPython does.
+4. timeit must not reject `number=-1` (CPython returns a float).
+5. A string `stmt`/`setup` must be refused by name at build time, as the task required.
+[commandcode stop=end_turn turns=24 out_tokens=49227]
+
+
+--- ORIGINAL TASK ---
 Lane: stdfall
 
 > Continuation of stdfall2. Antigravity finished step 1 only (18 lab programs + baseline RESULTS.md, 0/18) on branch ag-stdfall2 (commit 8a739174e) and then ran out of quota; PR #416 is open but has no modules yet. Start from origin/integ, cherry-pick 8a739174e, then do steps 2-4 below. Do not open a new PR.
