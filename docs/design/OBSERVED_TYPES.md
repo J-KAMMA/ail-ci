@@ -200,3 +200,131 @@ CPython; sampled share 30.7%, bound 1.444x); `field_valid` 0.657 -> 0.387 (`is_s
 Even with every task done, the corpus figures above say how far this route goes: a guarded native
 build only reaches the functions it compiles. Re-run `observe_probe.py --icount` after each task
 and report share, bound and achieved fraction.
+
+## 5. obs4 design: methods, module constants, calls between natives
+
+The rule stays: a native call returns exactly CPython's value, or the original runs from the
+start. The new part is that a native body now depends on *names outside its arguments* (a module
+constant, another function, `self`'s attributes and methods), and every such name can be rebound
+at run time by code the build never saw. Each one gets a guard whose failure means "run the
+original".
+
+**Price first** (from `obs3_task2.json`: a function's sampled self-time share inside its module,
+times the module's share of corpus CPython instructions; the 1 ms sampler over-weights very short
+functions, which is why the "34.7%" refusal row of section 1 shrinks here):
+
+| refusal | corpus share (instr.) | bound on the corpus figure |
+| --- | ---: | --- |
+| methods, read-only (`tree_build`: `_inorder`/`_height`/`_depth`, 99% of the module) | 5.7% | 0.697 -> ~0.643 (1.43x -> ~1.56x) |
+| methods that store scalar fields (`json_parse` `Parser.*`, `self.pos += 1`) | 5.1% | another ~-0.05 (step b, not now) |
+| module constants (`csv_parse` x4 `COMMA`, `field_valid` `valid_len`/`score_ok`) | ~7% (sampled; long loops) | most of csv_parse's 0.93 |
+| calls to user functions (`count_idents`, `longest_ident`) and `ch.is*()` on a local str | ~0.5% | small; prerequisite for recursive methods |
+
+So the order is constants + calls (cheap, and recursion through `self._depth(...)` needs the call
+rule), then read-only methods. `levenshtein` (a local list's `.append`, 7.9% sampled) is a
+different refusal and is not in this job.
+
+### 5.1 Module constants
+
+`_module_constants` already finds `NAME = <int/float/str/bool literal>` bound exactly once in the
+file and never declared `global`; `to_c` refused them only because the hybrid hands it the
+defs-only slice. The analysis process adds those assignments in front of the slice (`to_c` emits
+`static const`), for the hybrid only. Ints must fit int64 and strs must be UTF-8 encodable.
+
+What CPython can still do: `mod.NAME = 5` from another module, `globals()['NAME'] = ...`,
+`del NAME`, or call the function before the assignment has run (NameError). Guard: the C entry
+keeps, per constant, a "verified" flag. Verification looks the name up in the function's
+`__globals__` and compares exact type and value (int by value, float by bit pattern, str by
+`PyUnicode_Compare`, bool by identity); missing or different -> run the original. A dict watcher
+(`PyDict_AddWatcher`, 3.12+) on that globals dict clears the flag of any guarded key that is
+added, changed or deleted, and every flag on clear/clone/dealloc; so the per-call cost is one load
+per constant. If the interpreter's 8 watcher slots are taken, every call re-verifies (one dict
+lookup per name). A function whose globals are not the watched dict runs the original.
+
+### 5.2 Calls between natives
+
+`f` may call a top-level `g` when `g` is itself selected, the module binds `g` once (its `def`),
+the call passes exactly `g`'s parameter count positionally (no keywords, no defaults used), and the
+exact-kind pass (`_Kinds`, now told the callees' exact result kinds) proves each argument has the
+exact kind `g`'s entry checks (`int` never a bool, `float`, `str`, a list parameter of the same
+kind). Then `g`'s own selection proof holds at the call site and `to_c`, which compiles `f`'s
+unit from all defs, inlines or calls `g`'s C copy. Selection runs to a fixed point; self-recursion
+is assumed optimistically for `f` itself; mutual recursion and more than one recursive function in
+a unit are refused (the depth accounting below needs a single recursive chain).
+
+Guards: `g` is a guarded global like a constant: verified when `__globals__[g]` is a function
+whose vectorcall is `g`'s native entry (so it is the def this unit compiled), plus a per-call
+pointer compare of `g.__code__` against the codes recorded at install (`__code__` assignment does
+not touch the dict). `g`'s own constants and callees join `f`'s guard list (transitively).
+Defaults, keywords and closures do not matter (all arguments are passed; top-level defs have no
+closure). Units with guarded globals keep the GIL, so no other thread can rebind a name mid-call.
+Builtins (`len`, `range`, ...) keep the existing static rule (not rebound in the module); a
+run-time `builtins.len = ...` is not guarded today, as before.
+
+**Recursion depth.** CPython raises `RecursionError` when a frame is pushed with
+`tstate->py_recursion_remaining <= 0`; the C entry never pushed a frame, so even obs2's single
+natives could succeed where CPython fails at the limit. Every entry now requires
+`py_recursion_remaining >= K` (K = number of user functions in the unit, an upper bound on frames
+along one non-recursive path) or runs the original. A recursive unit's `AIL_MAX_RECURSION_DEPTH`
+(today a `#define 50000`) becomes a thread-local set per call to `min(50000, remaining - (K-1))`,
+and its "maximum recursion depth exceeded" stop becomes a trap: CPython then re-runs and raises
+(or succeeds, if the bound was only conservative). The 50000 cap keeps the C stack bounded when a
+program raises `sys.setrecursionlimit`.
+
+### 5.3 Methods (step a: read-only)
+
+Instances stay CPython objects; nothing about their layout changes. A method goes native by being
+**desugared into a synthetic top-level function** that the existing machinery compiles:
+`Tree._depth(self, idx, d)` becomes `__ail_m_Tree___depth(__ail_f_left, __ail_f_right, idx, d)`,
+each `self.<field>` read becomes a parameter, and each `self.<m>(args)` becomes a call of `m`'s
+synthetic function with `m`'s fields passed through (the field set is closed over the class's
+self-call graph). The synthetic defs exist only in the analysis source and the selection tree; the
+program that runs is the original text plus one install line after the class.
+
+Selection (simplest safe subset): a top-level class with no decorators, no keywords (so no
+metaclass), no bases (or only `object`), and only plain `def`s and a docstring in its body; a
+method with no decorators whose `self` is used only as `self.<field>` loads (no stores, no bare
+`self`) and `self.<method>(...)` calls to other selected methods of the class; every field read
+has a kind in int/float/bool/str/list[int]/list[float]. Field kinds are a hypothesis from the
+class's own stores (`self.f = e`, `self.f += e`, `self.f.append(e)`, `self.f[i] = e`, solved to a
+fixed point with `_Kinds`); a wrong guess only costs fallbacks because the entry checks every
+value.
+
+Entry guards, in order, before any native work (all are reads; failure = run the original):
+
+1. `Py_TYPE(self) == C`, C recorded at install. A subclass instance, overriding or not, runs the
+   original; so does `C.m(other, ...)`.
+2. Class shape: `Py_TYPE(C) == &PyType_Type` (no metaclass), heap type,
+   `tp_getattro == PyObject_GenericGetAttr` (no `__getattr__`/`__getattribute__`). For each field,
+   `_PyType_Lookup(C, field) == NULL`: no class attribute of that name anywhere in the MRO, so no
+   property, slot descriptor or class default can intercept the read, and the generic getattr
+   reads only the instance dict (no Python code runs). For each method the body calls on `self`
+   (recursion included), `_PyType_Lookup(C, name)` is the installed function object and its
+   `__code__` is a recorded code. `_PyType_Lookup` goes through CPython's own type-version method
+   cache, so it is correct after any class or base-class change and costs a few ns per name; no
+   separate `tp_version_tag` bookkeeping is needed.
+3. Instance: each field read once with `PyObject_GetAttr` (missing -> AttributeError cleared ->
+   original) and checked exactly like a parameter (lists copied, as today). For each self-called
+   method, the instance must not shadow it: `PyObject_GetAttr(self, name)` must be a bound method
+   of the installed function on `self` (one allocation per entry, only for methods that call
+   methods).
+
+During the native run the GIL is held (fields are containers; owner decision D4), no Python code
+runs, and the body stores nothing, so every `self.x` and `self.m` the CPython body would evaluate
+resolves to the value read at entry. A trap (index, overflow, recursion depth) re-runs the original
+method from the start, which is safe because the body has no side effects.
+
+Monkeypatching: `C.m = other` changes the type (method cache), `obj.m = other` is caught by guard
+3, `C.m.__code__ = ...` by the code compare, `obj.__class__ = D` by guard 1, adding a property or
+class attribute named like a field by guard 2. Install: `_ail_install_method(name, C, attr)` takes
+`C.__dict__[attr]`, checks it is the plain def (code name, positional arity, no varargs) and sets
+its vectorcall, as `_ail_install` does for functions. Not covered (they stay in CPython):
+`__slots__` fields (slot descriptors fail guard 2 anyway), inherited methods, properties,
+classmethods and staticmethods, any field store (step b: write scalar fields back at the end of a
+successful call, then `json_parse`), container fields of other kinds.
+
+**Guard cost per entry**: a type compare, ~3 cached type lookups, one `GetAttr` per field, one
+bound-method allocation if `self` methods are called, and the list copies. For `tree_build` one
+entry per traversal runs 121k recursive native calls, so the guards are noise; `min_key`/`max_key`
+copy two 60k-element lists to walk ~20 nodes, slower than CPython for those two (0.0% of the
+module; option-3 element-use guards would remove the copy).
