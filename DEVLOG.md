@@ -1,3 +1,26 @@
+## 2026-11-08 -- err2b re-applied: SDK selection and optional diagnostics import (job-rberr2b-11081034)
+
+Re-applied the accepted `job-err2b-11080441` change on this tree. `ail_agent_errors.py` stays pinned
+with `s` in `manifest.d`, and `tools/update_manifest.py` now carries `SDK_MODULES` beside the tree's
+existing top-level import scan, so a merge that keeps the other side of a shard conflict restores both
+the pin and the flag for this lazily imported root-level module; the built wheel ships
+`ail_lang/sdk/ail_agent_errors.py`. The legacy discovery tuple in `ail_sdk.export_sdk` names the module
+too, so a MANIFEST without `sdk_files` exports it. `ail_chatgpt.py` imports the module lazily inside
+`_agent_diagnostics`/`_strict_json` and computes the records only for `--json`, so a plain build (and
+its stdout/exit status) is unchanged when the module is absent; `--json` still reports the build with an empty
+`agent_diagnostics` when the module is absent. `pyc.fallback_note` is the plain `_fallback_message`
+string again, so a general-path build does not import the module either. `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py` regenerated the manifest and `--check` passes. No
+compiler, runtime or generated-C output change. Verified on this commit with
+`tools/par_check.py -j 2`: `test_ail_agent_errors`, `test_ail_packaging`, `test_ail_sdk`,
+`test_ail_sdk_environment`, `test_ail_fallback_note`, `test_ail_registry`, `test_ail_manifest_compiler`,
+`test_ail_strict`, `test_ail_build_reports`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (12 modules, 0 failed). Probes in `/tmp/probes/`: plain, Optional
+fallback, sorted-index fallback, Fraction, Decimal and routed values match CPython on both builds;
+with `ail_agent_errors.py` removed from a copy of `AIL_CURRENT`, a plain build still prints the
+fallback note with CPython's stdout and `--json`/`--strict --json` still report with an empty
+`agent_diagnostics`; with the module present, `--json` carries `AIL0103`/`AIL0104` records.
+
 ## 2026-11-07 -- layout1: flat-layout measurement and ranking (job-layout1-11080009)
 
 Measurement and design only; no compiler, runtime, test or bench change. `lab/layout/` now has

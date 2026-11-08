@@ -1187,7 +1187,7 @@ def _fallback_message(reason, location=None):
 def fallback_note(reason, location=None):
     """The one-line stderr notice for a program the typed path refused but the general path built.
     `reason` is the typed refusal text (it carries its own "write instead" hint when it has one)."""
-    return fallback_fields(reason, location)['message']
+    return _fallback_message(reason, location)
 
 
 def fallback_fields(reason, location=None, source_text=None):

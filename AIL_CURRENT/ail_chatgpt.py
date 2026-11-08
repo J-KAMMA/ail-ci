@@ -29,7 +29,6 @@ import tempfile
 from ail_syntax import SyntaxErrorAIL, ail_array_surface, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
 import ail_modules
-import ail_agent_errors
 
 sys.path.append(str(Path(__file__).resolve().parent / 'python/pkg-v12'))
 import fastwalk
@@ -5537,6 +5536,10 @@ def _agent_diagnostics(source, messages, severity=None, refusals=False):
     `refusals=True` is used on a failed build: a construct outside the catalogue still gets a
     generic error record, so a refusal never carries an empty `agent_diagnostics`."""
     try:
+        import ail_agent_errors
+    except ImportError:          # optional diagnostics module: a plain build must not need it
+        return []
+    try:
         text = source.read_text(encoding='utf-8')
     except (OSError, UnicodeError):
         text = None
@@ -5643,13 +5646,18 @@ def _strict_text(blockers, incomplete):
 
 def _strict_json(args, source, blockers, incomplete):
     try:
+        import ail_agent_errors
+    except ImportError:          # optional diagnostics module: `--json` still reports the blockers
+        ail_agent_errors = None
+    try:
         text = source.read_text(encoding='utf-8')
     except (OSError, UnicodeError):
         text = None
-    diagnostics = [ail_agent_errors.refusal(blocker.get('message') or '', source_text=text,
-                                             path=blocker.get('path'), line=blocker.get('line'),
-                                             col=blocker.get('column'))
-                   for blocker in blockers]
+    diagnostics = [] if ail_agent_errors is None else [
+        ail_agent_errors.refusal(blocker.get('message') or '', source_text=text,
+                                 path=blocker.get('path'), line=blocker.get('line'),
+                                 col=blocker.get('column'))
+        for blocker in blockers]
     return json.dumps(dict(
         schema='ail.strict/1', status='refused', strict=True, command=args.command, source=str(source),
         exit_code=3, blocker_count=len(blockers), incomplete=incomplete,
@@ -6647,7 +6655,7 @@ def main(argv=None):
                 return native_build.emit(args, {}, result.returncode, message=message,
                     agent_diagnostics=_agent_diagnostics(source, [human_message], severity='error',
                                                          refusals=True)
-                    if args.command == 'compile' else None)
+                    if args.json and args.command == 'compile' else None)
             built = target if target.is_file() else Path(str(target) + '.exe')
             if not built.is_file():
                 return native_build.emit(args, {}, 2, 'artifact', 'AIL ERROR: compiler returned success without an executable')
@@ -6691,7 +6699,7 @@ def main(argv=None):
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
                 'sha256': hashlib.sha256(output.read_bytes()).hexdigest()},
                 agent_diagnostics=_agent_diagnostics(source, fallback_messages)
-                if args.command == 'compile' else None)
+                if args.json and args.command == 'compile' else None)
     if args.command == 'build' and getattr(args, 'cpython', None):
         if not args.out:
             parser.error('build --cpython needs -o/--out DIRECTORY')
