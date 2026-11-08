@@ -3,7 +3,9 @@
     "probe.py",
     "general.py",
     "dict_iter.py",
-    "nested_name.py"
+    "nested_name.py",
+    "dict_unknown.py",
+    "lambda_scope.py"
   ],
   "cases": [
     {
@@ -351,6 +353,33 @@
       "expected": "bool",
       "oracle": "bool",
       "why": "the nested helper's x is int64_t in C but bool in Python; the outer helper has the same name"
+    },
+    {
+      "file": "dict_unknown.py",
+      "line": 8,
+      "character": 14,
+      "name": "k",
+      "expected": null,
+      "oracle": "int",
+      "why": "the iterated name is also reassigned from a parameter this cannot name, so no key type is certain"
+    },
+    {
+      "file": "lambda_scope.py",
+      "line": 1,
+      "character": 4,
+      "name": "x",
+      "expected": "float",
+      "oracle": "float",
+      "why": "a lambda's line shift must not let the module entry overwrite this function's type map"
+    },
+    {
+      "file": "lambda_scope.py",
+      "line": 3,
+      "character": 10,
+      "name": "x",
+      "expected": "float",
+      "oracle": "float",
+      "why": "the same local after the lambda assignment still has its compiler-inferred type"
     }
   ]
 }

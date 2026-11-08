@@ -43,10 +43,14 @@ Hover shows a type when it is certain:
   source, so it trusts a list or dict literal's items only while nothing mutates that container:
   an item store, `del`, a method call such as `append` or `update`, a call that receives the name,
   or an alias assignment makes the item type unknown. Iterating a dict yields its *keys* (never
-  its values), so a `for k in d` variable is typed from the dict's keys. A nested function is
-  matched by its own source scope, not by the compiler's mangled C name (`outer__helper__0`), so a
-  nested `helper` beside a top-level `helper` gets its own types. The build is cached per document
-  version and runs only after `didSave` or 1 s idle, never on every keystroke.
+  its values), so a `for k in d` variable is typed from the dict's keys; if the iterated name is
+  also assigned something the source cannot name, that unknown keeps it from claiming a key type.
+  A nested function is matched by its own source scope, not by the compiler's mangled C name
+  (`outer__helper__0`), so a nested `helper` beside a top-level `helper` gets its own types. The
+  module entry (`main`) and synthetic lambdas can have `#line` sets that fall inside a user
+  function after a lambda line shift, so only a C name that can be the scope's own name may supply
+  its map. The build is cached per document version and runs only after `didSave` or 1 s idle,
+  never on every keystroke.
 
 Every other name shows nothing, including a name on the general path (for example the `int | None`
 review function), `b"a b".split()`, `range(3)`, an attribute (`obj.x`) or a keyword label

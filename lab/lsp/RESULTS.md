@@ -28,28 +28,33 @@ It starts the server, opens the probe files, and checks every position in `expec
 
 # LSP hover with compiler-inferred types (`lab/lsp/hover`)
 
-42 names: the five lsp1b review names (`a b c d n`) plus 30 more (arithmetic, user calls, `len`,
+45 names: the five lsp1b review names (`a b c d n`) plus 30 more (arithmetic, user calls, `len`,
 a `range` loop variable, list and dict element reads, `str` methods, one name assigned an int and
 then a float, and one name on the general path), plus three regression names whose container
-literal is mutated (`xs[0] = 1`, `d["a"] = 1`, `xs.append(1)`), plus four review regressions: two
-dict-key loop variables (a dict yields its keys, not `_bool_kind`'s "not-bool") and a top-level
+literal is mutated (`xs[0] = 1`, `d["a"] = 1`, `xs.append(1)`), plus seven review regressions: two
+dict-key loop variables (a dict yields its keys, not `_bool_kind`'s "not-bool"), a top-level
 `helper` beside a nested `helper` (the nested C name is `outer__helper__0`, so the compiler types
-are keyed by the Python scope and its `def` line, not by the mangled C name). `expect.json` records the LSP
+are keyed by the Python scope and its `def` line, not by the mangled C name), a dict-key loop
+variable later reassigned from a parameter (an unknown binding is not dropped, so it shows nothing
+rather than a stale `bool`), and two reads of a local whose line numbers a lambda shifted (the
+module entry's `#line` set falls inside the function, so its C name must not overwrite that
+function's map). `expect.json` records the LSP
 position, the type hover must show (`expected`), the `type(x).__name__` CPython prints at that line
 (`oracle`), and why a `null` case must stay empty. `oracle.py` runs an instrumented copy under
 CPython and checks every `oracle` field.
 
 | Stage | Shown and right | Wrong | Empty where CPython has a type |
 | --- | --- | --- | --- |
-| Before (source-only hover) | 0/42 | 0 | 42 |
-| After | 36/42 | 0 | 6 |
+| Before (source-only hover) | 0/45 | 0 | 45 |
+| After | 38/45 | 0 | 7 |
 
-The six empty names are deliberate: `d = sum([1.5, 2.5])` (the C type is the numeric sum
+The seven empty names are deliberate: `d = sum([1.5, 2.5])` (the C type is the numeric sum
 `ail_nsum`, which is `int` or `float` at run time), `mixed` (assigned an int and then a float, so
-the compiler boxes it), `picked` (its function is on the general path, so there is no typed C), and
-the three mutated-container reads (a list or dict literal whose items change after the binding, so
+the compiler boxes it), `picked` (its function is on the general path, so there is no typed C), the
+three mutated-container reads (a list or dict literal whose items change after the binding, so
 the source cannot name the item type; CPython prints `int` for all three and the hover shows
-nothing).
+nothing), and a dict-key loop variable that is also assigned a parameter this cannot name (the
+key may be a bool or an int, so no type is certain).
 
 What each compiler output gives (probe `probe.py`, 2026-11-08):
 

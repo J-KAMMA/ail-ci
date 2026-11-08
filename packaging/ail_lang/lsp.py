@@ -577,8 +577,9 @@ def _binding_values(info, name):
 
 
 def _combine_bool(kinds):
-    kinds = [kind for kind in kinds if kind != "unknown"]
-    if not kinds:
+    # An unknown binding is a real possibility at this point: the name may hold that value, so
+    # dropping it would claim a type for a value this cannot name (lsp2 review, pZ6).
+    if not kinds or any(kind == "unknown" for kind in kinds):
         return "unknown"
     if all(kind == "bool" for kind in kinds):
         return "bool"
@@ -751,6 +752,18 @@ def _compiler_hover_type(name, info, ctype, returns):
     return mapped
 
 
+def _c_name_is_scope(c_name, scope_name):
+    """Whether a report's C function name can be the Python scope `scope_name`.
+
+    A top-level `def f` keeps its name; a nested `def helper` inside `outer` is `outer__helper__0`.
+    The module entry (`main`) and synthetic lambdas (`_ail_lam1`) can have `#line` sets that fall
+    inside a user function after a lambda line shift, so their name must not claim that scope.
+    """
+    if c_name == scope_name:
+        return True
+    return re.search(r"(?:^|__)%s(?:__\d+)?$" % re.escape(scope_name), c_name) is not None
+
+
 def _compiler_type_map(text, path, env, options):
     """(function name, def line) -> {local name: C type}, from a --debug build of the typed path.
 
@@ -843,7 +856,7 @@ def _compiler_type_map(text, path, env, options):
                     continue
                 previous = found.get(source, ctype)
                 found[source] = previous if previous == ctype else None
-            if scope is not None:
+            if scope is not None and _c_name_is_scope(function, scope.name):
                 result[(scope.name, scope.lineno)] = found
         return result
     finally:
