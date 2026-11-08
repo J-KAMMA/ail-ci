@@ -52,10 +52,6 @@ def _has_try(fn):
     return any(ins.op == 'try' for ins in I.walk(fn.body))
 
 
-def _defs(insns):
-    return {id(ins.results[0]): ins for ins in insns if ins.results}
-
-
 def _finalised(fn):
     """Class names the emitter must not reuse for, from the function's own attributes.
 
@@ -72,7 +68,6 @@ def mark(fn):
     if not enabled() or _has_try(fn):
         return 0
     insns = list(I.walk(fn.body))
-    defs = _defs(insns)
     finalised = _finalised(fn)
     initialized, escaped = set(), set()
     tainted, has_call = {}, {}          # id(value) -> set(id(place)) / bool
