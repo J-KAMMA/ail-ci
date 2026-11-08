@@ -15,8 +15,11 @@ s_deep = copy.deepcopy(num_set)
 num_set.add(10)
 f_shallow = copy.copy(frozen)
 f_deep = copy.deepcopy(frozen)
+big_frozen = frozenset([2**40, 2**41])
+bf_deep = copy.deepcopy(big_frozen)
 
 print("plain_tuple:", t_shallow == plain_tuple, t_deep == plain_tuple)
 print("nested_tuple:", nt_deep, nt_deep is nested_tuple, nt_deep[0] is nested_tuple[0])
 print("set:", sorted(list(s_shallow)), sorted(list(s_deep)), s_shallow is num_set, s_deep is num_set)
-print("frozenset:", sorted(list(f_shallow)), sorted(list(f_deep)), f_shallow is frozen)
+print("frozenset:", sorted(list(f_shallow)), sorted(list(f_deep)), f_shallow is frozen,
+      f_deep is frozen, bf_deep == big_frozen, bf_deep is big_frozen)

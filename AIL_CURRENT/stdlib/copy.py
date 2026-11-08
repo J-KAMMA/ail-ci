@@ -188,15 +188,6 @@ def deepcopy(x, memo=None, _nil=[]):
         items = []
         for item in x:
             items.append(deepcopy(item, memo))
-        same = True
-        i = 0
-        for item in x:
-            if item is not items[i]:
-                same = False
-                break
-            i = i + 1
-        if same:
-            return x
         y = frozenset(items)
         memo.put(x, y)
         return y
@@ -235,7 +226,7 @@ def deepcopy(x, memo=None, _nil=[]):
         same = True
         i = 0
         for item in x:
-            if item is not items[i]:
+            if not _same(item, items[i]):
                 same = False
                 break
             i = i + 1
