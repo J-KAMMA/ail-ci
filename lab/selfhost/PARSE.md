@@ -25,12 +25,13 @@ segment back to `<source>:<index>`.
 | CPython eval mode accepts | 164,105 |
 | identical | **164,105 (100.0000% of parseable)** |
 | accepted but different | **0** |
-| refused by `ailparse` | **0** |
+| refused by `ailparse` among CPython-accepted | **0** |
 | share of all extracted nodes | **99.9129%** |
 
 The 143 expressions CPython itself rejects in eval mode are 106 `yield`, 35 `yield from`, and 2
-starred assignment targets (`*x, y`, which is not an eval expression).  They are outside the stage-1
-set and the parser is not asked to accept them.
+starred assignment targets (`*x, y`, which is not an eval expression).  `ailparse` refuses all 143 by
+name: 141 as `ailparse: yield not supported` and the 2 assignment targets as
+`ailparse: token STAR not supported`.  No expression CPython rejects is accepted.
 
 The full S376 pass takes **20.6 s** in one process and peaks at **233 MB** (extraction plus the stage
 0 reference plus stage 1 parse/dump).
@@ -64,8 +65,9 @@ constructs outside this step: a complex literal (`1j`) and string `\N{...}` esca
 `ailparse: ... not supported`; neither occurs in S376.  Bytes literals follow CPython instead: `\u`,
 `\U` and `\N` stay as literal backslash text (`b'\u0041'` is `b'\\u0041'`), and an octal escape is
 truncated to a byte (`b'\400'` is `b'\x00'`, `b'\777'` is `b'\xff'`).  An f-string `=` debug field
-keeps the source from just after the opening `{`, and a format spec that begins with `{{` keeps the
-empty leading `Constant` CPython emits.  `...` is represented by a small local
+keeps the source from just after the opening `{`; a format spec keeps the empty `Constant` CPython
+emits before each `{{` group; and an empty plain string next to an f-string is dropped as CPython
+drops it.  `...` is represented by a small local
 sentinel whose `repr` is `Ellipsis`, because AIL cannot hold the CPython `Ellipsis` object as a value.
 
 The reference's own top refused constructs (not parser refusals) are:

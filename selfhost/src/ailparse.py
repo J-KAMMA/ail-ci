@@ -234,7 +234,7 @@ def _merge_constants(values):
     for v in values:
         if len(out) > 0 and isinstance(v, ailast.Constant) and isinstance(out[len(out) - 1], ailast.Constant):
             prev = out[len(out) - 1]
-            if isinstance(prev.value, str) and isinstance(v.value, str) and prev.kind == v.kind:
+            if isinstance(prev.value, str) and isinstance(v.value, str):
                 out[len(out) - 1] = ailast.Constant(prev.value + v.value, prev.kind,
                                                     prev.lineno, prev.col_offset,
                                                     v.end_lineno, v.end_col_offset)
@@ -410,7 +410,8 @@ class Parser:
         kwarg = None
         defaults = []
         seen_star = False
-        star_only = False
+        seen_slash = False
+        bare_star = False
         pending_default = None
         while True:
             self._skip()
@@ -422,6 +423,11 @@ class Parser:
                 self.advance()
                 continue
             if self.at('SLASH'):
+                if seen_slash:
+                    raise ParseError('ailparse: / may appear only once not supported')
+                if len(normal) == 0:
+                    raise ParseError('ailparse: at least one argument must precede / not supported')
+                seen_slash = True
                 self.advance()
                 k = 0
                 while k < len(normal):
@@ -433,7 +439,7 @@ class Parser:
                 self.advance()
                 seen_star = True
                 if self.at('COMMA') or self.at('COLON') or self.at('RPAR'):
-                    star_only = True
+                    bare_star = True
                     continue
                 if not self.at('NAME'):
                     raise ParseError('ailparse: lambda parameter not supported')
@@ -458,13 +464,15 @@ class Parser:
             if self.at('EQUAL'):
                 self.advance()
                 default = self.parse_test()
-            if seen_star and not star_only or seen_star:
+            if seen_star:
                 kwonly.append(a)
                 kwdefs.append(default)
             else:
                 normal.append(a)
                 if default is not None:
                     defaults.append(default)
+        if bare_star and len(kwonly) == 0:
+            raise ParseError('ailparse: named arguments must follow bare * not supported')
         return self.plain('arguments', [posonly, normal, vararg, kwonly, kwdefs, kwarg, defaults])
 
     def parse_or_test(self):
@@ -747,7 +755,7 @@ class Parser:
                 continue
             break
         self.expect('RSQB', ']')
-        if len(items) == 1 and not trailing:
+        if len(items) == 1 and not trailing and not isinstance(items[0], ailast.Starred):
             sl = items[0]
         else:
             sl = self.mk('Tuple', [items, ailast.Load()], start)
@@ -780,6 +788,8 @@ class Parser:
         t = self.cur()
         if t.type == 'NAME':
             self.advance()
+            if t.string == 'yield':
+                raise ParseError('ailparse: yield not supported')
             if t.string == 'True':
                 return self.mk('Constant', [True, None], start)
             if t.string == 'False':
@@ -852,7 +862,14 @@ class Parser:
         if any_f:
             if any_b:
                 raise ParseError('ailparse: bytes f-string not supported')
-            merged = _merge_constants(values)
+            combined = _merge_constants(values)
+            merged = []
+            k = 0
+            while k < len(combined):
+                v = combined[k]
+                if not (isinstance(v, ailast.Constant) and isinstance(v.value, str) and v.value == ''):
+                    merged.append(v)
+                k += 1
             end = self.prev
             return ailast.JoinedStr(merged, start.srow, start.scol, end.erow, end.ecol)
         if len(values) == 1:
@@ -942,13 +959,13 @@ class Parser:
     def parse_format_spec(self, raw):
         start = self.prev
         values = []
-        t0 = self.cur()
-        if t0.type == 'LBRACE' and self.i + 1 < len(self.toks):
-            nxt = self.toks[self.i + 1]
-            if nxt.type == 'LBRACE' and self.offset(nxt) == self.offset(t0) + len(t0.string):
-                values.append(ailast.Constant('', None, t0.srow, t0.scol, t0.srow, t0.scol))
         while True:
             t = self.cur()
+            if t.type == 'LBRACE' and self.i + 1 < len(self.toks):
+                nxt = self.toks[self.i + 1]
+                if (nxt.type == 'LBRACE' and self.prev.type != 'FSTRING_MIDDLE'
+                        and self.offset(nxt) == self.offset(t) + len(t.string)):
+                    values.append(ailast.Constant('', None, t.srow, t.scol, t.srow, t.scol))
             if t.type == 'FSTRING_MIDDLE':
                 self.advance()
                 txt = _unescape(t.string, raw, False)
@@ -978,15 +995,19 @@ class Parser:
             raise ParseError('ailparse: yield not supported')
         if self.at('STAR'):
             items = []
+            saw_comma = False
             while True:
                 items.append(self.parse_list_item())
                 if self.at('COMMA'):
+                    saw_comma = True
                     self.advance()
                     if self.at('RPAR'):
                         break
                     continue
                 break
             self.expect('RPAR', ')')
+            if not saw_comma:
+                raise ParseError('ailparse: cannot use starred expression here not supported')
             return self.mk('Tuple', [items, ailast.Load()], start)
         first = self.parse_namedexpr_test(True)
         if self.is_name('for') or (self.is_name('async') and self._next_name() == 'for'):

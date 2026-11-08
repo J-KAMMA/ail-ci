@@ -42,7 +42,15 @@ EDGE = [
     "[x := 1]", "(a := 1, b)", "await foo()", "f'{x:{y:{z}}}'", "f'{ {1: 2}[1] }'",
     "f'{x = :>{w}}'", "f'{(x:=5)}'", "f'{x:>{y}{z}}'", "f'{x!r:>{y}}'",
     "f'{ x=}'", "f'{ x + y = }'", "f'{x:{{}}}'", "f'{x:a{{}}}'", "f'{x:{{a}}}'",
+    "f'{x:{{}}{{}}}'", "f'{x:{y}{{}}}'", "f'{x:a{{}}{{}}}'", "f'{x:{{}}{{}}{{}}}'",
+    "f'{x}' ''", "'' f'{x}'", "f'{x}' '' f'{y}'", "f'{x}' u'' 'a'", "'a' u'a' f'{x}'",
+    "a[*b]", "a[*b,]", "a[*b, c]",
     "b'\\u0041'", "b'\\N{BULLET}'", "b'\\400'", "b'\\777'", "U'x'", "U'a' 'b'", "U'a' f'{x}'",
+]
+
+REFUSED = [
+    "(*a)", "lambda /: 1", "lambda /, x: 1", "lambda *, : 1", "lambda *,: 1",
+    "lambda *, **kw: 1", "lambda x, /, /: 1", "yield x",
 ]
 
 
@@ -109,6 +117,13 @@ class ParseTest(unittest.TestCase):
         with self.assertRaises(ailparse.ParseError) as cm:
             ailparse.parse_expr("yield x")
         self.assertTrue(str(cm.exception).startswith("ailparse:"))
+
+    def test_invalid_syntax_refused(self):
+        for text in REFUSED:
+            with self.subTest(text=text):
+                with self.assertRaises(ailparse.ParseError) as cm:
+                    ailparse.parse_expr(text)
+                self.assertTrue(str(cm.exception).startswith("ailparse:"))
 
     @unittest.skipUnless(HAVE_CC, "no C compiler")
     def test_stage2_matches_stage1(self):
