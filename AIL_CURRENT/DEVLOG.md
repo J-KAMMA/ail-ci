@@ -60,6 +60,30 @@ checked by `test_ail_agent_integrations.py` (registered in `tests.d/`). The guid
 produces a build that matches CPython at 28.9x (4.63 s vs 0.16 s, median of three). The strict
 refusal report is `ail.strict/1`; a successful build is `ail.build/1`. Probes under
 `/tmp/probes/` (eleven programs) match CPython on the general and default builds.
+## 2026-11-08 -- rbsetord2_rr1 full suite: `set.pop()` tests follow the accepted table order (job-rbsetord2_rr1-11081957)
+
+`test_ail_gaps_api2.SetPop` still expected `set.pop()` to be refused by name, which the re-applied
+setord2 change intentionally removed. The int-only pop programs now compare against CPython on the
+general and default builds: the fixed `SET_POP` program, an untyped fuzz that mixes add/discard/pop
+with iteration (directly and through a function argument), and a typed `set[int]` fuzz. The
+order-sensitive rolling hash makes a wrong popped element or a wrong remaining walk fail. The
+module's 14 tests pass; `test_ail_setorder` (S11) and `test_ail_safetynet` stay green.
+
+## 2026-11-08 -- rbsetord2_rr1 fix: `symmetric_difference_update` / `^=` in-place order (job-rbsetord2_rr1-11081957)
+
+Fixed the last review defect: `set.symmetric_difference_update`/`^=` computed `a ^ b` (copy the
+other set, walk `a`) and swapped bodies, while CPython mutates `a` in place walking the *other*
+operand's table order. The boxed `ail_setx_symmetric_difference_update_set` and the typed
+`set[int]` `^=` (`ail_iset_xor_update`, selected only for the augmented form) now start from `a`
+and toggle each key of `b` in `b`'s order; the non-in-place `^`/`symmetric_difference` keep the
+copy-`b` order. A dict argument follows CPython's dict fast path (insertion order); any other
+iterable is built into a set first, as CPython does. `test_ail_setorder.py` gains S11
+(`SDU_ORDER`, `TYPED_SDU`). 12 probes in `/tmp/probes` (minimal, large, `^=`, typed, typed method,
+dict insertion order, list/tuple/range/iterator/generator, frozenset, alias/self, empty, values
+through an argument/list item/field/dict value, non-in-place `^`) match CPython on both builds.
+`tools/diff_ids.py` is absent on this tree; `tools/update_manifest.py` and `--check` run. Tests on
+the final commit, `-j 2`: `test_ail_setorder`, `test_ail_sets_general`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.
 
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
