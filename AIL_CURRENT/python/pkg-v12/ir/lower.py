@@ -24,6 +24,7 @@ Locals are `local.alloc` places (S0 has no mem2reg; the C compiler promotes them
 the legacy path's locals). A parameter that is never assigned stays an SSA value.
 """
 import ast
+import itertools
 import os
 
 from pyfront import int_constant, refuse_int_pow_overflow
@@ -48,6 +49,10 @@ _LIST_MUTATORS = ('append', 'pop', 'clear', 'extend', 'insert', 'remove', 'sort'
 # A one-shot comprehension reserve is bounded like the legacy `_append_loop_reserve`: a huge range
 # bound must not allocate before an early exception, and a larger result still grows by doubling.
 _LIST_RESERVE_LIMIT = 1 << 22
+# Expression nodes that may run code able to resize a list (aug_target's 'aug' write).
+_MAY_RESIZE = (ast.Call, ast.NamedExpr, ast.Await, ast.Yield, ast.YieldFrom, ast.Lambda, ast.ListComp, ast.SetComp,
+               ast.DictComp, ast.GeneratorExp)
+_AUG_PAIRS = itertools.count(1)       # pairs the read and the write of one `xs[i] op= v` (emit_c.aug_read_index)
 
 
 def is_list(t):
@@ -2737,10 +2742,22 @@ class Lowering(TextLowering):
             raise NotS0('element store into %s' % base.type)
         index = self.as_int(self.expr(target.slice))
         elem = base.type.args[0].args[0]
+        # The write takes the read's mode: a checked read accepts a negative index by normalising it
+        # inside the helper, so an unchecked write at the same raw index would store before the
+        # buffer (`xs[-1] += 1`). The checked write normalises again against the length at the time
+        # of the store (CPython's list_ass_item, after the right-hand side ran); the index value
+        # itself is computed once. When the right-hand side has no call (nothing between the read
+        # and the write can resize the list), the read ('augr') and the write ('aug') carry one pair
+        # number: the range pass then proves the write from a non-negative index alone (the read
+        # already checked it against the length), and the C emitter normalises and checks the index
+        # once at the read and stores at that same normalised index (emit_c.aug_read_index).
         mode = self.index_mode(target)
-        old = self.b.value('list.get', [base, index], elem, {'mode': mode})
+        read_attrs, write_attrs = {'mode': mode}, {'mode': mode}
+        if mode == 'ck' and not any(isinstance(n, _MAY_RESIZE) for n in ast.walk(s.value)):
+            read_attrs['augr'] = write_attrs['aug'] = next(_AUG_PAIRS)
+        old = self.b.value('list.get', [base, index], elem, read_attrs)
         new = self.apply_binop(s, old, self.expr(s.value))
-        self.b.emit('list.set', [base, index, self.field_value(new, elem, s.value)], [], {'mode': 'nck'})
+        self.b.emit('list.set', [base, index, self.field_value(new, elem, s.value)], [], write_attrs)
 
     def apply_binop(self, s, left, right):
         """`left <op> right` for an augmented assignment, typed as the legacy path types the
