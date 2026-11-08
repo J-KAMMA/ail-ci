@@ -1,0 +1,7 @@
+lines 350000
+fields 2800000
+chars 5600000
+column2 1050000
+maxlen 11
+quotes 700000
+sum 0

@@ -1,0 +1,102 @@
+[
+ {
+  "module": "tokenizer",
+  "function": "count_idents",
+  "match": true,
+  "python_s": 0.23754263699993317,
+  "rust_s": 0.003102884999861999,
+  "speedup": 76.555,
+  "whole": {
+   "rust_s": 0.6355911509999714,
+   "rc": 0,
+   "error": "",
+   "cpython_s": 0.8658411119999982,
+   "speedup": 1.362,
+   "match": true
+  },
+  "py_len": 6,
+  "py_sha256": "34382656973b65c319c7cc34ba8ea864a539619fba932fe289eae28da0ac4ecb",
+  "rs_len": 6,
+  "rs_sha256": "34382656973b65c319c7cc34ba8ea864a539619fba932fe289eae28da0ac4ecb"
+ },
+ {
+  "module": "edit_dist",
+  "function": "levenshtein",
+  "match": true,
+  "python_s": 8.356600028491812e-05,
+  "rust_s": 1.3419999049801845e-06,
+  "speedup": 62.27,
+  "whole": {
+   "rust_s": 0.1210395029997926,
+   "rc": 0,
+   "error": "",
+   "cpython_s": 2.201509981000072,
+   "speedup": 18.188,
+   "match": true
+  },
+  "py_len": 1,
+  "py_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+  "rs_len": 1,
+  "rs_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+ },
+ {
+  "module": "float_loops",
+  "function": "dot",
+  "match": true,
+  "python_s": 0.24835468600031163,
+  "rust_s": 0.12423244499996144,
+  "speedup": 1.999,
+  "whole": {
+   "rust_s": 2.0552453819996117,
+   "rc": 0,
+   "error": "",
+   "cpython_s": 2.20909571600032,
+   "speedup": 1.075,
+   "match": true
+  },
+  "py_len": 17,
+  "py_sha256": "4ec1ff81063faed35154bd4e99df3c344eb65d09ca625808944b960300647fc0",
+  "rs_len": 17,
+  "rs_sha256": "4ec1ff81063faed35154bd4e99df3c344eb65d09ca625808944b960300647fc0"
+ },
+ {
+  "module": "matrix",
+  "function": "mat_mul",
+  "match": true,
+  "python_s": 2.761085837000337,
+  "rust_s": 0.013523390000045765,
+  "speedup": 204.171,
+  "whole": {
+   "rust_s": 0.06306088200017257,
+   "rc": 0,
+   "error": "",
+   "cpython_s": 2.8884140659997684,
+   "speedup": 45.804,
+   "match": true
+  },
+  "py_len": 534706,
+  "py_sha256": "87a4ae828cba48dc2f2c90565be3baca90a4b9a54567c8d6aab39b76dd30bb5f",
+  "rs_len": 534706,
+  "rs_sha256": "87a4ae828cba48dc2f2c90565be3baca90a4b9a54567c8d6aab39b76dd30bb5f"
+ },
+ {
+  "module": "rolling_stats",
+  "function": "window_sums",
+  "match": true,
+  "python_s": 0.388205145000029,
+  "rust_s": 0.13935587000014493,
+  "speedup": 2.786,
+  "whole": {
+   "rust_s": 1.8542059500000505,
+   "rc": 0,
+   "error": "",
+   "cpython_s": 2.647983703999671,
+   "speedup": 1.428,
+   "match": true
+  },
+  "py_len": 20999111,
+  "py_sha256": "d88388a4a8f5f3af5ca431833640fe03d4e417f976be3580426e48a3532d1b97",
+  "rs_len": 20999111,
+  "rs_sha256": "d88388a4a8f5f3af5ca431833640fe03d4e417f976be3580426e48a3532d1b97"
+ }
+]

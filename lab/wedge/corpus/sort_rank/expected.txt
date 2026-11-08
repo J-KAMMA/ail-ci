@@ -1,0 +1,7 @@
+words 1600000
+total 1600000
+max 68037
+above 26
+top [4, 5, 6, 2, 3, 1, 10, 7]
+topscore 1487629
+spread 16

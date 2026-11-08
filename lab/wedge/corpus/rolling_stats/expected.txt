@@ -1,0 +1,8 @@
+n 3000000
+windows 2999873
+total 1499083576
+moment 999130850736
+mean_scaled 1499
+runs 20
+over 595196
+acc 135776

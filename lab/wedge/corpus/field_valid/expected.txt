@@ -1,0 +1,5 @@
+good 700000
+upper 0
+email_ok 700000
+version_ok 466667
+weight 82422830

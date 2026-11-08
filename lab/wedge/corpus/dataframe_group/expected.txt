@@ -1,0 +1,7 @@
+rows 2500000
+groups 64
+total 1248750000
+filter 999000000
+weighted 3866249259
+biggest 39063
+scaled 84638646

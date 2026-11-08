@@ -1,0 +1,7 @@
+nodes 60000
+height 63
+sum 30000050832
+depth 2014045
+min 0
+max 999959
+total 2400245191920

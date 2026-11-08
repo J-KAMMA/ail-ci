@@ -1,0 +1,5 @@
+bytes 3120001
+tokens 640001
+depth 3
+digits 240000
+objects 120000
