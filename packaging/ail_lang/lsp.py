@@ -543,6 +543,7 @@ _C_TYPE_NAMES = {
 }
 _V_DECL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_ ]*?)\s+(v_[A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)")
 _DEBUG_DECL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_ ]*?)\s+([A-Za-z_][A-Za-z0-9_]*);\s*/\* --debug: the Python local \*/")
+_LINE_DIRECTIVE = re.compile(r'^#line\s+(\d+)\s+"([^"]*)"')
 _NOT_BOOL_BUILTINS = {"len", "int", "float", "str", "bytes", "list", "dict", "abs", "ord",
                       "chr", "round", "hex", "oct", "bin", "repr"}
 _BOOL_METHODS = {"startswith", "endswith", "isdigit", "isalpha", "isalnum", "isspace",
@@ -597,16 +598,45 @@ def _annotation_kind(text):
     return "unknown"
 
 
+def _iterable_element_kind(iterable, info, returns, seen):
+    """The kind of the items a literal container yields, or None when it is not a literal.
+
+    A dict yields its keys, not its values; `{**other}` has a key this cannot name.
+    """
+    if isinstance(iterable, (ast.List, ast.Tuple, ast.Set)):
+        return _combine_bool([_bool_kind(item, info, returns, seen) for item in iterable.elts])
+    if isinstance(iterable, ast.Dict):
+        if any(key is None for key in iterable.keys):
+            return "unknown"
+        return _combine_bool([_bool_kind(key, info, returns, seen) for key in iterable.keys])
+    return None
+
+
 def _for_iter_kind(iterable, info, returns, seen):
     if isinstance(iterable, ast.Call) and isinstance(iterable.func, ast.Name) \
             and iterable.func.id == "range":
         return "not-bool"
-    if isinstance(iterable, (ast.List, ast.Tuple, ast.Set)):
-        return _combine_bool([_bool_kind(item, info, returns, seen) for item in iterable.elts])
+    element = _iterable_element_kind(iterable, info, returns, seen)
+    if element is not None:
+        return element
     if isinstance(iterable, ast.Name):
-        if iterable.id in info["mutated"]:
+        if id(iterable) in seen or iterable.id in info["mutated"]:
             return "unknown"
-        return _bool_kind(iterable, info, returns, seen)
+        seen = set(seen)
+        seen.add(id(iterable))
+        kinds = []
+        for bound, for_iter in _binding_values(info, iterable.id):
+            if for_iter is not None:
+                kinds.append(_for_iter_kind(for_iter, info, returns, seen))
+                continue
+            element = _iterable_element_kind(bound, info, returns, seen)
+            if element is not None:
+                kinds.append(element)
+            elif isinstance(bound, ast.Name):
+                kinds.append(_for_iter_kind(bound, info, returns, seen))
+            else:
+                kinds.append("unknown")
+        return _combine_bool(kinds)
     return "unknown"
 
 
@@ -722,7 +752,13 @@ def _compiler_hover_type(name, info, ctype, returns):
 
 
 def _compiler_type_map(text, path, env, options):
-    """Function name -> {local name: C type}, from a --debug build of the typed path."""
+    """(function name, def line) -> {local name: C type}, from a --debug build of the typed path.
+
+    The report names each C function by its mangled name (`outer__helper__0` for a nested `def`),
+    not by the Python name the hover sees. The `#line` directives inside the C function's own
+    range point at its Python body, so the AST node whose span holds those lines identifies the
+    exact scope (a nested function has the same name as a top-level one).
+    """
     if not cli.find_c_compiler(env)[0]:
         return {}
     probe, directory = None, None
@@ -761,6 +797,13 @@ def _compiler_type_map(text, path, env, options):
             lines = (debug / "program.c").read_text(encoding="utf-8", errors="replace").splitlines()
         except (OSError, ValueError):
             return {}
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            return {}
+        functions = [node for node in ast.walk(tree)
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        source_path = os.path.realpath(str(probe))
         ranges = {}
         for generated in report.get("generated") or []:
             for item in generated.get("functions") or []:
@@ -770,6 +813,19 @@ def _compiler_type_map(text, path, env, options):
                     ranges[name] = (start, end)
         result = {}
         for function, (start, end) in ranges.items():
+            source_lines = []
+            for raw in lines[start - 1:end]:
+                directive = _LINE_DIRECTIVE.match(raw)
+                if directive and os.path.realpath(directive.group(2)) == source_path:
+                    source_lines.append(int(directive.group(1)))
+            scope = None
+            if source_lines:
+                low, high = min(source_lines), max(source_lines)
+                containing = [node for node in functions
+                              if node.lineno <= low and high <= node.end_lineno]
+                if containing:
+                    scope = min(containing,
+                                key=lambda node: (node.end_lineno - node.lineno, -node.lineno))
             found = {}
             for raw in lines[start - 1:end]:
                 match = _V_DECL.match(raw)
@@ -787,7 +843,8 @@ def _compiler_type_map(text, path, env, options):
                     continue
                 previous = found.get(source, ctype)
                 found[source] = previous if previous == ctype else None
-            result[function] = found
+            if scope is not None:
+                result[(scope.name, scope.lineno)] = found
         return result
     finally:
         if directory is not None:
@@ -1000,7 +1057,7 @@ def _hover_in_chain(tree, chain, name, compiler_types=None):
 
     def compiler_type(scope):
         if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return (compiler_types.get(scope.name) or {}).get(name)
+            return (compiler_types.get((scope.name, scope.lineno)) or {}).get(name)
         return None
 
     global_literals, global_uncertain = set(), False

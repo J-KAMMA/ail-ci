@@ -42,8 +42,11 @@ Hover shows a type when it is certain:
   `int64_t` could be either `int` or `bool` show nothing. The `int64_t` disambiguation reads the
   source, so it trusts a list or dict literal's items only while nothing mutates that container:
   an item store, `del`, a method call such as `append` or `update`, a call that receives the name,
-  or an alias assignment makes the item type unknown. The build is cached per document version and
-  runs only after `didSave` or 1 s idle, never on every keystroke.
+  or an alias assignment makes the item type unknown. Iterating a dict yields its *keys* (never
+  its values), so a `for k in d` variable is typed from the dict's keys. A nested function is
+  matched by its own source scope, not by the compiler's mangled C name (`outer__helper__0`), so a
+  nested `helper` beside a top-level `helper` gets its own types. The build is cached per document
+  version and runs only after `didSave` or 1 s idle, never on every keystroke.
 
 Every other name shows nothing, including a name on the general path (for example the `int | None`
 review function), `b"a b".split()`, `range(3)`, an attribute (`obj.x`) or a keyword label

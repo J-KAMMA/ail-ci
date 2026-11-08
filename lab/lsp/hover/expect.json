@@ -1,7 +1,9 @@
 {
   "files": [
     "probe.py",
-    "general.py"
+    "general.py",
+    "dict_iter.py",
+    "nested_name.py"
   ],
   "cases": [
     {
@@ -313,6 +315,42 @@
       "expected": null,
       "oracle": "int",
       "why": "the function is on the general path, so there is no typed C for it"
+    },
+    {
+      "file": "dict_iter.py",
+      "line": 3,
+      "character": 14,
+      "name": "k",
+      "expected": "bool",
+      "oracle": "bool",
+      "why": "iterating a dict yields its keys, here the bool True"
+    },
+    {
+      "file": "dict_iter.py",
+      "line": 6,
+      "character": 14,
+      "name": "j",
+      "expected": "bool",
+      "oracle": "bool",
+      "why": "iterating a dict bound to a name yields its keys, here the bool False"
+    },
+    {
+      "file": "nested_name.py",
+      "line": 1,
+      "character": 4,
+      "name": "x",
+      "expected": "float",
+      "oracle": "float",
+      "why": "the top-level helper's x; a same-named nested function must not shadow its C function"
+    },
+    {
+      "file": "nested_name.py",
+      "line": 8,
+      "character": 14,
+      "name": "x",
+      "expected": "bool",
+      "oracle": "bool",
+      "why": "the nested helper's x is int64_t in C but bool in Python; the outer helper has the same name"
     }
   ]
 }
