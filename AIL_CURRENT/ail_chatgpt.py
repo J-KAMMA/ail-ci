@@ -4973,7 +4973,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched
                 text = ffi.lower(path, text)
-            if entry and path.suffix.lower() == '.py':
+            if entry and syntax == 'python':
+                # Every Python-syntax entry, `.py` or a `.ail` file in the Python surface: the
+                # prelude-unit table is what lets a note raised inside a shipped prelude point at
+                # the user's call instead of a prelude line.
                 try:
                     entry_defs = {n.name for n in ast.walk(ast.parse(text))
                                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
@@ -5480,6 +5483,321 @@ _FALLBACK_NOTE = 'note: built on the general path'
 _FALLBACK_HINT = '; run with --strict to see why'
 _LINE_MARKER = re.compile(r'^ail-source-line: (\d+)\r?\n?', re.M)
 
+# Prelude definitions whose line in the merged text is past the end of the user's file: the note is
+# really about the user's call that reaches them.  Only these shipped modules are named; a name the
+# user wrote themselves is not a prelude unit (`_PRELUDE_UNITS` records what the preludes added).
+_PRELUDE_MODULES = (
+    ('Fraction', 'fractions'),
+    ('Decimal', 'decimal'),
+    ('DecimalException', 'decimal'),
+    ('UnicodeData', 'unicodedata'),
+    ('IPv4Address', 'ipaddress'),
+    ('IPv4Network', 'ipaddress'),
+)
+
+# The builtin (or expression) that reaches a dunder in a prelude: the old position was the
+# prelude's `def __float__`, the actionable one is the user's `float(...)` call.
+_PRELUDE_DUNDER_CALLS = {
+    '__float__': r'\bfloat\s*\(',
+    '__int__': r'\bint\s*\(',
+    '__index__': r'\b(?:int|range|len)\s*\(',
+    '__len__': r'\blen\s*\(',
+    '__str__': r'\b(?:str|print)\s*\(',
+    '__format__': r'\bformat\s*\(|\bf[ruRU]?[\'"]',
+    '__iter__': r'\b(?:list|tuple|for)\b',
+    '__eq__': r'==|!=',
+    '__lt__': r'[<>]=?',
+    '__add__': r'\+',
+    '__sub__': r'-',
+    '__mul__': r'\*',
+}
+
+
+# The value types a named prelude module adds, and the shipped file that defines them: a note
+# raised while the compiler checks the prelude names a definition there, and these let a caller
+# find the user's expression that used a value of that type.
+_PRELUDE_TYPES = {
+    'fractions': ('Fraction',),
+    'decimal': ('Decimal', 'DecimalException'),
+    'unicodedata': ('UnicodeData',),
+    'ipaddress': ('IPv4Address', 'IPv4Network'),
+}
+_PRELUDE_DEFINITION_FILES = {
+    'fractions': 'prelude_fraction.py',
+    'decimal': 'prelude_decimal.py',
+    'unicodedata': 'prelude_unicodedata.py',
+    'ipaddress': 'prelude_ipaddress.py',
+}
+_PRELUDE_DEFINITIONS = None
+
+
+def _prelude_definition_modules():
+    """Definition name -> module for the shipped preludes, read once from their source files."""
+    global _PRELUDE_DEFINITIONS
+    if _PRELUDE_DEFINITIONS is not None:
+        return _PRELUDE_DEFINITIONS
+    found = {}
+    for module, filename in _PRELUDE_DEFINITION_FILES.items():
+        try:
+            tree = ast.parse((ROOT / 'python/pkg-v12' / filename).read_text(encoding='utf-8'))
+        except (OSError, UnicodeError, SyntaxError):
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.setdefault(node.name, module)
+    _PRELUDE_DEFINITIONS = found
+    return found
+
+
+def _call_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _prelude_operation_operands(node, operation):
+    """The operand expressions of `node` when it is the operation `operation`, else None."""
+    calls = {
+        '__float__': ('float',),
+        '__int__': ('int',),
+        '__index__': ('int', 'range', 'len'),
+        '__len__': ('len',),
+        '__str__': ('str', 'print'),
+    }
+    if operation in calls:
+        if isinstance(node, ast.Call) and _call_name(node.func) in calls[operation]:
+            return [*node.args, *(keyword.value for keyword in node.keywords)]
+        return None
+    if operation == '__format__':
+        if isinstance(node, ast.JoinedStr):
+            return [value.value for value in node.values if isinstance(value, ast.FormattedValue)]
+        if isinstance(node, ast.Call) and _call_name(node.func) == 'format':
+            return [*node.args, *(keyword.value for keyword in node.keywords)]
+        return None
+    if operation == '__iter__':
+        if isinstance(node, ast.Call) and _call_name(node.func) in ('list', 'tuple', 'set', 'dict'):
+            return [*node.args, *(keyword.value for keyword in node.keywords)]
+        if isinstance(node, ast.For):
+            return [node.iter]
+        return None
+    comparisons = {
+        '__eq__': (ast.Eq, ast.NotEq), '__ne__': (ast.Eq, ast.NotEq),
+        '__lt__': (ast.Lt, ast.LtE, ast.Gt, ast.GtE), '__le__': (ast.Lt, ast.LtE, ast.Gt, ast.GtE),
+        '__gt__': (ast.Lt, ast.LtE, ast.Gt, ast.GtE), '__ge__': (ast.Lt, ast.LtE, ast.Gt, ast.GtE),
+    }
+    if operation in comparisons:
+        if isinstance(node, ast.Compare) and any(isinstance(op, comparisons[operation]) for op in node.ops):
+            return [node.left, *node.comparators]
+        return None
+    binaries = {
+        '__add__': (ast.Add,), '__sub__': (ast.Sub,), '__mul__': (ast.Mult,),
+        '__truediv__': (ast.Div,), '__floordiv__': (ast.FloorDiv,), '__mod__': (ast.Mod,),
+    }
+    if operation in binaries:
+        if isinstance(node, ast.BinOp) and isinstance(node.op, binaries[operation]):
+            return [node.left, node.right]
+        return None
+    return None
+
+
+def _prelude_origin(source, reason):
+    """(module, unit) when `reason` is about a definition a shipped prelude added, else (None, None)."""
+    units = _PRELUDE_UNITS.get(str(source), ())
+    if not units:
+        return None, None
+    for unit, module in _PRELUDE_MODULES:
+        if unit in units and re.search(r'\b%s\b' % re.escape(unit), reason):
+            return module, unit
+    definitions = _prelude_definition_modules()
+    for unit in units:
+        module = definitions.get(unit)
+        if module is not None and re.search(r'\b%s\b' % re.escape(unit), reason):
+            return module, unit
+    return None, None
+
+
+def _prelude_typed_names(tree, module):
+    """Names (and attribute names) that hold a value of `module`'s prelude type.
+
+    A small fixed point over assignments, aliases, list/dict items, attributes, returns and call
+    arguments is enough to tell `float(d)` from `float(3)` in the user's own source."""
+    types = _PRELUDE_TYPES.get(module, ())
+    if not types:
+        return set(), set()
+    names, attrs, returns = set(), set(), set()
+    functions = {node.name: node for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+    def value(node):
+        if isinstance(node, ast.Name):
+            return node.id in names
+        if isinstance(node, ast.Attribute):
+            return node.attr in attrs or value(node.value)
+        if isinstance(node, ast.Call):
+            if _call_name(node.func) in types or _call_name(node.func) in returns:
+                return True
+            return any(value(arg) for arg in node.args) or any(
+                value(keyword.value) for keyword in node.keywords)
+        if isinstance(node, ast.Subscript):
+            return value(node.value)
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return any(value(element) for element in node.elts)
+        if isinstance(node, ast.Dict):
+            return any(value(key) or value(item) for key, item in zip(node.keys, node.values))
+        if isinstance(node, ast.IfExp):
+            return value(node.body) or value(node.orelse)
+        if isinstance(node, ast.NamedExpr):
+            return value(node.value)
+        if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare)):
+            return any(value(child) for child in ast.iter_child_nodes(node)
+                       if isinstance(child, ast.expr))
+        return False
+
+    def bind(target):
+        if isinstance(target, ast.Name):
+            return {target.id}, set()
+        if isinstance(target, ast.Attribute):
+            return set(), {target.attr}
+        if isinstance(target, (ast.Tuple, ast.List)):
+            found_names, found_attrs = set(), set()
+            for element in target.elts:
+                names_part, attrs_part = bind(element)
+                found_names |= names_part
+                found_attrs |= attrs_part
+            return found_names, found_attrs
+        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+            return {target.value.id}, set()
+        return set(), set()
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and value(node.value):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    new_names, new_attrs = bind(target)
+                    if not new_names <= names or not new_attrs <= attrs:
+                        names |= new_names
+                        attrs |= new_attrs
+                        changed = True
+            elif isinstance(node, ast.Call):
+                definition = functions.get(_call_name(node.func))
+                if definition is not None:
+                    parameters = [argument.arg for argument in
+                                  (*definition.args.posonlyargs, *definition.args.args)]
+                    for parameter, argument_node in zip(parameters, node.args):
+                        if parameter not in names and _contains_typed(argument_node, names, attrs, types):
+                            names.add(parameter)
+                            changed = True
+        for name, definition in functions.items():
+            if name not in returns and any(
+                    isinstance(node, ast.Return) and value(node.value)
+                    for node in ast.walk(definition)):
+                returns.add(name)
+                changed = True
+    return names, attrs
+
+
+def _contains_typed(node, names, attrs, types=()):
+    """Whether `node` contains a reference to a value of the prelude's type."""
+    if isinstance(node, ast.Name):
+        return node.id in names
+    if isinstance(node, ast.Attribute):
+        return node.attr in attrs or _contains_typed(node.value, names, attrs, types)
+    if isinstance(node, ast.Call):
+        if _call_name(node.func) in types:
+            return True
+        return any(_contains_typed(child, names, attrs, types)
+                   for child in (*node.args, *(keyword.value for keyword in node.keywords)))
+    if isinstance(node, ast.Subscript):
+        return _contains_typed(node.value, names, attrs, types)
+    return any(_contains_typed(child, names, attrs, types) for child in ast.iter_child_nodes(node)
+               if isinstance(child, ast.expr))
+
+
+def _prelude_call_site(source, reason, unit, module=None):
+    """(line, column) of the user's call that reaches the prelude definition, 1-based.
+
+    The note names the definition that failed in the prelude; the actionable position is the
+    user's expression that used a value of that type.  The type is followed through assignments,
+    aliases, list/dict items, attributes and calls, so a second, unrelated call on a later line
+    (`print(float(3))`) is not chosen."""
+    try:
+        text = source.read_text(encoding='utf-8')
+        lines = text.splitlines()
+        tree = ast.parse(text)
+    except (OSError, UnicodeError, SyntaxError, ValueError):
+        return None
+    operation = None
+    dunder = re.search(r'__(\w+)__', reason)
+    if dunder is not None:
+        operation = '__%s__' % dunder.group(1)
+    elif 'format spec' in reason:
+        operation = '__format__'
+    types = _PRELUDE_TYPES.get(module, ())
+    names, attrs = _prelude_typed_names(tree, module)
+    candidates = []
+    if operation is not None and (names or attrs):
+        for node in ast.walk(tree):
+            operands = _prelude_operation_operands(node, operation)
+            if operands is not None and any(
+                    _contains_typed(operand, names, attrs, types) for operand in operands):
+                candidates.append(node)
+    if candidates:
+        first = min(candidates, key=lambda node: (node.lineno, node.col_offset))
+        return first.lineno, first.col_offset
+    if operation is None and (names or attrs):
+        uses = [node for node in ast.walk(tree)
+                if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names)
+                or (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in attrs)]
+        if uses:
+            first = min(uses, key=lambda node: (node.lineno, node.col_offset))
+            return first.lineno, first.col_offset
+    patterns = []
+    if dunder is not None:
+        call = _PRELUDE_DUNDER_CALLS.get(operation)
+        if call:
+            patterns.append(call)
+    if 'format spec' in reason:
+        patterns.append(r'\bformat\s*\(|\bf[ruRU]?[\'"]')
+    patterns.append(r'\b%s\b' % re.escape(unit))
+    for pattern in patterns:
+        found = [(number, match.start()) for number, line in enumerate(lines, 1)
+                 if (match := re.search(pattern, line))]
+        # the import and the construction name the type too; the call that fails is after them
+        calls = [(number, column) for number, column in found
+                 if not lines[number - 1].lstrip().startswith(('import ', 'from '))]
+        if calls:
+            return calls[-1]
+        if found:
+            return found[-1]
+    return None
+
+
+def _prelude_where(source, reason, where):
+    """(where, module): map a diagnostic line past the user's file back to the user's call site.
+
+    A prelude is appended to the merged text, so the compiler names a line of `prelude_*.py`; the
+    file length is what tells those lines apart.  Nothing outside a shipped prelude is moved."""
+    module, unit = _prelude_origin(source, reason)
+    if module is None:
+        return where, None
+    try:
+        count = len(source.read_text(encoding='utf-8').splitlines())
+    except (OSError, UnicodeError):
+        return where, module
+    located = re.match(r'^(?P<path>.*?):(?P<line>\d+)(?::(?P<col>\d+))?$', where or '')
+    line = int(located.group('line')) if located else None
+    if line is not None and line <= count:
+        return where, None
+    call = _prelude_call_site(source, reason, unit, module)
+    if call is None:
+        return where, module
+    path = located.group('path') if located else _relpath(source)
+    return '%s:%d:%d' % (path, call[0], call[1] + 1), module
 
 def _split_line_marker(text):
     """(text without the compiler's `ail-source-line: N` line, N or None)."""
@@ -5523,8 +5841,12 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
                     where = located[:-len(reason)].rstrip(': ')
                 else:
                     where = _marker_where(source_map or {}, marked)
+                where, prelude = _prelude_where(source, reason, where)
                 if where:
                     line = 'note: %s: built on the general path%s' % (where, line[len(_FALLBACK_NOTE):])
+                if prelude:
+                    line += (" (this note comes from the standard library's %s module)"
+                             % prelude)
             notes.append(line + hint)
     except Exception:
         return notes
