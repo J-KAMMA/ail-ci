@@ -39588,6 +39588,256 @@ def _dict_view_escape(source):
     return None if node is None else dictviews.refusal(node)
 
 
+def _own_scope_nodes(scope):
+    """Nodes of `scope`'s own statements, not those inside a nested def or class."""
+    found = []
+    stack = list(scope.body)
+    while stack:
+        node = stack.pop()
+        found.append(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _literal_row_kinds(node):
+    """The CPython kind at each position of a list display of scalar constants, or None."""
+    if not isinstance(node, ast.List) or not node.elts:
+        return None
+    kinds = []
+    for elt in node.elts:
+        if isinstance(elt, ast.UnaryOp) and isinstance(elt.op, ast.USub):
+            elt = elt.operand
+        if not isinstance(elt, ast.Constant):
+            return None
+        if isinstance(elt.value, bool):
+            kinds.append('bool')
+        elif isinstance(elt.value, int):
+            kinds.append('int')
+        elif isinstance(elt.value, str):
+            kinds.append('str')
+        else:
+            return None
+    return tuple(kinds)
+
+
+def _int_constant(node):
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        node = node.operand
+    return (isinstance(node, ast.Constant) and isinstance(node.value, int)
+            and not isinstance(node.value, bool))
+
+
+def _int_index_store(subscript, parents):
+    """True when `subscript` is stored an int value by a plain or augmented assignment."""
+    grand = parents.get(id(subscript))
+    if isinstance(grand, ast.AugAssign) and grand.target is subscript:
+        return not isinstance(grand.op, ast.Div) and _int_constant(grand.value)
+    if isinstance(grand, ast.Assign) and subscript in grand.targets:
+        return _int_constant(grand.value)
+    return False
+
+
+def _record_dict_aliases(scope):
+    """`(dict name, kinds, alias names)` for a local record dict that can be printed whole.
+
+    The record lowering (`ail_syntax.lower_dict_of_records`) models reads by constant index and
+    field stores, but not a value list printed as a whole (`print(v)` where `v = d[k]`).  This
+    finds the shapes where that print can be written from the row's fields without changing what
+    CPython prints: every store is a list display of scalar constants with the same kind at each
+    position, every fetch binds a name used only by constant indexes, `len`, membership or a
+    direct `print` argument, and no length-changing operation touches the row.  A non-int
+    position is only read, or stored an int value (which keeps it an int)."""
+    nodes = _own_scope_nodes(scope)
+    parents = {}
+    for node in nodes:
+        for child in ast.iter_child_nodes(node):
+            parents.setdefault(id(child), node)
+    dicts = set()
+    for node in nodes:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and (isinstance(node.value, ast.Dict) and not node.value.keys
+                     or isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                     and node.value.func.id == 'dict' and not node.value.args
+                     and not node.value.keywords)):
+            dicts.add(node.targets[0].id)
+    found = []
+    for name in sorted(dicts):
+        rows = []
+        aliases = set()
+        bad = False
+        for node in nodes:
+            if not isinstance(node, ast.Name) or node.id != name:
+                continue
+            parent = parents.get(id(node))
+            if isinstance(parent, ast.Assign) and parent.targets == [node]:
+                continue                         # the `{}` / `dict()` initialiser
+            if isinstance(parent, ast.Subscript) and parent.value is node:
+                grand = parents.get(id(parent))
+                if (isinstance(grand, ast.Assign) and len(grand.targets) == 1
+                        and grand.targets[0] is parent and _literal_row_kinds(grand.value) is not None):
+                    rows.append(grand)
+                    continue
+                if (isinstance(grand, ast.Assign) and len(grand.targets) == 1
+                        and isinstance(grand.targets[0], ast.Name)):
+                    aliases.add(grand.targets[0].id)
+                    continue
+                if isinstance(grand, ast.Delete):
+                    continue                     # `del d[k]`
+                bad = True
+                break
+            if isinstance(parent, ast.Attribute) and parent.value is node:
+                call = parents.get(id(parent))
+                if (isinstance(call, ast.Call) and call.func is parent
+                        and parent.attr in ('get', 'setdefault') and len(call.args) in (1, 2)
+                        and not call.keywords
+                        and (len(call.args) == 1
+                             or _literal_row_kinds(call.args[1]) is not None)):
+                    grand = parents.get(id(call))
+                    if (isinstance(grand, ast.Assign) and len(grand.targets) == 1
+                            and isinstance(grand.targets[0], ast.Name)):
+                        aliases.add(grand.targets[0].id)
+                    continue
+                bad = True
+                break
+            if (isinstance(parent, ast.Compare) and node in parent.comparators
+                    and len(parent.ops) == 1 and isinstance(parent.ops[0], (ast.In, ast.NotIn))):
+                continue
+            if (isinstance(parent, ast.Call) and node in parent.args
+                    and isinstance(parent.func, ast.Name) and parent.func.id == 'len'
+                    and len(parent.args) == 1):
+                continue
+            bad = True
+            break
+        if bad or not rows or not aliases:
+            continue
+        kind_tuples = {_literal_row_kinds(row.value) for row in rows}
+        if len(kind_tuples) != 1:
+            continue
+        kinds = next(iter(kind_tuples))
+        all_int = all(kind == 'int' for kind in kinds)
+        ok = True
+        for alias in aliases:
+            binds = [n for n in nodes
+                     if isinstance(n, ast.Name) and n.id == alias and isinstance(n.ctx, ast.Store)]
+            if len(binds) != 1:
+                ok = False
+                break
+            for node in nodes:
+                if not isinstance(node, ast.Name) or node.id != alias or isinstance(node.ctx, ast.Store):
+                    continue
+                parent = parents.get(id(node))
+                if isinstance(parent, ast.Subscript) and parent.value is node:
+                    if not (isinstance(parent.slice, ast.Constant)
+                            and isinstance(parent.slice.value, int)
+                            and not isinstance(parent.slice.value, bool)):
+                        ok = False
+                        break
+                    index = parent.slice.value
+                    if (0 <= index < len(kinds) and isinstance(parent.ctx, ast.Store)
+                            and not all_int and not (kinds[index] == 'int'
+                                                     and _int_index_store(parent, parents))):
+                        ok = False
+                        break
+                    continue
+                if isinstance(parent, ast.Call) and node in parent.args and isinstance(parent.func, ast.Name):
+                    if parent.func.id in ('len', 'print'):
+                        continue
+                if isinstance(parent, ast.Compare) and node in parent.comparators:
+                    continue
+                ok = False
+                break
+            if not ok:
+                break
+        if ok:
+            found.append((name, kinds, aliases))
+    return found
+
+
+def _row_print_text(alias, kinds):
+    """Source text that prints the row `alias` exactly as CPython prints the list."""
+    if all(kind == 'int' for kind in kinds):
+        return '[' + ', '.join('%s[%d]' % (alias, index) for index in range(len(kinds))) + ']'
+    text = "'['"
+    for index, _kind in enumerate(kinds):
+        text += " + %srepr(%s[%d])" % ("', ' + " if index else '', alias, index)
+    return text + " + ']'"
+
+
+def _byte_line_starts(text):
+    """The UTF-8 byte offset of every line start in `text`."""
+    starts = []
+    offset = 0
+    for line in text.split('\n'):
+        starts.append(offset)
+        offset += len(line.encode('utf8')) + 1
+    return starts
+
+
+def _expand_record_row_prints(source):
+    """`(source, dict names)` with `print(v)` written from the fields of a record row alias `v`;
+    `(source, set())` when no such print exists."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source, set()
+    scopes = [tree] + [n for n in ast.walk(tree)
+                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    edits = []
+    names = set()
+    for scope in scopes:
+        for name, kinds, aliases in _record_dict_aliases(scope):
+            for node in _own_scope_nodes(scope):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == 'print' and getattr(node, 'end_col_offset', None) is not None):
+                    continue
+                for arg in node.args:
+                    if isinstance(arg, ast.Name) and arg.id in aliases and getattr(arg, 'end_col_offset', None) is not None:
+                        text = _row_print_text(arg.id, kinds)
+                        edit = (arg.lineno, arg.col_offset, arg.end_lineno, arg.end_col_offset, text)
+                        if edit not in edits:
+                            edits.append(edit)
+                        names.add(name)
+    if not edits:
+        return source, set()
+    starts = _byte_line_starts(source)
+    data = source.encode('utf8')
+    for line0, col0, line1, col1, text in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+        a = starts[line0 - 1] + col0
+        b = starts[line1 - 1] + col1
+        data = data[:a] + text.encode('utf8') + data[b:]
+    return data.decode('utf8'), names
+
+
+def _apply_record_row_prints(source):
+    """Expand whole-row prints and re-run the record lowering only when it lowers every dict this
+    expansion touched.  When the lowering does not apply the source is returned unchanged, so a
+    program the lowering cannot model keeps its exact old behaviour (general path included)."""
+    expanded, names = _expand_record_row_prints(source)
+    if not names:
+        return source
+    try:
+        import ail_syntax
+        lowered = ail_syntax.lower_dict_of_records(expanded)
+    except Exception:                 # not importable here, or the lowering gave up: leave the source
+        return source
+    if lowered == expanded:
+        return source
+    try:
+        tree = ast.parse(lowered)
+    except (SyntaxError, ValueError):
+        return source
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and node.targets
+                and isinstance(node.targets[0], ast.Subscript)
+                and isinstance(node.targets[0].value, ast.Name)
+                and node.targets[0].value.id in names and isinstance(node.value, ast.List)):
+            return source
+    return lowered
+
+
 def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None):
     """Compile `source` (see `_to_c_unshadowed`) after renaming every module-level definition
     that shadows a built-in name (`fn abs`, `fn heappush`, `const max`, ...) together with every
@@ -39615,6 +39865,8 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
             for section in ('exports', 'constants'):
                 if section in external:
                     external[section] = {fresh.get(key, key): value for key, value in external[section].items()}
+    if os.environ.get('AIL_SURFACE') == 'python':
+        source = _apply_record_row_prints(source)
     _info0 = dict(info) if info is not None else None
     try:
         try:
