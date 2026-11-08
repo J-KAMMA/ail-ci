@@ -6,46 +6,37 @@
 
 --- LAST REVIEW ---
 ## review 1
+(free quota used up; paid model from here)
 [model commandcode/deepseek-v4.1-flash]
-## Review: stdfall2 (copy/timeit/marshal)
+## Review: stdfall2c (copy/timeit/marshal fix round)
 
-**What the change really does:** adds bundled AIL-source `stdlib/copy.py`, `timeit.py`, `marshal.py` (PyPy-derived writer rewritten to CPython v4 layout), 18 lab programs + RESULTS, a test module, PSF/MIT notices and manifest entries. No compiler/runtime code is touched. The worker's report is empty (no text), so I checked RESULTS.md's numbers against the code.
+**What the change really does:** `marshal.dumps` now only writes CPython's v0–2 bytes and refuses v3/4 (the six marshal lab programs were edited to pass `version=2`); `copy` refuses class instances of any kind and re-implements the caller's memo as a module-global `_memo_links` side table keyed by `len(dict)`; `timeit` drops the `number < 0` check; `copy/02` gains frozenset/big-int lines.
 
-**Verified:** `test_ail_std_stdfall2` and `test_ail_safetynet` pass on HEAD 6ff1cca78; 15/18 programs match CPython in both builds (RESULTS claim true). A no-feature program's `--debug-dir` `program.c` and executable are byte-identical to `/tmp/base`.
+**Verified**
+- `p_copy_frozen2`, `p_copy_frozen`, `p_copy_tuple_bigint`: same stdout in both builds (frozenset always-new + memo, big-int tuple memo).
+- `q_marshal_v012` (all int64 boundaries, bools, None, ±0.0, 1e300, inf, UTF-8, bytes, containers × versions 0/1/2) and `q_marshal_negzero2`: identical to CPython in both builds. v0–2 really is exact.
+- `q_timeit_neg` (`number=-1`, `repeat=-1`): same as CPython.
+- `q_copy_bytearray_alias`, `q_copy_tuple_sizes` (lengths 0/1/5, nested): same.
+- No-feature probe `q_nofeat`: `--debug-dir/program.c` byte-identical to `/tmp/base`; it doesn't use the feature.
+- `par_check -j 2 test_ail_std_stdfall2 test_ail_safetynet`: 2 modules, 0 failed. `update_manifest.py --check` clean. `test_ail_third_party_notices`/`test_ail_std_stdfall1` indeed absent.
+- Report's "v4 is a named ValueError refusal, programs use version=2": true, but it is a **run-time** refusal (the test builds then runs), not the build-time named refusal the fix instruction asked for; and the lab programs were edited instead of the module (task step 3: "fix the modules, never the programs").
 
-**Defects (all caused by the new modules; probes run on HEAD, both builds agree):**
+**Defects (caused by this change; base matches CPython)**
+1. `copy.deepcopy(x, memo_dict)` returns stale copies after the caller clears/reuses the dict. `q_copy_memo_clear.py`: CPython/base `[1] [1, 2]`, HEAD `[1] [1]`. `_memo_links` is a process-global registry that survives `memo.clear()`, so `_memo_get` finds an old entry that the caller's dict no longer holds. Silent wrong value; base was correct, so this is a regression.
+2. `copy.deepcopy(x, memo_dict)` corrupts the caller's dict. `q_copy_memo_keys.py` (`m={2:"x",5:"y"}`): CPython `x y 4 [7]`, HEAD `[[7]] y 2 [7]` — `_memo_put`/`_memo_keepalive` write with `d[len(d)]`, overwriting key 2 and leaving the wrong entry count. Consequence of the same design: the dict itself is never read, so pre-seeded `memo[id(x)] = copy` entries are ignored (could not probe: that program fails to build on base too — type-inference note `tuple(...) (a tuple of a run-time length)`).
+   Fix direction: key the caller's dict by `id(obj)` and look it up there; keep only the CPython keep-alive entry; delete the global `_memo_links` (it also leaks every memoised object forever).
 
-1. `marshal`: `-0.0` is conflated with `0.0` (value-based `_find_ref`). Probe `/tmp/rprobes/p_marshal_zero.py`: `dumps([0.0,-0.0])` → CPython `db02000000e70000000000000000e70000000000000080`, AIL `db02000000e70000000000000000**7201000000**`; `loads` then prints `0.0 0.0 0.0` vs CPython `0.0 -0.0 -0.0`. **Wrong value.**
+**Pre-existing (unchanged by this diff)**
+- `marshal.loads(b"")` → `EOFError: marshal data too short` vs CPython `EOF read where object expected` (`q_marshal_loadsv4.py`; reader string untouched).
+- `marshal.dumps(x, None/2.0/"2"/5)` argument validation differs (ValueError "version 4…" vs CPython TypeError; v5 accepted as 4 by CPython) — loud, not silent (`q_marshal_verargs.py`).
 
-2. `marshal`: `dumps([2**40, 2**40])` dies at run time — `_find_ref` uses `is` on ints. Probe `/tmp/rprobes/m5_intcontainer.py`: CPython prints `twoeq db02000000ec030000000000000000047201000000`; AIL prints the first 3 lines then stderr `AIL internal error: is between two equal ints outside -5..256`, exit 1. **Crash.**
-
-3. `marshal` ref/intern bytes are not CPython's (identity vs value): `/tmp/rprobes/m1_refs.py` `x=[1]; dumps([x])` → CPython `db01000000**db**01000000e901000000`, AIL `db01000000**5b**01000000e901000000`; `/tmp/rprobes/m2_strings.py` computed `"".join(["a","b","c"])` → CPython `**fa**03616263`, AIL `**da**03616263`; `/tmp/rprobes/p_marshal_strref.py` `[a+b, a+b]` → CPython `**5b**…fa…fa…`, AIL `**db**…da…72…`.
-
-4. `copy.deepcopy(bytearray)` crashes. `/tmp/rprobes/p_copy_bytearray.py`: CPython `bytearray b'ab'`; AIL `TypeError: cannot convert '_Shell' object to bytes`, exit 1.
-
-5. `copy.deepcopy` refuses any tuple of >4 elements. `/tmp/rprobes/p_copy_tuple5.py`: CPython `([1], [2], [3], [4], [5])` / `False`; AIL `copy.Error: un(deep)copyable tuple of length 5`, exit 1.
-
-6. Plain-class copy returns a `_Shell`. `/tmp/rprobes/c2_copy_class.py`: CPython `P P / True True / True True / 2`; AIL `_Shell _Shell / False False / False False / method err AttributeError`.
-
-7. `copy.deepcopy(x, memo_dict)` silently ignores the caller's memo. `/tmp/rprobes/c5_copy_memo.py`: CPython `mlen 2`, AIL `mlen 0`.
-
-8. `timeit.Timer(...).timeit(number=-1)` raises; CPython returns a float. `/tmp/rprobes/t1_timeit_numbers.py`: CPython `neg 1.0`; AIL `neg err ValueError number must be non-negative`.
-
-9. Lower priority: `marshal.dumps(x, version)` ignores `version` (`/tmp/rprobes/m4_read.py`: CPython `v2 6901000000 5b…6901000000`, AIL `e9…db…e9…`), and `marshal.loads(b"0")` returns `<_Null object>` where CPython raises `TypeError`.
-
-10. Task miss: a string `stmt` is refused at **run** time (program 06 builds then exits 1), not at build time with a named refusal as step 2 required; results record it but the use is not refused. (`copy/03` likewise builds and prints wrong output rather than being refused; it is one of the 3 allowed failures.)
-
-**Pre-existing:** none. The base has no `copy`/`timeit`/`marshal` module, so every probe fails at build there; the non-feature program's C is identical, so nothing is attributed to the base.
-
-**Unverified:** `test_ail_third_party_notices` / `test_ail_std_stdfall1` (not run per reviewer scope), the PyPy license/commit pin (no network), the 20 CI shards. Speed is not applicable — no compiler, runtime or benchmark file is edited.
+**Unverified:** `test_ail_files`, `test_ail_corpus_findings3`, CI shards; pre-seeded memo semantics (no compiling probe); speed not applicable — no compiler/runtime/bench file is touched.
 
 VERDICT: FIX
-1. marshal `_find_ref` must use identity/type-correct semantics: `dumps([0.0,-0.0])` and `dumps([2**40,2**40])` must match CPython instead of aliasing `-0.0` and crashing with the internal `is` error.
-2. marshal reference/interned flags must follow CPython (per-object, refcount/identity), so `dumps([x])`, computed strings and `[a+b,a+b]` produce CPython's bytes.
-3. copy must handle `bytearray`, tuples of any length, real class instances (or refuse them by name), and the caller's memo dict as CPython does.
-4. timeit must not reject `number=-1` (CPython returns a float).
-5. A string `stmt`/`setup` must be refused by name at build time, as the task required.
-[commandcode stop=end_turn turns=24 out_tokens=49227]
+1. `copy.deepcopy(x, memo)` stale after `memo.clear()` — probe `q_copy_memo_clear.py`: expected `[1] [1, 2]`, actual `[1] [1]` (base is correct; regression).
+2. `copy.deepcopy(x, memo)` overwrites caller keys / wrong length — probe `q_copy_memo_keys.py`: expected `x y 4 [7]`, actual `[[7]] y 2 [7]`.
+3. The marshal lab programs were edited to `dumps(x, 2)` instead of fixing the module/recording the refusal; the v3/4 refusal is at run time, not build time (task step 3 / review item 5's "build time" standard).
+[commandcode stop=end_turn turns=54 out_tokens=40524]
 
 
 --- ORIGINAL TASK ---
