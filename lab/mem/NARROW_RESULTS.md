@@ -23,6 +23,15 @@ that state, and `p == NULL` in a wide list so the hot accessors test a pointer t
 This runner has no CPU PMU (`/sys/bus/event_source/devices/cpu` is absent; `perf_event_open` is
 denied), so instruction counts are callgrind `Ir` at N = 300k, as the brief requires.
 
+The other nine compare tasks, peak RSS narrow vs default (min of 2, KiB): `berth_sim`
+240,328/240,328 (0.00%), `chain_relax` 1,204/1,204, `echo_pack` 1,204/1,204, `ledger_bin`
+1,232/1,232, `rail_transfer` 29,040/29,108 (−0.23%), `scar_life` 1,216/1,208 (+0.66%),
+`tally_lang` 1,244/1,240 (+0.32%), `term_rank` 1,240/1,244 (−0.32%), `ticket_audit`
+1,336/1,340 (−0.30%). None is worse than 1% (the +0.7% rows are 8 KiB of noise on a 1.2 MiB
+process). The inputs `gen.py` returns for `echo_pack` and `ledger_bin` in this harness run at
+~1.2 MiB, so those two rows are equal but not informative; the run_task harness feeds a larger
+input.
+
 The RSS target was "within 3% of fbnarrow1's emulated value" (379,132 KiB → at most 390,506 KiB):
 332,100 KiB is 12.4% **below** it, so the target is met without the escape hatch. fbnarrow1's
 emulated build cost 945,832,434 Ir at the same size; this build is +0.88% over that. Against the
@@ -72,10 +81,11 @@ in int32 on other inputs (folded weights), and the runtime widens it instead of 
 - The 10 compare tasks: 511 public+hidden cases, 0 stdout/exit differences between the narrow and
   default builds, and 0 against `reference.py` (both builds).
 - Byte-identical `program.c` without the variable (`AIL_NO_CACHE=1`, `PYTHONHASHSEED=0`,
-  `--debug-dir`) against a `work` worktree: the 10 compare tasks and the first 100
-  `lab/corpus/programs` files.
+  `--debug-dir`) against a `work` worktree: 108 of 110 programs (the 10 compare tasks and the
+  first 100 `lab/corpus/programs` files) are identical; `corpus/.../t018.py` and `t172.py` fail
+  to build on both trees with the same exit status (skipped, not a difference). 0 differ.
 - Probes in `/tmp/probes` (`bash ~/tools/cmp.sh <probe> $PWD` and a manual `AIL_NARROW_INT=1`
-  build): `bounds`, `int64`, `field_wide`, `negative` (in the test module), `index`,
+  build): `int64`, `field_wide` (a class field widened at run time and read from another function), `index`,
   `through_calls`, `aliasing` — all match CPython on stdout and exit status except two
   behaviours that are identical on the base: CPython's "list assignment index out of range" text
   (AIL says "list index out of range") and an int64 overflow inside `try` on the typed path.
