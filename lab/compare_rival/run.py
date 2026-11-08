@@ -631,6 +631,23 @@ def pypy_lines(tasks, data):
                  '(geomean AIL/PyPy **%.2fx**, below 1.0 is faster)%s.'
                  % (v['label'], v['wins'], v['n'], v['geomean'],
                     ', on `%s`' % '`, `'.join(v['faster_task']) if v['faster_task'] else ''))
+    # The plain column is a fresh process, so it never lets PyPy's JIT warm up.  Say what the
+    # warmed (5th run, one process) column says too: that is the number a long-lived process pays.
+    warm_wins = []
+    for arm, label in PY_ARMS:
+        pairs = []
+        for t in tasks:
+            res = data['tasks'][t]['results']
+            a = usable(res.get(arm), 'wall_ms')
+            w = (res.get('pypy') or {}).get('warm5_ms')
+            if a and isinstance(w, (int, float)) and w > 0:
+                pairs.append(a / w)
+        if pairs:
+            warm_wins.append('the %s arm is faster on **%d of %d** (geomean **%.2fx**)'
+                             % (label, sum(1 for v in pairs if v < 1), len(pairs), geomean(pairs)))
+    if warm_wins:
+        L.append('Against PyPy\'s warmed fifth run (`warm5 ms`), %s; the cold column above is '
+                 'the harsher comparison for PyPy.' % ', and '.join(warm_wins))
     return L
 
 
@@ -678,7 +695,7 @@ def render(result):
     has_pypy = any((data['tasks'][t]['results'].get('pypy') or {}).get('build_ok') for t in tasks)
     L.append('| task | tool | correct | wall ms | ' + ('warm5 ms | ' if has_pypy else '') +
              'instructions | peak RSS MiB | artifact KiB | compile s | build disk MiB | single exe |')
-    L.append('|---|---|---|---|' + ('---|' if has_pypy else '') + '---|---|---|---|---|---|---|')
+    L.append('|---|---|---|---|' + ('---|' if has_pypy else '') + '---|---|---|---|---|---|')
     for task in tasks:
         res = data['tasks'][task]['results']
         for tool in ALL_TOOLS:
@@ -688,7 +705,7 @@ def render(result):
             name = tool + (' (patched)' if r.get('patched') else '')
             if not r.get('build_ok'):
                 L.append('| %s | %s | build refused | - | ' % (task, name) + ('- | ' if has_pypy else '') +
-                         '- | - | - | - | - | - | - |')
+                         '- | - | - | - | - | - |')
                 continue
             rss = '%.1f' % (r['rss_kib'] / 1024) if r.get('rss_kib') else '-'
             art = '%.0f' % (r['binary_bytes'] / 1024) if r.get('binary_bytes') else '-'
@@ -781,7 +798,7 @@ def render(result):
 # A rival tool is built by the toolchain named here; `versions()` reports that toolchain's version,
 # and a version starting with `missing` means this runner cannot build the tool at all.
 TOOLCHAIN = {'cython-main': 'cython', 'cython-typed': 'cython', 'nuitka': 'nuitka',
-             'mypyc': 'mypy', 'codon': 'codon', 'codon-main': 'codon'}
+             'mypyc': 'mypy', 'codon': 'codon', 'codon-main': 'codon', 'pypy': 'pypy'}
 
 
 def toolchain_missing(result, tool):

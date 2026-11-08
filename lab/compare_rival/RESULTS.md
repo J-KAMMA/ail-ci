@@ -23,15 +23,15 @@ Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 o
 ## Per task
 
 | task | tool | correct | wall ms | warm5 ms | instructions | peak RSS MiB | artifact KiB | compile s | build disk MiB | single exe |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|---|---|
 | berth_sim | ail | yes | 3620 | - | - | 234.8 | 72 | 13.61 | 0.2 | yes |
 | berth_sim | ail-py | yes | 20610 | - | - | 8956.4 | 490 | 29.10 | 1.5 | yes |
 | berth_sim | cython-main | yes | 14927 | - | - | 1095.7 | 691 | 3.45 | 1.3 | yes |
 | berth_sim | cython-typed | yes | 15875 | - | - | 903.1 | 693 | 3.53 | 1.3 | yes |
 | berth_sim | nuitka | yes | 15251 | - | - | 1102.3 | 4098 | 37.88 | 40.9 | yes |
 | berth_sim | mypyc | yes | 11222 | - | - | 791.8 | 386 | 3.77 | 3.8 | no |
-| berth_sim | codon | build refused | - | - | - | - | - | - | - | - | - |
-| berth_sim | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| berth_sim | codon | build refused | - | - | - | - | - | - | - | - |
+| berth_sim | codon-main | build refused | - | - | - | - | - | - | - | - |
 | berth_sim | pypy | yes | 13352 | 11801 | - | 1873.4 | - | - | 150.5 (interp) | no |
 | chain_relax | ail | yes | 1139 | - | - | 3.9 | 34 | 2.75 | 0.1 | yes |
 | chain_relax | ail-py | timeout | - | - | - | - | 243 | 5.87 | 0.8 | yes |
@@ -39,7 +39,7 @@ Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 o
 | chain_relax | cython-typed | yes | 16184 | - | - | 24.0 | 621 | 3.05 | 1.2 | yes |
 | chain_relax | nuitka | yes | 10755 | - | - | 29.7 | 4090 | 37.96 | 40.7 | yes |
 | chain_relax | mypyc | yes | 7842 | - | - | 22.9 | 307 | 3.12 | 3.3 | no |
-| chain_relax | codon | build refused | - | - | - | - | - | - | - | - | - |
+| chain_relax | codon | build refused | - | - | - | - | - | - | - | - |
 | chain_relax | codon-main | no (23/33 wrong) | 6 | - | 86.56M | 9.6 | 1043 | 6.79 | 1.0 | yes |
 | chain_relax | pypy | yes | 1153 | 1232 | - | 67.5 | - | - | 150.5 (interp) | no |
 | echo_pack | ail | yes | 938 | - | - | 346.1 | 35 | 3.29 | 0.1 | yes |
@@ -47,9 +47,9 @@ Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 o
 | echo_pack | cython-main | yes | 25949 | - | - | 1557.6 | 665 | 3.18 | 1.3 | yes |
 | echo_pack | cython-typed | yes | 30605 | - | - | 1366.3 | 787 | 3.51 | 1.4 | yes |
 | echo_pack | nuitka | yes | 31219 | - | - | 1564.4 | 4094 | 38.19 | 40.7 | yes |
-| echo_pack | mypyc | build refused | - | - | - | - | - | - | - | - | - |
-| echo_pack | codon | build refused | - | - | - | - | - | - | - | - | - |
-| echo_pack | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| echo_pack | mypyc | build refused | - | - | - | - | - | - | - | - |
+| echo_pack | codon | build refused | - | - | - | - | - | - | - | - |
+| echo_pack | codon-main | build refused | - | - | - | - | - | - | - | - |
 | echo_pack | pypy | yes | 10685 | 8967 | - | 919.6 | - | - | 150.5 (interp) | no |
 | ledger_bin | ail | yes | 808 | - | - | 329.8 | 68 | 3.70 | 0.2 | yes |
 | ledger_bin | ail-py | yes | 45021 | - | - | 2978.9 | 493 | 14.61 | 1.5 | yes |
@@ -57,8 +57,8 @@ Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 o
 | ledger_bin | cython-typed | yes | 22819 | - | - | 914.7 | 822 | 4.13 | 1.6 | yes |
 | ledger_bin | nuitka | yes | 15389 | - | - | 1252.1 | 4110 | 37.98 | 41.2 | yes |
 | ledger_bin | mypyc | yes | 6356 | - | - | 742.7 | 390 | 3.82 | 3.8 | no |
-| ledger_bin | codon | build refused | - | - | - | - | - | - | - | - | - |
-| ledger_bin | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| ledger_bin | codon | build refused | - | - | - | - | - | - | - | - |
+| ledger_bin | codon-main | build refused | - | - | - | - | - | - | - | - |
 | ledger_bin | pypy | yes | 9831 | 5518 | - | 976.1 | - | - | 150.5 (interp) | no |
 | rail_transfer | ail | yes | 60 | - | - | 28.3 | 68 | 3.05 | 0.2 | yes |
 | rail_transfer | ail-py | yes | 850 | - | - | 465.3 | 496 | 10.82 | 1.5 | yes |
@@ -66,35 +66,35 @@ Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 o
 | rail_transfer | cython-typed | yes | 1158 | - | - | 118.3 | 1039 | 4.72 | 1.8 | yes |
 | rail_transfer | nuitka | yes | 614 | - | 206.94M | 121.3 | 4110 | 37.67 | 41.0 | yes |
 | rail_transfer | mypyc | yes | 840 | - | - | 88.1 | 470 | 4.30 | 4.2 | no |
-| rail_transfer | codon | build refused | - | - | - | - | - | - | - | - | - |
-| rail_transfer | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| rail_transfer | codon | build refused | - | - | - | - | - | - | - | - |
+| rail_transfer | codon-main | build refused | - | - | - | - | - | - | - | - |
 | rail_transfer | pypy | yes | 585 | 212 | - | 144.9 | - | - | 150.5 (interp) | no |
 | scar_life | ail | yes | 32822 | - | - | 17.3 | 44 | 2.49 | 0.2 | yes |
-| scar_life | ail-py | build refused | - | - | - | - | - | - | - | - | - |
+| scar_life | ail-py | build refused | - | - | - | - | - | - | - | - |
 | scar_life | cython-main | yes | 4117 | - | - | 99.0 | 945 | 4.12 | 1.7 | yes |
 | scar_life | cython-typed | timeout | - | - | - | - | 693 | 3.26 | 1.3 | yes |
 | scar_life | nuitka | yes | 4496 | - | - | 107.5 | 4338 | 41.17 | 43.2 | yes |
-| scar_life | mypyc | build refused | - | - | - | - | - | - | - | - | - |
-| scar_life | codon | build refused | - | - | - | - | - | - | - | - | - |
-| scar_life | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| scar_life | mypyc | build refused | - | - | - | - | - | - | - | - |
+| scar_life | codon | build refused | - | - | - | - | - | - | - | - |
+| scar_life | codon-main | build refused | - | - | - | - | - | - | - | - |
 | scar_life | pypy | yes | 19044 | 10229 | - | 276.4 | - | - | 150.5 (interp) | no |
 | tally_lang | ail | yes | 1870 | - | - | 1.6 | 77 | 5.26 | 0.3 | yes |
-| tally_lang | ail-py | build refused | - | - | - | - | - | - | - | - | - |
+| tally_lang | ail-py | build refused | - | - | - | - | - | - | - | - |
 | tally_lang | cython-main | yes | 10162 | - | - | 12.7 | 1453 | 6.17 | 2.4 | yes |
 | tally_lang | cython-typed | yes | 59789 | - | - | 12.6 | 1508 | 6.38 | 2.6 | yes |
 | tally_lang | nuitka | yes | 9558 | - | - | 21.2 | 4362 | 41.40 | 43.8 | yes |
 | tally_lang | mypyc | yes | 8634 | - | - | 11.5 | 458 | 4.19 | 4.1 | no |
-| tally_lang | codon | build refused | - | - | - | - | - | - | - | - | - |
-| tally_lang | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| tally_lang | codon | build refused | - | - | - | - | - | - | - | - |
+| tally_lang | codon-main | build refused | - | - | - | - | - | - | - | - |
 | tally_lang | pypy | yes | 2154 | 1187 | - | 82.1 | - | - | 150.5 (interp) | no |
 | term_rank | ail | yes | 3063 | - | - | 157.4 | 81 | 5.05 | 0.3 | yes |
 | term_rank | ail-py | yes | 26242 | - | - | 2617.5 | 844 | 32.11 | 2.5 | yes |
 | term_rank | cython-main | yes | 7502 | - | - | 408.4 | 674 | 2.93 | 1.3 | yes |
 | term_rank | cython-typed | yes | 14937 | - | - | 150.5 | 846 | 3.68 | 1.5 | yes |
 | term_rank | nuitka | yes | 7714 | - | - | 414.7 | 4318 | 41.03 | 42.9 | yes |
-| term_rank | mypyc | build refused | - | - | - | - | - | - | - | - | - |
-| term_rank | codon | build refused | - | - | - | - | - | - | - | - | - |
-| term_rank | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| term_rank | mypyc | build refused | - | - | - | - | - | - | - | - |
+| term_rank | codon | build refused | - | - | - | - | - | - | - | - |
+| term_rank | codon-main | build refused | - | - | - | - | - | - | - | - |
 | term_rank | pypy | yes | 5458 | 4732 | - | 515.2 | - | - | 150.5 (interp) | no |
 | ticket_audit | ail | yes | 1646 | - | - | 248.8 | 114 | 5.69 | 0.4 | yes |
 | ticket_audit | ail-py | yes | 58418 | - | - | 3435.1 | 1259 | 97.52 | 3.7 | yes |
@@ -102,8 +102,8 @@ Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 o
 | ticket_audit | cython-typed | yes | 13818 | - | - | 302.6 | 1435 | 5.95 | 2.4 | yes |
 | ticket_audit | nuitka | yes | 11427 | - | - | 542.0 | 4346 | 50.78 | 43.5 | yes |
 | ticket_audit | mypyc | yes | 5202 | - | - | 296.9 | 466 | 5.90 | 4.2 | no |
-| ticket_audit | codon | build refused | - | - | - | - | - | - | - | - | - |
-| ticket_audit | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| ticket_audit | codon | build refused | - | - | - | - | - | - | - | - |
+| ticket_audit | codon-main | build refused | - | - | - | - | - | - | - | - |
 | ticket_audit | pypy | yes | 5337 | 5455 | - | 484.6 | - | - | 150.5 (interp) | no |
 | tree_fold | ail | yes | 1232 | - | - | 358.8 | 85 | 6.37 | 0.3 | yes |
 | tree_fold | ail-py | yes | 71473 | - | - | 5084.3 | 1003 | 109.46 | 3.0 | yes |
@@ -111,8 +111,8 @@ Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 o
 | tree_fold | cython-typed | timeout | - | - | - | - | 1262 | 6.98 | 2.2 | yes |
 | tree_fold | nuitka | yes | 17954 | - | - | 1162.3 | 4330 | 63.90 | 43.2 | yes |
 | tree_fold | mypyc | yes | 18578 | - | - | 1202.3 | 455 | 10.62 | 4.1 | no |
-| tree_fold | codon | build refused | - | - | - | - | - | - | - | - | - |
-| tree_fold | codon-main | build refused | - | - | - | - | - | - | - | - | - |
+| tree_fold | codon | build refused | - | - | - | - | - | - | - | - |
+| tree_fold | codon-main | build refused | - | - | - | - | - | - | - | - |
 | tree_fold | pypy | yes | 7053 | 6925 | - | 1427.6 | - | - | 150.5 (interp) | no |
 
 ## PyPy
@@ -137,6 +137,7 @@ Every warm run produced the CPython reference output on 10 of 10 tasks; a mismat
 **Headline.** 
 On wall time, **AIL standalone (typed.py) is faster than PyPy on 9 of the 10 tasks it can be compared on** (geomean AIL/PyPy **0.31x**, below 1.0 is faster), on `berth_sim`, `chain_relax`, `echo_pack`, `ledger_bin`, `rail_transfer`, `tally_lang`, `term_rank`, `ticket_audit`, `tree_fold`.
 On wall time, **AIL standalone (main.py) is faster than PyPy on 1 of the 7 tasks it can be compared on** (geomean AIL/PyPy **3.01x**, below 1.0 is faster), on `echo_pack`.
+Against PyPy's warmed fifth run (`warm5 ms`), the AIL standalone (typed.py) arm is faster on **8 of 10** (geomean **0.43x**), and the AIL standalone (main.py) arm is faster on **1 of 7** (geomean **4.02x**); the cold column above is the harsher comparison for PyPy.
 
 ## Summary: AIL against the best rival
 

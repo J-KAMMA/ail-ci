@@ -104,6 +104,10 @@ def _first_diff(want, got):
         y = b[i] if i < len(b) else '<missing>'
         if x != y:
             return 'stdout line %d: CPython %r / PyPy %r' % (i + 1, x[:160], y[:160])
+    if want != got:
+        # splitlines() hides a trailing-newline-only difference; report it as the last line.
+        return 'stdout line %d: CPython ends %r / PyPy ends %r' % (
+            len(a), want.decode('utf-8', 'replace')[-40:], got.decode('utf-8', 'replace')[-40:])
     return None
 
 

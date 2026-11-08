@@ -48,17 +48,16 @@ def row(tool, wall, **extra):
     return rec
 
 
-def synthetic(tasks=('tree_fold', 'scar_life')):
+def synthetic(tasks=('tree_fold', 'scar_life'), has_pypy=True):
     """AIL, PyPy and one compiled rival, with a known answer: AIL wins one task and loses one."""
     out = {}
     for task, ail_ms, pypy_ms, warm_ms in zip(tasks, (1000.0, 4000.0), (2000.0, 800.0), (1500.0, 700.0)):
-        out[task] = dict(case='perf', input_bytes=10, expected_exit=0, results={
-            'ail': row('ail', ail_ms),
-            'ail-py': row('ail-py', ail_ms * 1.5),
-            'nuitka': row('nuitka', 3000.0),
-            'pypy': row('pypy', pypy_ms, compile_s=None, build_disk_kib=154120, binary_bytes=None,
-                        standalone=False, interpreter=True, warm5_ms=warm_ms, warm5_correct=True),
-        })
+        results = {'ail': row('ail', ail_ms), 'ail-py': row('ail-py', ail_ms * 1.5),
+                   'nuitka': row('nuitka', 3000.0)}
+        if has_pypy:
+            results['pypy'] = row('pypy', pypy_ms, compile_s=None, build_disk_kib=154120, binary_bytes=None,
+                                  standalone=False, interpreter=True, warm5_ms=warm_ms, warm5_correct=True)
+        out[task] = dict(case='perf', input_bytes=10, expected_exit=0, results=results)
     return dict(date='2026-11-08', head='abcdef0', icount_method='none', tools={'pypy': 'PyPy 7.3.23'},
                 settings={}, tasks=out, safety_probes=[], safety={})
 
@@ -77,6 +76,24 @@ class RivalPyPyRow(unittest.TestCase):
         self.assertEqual(cells[8], '-', 'compile s is "-" for an interpreter')
         self.assertTrue(cells[9].endswith('(interp)'), cells[9])
         self.assertEqual(cells[10], 'no', 'an interpreter is not a single exe')
+
+    def test_every_row_has_the_header_column_count(self):
+        # The warm column is optional, and a `build refused` row must still line up with the header.
+        for has_pypy in (True, False):
+            data = synthetic(has_pypy=has_pypy)
+            data['tasks']['scar_life']['results']['nuitka'] = dict(
+                tool='nuitka', build_ok=False, build_error='build timeout', run_cmd=None)
+            text = self.m.render(data)
+            lines = text.splitlines()
+            start = next(i for i, ln in enumerate(lines) if ln.startswith('| task | tool | correct |'))
+            header = len([c for c in lines[start].strip().strip('|').split('|')])
+            row = start + 1
+            while row < len(lines) and lines[row].startswith('|'):
+                cells = [c for c in lines[row].strip().strip('|').split('|')]
+                self.assertEqual(len(cells), header,
+                                 '%s, row %d: %s' % ('with PyPy' if has_pypy else 'without PyPy', row, lines[row]))
+                row += 1
+            self.assertEqual(header, 11 if has_pypy else 10)
 
     def test_warm_column_is_present_only_when_measured(self):
         self.assertIn('| task | tool | correct | wall ms | warm5 ms |', self.text)
@@ -151,6 +168,23 @@ class RivalPyPyMerge(unittest.TestCase):
         self.assertEqual(merged['tool_runs']['nuitka'], dict(date='2026-11-06', head='e9cb684', source='base'))
         self.assertEqual(merged['tool_runs']['pypy'], dict(date='2026-11-08', head='abcdef0', source='this run'))
         self.assertEqual(merged['tools']['nuitka'], '4.3.4', "the base version replaces this run's 'missing'")
+
+    def test_a_missing_pypy_keeps_the_base_pypy_row(self):
+        # PyPy is an interpreter, so its "toolchain" is the interpreter: when it is absent here the
+        # base measurement is kept, exactly like Cython or Nuitka.
+        m = rival()
+        base = self.base()
+        now = self.now()
+        now['tools']['pypy'] = 'missing (FileNotFoundError)'
+        for task in now['tasks'].values():
+            task['results']['pypy'] = dict(tool='pypy', build_ok=False, build_error='pypy not found',
+                                           run_cmd=None, compile_s=None)
+        merged = m.layer_base(now, base, ['pypy'], 'abcdef0')
+        kept = merged['tasks']['tree_fold']['results']['pypy']
+        self.assertTrue(kept['build_ok'])
+        self.assertEqual(kept['wall_ms'], 2000.0)
+        self.assertEqual(merged['tool_runs']['pypy'],
+                         dict(date='2026-11-06', head='e9cb684', source='base'))
 
     def test_an_installed_tool_that_refuses_does_replace_the_base_row(self):
         # A refusal is a result: it must be visible, not hidden behind the older measurement.
@@ -293,6 +327,9 @@ class WedgePyPyArm(unittest.TestCase):
         self.assertEqual(self.m._first_diff(b'a\nb\n', b'a\nc\n'), "stdout line 2: CPython 'b' / PyPy 'c'")
         self.assertIsNone(self.m._first_diff(b'a\n', b'a\n'))
         self.assertIn('missing', self.m._first_diff(b'a\nb\n', b'a\n'))
+        # splitlines() hides a trailing-newline-only difference; it must still be reported.
+        self.assertIn('ok', self.m._first_diff(b'ok\n', b'ok'))
+        self.assertIn('CPython', self.m._first_diff(b'ok\n', b'ok'))
 
     def test_report_renders_the_pypy_columns(self):
         r = wedge_report()
