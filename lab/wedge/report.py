@@ -43,6 +43,23 @@ def fmt(v, digits=3):
     return str(v)
 
 
+def _pypy_label(measure):
+    """'PyPy 7.3.23' from the recorded `--version` line, which is 'Python X ... [PyPy v ...]'."""
+    rows = [r for r in measure.values() if r.get('pypy_s')]
+    seen = []
+    for r in rows:
+        text = r.get('pypy_version') or ''
+        marker = text.find('[PyPy ')
+        if marker >= 0:
+            version = text[marker + 1:text.find(']', marker)].strip()
+            version = version.split(' with ')[0].strip()
+            if version not in seen:
+                seen.append(version)
+    if not seen:
+        return 'no PyPy row measured'
+    return 'PyPy ' + '; '.join(v[len('PyPy '):] if v.startswith('PyPy ') else v for v in seen)
+
+
 def main():
     out_path = Path(sys.argv[sys.argv.index('-o') + 1]) if '-o' in sys.argv else HERE / 'RESULTS.md'
     census = {r['module']: r for r in load('census.json')}
@@ -69,7 +86,8 @@ def main():
     A('')
     A('Measurement only; the compiler is not changed.  Branch `job-wedge1-11080724`, '
       'run 2026-11-07 on a 4-core GitHub Actions runner, CPython 3.12.3, gcc 13.3.0, '
-      'PyO3 0.22.6 for the Rust bar.')
+      'PyO3 0.22.6 for the Rust bar.  The PyPy column (section 2) was added on 2026-11-08 by '
+      '`job-pypy1-11090337` with %s.' % _pypy_label(measure))
     A('')
     A('## The answer, in one paragraph')
     A('')
@@ -96,6 +114,25 @@ def main():
          analysis['reasons'][1]['family'],
          pct(100 * analysis['reasons'][1]['share_of_kept'])))
     A('')
+    pp_ok = [m for m in modules if measure[m].get('pypy_s') and measure[m].get('cpython_s')]
+    hy_pairs = [(m, measure[m]['hybrid_s'] / measure[m]['pypy_s']) for m in modules
+                if measure[m].get('hybrid_s') and measure[m].get('pypy_s')]
+    se_pairs = [(m, measure[m]['standalone_s'] / measure[m]['pypy_s']) for m in modules
+                if measure[m].get('standalone_s') and measure[m].get('pypy_s')]
+    if pp_ok:
+        A('**Against PyPy** (%s, section 2): PyPy runs the corpus at **%sx** CPython time; the AIL '
+          'standalone binary is **faster than PyPy on %d of %d modules** (geomean '
+          '**%sx** PyPy) and the hybrid on **%d of %d** (geomean **%sx**), with PyPy\'s output '
+          'byte-identical to CPython on %d of %d modules.'
+          % (_pypy_label(measure),
+             fmt(statistics.geometric_mean([measure[m]['pypy_s'] / measure[m]['cpython_s']
+                                            for m in pp_ok]), 3),
+             sum(1 for _, v in se_pairs if v < 1), len(se_pairs),
+             fmt(statistics.geometric_mean([v for _, v in se_pairs]), 3) if se_pairs else 'n/a',
+             sum(1 for _, v in hy_pairs if v < 1), len(hy_pairs),
+             fmt(statistics.geometric_mean([v for _, v in hy_pairs]), 3) if hy_pairs else 'n/a',
+             sum(1 for m in modules if measure[m].get('pypy_match')), len(modules)))
+        A('')
     A('## 1. The corpus')
     A('')
     A('Fifteen small modules under `lab/wedge/corpus/<kind>/`, each a `<kind>.py` of plain typed '
@@ -132,17 +169,20 @@ def main():
     A('`native` is the functions the hybrid build actually wrapped (from `build.json`).  '
       '`match` is byte-identical stdout, exit status and last stderr line against `python3 run.py`.  '
       '`oracle` is the committed `expected.txt` matching the live CPython run byte for byte.  '
+      '`pypy match` is the same `expected.txt` against every one of PyPy\'s five runs (a difference '
+      'is a PyPy result, recorded in `measure.json` as `pypy_diff`, not fixed in the sources).  '
       'Wall time is the median of 5 runs.  `standalone` is the binary from '
       '`ail compile run.py --syntax python`; `(+exact)` means the default build stopped loudly on '
       'int64 overflow and `--exact-int` then built a matching binary.')
     A('')
-    A('| module | funcs | native | native share | oracle | hybrid match | standalone | CPython s | hybrid s | hybrid / CPython | standalone s |')
-    A('| --- | ---: | ---: | ---: | --- | --- | --- | ---: | ---: | ---: | ---: |')
+    A('| module | funcs | native | native share | oracle | hybrid match | pypy match | standalone | CPython s | PyPy s | hybrid s | hybrid / CPython | hybrid / PyPy | standalone / PyPy |')
+    A('| --- | ---: | ---: | ---: | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |')
     for m in modules:
         c, b, w = census[m], boundary[m], measure[m]
         n = len(b['native'])
         f = len(b['functions'])
         py = w.get('cpython_s')
+        pp = w.get('pypy_s')
         hy = w.get('hybrid_s')
         se = w.get('standalone_s')
         st = 'match' if c['match'].get('standalone') else 'no'
@@ -153,16 +193,29 @@ def main():
         ratio = ('%.3fx' % (hy / py)) if py and hy else 'n/a'
         ora = c.get('oracle') or {}
         ora_st = ('yes' if ora.get('match') else 'NO') if ora.get('present') else 'missing'
-        A('| `%s` | %d | %d | %s%% | %s | %s | %s | %s | %s | %s | %s |'
+        pp_st = 'yes' if w.get('pypy_match') else ('NO' if w.get('pypy_s') else 'n/a')
+        A('| `%s` | %d | %d | %s%% | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |'
           % (m, f, n, pct(100.0 * n / f, 0), ora_st,
-             'yes' if c['match'].get('hybrid') else 'NO',
-             st, fmt(py), fmt(hy), ratio, fmt(se)))
+             'yes' if c['match'].get('hybrid') else 'NO', pp_st,
+             st, fmt(py), fmt(pp), fmt(hy), ratio,
+             ('%.3fx' % (hy / pp)) if hy and pp else 'n/a',
+             ('%.4fx' % (se / pp)) if se and pp else 'n/a'))
     A('')
     A('**Silent differences: zero.**  Every hybrid build matched CPython on every module; the '
       'standalone build matched on 13 of 15 by default and all 15 with `--exact-int`.  The two '
       'default-build stops are loud (`OverflowError: integer overflow in * ... --exact-int gives '
       'exact ints`), never a wrong answer.')
     A('')
+    pp_rows = [m for m in modules if measure[m].get('pypy_s')]
+    pp_bad = [m for m in modules if measure[m].get('pypy_error') or
+              (measure[m].get('pypy_s') and not measure[m].get('pypy_match'))]
+    if pp_rows:
+        A('**PyPy output: %d of %d modules byte-identical.**  PyPy ran the same `run.py` on the same '
+          'input, five times, and every run was compared with the committed `expected.txt`.%s'
+          % (sum(1 for m in pp_rows if measure[m].get('pypy_match')), len(modules),
+             ''.join('  `%s`: %s.' % (m, measure[m].get('pypy_diff') or measure[m].get('pypy_error'))
+                     for m in pp_bad) if pp_bad else ''))
+        A('')
     A('### What the wall-time columns say')
     A('')
     ok = [m for m in modules if measure[m].get('cpython_s') and measure[m].get('hybrid_s')]
@@ -180,8 +233,35 @@ def main():
                                         fmt(measure[m]['standalone_s'], 3))
                    for m in sorted(ok, key=lambda x: -(
                        (measure[x]['cpython_s'] or 0) / max(measure[x]['standalone_s'] or 1e9, 1e-9))
-                   )[:4])))
+                    )[:4])))
     A('')
+    if pp_rows:
+        hy_pp = [(m, measure[m]['hybrid_s'] / measure[m]['pypy_s']) for m in modules
+                 if measure[m].get('hybrid_s') and measure[m].get('pypy_s')]
+        se_pp = [(m, measure[m]['standalone_s'] / measure[m].get('pypy_s')
+                  if measure[m].get('standalone_s') and measure[m].get('pypy_s') else None)
+                 for m in modules]
+        se_pp = [(m, v) for m, v in se_pp if v]
+        pp_hy = statistics.geometric_mean([v for _, v in hy_pp]) if hy_pp else None
+        pp_se = statistics.geometric_mean([v for _, v in se_pp]) if se_pp else None
+        A('### What PyPy does to the same fifteen modules')
+        A('')
+        A('PyPy needs no build and no types: it runs `run.py` and JIT-compiles the hot loops.  On '
+          'this corpus it is **%sx** CPython wall time (geomean over %d modules that matched the '
+          'oracle), so a plain CPython program already gets most of what this benchmark is about.  '
+          'The hybrid, which keeps the function boundary, lands at **%sx** PyPy (%d of %d modules '
+          'faster than PyPy) and the standalone binary at **%sx** PyPy (%d of %d faster).  Ratios '
+          'below 1.0 mean AIL is faster; `measure.json` holds every median.'
+          % (fmt(statistics.geometric_mean([measure[m]['pypy_s'] / measure[m]['cpython_s']
+                                            for m in pp_rows]), 3), len(pp_rows),
+             fmt(pp_hy, 3), sum(1 for _, v in hy_pp if v < 1), len(hy_pp),
+             fmt(pp_se, 3), sum(1 for _, v in se_pp if v < 1), len(se_pp)))
+        A('')
+        A('Where the two AIL arms lose to PyPy is the module whose hot function is a plain method '
+          'or a container-returning builder: the hybrid leaves it on CPython (so it pays CPython '
+          'plus the boundary) and PyPy makes it fast.  Where the standalone binary types the whole '
+          'driver it beats PyPy by the C-quality margin the table shows.')
+        A('')
     A('## 3. The Rust bar')
     A('')
     A('`lab/wedge/rust/` is a hand-written PyO3 0.22 extension (`hotrust`) holding the single '

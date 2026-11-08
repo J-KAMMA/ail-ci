@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""compare-rival: AIL against the Python compilers Nuitka, Cython, mypyc and Codon.
+"""compare-rival: AIL against the Python compilers Nuitka, Cython, mypyc and Codon, plus PyPy.
 
     python3 lab/compare_rival/run.py                       # all ten tasks, every rival -> results.json + RESULTS.md
     python3 lab/compare_rival/run.py --tasks tree_fold chain_relax
     python3 lab/compare_rival/run.py --tools nuitka,cython-main
+    python3 lab/compare_rival/run.py --tools pypy           # the interpreter arm only
     python3 lab/compare_rival/run.py --safety              # only the five safety probes
 
 Every rival compiles the same source AIL uses: Nuitka and plain Cython take `src/<task>/main.py`,
 mypyc, Codon and annotated Cython take `src/<task>/typed.py`.  `ail` is the compare-lab AIL column
-(typed.py through AIL), `ail-py` compiles main.py.  A refusal is a result: the first error line is
-kept.  `patches/<tool>/<task>/` may hold a syntax-only patch, and the row is marked "patched".
+(typed.py through AIL), `ail-py` compiles main.py.  `pypy` runs main.py in the PyPy interpreter: it
+compiles nothing (`compile_s` is `-`, its build disk is the interpreter install marked `interpreter`)
+and it is measured in two ways, because its JIT needs warm-up: the plain wall time of a fresh
+process (median of 5, like every other row) and the time of the 5th run inside one process
+(`warm5_ms`, `pypy_warm.py`), on the same input with the same reference.  A refusal is a result:
+the first error line is kept.  `patches/<tool>/<task>/` may hold a syntax-only patch, and the row
+is marked "patched".
 
 Measurement reuses lab/compare/run_task.py: the perf input and every public/hidden case come from
 the task's gen.py, the oracle is its reference.py, wall time is the median of 5 runs, instructions
@@ -45,11 +51,18 @@ CYTHON = VENV / 'bin' / 'cython'
 VENVPY = VENV / 'bin' / 'python'
 
 TASKS = sorted(p.name for p in (COMPARE / 'src').iterdir() if p.is_dir())
-ALL_TOOLS = ['ail', 'cython-main', 'cython-typed', 'nuitka', 'mypyc', 'codon', 'codon-main']
+ALL_TOOLS = ['ail', 'ail-py', 'cython-main', 'cython-typed', 'nuitka', 'mypyc', 'codon', 'codon-main', 'pypy']
 SOURCE = {'ail': 'typed.py', 'ail-py': 'main.py', 'cython-main': 'main.py', 'cython-typed': 'typed.py',
-          'nuitka': 'main.py', 'mypyc': 'typed.py', 'codon': 'typed.py', 'codon-main': 'main.py'}
+          'nuitka': 'main.py', 'mypyc': 'typed.py', 'codon': 'typed.py', 'codon-main': 'main.py',
+          'pypy': 'main.py'}
 STANDALONE = {'ail': True, 'ail-py': True, 'cython-main': True, 'cython-typed': True, 'nuitka': True,
-              'mypyc': False, 'codon': True, 'codon-main': True}
+              'mypyc': False, 'codon': True, 'codon-main': True, 'pypy': False}
+# An interpreter compiles nothing: `compile_s` is '-', the build disk is the install and the kind says so.
+INTERPRETER = {'pypy': True}
+# PyPy's JIT needs warm-up to show its steady rate, so it also gets the 5th run in one process.
+WARM5 = {'pypy': True}
+PYPY = Path(os.environ.get('PYPY', '/opt/hostedtoolcache/PyPy/3.11.17/x64/bin/pypy3'))
+WARM_SRC = HERE / 'pypy_warm.py'
 # "single executable" for Cython means one file that links libpython3.12 at run time; mypyc leaves a
 # Python extension module that needs the interpreter plus the `ail` runtime module.
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
@@ -126,6 +139,7 @@ def versions():
                 mypy=first([str(VENVPY), '-m', 'mypy', '--version']),
                 nuitka=first([str(VENVPY), '-m', 'nuitka', '--version']),
                 codon=first([str(CODON_BIN), '--version']),
+                pypy=pypy_version(),
                 valgrind=first(['valgrind', '--version']))
 
 
@@ -274,11 +288,68 @@ def check_cases_budget(tool, cmd, check, expected, work, budget=CASE_BUDGET_S):
                 cases_skipped=skipped)
 
 
+def pypy_version():
+    try:
+        p = subprocess.run([str(PYPY), '--version'], capture_output=True, text=True, timeout=60)
+        text = (((p.stdout or '') + (p.stderr or '')).strip().splitlines())
+        return ' '.join(line for line in text if line) or 'missing'
+    except Exception as e:
+        return 'missing (%s)' % type(e).__name__
+
+
+def pypy_install_kib():
+    """The interpreter install PyPy needs on disk; it is not a build artifact (nothing is built)."""
+    try:
+        return RT.du_kib(Path(os.path.realpath(str(PYPY))).parents[1])
+    except Exception:
+        return None
+
+
+def build_pypy(task, root):
+    """PyPy builds nothing: the row is the interpreter plus the source it runs."""
+    fresh, env = RT.fresh_dir(root, 'pypy-' + task)
+    d = fresh / 'src'
+    d.mkdir()
+    source = d / SOURCE['pypy']
+    shutil.copy(COMPARE / 'src' / task / SOURCE['pypy'], source)
+    return dict(tool='pypy', source=source.name, standalone=False, interpreter=True, dir=str(d),
+                build_ok=PYPY.is_file(), build_error='' if PYPY.is_file() else 'pypy not found at %s' % PYPY,
+                compile_s=None, build_disk_kib=pypy_install_kib(), binary_bytes=None,
+                run_cmd=[str(PYPY), '-B', str(source)] if PYPY.is_file() else None)
+
+
+def warm5(rec, case, expected, work):
+    """Time the 5th run of the program in one PyPy process (the run a warmed JIT does)."""
+    out_json = work / 'warm-pypy.json'
+    stdin = str(case['path']) if case['stdin'] else '-'
+    cmd = [str(PYPY), '-B', str(WARM_SRC), rec['run_cmd'][2], '5', str(expected['stdout']),
+           str(expected['returncode']), stdin, str(out_json), *case['args']]
+    try:
+        p = subprocess.run(cmd, cwd=work, capture_output=True, timeout=RT.RUN_TIMEOUT * 5,
+                           env=dict(os.environ, AIL_NO_CACHE='1'))
+    except subprocess.TimeoutExpired:
+        return dict(warm5_ms=None, warm5_note='timeout')
+    if not out_json.is_file():
+        return dict(warm5_ms=None, warm5_note='no report: %s' % first_error(p.stderr or p.stdout))
+    try:
+        report = json.loads(out_json.read_text())
+    finally:
+        for f in work.glob('warm-run-*.out'):
+            f.unlink(missing_ok=True)
+    runs = report.get('runs') or []
+    if len(runs) < 5:
+        return dict(warm5_ms=None, warm5_note='only %d runs' % len(runs))
+    return dict(warm5_ms=round(runs[4]['seconds'] * 1000, 1), warm5_runs_ms=[round(r['seconds'] * 1000, 1) for r in runs],
+                warm5_correct=runs[4]['match'], warm5_all_correct=all(r['match'] for r in runs))
+
+
 def measure(rec, task, case, expected, check, expected_cases, work, icount, mode):
     cmd = rec.get('run_cmd')
     if not cmd:
         return rec
     rec.update(RT.run_pass(rec['tool'], cmd, case, expected, work, smoke=False))
+    if WARM5.get(rec['tool']) and rec.get('status') in ('ok', 'MISMATCH'):
+        rec.update(warm5(rec, case, expected, work))
     if check and rec.get('status') == 'timeout':
         rec['cases_note'] = 'perf run timed out; cases not run'
     elif check:
@@ -313,6 +384,8 @@ def task_work(task, tools, args, root, icount, mode):
         try:
             if tool in ('ail', 'ail-py'):
                 rec = build_ail(tool, task, work)
+            elif tool == 'pypy':
+                rec = build_pypy(task, work)
             else:
                 rec = build_tool(tool, task, COMPARE / 'src' / task / SOURCE[tool], work)
         except Exception as e:
@@ -342,6 +415,10 @@ def safety_probe(tool, probe, root):
         if p.returncode != 0 or not out.is_file():
             return dict(build_ok=False, build_error=first_error(p.stderr or p.stdout))
         return dict(build_ok=True, run_cmd=[str(out)], standalone=True)
+    elif tool == 'pypy':
+        # the interpreter compiles nothing: the probe runs as-is, exactly like the CPython reference
+        return dict(build_ok=PYPY.is_file(), build_error='' if PYPY.is_file() else 'pypy not found',
+                    run_cmd=[str(PYPY), '-B', str(probe)], standalone=False, interpreter=True)
     else:
         rec = build_tool(tool, 'safety-' + probe.stem, probe, root, probe=True)
         return rec
@@ -457,6 +534,94 @@ def summary(tasks, data):
     return lines, wins
 
 
+PY_ARMS = [('ail', 'AIL standalone (typed.py)'), ('ail-py', 'AIL standalone (main.py)')]
+
+
+def against_pypy(tasks, data, key='wall_ms'):
+    """AIL arm / PyPy per task, and the counts the headline needs: how many tasks each arm wins."""
+    out = {}
+    for arm, label in PY_ARMS:
+        ratios, wins, ties, n = [], 0, 0, 0
+        for task in tasks:
+            res = data['tasks'][task]['results']
+            a, p = usable(res.get(arm), key), usable(res.get('pypy'), key)
+            if a is None or p is None:
+                continue
+            ratios.append(a / p)
+            n += 1
+            if a < p:
+                wins += 1
+            elif a == p:
+                ties += 1
+        out[arm] = dict(label=label, ratios=ratios, wins=wins, ties=ties, n=n, geomean=geomean(ratios),
+                        faster_task=[t for t in tasks
+                                     if usable(data['tasks'][t]['results'].get(arm), key)
+                                     and usable(data['tasks'][t]['results'].get('pypy'), key)
+                                     and usable(data['tasks'][t]['results'][arm], key)
+                                     < usable(data['tasks'][t]['results']['pypy'], key)])
+    return out
+
+
+def pypy_lines(tasks, data):
+    """The PyPy section: warm-up first, then the AIL/PyPy ratio per task and the headline."""
+    L = []
+    vs = against_pypy(tasks, data)
+    warmed = [(t, data['tasks'][t]['results']['pypy']) for t in tasks
+              if usable(data['tasks'][t]['results'].get('pypy'), 'wall_ms')]
+    if not warmed:
+        return ['## PyPy', '', 'No PyPy row was measured in this result file (`--tools` did not include '
+                '`pypy`, or the interpreter was not found).', '']
+    warm = {t: r.get('warm5_ms') for t, r in warmed if r.get('warm5_ms')}
+    L.append('## PyPy')
+    L.append('')
+    L.append('PyPy runs `src/<task>/main.py` unchanged, in the interpreter, on the same perf input and against the '
+             'same `reference.py`. Nothing is compiled, so `compile s` is `-` and the build-disk cell is the '
+             'interpreter install, marked `interpreter` in `results.json` (`build_kind`). Wall time is the median '
+             'of 5 fresh processes, like every other row. `warm5 ms` is the **5th run inside one process** '
+             '(`pypy_warm.py` times `exec` of the compiled source with a fresh globals dict, a fresh stdin over the '
+             'same bytes and its own stdout, and checks that output against the same reference): that is the run a '
+             'JIT that has seen the hot loops once gives, and it is the fairer number for a long-lived process, '
+             'while the plain column is what a short-lived `python main.py` pays. `warm/plain` is the ratio.')
+    L.append('')
+    if not warm:
+        if warmed:
+            L.append('The warm-up column is **not measured** in this result file: %d PyPy rows were measured '
+                     'without `pypy_warm.py`.' % len(warmed))
+        else:
+            L.append('No PyPy row was measured in this result file.')
+        L.append('')
+    else:
+        L.append('| task | PyPy plain ms | PyPy warm5 ms | warm / plain | AIL standalone / PyPy | AIL (main.py) / PyPy |')
+        L.append('|---|---|---|---|---|---|')
+        for t, r in sorted(warmed):
+            w = r.get('warm5_ms')
+            res = data['tasks'][t]['results']
+            cells = []
+            for arm, _ in PY_ARMS:
+                a, p = usable(res.get(arm), 'wall_ms'), usable(res.get('pypy'), 'wall_ms')
+                cells.append('%.2fx' % (a / p) if a and p else '-')
+            L.append('| %s | %.0f | %s | %s | %s | %s |' % (
+                t, r['wall_ms'], '%.0f' % w if w else '-',
+                '%.2fx' % (w / r['wall_ms']) if w and r.get('wall_ms') else '-', cells[0], cells[1]))
+        L.append('')
+        diffs = [(t, r) for t, r in warmed if r.get('warm5_correct') is False]
+        L.append('Every warm run produced the CPython reference output on %d of %d tasks; a mismatch would be a '
+                 'PyPy result, not an AIL one.' % (len(warmed) - len(diffs), len(warmed))
+                 if not diffs else 'Warm-run output differs from CPython on: %s (a PyPy result, listed and not '
+                 'fixed in the sources).' % ', '.join(t for t, _ in diffs))
+        L.append('')
+    L.append('**Headline.** ')
+    for arm, v in vs.items():
+        if v['geomean'] is None:
+            L.append('The %s arm has no measured PyPy pair.' % v['label'])
+            continue
+        L.append('On wall time, **%s is faster than PyPy on %d of the %d tasks it can be compared on** '
+                 '(geomean AIL/PyPy **%.2fx**, below 1.0 is faster)%s.'
+                 % (v['label'], v['wins'], v['n'], v['geomean'],
+                    ', on `%s`' % '`, `'.join(v['faster_task']) if v['faster_task'] else ''))
+    return L
+
+
 def render(result):
     data = result
     tasks = list(data['tasks'])
@@ -488,10 +653,20 @@ def render(result):
     for k, v in data['tools'].items():
         L.append('| %s | %s |' % (k, v))
     L.append('')
+    runs = data.get('tool_runs') or {}
+    if runs:
+        # Two runs can be in one table (--base): say which, so a reader never compares timings across
+        # machines without knowing it.
+        L.append('Where each column was measured (`tool_runs` in `results.json`): %s.'
+                 % '; '.join('%s %s on commit `%s`' % (tool, r.get('date'), r.get('head'))
+                             for tool, r in sorted(runs.items())))
+        L.append('')
     L.append('## Per task')
     L.append('')
-    L.append('| task | tool | correct | wall ms | instructions | peak RSS MiB | artifact KiB | compile s | build disk MiB | single exe |')
-    L.append('|---|---|---|---|---|---|---|---|---|---|')
+    has_pypy = any((data['tasks'][t]['results'].get('pypy') or {}).get('build_ok') for t in tasks)
+    L.append('| task | tool | correct | wall ms | ' + ('warm5 ms | ' if has_pypy else '') +
+             'instructions | peak RSS MiB | artifact KiB | compile s | build disk MiB | single exe |')
+    L.append('|---|---|---|---|' + ('---|' if has_pypy else '') + '---|---|---|---|---|---|---|')
     for task in tasks:
         res = data['tasks'][task]['results']
         for tool in ALL_TOOLS:
@@ -500,17 +675,23 @@ def render(result):
                 continue
             name = tool + (' (patched)' if r.get('patched') else '')
             if not r.get('build_ok'):
-                L.append('| %s | %s | build refused | - | - | - | - | - | - | - |' % (task, name))
+                L.append('| %s | %s | build refused | - | ' % (task, name) + ('- | ' if has_pypy else '') +
+                         '- | - | - | - | - | - | - |')
                 continue
             rss = '%.1f' % (r['rss_kib'] / 1024) if r.get('rss_kib') else '-'
             art = '%.0f' % (r['binary_bytes'] / 1024) if r.get('binary_bytes') else '-'
             disk = '%.1f' % (r['build_disk_kib'] / 1024) if r.get('build_disk_kib') is not None else '-'
-            L.append('| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |' % (
+            if r.get('interpreter'):
+                disk += ' (interp)'
+            warm_cell = (('%.0f' % r['warm5_ms']) if r.get('warm5_ms') else '-') + ' | ' if has_pypy else ''
+            L.append('| %s | %s | %s | %s | %s%s | %s | %s | %s | %s | %s |' % (
                 task, name, correct_label(r),
-                '%.0f' % r['wall_ms'] if r.get('wall_ms') is not None else '-',
+                '%.0f' % r['wall_ms'] if r.get('wall_ms') is not None else '-', warm_cell,
                 f_int(r.get('instructions')), rss, art,
                 '%.2f' % r['compile_s'] if r.get('compile_s') is not None else '-', disk,
                 'yes' if r.get('standalone') else 'no'))
+    L.append('')
+    L.extend(pypy_lines(tasks, data))
     L.append('')
     L.append('## Summary: AIL against the best rival')
     L.append('')
@@ -590,6 +771,10 @@ def main():
     ap.add_argument('--icount', choices=['auto', 'perf', 'callgrind', 'none'], default='auto')
     ap.add_argument('--jobs', type=int, default=1)
     ap.add_argument('--merge', metavar='DIR', help='merge the result-*.json files in DIR into --out')
+    ap.add_argument('--base', metavar='JSON',
+                    help='start from this results.json and add/replace only the tools measured now; the '
+                         'result records which tools came from which run in `tool_runs`.  Use it when a '
+                         'toolchain is not installed here (the CI job measures everything).')
     args = ap.parse_args()
     if args.merge:
         # actions/download-artifact with `pattern:` writes each artifact under results/<artifact>/,
@@ -644,6 +829,13 @@ def main():
                   safety_probes=[p.stem for p in sorted((HERE / 'safety').glob('*.py'))], safety={})
     result['tools']['ail'] = 'checkout ' + head
 
+    base = None
+    if args.base:
+        base = json.loads(Path(args.base).read_text())
+        result['base'] = dict(file=str(args.base), date=base.get('date'), head=base.get('head'),
+                              tools=sorted({t for task in (base.get('tasks') or {}).values()
+                                            for t in task['results']}))
+
     if not args.safety:
         with ThreadPoolExecutor(max_workers=args.jobs) as pool:
             futures = [pool.submit(task_work, t, tools, args, root, icount, mode) for t in tasks]
@@ -653,9 +845,43 @@ def main():
                 Path(args.out).write_text(json.dumps(result, indent=1) + '\n', encoding='utf8')   # partial survives a timeout
         result['tasks'] = {t: result['tasks'][t] for t in tasks if t in result['tasks']}
 
+    if base:
+        # Layer the rows measured now over the base result.  The base keeps every tool it had, the
+        # rows measured now replace theirs, and `tool_runs` says which run produced each column --
+        # a reader must be able to tell a number measured here from one measured on CI.
+        merged_tasks = dict(base.get('tasks') or {})
+        for task, rec in result['tasks'].items():
+            old = merged_tasks.get(task) or {}
+            rows = dict(old.get('results') or {})
+            rows.update(rec.get('results') or {})
+            merged_tasks[task] = dict(old, **dict(rec, results=rows))
+        result['tasks'] = merged_tasks
+        measured_now = {t for task in result['tasks'].values() for t in task['results']} & set(tools)
+        old_runs = base.get('tool_runs') or {}
+        result['tool_runs'] = {}
+        for tool in sorted({t for task in result['tasks'].values() for t in task['results']}):
+            if tool in measured_now:
+                result['tool_runs'][tool] = dict(date=result['date'], head=head, source='this run')
+            else:
+                result['tool_runs'][tool] = dict(old_runs.get(tool) or
+                                                 dict(date=base.get('date'), head=base.get('head')),
+                                                 source='base')
+        # A version this run could not probe (the toolchain is not installed here) comes from the base.
+        for k, v in (base.get('tools') or {}).items():
+            if str(result['tools'].get(k, '')).startswith('missing'):
+                result['tools'][k] = v
+
     if not args.no_safety:
         print('safety probes', file=sys.stderr, flush=True)
         result['safety'] = run_safety(tools if not args.safety else tools, root, args.jobs)
+        if base and base.get('safety'):
+            merged_safety = {k: dict(v) for k, v in base['safety'].items()}
+            merged_safety.update(result['safety'])
+            result['safety'] = merged_safety
+            for p in base.get('safety_probes') or []:
+                if p not in result['safety_probes']:
+                    result['safety_probes'].append(p)
+            result['safety_probes'] = sorted(result['safety_probes'])
 
     Path(args.out).write_text(json.dumps(result, indent=1) + '\n', encoding='utf8')
     if result['tasks']:
