@@ -58,10 +58,10 @@ at 1.5x); a single module cannot reach it.
   flag (it treats the argument as a module name and writes `build/setup.py`); the version was read
   from `mypy.version.__version__`. The generated `build/` directory was moved out of the tree to
   `/tmp/mypyc-artifacts/`.
-- Not run, per the stop rule: `mypyc rangecheck.py`, `lab/mypyc/trial.py`, the 120-input C/refusal
-  hash comparison, the 10-task instruction count, and the cold front-end seconds. Sub-step 2
-  ("trial compile") is where the stop takes effect, so there is no measured "achieved" number and
-  no `patch_rangecheck.diff`.
+- Not run, per the stop rule: `mypyc rangecheck.py`, the trial harness (`trial.py`, not created),
+  the 120-input C/refusal hash comparison, the 10-task instruction count, and the cold front-end
+  seconds. Sub-step 2 ("trial compile") is where the stop takes effect, so there is no measured
+  "achieved" number and no `patch_rangecheck.diff`.
 - Local tests on the final commit: `python3 tools/par_check.py -j 2 test_ail_safetynet
   test_ail_files test_ail_corpus_findings3` — **3 modules, 0 failed** (366 s).
   `python3 tools/update_manifest.py --check` passes. The change adds only markdown under
