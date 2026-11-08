@@ -326,6 +326,14 @@ class AgentErrors(unittest.TestCase):
              'fractions', 'dunder'),
             ('decimal_format', 'from decimal import Decimal\nd = Decimal("1.234")\nprint(f"{d:.2f}")\n',
              'decimal', 'format spec'),
+            # a later call of the same builtin on a value that is not the prelude type must not
+            # move the note: the failing expression is the one that reaches the prelude.
+            ('fraction_call_then_literal',
+             'from fractions import Fraction\na = Fraction(1, 2)\nprint(float(a))\nprint(float(3))\n',
+             'fractions', 'dunder'),
+            ('decimal_format_then_literal',
+             'from decimal import Decimal\nd = Decimal("2.5")\nprint(f"{d:.1f}")\nprint(f"{1.5:.1f}")\n',
+             'decimal', 'format spec'),
         )
         for name, text, module, marker in cases:
             with self.subTest(name=name):
@@ -341,6 +349,23 @@ class AgentErrors(unittest.TestCase):
                 self.assertEqual(int(where.group(1)), 3, note)
                 self.assertNotIn(':235:', note)
                 self.assertNotIn(':1687:', note)
+
+    def test_prelude_note_without_the_unit_name_points_at_the_users_call(self):
+        # `_dec_cmp_parts` is a definition the decimal prelude adds; the reason does not contain
+        # the word `Decimal`, so the note used to stay at prelude line 318.  It now names the
+        # user's first use and says which module it came from.
+        source = self.tmp / 'decimal_plain.py'
+        source.write_text('from decimal import Decimal\nd = Decimal("2.5")\nprint(d + d)\n',
+                          encoding='utf-8')
+        built = self.compile(source, 'decimal_plain', as_json=False)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        note = next(line for line in built.stderr.splitlines()
+                    if 'built on the general path' in line)
+        self.assertIn("standard library's decimal module", note)
+        where = re.search(r':(\d+):(\d+): built on the general path', note)
+        self.assertIsNotNone(where, note)
+        self.assertEqual(int(where.group(1)), 3, note)
+        self.assertNotIn(':318:', note)
 
     def assert_applied_output(self, name, text, code, expected, dropped):
         source = self.tmp / (name + '.py')

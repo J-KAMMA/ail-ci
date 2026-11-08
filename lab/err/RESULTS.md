@@ -206,3 +206,9 @@ the `Replace:`/`With:` block; the human note does not carry it (the `--json` `fi
 does, and applying it removes the note).
 
 Raw records: `lab/err/fixrate_err3.json`.
+
+Follow-up (`job-err3-11081940`): the note now selects the user's call that is actually refused.
+A later call on a value that is not the prelude type (`print(float(3))`, `f"{1.5:.1f}"`) is no
+longer chosen, and a reason that names only a prelude helper (`_dec_cmp_parts`) is mapped too.
+These changes move only the `file:line:col` of the notes; the message text and the rates above
+are unchanged, so the model run was not repeated.

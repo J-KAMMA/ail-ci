@@ -1,3 +1,26 @@
+## 2026-11-08 -- err3 follow-up: the prelude note picks the call that fails (job-err3-11081940)
+
+The err3 review found three defects; this commit fixes all three.
+
+`AIL_CURRENT/ail_chatgpt.py`: `_prelude_origin` now recognizes *any* definition a shipped
+prelude added (mapped to its module from `prelude_fraction.py`, `prelude_decimal.py`,
+`prelude_unicodedata.py`, `prelude_ipaddress.py`), not only the public type names.  A note whose
+reason names `_dec_cmp_parts` therefore points at the user's call and says `decimal`, instead of
+staying at prelude line 318.
+
+`_prelude_call_site` no longer returns the last regex match.  A small `ast` fixed point follows
+`Type(...)` assignments, aliases, list/dict items, attributes, returns and call arguments, then
+picks the operation node whose operand is a value of that prelude type.  `print(float(a))`
+followed by `print(float(3))` now points at line 3 (was line 4), and `f"{d:.1f}"` followed by
+`f"{1.5:.1f}"` points at line 3 (was line 4).  The regex path remains only as a fallback when the
+type cannot be proven.
+
+Tests: `test_ail_pre133.py` and `test_ail_agent_errors.py` gain the two later-literal cases and
+the `_dec_cmp_parts` case.  Probes (`/tmp/probes_err3`, `bash ~/tools/cmp.sh`, both builds, all
+stdout equal to CPython): the three review programs, and `Fraction` through a function argument,
+a list item, an attribute, a dict value, an alias and a negative value; `Decimal` through
+`<`, `int()` and `+`.  `tools/update_manifest.py` is re-run on this commit.
+
 ## 2026-11-08 -- err3: row-arity note names the user's rows, prelude notes reach the user's call (job-err3-11081516)
 
 Step 2 of `docs/design/AGENT_ERRORS.md`.

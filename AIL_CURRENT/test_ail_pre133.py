@@ -23,6 +23,11 @@ POPROW = (ROOT.parent / 'lab' / 'err' / 'triggers' / '02_poprow_arity.py').read_
     encoding='utf-8')
 FRACTION_NOTE = 'from fractions import Fraction\nx = Fraction(1, 2)\nprint(float(x))\n'
 DECIMAL_NOTE = 'from decimal import Decimal\nd = Decimal("1.234")\nprint(f"{d:.2f}")\n'
+FRACTION_LATER_LITERAL = ('from fractions import Fraction\na = Fraction(1, 2)\n'
+                          'print(float(a))\nprint(float(3))\n')
+DECIMAL_LATER_LITERAL = ('from decimal import Decimal\nd = Decimal("2.5")\n'
+                         'print(f"{d:.1f}")\nprint(f"{1.5:.1f}")\n')
+DECIMAL_PLAIN = 'from decimal import Decimal\nd = Decimal("2.5")\nprint(d + d)\n'
 
 CLASS_ATTRS = r'''class A__B:
     n = {1: 2}
@@ -144,7 +149,9 @@ class Pre133Tests(unittest.TestCase):
         # A refusal raised while loading `fractions`/`decimal` was reported at a line of the
         # prelude (235, 1687).  The note now names the user's call and the module it came from.
         cases = (('frac_note', FRACTION_NOTE, 'fractions', 'dunder'),
-                 ('dec_note', DECIMAL_NOTE, 'decimal', 'format spec'))
+                 ('dec_note', DECIMAL_NOTE, 'decimal', 'format spec'),
+                 ('frac_note_later_literal', FRACTION_LATER_LITERAL, 'fractions', 'dunder'),
+                 ('dec_note_later_literal', DECIMAL_LATER_LITERAL, 'decimal', 'format spec'))
         for name, text, module, marker in cases:
             with self.subTest(name=name):
                 with tempfile.TemporaryDirectory(prefix='ail-pre133-') as directory:
@@ -160,6 +167,22 @@ class Pre133Tests(unittest.TestCase):
                     self.assertEqual(int(where.group(1)), 3, note)
                     self.assertNotIn(':235:', note)
                     self.assertNotIn(':1687:', note)
+
+    def test_prelude_note_without_the_unit_name_points_at_the_users_call(self):
+        # The reason names `_dec_cmp_parts`, a definition the decimal prelude adds, not the word
+        # `Decimal`; the note used to stay at prelude line 318.  It now names the user's use.
+        with tempfile.TemporaryDirectory(prefix='ail-pre133-') as directory:
+            done, _ = build(directory, 'dec_plain', DECIMAL_PLAIN, general=False, quiet=False,
+                            suffix='.py')
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            note = next((line for line in done.stderr.splitlines()
+                         if 'built on the general path' in line), '')
+            self.assertTrue(note, done.stderr)
+            self.assertIn("standard library's decimal module", note)
+            where = re.search(r':(\d+):(\d+):', note)
+            self.assertIsNotNone(where, note)
+            self.assertEqual(int(where.group(1)), 3, note)
+            self.assertNotIn(':318:', note)
 
     def test_fraction_prelude_adds_no_tuple_notes_to_a_refusal(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre133-') as directory:
