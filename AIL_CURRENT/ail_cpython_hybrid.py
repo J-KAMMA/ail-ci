@@ -18,6 +18,7 @@ Design and the wider semantics are in docs/design/CPYTHON_HYBRID.md (AIL_CURRENT
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import os
 import re
@@ -459,7 +460,7 @@ def _bound_names(fn):
     return names
 
 
-def _link_natives(chosen, rejected, funcs, consts, values, csrcs=None):
+def _link_natives(chosen, rejected, funcs, consts, values, csrcs=None, methods=None):
     """obs4: settle the call graph between selected natives and the guards each unit needs.
 
     A unit is the entry plus every native it reaches; `to_c` compiled them all into it.  Refused
@@ -519,10 +520,16 @@ def _link_natives(chosen, rejected, funcs, consts, values, csrcs=None):
         for n, why in drop.items():
             del chosen[n]
             rejected[n] = why
+    methods = methods or {}
     for n, item in chosen.items():
         unit = closure[n] | {n}
         recursive = any(m in calls[m] for m in unit)
-        item['callees'] = sorted(closure[n])
+        # A method's calls of other methods (itself included) are guarded through the class
+        # (section 5.3), not as module globals: the synthetic names never exist at run time.
+        item['callees'] = sorted(m for m in closure[n] if m not in methods)
+        item['mcalls'] = sorted(m for m in closure[n] if m in methods)
+        if n in methods:
+            item['method'] = methods[n]
         item['consts'] = sorted({c for m in unit for c in consts_of(m)})
         item['const_values'] = {c: values[c] for c in item['consts']}
         item['nfuncs'] = len(unit)
@@ -588,9 +595,13 @@ class _Kinds:
     """Exact kinds of one function's names (see the section comment above)."""
 
     def __init__(self, fn, params, shadowed=frozenset(), skip=frozenset(), consts=None,
-                 calls=None):
+                 calls=None, fields=None, selfname=None):
         self.shadowed = set(shadowed)
         self.consts = dict(consts or {})
+        # obs4 methods: `self.<field>` kinds while guessing a class's field kinds (a hypothesis
+        # the C entry checks; never used for a proof about a synthetic function's own body).
+        self.fields = fields or {}
+        self.selfname = selfname
         # obs4: {name: exact result kind} of the selected natives this body may call.
         self.calls = dict(calls or {})
         self.env = {}
@@ -717,6 +728,9 @@ class _Kinds:
             return self.consts.get(e.id)
         if isinstance(e, ast.BinOp):
             return _binop_kind(e.op, self.kind(e.left), self.kind(e.right))
+        if isinstance(e, ast.Attribute) and self.selfname is not None \
+                and isinstance(e.value, ast.Name) and e.value.id == self.selfname:
+            return self.fields.get(e.attr)
         if isinstance(e, ast.UnaryOp):
             if isinstance(e.op, ast.Not):
                 return 'bool'
@@ -800,6 +814,287 @@ def _parents(fn):
         for child in ast.iter_child_nodes(node):
             out[id(child)] = node
     return out
+
+
+# ---- methods (obs4, OBSERVED_TYPES.md section 5.3) ----------------------------------------------
+#
+# A read-only method of a plain class becomes a synthetic top-level function: each `self.<field>`
+# read is a parameter, each `self.<method>(...)` a call of that method's synthetic function with
+# its fields passed through.  The existing selection, `to_c` and wrapper machinery handle it like
+# any function; the C entry reads the fields from `self` after the type/MRO/instance guards.
+
+_FIELD_PREFIX = '__ail_f_'
+_KIND_ANN = {'int': 'int', 'float': 'float', 'str': 'str', 'bool': 'bool',
+             'list[int]': 'list[int]', 'list[float]': 'list[float]'}
+
+
+def _synthetic_name(cls, attr):
+    return '__ail_m%d_%s_%s' % (len(cls), cls, attr)
+
+
+def _ann_text_kind(node):
+    if node is None:
+        return None
+    try:
+        text = ast.unparse(node).replace(' ', '')
+    except Exception:
+        return None
+    return _KIND_ANN.get(text)
+
+
+def _simple_class(node):
+    """A class the method guards can describe: no decorators, no keywords (so no metaclass), no
+    bases but `object`, and a body of plain defs, a docstring or `pass` only."""
+    if node.decorator_list or node.keywords:
+        return False
+    if any(not (isinstance(b, ast.Name) and b.id == 'object') for b in node.bases):
+        return False
+    for i, stmt in enumerate(node.body):
+        if isinstance(stmt, ast.FunctionDef):
+            continue
+        if isinstance(stmt, ast.Pass):
+            continue
+        if i == 0 and isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) \
+                and isinstance(stmt.value.value, str):
+            continue
+        return False
+    return True
+
+
+def _self_name(fn):
+    a = fn.args
+    if a.posonlyargs or a.vararg or a.kwarg or a.kwonlyargs or a.defaults or not a.args:
+        return None
+    return a.args[0].arg
+
+
+def _is_self_attr(node, selfname):
+    return isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+        and node.value.id == selfname
+
+
+def _field_kinds(cls_node):
+    """{field: kind} guessed from the class's own stores (a hypothesis: the C entry checks every
+    value it reads, so a wrong guess costs fallbacks only)."""
+    sources = {}
+    for fn in cls_node.body:
+        if not isinstance(fn, ast.FunctionDef) or not fn.args.args:
+            continue
+        selfname = fn.args.args[0].arg
+        params = [(a.arg, _ann_text_kind(a.annotation)) for a in fn.args.args[1:]]
+        params = [(p, k) for p, k in params if k is not None]
+        for node in ast.walk(fn):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                value = node.value
+                for t in targets:
+                    if _is_self_attr(t, selfname):
+                        tag = 'aug' if isinstance(node, ast.AugAssign) else 'expr'
+                        sources.setdefault(t.attr, []).append((tag, fn, params, node))
+                    elif isinstance(t, ast.Subscript) and _is_self_attr(t.value, selfname):
+                        tag = 'item_aug' if isinstance(node, ast.AugAssign) else 'item'
+                        sources.setdefault(t.value.attr, []).append((tag, fn, params, node))
+                    else:
+                        for sub in ast.walk(t):
+                            if _is_self_attr(sub, selfname) and isinstance(sub.ctx, ast.Store):
+                                sources.setdefault(sub.attr, []).append(('bad', fn, params, node))
+                del value
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                    and node.func.attr == 'append' and _is_self_attr(node.func.value, selfname) \
+                    and len(node.args) == 1 and not node.keywords:
+                sources.setdefault(node.func.value.attr, []).append(('item', fn, params, node))
+            elif _is_self_attr(node, selfname) and isinstance(node.ctx, ast.Del):
+                sources.setdefault(node.attr, []).append(('bad', fn, params, node))
+    env = {f: _TOP for f in sources}
+    for _ in range(16):
+        new = {}
+        for f, srcs in sources.items():
+            scalars, elems, is_list, bad = [], [], False, False
+            for tag, fn, params, node in srcs:
+                kinds = _Kinds(fn, params, fields=env, selfname=fn.args.args[0].arg)
+                if tag == 'bad':
+                    bad = True
+                elif tag == 'expr':
+                    v = node.value
+                    if v is None:
+                        bad = True
+                    elif isinstance(v, ast.List):
+                        is_list = True
+                        elems.extend(kinds.kind(e) for e in v.elts)
+                    elif isinstance(v, ast.BinOp) and isinstance(v.op, ast.Mult) and (
+                            isinstance(v.left, ast.List) or isinstance(v.right, ast.List)):
+                        lst = v.left if isinstance(v.left, ast.List) else v.right
+                        is_list = True
+                        elems.extend(kinds.kind(e) for e in lst.elts)
+                    else:
+                        scalars.append(kinds.kind(v))
+                elif tag == 'aug':
+                    scalars.append(_binop_kind(node.op, env.get(f), kinds.kind(node.value)))
+                elif tag == 'item':
+                    is_list = True
+                    elems.append(kinds.kind(node.args[0] if isinstance(node, ast.Call)
+                                            else node.value))
+                elif tag == 'item_aug':
+                    is_list = True
+            if bad or (is_list and scalars):
+                new[f] = None
+                continue
+            if is_list:
+                known = {k for k in elems if k != _TOP}
+                if None in known or len(known) > 1:
+                    new[f] = None
+                elif not known:
+                    new[f] = _TOP
+                else:
+                    e = known.pop()
+                    new[f] = 'list[%s]' % e if e in ('int', 'float') else None
+                continue
+            known = {k for k in scalars if k != _TOP}
+            if None in known or len(known) > 1:
+                new[f] = None
+            else:
+                new[f] = known.pop() if known else _TOP
+        if new == env:
+            break
+        env = new
+    return {f: k for f, k in env.items() if k in _KIND_ANN}
+
+
+class _Desugar(ast.NodeTransformer):
+    def __init__(self, cls, selfname, fields_of):
+        self.cls = cls
+        self.selfname = selfname
+        self.fields_of = fields_of
+
+    def visit_Call(self, node):
+        func = node.func
+        if _is_self_attr(func, self.selfname) and func.attr in self.fields_of:
+            args = [ast.Name(id=_FIELD_PREFIX + f, ctx=ast.Load())
+                    for f in self.fields_of[func.attr]]
+            return ast.copy_location(ast.Call(
+                func=ast.Name(id=_synthetic_name(self.cls, func.attr), ctx=ast.Load()),
+                args=args + [self.visit(a) for a in node.args], keywords=[]), node)
+        return self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        if _is_self_attr(node, self.selfname):
+            return ast.copy_location(ast.Name(id=_FIELD_PREFIX + node.attr, ctx=ast.Load()), node)
+        return self.generic_visit(node)
+
+
+def _method_synthetics(tree):
+    """[(synthetic FunctionDef, meta)] for the read-only methods of simple top-level classes;
+    meta = {'cls', 'attr', 'fields': [(field, kind)], 'nown', 'end'}; plus {qualname: reason}
+    for every other method of a top-level class."""
+    out, refusals = [], {}
+    for cls in tree.body:
+        if not isinstance(cls, ast.ClassDef):
+            continue
+        defs = [fn for fn in cls.body if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        methods = {fn.name: fn for fn in defs if isinstance(fn, ast.FunctionDef)}
+        why_cls = None
+        if not _simple_class(cls):
+            why_cls = 'method of a class with decorators, bases, a metaclass or class attributes'
+        elif len(methods) != len(defs):
+            why_cls = 'method of a class that defines a name twice'
+        if why_cls:
+            for fn in defs:
+                refusals['%s.%s' % (cls.name, fn.name)] = why_cls + ', stays in CPython'
+            continue
+        fkinds = _field_kinds(cls)
+        own_fields, self_calls = {}, {}
+        for name, fn in methods.items():
+            selfname = _self_name(fn)
+            qual = '%s.%s' % (cls.name, name)
+            if fn.decorator_list or selfname is None or name.startswith('__'):
+                refusals[qual] = ('a decorated, dunder or non-plain-signature method stays '
+                                  'in CPython')
+                continue
+            if any(isinstance(n, ast.Name) and n.id.startswith('__ail_') for n in ast.walk(fn)):
+                refusals[qual] = 'a name starting with __ail_ stays in CPython'
+                continue
+            parents = _parents(fn)
+            fields, calls, ok = set(), set(), True
+            for node in ast.walk(fn):
+                if not (isinstance(node, ast.Name) and node.id == selfname):
+                    continue
+                if node is fn.args.args[0]:
+                    continue
+                parent = parents.get(id(node))
+                if not isinstance(node.ctx, ast.Load) or not isinstance(parent, ast.Attribute) \
+                        or not isinstance(parent.ctx, ast.Load) or parent.attr.startswith('__'):
+                    ok = 'self is stored to or used other than by reading an attribute'
+                    break
+                holder = parents.get(id(parent))
+                if isinstance(holder, ast.Call) and holder.func is parent:
+                    if parent.attr not in methods or holder.keywords:
+                        ok = 'calls self.%s, not a plain method of the class' % parent.attr
+                        break
+                    calls.add(parent.attr)
+                elif parent.attr in methods or parent.attr not in fkinds:
+                    ok = 'field self.%s has no scalar or int/float list kind' % parent.attr
+                    break
+                else:
+                    fields.add(parent.attr)
+            # `self` inside a nested def or lambda would be a closure: refused above only if
+            # it is not an attribute read; refuse any nested scope that mentions it at all.
+            for sub in ast.walk(fn):
+                if sub is not fn and isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                                      ast.Lambda, ast.ClassDef)):
+                    if any(isinstance(n, ast.Name) and n.id == selfname for n in ast.walk(sub)):
+                        ok = 'a nested scope uses self'
+            if ok is True:
+                own_fields[name] = fields
+                self_calls[name] = calls
+            else:
+                refusals[qual] = 'method: %s, stays in CPython' % ok
+        cands = set(own_fields)
+        while True:
+            drop = {m for m in cands if not self_calls[m] <= cands}
+            if not drop:
+                break
+            cands -= drop
+            for m in drop:
+                refusals['%s.%s' % (cls.name, m)] = ('method: calls a method that stays in '
+                                                     'CPython, stays in CPython')
+        fields_of = {}
+        for m in cands:
+            seen, todo, acc = set(), [m], set()
+            while todo:
+                k = todo.pop()
+                if k in seen:
+                    continue
+                seen.add(k)
+                acc |= own_fields[k]
+                todo.extend(self_calls[k])
+            fields_of[m] = sorted(acc)
+        for m in sorted(cands):
+            fn = methods[m]
+            selfname = _self_name(fn)
+            # The entry copies every list field (as for list parameters).  A body with no loop
+            # and no method call cannot pay for that O(n) copy (`Frame.rows` = `len(self.key)`
+            # measured 0.508 -> 0.517 on dataframe_group), so it stays in CPython.
+            if any(fkinds[f] in _LIST for f in fields_of[m]) and not self_calls[m] and not any(
+                    isinstance(n, (ast.For, ast.While, ast.comprehension)) for n in _own_nodes(fn)):
+                refusals['%s.%s' % (cls.name, m)] = ('method: a loop-free body would copy a list '
+                                                     'field on every call, stays in CPython')
+                continue
+            body = [_Desugar(cls.name, selfname, fields_of).visit(ast.fix_missing_locations(
+                    copy.deepcopy(stmt))) for stmt in fn.body]
+            args = [ast.arg(arg=_FIELD_PREFIX + f, annotation=ast.parse(fkinds[f], mode='eval').body)
+                    for f in fields_of[m]]
+            args += [copy.deepcopy(a) for a in fn.args.args[1:]]
+            extra = {'type_params': []} if sys.version_info >= (3, 12) else {}
+            syn = ast.FunctionDef(
+                name=_synthetic_name(cls.name, m),
+                args=ast.arguments(posonlyargs=[], args=args, vararg=None, kwonlyargs=[],
+                                   kw_defaults=[], kwarg=None, defaults=[]),
+                body=body, decorator_list=[], returns=copy.deepcopy(fn.returns), **extra)
+            ast.fix_missing_locations(syn)
+            out.append((syn, {'cls': cls.name, 'attr': m,
+                              'fields': [(f, fkinds[f]) for f in fields_of[m]],
+                              'nown': len(fn.args.args) - 1, 'end': cls.end_lineno}))
+    return out, refusals
 
 
 def _list_return_proof(fn, params, shadowed=frozenset(), consts=None, calls=None):
@@ -1389,7 +1684,7 @@ pymix.analyze = _analyze
               'note': data.get('note') or ''}
     return report, facts
 
-def _select(src, tree, report, facts):
+def _select(src, tree, report, facts, methods=None):
     """The units worth wrapping, with the safety filters the design names."""
     import bigcap
     import pymix
@@ -1498,7 +1793,7 @@ def _select(src, tree, report, facts):
         if not grew:
             break
     _link_natives(chosen, rejected, funcs, consts, _module_constant_values(tree),
-                  {u[1]: u[2] for u in units})
+                  {u[1]: u[2] for u in units}, methods or {})
     # wedge1: a function refused before it reaches _select (pymix or the emitter) used to leave
     # no trace, so most refusals were silent.  Name every remaining top-level function too.
     pymix_rejected = report.get('pymix_rejected') or {}
@@ -1821,7 +2116,8 @@ static PyObject *ail_fill_defaults(PyObject *func, PyObject *const *args, Py_ssi
 def _guarded(item):
     """obs4: the entry depends on module globals (constants, callees) or on CPython's recursion
     budget; only the 3.12+ vectorcall entry can check those, the Python wrapper path falls back."""
-    return bool(item.get('consts') or item.get('callees') or item.get('rlimit'))
+    return bool(item.get('consts') or item.get('callees') or item.get('rlimit')
+                or item.get('method'))
 
 
 def _c_string(text):
@@ -2005,6 +2301,161 @@ def _vectorcall_entry(item):
     return out
 
 
+def _method_source(item, items_by_name):
+    """obs4 (section 5.3): the class/instance guard and the vectorcall entry of a method.
+
+    `ail_mguard_<n>` runs before any native work and only reads: `type(self)` is the class the
+    method was installed from; the class has no metaclass, is a heap type with the generic
+    getattr; no class attribute anywhere in the MRO is named like a field (so the read below only
+    sees the instance dict and runs no Python code); every method the body calls on `self`
+    resolves to its installed function with a recorded code and is not shadowed on the instance.
+    It then reads every field (new references in `held`), which the core checks and converts like
+    parameters.  Any failure runs the original method."""
+    name, meta = item['name'], item['method']
+    fields = [f for f, _k in meta['fields']]
+    nf, nown = len(fields), meta['nown']
+    mcalls = item.get('mcalls') or []
+    frames = int(item.get('nfuncs') or 1)
+    out = ['#if PY_VERSION_HEX >= 0x030C0000',
+           'static PyObject *ail_cls_%s, *ail_mfunc_%s;' % (name, name),
+           'static PyObject *ail_mname_%s;' % name]
+    if nf:
+        out.append('static PyObject *ail_mf_%s[%d];' % (name, nf))
+    out.append('static int ail_mguard_%s(PyObject *self, PyObject **held) {' % name)
+    out.extend([
+        '    PyTypeObject *t = Py_TYPE(self);',
+        '    if (ail_cls_%s == NULL || (PyObject *)t != ail_cls_%s) return 0;' % (name, name),
+        '    if (Py_TYPE(t) != &PyType_Type || !(t->tp_flags & Py_TPFLAGS_HEAPTYPE)',
+        '            || t->tp_getattro != PyObject_GenericGetAttr) return 0;',
+    ])
+    for i in range(nf):
+        out.append('    if (_PyType_Lookup(t, ail_mf_%s[%d]) != NULL) return 0;' % (name, i))
+    for callee in mcalls:
+        out.extend([
+            '    {',
+            '        PyObject *f = _PyType_Lookup(t, ail_mname_%s);' % callee,
+            '        if (f == NULL || f != ail_mfunc_%s' % callee,
+            '                || !ail_known_code(ail_code_%s, PyFunction_GET_CODE(f))) return 0;' % callee,
+            '        PyObject *b = PyObject_GetAttr(self, ail_mname_%s);' % callee,
+            '        if (b == NULL) { PyErr_Clear(); return 0; }',
+            '        int same = PyMethod_Check(b) && PyMethod_GET_FUNCTION(b) == f',
+            '                   && PyMethod_GET_SELF(b) == self;',
+            '        Py_DECREF(b);',
+            '        if (!same) return 0;',
+            '    }',
+        ])
+    for i in range(nf):
+        out.extend([
+            '    held[%d] = PyObject_GetAttr(self, ail_mf_%s[%d]);' % (i, name, i),
+            '    if (held[%d] == NULL) {' % i,
+            '        PyErr_Clear();',
+        ])
+        for j in range(i):
+            out.append('        Py_DECREF(held[%d]);' % j)
+        out.extend(['        return 0;', '    }'])
+    out.extend(['    return 1;', '}'])
+    cond = ['kwnames == NULL', 'ail_known_code(ail_code_%s, PyFunction_GET_CODE(func))' % name,
+            'PyVectorcall_NARGS(nargsf) == %d' % (nown + 1),
+            'PyThreadState_GET()->py_recursion_remaining >= %d' % frames]
+    if _guard_names([item]):
+        cond.append('ail_guard_%s(func)' % name)
+    out.extend([
+        'static PyObject *ail_v_%s(PyObject *func, PyObject *const *args, size_t nargsf, '
+        'PyObject *kwnames) {' % name,
+        '    if (%s) {' % '\n            && '.join(cond),
+        '        PyObject *held[%d];' % max(1, nf),
+        '        if (ail_mguard_%s(args[0], held)) {' % name,
+        '            PyObject *o[%d];' % max(1, nf + nown),
+    ])
+    for i in range(nf):
+        out.append('            o[%d] = held[%d];' % (i, i))
+    for i in range(nown):
+        out.append('            o[%d] = args[%d];' % (nf + i, i + 1))
+    if item.get('rlimit'):
+        out.append('            int64_t budget = (int64_t)PyThreadState_GET()->py_recursion_remaining'
+                   ' - %d;' % (frames - 1))
+        out.append('            %s__hybrid_rlimit = budget < %d ? budget : %d;'
+                   % (item['mangled'], item['rlimit'], item['rlimit']))
+    out.append('            PyObject *r = ail_core_%s(o);' % name)
+    for i in range(nf):
+        out.append('            Py_DECREF(held[%d]);' % i)
+    out.extend([
+        '            if (r || PyErr_Occurred()) return r;',
+        '        }',
+        '    }',
+        '    return _PyFunction_Vectorcall(func, args, nargsf, kwnames);',
+        '}',
+        '#endif',
+    ])
+    return out
+
+
+def _method_init(items):
+    out = ['#if PY_VERSION_HEX >= 0x030C0000']
+    for item in items:
+        meta = item.get('method')
+        if not meta:
+            continue
+        name = item['name']
+        out.append('    ail_mname_%s = PyUnicode_InternFromString("%s");' % (name, meta['attr']))
+        out.append('    if (!ail_mname_%s) { Py_DECREF(m); return NULL; }' % name)
+        for i, (f, _k) in enumerate(meta['fields']):
+            out.append('    ail_mf_%s[%d] = PyUnicode_InternFromString("%s");' % (name, i, f))
+            out.append('    if (!ail_mf_%s[%d]) { Py_DECREF(m); return NULL; }' % (name, i))
+    out.append('#endif')
+    return out
+
+
+def _install_method_source(items):
+    """`_ail_install_method(name, cls, attr)`: install a method's native entry on the plain def
+    in `cls.__dict__` (same checks as `_ail_install`) and remember the class for the guards."""
+    out = [
+        'static PyObject *ail_install_method(PyObject *self, PyObject *args) {',
+        '    const char *name, *attr; PyObject *cls;',
+        '    if (!PyArg_ParseTuple(args, "sOs", &name, &cls, &attr)) return NULL;',
+        '#if PY_VERSION_HEX >= 0x030C0000',
+        '    if (!PyType_Check(cls)) Py_RETURN_FALSE;',
+        '    PyObject *dict = ((PyTypeObject *)cls)->tp_dict;',
+        '    PyObject *func = dict ? PyDict_GetItemString(dict, attr) : NULL;',
+        '    if (!func || !PyFunction_Check(func)) Py_RETURN_FALSE;',
+        '    PyCodeObject *co = (PyCodeObject *)PyFunction_GET_CODE(func);',
+        '    if (co->co_flags & (CO_VARARGS | CO_VARKEYWORDS | CO_GENERATOR | CO_COROUTINE |',
+        '                        CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE)) Py_RETURN_FALSE;',
+        '    if (co->co_kwonlyargcount != 0) Py_RETURN_FALSE;',
+        '    if (PyUnicode_CompareWithASCIIString(co->co_name, attr) != 0) Py_RETURN_FALSE;',
+        '    PyObject **slots = NULL, **clsp = NULL, **funcp = NULL; vectorcallfunc entry = NULL;',
+        '    int n = -1;',
+    ]
+    for item in items:
+        meta = item.get('method')
+        if not meta:
+            continue
+        nm = item['name']
+        out.append('    if (!strcmp(name, "%s") && !strcmp(attr, "%s")) { slots = ail_code_%s; '
+                   'entry = ail_v_%s; n = %d; clsp = &ail_cls_%s; funcp = &ail_mfunc_%s; }'
+                   % (nm, meta['attr'], nm, nm, meta['nown'] + 1, nm, nm))
+    out.extend([
+        '    if (!slots || co->co_argcount != n) Py_RETURN_FALSE;',
+        '    vectorcallfunc now = ((PyFunctionObject *)func)->vectorcall;',
+        '    if (now != _PyFunction_Vectorcall && now != entry) Py_RETURN_FALSE;',
+        '    int i = 0;',
+        '    while (i < AIL_CODES && slots[i] && slots[i] != (PyObject *)co) i++;',
+        '    if (i == AIL_CODES) Py_RETURN_FALSE;',
+        '    if (!slots[i]) { Py_INCREF(co); slots[i] = (PyObject *)co; }',
+        '    Py_INCREF(cls); Py_XSETREF(*clsp, cls);',
+        '    Py_INCREF(func); Py_XSETREF(*funcp, func);',
+        '    PyFunction_SetVectorcall((PyFunctionObject *)func, entry);',
+        '    Py_RETURN_TRUE;',
+        '#else',
+        '    (void)name; (void)attr; (void)cls;',
+        '    Py_RETURN_FALSE;',
+        '#endif',
+        '}',
+        '',
+    ])
+    return out
+
+
 def _guard_fn(item, index):
     names = [g for g, _v in _guard_names([item])]
     if not names:
@@ -2017,7 +2468,7 @@ def _guard_fn(item, index):
             '#endif']
 
 
-def _install_source(items):
+def _install_source(items, methods_too=None):
     out = [
         'static PyObject *ail_install(PyObject *self, PyObject *args) {',
         '    const char *name; PyObject *func;',
@@ -2060,6 +2511,8 @@ def _install_source(items):
     ])
     for item in items:
         out.append('        if (v == ail_v_%s) Py_RETURN_TRUE;' % item['name'])
+    for item in methods_too or ():
+        out.append('        if (v == ail_v_%s) Py_RETURN_TRUE;' % item['name'])
     out.extend([
         '    }',
         '#endif',
@@ -2093,6 +2546,9 @@ def _wrapper_source(module, items):
         out.append('static PyObject *ail_code_%s[AIL_CODES];' % item['name'])
         out.append('static PyObject *ail_v_%s(PyObject *, PyObject *const *, size_t, PyObject *);'
                    % item['name'])
+        if item.get('method'):
+            out.append('static PyObject *ail_cls_{0}, *ail_mfunc_{0}, *ail_mname_{0};'
+                       .format(item['name']))
     out.append('#endif')
     out.extend(_guard_source(items))
     gindex = {g: i for i, (g, _v) in enumerate(_guard_names(items))}
@@ -2318,13 +2774,16 @@ def _wrapper_source(module, items):
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    return NULL;')
         out.append('}')
-        out.extend(_vectorcall_entry(item))
+        out.extend(_method_source(item, None) if item.get('method') else _vectorcall_entry(item))
         out.append('')
-    out.extend(_install_source(items))
+    out.extend(_install_source([i for i in items if not i.get('method')],
+                               [i for i in items if i.get('method')]))
+    out.extend(_install_method_source(items))
     out.append('static PyMethodDef ail_methods[] = {')
     for item in items:
         out.append('    {"%s", ail_w_%s, METH_VARARGS, NULL},' % (item['name'], item['name']))
     out.append('    {"_ail_install", ail_install, METH_VARARGS, NULL},')
+    out.append('    {"_ail_install_method", ail_install_method, METH_VARARGS, NULL},')
     out.append('    {"_ail_is_native", ail_is_native, METH_O, NULL},')
     out.append('    {NULL, NULL, 0, NULL}')
     out.append('};')
@@ -2337,6 +2796,7 @@ def _wrapper_source(module, items):
     out.append('    Py_INCREF(AilHybridFallback);')
     out.append('    PyModule_AddObject(m, "Fallback", AilHybridFallback);')
     out.extend(_guard_init(items))
+    out.extend(_method_init(items))
     out.append('    return m;')
     out.append('}')
     return '\n'.join(out) + '\n'
@@ -2481,7 +2941,7 @@ def _preamble(module, original_path):
     return _text.replace('__AIL_MODULE__', module).replace('__AIL_SOURCE__', repr(str(original_path)))
 
 
-def _hybrid_source(source, tree, module, names, original_path):
+def _hybrid_source(source, tree, module, names, original_path, methods=()):
     """Original text plus a preamble and one rebinding after each accelerated top-level def."""
     lines = source.splitlines(keepends=True)
     if lines and not lines[-1].endswith('\n'):
@@ -2498,7 +2958,13 @@ def _hybrid_source(source, tree, module, names, original_path):
                     'except Exception:\n'
                     '    pass\n' % (name, name, name, name))
             edits.append((fn.end_lineno, 0, text))
-    edits.sort(key=lambda e: e[0], reverse=True)
+    for syn, meta in methods:
+        text = ('try:\n'
+                '    _ail_hybrid_native._ail_install_method(%r, %s, %r)\n'
+                'except Exception:\n'
+                '    pass\n' % (syn, meta['cls'], meta['attr']))
+        edits.append((meta['end'], 1, text))
+    edits.sort(key=lambda e: (e[0], -e[1]), reverse=True)
     for at, _off, text in edits:
         lines.insert(at, text)
     return ''.join(lines)
@@ -2644,9 +3110,30 @@ def build(source_path, output_dir):
         'python_file': stem + '.py',
     }
     chosen = {}
+    methods = {}
     try:
-        units_report, facts = _analysis(source)
-        chosen, report['rejected'] = _select(source, tree, units_report, facts)
+        # obs4: read-only methods enter the analysis as synthetic top-level functions; the
+        # program that runs is still the original text (section 5.3).
+        try:
+            synth, method_refusals = _method_synthetics(tree)
+        except Exception as error:                     # never let the method pass break a build
+            synth, method_refusals = [], {}
+            report['note_methods'] = 'method pass failed: %s' % error
+        analysis_source = source
+        if synth:
+            analysis_source = source.rstrip('\n') + '\n\n\n' + '\n\n\n'.join(
+                ast.unparse(fn) for fn, _m in synth) + '\n'
+        methods = {fn.name: meta for fn, meta in synth}
+        analysis_tree = ast.parse(analysis_source) if synth else tree
+        units_report, facts = _analysis(analysis_source)
+        chosen, report['rejected'] = _select(analysis_source, analysis_tree, units_report, facts,
+                                             methods)
+        for name in list(report['rejected']):
+            if name in methods:
+                meta = methods[name]
+                report['rejected']['%s.%s' % (meta['cls'], meta['attr'])] = \
+                    report['rejected'].pop(name)
+        report['rejected'].update(method_refusals)
         units = units_report.get('mix_units') or []
         items = [chosen[name] for name in sorted(chosen)
                  if any(u[1] == name for u in units)]
@@ -2656,7 +3143,9 @@ def build(source_path, output_dir):
             broken = _verify_import(so, module, names)
             if broken is None:
                 report['extension'] = so.name
-                report['accelerated'] = names
+                report['accelerated'] = sorted(
+                    '%s.%s' % (methods[n]['cls'], methods[n]['attr']) if n in methods else n
+                    for n in names)
             else:
                 # Never claim native for code that does not load: drop the extension, keep the
                 # program on CPython, name the reason per function and say so on stderr.
@@ -2678,7 +3167,10 @@ def build(source_path, output_dir):
     # Always keep an unmodified copy and a runnable hybrid copy.  `prog_run.py` is the file the
     # task names; the `<stem>.py` copy stays for callers of the earlier --cpython prototype.
     (output_dir / (stem + '.orig.py')).write_text(source, encoding='utf-8')
-    hybrid = _hybrid_source(source, tree, module, report['accelerated'], source_path)
+    installed = [n for n in report['accelerated'] if n in _top_level_functions(tree)]
+    method_installs = [(n, methods[n]) for n in sorted(methods)
+                       if '%s.%s' % (methods[n]['cls'], methods[n]['attr']) in report['accelerated']]
+    hybrid = _hybrid_source(source, tree, module, installed, source_path, method_installs)
     (output_dir / report['run_file']).write_text(hybrid, encoding='utf-8')
     legacy = output_dir / report['python_file']
     if legacy.resolve() != source_path:

@@ -58,7 +58,12 @@ def native(f):
     if check is not None:
         return bool(check(f))
     return getattr(f, '__globals__', None) is not vars(m)
-print(json.dumps(sorted(n for n in json.loads(sys.argv[2]) if native(getattr(m, n, None)))))
+def lookup(name):
+    obj = m
+    for part in name.split('.'):          # obs4: methods are listed as Class.method
+        obj = getattr(obj, part, None)
+    return obj
+print(json.dumps(sorted(n for n in json.loads(sys.argv[2]) if native(lookup(n)))))
 '''
 
 sys.path.insert(0, str(ROOT / 'AIL_CURRENT'))

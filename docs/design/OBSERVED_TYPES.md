@@ -336,6 +336,26 @@ its vectorcall, as `_ail_install` does for functions. Not covered (they stay in 
 classmethods and staticmethods, any field store (step b: write scalar fields back at the end of a
 successful call, then `json_parse`), container fields of other kinds.
 
+**obs4 task 3 (done; read-only methods).** Built as designed (`_method_synthetics`,
+`_method_source`, `_ail_install_method`); `build.json` names methods `Class.method`. One rule added
+from measurement: a loop-free method body that reads a list field (`Frame.rows` = `len(self.key)`)
+stays in CPython, because the entry copies the list on every call (dataframe_group went 0.508 ->
+0.517 with it, back to 0.510 without). Measured (`obs4_task3.json`, `hand` = `bare+obs` to 0.006):
+natives 57 -> 65, `tree_build` 1.000 -> 0.251 (all 8 read-only `Tree` methods, the three recursive
+traversals included), corpus 0.638 -> 0.594 (1.68x vs CPython; obs3 was 0.697, 1.43x); other
+modules within noise; all 30 builds byte-identical to the oracle and live CPython.
+`test_ail_hybrid_methods.py` checks against CPython: a wrong argument or field type, big and
+overflowing int fields, an instance attribute shadowing a self-called method, `C.m = ...`,
+`C.m.__code__ = ...`, a subclass with and without an override, a property or class attribute named
+like a field, a missing field, `C.m(other_obj)`, `obj.__class__ = C`, and both sides of the
+recursion limit.
+
+Remaining refusals after obs4 (`hand`, instruction-weighted as in the price table): `levenshtein`
+7.6% (append to a local list), `bloom_probe` 4.1% (division), `list[str]` / `dict` / `bytes` /
+nested-list parameters ~16% together (`sort_rank`, `graph_search`, `hashing`, `ast_lint`),
+methods that store a field 3.4% (`json_parse` `Parser.skip_ws`/`parse_string`: step b),
+`sum_column` 2.2% (`int()` of a str).
+
 **Guard cost per entry**: a type compare, ~3 cached type lookups, one `GetAttr` per field, one
 bound-method allocation if `self` methods are called, and the list copies. For `tree_build` one
 entry per traversal runs 121k recursive native calls, so the guards are noise; `min_key`/`max_key`
