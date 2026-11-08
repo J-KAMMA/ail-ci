@@ -1,3 +1,60 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode/deepseek-v4.1-flash-free]
+## Review report — job ffpkg1
+
+**What the diff really does.** Commit `8e5ebff` adds a standalone `AIL_CURRENT/ail_pkg.py` (`add/remove/sync/list`) and a local-index test; `4c3af3b` fixes the five earlier review findings (sync refetch, prerelease filter, wheel tags, dependency pins, missing-tree refusal). It touches no compiler/runtime file, so generated C is trivially unchanged (`git diff work..HEAD -- AIL_CURRENT/ail_chatgpt.py` is empty). `cli.py` left untouched as the design permits.
+
+**Probes.** `ail_pkg` is not an AIL program, so I exercised it directly with a `file://` fake index (`/tmp/rprobes/harness.py`, `probe_a.py`, `probe_b.py`, `probe_c.py`, `probe_d.py`, `probe_e.py`). Verified good: real PyPI `tabulate 0.9.0` hash `024ca478…`, `click`, `six`, `python-dateutil`; sync refetch restores trees, creates `.ail-wheels/`, leaves no temp dirs; sync leaves the tree intact on a tampered wheel; missing locked tree is refused by name. A differential matrix of `_accepts_python` vs `packaging.SpecifierSet` gives **23/99 mismatches**.
+
+### Defects
+
+1. **The new dependency-specifier matcher is not PEP 440; it silently accepts unsatisfied requirements (and `sync` reproduces them).**
+   `/tmp/rprobes/probe_e.py`: index has `alpha 1.0.0`; `beta` has `Requires-Dist: alpha>1.0`.
+   ```
+   add alpha==1.0.0 ; add beta==1.0.0 ; sync
+   expected: refusal (1.0.0 is not > 1.0 per PEP 440)   actual: "added beta 1.0.0", "synced 2 packages" (rc 0)
+   ```
+   `/tmp/rprobes/probe_d.py`: locked `alpha 2.0.0rc1`, `beta` requires `alpha>=2.0` → accepted by `add` and `sync`, but `SpecifierSet(">=2.0").contains("2.0.0rc1")` is `False`.
+   Cause: `_version_key`/`_compare` compare tuples lexicographically (`1.0 < 1.0.0`, prerelease sorts above the final release), and `_accepts_python` is used by `_requirements`, `_check_reverse_requirements` and `sync`.
+
+2. **The same matcher wrongly refuses valid requirements (loud false negatives).**
+   `/tmp/rprobes/probe_a.py`: `alpha` locked `1.0.0`, `gamma` requires `alpha==1.0` → expected success (PEP 440 zero-padding), actual `ail_pkg: gamma requires alpha==1.0, but alpha is locked at 1.0.0`. Likewise `==1.0.*` is refused, and a parenthesised specifier `alpha (>=1.0)` fails with `unknown Requires-Python clause '(>=1.0)'`.
+
+3. **`_is_stable` falsely classifies a stable local version as a prerelease.**
+   `/tmp/rprobes/probe_b.py`: index has only `loc 1.0.0+1abc`; `add loc` → expected `added loc 1.0.0+1abc`, actual `loc: no non-yanked stable version with a pure-Python wheel`. The regex `(?:^|[._-]|\d)(?:…|a|b|c|…)` matches the `1a` inside a local segment.
+
+### Claims
+- sync refetch / `.ail-wheels/` / download kept until extraction — **verified**.
+- bare name rejects `1.0.0rc1`, `a1`, `b1`, `dev1` — **verified** for those forms; **false** as a general PEP 440 claim (defect 3).
+- py2-only wheels refused, py3 preferred — **verified** (`py2.py3` also accepted correctly).
+- dependency specs stored and enforced by `add` and `sync` — **stored: verified; enforced correctly: false** (defects 1–2).
+- missing locked vendor tree refused with “run `ail sync` first” — **verified**.
+- `test_ail_pkg` passes — **verified** (module ok). Required modules `test_ail_pkg`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` with `-j 2`: **4/4 ok**. `update_manifest.py --check` rc=0; changed files are only the allowed ones + `manifest.d/0d.txt`, `21.txt` — **verified**.
+- census 30/30 with matching hashes — **partially verified** (4 packages spot-checked against PyPI, all hashes match); `test_ail_packaging` — **unverified**.
+
+**Pre-existing:** none identified. **Unverified:** full 30-package PyPI census; `test_ail_packaging`.
+
+VERDICT: FIX
+[cost $0.0000, opencode tokens {"total": 1156762, "input": 86388, "output": 7151, "reasoning": 33847, "cache.write": 0, "cache.read": 1029376}]
+    tool time: bash 6.5 min
+        250s bash   cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000; timeout 900 python3 tools/par_check.py -j 2 test_ail_
+        136s bash   cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000; timeout 600 python3 tools/par_check.py -j 2 test_ail_
+          1s bash   cd /tmp/rprobes && rm -rf real2 real3 && mkdir real2 real3 ulimit -v 1500000 cd /tmp/rprobes/real2 && timeout 
+          0s bash   cd /home/runner/work/ail-ci/ail-ci && python3 tools/update_manifest.py --check; echo "manifest rc=$?"; git dif
+          0s bash   mkdir -p /tmp/rprobes/realpkg && cd /tmp/rprobes/realpkg && rm -rf * .??* 2>/dev/null; ulimit -v 1500000; time
+          0s bash   cat > /tmp/rprobes/probe_a.py <<'PY' from harness import * base=tempfile.mkdtemp(prefix="idx-"); ix=Index(base
+          0s bash   cat > /tmp/rprobes/probe_b.py <<'PY' from harness import * # local-only stable version and wildcard/paren spec
+          0s bash   cat > /tmp/rprobes/probe_c.py <<'PY' from harness import * base=tempfile.mkdtemp(prefix="idx3-"); ix=Index(bas
+
+
+--- ORIGINAL TASK ---
 Lane: ff-pkg
 Needs: ffpkg0
 
