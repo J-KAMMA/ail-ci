@@ -143,6 +143,14 @@ class WasiRefusalTests(unittest.TestCase):
         self.assertIsNone(wasm_build.wasi_refusal('print(1)\n'))
         self.assertIn('threading', wasm_build.wasi_refusal('def f():\n    import threading\n'))
 
+    def test_build_refuses_before_needing_zig(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / 'm.py'
+            src.write_text('import socket\n')
+            ok, msg = wasm_build.build(src, Path(tmp) / 'm.wasm', Path(tmp) / 'w')
+            self.assertFalse(ok)
+            self.assertIn('socket is not available on wasm32-wasi', msg)
+
 
 if __name__ == '__main__':
     unittest.main()

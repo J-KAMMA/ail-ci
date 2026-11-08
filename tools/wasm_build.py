@@ -115,15 +115,15 @@ def c_sources(debug_dir):
 def build(src, out, work, extra=()):
     """Builds WORK/native and OUT; WORK/c must not exist yet. Returns (ok, message): the first compiler or
     linker error on failure."""
-    z = zig()
-    if not z:
-        return False, 'zig is not installed (AIL_ZIG, PATH or ~/tools/zig/zig)'
     try:
         refusal = wasi_refusal(Path(src).read_text(encoding='utf-8', errors='surrogateescape'))
     except OSError:
         refusal = None
     if refusal:
         return False, refusal
+    z = zig()
+    if not z:
+        return False, 'zig is not installed (AIL_ZIG, PATH or ~/tools/zig/zig)'
     work.mkdir(parents=True, exist_ok=True)
     debug_dir, native = work / 'c', work / 'native'
     if debug_dir.exists() or native.exists():
