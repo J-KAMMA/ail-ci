@@ -28,9 +28,14 @@ def _wasmtime():
 @unittest.skipUnless(wasm_build.zig(), 'zig is not installed')
 @unittest.skipUnless(_wasmtime(), 'wasmtime is not installed')
 class WasmTests(unittest.TestCase):
-    def build(self, work, src):
+    def build(self, work, src, force_general=False):
         out = work / (src.stem + '.wasm')
-        ok, msg = wasm_build.build(src, out, work / ('w-' + src.parent.name + '-' + src.stem))
+        if force_general:
+            os.environ['AIL_UNIFIED_FORCE'] = '1'
+        try:
+            ok, msg = wasm_build.build(src, out, work / ('w-' + src.parent.name + '-' + src.stem))
+        finally:
+            os.environ.pop('AIL_UNIFIED_FORCE', None)
         self.assertTrue(ok, msg)
         return out
 
@@ -47,6 +52,16 @@ class WasmTests(unittest.TestCase):
             src.write_text('n = 6 * 7\nprint("hello", n, str(n) * 2)\n')
             r = self.run_wasm(self.build(work, src))
             self.assertEqual((r.returncode, r.stdout), (0, b'hello 42 4242\n'))
+
+    def test_a_local_module_shadows_a_refused_name(self):
+        # `import signal` with a sibling signal.py is an ordinary local module, not the standard one
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / 'signal.py').write_text('def v():\n    return 41\n')
+            src = work / 'main.py'
+            src.write_text('import signal\nprint(signal.v())\n')
+            r = self.run_wasm(self.build(work, src))
+            self.assertEqual((r.returncode, r.stdout), (0, b'41\n'))
 
     def test_try_except(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,10 +103,85 @@ class WasmTests(unittest.TestCase):
         # read_stdin_bytes(1 << 40): needs wasm_build.patch_c's saturation for wasm32's 32-bit size_t
         self.check_task('tree_fold')
 
+    def test_deep_recursion_is_loud(self):
+        typed = 'def f(n: int) -> int:\n    if n <= 0:\n        return 0\n    return f(n - 1) + 1\n'
+        untyped = 'def f(n):\n    if n <= 0:\n        return 0\n    return f(n - 1) + 1\n'
+        # The general path stops on a real-stack check against a 256 MiB budget (AIL_STACK_UNLIMITED), so it needs
+        # AIL_UNIFIED_FORCE=1 to be exercised at all; the typed path stops on AIL_MAX_RECURSION_DEPTH.
+        for name, defs, forced in (('typed', typed, False), ('untyped', untyped, False), ('general', untyped, True)):
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                src = work / ('deep-' + name + '.py')
+                src.write_text(defs + '\nprint(f(50000000))\n')
+                r = self.run_wasm(self.build(work, src, force_general=forced))
+                self.assertNotEqual(r.returncode, 0)
+                err = r.stderr.decode('utf-8', 'replace')
+                self.assertIn('RecursionError', err)
+                self.assertNotIn('wasm trap', err.lower())
+
     def test_patch_c_refuses_a_changed_reader(self):
         text = 'static unsigned char *ail_stdin_fill_bytes(unsigned char *buf, size_t *capp) {}\n'
         self.assertIn('changed shape', wasm_build.patch_c(text)[1])
         self.assertEqual(wasm_build.patch_c('int main(void) { return 0; }\n'), ('int main(void) { return 0; }\n', ''))
+
+
+class WasiRefusalTests(unittest.TestCase):
+    """The WASI target refuses subprocess / threading / socket / signal by name at build time."""
+
+    def compile_wasi(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            src = work / 'm.py'
+            src.write_text(text)
+            env = {k: v for k, v in os.environ.items() if k not in ('AIL_TARGET', 'AIL_TARGET_OS')}
+            env['AIL_TARGET'] = 'wasi'
+            return subprocess.run([sys.executable, '-B', str(REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'),
+                                   'compile', str(src), '-o', str(work / 'm.bin')],
+                                  capture_output=True, text=True, timeout=120, env=env)
+
+    def assert_refused(self, r, module):
+        out = r.stderr + r.stdout
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn('%s is not available on wasm32-wasi' % module, out)
+        self.assertIn('write instead:', out)
+
+    def test_subprocess_refused_by_name(self):
+        self.assert_refused(self.compile_wasi(
+            'import subprocess\nr = subprocess.run(["true"])\nprint(r.returncode)\n'), 'subprocess')
+
+    def test_threading_refused_by_name(self):
+        self.assert_refused(self.compile_wasi('import threading\nprint("x")\n'), 'threading')
+
+    def test_socket_and_signal_refused_by_the_wasm_build(self):
+        for module in ('socket', 'signal'):
+            msg = wasm_build.wasi_refusal('import %s\nprint(1)\n' % module)
+            self.assertIsNotNone(msg)
+            self.assertIn(module, msg)
+            self.assertIn('WASI', msg)
+            self.assertIn('write instead:', msg)
+        self.assertIsNone(wasm_build.wasi_refusal('print(1)\n'))
+        self.assertIn('threading', wasm_build.wasi_refusal('def f():\n    import threading\n'))
+
+    def test_a_local_module_is_not_refused(self):
+        # the compiler resolves `import signal` to a sibling signal.py; the refusal must not pre-empt that
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / 'main.py'
+            src.write_text('import signal\nprint(signal.v())\n')
+            self.assertIsNotNone(wasm_build.wasi_refusal('import signal\nprint(1)\n', src))
+            (Path(tmp) / 'signal.py').write_text('def v():\n    return 41\n')
+            self.assertIsNone(wasm_build.wasi_refusal('import signal\nprint(1)\n', src))
+            self.assertIsNone(wasm_build.wasi_refusal('import signal as s\nprint(s.v())\n', src))
+            self.assertIsNone(wasm_build.wasi_refusal('from signal import v\nprint(v())\n', src))
+            (Path(tmp) / 'threading.py').write_text('def f():\n    return 1\n')
+            self.assertIsNone(wasm_build.wasi_refusal('import threading\nprint(threading.f())\n', src))
+
+    def test_build_refuses_before_needing_zig(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / 'm.py'
+            src.write_text('import socket\n')
+            ok, msg = wasm_build.build(src, Path(tmp) / 'm.wasm', Path(tmp) / 'w')
+            self.assertFalse(ok)
+            self.assertIn('socket is not available on wasm32-wasi', msg)
 
 
 if __name__ == '__main__':

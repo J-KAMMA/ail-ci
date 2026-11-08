@@ -7,10 +7,13 @@ Runs `ail_chatgpt.py compile SRC --debug-dir WORK/c` for the host (the host bina
 WORK/native), takes WORK/c/program.c plus every other generated C file WORK/c/native_report.json lists, and builds them
 with `zig cc -target wasm32-wasi -O2`, force-including tools/wasm_shim.h (the setjmp/longjmp tag, all behind
 `#ifdef __wasi__`). zig is AIL_ZIG, `zig` on PATH, or ~/tools/zig/zig (as test_ail_cross_target.py finds it);
-tested with zig 0.17.1. Run the result with `wasmtime run -W exceptions=y` (wasmtime 50.0.1; see WASMTIME_FLAGS).
+tested with zig 0.17.1. Run the result with `wasmtime run` and WASMTIME_FLAGS (wasmtime 50.0.1): `-W exceptions=y`
+for try/except and `-W max-wasm-stack=268435456`, without which a deep recursion traps instead of raising
+RecursionError.
 Prints one JSON line: output path, bytes, and the native binary. A failing step exits 1 with the first error line.
 """
 import argparse
+import ast
 import json
 import os
 import shutil
@@ -21,13 +24,71 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPILER = ROOT / 'AIL_CURRENT' / 'ail_chatgpt.py'
+if str(ROOT / 'AIL_CURRENT') not in sys.path:
+    sys.path.insert(0, str(ROOT / 'AIL_CURRENT'))
+import ail_modules      # the compiler's own local-module test: a sibling module shadows the standard one
 SHIM = Path(__file__).resolve().parent / 'wasm_shim.h'
 ZIG_FLAGS = ['-target', 'wasm32-wasi', '-O2', '-fno-tree-slp-vectorize', '-ffp-contract=off',
              '-Werror=implicit-function-declaration', '-Werror=implicit-int', '-Werror=incompatible-pointer-types',
              '-mexception-handling', '-mllvm', '-wasm-enable-sjlj', '-mllvm', '-wasm-use-legacy-eh=false',
              '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-D_WASI_EMULATED_MMAN', '-lwasi-emulated-mman',
-             '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '-s']
-WASMTIME_FLAGS = ['-W', 'exceptions=y']     # try/except runs on the exception-handling proposal
+             '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks',
+             # The general path's stack check reserves AIL_STACK_UNLIMITED (256 MiB on 32-bit) when getrlimit is
+             # absent, so the real stack must be that large or a runaway recursion would trap before RecursionError.
+             '-Wl,-z,stack-size=268435456', '-s']
+# try/except runs on the exception-handling proposal. max-wasm-stack is wasmtime's NATIVE execution stack, separate
+# from the module's linear-memory stack set by -z stack-size. Its default is under 1 MiB, which traps with "call stack
+# exhausted" before a runaway recursion reaches AIL's own depth check (typed: AIL_MAX_RECURSION_DEPTH; general path:
+# the real-stack check against a 256 MiB budget). Raise it to the same 256 MiB so the program reports RecursionError
+# instead of a bare trap. Without this flag a deep recursion has no message; see RESULTS.md.
+WASMTIME_FLAGS = ['-W', 'exceptions=y', '-W', 'max-wasm-stack=268435456']
+
+# Modules whose Python implementations cannot exist on wasm32-wasi. proclib.py and threadlib.py refuse
+# them in the compiler when AIL_TARGET_OS is wasi; this scan covers the same imports up front (and the
+# threaded patterns typedpar.py lowers away before threadlib.py sees the import), so the build names
+# WASI instead of reaching a linker error.
+WASI_REFUSED = {
+    'subprocess': 'WASI has no process creation (no fork/exec)',
+    'multiprocessing': 'WASI has no process creation (no fork/exec)',
+    'threading': 'WASI has no threads',
+    'queue': 'WASI has no threads',
+    'concurrent': 'WASI has no threads',
+    'socket': 'WASI has no network sockets',
+    'signal': 'WASI has no POSIX signals',
+}
+
+
+def wasi_refusal(text, src=None):
+    """The WASI refusal for the first import of a module wasm32-wasi cannot support, or None. An import that
+    resolves to a local module (`signal.py` beside the entry, an AIL_PATH module, a package) is not the standard
+    module the compiler would refuse for, so it is left to the compiler's own resolution."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names = [node.module]
+        else:
+            continue
+        for name in names:
+            if name.split('.')[0] in WASI_REFUSED:
+                found.append(name)
+    if not found:
+        return None
+    program = None
+    if src is not None:                 # without the path the search path is unknown, so no import is local
+        program = ail_modules.Program(src, lambda p: Path(p).read_bytes().decode('utf-8', 'surrogateescape'))
+    for name in found:
+        base = name.split('.')[0]
+        if program is None or not program.local_top(base):
+            return ('%s is not available on wasm32-wasi: %s.\n'
+                    '  write instead: run the program on the host target, or keep %s out of the wasm build'
+                    % (base, WASI_REFUSED[base], base))
+    return None
 
 
 def zig():
@@ -78,6 +139,12 @@ def c_sources(debug_dir):
 def build(src, out, work, extra=()):
     """Builds WORK/native and OUT; WORK/c must not exist yet. Returns (ok, message): the first compiler or
     linker error on failure."""
+    try:
+        refusal = wasi_refusal(Path(src).read_text(encoding='utf-8', errors='surrogateescape'), Path(src).resolve())
+    except OSError:
+        refusal = None
+    if refusal:
+        return False, refusal
     z = zig()
     if not z:
         return False, 'zig is not installed (AIL_ZIG, PATH or ~/tools/zig/zig)'
@@ -85,8 +152,9 @@ def build(src, out, work, extra=()):
     debug_dir, native = work / 'c', work / 'native'
     if debug_dir.exists() or native.exists():
         return False, '%s already holds a build' % work
+    env = dict(os.environ, AIL_TARGET_OS='wasi')      # proclib.py / threadlib.py refuse by name for WASI
     r = subprocess.run([sys.executable, '-B', str(COMPILER), 'compile', str(src), '-o', str(native),
-                        '--debug-dir', str(debug_dir), *extra], capture_output=True, text=True)
+                        '--debug-dir', str(debug_dir), *extra], capture_output=True, text=True, env=env)
     if r.returncode != 0 or not (debug_dir / 'program.c').is_file():
         return False, 'host compile: ' + first_error(r.stderr + r.stdout)
     sources = []

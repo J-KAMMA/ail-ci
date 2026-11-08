@@ -1,4 +1,69 @@
-# AIL on wasm32-wasi (ffwasm1, 2026-11-06)
+# AIL on wasm32-wasi (ffwasm1, 2026-11-06; ffwasm2, 2026-11-08)
+
+## ffwasm2 (2026-11-08): WASI refusals, remaining tasks, sizes
+
+This run re-fetched the pinned toolchain from the official sources and re-measured everything. Both archives match the
+sha256 recorded under ffwasm1 (zig 0.17.1 `3581863e...b17a`, wasmtime 50.0.1 `68546645...98a5`), so the numbers below
+were produced on this runner, not copied from ffwasm1.
+
+Refusals by name (no linker error), each with a `write instead:` line, checked with `AIL_TARGET=wasi`:
+- `import subprocess` -> `subprocess is not available on wasm32-wasi: WASI has no process creation (no fork/exec)`
+  (proclib.py; `AIL_TARGET=wasi`, or `AIL_TARGET_OS=wasi`). Exit 3, `not in the subset:` prefix.
+- `import threading` / `queue` / `concurrent.futures` -> `... is not available on wasm32-wasi: WASI has no threads`
+  (threadlib.py). Exit 2.
+- `import socket` / `signal` -> the same shape from `tools/wasm_build.py` (`WASI_REFUSED`), checked before the
+  toolchain so the build fails with the name even when zig is missing. It also catches the threaded patterns
+  `typedpar.py` lowers before threadlib.py sees the import. There is no socklib.py or siglib.py in this tree, so the
+  build script is the refusing layer for those two; without it `ail_chatgpt.py compile` falls back to the general path
+  and the failure would only appear at link time.
+- The `WASI_REFUSED` scan resolves each import through `ail_modules.Program.local_top`, so an `import signal` that
+  names a sibling `signal.py`, a package directory, an `AIL_PATH` module or a bundled module is left to the compiler:
+  it is an ordinary local module, not the standard one, and still builds. Only the standard module is refused.
+- `tools/wasm_build.py` runs the host compiler with `AIL_TARGET_OS=wasi`, not `AIL_TARGET=wasi`: the latter would make
+  `sys.platform` unknown in `ail_modules.py` until `TARGETS['wasi']` exists.
+
+Remaining tasks: none. The ffwasm1 table's 10/10 is re-verified below. The build carries
+`-D_WASI_EMULATED_PROCESS_CLOCKS` and the test's `--dir D::D` preopens; `clock_gettime` and file preopens work (the
+tasks read files and stdin).
+
+Deep recursion (the one real bug found by running the new test): AIL's typed path stops at
+`AIL_MAX_RECURSION_DEPTH` (50000 frames) and the general path at a real-stack check against a 256 MiB
+`AIL_STACK_UNLIMITED` budget, so the module needs a 256 MiB stack (`-Wl,-z,stack-size=268435456`). But wasmtime's
+**native** execution stack (`-W max-wasm-stack`, default under 1 MiB) is separate from that linear-memory stack, and it
+trapped with `wasm trap: call stack exhausted` before either check fired. `WASMTIME_FLAGS` now sets
+`-W max-wasm-stack=268435456`, matching the linear budget, so the program reports `RecursionError` instead. Verified
+(typed, auto-typed, and `AIL_UNIFIED_FORCE=1` general path): `f(50000000)` exits nonzero with
+`RecursionError: maximum recursion depth exceeded` on stderr and no "call stack exhausted"; `f(49000)` still computes.
+`test_deep_recursion_is_loud` covers all three paths.
+
+**Run with `-W max-wasm-stack=268435456` (part of `WASMTIME_FLAGS`)** or a deep recursion traps without a message.
+
+## Size table (ffwasm2, this run)
+
+`.wasm` bytes per compare-lab task, standard build (`zig cc ... -O2 ... -s`). `-s` already strips: the same program is
+921,159 bytes without it and 7,424 with it, so these numbers are stripped. `wasm-strip` is not installed, and is not
+needed. The Rust side is **not measured**: `rustup target list --installed` lists only `x86_64-unknown-linux-gnu`, no
+`wasm32-wasip1`, and the task says to record that and stop rather than install the target.
+
+| task | cases matching | `.wasm` bytes |
+|---|---|---|
+| berth_sim | 27/27 | 75,658 |
+| chain_relax | 33/33 | 47,310 |
+| echo_pack | 58/58 | 47,087 |
+| ledger_bin | 56/56 | 76,029 |
+| rail_transfer | 25/25 | 78,854 |
+| scar_life | 54/54 | 53,841 |
+| tally_lang | 76/76 | 114,989 |
+| term_rank | 44/44 | 92,043 |
+| ticket_audit | 92/92 | 217,375 |
+| tree_fold | 56/56 | 76,584 |
+
+**10/10 build, 10/10 match** on every public, hidden and perf case (stdout and exit status vs
+`tasks/<task>/reference.py` under CPython 3.12). Geomean size 79,097 bytes; total 879,770 bytes. Sizes differ a few
+percent from the ffwasm1 column because the runtime changed between snapshots; the match counts are unchanged.
+No linker error and no trap without a message remains.
+
+## ffwasm1
 
 `tools/wasm_build.py SRC -o OUT.wasm` runs the host compile (`ail_chatgpt.py compile SRC --debug-dir WORK/c`), takes
 `WORK/c/program.c` and builds it with `zig cc -target wasm32-wasi -O2`, force-including `tools/wasm_shim.h`. Run it

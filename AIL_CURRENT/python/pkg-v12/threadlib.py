@@ -24,6 +24,7 @@ modules is returned as written, byte for byte.
 import ast
 import builtins
 import copy
+import os
 
 MARKER = '_ail_threads'
 MODULES = ('threading', 'queue', 'concurrent.futures')
@@ -535,6 +536,24 @@ def _release_before_jumps(stmts, leave):
     return found
 
 
+def wasi_target():
+    """Whether the build targets wasm32-wasi: AIL_TARGET=wasi, or AIL_TARGET_OS=wasi from tools/wasm_build.py."""
+    return os.environ.get('AIL_TARGET') == 'wasi' or os.environ.get('AIL_TARGET_OS') == 'wasi'
+
+
+def _first_module(tree):
+    """The first import node of threading / queue / concurrent.futures, and the module it names."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name in MODULES or a.name.split('.')[0] == 'concurrent':
+                    return node, a.name
+        elif isinstance(node, ast.ImportFrom) and not node.level and (
+                node.module in MODULES or node.module == 'concurrent'):
+            return node, node.module
+    return None, None
+
+
 def rewrite_text(source, notes=None):
     """The program with its threading / queue / concurrent.futures uses lowered, or the source as written."""
     if not any(word in source for word in ('threading', 'queue', 'concurrent')):
@@ -545,6 +564,21 @@ def rewrite_text(source, notes=None):
         return source
     if not _uses_modules(tree):
         return source
+    if wasi_target():
+        node, name = _first_module(tree)
+        if node is not None:
+            text = ('%s is not available on wasm32-wasi: WASI has no threads.\n'
+                    '  write instead: run the program on the host target, or do the work in one thread' % name)
+            try:
+                import ail_syntax
+            except ImportError:
+                ail_syntax = None
+            if ail_syntax is not None:
+                raise ail_syntax.SyntaxErrorAIL(text, lineno=getattr(node, 'lineno', None) or 1,
+                                                offset=getattr(node, 'col_offset', 0) + 1)
+            if notes is not None:
+                notes.append((getattr(node, 'lineno', None) or 1, text))
+            return source
     try:
         imports = _Imports(tree)
         rw = _Rewriter(tree, imports)
