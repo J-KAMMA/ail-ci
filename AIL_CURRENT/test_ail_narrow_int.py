@@ -158,6 +158,102 @@ def main() -> None:
 main()
 '''
 
+SLICE = '''def main() -> None:
+    xs: list[int] = []
+    for v in (1, 2147483647, 2147483648, -2147483649, 7, 9):
+        xs.append(v)
+    a = xs[1:4]
+    for v in a:
+        print(v)
+    b = xs[:]
+    for v in b:
+        print(v)
+    c = xs[::2]
+    for v in c:
+        print(v)
+    d = xs[::-1]
+    for v in d:
+        print(v)
+    e = xs[2:]
+    for v in e:
+        print(v)
+    f = xs[:2]
+    for v in f:
+        print(v)
+    g = xs[-3:-1]
+    for v in g:
+        print(v)
+    h = xs[0:0]
+    print(len(h))
+    ys = xs[1:5:2]
+    print(len(ys), ys[0], ys[1])
+    print(xs[0], xs[1], xs[2], xs[3], xs[4], xs[5])
+
+main()
+'''
+
+COPY = '''def main() -> None:
+    xs: list[int] = []
+    for v in (2147483647, 2147483648, -2147483649, 0):
+        xs.append(v)
+    ys = xs.copy()
+    print(len(ys))
+    for v in ys:
+        print(v)
+    ys[0] = 5
+    print(xs[0], ys[0])
+    zs = list(xs)
+    for v in zs:
+        print(v)
+    ws = xs + ys
+    print(len(ws))
+    for v in ws:
+        print(v)
+    es: list[int] = []
+    t = es.copy()
+    print(len(t))
+    u = list(es)
+    print(len(u))
+    w = es + es
+    print(len(w))
+
+main()
+'''
+
+SORT = '''def main() -> None:
+    xs: list[int] = []
+    for v in (5, 2147483648, -3, 2147483647, -2147483649, 0):
+        xs.append(v)
+    xs.sort()
+    for v in xs:
+        print(v)
+    ys = sorted(xs)
+    for v in ys:
+        print(v)
+    print(len(xs))
+    es: list[int] = []
+    es.sort()
+    q = sorted(es)
+    print(len(q))
+
+main()
+'''
+
+KEYSORT = '''def main() -> None:
+    key: list[int] = []
+    for v in (5, 3, 5, 3, 5, 3):
+        key.append(v)
+    idx: list[int] = []
+    for i in range(len(key)):
+        idx.append(i)
+    idx.sort(key=lambda i: key[i])
+    print(idx)
+    order = sorted(idx, key=lambda i: key[i])
+    print(order)
+
+main()
+'''
+
 EMPTY = '''def main() -> None:
     xs: list[int] = []
     print(len(xs))
@@ -250,6 +346,18 @@ class NarrowIntTests(unittest.TestCase):
 
     def test_empty_list(self):
         self.check('empty', EMPTY)
+
+    def test_slices_across_int32_boundary(self):
+        self.check('slice', SLICE)
+
+    def test_copy_and_concatenate(self):
+        self.check('copy', COPY)
+
+    def test_sort_of_widened_list(self):
+        self.check('sort', SORT)
+
+    def test_key_sort_equal_keys_are_stable(self):
+        self.check('keysort', KEYSORT)
 
     def test_write_index_text_matches_across_builds(self):
         source = ('def main() -> None:\n    xs: list[int] = []\n    xs.append(1)\n'

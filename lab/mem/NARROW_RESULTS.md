@@ -1,3 +1,46 @@
+# fbnarrow4: slices, copies, sorts, and the default-on gate
+
+`AIL_NARROW_INT` stays **opt-in**. The owner decision of 2026-11-06 says not to switch a default;
+the numbers below are also short of the gate (the tree_fold peak target is 330 MiB, and one row is
+not measured).
+
+## New list shapes this step supports
+
+`x[a:b]`, `x[a:b:c]` (same width as the source), `x.copy()`, `list(x)`, `x + y` (the runtime
+widens on push, so no range proof is needed), `x.sort()`, `sorted(x)`, and `sorted(x)[a:b]` when
+the source is narrow. A key sort column (`_ail_sk1_*`) is still a comprehension local and is not
+narrowed: the key lambda reads its int lists through the ordinary subscript emitter, which works,
+but the analysis does not yet treat the column itself as narrow. Widening cannot happen in a copy
+or a sort (no new values), so the width carries over. Field `dep` (`t.dep[j] -= 1`) and the keyed
+sort over `t.par` keep those two lists int64 (augmented index write and a lambda read).
+
+## tree_fold (N = 3,000,000, same input as `lab/mem/NARROW.md`)
+
+| | default | `AIL_NARROW_INT=1` | change |
+|---|---:|---:|---:|
+| peak RSS, `/usr/bin/time -v`, median of 3 (KiB) | 367,240 | 355,600 | **−3.17%** |
+| stdout | identical on the perf input and all public cases checked | | |
+| binary size (bytes) | 86,568 | 86,864 | +0.34% |
+
+This is a GitHub Actions runner (4 cores). The target of 330 MiB is **not met**; the lists that stay
+int64 are named above. `w` now narrows because `.copy()` is supported (it was the only use keeping
+it int64), so the two live `w` sites (64.0 MiB in `NARROW.md`) are no longer 8-byte.
+
+## Gate rows (not complete)
+
+| row | result |
+|---|---|
+| run instructions (10 compare tasks, 6 rc programs) | **not measured** (time budget; no PMU on this runner) |
+| peak RSS, none higher by >1% | only tree_fold measured (−3.17%); other 9 tasks/6 programs not run |
+| binary size, none larger by >2% | only tree_fold measured (+0.34%) |
+| output differences on public/hidden cases | tree_fold perf + first public cases: 0; full 55-case sweep not run |
+| first 100 corpus programs unchanged | not run |
+| 20 shards green | not run |
+
+Because the gate is incomplete and one row was not measured, the default is not flipped. Fixing
+`dep`, the keyed sort over `par`, the `[0] * n` locals and the augmented index writes on `sub`,
+`cs`, `pos` and `cc` is the remaining work toward 330 MiB.
+
 # fbnarrow3: `ail_ilist` for `list[int]` locals and class fields (opt-in `AIL_NARROW_INT=1`)
 
 The typed (legacy) emitter stores a `list[int]` local or class field as `ail_ilist` when every

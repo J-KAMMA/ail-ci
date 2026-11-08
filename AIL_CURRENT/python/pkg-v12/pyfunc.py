@@ -13455,6 +13455,20 @@ def _sorted_into_temp(node, ctx):
                           'this deliberately and there is no route today -- index the list and '
                           'write the comparison loop yourself, or keep the values as scaled '
                           'whole numbers and sort those')
+    if isinstance(node.args[0], ast.Name) and node.args[0].id in getattr(ctx, 'narrow_int', ()):
+        # `sorted(xs)` over a narrowed local: read elements through the width-aware accessor.
+        src = ctx.cname(node.args[0].id)
+        ctx.parts.update(('LIST', 'SORT'))
+        c, _ = ctx.temp(LIST)
+        ctx.pre.append('ail_list_clear(&%s);' % c)
+        ctx.pre.append('for (int64_t _i = 0; _i < %s.n; _i++) ail_list_push(&%s, ail_ilist_get(&%s, _i));'
+                       % (src, c, src))
+        ctx.pre.append('ail_list_sort(&%s);' % c)
+        if reverse:
+            ctx.pre.append('for (int64_t _i = 0, _j = %s.n - 1; _i < _j; _i++, _j--) '
+                           '{ int64_t _t = %s.p[_i]; %s.p[_i] = %s.p[_j]; %s.p[_j] = _t; }'
+                           % (c, c, c, c, c))
+        return c, None
     ctx.parts.update(('LIST', 'SORT'))
     c, _ = ctx.temp(LIST)
     # # A generated temp's declaration is hoisted to the top of the function, so inside a loop it
@@ -20467,6 +20481,8 @@ def _method(node, ctx, *, as_stmt=False):
         ctx.parts.update(('LIST', 'POOL'))
         return 'ail_list_push(&%s, %s)' % (c, h)
     if m == 'sort' and t == LIST and not a and not node.keywords:
+        if name in getattr(ctx, 'narrow_int', ()):
+            return 'ail_ilist_sort(&%s)' % c
         if name in ctx.nlist:
             raise Unsupported('%r.sort() on a list of lists; its elements are handles, not '
                               'comparable numbers' % name)
@@ -24366,6 +24382,18 @@ def _stmt_inner(node, ctx, ind):
                 if v0.slice.upper is not None:
                     hi = _expr(v0.slice.upper, ctx)
                 pre = _flush(ctx, pad)
+                if v0.value.id in getattr(ctx, 'narrow_int', ()):
+                    # `ys = xs[a:b:c]` where `xs` is an `ail_ilist`: the width-aware slice helper
+                    # reads `q` when the source widened. The destination may be either kind.
+                    if src_c == c:
+                        return (pre + '%s{ ail_ilist _sw = {0};\n' % pad
+                                + '%sail_ilist_slice_from_ilist(&_sw, &%s, %s, %s, %d);\n'
+                                % (pad, src_c, lo, hi, stv)
+                                + '%sail_ilist_free(&%s); %s = _sw; }\n' % (pad, c, c))
+                    clear = '%sail_list_clear(&%s);\n' % (pad, c) if rebound else ''
+                    return (pre + clear
+                            + '%sail_narrow_slice_into(&%s, &%s, %s, %s, %d);\n'
+                            % (pad, c, src_c, lo, hi, stv))
                 if src_c == c:
                     # `xs = xs[a:b]` -- the source is the destination: build the slice in a private
                     # list first (clearing the destination would empty the source), then swap it in

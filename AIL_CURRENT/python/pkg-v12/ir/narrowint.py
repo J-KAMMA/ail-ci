@@ -101,6 +101,7 @@ static inline __attribute__((always_inline)) void ail_ilist_push(ail_ilist *s, i
 }
 static __attribute__((noinline, noreturn)) void ail_ilist_index_fail(void) {
     ail_die("list index out of range");
+    __builtin_unreachable();
 }
 static inline __attribute__((always_inline)) int64_t ail_ilist_get(const ail_ilist *s, int64_t i) {
     if (__builtin_expect((uint64_t)i < (uint64_t)s->n && s->p, 1))
@@ -140,6 +141,47 @@ static void ail_ilist_reverse(ail_ilist *s) {
         if (s->wide) { int64_t v = s->q[i]; s->q[i] = s->q[j]; s->q[j] = v; }
         else { int32_t v = s->p[i]; s->p[i] = s->p[j]; s->p[j] = v; }
     }
+}
+static __attribute__((unused)) int ail__ilist_cmp32(const void *a, const void *b) {
+    int32_t x = *(const int32_t *)a, y = *(const int32_t *)b;
+    return (x > y) - (x < y);
+}
+static __attribute__((unused)) int ail__ilist_cmp64(const void *a, const void *b) {
+    int64_t x = *(const int64_t *)a, y = *(const int64_t *)b;
+    return (x > y) - (x < y);
+}
+static __attribute__((unused)) void ail_ilist_sort(ail_ilist *s) {
+    if (s->n < 2) return;
+    if (s->wide) qsort(s->q, (size_t)s->n, sizeof *s->q, ail__ilist_cmp64);
+    else qsort(s->p, (size_t)s->n, sizeof *s->p, ail__ilist_cmp32);
+}
+static void ail__ilist_slice_bounds(const ail_ilist *s, int64_t lo, int64_t hi, int64_t st,
+                                    int64_t *a, int64_t *b) {
+    int64_t n = s->n;
+    if (st == 0) ail_die("slice step cannot be zero");
+    if (st > 0) {
+        *a = lo < 0 ? (lo + n < 0 ? 0 : lo + n) : (lo > n ? n : lo);
+        *b = hi < 0 ? (hi + n < 0 ? 0 : hi + n) : (hi > n ? n : hi);
+    } else {
+        *a = lo < 0 ? (lo + n < -1 ? -1 : lo + n) : (lo > n - 1 ? n - 1 : lo);
+        *b = hi < 0 ? (hi + n < -1 ? -1 : hi + n) : (hi > n - 1 ? n - 1 : hi);
+    }
+}
+static void ail_ilist_slice_from_ilist(ail_ilist *d, const ail_ilist *s,
+                                       int64_t lo, int64_t hi, int64_t st) {
+    int64_t a, b;
+    ail__ilist_slice_bounds(s, lo, hi, st, &a, &b);
+    ail_ilist_clear(d);
+    for (int64_t i = a; st > 0 ? i < b : i > b; i += st)
+        ail_ilist_push(d, s->wide ? s->q[i] : s->p[i]);
+}
+static void ail_list_slice_from_ilist(ail_list *d, const ail_ilist *s,
+                                      int64_t lo, int64_t hi, int64_t st) {
+    int64_t a, b;
+    ail__ilist_slice_bounds(s, lo, hi, st, &a, &b);
+    ail_list_clear(d);
+    for (int64_t i = a; st > 0 ? i < b : i > b; i += st)
+        ail_list_push(d, s->wide ? s->q[i] : s->p[i]);
 }
 static ail_ilist ail_ilist_from_list(const ail_list *src) {
     ail_ilist out = {0};
@@ -286,6 +328,7 @@ static void ail_ilist_extend_list(ail_ilist *s, const ail_list *src) {
 #define ail_list_view_get(D, N, I) _Generic((D), int32_t*: ail_ilist_view_get, const int32_t*: ail_ilist_view_get, default: ail_list_view_get)((D), (N), (I))
 #define ail_list_view_set(D, N, I, V) _Generic((D), int32_t*: ail_ilist_view_set, default: ail_list_view_set)((D), (N), (I), (V))
 #define ail_list_copy(D, S) _Generic((D), ail_ilist*: _Generic((S), ail_ilist*: ail_ilist_copy_from_ilist, const ail_ilist*: ail_ilist_copy_from_ilist, default: ail_ilist_copy_from_list), default: _Generic((S), ail_ilist*: ail_list_copy_from_ilist, const ail_ilist*: ail_list_copy_from_ilist, default: ail_list_copy))((D), (S))
+#define ail_narrow_slice_into(D, S, LO, HI, ST) _Generic((D), ail_ilist*: ail_ilist_slice_from_ilist, default: ail_list_slice_from_ilist)((D), (S), (LO), (HI), (ST))
 #define ail_numfield_list_append(S, V) _Generic((S), ail_ilist*: ail_ilist_push, default: ail_numfield_list_append)((S), (V))
 #define ail_numfield_list_pop(S, I) _Generic((S), ail_ilist*: ail_ilist_pop, default: ail_numfield_list_pop)((S), (I))
 #define ail_numfield_list_clear(S) _Generic((S), ail_ilist*: ail_ilist_clear, default: ail_numfield_list_clear)((S))
@@ -334,16 +377,66 @@ _NARROW_FIELDS = set()
 
 def blocks_ir(fn, ctx):
     """The IR backend has no `ail_ilist` emitters: a function that touches a narrowed class
-    field must take the legacy typed emitter, which does. A function with only narrowed locals
-    keeps the IR path (where the locals stay `ail_list`), so its C and its error texts are
-    exactly what they were without the variable."""
+    field, or that has a narrowed local, must take the legacy typed emitter, which does. A
+    function with neither keeps the IR path, so its C and its error texts are exactly what they
+    were without the variable."""
     if not enabled():
         return False
+    if getattr(ctx, 'narrow_int', ()):
+        return True
     return any(isinstance(node, ast.Attribute) and node.attr in _NARROW_FIELDS
                for node in ast.walk(fn))
 
 
-def _local_binding_ok(name, fn, parents):
+def _narrow_ref(node, names):
+    """A name/field expression that denotes a list already narrowed (or being narrowed)."""
+    if isinstance(node, ast.Name):
+        return node.id in names
+    if isinstance(node, ast.Attribute):
+        return node.attr in _NARROW_FIELDS
+    return False
+
+
+def _carry_ok(node, names):
+    """An expression whose values are all copied out of narrow lists: `.copy()`, `list(x)`,
+    `sorted(x)`, `x[a:b]` / `x[a:b:c]`, and `x + y` when both sides are narrow. No new value can
+    reach such a list that a narrow source did not already hold, so the width carries over."""
+    if _narrow_ref(node, names):
+        return True
+    if isinstance(node, ast.Call):
+        func = node.func
+        if (isinstance(func, ast.Attribute) and func.attr == 'copy'
+                and not node.args and not node.keywords):
+            return _carry_ok(func.value, names)
+        if (isinstance(func, ast.Name) and func.id in ('list', 'sorted')
+                and len(node.args) == 1 and not node.keywords):
+            return _carry_ok(node.args[0], names)
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+        return _carry_ok(node.value, names)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        # Either side may still be an int64 list: the runtime widens on push, so `x + y` never
+        # truncates and needs no proof that both operands are narrow.
+        return (_carry_ok(node.left, names)
+                or isinstance(node.left, (ast.Name, ast.Attribute))) \
+            and (_carry_ok(node.right, names)
+                 or isinstance(node.right, (ast.Name, ast.Attribute)))
+    return False
+
+
+def _bound_name(parents, value):
+    """True when `value` is the whole right side of an assignment to one plain name."""
+    parent = parents.get(value)
+    if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is value:
+        targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+        return len(targets) == 1 and isinstance(targets[0], ast.Name)
+    return False
+
+
+def _binding_ok(value, names):
+    return _empty_list(value) or _carry_ok(value, names)
+
+
+def _local_bindings_ok(name, fn, names):
     seen = False
     for node in ast.walk(fn):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -353,14 +446,14 @@ def _local_binding_ok(name, fn, parents):
                 continue
             for target in targets:
                 if isinstance(target, ast.Name) and target.id == name:
-                    if not _empty_list(value):
+                    if not _binding_ok(value, names):
                         return False
                     seen = True
                 elif isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)) \
                         and len(target.elts) == len(value.elts):
                     for t, v in zip(target.elts, value.elts):
                         if isinstance(t, ast.Name) and t.id == name:
-                            if not _empty_list(v):
+                            if not _binding_ok(v, names):
                                 return False
                             seen = True
         elif isinstance(node, (ast.For, ast.AsyncFor)):
@@ -390,25 +483,39 @@ _LOCAL_METHODS = frozenset(('append', 'pop', 'clear'))
 _PARALLEL_NODES = (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 
-def _local_use_ok(node, name, parents):
+def _local_use_ok(node, name, parents, names):
     parent = parents.get(node)
     grand = parents.get(parent)
     if isinstance(parent, ast.Subscript) and parent.value is node:
         if isinstance(grand, ast.AugAssign) and grand.target is parent:
             return False
-        return not isinstance(parent.slice, ast.Slice)
+        if isinstance(parent.slice, ast.Slice):
+            return _bound_name(parents, parent)
+        return True
     if isinstance(parent, ast.Call):
         if parent.func is node:
             return False
         if (isinstance(parent.func, ast.Name) and parent.func.id == 'len'
                 and not parent.keywords and len(parent.args) == 1 and parent.args[0] is node):
             return True
+        if (isinstance(parent.func, ast.Name) and parent.func.id in ('list', 'sorted')
+                and len(parent.args) == 1 and not parent.keywords and parent.args[0] is node):
+            return _bound_name(parents, parent)
         return False
     if isinstance(parent, ast.Attribute) and parent.value is node:
+        if parent.attr == 'copy':
+            return (isinstance(grand, ast.Call) and grand.func is parent
+                    and not grand.args and not grand.keywords and _bound_name(parents, grand))
+        if parent.attr == 'sort':
+            return (isinstance(grand, ast.Call) and grand.func is parent
+                    and not grand.args and not grand.keywords)
         return (parent.attr in _LOCAL_METHODS and isinstance(grand, ast.Call)
                 and grand.func is parent and not grand.keywords)
     if isinstance(parent, ast.For) and parent.iter is node:
         return True
+    if isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Add) \
+            and (parent.left is node or parent.right is node):
+        return _bound_name(parents, parent)
     if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is node:
         targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
         return all(isinstance(t, ast.Attribute) and t.attr in _NARROW_FIELDS
@@ -429,27 +536,34 @@ def locals(fn, ctx, classes=None):
         excluded.update(getattr(ctx, attr, ()) or ())
     bindings = getattr(ctx, 'local_bindings', ()) or ()
     parents = _parents(fn)
-    out = set()
-    for name in bindings:
-        if name in ctx.kind or name in excluded or name in ctx.modconsts:
-            continue
-        if ctx.types.get(name) != LIST:
-            continue
-        if not _local_binding_ok(name, fn, parents):
-            continue
+
+    def usable(name, names):
         ok = True
         for node in ast.walk(fn):
             if isinstance(node, _PARALLEL_NODES):
                 if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node)):
-                    ok = False
-                    break
+                    return False
             if not (isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load)):
                 continue
-            if not _local_use_ok(node, name, parents):
-                ok = False
-                break
-        if ok:
-            out.add(name)
+            if not _local_use_ok(node, name, parents, names):
+                return False
+        return ok
+
+    candidates = [name for name in bindings
+                  if name not in ctx.kind and name not in excluded and name not in ctx.modconsts
+                  and ctx.types.get(name) == LIST]
+    out = set()
+    changed = True
+    while changed:
+        changed = False
+        for name in candidates:
+            if name in out:
+                continue
+            if not _local_bindings_ok(name, fn, out):
+                continue
+            if usable(name, out):
+                out.add(name)
+                changed = True
     return frozenset(out)
 
 
@@ -461,8 +575,10 @@ def _field_use_ok(node, attr, parents):
     parent = parents.get(node)
     grand = parents.get(parent)
     if isinstance(parent, ast.Subscript) and parent.value is node:
-        if isinstance(parent.slice, ast.Slice) or isinstance(parent.ctx, ast.Del):
+        if isinstance(parent.ctx, ast.Del):
             return False
+        if isinstance(parent.slice, ast.Slice):
+            return _bound_name(parents, parent)
         if isinstance(grand, ast.AugAssign) and grand.target is parent:
             return False
         return True
@@ -472,8 +588,17 @@ def _field_use_ok(node, attr, parents):
         if (isinstance(parent.func, ast.Name) and parent.func.id == 'len'
                 and not parent.keywords and len(parent.args) == 1 and parent.args[0] is node):
             return True
+        if (isinstance(parent.func, ast.Name) and parent.func.id in ('list', 'sorted')
+                and len(parent.args) == 1 and not parent.keywords and parent.args[0] is node):
+            return _bound_name(parents, parent)
         return False
     if isinstance(parent, ast.Attribute) and parent.value is node:
+        if parent.attr == 'copy':
+            return (isinstance(grand, ast.Call) and grand.func is parent
+                    and not grand.args and not grand.keywords and _bound_name(parents, grand))
+        if parent.attr == 'sort':
+            return (isinstance(grand, ast.Call) and grand.func is parent
+                    and not grand.args and not grand.keywords)
         if parent.attr in _FIELD_BLOCK_METHODS:
             return False
         return (parent.attr in _FIELD_METHODS and isinstance(grand, ast.Call)
