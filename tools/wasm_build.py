@@ -11,6 +11,7 @@ tested with zig 0.17.1. Run the result with `wasmtime run -W exceptions=y` (wasm
 Prints one JSON line: output path, bytes, and the native binary. A failing step exits 1 with the first error line.
 """
 import argparse
+import ast
 import json
 import os
 import shutil
@@ -28,6 +29,42 @@ ZIG_FLAGS = ['-target', 'wasm32-wasi', '-O2', '-fno-tree-slp-vectorize', '-ffp-c
              '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-D_WASI_EMULATED_MMAN', '-lwasi-emulated-mman',
              '-D_WASI_EMULATED_PROCESS_CLOCKS', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '-s']
 WASMTIME_FLAGS = ['-W', 'exceptions=y']     # try/except runs on the exception-handling proposal
+
+# Modules whose Python implementations cannot exist on wasm32-wasi. proclib.py and threadlib.py refuse
+# them in the compiler when AIL_TARGET_OS is wasi; this scan covers the same imports up front (and the
+# threaded patterns typedpar.py lowers away before threadlib.py sees the import), so the build names
+# WASI instead of reaching a linker error.
+WASI_REFUSED = {
+    'subprocess': 'WASI has no process creation (no fork/exec)',
+    'multiprocessing': 'WASI has no process creation (no fork/exec)',
+    'threading': 'WASI has no threads',
+    'queue': 'WASI has no threads',
+    'concurrent': 'WASI has no threads',
+    'socket': 'WASI has no network sockets',
+    'signal': 'WASI has no POSIX signals',
+}
+
+
+def wasi_refusal(text):
+    """The WASI refusal for the first import of a module wasm32-wasi cannot support, or None."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names = [node.module]
+        else:
+            continue
+        for name in names:
+            base = name.split('.')[0]
+            if base in WASI_REFUSED:
+                return ('%s is not available on wasm32-wasi: %s.\n'
+                        '  write instead: run the program on the host target, or keep %s out of the wasm build'
+                        % (base, WASI_REFUSED[base], base))
+    return None
 
 
 def zig():
@@ -81,12 +118,19 @@ def build(src, out, work, extra=()):
     z = zig()
     if not z:
         return False, 'zig is not installed (AIL_ZIG, PATH or ~/tools/zig/zig)'
+    try:
+        refusal = wasi_refusal(Path(src).read_text(encoding='utf-8', errors='surrogateescape'))
+    except OSError:
+        refusal = None
+    if refusal:
+        return False, refusal
     work.mkdir(parents=True, exist_ok=True)
     debug_dir, native = work / 'c', work / 'native'
     if debug_dir.exists() or native.exists():
         return False, '%s already holds a build' % work
+    env = dict(os.environ, AIL_TARGET_OS='wasi')      # proclib.py / threadlib.py refuse by name for WASI
     r = subprocess.run([sys.executable, '-B', str(COMPILER), 'compile', str(src), '-o', str(native),
-                        '--debug-dir', str(debug_dir), *extra], capture_output=True, text=True)
+                        '--debug-dir', str(debug_dir), *extra], capture_output=True, text=True, env=env)
     if r.returncode != 0 or not (debug_dir / 'program.c').is_file():
         return False, 'host compile: ' + first_error(r.stderr + r.stdout)
     sources = []

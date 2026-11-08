@@ -94,5 +94,43 @@ class WasmTests(unittest.TestCase):
         self.assertEqual(wasm_build.patch_c('int main(void) { return 0; }\n'), ('int main(void) { return 0; }\n', ''))
 
 
+class WasiRefusalTests(unittest.TestCase):
+    """The WASI target refuses subprocess / threading / socket / signal by name at build time."""
+
+    def compile_wasi(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            src = work / 'm.py'
+            src.write_text(text)
+            env = {k: v for k, v in os.environ.items() if k not in ('AIL_TARGET', 'AIL_TARGET_OS')}
+            env['AIL_TARGET'] = 'wasi'
+            return subprocess.run([sys.executable, '-B', str(REPO / 'AIL_CURRENT' / 'ail_chatgpt.py'),
+                                   'compile', str(src), '-o', str(work / 'm.bin')],
+                                  capture_output=True, text=True, timeout=120, env=env)
+
+    def assert_refused(self, r, module):
+        out = r.stderr + r.stdout
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn('%s is not available on wasm32-wasi' % module, out)
+        self.assertIn('write instead:', out)
+
+    def test_subprocess_refused_by_name(self):
+        self.assert_refused(self.compile_wasi(
+            'import subprocess\nr = subprocess.run(["true"])\nprint(r.returncode)\n'), 'subprocess')
+
+    def test_threading_refused_by_name(self):
+        self.assert_refused(self.compile_wasi('import threading\nprint("x")\n'), 'threading')
+
+    def test_socket_and_signal_refused_by_the_wasm_build(self):
+        for module in ('socket', 'signal'):
+            msg = wasm_build.wasi_refusal('import %s\nprint(1)\n' % module)
+            self.assertIsNotNone(msg)
+            self.assertIn(module, msg)
+            self.assertIn('WASI', msg)
+            self.assertIn('write instead:', msg)
+        self.assertIsNone(wasm_build.wasi_refusal('print(1)\n'))
+        self.assertIn('threading', wasm_build.wasi_refusal('def f():\n    import threading\n'))
+
+
 if __name__ == '__main__':
     unittest.main()
