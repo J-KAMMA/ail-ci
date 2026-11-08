@@ -1,3 +1,23 @@
+## 2026-11-08 -- fz240: `float()` of an exact int constant past int64 already matches CPython (job-fz240-11081749)
+
+The daily fuzzer (seed 2076507535) reported `line 3: cpython='False' ail='275'` for
+`2.5e-3 > float((4611686018427387904 * 53))` inside a `try`/`finally`; at the fuzz run AIL stopped
+with `OverflowError` after the `finally` line.  The difference does not reproduce on this tree:
+`bash ~/tools/cmp.sh /tmp/probes/fz240.py $PWD` says `g same stdout` and `d same stdout`, and
+`lab/fuzz/run.py --start 2076507535 --count 1 --jobs 1` classes both modes as `same` (1/1).  The
+direct `float(<exact int constant expression>)` route folds the exact value before the int64 checks
+and converts it to the nearest double, so the seed matches CPython.  No compiler change was made.
+Minimized to that construct; the same expression bound to an `int` local
+(`v: int = 4611686018427387904 * 53`) and `float(1 << 2000)` are refused by name
+(`int64 constant expression out of range` / `... overflows int64`), and a wide run-time
+multiplication keeps the declared `OverflowError: integer overflow` (exit 1, stdout a prefix of
+CPython's).  Added `test_ail_fz240.py` (registered in `tests.d`): the seed, the sign/power/bool/float
+constant neighbours, values through an argument, a list item, an attribute and a dict value inside
+int64, the named refusals and the declared wide-runtime contract, on the default and `AIL_IR=1`
+builds.  Probes: `/tmp/probes/fz240{,_min,_flow,_more,_runtime,_local,_local2,_exact,_huge}.py`; all
+match CPython or are refused by name except the declared int64 multiplication overflow.  Tests on
+this commit, `-j 2`: test_ail_fz240, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3
+(4/4, 339 s); manifest `--check` clean.
 ## 2026-11-08 -- err2_fix1: legacy SDK discovery carries the compiler-imported error module (job-err2_fix1-11080948)
 
 `test_ail_sdk` was green before err2 and its
