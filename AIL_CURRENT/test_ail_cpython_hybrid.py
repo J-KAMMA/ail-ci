@@ -267,7 +267,7 @@ except IndexError as e:
             src, out, report = self.build(tmp, 'first', text)
             self.assertEqual(report['accelerated'], ['first'], report)
             self.assertTrue((out / report['extension']).is_file(), report)
-            check = ('m.first.__globals__ is not vars(m)')
+            check = 'ext._ail_is_native(m.first)'
             # cwd = out: `import first` must find the hybrid copy, not the source beside `tmp`
             got = run([sys.executable, '-B', '-c', probe.replace('NATIVE_CHECK', check)],
                       str(out), env=dict(os.environ, PYTHONPATH=str(out)))
@@ -368,6 +368,67 @@ print(m.f(4), m.g(), m.g(4), m.g(n=5), m.h(1, 2, 3), m.k(4, 5, 6))
             for name in ('f', 'g', 'h', 'k'):
                 self.assertIn(name, report['accelerated'])
             self.compare_imported(tmp, out, runner)
+
+    def test_vectorcall_entry_matches_cpython(self):
+        """obs2: the C entry is installed on the original function object.  Keywords, defaults,
+        wrong arity, non-fitting arguments, `*args`/`**kw` call sites, map/partial, a replaced
+        `__code__` or `__defaults__`, and introspection must all behave exactly as CPython."""
+        text = '''
+def add(a: int, b: int = 10) -> int:
+    return a + b
+
+def scale(x: float, k: float) -> float:
+    return x * k
+
+def flag(b: bool, n: int) -> int:
+    return n + 1 if b else n - 1
+
+def greet(s: str) -> str:
+    return s + '!'
+'''
+        runner = '''
+import functools, inspect, types
+import vc as m
+print(type(m.add) is types.FunctionType, m.add.__name__, m.add.__qualname__, m.add.__defaults__)
+print(inspect.signature(m.add), m.add.__code__.co_varnames, m.add.__globals__ is vars(m))
+print(m.add(1, 2), m.add(1), m.add(a=1, b=2), m.add(1, b=5), m.add(*(3, 4)), m.add(**{'a': 5}))
+print(m.add(2**63 - 1, 1), m.add(-2**63, -1), m.add(2**70, 1), m.add(True, True), m.add(1.5, 2))
+print(list(map(m.add, [1, 2], [3, 4])), functools.partial(m.add, b=1)(4))
+for bad in ((), (1, 2, 3), ('a', 1), (None,)):
+    try:
+        print(m.add(*bad))
+    except TypeError as e:
+        print('TypeError', e)
+try:
+    m.add(1, c=2)
+except TypeError as e:
+    print('TypeError', e)
+print(m.scale(1.5, 2.0), m.scale(3, 0.5), m.scale(float('nan'), 0.0), m.scale(1e308, 10.0))
+print(m.flag(True, 1), m.flag(False, 1), m.flag(1, 1), m.greet('x'), m.greet('東京'))
+try:
+    m.greet(b'x')
+except TypeError as e:
+    print('TypeError', e)
+m.add.__defaults__ = (100,)
+print(m.add(1))
+def other(a, b=0):
+    return a - b
+m.add.__code__ = other.__code__
+print(m.add(1, 2), m.add(1))
+'''
+        probe = '''
+import vc as m
+nat = m._ail_hybrid_native
+print([nat._ail_is_native(getattr(m, n)) for n in ('add', 'scale', 'flag', 'greet')])
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'vc', text)
+            for name in ('add', 'scale', 'flag', 'greet'):
+                self.assertIn(name, report['accelerated'])
+            self.compare_imported(tmp, out, runner)
+            got = run([sys.executable, '-B', '-c', probe], str(out),
+                      env=dict(os.environ, PYTHONPATH=str(out)))
+            self.assertEqual(got.stdout, b'[True, True, True, True]\n', got.stderr[-2000:])
 
     def test_fallback_from_later_arguments_releases_buffers(self):
         text = '''

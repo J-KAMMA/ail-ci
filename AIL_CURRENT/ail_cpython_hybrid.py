@@ -817,6 +817,119 @@ def _c_proto(item, symbol=None):
     return '%s %s(%s)' % (rtype, symbol or item['mangled'], ', '.join(args))
 
 
+_VECTORCALL_HELPERS = r'''
+#if PY_VERSION_HEX >= 0x030C0000
+/* obs2: the native entry is the original function object itself.  `_ail_install` sets its
+   vectorcall (PyFunction_SetVectorcall, the CPython 3.12 hook for JITs) to a per-unit C entry
+   that runs the scalar/list guards in C and calls the native code; on any guard failure, keyword
+   arguments, a wrong argument count, an int64 overflow or a trap it calls the unaltered
+   `_PyFunction_Vectorcall`, i.e. the original Python code with the very same arguments.  The
+   function object, its code, defaults, annotations and identity stay CPython's own.  A changed
+   `__code__` is not one of the codes recorded at install time, so it runs in CPython too. */
+#define AIL_CODES 4
+static int ail_known_code(PyObject *const *slots, PyObject *code) {
+    for (int i = 0; i < AIL_CODES; i++) if (slots[i] == code) return 1;
+    return 0;
+}
+/* Fewer positional arguments than parameters: take the rest from the function's current
+   `__defaults__`, as CPython would.  Returns a new reference to the defaults tuple (kept alive
+   while the native call may run without the GIL), or NULL when the call must run in CPython. */
+static PyObject *ail_fill_defaults(PyObject *func, PyObject *const *args, Py_ssize_t nargs,
+                                   Py_ssize_t n, PyObject **o) {
+    PyObject *d = PyFunction_GET_DEFAULTS(func);
+    Py_ssize_t nd = d ? PyTuple_GET_SIZE(d) : 0;
+    if (nargs > n || nargs < n - nd) return NULL;
+    for (Py_ssize_t i = 0; i < nargs; i++) o[i] = args[i];
+    for (Py_ssize_t i = nargs; i < n; i++) o[i] = PyTuple_GET_ITEM(d, nd - (n - i));
+    Py_INCREF(d);
+    return d;
+}
+#endif
+'''
+
+
+def _vectorcall_entry(name, n):
+    """The METH_FASTCALL-style vectorcall entry installed on the original function (3.12+)."""
+    return [
+        '#if PY_VERSION_HEX >= 0x030C0000',
+        'static PyObject *ail_code_%s[AIL_CODES];' % name,
+        'static PyObject *ail_v_%s(PyObject *func, PyObject *const *args, size_t nargsf, '
+        'PyObject *kwnames) {' % name,
+        '    if (kwnames == NULL && ail_known_code(ail_code_%s, PyFunction_GET_CODE(func))) {' % name,
+        '        Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);',
+        '        PyObject *r;',
+        '        if (nargs == %d) {' % n,
+        '            r = ail_core_%s(args);' % name,
+        '        } else {',
+        '            PyObject *o[%d];' % max(1, n),
+        '            PyObject *d = ail_fill_defaults(func, args, nargs, %d, o);' % n,
+        '            if (!d) goto original;',
+        '            r = ail_core_%s(o);' % name,
+        '            Py_DECREF(d);',
+        '        }',
+        '        if (r || PyErr_Occurred()) return r;',
+        '    }',
+        'original:',
+        '    return _PyFunction_Vectorcall(func, args, nargsf, kwnames);',
+        '}',
+        '#endif',
+    ]
+
+
+def _install_source(items):
+    out = [
+        'static PyObject *ail_install(PyObject *self, PyObject *args) {',
+        '    const char *name; PyObject *func;',
+        '    if (!PyArg_ParseTuple(args, "sO", &name, &func)) return NULL;',
+        '#if PY_VERSION_HEX >= 0x030C0000',
+        '    if (!PyFunction_Check(func)) Py_RETURN_FALSE;',
+        '    PyCodeObject *co = (PyCodeObject *)PyFunction_GET_CODE(func);',
+        '    /* Only a plain positional signature of the native arity: no *args/**kw, no keyword-only',
+        '       parameters, not a generator/coroutine, and the code of the def itself (a decorator\'s',
+        '       inner function has another name).  Anything else keeps the Python wrapper path. */',
+        '    if (co->co_flags & (CO_VARARGS | CO_VARKEYWORDS | CO_GENERATOR | CO_COROUTINE |',
+        '                        CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE)) Py_RETURN_FALSE;',
+        '    if (co->co_kwonlyargcount != 0) Py_RETURN_FALSE;',
+        '    if (PyUnicode_CompareWithASCIIString(co->co_name, name) != 0) Py_RETURN_FALSE;',
+        '    PyObject **slots = NULL; vectorcallfunc entry = NULL; int n = -1;',
+    ]
+    for item in items:
+        out.append('    if (!strcmp(name, "%s")) { slots = ail_code_%s; entry = ail_v_%s; n = %d; }'
+                   % (item['name'], item['name'], item['name'], len(item['params'])))
+    out.extend([
+        '    if (!slots || co->co_argcount != n) Py_RETURN_FALSE;',
+        '    vectorcallfunc now = ((PyFunctionObject *)func)->vectorcall;',
+        '    if (now != _PyFunction_Vectorcall && now != entry) Py_RETURN_FALSE;',
+        '    int i = 0;',
+        '    while (i < AIL_CODES && slots[i] && slots[i] != (PyObject *)co) i++;',
+        '    if (i == AIL_CODES) Py_RETURN_FALSE;',
+        '    if (!slots[i]) { Py_INCREF(co); slots[i] = (PyObject *)co; }',
+        '    PyFunction_SetVectorcall((PyFunctionObject *)func, entry);',
+        '    Py_RETURN_TRUE;',
+        '#else',
+        '    (void)name; (void)func;',
+        '    Py_RETURN_FALSE;',
+        '#endif',
+        '}',
+        '/* True when `func` runs through one of this module\'s native entries (tests, probes). */',
+        'static PyObject *ail_is_native(PyObject *self, PyObject *func) {',
+        '#if PY_VERSION_HEX >= 0x030C0000',
+        '    if (PyFunction_Check(func)) {',
+        '        vectorcallfunc v = ((PyFunctionObject *)func)->vectorcall;',
+    ])
+    for item in items:
+        out.append('        if (v == ail_v_%s) Py_RETURN_TRUE;' % item['name'])
+    out.extend([
+        '    }',
+        '#endif',
+        '    (void)func;',
+        '    Py_RETURN_FALSE;',
+        '}',
+        '',
+    ])
+    return out
+
+
 def _wrapper_source(module, items):
     out = [
         '#include <Python.h>',
@@ -831,11 +944,12 @@ def _wrapper_source(module, items):
         '    PyErr_SetString(AilHybridFallback, "argument or result does not fit the AIL ABI");',
         '    return NULL;',
         '}',
-        '',
+        _VECTORCALL_HELPERS,
     ]
     for item in items:
         callee = item['mangled'] + '__hybrid_call' if item.get('indexes') else item['mangled']
         out.append('extern %s;' % _c_proto(item, callee))
+        out.append('static PyObject *ail_core_%s(PyObject *const *o);' % item['name'])
     out.append('')
     for item in items:
         name = item['name']
@@ -849,9 +963,20 @@ def _wrapper_source(module, items):
         hold = any(kind in _LIST for _p, kind in params)
         begin = [] if hold else ['    Py_BEGIN_ALLOW_THREADS']
         end = [] if hold else ['    Py_END_ALLOW_THREADS']
+        n = len(params)
+        # The METH_VARARGS entry (`_ail_hybrid_native.<name>`) is kept for the Python-wrapper
+        # path (CPython < 3.12, or a signature `_ail_install` refuses); it raises Fallback.
         out.append('static PyObject *ail_w_%s(PyObject *self, PyObject *args) {' % name)
-        out.append('    PyObject *o[%d];' % max(1, len(params)))
-        out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % len(params))
+        out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % n)
+        out.append('    PyObject *r = ail_core_%s(((PyTupleObject *)args)->ob_item);' % name)
+        out.append('    if (!r && !PyErr_Occurred()) return ail_hybrid_fallback();')
+        out.append('    return r;')
+        out.append('}')
+        # The core: argument checks, conversion and the native call.  It returns the result, or
+        # NULL with no exception set when the call must run in CPython instead (a guard failed,
+        # an int64 overflow, an index/key trap), or NULL with an exception (MemoryError only).
+        # Every check runs before any native work, so a fallback has nothing to undo.
+        out.append('static PyObject *ail_core_%s(PyObject *const *o) {' % name)
         if item.get('indexes'):
             out.append('    extern __thread int %s;' % trap)
         # Every conversion failure after the declarations below must free whatever buffers an
@@ -859,9 +984,8 @@ def _wrapper_source(module, items):
         # the label is not emitted, so keep the direct return in that case.
         bufs = ['b%d' % i for i, (_p, kind) in enumerate(params)
                 if kind in ('list[int]', 'list[float]')]
-        fail = 'goto fallback' if bufs else 'return ail_hybrid_fallback()'
+        fail = 'goto fallback' if bufs else 'return NULL'
         for i, (p, kind) in enumerate(params):
-            out.append('    o[%d] = PyTuple_GET_ITEM(args, %d);' % (i, i))
             # Declare every list buffer before any conversion loop.  A later loop can `goto
             # fallback` before its own declaration would have run; the label frees all of them,
             # so each must already be a valid pointer (NULL frees are no-ops).
@@ -875,7 +999,7 @@ def _wrapper_source(module, items):
             if kind in ('int', 'bool'):
                 if kind == 'bool':
                     out.append('    if (!PyBool_Check(%s)) %s;' % (o, fail))
-                    out.append('    int64_t a%d = PyObject_IsTrue(%s) ? 1 : 0;' % (i, o))
+                    out.append('    int64_t a%d = %s == Py_True;' % (i, o))
                 else:
                     out.append('    if (!PyLong_CheckExact(%s)) %s;' % (o, fail))
                     out.append('    int ovf%d = 0; long long a%d = PyLong_AsLongLongAndOverflow(%s, &ovf%d);' % (i, i, o, i))
@@ -948,7 +1072,7 @@ def _wrapper_source(module, items):
             out.append('    PyMem_Free(sb);')
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
-            out.append('    if (!res) { PyErr_Clear(); return ail_hybrid_fallback(); }')
+            out.append('    if (!res) { PyErr_Clear(); return NULL; }')
             out.append('    return res;')
         elif ret == 'float':
             out.append('    double r;')
@@ -971,7 +1095,7 @@ def _wrapper_source(module, items):
                 out.append('    if (%s) %s;' % (trap, fail))
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
-            out.append('    if (ovf) return ail_hybrid_fallback();')
+            out.append('    if (ovf) return NULL;')
             if ret == 'bool':
                 out.append('    return PyBool_FromLong((long)r);')
             else:
@@ -980,12 +1104,16 @@ def _wrapper_source(module, items):
             out.append('fallback:')
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
-            out.append('    return ail_hybrid_fallback();')
+            out.append('    return NULL;')
         out.append('}')
+        out.extend(_vectorcall_entry(name, n))
         out.append('')
+    out.extend(_install_source(items))
     out.append('static PyMethodDef ail_methods[] = {')
     for item in items:
         out.append('    {"%s", ail_w_%s, METH_VARARGS, NULL},' % (item['name'], item['name']))
+    out.append('    {"_ail_install", ail_install, METH_VARARGS, NULL},')
+    out.append('    {"_ail_is_native", ail_is_native, METH_O, NULL},')
     out.append('    {NULL, NULL, 0, NULL}')
     out.append('};')
     out.append('static struct PyModuleDef ail_module = {PyModuleDef_HEAD_INIT, "%s", NULL, -1, ail_methods};' % module)
@@ -1039,9 +1167,18 @@ def _preamble(module, original_path):
         '        except _ail_hybrid_native.Fallback:\n'
         '            pass\n'
         '    return _original(*_pos, *_varargs, **_kw, **_varkw)\n'
-        'def _ail_hybrid_make(_native, _original):\n'
+        'def _ail_hybrid_make(_native, _original, _name=None):\n'
         '    if _native is None or _original is None:\n'
         '        return _original\n'
+        '    # CPython 3.12+: the C entry is installed on the original function object itself\n'
+        '    # (vectorcall); it falls back to the original code in C.  No Python frame is added.\n'
+        '    _install = getattr(_ail_hybrid_native, "_ail_install", None)\n'
+        '    if _install is not None and _name is not None:\n'
+        '        try:\n'
+        '            if _install(_name, _original):\n'
+        '                return _original\n'
+        '        except Exception:\n'
+        '            pass\n'
         '    try:\n'
         '        import inspect as _ail_hybrid_inspect\n'
         '        _params = list(_ail_hybrid_inspect.signature(_original).parameters.values())\n'
@@ -1124,7 +1261,7 @@ def _preamble(module, original_path):
         '        pass\n'
         '    return _call\n'
         'if _ail_hybrid_native is None:\n'
-        '    def _ail_hybrid_make(_native, _original):\n'
+        '    def _ail_hybrid_make(_native, _original, _name=None):\n'
         '        return _original\n'
         '# --- original program follows ---\n\n'
     )
@@ -1144,9 +1281,9 @@ def _hybrid_source(source, tree, module, names, original_path):
         fn = funcs.get(name)
         if fn is not None and getattr(fn, 'end_lineno', None):
             text = ('try:\n'
-                    '    %s = _ail_hybrid_make(_ail_hybrid_native.%s, %s)\n'
+                    '    %s = _ail_hybrid_make(_ail_hybrid_native.%s, %s, %r)\n'
                     'except Exception:\n'
-                    '    pass\n' % (name, name, name))
+                    '    pass\n' % (name, name, name, name))
             edits.append((fn.end_lineno, 0, text))
     edits.sort(key=lambda e: e[0], reverse=True)
     for at, _off, text in edits:
