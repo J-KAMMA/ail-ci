@@ -14,7 +14,7 @@ normal `ail` installation.
 | `textDocument/didSave` | Re-checks the file on disk (or the text sent with the save). |
 | `textDocument/didClose` | Clears the diagnostics for the closed document. |
 | `textDocument/publishDiagnostics` | Diagnostics from the same `ail check` front end that `ail build` uses. |
-| `textDocument/hover` | On a diagnostic: its `write instead:` rewrite. Elsewhere: a function signature, an annotation, a certain literal type, or nothing. |
+| `textDocument/hover` | On a diagnostic: its `write instead:` rewrite. Elsewhere: a function signature, an annotation, a certain literal type, a type the typed path inferred, or nothing. |
 | `textDocument/definition` | The binding of the name at the cursor: a local, parameter, function, class, method through `self.m()` or through a local name bound to a class or an instance of a class in the same file, or a name imported from another module. Every binding of a name with several assignments is returned; when the target is not certain the answer is `null`. |
 
 Diagnostics carry the compiler message and its `write instead:` text. A source that does not load,
@@ -28,16 +28,33 @@ Imports, the project file and relative paths keep working because the buffer is 
 real file; in a read-only directory it is checked in a temporary directory with the real directory
 first on `AIL_PATH`.
 
-Hover shows a type only when it is certain:
+Hover shows a type when it is certain:
 
 * a function name shows its signature as written;
 * a parameter or a name with an annotation shows the annotation text;
 * a name whose every assignment in its scope is a literal of one type (`int`, `float`, `str`,
-  `bytes`, `bool` or `None`) shows that type.
+  `bytes`, `bool` or `None`) shows that type;
+* a name the typed path gives a local type shows `` `x`: `float` (inferred by the typed path) ``.
+  The type comes from the C declarations of a `--debug` build (`int64_t` -> `int`,
+  `double` -> `float`, the list, str and dict structs), and only where the C type maps to one
+  Python type. A name the compiler boxes because it is assigned two different types, a numeric
+  sum (`sum(...)`, which is an int or a float at run time), and an unannotated name whose C
+  `int64_t` could be either `int` or `bool` show nothing. The `int64_t` disambiguation reads the
+  source, so it trusts a list or dict literal's items only while nothing mutates that container:
+  an item store, `del`, a method call such as `append` or `update`, a call that receives the name,
+  or an alias assignment makes the item type unknown. Iterating a dict yields its *keys* (never
+  its values), so a `for k in d` variable is typed from the dict's keys; if the iterated name is
+  also assigned something the source cannot name, that unknown keeps it from claiming a key type.
+  A nested function is matched by its own source scope, not by the compiler's mangled C name
+  (`outer__helper__0`), so a nested `helper` beside a top-level `helper` gets its own types. The
+  module entry (`main`) and synthetic lambdas can have `#line` sets that fall inside a user
+  function after a lambda line shift, so only a C name that can be the scope's own name may supply
+  its map. The build is cached per document version and runs only after `didSave` or 1 s idle,
+  never on every keystroke.
 
-Every other name shows nothing, including a name assigned from arithmetic or a call (for example the
-five names in the review probe), `b"a b".split()`, `range(3)`, an attribute (`obj.x`) or a keyword
-label (`f(x=x)`), and any position inside a string or a comment. A wrong type is worse than no type.
+Every other name shows nothing, including a name on the general path (for example the `int | None`
+review function), `b"a b".split()`, `range(3)`, an attribute (`obj.x`) or a keyword label
+(`f(x=x)`), and any position inside a string or a comment. A wrong type is worse than no type.
 
 Go-to-definition uses the same scope analysis. It follows the compiler's import search order (the
 program's directory, then `AIL_PATH`, then the bundled `AIL_CURRENT/stdlib/`) and reads the open

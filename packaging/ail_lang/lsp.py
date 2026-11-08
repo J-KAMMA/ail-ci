@@ -11,13 +11,16 @@
 * Hover on a diagnostic shows the rewrite ("write instead: ...") or, when there is none, the message.
   Hover elsewhere is certain or absent: a function name shows its signature; a parameter or an annotated
   name shows its annotation; a name whose every assignment in its scope is a literal of one kind
-  (int, float, str, bytes, bool or None) shows that kind; anything else shows nothing.
+  (int, float, str, bytes, bool or None) shows that kind; a local the typed path gives a C type shows
+  "name: type (inferred by the typed path)", from a --debug build cached per document version (built
+  only after didSave or 1 s idle); anything else shows nothing.
 * didChange is full sync (LSP change kind 1). The buffer text is checked, so an unsaved edit still gets
   diagnostics; didSave with no text checks the file on disk.
 The blocker list comes from `compile --strict --json` (ail.strict/1: every blocker, with its rewrite); `classify()` decides
 Warning or Error.
 """
 import ast
+import hashlib
 import io
 import json
 import os
@@ -26,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tokenize
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -291,7 +295,7 @@ def _new_scope_info():
             "globals": set(), "nonlocals": set(),
             "global_literals": {}, "global_uncertain": set(),
             "nonlocal_literals": {}, "nonlocal_uncertain": set(),
-            "sites": {}}
+            "sites": {}, "mutated": set(), "classes": {}}
 
 
 def _add_site(info, name, node, kind, **extra):
@@ -321,16 +325,60 @@ def _mark_literal(name, kind, info):
         info["literals"].setdefault(name, set()).add(kind)
 
 
-def _bind_target(target, info):
+def _bind_target(target, info, for_iter=None):
     """Record a binding that is not a literal assignment as uncertain."""
     if isinstance(target, ast.Name):
         _mark_uncertain(target.id, info)
-        _add_site(info, target.id, target, "assign")
+        _add_site(info, target.id, target, "assign", for_iter=for_iter)
     elif isinstance(target, (ast.Tuple, ast.List)):
         for item in target.elts:
-            _bind_target(item, info)
+            _bind_target(item, info, for_iter)
     elif isinstance(target, ast.Starred):
-        _bind_target(target.value, info)
+        _bind_target(target.value, info, for_iter)
+
+
+def _mark_mutated_target(target, mutated):
+    """Record the base name of a subscript or attribute store, which mutates that container."""
+    if isinstance(target, (ast.Subscript, ast.Attribute)) and isinstance(target.value, ast.Name):
+        mutated.add(target.value.id)
+
+
+def _mutated_names(nodes):
+    """Names whose bound value the scope can change, so a literal's elements cannot be trusted.
+
+    A list or dict literal is only evidence for the type of its items while no code mutates it.
+    Anything that can change a container — an item or attribute store, `del`, a method call, a
+    call that receives it, or an alias assignment — marks the name: the analysis then shows nothing
+    rather than a possibly wrong type.
+    """
+    mutated = set()
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets, value = [node.target], getattr(node, "value", None)
+        else:
+            targets, value = [], None
+        for target in targets:
+            _mark_mutated_target(target, mutated)
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            mutated.add(node.target.id)
+        if isinstance(node, ast.Delete):
+            for target in node.targets:
+                _mark_mutated_target(target, mutated)
+        if isinstance(node, ast.Call):
+            function = node.func
+            if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
+                mutated.add(function.value.id)
+            for argument in node.args:
+                if isinstance(argument, ast.Name):
+                    mutated.add(argument.id)
+            for keyword in node.keywords:
+                if isinstance(keyword.value, ast.Name):
+                    mutated.add(keyword.value.id)
+        if isinstance(value, ast.Name):
+            mutated.add(value.id)
+    return mutated
 
 
 def _pattern_bindings(pattern):
@@ -344,7 +392,7 @@ def _pattern_bindings(pattern):
     return bindings
 
 
-def _scope_info(scope):
+def _scope_info(scope, classes=None):
     """Bindings of one scope.
 
     `annotations` maps a parameter or annotated name to its annotation text; `literals` maps a name
@@ -353,6 +401,7 @@ def _scope_info(scope):
     `nonlocal` declaration are kept apart so the scope they write can be resolved.
     """
     info = _new_scope_info()
+    info["classes"] = classes or {}
     annotations, literals, uncertain, functions = (info["annotations"], info["literals"],
                                                    info["uncertain"], info["functions"])
 
@@ -379,6 +428,7 @@ def _scope_info(scope):
             _bind_target(target, info)
 
     nodes = list(_scope_nodes(scope))
+    info["mutated"] = _mutated_names(nodes)
     for node in nodes:
         if isinstance(node, ast.Global):
             info["globals"].update(node.names)
@@ -420,7 +470,7 @@ def _scope_info(scope):
         elif isinstance(node, ast.NamedExpr):
             assign(node.target, node.value)
         elif isinstance(node, (ast.For, ast.AsyncFor)):
-            _bind_target(node.target, info)
+            _bind_target(node.target, info, node.iter)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 if item.optional_vars is not None:
@@ -458,7 +508,7 @@ def _bound(info, name):
             or name in info["functions"])
 
 
-def _hover_text(name, info, extra_literals=(), extra_uncertain=False):
+def _hover_text(name, info, extra_literals=(), extra_uncertain=False, compiler_type=None, returns=None):
     """The certain hover text for one resolved binding, or None."""
     if name in info["annotations"]:
         return "`%s`: `%s`" % (name, info["annotations"][name])
@@ -466,10 +516,11 @@ def _hover_text(name, info, extra_literals=(), extra_uncertain=False):
     uncertain = extra_uncertain or name in info["uncertain"]
     if name in info["functions"] and not kinds and not uncertain:
         return "```python\n%s\n```" % _signature(info["functions"][name])
-    if uncertain:
-        return None
-    if len(kinds) == 1:
+    if len(kinds) == 1 and not uncertain:
         return "`%s`: `%s`" % (name, next(iter(kinds)))
+    inferred = _compiler_hover_type(name, info, compiler_type, returns or {})
+    if inferred is not None:
+        return "`%s`: `%s` (inferred by the typed path)" % (name, inferred)
     return None
 
 
@@ -477,6 +528,467 @@ def _signature(node):
     arguments = ast.unparse(node.args)
     returns = _annotation(node.returns)
     return "def %s(%s)%s" % (node.name, arguments, " -> %s" % returns if returns else "")
+
+
+# ---------------------------------------------------------------- compiler types
+
+# C declarations whose Python type is one-to-one. `int64_t` is handled separately because CPython
+# bool is also an int64_t; `ail_nsum` and the numeric box are deliberately absent.
+_C_TYPE_NAMES = {
+    "int64_t": "int",
+    "double": "float",
+    "ail_str": "str",
+    "ail_bytes": "bytes",
+    "ail_slist": "list",
+    "ail_list": "list",
+    "ail_flist": "list",
+    "ail_tab": "dict",
+}
+_V_DECL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_ ]*?)\s+(v_[A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)")
+_DEBUG_DECL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_ ]*?)\s+([A-Za-z_][A-Za-z0-9_]*);\s*/\* --debug: the Python local \*/")
+_LINE_DIRECTIVE = re.compile(r'^#line\s+(\d+)\s+"([^"]*)"')
+_NOT_BOOL_BUILTINS = {"len", "int", "float", "str", "bytes", "list", "dict", "abs", "ord",
+                      "chr", "round", "hex", "oct", "bin", "repr"}
+_BOOL_METHODS = {"startswith", "endswith", "isdigit", "isalpha", "isalnum", "isspace",
+                 "islower", "isupper", "istitle", "isnumeric", "isdecimal", "isidentifier",
+                 "isprintable"}
+_INT_METHODS = {"count", "find", "rfind", "index", "rindex"}
+_STR_METHODS = {"upper", "lower", "strip", "lstrip", "rstrip", "replace", "join", "format",
+                "capitalize", "casefold", "center", "expandtabs", "ljust", "rjust", "zfill",
+                "title", "swapcase", "removeprefix", "removesuffix"}
+
+
+def _function_returns(tree):
+    """Function name -> return annotation text, for the calls a value may make.
+
+    A nested or later `def` shadows an earlier one, and the call's scope is not traced here, so a
+    name whose definitions disagree on the annotation is left unknown instead of claiming the
+    first same-named def in the file.
+    """
+    result = {}
+    ambiguous = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            text = _annotation(node.returns)
+            if node.name in result and result[node.name] != text:
+                ambiguous.add(node.name)
+            else:
+                result[node.name] = text
+    for name in ambiguous:
+        result.pop(name, None)
+    return result
+
+
+def _class_methods(tree):
+    """Class name -> {method name: return annotation text}, for method calls on an instance.
+
+    A duplicate `def` in a class body binds the last one, so the last annotation wins.
+    """
+    result = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            methods = result.setdefault(node.name, {})
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    methods[item.name] = _annotation(item.returns)
+    return result
+
+
+def _annotation_type_name(text, classes):
+    """The Python type an annotation names, or None when it is not a type this can be sure of."""
+    if not text:
+        return None
+    text = text.strip()
+    if text in ("str", "bytes", "int", "float", "bool", "list", "dict", "set", "tuple"):
+        return text
+    for name in ("list", "dict", "set", "tuple"):
+        if text.startswith(name + "[") and text.endswith("]"):
+            return name
+    if text in classes:
+        return text
+    return None
+
+
+def _source_type(value, info, returns, seen):
+    """The Python type of a value expression this can name from the source, or None."""
+    if value is None or id(value) in seen:
+        return None
+    seen = set(seen)
+    seen.add(id(value))
+    classes = info.get("classes") or {}
+    if isinstance(value, ast.Constant):
+        item = value.value
+        if isinstance(item, bool):
+            return "bool"
+        if isinstance(item, int):
+            return "int"
+        if isinstance(item, float):
+            return "float"
+        if isinstance(item, str):
+            return "str"
+        if isinstance(item, bytes):
+            return "bytes"
+        if item is None:
+            return "NoneType"
+        return None
+    if isinstance(value, ast.List):
+        return "list"
+    if isinstance(value, ast.Dict):
+        return "dict"
+    if isinstance(value, ast.Set):
+        return "set"
+    if isinstance(value, ast.Tuple):
+        return "tuple"
+    if isinstance(value, ast.JoinedStr):
+        return "str"
+    if isinstance(value, ast.Call):
+        function = value.func
+        if isinstance(function, ast.Name):
+            if function.id in classes:
+                return function.id
+            if function.id in ("str", "bytes", "int", "float", "bool", "list", "dict",
+                               "set", "tuple"):
+                return function.id
+            if function.id in returns:
+                return _annotation_type_name(returns[function.id], classes)
+        return None
+    if isinstance(value, ast.Name):
+        text = info.get("annotations", {}).get(value.id)
+        if text:
+            annotation = _annotation_type_name(text, classes)
+            if annotation is not None:
+                return annotation
+        results = []
+        for bound, for_iter in _binding_values(info, value.id):
+            if for_iter is not None:
+                results.append(None)
+            else:
+                results.append(_source_type(bound, info, returns, seen))
+        if results and all(item == results[0] and item is not None for item in results):
+            return results[0]
+    return None
+
+
+def _binding_values(info, name):
+    """(value node, for-iterable) pairs from the assignments of `name` in one scope."""
+    result = []
+    for site in info["sites"].get(name, []):
+        if site.get("kind") != "assign":
+            continue
+        value, for_iter = site.get("value"), site.get("for_iter")
+        if value is not None or for_iter is not None:
+            result.append((value, for_iter))
+    return result
+
+
+def _combine_bool(kinds):
+    # An unknown binding is a real possibility at this point: the name may hold that value, so
+    # dropping it would claim a type for a value this cannot name (lsp2 review, pZ6).
+    if not kinds or any(kind == "unknown" for kind in kinds):
+        return "unknown"
+    if all(kind == "bool" for kind in kinds):
+        return "bool"
+    if all(kind == "not-bool" for kind in kinds):
+        return "not-bool"
+    return "unknown"
+
+
+def _annotation_kind(text):
+    if not text:
+        return "unknown"
+    text = text.strip()
+    if text == "bool":
+        return "bool"
+    if text in ("int", "float", "str", "bytes", "list", "dict", "None", "NoneType"):
+        return "not-bool"
+    return "unknown"
+
+
+def _iterable_element_kind(iterable, info, returns, seen):
+    """The kind of the items a literal container yields, or None when it is not a literal.
+
+    A dict yields its keys, not its values; `{**other}` has a key this cannot name.
+    """
+    if isinstance(iterable, (ast.List, ast.Tuple, ast.Set)):
+        return _combine_bool([_bool_kind(item, info, returns, seen) for item in iterable.elts])
+    if isinstance(iterable, ast.Dict):
+        if any(key is None for key in iterable.keys):
+            return "unknown"
+        return _combine_bool([_bool_kind(key, info, returns, seen) for key in iterable.keys])
+    return None
+
+
+def _for_iter_kind(iterable, info, returns, seen):
+    if isinstance(iterable, ast.Call) and isinstance(iterable.func, ast.Name) \
+            and iterable.func.id == "range":
+        return "not-bool"
+    element = _iterable_element_kind(iterable, info, returns, seen)
+    if element is not None:
+        return element
+    if isinstance(iterable, ast.Name):
+        if id(iterable) in seen or iterable.id in info["mutated"]:
+            return "unknown"
+        seen = set(seen)
+        seen.add(id(iterable))
+        kinds = []
+        for bound, for_iter in _binding_values(info, iterable.id):
+            if for_iter is not None:
+                kinds.append(_for_iter_kind(for_iter, info, returns, seen))
+                continue
+            element = _iterable_element_kind(bound, info, returns, seen)
+            if element is not None:
+                kinds.append(element)
+            elif isinstance(bound, ast.Name):
+                kinds.append(_for_iter_kind(bound, info, returns, seen))
+            else:
+                kinds.append("unknown")
+        return _combine_bool(kinds)
+    return "unknown"
+
+
+def _subscript_kind(value, info, returns, seen):
+    container = value.value
+    if isinstance(container, (ast.List, ast.Tuple, ast.Set)):
+        return _combine_bool([_bool_kind(item, info, returns, seen) for item in container.elts])
+    if isinstance(container, ast.Dict):
+        return _combine_bool([_bool_kind(item, info, returns, seen) for item in container.values])
+    if isinstance(container, ast.Name):
+        if container.id in info["mutated"]:
+            return "unknown"
+        kinds = []
+        for bound, for_iter in _binding_values(info, container.id):
+            if for_iter is not None:
+                kinds.append(_for_iter_kind(for_iter, info, returns, seen))
+            elif isinstance(bound, (ast.List, ast.Tuple, ast.Set)):
+                kinds.append(_combine_bool([_bool_kind(item, info, returns, seen) for item in bound.elts]))
+            elif isinstance(bound, ast.Dict):
+                kinds.append(_combine_bool([_bool_kind(item, info, returns, seen) for item in bound.values]))
+            else:
+                kinds.append("unknown")
+        return _combine_bool(kinds)
+    return "unknown"
+
+
+def _method_bool_kind(function, info, returns, seen):
+    """The kind of a method call, from the receiver's type, never from the method name alone."""
+    receiver = _source_type(function.value, info, returns, seen)
+    classes = info.get("classes") or {}
+    if receiver in classes:
+        methods = classes[receiver]
+        if function.attr in methods:
+            return _annotation_kind(methods[function.attr])
+        return "unknown"
+    if receiver in ("str", "bytes"):
+        if function.attr in _BOOL_METHODS:
+            return "bool"
+        if function.attr in _INT_METHODS or function.attr in _STR_METHODS:
+            return "not-bool"
+        return "unknown"
+    if receiver in ("list", "tuple") and function.attr == "count":
+        return "not-bool"
+    return "unknown"
+
+
+def _bool_kind(value, info, returns, seen):
+    """`bool`, `not-bool` or `unknown` for the value of a binding."""
+    if value is None:
+        return "unknown"
+    if id(value) in seen:
+        return "unknown"
+    seen = set(seen)
+    seen.add(id(value))
+    if isinstance(value, ast.Constant):
+        return "bool" if isinstance(value.value, bool) else "not-bool"
+    if isinstance(value, ast.Compare):
+        return "bool"
+    if isinstance(value, ast.UnaryOp):
+        if isinstance(value.op, ast.Not):
+            return "bool"
+        return "not-bool"
+    if isinstance(value, ast.BinOp):
+        if isinstance(value.op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
+            return _combine_bool([_bool_kind(value.left, info, returns, seen),
+                                  _bool_kind(value.right, info, returns, seen)])
+        return "not-bool"
+    if isinstance(value, ast.BoolOp):
+        return _combine_bool([_bool_kind(item, info, returns, seen) for item in value.values])
+    if isinstance(value, ast.IfExp):
+        return _combine_bool([_bool_kind(value.body, info, returns, seen),
+                              _bool_kind(value.orelse, info, returns, seen)])
+    if isinstance(value, ast.Subscript):
+        return _subscript_kind(value, info, returns, seen)
+    if isinstance(value, ast.Call):
+        function = value.func
+        if isinstance(function, ast.Name):
+            if function.id in returns:
+                return _annotation_kind(returns[function.id])
+            if function.id == "bool":
+                return "bool"
+            if function.id in _NOT_BOOL_BUILTINS:
+                return "not-bool"
+            return "unknown"
+        if isinstance(function, ast.Attribute):
+            return _method_bool_kind(function, info, returns, seen)
+        return "unknown"
+    if isinstance(value, ast.Name):
+        kinds = []
+        for bound, for_iter in _binding_values(info, value.id):
+            if for_iter is not None:
+                kinds.append(_for_iter_kind(for_iter, info, returns, seen))
+            else:
+                kinds.append(_bool_kind(bound, info, returns, seen))
+        return _combine_bool(kinds)
+    if isinstance(value, (ast.List, ast.Tuple, ast.Set, ast.Dict, ast.Lambda,
+                          ast.JoinedStr, ast.ListComp, ast.SetComp, ast.DictComp,
+                          ast.GeneratorExp)):
+        return "not-bool"
+    return "unknown"
+
+
+def _int_kind(name, info, returns):
+    """`bool` or `int` for an int64_t binding, or None when the source cannot tell them apart."""
+    values = _binding_values(info, name)
+    if not values:
+        return None
+    kinds = []
+    for value, for_iter in values:
+        if for_iter is not None:
+            kinds.append(_for_iter_kind(for_iter, info, returns, set()))
+        else:
+            kinds.append(_bool_kind(value, info, returns, set()))
+    combined = _combine_bool(kinds)
+    if combined == "bool":
+        return "bool"
+    if combined == "not-bool":
+        return "int"
+    return None
+
+
+def _compiler_hover_type(name, info, ctype, returns):
+    if not ctype:
+        return None
+    mapped = _C_TYPE_NAMES.get(ctype)
+    if mapped == "int":
+        return _int_kind(name, info, returns)
+    return mapped
+
+
+def _c_name_is_scope(c_name, scope_name):
+    """Whether a report's C function name can be the Python scope `scope_name`.
+
+    A top-level `def f` keeps its name; a nested `def helper` inside `outer` is `outer__helper__0`.
+    The module entry (`main`) and synthetic lambdas (`_ail_lam1`) can have `#line` sets that fall
+    inside a user function after a lambda line shift, so their name must not claim that scope.
+    """
+    if c_name == scope_name:
+        return True
+    return re.search(r"(?:^|__)%s(?:__\d+)?$" % re.escape(scope_name), c_name) is not None
+
+
+def _compiler_type_map(text, path, env, options):
+    """(function name, def line) -> {local name: C type}, from a --debug build of the typed path.
+
+    The report names each C function by its mangled name (`outer__helper__0` for a nested `def`),
+    not by the Python name the hover sees. The `#line` directives inside the C function's own
+    range point at its Python body, so the AST node whose span holds those lines identifies the
+    exact scope (a nested function has the same name as a top-level one).
+    """
+    if not cli.find_c_compiler(env)[0]:
+        return {}
+    probe, directory = None, None
+    if path is not None and path.parent.is_dir():
+        try:
+            handle, name = tempfile.mkstemp(prefix=".ail-lsp-types-", suffix=path.suffix or ".py",
+                                            dir=str(path.parent))
+        except OSError:
+            pass
+        else:
+            os.close(handle)
+            probe = Path(name)
+    if probe is None:
+        directory = tempfile.mkdtemp(prefix="ail-lsp-types-")
+        probe = Path(directory) / ((path.name if path is not None else None) or "probe.py")
+    build_root = tempfile.mkdtemp(prefix="ail-lsp-c-")
+    debug = Path(build_root) / "debug"
+    try:
+        probe.write_text(text, encoding="utf-8")
+        build_env = dict(env)
+        if directory is not None and path is not None:
+            existing = build_env.get("AIL_PATH")
+            build_env["AIL_PATH"] = str(path.parent) + (os.pathsep + existing if existing else "")
+        command = cli._sdk_command("compile", "--strict", "--debug", "--debug-dir", debug,
+                                   *options, probe, "-o", Path(build_root) / "probe")
+        try:
+            done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", timeout=BUILD_TIMEOUT, env=build_env)
+        except (OSError, subprocess.SubprocessError):
+            return {}
+        if done.returncode != 0:
+            return {}
+        report_path = debug / "native_report.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            lines = (debug / "program.c").read_text(encoding="utf-8", errors="replace").splitlines()
+        except (OSError, ValueError):
+            return {}
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            return {}
+        functions = [node for node in ast.walk(tree)
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        source_path = os.path.realpath(str(probe))
+        ranges = {}
+        for generated in report.get("generated") or []:
+            for item in generated.get("functions") or []:
+                name = item.get("function")
+                start, end = item.get("c_line_start"), item.get("c_line_end")
+                if name and start and end:
+                    ranges[name] = (start, end)
+        result = {}
+        for function, (start, end) in ranges.items():
+            source_lines = []
+            for raw in lines[start - 1:end]:
+                directive = _LINE_DIRECTIVE.match(raw)
+                if directive and os.path.realpath(directive.group(2)) == source_path:
+                    source_lines.append(int(directive.group(1)))
+            scope = None
+            if source_lines:
+                low, high = min(source_lines), max(source_lines)
+                containing = [node for node in functions
+                              if node.lineno <= low and high <= node.end_lineno]
+                if containing:
+                    scope = min(containing,
+                                key=lambda node: (node.end_lineno - node.lineno, -node.lineno))
+            found = {}
+            for raw in lines[start - 1:end]:
+                match = _V_DECL.match(raw)
+                if match:
+                    ctype, declared = match.group(1).strip(), match.group(2)
+                    if declared.startswith("v__"):
+                        continue
+                    source = declared[2:] if declared.startswith("v_") else declared
+                else:
+                    match = _DEBUG_DECL.match(raw)
+                    if not match:
+                        continue
+                    ctype, source = match.group(1).strip(), match.group(2)
+                if not source:
+                    continue
+                previous = found.get(source, ctype)
+                found[source] = previous if previous == ctype else None
+            if scope is not None and _c_name_is_scope(function, scope.name):
+                result[(scope.name, scope.lineno)] = found
+        return result
+    finally:
+        if directory is not None:
+            shutil.rmtree(directory, ignore_errors=True)
+        elif probe is not None:
+            try:
+                probe.unlink()
+            except OSError:
+                pass
+        shutil.rmtree(build_root, ignore_errors=True)
 
 
 def _position_offset(text, position):
@@ -665,15 +1177,23 @@ def _scope_kind(scope):
     return "function"
 
 
-def _hover_in_chain(tree, chain, name):
+def _hover_in_chain(tree, chain, name, compiler_types=None):
     """Resolve `name` through the cursor's scopes, then return a certain hover text or None."""
     infos = {}
+    compiler_types = compiler_types or {}
+    returns = _function_returns(tree)
+    classes = _class_methods(tree)
 
     def info_for(scope):
         key = id(scope)
         if key not in infos:
-            infos[key] = _scope_info(scope)
+            infos[key] = _scope_info(scope, classes)
         return infos[key]
+
+    def compiler_type(scope):
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return (compiler_types.get((scope.name, scope.lineno)) or {}).get(name)
+        return None
 
     global_literals, global_uncertain = set(), False
     nonlocal_literals, nonlocal_uncertain = set(), False
@@ -689,7 +1209,7 @@ def _hover_in_chain(tree, chain, name):
                         | global_literals | nonlocal_literals)
             uncertain = (name in info["uncertain"] or name in info["global_uncertain"]
                          or global_uncertain or nonlocal_uncertain)
-            return _hover_text(name, info, literals, uncertain)
+            return _hover_text(name, info, literals, uncertain, None, returns)
         if kind == "class" and index != len(chain) - 1:
             # A class body is not an enclosing scope for a method, lambda or comprehension.
             continue
@@ -707,7 +1227,8 @@ def _hover_in_chain(tree, chain, name):
                 continue
             if _bound(info, name):
                 return _hover_text(name, info, nonlocal_literals,
-                                   name in info["uncertain"] or nonlocal_uncertain)
+                                   name in info["uncertain"] or nonlocal_uncertain,
+                                   compiler_type(scope), returns)
             continue
         if kind in ("function", "comprehension", "class"):
             if name in info["globals"]:
@@ -721,7 +1242,7 @@ def _hover_in_chain(tree, chain, name):
                 nonlocal_uncertain = nonlocal_uncertain or name in info["nonlocal_uncertain"]
                 continue
         if _bound(info, name):
-            return _hover_text(name, info)
+            return _hover_text(name, info, compiler_type=compiler_type(scope), returns=returns)
     return None
 
 
@@ -1152,7 +1673,7 @@ def definition(text, path, position, read_text=None):
     return _dedup(locations)
 
 
-def type_hover(text, position):
+def type_hover(text, position, compiler_types=None):
     """Markdown for a certain type or a function signature at the cursor; None when it is not certain."""
     token = _token_at(text, position)
     if token is None:
@@ -1165,7 +1686,7 @@ def type_hover(text, position):
     if not _plain_name_token(text, tree, token):
         return None
     offset = _position_offset(text, position)
-    return _hover_in_chain(tree, _scope_chain(text, tree, offset), name)
+    return _hover_in_chain(tree, _scope_chain(text, tree, offset), name, compiler_types)
 
 
 def apply_change(text, change):
@@ -1189,6 +1710,30 @@ class Server:
         self.published = {}                # uri -> diagnostics last published
         self.shown = {}                    # opened uri -> every uri it published to
         self.documents = {}                # uri -> current buffer text
+        self.versions = {}                 # uri -> document version
+        self.changed_at = {}               # uri -> time of the last open/change
+        self.saved = set()                 # uris saved since the last change
+        self.type_cache = {}               # uri -> ((version, digest), function -> {name: C type})
+
+    def compiler_types(self, uri, text, path):
+        """Cached compiler-inferred local types, built only after didSave or 1 s idle."""
+        if text is None or path is None:
+            return {}
+        version = self.versions.get(uri)
+        key = (version, hashlib.sha256(text.encode("utf-8")).hexdigest())
+        cached = self.type_cache.get(uri)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        if uri not in self.saved and time.monotonic() - self.changed_at.get(uri, 0.0) < 1.0:
+            return {}
+        try:
+            found = project.find(path.parent)
+        except project.ProjectError:
+            found = None
+        options = found.compiler_options() if found else []
+        result = _compiler_type_map(text, path, cli._env(), options)
+        self.type_cache[uri] = (key, result)
+        return result
 
     def _open_text(self, path):
         """The buffer text of an open document, so definitions use unsaved edits; None when not open."""
@@ -1300,9 +1845,14 @@ class Server:
             uri = document.get("uri", "")
             if document.get("text") is not None:
                 self.documents[uri] = document["text"]
+            self.versions[uri] = document.get("version") or 0
+            self.changed_at[uri] = time.monotonic()
+            self.saved.discard(uri)
+            self.type_cache.pop(uri, None)
             self.analyse(uri, document.get("text"))
         elif method == "textDocument/didChange":
-            uri = (params.get("textDocument") or {}).get("uri", "")
+            document = params.get("textDocument") or {}
+            uri = document.get("uri", "")
             text = self.documents.get(uri)
             if text is None:
                 path = uri_to_path(uri)
@@ -1310,15 +1860,27 @@ class Server:
             for change in params.get("contentChanges") or []:
                 text = apply_change(text, change)
             self.documents[uri] = text
+            self.versions[uri] = document.get("version") or self.versions.get(uri) or 0
+            self.changed_at[uri] = time.monotonic()
+            self.saved.discard(uri)
+            self.type_cache.pop(uri, None)
             self.analyse(uri, text)
         elif method == "textDocument/didSave":
-            uri = (params.get("textDocument") or {}).get("uri", "")
+            document = params.get("textDocument") or {}
+            uri = document.get("uri", "")
             if params.get("text") is not None:
                 self.documents[uri] = params["text"]
+            if document.get("version") is not None:
+                self.versions[uri] = document["version"]
+            self.saved.add(uri)
             self.analyse(uri, params.get("text"))
         elif method == "textDocument/didClose":
             uri = (params.get("textDocument") or {}).get("uri", "")
             self.documents.pop(uri, None)
+            self.versions.pop(uri, None)
+            self.changed_at.pop(uri, None)
+            self.saved.discard(uri)
+            self.type_cache.pop(uri, None)
             for target in self.shown.pop(uri, {uri}):
                 self.publish(target, [])
         elif method == "textDocument/definition":
@@ -1346,7 +1908,9 @@ class Server:
                     if path is not None and path.is_file():
                         text = path.read_text(encoding="utf-8", errors="replace")
                 if text is not None:
-                    value = type_hover(text, position)
+                    path = uri_to_path(uri)
+                    types = self.compiler_types(uri, text, path)
+                    value = type_hover(text, position, types)
                     if value:
                         answer = {"contents": {"kind": "markdown", "value": value}}
             self.reply(message, answer)

@@ -21,6 +21,45 @@ The daily fuzzer (seed 2076514981) reported `DIFF|exit code cpython=0 ail=1; lin
 The difference does not reproduce on this tree.  `bash ~/tools/cmp.sh /tmp/probes/fz241.py $PWD` says `g same stdout` and `d same stdout`, and `lab/fuzz/run.py --start 2076514981 --count 1 --jobs 1` classes both modes as `same` (1/1, default and `AIL_IR=1`).  No compiler change was made.
 
 Minimized to the tuple-key sort on an aliased list; the string ordering comparison also matches.  Probes (`/tmp/probes/fz241{,_min,_tuples,_types,_routes,_routes2,_str,_loop,_alias}.py`, `cmp.sh` g/d plus an explicit `AIL_IR=1` build) all match CPython.  Added `test_ail_fz241.py` (registered in `tests.d`): the minimized seed, tuple-key sorts over int/float/bool/str and list-of-tuple elements, direct tuple comparison, `sorted`/`min`/`max` with tuple keys, str ordering, and values reaching a sort through an argument, a list item, an attribute and a dict value, on the default and `AIL_IR=1` builds.
+## 2026-11-08 -- fdlsp2 hover review fixes: receiver-type method calls, augmented mutation (job-rbfdlsp2-11082100)
+
+Fixed the two review defects in `packaging/ail_lang/lsp.py`. A method call is now typed from its
+receiver, never from the method name alone: a class instance uses the method's return annotation
+(`c.isalpha() -> int` is `int`, `c.count() -> bool` is `bool`, an unannotated method or an unknown
+receiver shows nothing), and only a receiver the source proves is `str`/`bytes` uses the
+character-method tables. `_mutated_names` now also marks a bare `AugAssign` target, so
+`xs = [True]; xs += [1]` makes the item type unknown instead of trusting the old literal.
+
+Hover probes in `/tmp/probes/hover_methods.py` (10/10): class method `-> int` and `-> bool`,
+unknown receiver `.isalpha()`/`.count()`, unannotated class method, annotated `str` receiver,
+bytes literal, list `+=`, subscript `+=`. Compilable probes `methodname2.py`, `methodname3.py`
+and `aug.py` match CPython stdout/exit in both builds with `bash ~/tools/cmp.sh`. Tests on the
+final commit, `-j 2`: `test_ail_lsp`, `test_ail_lsp_def`, `test_ail_lsp_hover`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 6 modules, 0 failed, 193 s.
+
+## 2026-11-08 -- fdlsp2 re-applied: LSP hover shows compiler-inferred local types (job-rbfdlsp2-11082100)
+
+Re-applied the accepted `job-fdlsp2-11081741` change (`9d53b559`..`FETCH_HEAD`) on this tree. The
+`packaging/ail_lang/lsp.py` hover now maps a `--debug` build's C locals to `int`/`float`/`str`/
+`bytes`/`list`/`dict`, keyed by the Python scope and its `def` line and cached per document version;
+`int64_t` is shown only when the source proves the value is not `bool`, and a mutated list or dict
+literal shows nothing. The `docs/LSP.md`, `lab/lsp/RESULTS.md`, `lab/lsp/hover/` probes,
+`test_ail_lsp_hover.py` and its `tests.d/` registration applied unchanged. The
+`.github/workflows/agent-worker.yml` hunk was already present on this tree, so it was left alone.
+`tools/diff_ids.py` is not present on this tree, so only `tools/update_manifest.py` ran; it
+regenerated the two new-file pins and `--check` passes.
+
+Probes in `/tmp/probes/`, run with `bash ~/tools/cmp.sh <probe> $PWD` (general and default builds):
+`hover_types.py` (int/float/str/bool/comparison/`not`/negative/zero/user call/`len`/`range` loop/
+list and dict reads/str methods/empty list/`sum`-free arithmetic), `hover_mutation.py` (item store,
+`append`, `extend`, alias then mutate, empty list append), `hover_dict_keys.py` (dict-key iteration
+for bool/False/str and `{**base}`) and `hover_values.py` (values through an argument, a list item, a
+dict value and an attribute, then a loop). All four match CPython stdout and exit status in both
+builds. The authoritative hover probe `test_ail_lsp_hover` checks all 45 `expect.json` cases (38
+shown right, 7 deliberately empty) and passes.
+
+Tests on the final commit, `-j 2`: `test_ail_lsp`, `test_ail_lsp_def`, `test_ail_lsp_hover`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` -- 6 modules, 0 failed, 283 s.
 
 ## 2026-11-08 -- wedge2: hybrid-native functions index lists and dicts (job-wedge2-11081603)
 
