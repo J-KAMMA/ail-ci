@@ -413,3 +413,15 @@ stays in CPython) and `dict` parameters (no corpus function takes one; `to_c` ha
 parameter ABI). Measured (`obs5_task3.json`): `hashing` 1.000 -> 0.277, `sort_rank` 0.995 -> 0.181;
 `tokenizer`, `field_valid`, `json_parse`, `csv_parse` unchanged; all outputs byte-identical.
 `examples/hybrid/checksum_text.py` (`ord` over a str) is now accelerated.
+
+**obs5 task 4 (`int(str)`).** Done before field stores: one hour of work and a smaller design risk.
+CPython's `int(str)` accepts Unicode whitespace and digits, `+`, single `_` between digits and
+any size; the typed runtime reimplements all of that, and a difference anywhere in it would be a
+silent one. So the hybrid does not trust it: `int(<proven str>)` is accepted, and in the hybrid's
+copy of the unit the general parser `ail__str_to_int_full` is replaced by a trap, leaving only
+`ail_str_to_int`'s inline fast path (`-?[0-9]{1,18}` in ASCII, whose value CPython reads
+identically, leading zeros and `-0` included). Every other text -- whitespace, `+`, `_`,
+non-ASCII digits, 19+ digits, junk -- abandons the call and CPython re-runs it (value or
+ValueError). A unit whose parser is not the expected definition is refused. pymix's ValueError
+escape refusal for `int(...)` is lifted in the hybrid's analysis like division. Measured
+(`obs5_task4.json`): `csv_parse` 0.547 -> 0.220 (`sum_column`); all outputs byte-identical.

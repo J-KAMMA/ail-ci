@@ -480,6 +480,84 @@ VIEWS_NATIVE = ('count_terms', 'total_len', 'first_chars', 'fnv1a', 'adler', 'at
 VIEWS_REFUSED = ('ord_param',)
 
 
+STRINT = '''
+COMMA = ","
+
+
+def sum_column(text: str, col: int) -> int:
+    total = 0
+    count = 0
+    body = ""
+    n = len(text)
+    i = 0
+    while i < n:
+        ch = text[i]
+        if ch == "\\n":
+            if body != "":
+                total += int(body)
+            body = ""
+            count = 0
+        elif ch == COMMA:
+            if count == col and body != "":
+                total += int(body)
+            count += 1
+            body = ""
+        elif count == col:
+            body += ch
+        i += 1
+    if body != "":
+        total += int(body)
+    return total
+
+
+def twice(s: str) -> int:
+    t = 0
+    k = 0
+    while k < 2:
+        t += int(s)
+        k += 1
+    return t
+
+
+def caught(s: str) -> int:
+    try:
+        return twice(s)
+    except ValueError:
+        return -1
+'''
+
+STRINT_RUNNER = r'''
+import strint as m
+
+
+def show(label, f, *args):
+    try:
+        r = f(*args)
+        print(label, type(r).__name__, repr(r))
+    except Exception as e:
+        print(label, 'raised', type(e).__name__, str(e))
+
+
+rows = '\n'.join('%d,%d,x%d' % (i, i * 7 - 300, i) for i in range(200))
+show('sum0', m.sum_column, rows, 0)
+show('sum1', m.sum_column, rows, 1)
+show('sum2', m.sum_column, rows, 2)
+show('sum_ws', m.sum_column, '1, 2\n3,4', 1)
+show('sum_big', m.sum_column, '1,99999999999999999999\n2,3', 1)
+for s in ['12', '-7', '007', '-0', '0', ' 12', '12 ', '+5', '1_000', '١٢', '', 'abc',
+          '12a', '9' * 18, '-' + '9' * 18, '9' * 19, '-9223372036854775808', '9' * 30, '\t3\n',
+          '0x10', '−5', '²', '-', '--1', '1e3', ' 7', '4 ', '1__0', '_1']:
+    show('twice %r' % s, m.twice, s)
+    show('caught %r' % s, m.caught, s)
+for _ in range(2000):
+    m.twice('123')
+print('loops-ok')
+'''
+
+STRINT_NATIVE = ('sum_column', 'twice')
+STRINT_REFUSED = ('caught',)
+
+
 def run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, timeout=600)
 
@@ -536,6 +614,11 @@ class Runs(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-views-') as tmp:
             out, report = self.build(tmp, 'views', VIEWS)
             self.compare(tmp, out, VIEWS_RUNNER, VIEWS_NATIVE, VIEWS_REFUSED, report, 'views')
+
+    def test_int_of_str_matches_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-strint-') as tmp:
+            out, report = self.build(tmp, 'strint', STRINT)
+            self.compare(tmp, out, STRINT_RUNNER, STRINT_NATIVE, STRINT_REFUSED, report, 'strint')
 
 
 if __name__ == '__main__':

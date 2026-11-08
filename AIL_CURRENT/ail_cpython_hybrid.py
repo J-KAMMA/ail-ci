@@ -332,6 +332,13 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
         return (_provably_float(args[0], float_names)
                 or (ret in ('int', 'bool')
                     and _provably_int(args[0], int_names, True, bool_names, False)))
+    if func.id == 'int' and len(args) == 1 and kinds is not None and kinds.builtin('int') \
+            and kinds.kind(args[0]) == 'str':
+        # obs5: `int(<str>)`.  The unit's parser is cut down to `-?[0-9]{1,18}` in ASCII (which
+        # CPython reads to the same value); any other text traps and CPython re-runs the call
+        # (`_STR_INT_FULL`), so whitespace, '+', '_', Unicode digits, big values and the
+        # ValueError are all CPython's own.
+        return True
     if func.id == 'int' and len(args) <= 1:
         # int(<int/bool>) is the identity; int(<float>) can raise ValueError/OverflowError,
         # which this clone cannot reproduce without an overflow wrapper for every result kind.
@@ -373,6 +380,18 @@ def _has_variable_division(fn):
             if not _nonzero_constant(right):
                 return True
     return False
+
+
+def _has_str_int(fn, kinds):
+    """obs5: the body calls `int(<proven str>)`."""
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'int'
+               and len(n.args) == 1 and not n.keywords and kinds.builtin('int')
+               and kinds.kind(n.args[0]) == 'str' for n in _own_nodes(fn))
+
+
+# obs5: the typed runtime's general `int(<str>)` parser.  The hybrid replaces it in its own copy of
+# a unit by a trap, keeping only `ail_str_to_int`'s inline fast path (`-?[0-9]{1,18}`, ASCII).
+_STR_INT_FULL = 'static int64_t ail__str_to_int_full(ail_str s) {'
 
 
 def _unsafe_body(fn, params=(), ret=None, fresh=(), natives=None, kinds=None):
@@ -600,7 +619,7 @@ def _link_natives(chosen, rejected, funcs, consts, values, csrcs=None, methods=N
             item['trap'] = True
         # obs5: a zero divisor anywhere in the unit (a callee's or a self-called method's body
         # included) stops the clone; the trap pad turns that into a fallback.
-        if any(chosen[m].get('vardiv') for m in unit if m in chosen):
+        if any(chosen[m].get('vardiv') or chosen[m].get('strint') for m in unit if m in chosen):
             item['trap'] = True
 
 
@@ -1750,6 +1769,9 @@ def _raise_site_exc(node):
     # divisor only with exact numeric operands, so the ZeroDivisionError is always CPython's own.
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
         return None
+    # obs5: `int(<str>)` traps on any text but a plain decimal; CPython raises the ValueError.
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'int':
+        return None
     return _old_raise_site(node)
 pymix._raise_site_exc = _raise_site_exc
 # obs3: pymix cannot type `out = []; out.append(x); return out` (an empty literal has no element
@@ -2066,6 +2088,9 @@ def _select(src, tree, report, facts, methods=None):
             return None, 'the list parameter is mutated'
         indexes = any(isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice)
                       for n in _own_nodes(funcs[pyname]))
+        strint = _has_str_int(funcs[pyname], kinds)
+        if strint and ('ail_str_to_int(' not in csrc or csrc.count(_STR_INT_FULL) != 1):
+            return None, "int(<str>): the typed clone's parser is not the one the hybrid cuts down"
         mix_ovf = ('int %s__mix_overflow = 0;' % mangled) in csrc
         return {
             'name': pyname, 'mangled': mangled, 'params': params,
@@ -2077,8 +2102,9 @@ def _select(src, tree, report, facts, methods=None):
             # int64 overflow stop into "run the original in CPython".  An int result with the
             # mixed-mode overflow signal already handles its overflow stops.
             'vardiv': _has_variable_division(funcs[pyname]),
+            'strint': strint,
             'trap': bool(indexes or ret in _LIST or _overflow_stop_reachable(csrc, mangled)
-                         or _has_variable_division(funcs[pyname])),
+                         or _has_variable_division(funcs[pyname]) or strint),
         }, None
 
     # obs4: a body that calls other natives is selectable only once they are, so selection runs
@@ -3356,6 +3382,14 @@ def _compile(items, units, module, out_dir):
                     + csrc[cap.end():])
         if item.get('trap'):
             csrc = _trap_patch(csrc, item['mangled'])
+            if csrc.count(_STR_INT_FULL) == 1:
+                # obs5: anything but the inline fast path's plain decimal is CPython's to parse.
+                csrc = csrc.replace(_STR_INT_FULL, (
+                    'static int64_t ail__str_to_int_full(ail_str s) { (void)s; %s__hybrid_hit(); '
+                    'return 0; }\n__attribute__((unused)) static int64_t '
+                    'ail__str_to_int_full_obs5_unused(ail_str s) {') % item['mangled'])
+            elif item.get('strint'):
+                raise RuntimeError('typed unit %r: int(<str>) parser not found' % item['name'])
         # The mixed-mode overflow signal is a per-function global.  The hybrid releases the GIL
         # around every native call, so two threads can otherwise reset/read each other's flag and
         # a truncated int could escape.  Give the hybrid's copy of the unit a thread-local flag;

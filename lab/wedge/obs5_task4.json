@@ -1,0 +1,567 @@
+[
+ {
+  "all_defs": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_fields",
+     "field_chars",
+     "max_field_len",
+     "quote_count",
+     "sum_column"
+    ],
+    "build_rc": 0,
+    "build_s": 5.52,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_fields",
+     "field_chars",
+     "max_field_len",
+     "quote_count",
+     "sum_column"
+    ],
+    "rejected": {
+     "split_lines": "unresolved-return: no return, or contradictory returns stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "icount": {
+   "cpython": 29938614436,
+   "hand": 6581833370
+  },
+  "module": "csv_parse",
+  "observe_same_output": true,
+  "profile": {
+   "count_fields": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.518781
+   },
+   "field_chars": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.422264
+   },
+   "max_field_len": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.285531
+   },
+   "quote_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.140755
+   },
+   "split_lines": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[str]": 1
+    },
+    "self_s": 0.390091
+   },
+   "sum_column": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "col": {
+      "int": 1
+     },
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.691708
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "field_weight",
+     "is_simple_email",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name",
+     "score_ok",
+     "valid_len"
+    ],
+    "build_rc": 0,
+    "build_s": 4.78,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "field_weight",
+     "is_simple_email",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name",
+     "score_ok",
+     "valid_len"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "icount": {
+   "cpython": 29972502215,
+   "hand": 9535707490
+  },
+  "module": "field_valid",
+  "observe_same_output": true,
+  "profile": {
+   "field_weight": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "email": {
+      "str": 11945
+     },
+     "name": {
+      "str": 11945
+     },
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.752626
+   },
+   "is_simple_email": {
+    "big": {},
+    "calls": 1400000,
+    "generator": false,
+    "params": {
+     "addr": {
+      "str": 22883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 1.469222
+   },
+   "is_upper_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.328273
+   },
+   "looks_like_version": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "tag": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.3603
+   },
+   "normalise_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "raw": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "str": 1088
+    },
+    "self_s": 0.916763
+   },
+   "score_ok": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.244203
+   },
+   "valid_len": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.496413
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Parser.__init__",
+   "Parser.parse_array",
+   "Parser.parse_number",
+   "Parser.parse_object",
+   "Parser.parse_string",
+   "Parser.parse_value",
+   "Parser.skip_ws",
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_tokens",
+     "depth_of",
+     "digits_in",
+     "document_bytes"
+    ],
+    "build_rc": 0,
+    "build_s": 5.71,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_tokens",
+     "depth_of",
+     "digits_in",
+     "document_bytes"
+    ],
+    "rejected": {
+     "Parser.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+     "Parser.parse_array": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_number": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_object": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_string": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_value": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.skip_ws": "method: self is stored to or used other than by reading an attribute, stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "icount": {
+   "cpython": 21145267622,
+   "hand": 17865028605
+  },
+  "module": "json_parse",
+  "observe_same_output": true,
+  "profile": {
+   "Parser": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Parser.__init__": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 3
+     },
+     "text": {
+      "str": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 3
+    },
+    "self_s": 0.0
+   },
+   "Parser.parse_array": {
+    "big": {},
+    "calls": 120003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.192326
+   },
+   "Parser.parse_number": {
+    "big": {},
+    "calls": 240000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 4758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.444755
+   },
+   "Parser.parse_object": {
+    "big": {},
+    "calls": 120000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.196333
+   },
+   "Parser.parse_string": {
+    "big": {},
+    "calls": 1080000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 1.246115
+   },
+   "Parser.parse_value": {
+    "big": {},
+    "calls": 1080003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1104
+    },
+    "self_s": 0.841428
+   },
+   "Parser.skip_ws": {
+    "big": {},
+    "calls": 4080006,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 64758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1104
+    },
+    "self_s": 2.067509
+   },
+   "count_tokens": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.064109
+   },
+   "depth_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.152258
+   },
+   "digits_in": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.056095
+   },
+   "document_bytes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ }
+]
