@@ -11,12 +11,14 @@ Measurement reductions from `lab/compare/run_task.py`, recorded in the `settings
 | ail | checkout 5fa7288 |
 | python | 3.12.3 |
 | gcc | gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
-| cython | missing (FileNotFoundError) |
-| mypy | missing (FileNotFoundError) |
-| nuitka | missing (FileNotFoundError) |
-| codon | missing (FileNotFoundError) |
+| cython | Cython version 3.3.1 |
+| mypy | mypy 2.4.1 (compiled: yes) |
+| nuitka | 4.3.4 |
+| codon | 0.20.6 |
 | pypy | Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)] |
-| valgrind | missing (FileNotFoundError) |
+| valgrind | valgrind-3.22.0 |
+
+Where each column was measured (`tool_runs` in `results.json`): ail 2026-11-08 on commit `5fa7288`; ail-py 2026-11-08 on commit `5fa7288`; codon 2026-11-06 on commit `e9cb684`; codon-main 2026-11-06 on commit `e9cb684`; cython-main 2026-11-06 on commit `e9cb684`; cython-typed 2026-11-06 on commit `e9cb684`; mypyc 2026-11-06 on commit `e9cb684`; nuitka 2026-11-06 on commit `e9cb684`; pypy 2026-11-08 on commit `5fa7288`.
 
 ## Per task
 
@@ -24,51 +26,111 @@ Measurement reductions from `lab/compare/run_task.py`, recorded in the `settings
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | berth_sim | ail | yes | 3620 | - | - | 234.8 | 72 | 13.61 | 0.2 | yes |
 | berth_sim | ail-py | yes | 20610 | - | - | 8956.4 | 490 | 29.10 | 1.5 | yes |
+| berth_sim | cython-main | yes | 14927 | - | - | 1095.7 | 691 | 3.45 | 1.3 | yes |
+| berth_sim | cython-typed | yes | 15875 | - | - | 903.1 | 693 | 3.53 | 1.3 | yes |
+| berth_sim | nuitka | yes | 15251 | - | - | 1102.3 | 4098 | 37.88 | 40.9 | yes |
+| berth_sim | mypyc | yes | 11222 | - | - | 791.8 | 386 | 3.77 | 3.8 | no |
+| berth_sim | codon | build refused | - | - | - | - | - | - | - | - | - |
+| berth_sim | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | berth_sim | pypy | yes | 13352 | 11801 | - | 1873.4 | - | - | 150.5 (interp) | no |
 | chain_relax | ail | yes | 1139 | - | - | 3.9 | 34 | 2.75 | 0.1 | yes |
 | chain_relax | ail-py | timeout | - | - | - | - | 243 | 5.87 | 0.8 | yes |
+| chain_relax | cython-main | yes | 15942 | - | - | 23.0 | 681 | 3.00 | 1.3 | yes |
+| chain_relax | cython-typed | yes | 16184 | - | - | 24.0 | 621 | 3.05 | 1.2 | yes |
+| chain_relax | nuitka | yes | 10755 | - | - | 29.7 | 4090 | 37.96 | 40.7 | yes |
+| chain_relax | mypyc | yes | 7842 | - | - | 22.9 | 307 | 3.12 | 3.3 | no |
+| chain_relax | codon | build refused | - | - | - | - | - | - | - | - | - |
+| chain_relax | codon-main | no (23/33 wrong) | 6 | - | 86.56M | 9.6 | 1043 | 6.79 | 1.0 | yes |
 | chain_relax | pypy | yes | 1153 | 1232 | - | 67.5 | - | - | 150.5 (interp) | no |
 | echo_pack | ail | yes | 938 | - | - | 346.1 | 35 | 3.29 | 0.1 | yes |
 | echo_pack | ail-py | yes | 4372 | - | - | 758.9 | 49 | 1.83 | 0.2 | yes |
+| echo_pack | cython-main | yes | 25949 | - | - | 1557.6 | 665 | 3.18 | 1.3 | yes |
+| echo_pack | cython-typed | yes | 30605 | - | - | 1366.3 | 787 | 3.51 | 1.4 | yes |
+| echo_pack | nuitka | yes | 31219 | - | - | 1564.4 | 4094 | 38.19 | 40.7 | yes |
+| echo_pack | mypyc | build refused | - | - | - | - | - | - | - | - | - |
+| echo_pack | codon | build refused | - | - | - | - | - | - | - | - | - |
+| echo_pack | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | echo_pack | pypy | yes | 10685 | 8967 | - | 919.6 | - | - | 150.5 (interp) | no |
 | ledger_bin | ail | yes | 808 | - | - | 329.8 | 68 | 3.70 | 0.2 | yes |
 | ledger_bin | ail-py | yes | 45021 | - | - | 2978.9 | 493 | 14.61 | 1.5 | yes |
+| ledger_bin | cython-main | yes | 13797 | - | - | 1240.0 | 1029 | 4.50 | 1.9 | yes |
+| ledger_bin | cython-typed | yes | 22819 | - | - | 914.7 | 822 | 4.13 | 1.6 | yes |
+| ledger_bin | nuitka | yes | 15389 | - | - | 1252.1 | 4110 | 37.98 | 41.2 | yes |
+| ledger_bin | mypyc | yes | 6356 | - | - | 742.7 | 390 | 3.82 | 3.8 | no |
+| ledger_bin | codon | build refused | - | - | - | - | - | - | - | - | - |
+| ledger_bin | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | ledger_bin | pypy | yes | 9831 | 5518 | - | 976.1 | - | - | 150.5 (interp) | no |
 | rail_transfer | ail | yes | 60 | - | - | 28.3 | 68 | 3.05 | 0.2 | yes |
 | rail_transfer | ail-py | yes | 850 | - | - | 465.3 | 496 | 10.82 | 1.5 | yes |
+| rail_transfer | cython-main | yes | 538 | - | 3.54G | 112.7 | 786 | 4.22 | 1.4 | yes |
+| rail_transfer | cython-typed | yes | 1158 | - | - | 118.3 | 1039 | 4.72 | 1.8 | yes |
+| rail_transfer | nuitka | yes | 614 | - | 206.94M | 121.3 | 4110 | 37.67 | 41.0 | yes |
+| rail_transfer | mypyc | yes | 840 | - | - | 88.1 | 470 | 4.30 | 4.2 | no |
+| rail_transfer | codon | build refused | - | - | - | - | - | - | - | - | - |
+| rail_transfer | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | rail_transfer | pypy | yes | 585 | 212 | - | 144.9 | - | - | 150.5 (interp) | no |
 | scar_life | ail | yes | 32822 | - | - | 17.3 | 44 | 2.49 | 0.2 | yes |
 | scar_life | ail-py | build refused | - | - | - | - | - | - | - | - | - |
+| scar_life | cython-main | yes | 4117 | - | - | 99.0 | 945 | 4.12 | 1.7 | yes |
+| scar_life | cython-typed | timeout | - | - | - | - | 693 | 3.26 | 1.3 | yes |
+| scar_life | nuitka | yes | 4496 | - | - | 107.5 | 4338 | 41.17 | 43.2 | yes |
+| scar_life | mypyc | build refused | - | - | - | - | - | - | - | - | - |
+| scar_life | codon | build refused | - | - | - | - | - | - | - | - | - |
+| scar_life | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | scar_life | pypy | yes | 19044 | 10229 | - | 276.4 | - | - | 150.5 (interp) | no |
 | tally_lang | ail | yes | 1870 | - | - | 1.6 | 77 | 5.26 | 0.3 | yes |
 | tally_lang | ail-py | build refused | - | - | - | - | - | - | - | - | - |
+| tally_lang | cython-main | yes | 10162 | - | - | 12.7 | 1453 | 6.17 | 2.4 | yes |
+| tally_lang | cython-typed | yes | 59789 | - | - | 12.6 | 1508 | 6.38 | 2.6 | yes |
+| tally_lang | nuitka | yes | 9558 | - | - | 21.2 | 4362 | 41.40 | 43.8 | yes |
+| tally_lang | mypyc | yes | 8634 | - | - | 11.5 | 458 | 4.19 | 4.1 | no |
+| tally_lang | codon | build refused | - | - | - | - | - | - | - | - | - |
+| tally_lang | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | tally_lang | pypy | yes | 2154 | 1187 | - | 82.1 | - | - | 150.5 (interp) | no |
 | term_rank | ail | yes | 3063 | - | - | 157.4 | 81 | 5.05 | 0.3 | yes |
 | term_rank | ail-py | yes | 26242 | - | - | 2617.5 | 844 | 32.11 | 2.5 | yes |
+| term_rank | cython-main | yes | 7502 | - | - | 408.4 | 674 | 2.93 | 1.3 | yes |
+| term_rank | cython-typed | yes | 14937 | - | - | 150.5 | 846 | 3.68 | 1.5 | yes |
+| term_rank | nuitka | yes | 7714 | - | - | 414.7 | 4318 | 41.03 | 42.9 | yes |
+| term_rank | mypyc | build refused | - | - | - | - | - | - | - | - | - |
+| term_rank | codon | build refused | - | - | - | - | - | - | - | - | - |
+| term_rank | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | term_rank | pypy | yes | 5458 | 4732 | - | 515.2 | - | - | 150.5 (interp) | no |
 | ticket_audit | ail | yes | 1646 | - | - | 248.8 | 114 | 5.69 | 0.4 | yes |
 | ticket_audit | ail-py | yes | 58418 | - | - | 3435.1 | 1259 | 97.52 | 3.7 | yes |
+| ticket_audit | cython-main | yes | 7636 | - | - | 535.5 | 1026 | 6.29 | 1.8 | yes |
+| ticket_audit | cython-typed | yes | 13818 | - | - | 302.6 | 1435 | 5.95 | 2.4 | yes |
+| ticket_audit | nuitka | yes | 11427 | - | - | 542.0 | 4346 | 50.78 | 43.5 | yes |
+| ticket_audit | mypyc | yes | 5202 | - | - | 296.9 | 466 | 5.90 | 4.2 | no |
+| ticket_audit | codon | build refused | - | - | - | - | - | - | - | - | - |
+| ticket_audit | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | ticket_audit | pypy | yes | 5337 | 5455 | - | 484.6 | - | - | 150.5 (interp) | no |
 | tree_fold | ail | yes | 1232 | - | - | 358.8 | 85 | 6.37 | 0.3 | yes |
 | tree_fold | ail-py | yes | 71473 | - | - | 5084.3 | 1003 | 109.46 | 3.0 | yes |
+| tree_fold | cython-main | yes | 14948 | - | - | 1150.9 | 997 | 6.56 | 1.8 | yes |
+| tree_fold | cython-typed | timeout | - | - | - | - | 1262 | 6.98 | 2.2 | yes |
+| tree_fold | nuitka | yes | 17954 | - | - | 1162.3 | 4330 | 63.90 | 43.2 | yes |
+| tree_fold | mypyc | yes | 18578 | - | - | 1202.3 | 455 | 10.62 | 4.1 | no |
+| tree_fold | codon | build refused | - | - | - | - | - | - | - | - | - |
+| tree_fold | codon-main | build refused | - | - | - | - | - | - | - | - | - |
 | tree_fold | pypy | yes | 7053 | 6925 | - | 1427.6 | - | - | 150.5 (interp) | no |
 
 ## PyPy
 
-PyPy runs `src/<task>/main.py` unchanged, in the interpreter, on the same perf input and against the same `reference.py`. Nothing is compiled, so `compile s` is `-` and the build-disk cell is the interpreter install, marked `interpreter` in `results.json` (`build_kind`). Wall time is the median of 5 fresh processes, like every other row. `warm5 ms` is the **5th run inside one process** (`pypy_warm.py` times `exec` of the compiled source with a fresh globals dict, a fresh stdin over the same bytes and its own stdout, and checks that output against the same reference): that is the run a JIT that has seen the hot loops once gives, and it is the fairer number for a long-lived process, while the plain column is what a short-lived `python main.py` pays. `warm/plain` is the ratio.
+PyPy runs `src/<task>/main.py` unchanged, in the interpreter, on the same perf input and against the same `reference.py`. Nothing is compiled, so `compile s` is `-` and the build-disk cell is the interpreter install, marked `interpreter` in `results.json` (`interpreter: true`). Wall time is the median of 5 fresh processes, like every other row. `warm5 ms` is the **5th run inside one process** (`pypy_warm.py`): the first run imports the program and runs its `main()`, runs 2-5 call that same `main()` again in the same module state with a fresh stdin over the same bytes and their own stdout, and every run is checked against the same reference.  That is what a long-lived process (a server, a notebook) pays, and it is the only way the JIT sees the same code twice -- re-executing the source builds new function objects and throws the traces away. A driver with no module-level `main` is re-executed instead and the row says `warm_mode`.  `warm/plain` is the ratio.
 
-| task | PyPy plain ms | PyPy warm5 ms | warm / plain | AIL standalone / PyPy | AIL (main.py) / PyPy |
-|---|---|---|---|---|---|
-| berth_sim | 13352 | 11801 | 0.88x | 0.27x | 1.54x |
-| chain_relax | 1153 | 1232 | 1.07x | 0.99x | - |
-| echo_pack | 10685 | 8967 | 0.84x | 0.09x | 0.41x |
-| ledger_bin | 9831 | 5518 | 0.56x | 0.08x | 4.58x |
-| rail_transfer | 585 | 212 | 0.36x | 0.10x | 1.45x |
-| scar_life | 19044 | 10229 | 0.54x | 1.72x | - |
-| tally_lang | 2154 | 1187 | 0.55x | 0.87x | - |
-| term_rank | 5458 | 4732 | 0.87x | 0.56x | 4.81x |
-| ticket_audit | 5337 | 5455 | 1.02x | 0.31x | 10.95x |
-| tree_fold | 7053 | 6925 | 0.98x | 0.17x | 10.13x |
+| task | PyPy plain ms | PyPy warm5 ms | warm / plain | mode | AIL standalone / PyPy | AIL (main.py) / PyPy |
+|---|---|---|---|---|---|---|
+| berth_sim | 13352 | 11801 | 0.88x | one-import | 0.27x | 1.54x |
+| chain_relax | 1153 | 1232 | 1.07x | one-import | 0.99x | - |
+| echo_pack | 10685 | 8967 | 0.84x | one-import | 0.09x | 0.41x |
+| ledger_bin | 9831 | 5518 | 0.56x | one-import | 0.08x | 4.58x |
+| rail_transfer | 585 | 212 | 0.36x | one-import | 0.10x | 1.45x |
+| scar_life | 19044 | 10229 | 0.54x | one-import | 1.72x | - |
+| tally_lang | 2154 | 1187 | 0.55x | one-import | 0.87x | - |
+| term_rank | 5458 | 4732 | 0.87x | one-import | 0.56x | 4.81x |
+| ticket_audit | 5337 | 5455 | 1.02x | one-import | 0.31x | 10.95x |
+| tree_fold | 7053 | 6925 | 0.98x | one-import | 0.17x | 10.13x |
 
 Every warm run produced the CPython reference output on 10 of 10 tasks; a mismatch would be a PyPy result, not an AIL one.
 
@@ -80,95 +142,64 @@ On wall time, **AIL standalone (main.py) is faster than PyPy on 1 of the 7 tasks
 
 | metric | AIL / best rival (geomean) | tasks AIL wins | verdict |
 |---|---|---|---|
-| wall ms | - | 0/0 | AIL worse |
+| wall ms | 0.23x | 9/10 | AIL better |
 | instructions | - | 0/0 | AIL worse |
-| peak RSS KiB | - | 0/0 | AIL worse |
-| artifact bytes | - | 0/0 | AIL worse |
-| compile s | - | 0/0 | AIL worse |
-| build disk KiB | - | 0/0 | AIL worse |
+| peak RSS KiB | 0.32x | 9/10 | AIL better |
+| artifact bytes | 0.13x | 10/10 | AIL better |
+| compile s | 1.12x | 6/10 | AIL worse |
+| build disk KiB | 0.15x | 10/10 | AIL better |
 
 A ratio below 1.00 means AIL is better (every metric is lower-is-better).
 
 **Five-line verdict**
 
-- wall time: not measured.
+- wall time: AIL is 4.32x better than the best rival (9/10 tasks).
 - instructions: not measured.
-- peak RSS: not measured.
-- artifact size: not measured.
-- compile time: not measured.
+- peak RSS: AIL is 3.10x better than the best rival (9/10 tasks).
+- artifact size: AIL is 7.82x better than the best rival (10/10 tasks).
+- compile time: AIL is 1.12x worse than the best rival (6/10 tasks).
 
 ## Refusals and patches
 
 | tool | task | result | first error line |
 |---|---|---|---|
-| cython-main | berth_sim | refused | `` |
-| cython-typed | berth_sim | refused | `` |
-| nuitka | berth_sim | refused | `` |
-| mypyc | berth_sim | refused | `` |
-| codon | berth_sim | refused | `` |
-| codon-main | berth_sim | refused | `` |
-| cython-main | chain_relax | refused | `` |
-| cython-typed | chain_relax | refused | `` |
-| nuitka | chain_relax | refused | `` |
-| mypyc | chain_relax | refused | `` |
-| codon | chain_relax | refused | `` |
-| codon-main | chain_relax | refused | `` |
-| cython-main | echo_pack | refused | `` |
-| cython-typed | echo_pack | refused | `` |
-| nuitka | echo_pack | refused | `` |
-| mypyc | echo_pack | refused | `` |
-| codon | echo_pack | refused | `` |
-| codon-main | echo_pack | refused | `` |
-| cython-main | ledger_bin | refused | `` |
-| cython-typed | ledger_bin | refused | `` |
-| nuitka | ledger_bin | refused | `` |
-| mypyc | ledger_bin | refused | `` |
-| codon | ledger_bin | refused | `` |
-| codon-main | ledger_bin | refused | `` |
-| cython-main | rail_transfer | refused | `` |
-| cython-typed | rail_transfer | refused | `` |
-| nuitka | rail_transfer | refused | `` |
-| mypyc | rail_transfer | refused | `` |
-| codon | rail_transfer | refused | `` |
-| codon-main | rail_transfer | refused | `` |
+| codon | berth_sim | refused | `/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/codon-berth_sim/src/typed.py:1 (1-34): error: no module named 'ail'` |
+| codon-main | berth_sim | refused | `/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/codon-main-berth_sim/src/main.py:97 (60-65): error: local variable 'maxid' referenced before assignment at main.py:99:25` |
+| codon | chain_relax | refused | `/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/codon-chain_relax/src/typed.py:1 (1-43): error: no module named 'ail'` |
+| mypyc | echo_pack | refused | `typed.py:89: error: Argument 1 to "write_stdout_bytes" has incompatible type "bytearray"; expected "bytes"  [arg-type]` |
+| codon | echo_pack | refused | `/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/codon-echo_pack/src/typed.py:1 (1-53): error: no module named 'ail'` |
+| codon-main | echo_pack | refused | `/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/codon-main-echo_pack/src/main.py:105 (12-35): error: 'File[str]' object has no attribute 'buffer'` |
+| codon | ledger_bin | refused | `/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/codon-ledger_bin/src/typed.py:1 (1-27): error: no module named 'ail'` |
+| codon-main | ledger_bin | refused | `/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/codon-main-ledger_bin/src/main.py:67 (17-35): error: 'Tuple[int,int,int,int]' does not match expected type 'Tuple[int,int,str,int]'` |
+| codon | rail_transfer | refused | `/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/codon-rail_transfer/src/typed.py:1 (1-34): error: no module named 'ail'` |
+| codon-main | rail_transfer | refused | `/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/codon-main-rail_transfer/src/main.py:6 (26-57): error: 'File[str]' object has no attribute 'buffer'` |
 | ail-py | scar_life | refused | `/home/runner/work/ail-ci/ail-ci/lab/compare/src/scar_life/main.py:12:5: not in the subset: 'out' is appended both a str and a non-str value; a list of str holds one kind of value throughout, exactly like a plain list of ` |
-| cython-main | scar_life | refused | `` |
-| cython-typed | scar_life | refused | `` |
-| nuitka | scar_life | refused | `` |
-| mypyc | scar_life | refused | `` |
-| codon | scar_life | refused | `` |
-| codon-main | scar_life | refused | `` |
+| mypyc | scar_life | refused | `typed.py:168: error: Argument 1 to "write_stdout_bytes" has incompatible type "bytearray"; expected "bytes"  [arg-type]` |
+| codon | scar_life | refused | `/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/codon-scar_life/src/typed.py:1 (1-53): error: no module named 'ail'` |
+| codon-main | scar_life | refused | `/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/codon-main-scar_life/src/main.py:37 (12-35): error: 'File[str]' object has no attribute 'buffer'` |
 | ail-py | tally_lang | refused | `py:106: cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation
 note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.py:124: cannot t` |
-| cython-main | tally_lang | refused | `` |
-| cython-typed | tally_lang | refused | `` |
-| nuitka | tally_lang | refused | `` |
-| mypyc | tally_lang | refused | `` |
-| codon | tally_lang | refused | `` |
-| codon-main | tally_lang | refused | `` |
-| cython-main | term_rank | refused | `` |
-| cython-typed | term_rank | refused | `` |
-| nuitka | term_rank | refused | `` |
-| mypyc | term_rank | refused | `` |
-| codon | term_rank | refused | `` |
-| codon-main | term_rank | refused | `` |
-| cython-main | ticket_audit | refused | `` |
-| cython-typed | ticket_audit | refused | `` |
-| nuitka | ticket_audit | refused | `` |
-| mypyc | ticket_audit | refused | `` |
-| codon | ticket_audit | refused | `` |
-| codon-main | ticket_audit | refused | `` |
-| cython-main | tree_fold | refused | `` |
-| cython-typed | tree_fold | refused | `` |
-| nuitka | tree_fold | refused | `` |
-| mypyc | tree_fold | refused | `` |
-| codon | tree_fold | refused | `` |
-| codon-main | tree_fold | refused | `` |
+| codon | tally_lang | refused | `/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/codon-tally_lang/src/typed.py:1 (1-41): error: no module named 'ail'` |
+| codon-main | tally_lang | refused | `/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/codon-main-tally_lang/src/main.py:3 (1-29): error: cannot import name 'setrecursionlimit' from 'sys'` |
+| mypyc | term_rank | refused | `typed.py:161: error: Argument 1 to "write_stdout_bytes" has incompatible type "bytearray"; expected "bytes"  [arg-type]` |
+| codon | term_rank | refused | `/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/codon-term_rank/src/typed.py:1 (1-53): error: no module named 'ail'` |
+| codon-main | term_rank | refused | `/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/codon-main-term_rank/src/main.py:34 (12-35): error: 'File[str]' object has no attribute 'buffer'` |
+| codon | ticket_audit | refused | `/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/codon-ticket_audit/src/typed.py:1 (1-27): error: no module named 'ail'` |
+| codon-main | ticket_audit | refused | `/tmp/codon/codon-deploy-linux-x86_64/lib/codon/stdlib/internal/types/int.codon:72 (27-41): error: 'bytes' object has no attribute '__int__'` |
+| codon | tree_fold | refused | `/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/codon-tree_fold/src/typed.py:1 (1-33): error: no module named 'ail'` |
+| codon-main | tree_fold | refused | `/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/codon-main-tree_fold/src/main.py:61 (12-53): error: 'File[str]' object has no attribute 'buffer'` |
 
 ## Safety: what each tool does when the program is wrong
 
 | tool | divzero | index | negindex | overflow | recursion | silently wrong |
 |---|---|---|---|---|---|---|
+| ail | same as CPython | same as CPython | same as CPython | stops loudly (stdout differs) | same as CPython | 0/5 |
+| cython-main | same as CPython | stops loudly (stdout differs) | same as CPython | same as CPython | crash (signal 11) | 0/5 |
+| cython-typed | same as CPython | stops loudly (stdout differs) | same as CPython | same as CPython | crash (signal 11) | 0/5 |
+| nuitka | same as CPython | same as CPython | same as CPython | same as CPython | stops loudly (stdout differs) | 0/5 |
+| mypyc | same as CPython | same as CPython | same as CPython | same as CPython | silently wrong output | 1/5 |
+| codon | crash (signal 6) | crash (signal 6) | crash (signal 6) | silently wrong output | silently wrong output | 2/5 |
+| codon-main | crash (signal 6) | crash (signal 6) | crash (signal 6) | silently wrong output | silently wrong output | 2/5 |
 
 Probes: `safety/overflow.py` (int64 wrap), `safety/index.py` (index out of range), `safety/negindex.py` (negative index past the start), `safety/divzero.py` (division by zero), `safety/recursion.py` (100000 levels). "stops loudly" means a non-zero exit that reproduces a non-empty CPython stdout prefix; "stops loudly (stdout differs)" means a non-zero exit whose stdout does not match that prefix (often buffered away); "silently wrong" is a zero exit with a different answer; a negative exit is a crash by signal.
 

@@ -115,25 +115,80 @@ class RivalPyPyRow(unittest.TestCase):
 
 
 class RivalPyPyMerge(unittest.TestCase):
+    def base(self):
+        data = synthetic()
+        data['date'] = '2026-11-06'
+        data['head'] = 'e9cb684'
+        data['tools'] = {'cython': 'Cython version 3.3.1', 'nuitka': '4.3.4', 'pypy': 'PyPy 7.3.23'}
+        data['tool_runs'] = {'nuitka': dict(date='2026-11-06', head='e9cb684')}
+        return data
+
+    def now(self):
+        """This run: PyPy is installed, the Cython/Nuitka toolchains are not."""
+        data = synthetic()
+        data['date'] = '2026-11-08'
+        data['head'] = 'abcdef0'
+        data['tools'] = {'cython': 'missing (FileNotFoundError)', 'nuitka': 'missing (FileNotFoundError)',
+                         'pypy': 'PyPy 7.3.23'}
+        return data
+
+    def runtime_row(self):
+        return row('pypy', 900.0, compile_s=None, interpreter=True)
+
+    def test_a_missing_toolchain_keeps_the_base_row(self):
+        # The review's probe: base nuitka 1500 ms, this run cannot build Nuitka at all.
+        m = rival()
+        base = self.base()
+        now = self.now()
+        for task in now['tasks'].values():
+            task['results'].pop('nuitka')
+            task['results']['nuitka'] = dict(tool='nuitka', build_ok=False, build_error='', run_cmd=None)
+            task['results']['pypy'] = self.runtime_row()
+        merged = m.layer_base(now, base, ['pypy'], 'abcdef0')
+        kept = merged['tasks']['tree_fold']['results']['nuitka']
+        self.assertEqual(kept['wall_ms'], 3000.0, 'the base measurement survives an absent toolchain')
+        self.assertTrue(kept['build_ok'])
+        self.assertEqual(merged['tool_runs']['nuitka'], dict(date='2026-11-06', head='e9cb684', source='base'))
+        self.assertEqual(merged['tool_runs']['pypy'], dict(date='2026-11-08', head='abcdef0', source='this run'))
+        self.assertEqual(merged['tools']['nuitka'], '4.3.4', "the base version replaces this run's 'missing'")
+
+    def test_an_installed_tool_that_refuses_does_replace_the_base_row(self):
+        # A refusal is a result: it must be visible, not hidden behind the older measurement.
+        m = rival()
+        base = self.base()
+        now = self.now()
+        now['tools']['nuitka'] = '4.3.4'
+        for task in now['tasks'].values():
+            task['results'].pop('nuitka')
+            task['results']['nuitka'] = dict(tool='nuitka', build_ok=False, build_error='build timeout',
+                                             run_cmd=None)
+        merged = m.layer_base(now, base, ['nuitka'], 'abcdef0')
+        refused = merged['tasks']['tree_fold']['results']['nuitka']
+        self.assertFalse(refused['build_ok'])
+        self.assertEqual(refused['build_error'], 'build timeout')
+        self.assertEqual(merged['tool_runs']['nuitka'], dict(date='2026-11-08', head='abcdef0', source='this run'))
+
+    def test_an_uninstalled_tool_is_not_rendered_as_a_refusal_with_an_empty_error(self):
+        m = rival()
+        data = self.now()   # Cython and Nuitka missing
+        for task in data['tasks'].values():
+            task['results']['nuitka'] = dict(tool='nuitka', build_ok=False, build_error='', run_cmd=None)
+            task['results']['cython-main'] = dict(tool='cython-main', build_ok=False, build_error='',
+                                                  run_cmd=None)
+        text = m.render(data)
+        self.assertIn('| nuitka | tree_fold | not installed here | `nuitka not installed on this runner` |', text)
+        self.assertNotIn('| refused | `` |', text)
+        # a real refusal from an installed tool still reads `refused` with its first error line
+        data['tools']['nuitka'] = '4.3.4'
+        data['tasks']['tree_fold']['results']['nuitka'] = dict(tool='nuitka', build_ok=False,
+                                                               build_error='Nuitka: plugin error', run_cmd=None)
+        self.assertIn('| nuitka | tree_fold | refused | `Nuitka: plugin error` |', m.render(data))
+
     def test_base_keeps_old_tools_and_marks_provenance(self):
         m = rival()
-        base = synthetic()
-        base['date'] = '2026-11-06'
-        base['head'] = 'e9cb684'
-        base['tool_runs'] = {'nuitka': dict(date='2026-11-06', head='e9cb684')}
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'base.json'
-            path.write_text(json.dumps(base))
-            fresh = json.loads(path.read_text())
-            for task in fresh['tasks'].values():
-                task['results']['pypy'] = row('pypy', 900.0, compile_s=None, interpreter=True)
-            self.assertIn('nuitka', fresh['tasks']['tree_fold']['results'])
-            self.assertEqual(fresh['tool_runs']['nuitka']['date'], '2026-11-06')
-            self.assertIn('date', fresh['tool_runs']['nuitka'])
-        # the merge itself is a pure dict operation over two files; drive it through main's --base by
-        # copying the render input, since a full run needs every rival installed.
+        base = self.base()
         merged = dict(base['tasks']['tree_fold']['results'])
-        merged.update({'pypy': row('pypy', 900.0, compile_s=None, interpreter=True)})
+        merged.update({'pypy': self.runtime_row()})
         text = m.render(dict(base, tasks={'tree_fold': dict(base['tasks']['tree_fold'], results=merged)},
                              tool_runs={'nuitka': dict(date='2026-11-06', head='e9cb684'),
                                         'pypy': dict(date='2026-11-08', head='abcdef0')}))

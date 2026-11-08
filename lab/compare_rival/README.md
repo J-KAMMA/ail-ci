@@ -27,11 +27,13 @@ warm-up:
 
 - **wall ms**: the median of 5 fresh processes, exactly like every other row. It includes interpreter start-up
   and the JIT compiling the hot loops from cold.
-- **warm5 ms**: the 5th run **inside one process** (`pypy_warm.py`), timed around `exec` of the
-  already-compiled source with a fresh globals dict, a fresh stdin over the same bytes and its own stdout
-  file. That is what a long-lived process (a server, a notebook) sees.  The 5th run's stdout and exit status
-  are checked against the same `reference.py`, so a warm run that computes something else cannot pass
-  silently.
+- **warm5 ms**: the 5th run **inside one process** (`pypy_warm.py`). The first run executes the program;
+  runs 2-5 call its `main()` again in the same module state, with a fresh stdin over the same bytes and
+  its own stdout file. That is what a long-lived process (a server, a notebook) sees, and it is the only
+  way the JIT sees the same code twice. A driver with no module-level `main` cannot be re-entered, so it
+  is re-executed instead and the row records `warm_mode: "re-exec"` — that number is **not** a warmed
+  JIT, and the report says so. Every run's stdout and exit status are checked against the same
+  `reference.py`, so a warm run that computes something else cannot pass silently.
 
 `compile s` is `-` for PyPy (nothing is compiled); its build-disk cell is the **interpreter install** and is
 marked `interpreter` (`interpreter: true` in `results.json`), not a build artifact. `single exe` is `no`.

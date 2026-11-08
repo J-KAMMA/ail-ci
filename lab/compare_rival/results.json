@@ -1,20 +1,29 @@
 {
- "date": "2026-11-06",
- "head": "e9cb684",
- "icount_method": "callgrind",
+ "date": "2026-11-08",
+ "head": "5fa7288",
+ "icount_method": "none",
  "runner": {
   "os": "7.0.0-1017-azure",
   "cpus": 4,
   "image": "20261101.360.1"
  },
+ "settings": {
+  "build_runs": 1,
+  "run_timeout_s": 180,
+  "case_timeout_s": 30,
+  "callgrind_timeout_s": 120,
+  "callgrind_max_wall_ms": 4000,
+  "case_budget_s": 240
+ },
  "tools": {
-  "ail": "checkout e9cb684",
+  "ail": "checkout 5fa7288",
   "python": "3.12.3",
   "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
   "cython": "Cython version 3.3.1",
   "mypy": "mypy 2.4.1 (compiled: yes)",
   "nuitka": "4.3.4",
   "codon": "0.20.6",
+  "pypy": "Python 3.11.15 (194f9f44b505, May 25 2026, 19:34:11) [PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
   "valgrind": "valgrind-3.22.0"
  },
  "pins": {
@@ -26,13 +35,6 @@
   "SETUPTOOLS": "75.8.0",
   "CODON": "0.20.6"
  },
- "safety_probes": [
-  "divzero",
-  "index",
-  "negindex",
-  "overflow",
-  "recursion"
- ],
  "tasks": {
   "berth_sim": {
    "case": "perf",
@@ -46,33 +48,33 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      8.491
+      13.61
      ],
-     "compile_s": 8.491,
-     "build_disk_kib": 240,
-     "binary_bytes": 69192,
-     "stripped_bytes": 63704,
+     "compile_s": 13.61,
+     "build_disk_kib": 252,
+     "binary_bytes": 73416,
+     "stripped_bytes": 67800,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-berth_sim-r9zx44c8/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 2125.8,
-     "wall_min_ms": 2121.3,
+     "wall_ms": 3620.3,
+     "wall_min_ms": 3208.7,
      "wall_runs_ms": [
-      2143.1,
-      2133.4,
-      2125.8,
-      2121.3,
-      2125.1
+      3620.3,
+      3208.7,
+      3273.8,
+      4134.2,
+      4105.7
      ],
-     "rss_kib": 245108,
+     "rss_kib": 240412,
      "cases_public": [
       3,
       3
@@ -82,7 +84,7 @@
       23
      ],
      "cases_failed": [],
-     "instructions": 8383606649
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -270,6 +272,104 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-trrlc8iz/rival-berth_sim-gjt2_hyi/codon-main-berth_sim/src/main.py:97 (60-65): error: local variable 'maxid' referenced before assignment at main.py:99:25",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 3828,
+     "path": "general",
+     "why_not_typed": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.py:49:5: not in the subset: the module code can need an int beyond int64 (it calls main(), which can need a big int (`<<` by an amount that is not a constant)); the typed path has int64 only and the general path has exact big ints",
+     "build_ok": true,
+     "fallback_notes": 1,
+     "fallback_note": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/berth_sim/main.py:49:5: built on the general path (about 20x slower) because the module code can need an int beyond int64 (it calls main(), which can need a big int (`<<` by an amount that is not a constant)); the typed path has int64 only and th",
+     "compile_s_runs": [
+      29.104
+     ],
+     "compile_s": 29.104,
+     "build_disk_kib": 1516,
+     "binary_bytes": 501384,
+     "stripped_bytes": 473464,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-berth_sim-r9zx44c8/ail-py-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 20609.7,
+     "wall_min_ms": 20554.0,
+     "wall_runs_ms": [
+      20609.7,
+      20554.0,
+      23503.1
+     ],
+     "rss_kib": 9171316,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      23,
+      23
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-berth_sim-r9zx44c8/pypy-berth_sim/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-berth_sim-r9zx44c8/pypy-berth_sim/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 13352.3,
+     "wall_min_ms": 13123.9,
+     "wall_runs_ms": [
+      13460.4,
+      13215.9,
+      13352.3,
+      13526.6,
+      13123.9
+     ],
+     "rss_kib": 1918356,
+     "warm5_ms": 11800.8,
+     "warm5_runs_ms": [
+      14192.9,
+      12689.1,
+      12417.4,
+      11957.2,
+      11800.8
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      23,
+      23
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -285,9 +385,9 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      1.86
+      2.752
      ],
-     "compile_s": 1.86,
+     "compile_s": 2.752,
      "build_disk_kib": 144,
      "binary_bytes": 35088,
      "stripped_bytes": 30936,
@@ -295,21 +395,21 @@
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-trrlc8iz/rival-chain_relax-j2jvypb7/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-chain_relax-656h0wqv/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 1118.8,
-     "wall_min_ms": 1111.4,
+     "wall_ms": 1138.6,
+     "wall_min_ms": 1126.7,
      "wall_runs_ms": [
-      1118.8,
-      1111.4,
-      1120.8,
-      1111.7,
-      1191.3
+      1138.6,
+      1145.5,
+      1126.7,
+      1127.0,
+      1142.8
      ],
      "rss_kib": 4024,
      "cases_public": [
@@ -321,7 +421,7 @@
       29
      ],
      "cases_failed": [],
-     "instructions": 1692839353
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -560,6 +660,84 @@
       "hidden/random2"
      ],
      "instructions": 86563546
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 1991,
+     "path": "general",
+     "why_not_typed": "construct:     assignment `_tu3 = parse(a[2], 0, 18446744073709551615)` | why not typed: the integer literal 18446744073709551615 does not fit in a 64-bit signed integer, and an integer here is one (SEMANTICS section 1). CPython computes it exactly, because its int is unbounded; this compiler would ",
+     "build_ok": true,
+     "fallback_notes": 1,
+     "fallback_note": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/chain_relax/main.py:28:5: built on the general path (about 20x slower) because the module code can need an int beyond int64 (it calls main(), which can need a big int (an int literal beyond int64)); the typed path has int64 only and the general p",
+     "compile_s_runs": [
+      5.867
+     ],
+     "compile_s": 5.867,
+     "build_disk_kib": 772,
+     "binary_bytes": 249216,
+     "stripped_bytes": 233672,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-chain_relax-656h0wqv/ail-py-build0/out/prog"
+     ],
+     "status": "timeout",
+     "correct": false,
+     "cases_note": "perf run timed out; cases not run"
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-chain_relax-656h0wqv/pypy-chain_relax/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-chain_relax-656h0wqv/pypy-chain_relax/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 1153.3,
+     "wall_min_ms": 1147.3,
+     "wall_runs_ms": [
+      1151.8,
+      1155.3,
+      1147.3,
+      1182.0,
+      1153.3
+     ],
+     "rss_kib": 69096,
+     "warm5_ms": 1232.4,
+     "warm5_runs_ms": [
+      1240.0,
+      1248.4,
+      1229.3,
+      1228.8,
+      1232.4
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      29,
+      29
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -575,9 +753,9 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      3.211
+      3.287
      ],
-     "compile_s": 3.211,
+     "compile_s": 3.287,
      "build_disk_kib": 144,
      "binary_bytes": 36096,
      "stripped_bytes": 30936,
@@ -585,23 +763,23 @@
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-echo_pack-zqmvzmji/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 848.6,
-     "wall_min_ms": 801.2,
+     "wall_ms": 938.4,
+     "wall_min_ms": 830.3,
      "wall_runs_ms": [
-      801.2,
-      848.6,
-      890.3,
-      872.8,
-      829.5
+      898.3,
+      1144.7,
+      938.4,
+      830.3,
+      965.9
      ],
-     "rss_kib": 354400,
+     "rss_kib": 354408,
      "cases_public": [
       3,
       3
@@ -611,7 +789,7 @@
       54
      ],
      "cases_failed": [],
-     "instructions": 5447659698
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -764,6 +942,104 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-trrlc8iz/rival-echo_pack-u2d5wuu3/codon-main-echo_pack/src/main.py:105 (12-35): error: 'File[str]' object has no attribute 'buffer'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 3006,
+     "path": "typed",
+     "build_ok": true,
+     "fallback_notes": 0,
+     "compile_s_runs": [
+      1.831
+     ],
+     "compile_s": 1.831,
+     "build_disk_kib": 188,
+     "binary_bytes": 49808,
+     "stripped_bytes": 43224,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-echo_pack-zqmvzmji/ail-py-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 4372.4,
+     "wall_min_ms": 3899.4,
+     "wall_runs_ms": [
+      4372.4,
+      4410.6,
+      3899.4,
+      3910.4,
+      4582.4
+     ],
+     "rss_kib": 777100,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      54,
+      54
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-echo_pack-zqmvzmji/pypy-echo_pack/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-echo_pack-zqmvzmji/pypy-echo_pack/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 10684.7,
+     "wall_min_ms": 9575.5,
+     "wall_runs_ms": [
+      11193.5,
+      9999.3,
+      10923.5,
+      10684.7,
+      9575.5
+     ],
+     "rss_kib": 941628,
+     "warm5_ms": 8966.7,
+     "warm5_runs_ms": [
+      11219.4,
+      10839.2,
+      9818.1,
+      8966.6,
+      8966.7
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      54,
+      54
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -779,33 +1055,33 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      3.408
+      3.696
      ],
-     "compile_s": 3.408,
-     "build_disk_kib": 216,
-     "binary_bytes": 61208,
-     "stripped_bytes": 55512,
+     "compile_s": 3.696,
+     "build_disk_kib": 240,
+     "binary_bytes": 69480,
+     "stripped_bytes": 63704,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-ledger_bin-upao2mz9/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 695.3,
-     "wall_min_ms": 691.7,
+     "wall_ms": 807.7,
+     "wall_min_ms": 776.7,
      "wall_runs_ms": [
-      695.3,
-      691.7,
-      691.7,
-      696.6,
-      732.4
+      807.7,
+      776.7,
+      906.3,
+      799.6,
+      832.2
      ],
-     "rss_kib": 340604,
+     "rss_kib": 337752,
      "cases_public": [
       3,
       3
@@ -815,7 +1091,7 @@
       52
      ],
      "cases_failed": [],
-     "instructions": 5394585226
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -1003,6 +1279,104 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-trrlc8iz/rival-ledger_bin-9gh6poti/codon-main-ledger_bin/src/main.py:67 (17-35): error: 'Tuple[int,int,int,int]' does not match expected type 'Tuple[int,int,str,int]'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 5123,
+     "path": "general",
+     "why_not_typed": "construct:     a nested def inside a loop ('rv') is not available | why not typed: this lowering builds one shared C function for a nested def, not a fresh one per iteration; define it once, outside the loop, or as a direct statement of the loop body",
+     "build_ok": true,
+     "fallback_notes": 1,
+     "fallback_note": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/ledger_bin/main.py:118:13: built on the general path (about 20x slower) because `acc.get(r[1])` with one argument needs Optional values (s8): prove `r[1] in acc` and read `acc[r[1]]`, or pass the missing row as a second argument. Original refusal",
+     "compile_s_runs": [
+      14.605
+     ],
+     "compile_s": 14.605,
+     "build_disk_kib": 1528,
+     "binary_bytes": 505232,
+     "stripped_bytes": 478872,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-ledger_bin-upao2mz9/ail-py-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 45021.0,
+     "wall_min_ms": 44805.0,
+     "wall_runs_ms": [
+      45021.0,
+      44805.0,
+      52111.0
+     ],
+     "rss_kib": 3050436,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-ledger_bin-upao2mz9/pypy-ledger_bin/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-ledger_bin-upao2mz9/pypy-ledger_bin/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 9831.3,
+     "wall_min_ms": 9649.6,
+     "wall_runs_ms": [
+      9649.6,
+      9798.8,
+      9831.3,
+      11309.8,
+      10099.4
+     ],
+     "rss_kib": 999492,
+     "warm5_ms": 5517.7,
+     "warm5_runs_ms": [
+      5961.7,
+      5289.8,
+      4899.5,
+      5223.9,
+      5517.7
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -1018,33 +1392,33 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      2.715
+      3.051
      ],
-     "compile_s": 2.715,
-     "build_disk_kib": 228,
-     "binary_bytes": 65136,
-     "stripped_bytes": 59608,
+     "compile_s": 3.051,
+     "build_disk_kib": 240,
+     "binary_bytes": 69328,
+     "stripped_bytes": 63704,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-rail_transfer-abcm89r6/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 53.9,
-     "wall_min_ms": 53.3,
+     "wall_ms": 59.9,
+     "wall_min_ms": 59.4,
      "wall_runs_ms": [
-      53.9,
-      53.3,
-      53.9,
-      54.8,
-      53.8
+      60.8,
+      59.6,
+      60.8,
+      59.4,
+      59.9
      ],
-     "rss_kib": 28952,
+     "rss_kib": 28956,
      "cases_public": [
       3,
       3
@@ -1054,7 +1428,7 @@
       21
      ],
      "cases_failed": [],
-     "instructions": 387941054
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -1244,6 +1618,106 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-trrlc8iz/rival-rail_transfer-13e3zvj4/codon-main-rail_transfer/src/main.py:6 (26-57): error: 'File[str]' object has no attribute 'buffer'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 6831,
+     "path": "general",
+     "why_not_typed": "construct:     the constant None | why not typed: the constant None; this language has no null value, so nothing holds one",
+     "build_ok": true,
+     "fallback_notes": 1,
+     "fallback_note": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/rail_transfer/main.py:55:5: built on the general path (about 20x slower) because the module code can need an int beyond int64 (it calls main(), which can need a big int (`<<` by an amount that is not a constant)); the typed path has int64 only an",
+     "compile_s_runs": [
+      10.823
+     ],
+     "compile_s": 10.823,
+     "build_disk_kib": 1540,
+     "binary_bytes": 508144,
+     "stripped_bytes": 481048,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-rail_transfer-abcm89r6/ail-py-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 849.9,
+     "wall_min_ms": 835.6,
+     "wall_runs_ms": [
+      856.8,
+      842.4,
+      835.6,
+      849.9,
+      849.9
+     ],
+     "rss_kib": 476456,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      21,
+      21
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-rail_transfer-abcm89r6/pypy-rail_transfer/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-rail_transfer-abcm89r6/pypy-rail_transfer/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 584.7,
+     "wall_min_ms": 565.4,
+     "wall_runs_ms": [
+      582.7,
+      585.1,
+      591.3,
+      565.4,
+      584.7
+     ],
+     "rss_kib": 148412,
+     "warm5_ms": 211.7,
+     "warm5_runs_ms": [
+      471.5,
+      255.6,
+      233.9,
+      225.2,
+      211.7
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      21,
+      21
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -1259,31 +1733,31 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      2.188
+      2.486
      ],
-     "compile_s": 2.188,
+     "compile_s": 2.486,
      "build_disk_kib": 168,
-     "binary_bytes": 44728,
+     "binary_bytes": 44768,
      "stripped_bytes": 39128,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-scar_life-uwc4s3c4/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 24673.0,
-     "wall_min_ms": 24654.6,
+     "wall_ms": 32822.5,
+     "wall_min_ms": 23930.5,
      "wall_runs_ms": [
-      24654.6,
-      24673.0,
-      24759.3
+      23930.5,
+      32822.5,
+      36010.4
      ],
-     "rss_kib": 17672,
+     "rss_kib": 17668,
      "cases_public": [
       3,
       3
@@ -1293,9 +1767,7 @@
       50
      ],
      "cases_failed": [],
-     "cases_skipped": 0,
-     "instructions": null,
-     "instructions_note": "skipped: wall > 4 s, callgrind too slow"
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -1433,6 +1905,70 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-r9uqzx_f/rival-scar_life-qtbaiaoi/codon-main-scar_life/src/main.py:37 (12-35): error: 'File[str]' object has no attribute 'buffer'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 3548,
+     "path": "refused",
+     "why_not_typed": "construct:     'out' is appended both a str and a non-str value | why not typed: 'out' is appended both a str and a non-str value; a list of str holds one kind of value throughout, exactly like a plain list of numbers",
+     "build_ok": false,
+     "fallback_notes": 1,
+     "fallback_note": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/scar_life/main.py:12:5: not in the subset: 'out' is appended both a str and a non-str value; a list of str holds one kind of value throughout, exactly like a plain list of numbers -- keep it to one kind, or build two separate lists (the general path co",
+     "build_error": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/scar_life/main.py:12:5: not in the subset: 'out' is appended both a str and a non-str value; a list of str holds one kind of value throughout, exactly like a plain list of numbers -- keep it to one kind, or build two separate lists (the general path could not build this program either); general path: walking a set shows the order its elements were inserted, where CPython walks its hash table (and a set of str in a per-run random order); the two can differ, so this is refused rather than printed wrong.\n",
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-scar_life-uwc4s3c4/pypy-scar_life/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-scar_life-uwc4s3c4/pypy-scar_life/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 19044.2,
+     "wall_min_ms": 18831.4,
+     "wall_runs_ms": [
+      18831.4,
+      19044.2,
+      19259.8
+     ],
+     "rss_kib": 283024,
+     "warm5_ms": 10228.8,
+     "warm5_runs_ms": [
+      10542.0,
+      10371.5,
+      10352.7,
+      10232.2,
+      10228.8
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      50,
+      50
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -1448,33 +1984,33 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      3.26
+      5.261
      ],
-     "compile_s": 3.26,
+     "compile_s": 5.261,
      "build_disk_kib": 272,
-     "binary_bytes": 78696,
+     "binary_bytes": 78776,
      "stripped_bytes": 71896,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-tally_lang-o76m7amm/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 1119.1,
-     "wall_min_ms": 1101.8,
+     "wall_ms": 1869.7,
+     "wall_min_ms": 1798.7,
      "wall_runs_ms": [
-      1101.8,
-      1103.8,
-      1147.3,
-      1119.1,
-      1370.2
+      1838.4,
+      1798.7,
+      1972.1,
+      1961.9,
+      1869.7
      ],
-     "rss_kib": 1628,
+     "rss_kib": 1624,
      "cases_public": [
       3,
       3
@@ -1484,8 +2020,7 @@
       72
      ],
      "cases_failed": [],
-     "cases_skipped": 0,
-     "instructions": 19585727561
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -1679,6 +2214,72 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-r9uqzx_f/rival-tally_lang-7kxt6nkt/codon-main-tally_lang/src/main.py:3 (1-29): error: cannot import name 'setrecursionlimit' from 'sys'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 8607,
+     "path": "refused",
+     "why_not_typed": "construct:     assignment `wk.v[3] = pos + 1 - s` | why not typed: field `v` is a list or dict that gets bools and numbers (Python keeps each element's own type)",
+     "build_ok": false,
+     "fallback_notes": 1,
+     "fallback_note": "/home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.py:411:5: not in the subset: field `v` is a list or dict that gets bools and numbers (Python keeps each element's own type) (the general path could not build this program either); general path: exec() is not built: this language compile",
+     "build_error": "py:106: cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.py:124: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.py:224: a comparison of tuples of different shapes (or of a tuple with something else); compare field by field\nnote: /home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.py:240: a comparison of tuples of different shapes (or of a tuple with something else); compare field by field\n",
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-tally_lang-o76m7amm/pypy-tally_lang/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-tally_lang-o76m7amm/pypy-tally_lang/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 2153.5,
+     "wall_min_ms": 2012.6,
+     "wall_runs_ms": [
+      2153.5,
+      2196.1,
+      2012.6,
+      2040.8,
+      2318.8
+     ],
+     "rss_kib": 84032,
+     "warm5_ms": 1187.2,
+     "warm5_runs_ms": [
+      1192.4,
+      1242.1,
+      1179.5,
+      1183.2,
+      1187.2
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      72,
+      72
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -1694,33 +2295,33 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      2.954
+      5.047
      ],
-     "compile_s": 2.954,
-     "build_disk_kib": 272,
-     "binary_bytes": 78816,
-     "stripped_bytes": 71896,
+     "compile_s": 5.047,
+     "build_disk_kib": 284,
+     "binary_bytes": 82968,
+     "stripped_bytes": 75992,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-term_rank-2cseujnj/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 1838.5,
-     "wall_min_ms": 1777.9,
+     "wall_ms": 3062.9,
+     "wall_min_ms": 2817.9,
      "wall_runs_ms": [
-      1777.9,
-      1789.0,
-      1896.4,
-      1926.9,
-      1838.5
+      2817.9,
+      2944.8,
+      3127.8,
+      3076.0,
+      3062.9
      ],
-     "rss_kib": 161080,
+     "rss_kib": 161148,
      "cases_public": [
       3,
       3
@@ -1730,8 +2331,7 @@
       40
      ],
      "cases_failed": [],
-     "cases_skipped": 0,
-     "instructions": 15480678531
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -1893,6 +2493,104 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-r9uqzx_f/rival-term_rank-1ez1w91v/codon-main-term_rank/src/main.py:34 (12-35): error: 'File[str]' object has no attribute 'buffer'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 2267,
+     "path": "general",
+     "why_not_typed": "construct:     's' is annotated bytes in the source | why not typed: 's' is annotated bytes in the source, but the caller also supplies int; refusing rather than silently choosing one.",
+     "build_ok": true,
+     "fallback_notes": 1,
+     "fallback_note": "note: built on the general path (about 20x slower) because a generator expression saved as a value (the general path builds it lazily); run with --strict to see why",
+     "compile_s_runs": [
+      32.113
+     ],
+     "compile_s": 32.113,
+     "build_disk_kib": 2584,
+     "binary_bytes": 864752,
+     "stripped_bytes": 836080,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-term_rank-2cseujnj/ail-py-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 26242.1,
+     "wall_min_ms": 25950.5,
+     "wall_runs_ms": [
+      25950.5,
+      26242.1,
+      26245.4
+     ],
+     "rss_kib": 2680292,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      40,
+      40
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-term_rank-2cseujnj/pypy-term_rank/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-term_rank-2cseujnj/pypy-term_rank/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 5457.5,
+     "wall_min_ms": 5278.0,
+     "wall_runs_ms": [
+      5278.0,
+      5457.5,
+      5563.2,
+      5515.0,
+      5402.7
+     ],
+     "rss_kib": 527556,
+     "warm5_ms": 4732.0,
+     "warm5_runs_ms": [
+      4539.1,
+      4311.6,
+      4271.6,
+      4241.0,
+      4732.0
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      40,
+      40
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -1908,33 +2606,33 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      8.156
+      5.693
      ],
-     "compile_s": 8.156,
-     "build_disk_kib": 372,
-     "binary_bytes": 112584,
-     "stripped_bytes": 104664,
+     "compile_s": 5.693,
+     "build_disk_kib": 384,
+     "binary_bytes": 116744,
+     "stripped_bytes": 108760,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-r9uqzx_f/rival-ticket_audit-_e79vo72/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-ticket_audit-23k79vn_/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 2737.6,
-     "wall_min_ms": 2607.9,
+     "wall_ms": 1645.6,
+     "wall_min_ms": 1578.8,
      "wall_runs_ms": [
-      2607.9,
-      2716.8,
-      2762.8,
-      2803.5,
-      2737.6
+      1658.3,
+      1612.5,
+      1578.8,
+      1645.6,
+      1757.1
      ],
-     "rss_kib": 254732,
+     "rss_kib": 254820,
      "cases_public": [
       3,
       3
@@ -1944,9 +2642,7 @@
       88
      ],
      "cases_failed": [],
-     "cases_skipped": 0,
-     "instructions": null,
-     "instructions_note": "callgrind timeout (120 s)"
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -2142,6 +2838,104 @@
      "binary_bytes": null,
      "build_error": "/tmp/codon/codon-deploy-linux-x86_64/lib/codon/stdlib/internal/types/int.codon:72 (27-41): error: 'bytes' object has no attribute '__int__'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 6203,
+     "path": "general",
+     "why_not_typed": "construct:     events[ev] = [vc, cents, set()] | why not typed: `events[ev] = [vc, cents, set()]` uses `events` as a dict of containers -- its values are lists, sets or dicts. A typed dict holds int, float, str or bytes values (an int-keyed dict of int lists aside), so this is refused.",
+     "build_ok": true,
+     "fallback_notes": 1,
+     "fallback_note": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/ticket_audit/main.py:111:13: built on the general path (about 20x slower) because `events.get(ev)` with one argument needs Optional values (s8): prove `ev in events` and read `events[ev]`, or pass the missing row as a second argument. Original re",
+     "compile_s_runs": [
+      97.521
+     ],
+     "compile_s": 97.521,
+     "build_disk_kib": 3828,
+     "binary_bytes": 1289688,
+     "stripped_bytes": 1259896,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-ticket_audit-23k79vn_/ail-py-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 58417.8,
+     "wall_min_ms": 57774.5,
+     "wall_runs_ms": [
+      57774.5,
+      58417.8,
+      60756.5
+     ],
+     "rss_kib": 3517500,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      88,
+      88
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-ticket_audit-23k79vn_/pypy-ticket_audit/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-ticket_audit-23k79vn_/pypy-ticket_audit/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 5336.8,
+     "wall_min_ms": 5122.1,
+     "wall_runs_ms": [
+      5129.4,
+      5336.8,
+      5122.1,
+      5453.9,
+      5691.9
+     ],
+     "rss_kib": 496260,
+     "warm5_ms": 5455.4,
+     "warm5_runs_ms": [
+      5490.7,
+      5070.1,
+      4940.9,
+      4867.2,
+      5455.4
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      88,
+      88
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   },
@@ -2157,33 +2951,33 @@
      "build_ok": true,
      "fallback_notes": 0,
      "compile_s_runs": [
-      5.555
+      6.373
      ],
-     "compile_s": 5.555,
+     "compile_s": 6.373,
      "build_disk_kib": 296,
-     "binary_bytes": 86664,
+     "binary_bytes": 86568,
      "stripped_bytes": 80088,
      "tool": "ail",
      "source": "typed.py",
      "standalone": true,
      "run_cmd": [
-      "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/ail-build0/out/prog"
+      "/tmp/compare-rival-45bbvaws/rival-tree_fold-tekdzwlv/ail-build0/out/prog"
      ],
      "status": "ok",
      "correct": true,
      "exit_codes": [
       0
      ],
-     "wall_ms": 1388.3,
-     "wall_min_ms": 1311.5,
+     "wall_ms": 1232.3,
+     "wall_min_ms": 1162.0,
      "wall_runs_ms": [
-      1319.0,
-      1492.4,
-      1443.0,
-      1311.5,
-      1388.3
+      1162.0,
+      1243.1,
+      1232.3,
+      1163.2,
+      1308.8
      ],
-     "rss_kib": 414996,
+     "rss_kib": 367412,
      "cases_public": [
       3,
       3
@@ -2193,8 +2987,7 @@
       52
      ],
      "cases_failed": [],
-     "cases_skipped": 0,
-     "instructions": 8935993113
+     "cases_skipped": 0
     },
     "cython-main": {
      "tool": "cython-main",
@@ -2362,10 +3155,114 @@
      "binary_bytes": null,
      "build_error": "/tmp/compare-rival-3tue6ifi/rival-tree_fold-wwwgkuu6/codon-main-tree_fold/src/main.py:61 (12-53): error: 'File[str]' object has no attribute 'buffer'",
      "run_cmd": null
+    },
+    "ail-py": {
+     "lang": "ail-py",
+     "source_bytes": 6778,
+     "path": "general",
+     "why_not_typed": "construct:     an empty tuple appended to 'kids' | why not typed: it has no fields to read",
+     "build_ok": true,
+     "fallback_notes": 1,
+     "fallback_note": "note: /home/runner/work/ail-ci/ail-ci/lab/compare/src/tree_fold/main.py:17:5: built on the general path (about 20x slower) because an empty tuple appended to 'kids': it has no fields to read; run with --strict to see why",
+     "compile_s_runs": [
+      109.458
+     ],
+     "compile_s": 109.458,
+     "build_disk_kib": 3052,
+     "binary_bytes": 1026720,
+     "stripped_bytes": 996744,
+     "tool": "ail-py",
+     "source": "main.py",
+     "standalone": true,
+     "run_cmd": [
+      "/tmp/compare-rival-45bbvaws/rival-tree_fold-tekdzwlv/ail-py-build0/out/prog"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 71473.1,
+     "wall_min_ms": 70958.0,
+     "wall_runs_ms": [
+      71988.2,
+      70958.0
+     ],
+     "rss_kib": 5206310,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0
+    },
+    "pypy": {
+     "tool": "pypy",
+     "source": "main.py",
+     "standalone": false,
+     "interpreter": true,
+     "dir": "/tmp/compare-rival-45bbvaws/rival-tree_fold-tekdzwlv/pypy-tree_fold/src",
+     "build_ok": true,
+     "build_error": "",
+     "compile_s": null,
+     "build_disk_kib": 154120,
+     "binary_bytes": null,
+     "run_cmd": [
+      "/tmp/pypy/pypy3.11-v7.3.23-linux64/bin/pypy3",
+      "-B",
+      "/tmp/compare-rival-45bbvaws/rival-tree_fold-tekdzwlv/pypy-tree_fold/src/main.py"
+     ],
+     "status": "ok",
+     "correct": true,
+     "exit_codes": [
+      0
+     ],
+     "wall_ms": 7052.8,
+     "wall_min_ms": 7040.8,
+     "wall_runs_ms": [
+      7064.0,
+      7120.3,
+      7040.8,
+      7052.8,
+      7050.7
+     ],
+     "rss_kib": 1461912,
+     "warm5_ms": 6925.4,
+     "warm5_runs_ms": [
+      7368.5,
+      6974.5,
+      6983.4,
+      6962.9,
+      6925.4
+     ],
+     "warm5_correct": true,
+     "warm5_all_correct": true,
+     "cases_public": [
+      3,
+      3
+     ],
+     "cases_hidden": [
+      52,
+      52
+     ],
+     "cases_failed": [],
+     "cases_skipped": 0,
+     "warm_mode": "one-import"
     }
    }
   }
  },
+ "safety_probes": [
+  "divzero",
+  "index",
+  "negindex",
+  "overflow",
+  "recursion"
+ ],
  "safety": {
   "ail": {
    "divzero": {
@@ -2627,12 +3524,51 @@
    }
   }
  },
- "settings": {
-  "build_runs": 1,
-  "run_timeout_s": 180,
-  "case_timeout_s": 30,
-  "callgrind_timeout_s": 120,
-  "callgrind_max_wall_ms": 4000,
-  "case_budget_s": 240
+ "tool_runs": {
+  "ail": {
+   "date": "2026-11-08",
+   "head": "5fa7288",
+   "source": "this run"
+  },
+  "ail-py": {
+   "date": "2026-11-08",
+   "head": "5fa7288",
+   "source": "this run"
+  },
+  "codon": {
+   "date": "2026-11-06",
+   "head": "e9cb684",
+   "source": "base"
+  },
+  "codon-main": {
+   "date": "2026-11-06",
+   "head": "e9cb684",
+   "source": "base"
+  },
+  "cython-main": {
+   "date": "2026-11-06",
+   "head": "e9cb684",
+   "source": "base"
+  },
+  "cython-typed": {
+   "date": "2026-11-06",
+   "head": "e9cb684",
+   "source": "base"
+  },
+  "mypyc": {
+   "date": "2026-11-06",
+   "head": "e9cb684",
+   "source": "base"
+  },
+  "nuitka": {
+   "date": "2026-11-06",
+   "head": "e9cb684",
+   "source": "base"
+  },
+  "pypy": {
+   "date": "2026-11-08",
+   "head": "5fa7288",
+   "source": "this run"
+  }
  }
 }

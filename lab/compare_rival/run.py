@@ -409,7 +409,8 @@ def task_work(task, tools, args, root, icount, mode):
 # ---------------------------------------------------------------- safety probes
 
 def safety_probe(tool, probe, root):
-    if tool == 'ail':
+    if tool in ('ail', 'ail-py'):
+        # A safety probe is a plain .py file, so both AIL arms build it the same way.
         fresh, env = RT.fresh_dir(root, 'ail-safety-%s' % probe.stem)
         out = fresh / 'prog'
         p = run([PY, '-B', str(AIL), 'compile', str(probe), '-o', str(out), '--syntax', 'python'], fresh, env)
@@ -535,7 +536,7 @@ def summary(tasks, data):
     return lines, wins
 
 
-PY_ARMS = [('ail', 'AIL from typed.py'), ('ail-py', 'AIL from main.py')]
+PY_ARMS = [('ail', 'AIL standalone (typed.py)'), ('ail-py', 'AIL standalone (main.py)')]
 
 
 def against_pypy(tasks, data, key='wall_ms'):
@@ -615,6 +616,12 @@ def pypy_lines(tasks, data):
                  if not diffs else 'Warm-run output differs from CPython on: %s (a PyPy result, listed and not '
                  'fixed in the sources).' % ', '.join(t for t, _ in diffs))
         L.append('')
+        reexec = [t for t, r in warmed if r.get('warm_mode') == 're-exec']
+        if reexec:
+            L.append('On `%s` the driver has no module-level `main` to re-enter, so `warm5 ms` is a re-exec of '
+                     'the source (`mode: re-exec`), not a warmed JIT: read those cells as a fresh process, not '
+                     'as a steady-state number.' % '`, `'.join(sorted(reexec)))
+            L.append('')
     L.append('**Headline.** ')
     for arm, v in vs.items():
         if v['geomean'] is None:
@@ -736,8 +743,13 @@ def render(result):
             if r.get('build_ok'):
                 continue
             any_ref = True
-            L.append('| %s | %s | %s | `%s` |' % (tool, task, 'patched' if r.get('patched') else 'refused',
-                                                   (r.get('build_error') or '').replace('|', '/')[:220]))
+            if toolchain_missing(data, tool):
+                outcome, error = 'not installed here', '%s not installed on this runner' % TOOLCHAIN[tool]
+            else:
+                outcome = 'patched' if r.get('patched') else 'refused'
+                error = r.get('build_error') or 'build failed with no error output'
+            L.append('| %s | %s | %s | `%s` |' % (tool, task, outcome,
+                                                   (error or '').replace('|', '/')[:220]))
     if not any_ref:
         L.append('| - | - | none | - |')
     L.append('')
@@ -766,26 +778,44 @@ def render(result):
     return '\n'.join(L) + '\n'
 
 
+# A rival tool is built by the toolchain named here; `versions()` reports that toolchain's version,
+# and a version starting with `missing` means this runner cannot build the tool at all.
+TOOLCHAIN = {'cython-main': 'cython', 'cython-typed': 'cython', 'nuitka': 'nuitka',
+             'mypyc': 'mypy', 'codon': 'codon', 'codon-main': 'codon'}
+
+
+def toolchain_missing(result, tool):
+    """True when the result file says this tool's toolchain is not installed here."""
+    key = TOOLCHAIN.get(tool)
+    return bool(key) and str((result.get('tools') or {}).get(key, '')).startswith('missing')
+
+
 def layer_base(result, base, tools, head):
     """Lay the rows `result` measured now over `base`, and record which run made each column.
 
     The base keeps every tool it had, the rows measured now replace theirs, and `tool_runs` says
     which run produced each column -- a reader must be able to tell a number measured here from one
-    measured on CI.  A version this run could not probe (toolchain not installed here) comes from
-    the base only when this run's value says `missing`.
+    measured on CI.  A row for a tool whose toolchain this run reports as `missing` is not a
+    measurement: the base row is kept (and marked `source: base`) rather than overwritten by the
+    failure the absent toolchain produced.  A refusal from an installed tool does replace the base
+    row -- that is a result.
     """
     merged_tasks = dict(base.get('tasks') or {})
+    from_this_run = set()
     for task, rec in result['tasks'].items():
         old = merged_tasks.get(task) or {}
         rows = dict(old.get('results') or {})
-        rows.update(rec.get('results') or {})
+        for tool, new in (rec.get('results') or {}).items():
+            if tool in rows and not new.get('build_ok') and toolchain_missing(result, tool):
+                continue                      # not measured here; keep the base row
+            rows[tool] = new
+            from_this_run.add(tool)
         merged_tasks[task] = dict(old, **dict(rec, results=rows))
     result['tasks'] = merged_tasks
-    measured_now = {t for task in result['tasks'].values() for t in task['results']} & set(tools)
     old_runs = base.get('tool_runs') or {}
     result['tool_runs'] = {}
     for tool in sorted({t for task in result['tasks'].values() for t in task['results']}):
-        if tool in measured_now:
+        if tool in from_this_run and tool in tools:
             result['tool_runs'][tool] = dict(date=result['date'], head=head, source='this run')
         else:
             result['tool_runs'][tool] = dict(old_runs.get(tool) or
