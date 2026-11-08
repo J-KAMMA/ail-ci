@@ -2228,6 +2228,11 @@ _BORROWED_PARAMS = {}
 # rc2 (ir/borrow.py): True while the read-only-parameter rule is on. It then decides the elision
 # for every managed reference kind, not only the class instances the legacy scan covered.
 _BORROW_WIDE = False
+# rc4 (ir/reuse.py): the ctor assignments whose old same-class object can be reused in place, and
+# whether any exist for this program (the C prelude emits the helper only then, so a program with
+# no pair is byte-identical to the pre-rc4 build).
+_REUSE_SITES = {}
+_REUSE_ON = False
 # fclist1: `{fname: frozenset(params)}`, the flat list parameters a function writes element by
 # element (`xs[i] = v`). CPython passes the list object, so the caller sees the stores; such a
 # parameter is passed as a writable pointer into the caller's own buffer. `_scan_written_lists`
@@ -36470,6 +36475,35 @@ def _scan_classes(classdefs):
     return classes
 
 
+# rc4 (ir/reuse.py): the one C helper for reuse. It is emitted only for a program that actually
+# has a pair, so the prelude of every other program is unchanged. `ail_obj_reuse` is the Perceus
+# fast path: when the dropped object is uniquely held and the next allocation has the same size,
+# drop its fields now and park the storage for that allocation; otherwise release it as before.
+_REUSE_PRELUDE = '''static void *ail_reuse_pending;
+static size_t ail_reuse_pending_size;
+static void ail_obj_release(void *value);
+static inline void *ail_obj_reuse(void *value, size_t size) {
+    if (value) {
+        ail_obj_header *h = value;
+        if (h->refs == 1 && h->cls == (uint16_t)((size + 7) >> 3)) {
+            if (h->drop) ail_obj_drops[h->drop](value);
+            h->refs = 1;
+            ail_reuse_pending = value;
+            ail_reuse_pending_size = size;
+            return value;
+        }
+        ail_obj_release(value);
+    }
+    return 0;
+}
+'''
+_REUSE_CHECK = '''    if (__builtin_expect(ail_reuse_pending != 0, 0) && ail_reuse_pending_size == size) {
+        void *reused = ail_reuse_pending;
+        ail_reuse_pending = 0;
+        ((ail_obj_header *)reused)->drop = (uint16_t)drop;
+        return reused;
+    }
+'''
 _RELEASE_RECURSIVE = """static __attribute__((noinline)) void ail_obj_release(void *value) {
     if (value) {
         ail_obj_header *h = value;
@@ -37083,7 +37117,13 @@ static inline __attribute__((always_inline)) void ail_olist_sort_%s_%s(ail_olist
     if drop_ids:
         out.append('static void (*ail_obj_drops[%d])(void *) = { 0, ail_olist_drop%s };\n'
                    % (len(drop_ids) + 2, ''.join(', ail_obj_drop_' + name for name in drop_ids)))
-    return ''.join(out).replace('@@NDROPS@@', str(len(drop_ids) + 2))
+    text = ''.join(out).replace('@@NDROPS@@', str(len(drop_ids) + 2))
+    from ir import reuse as _reuse_module
+    if _reuse_module.enabled() and _reuse_module.used():
+        signature = ('static inline __attribute__((always_inline)) void *ail_obj_new'
+                     '(size_t size, unsigned drop) {\n')
+        text = text.replace(signature, _REUSE_PRELUDE + signature + _REUSE_CHECK, 1)
+    return text
 
 
 # ---------------------------------------------------------------------------------------------
@@ -40062,7 +40102,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         raise Unsupported('%s: a module variable rebound with `global` is built only into a whole '
                           'program, not a library or a separately compiled module'
                           % ', '.join(sorted(_MODCONSTS.vars)))
-    global _BORROWED_PARAMS, _BORROW_WIDE
+    global _BORROWED_PARAMS, _BORROW_WIDE, _REUSE_SITES, _REUSE_ON
     from ir import borrow as _borrow          # rc2: the read-only-parameter rule (ir/borrow.py)
     _BORROW_WIDE = _borrow.enabled()
     _BORROWED_PARAMS = _borrow.analyze(tree, library, {name, entry}) if _BORROW_WIDE else {}
@@ -40104,7 +40144,17 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
             raise refusal
         classes[_n].init_ctx.parts.add('DIE')
     if classes:
+        # rc4 (ir/reuse.py): the switch that adds the `ail_obj_reuse` prelude; the IR emitter marks
+        # the pairs that may use it (a same-size second `obj.init` on one place).
+        from ir import reuse as _reuse
+        _REUSE_SITES = {}
+        _REUSE_ON = _reuse.enabled()
+        _reuse.reset()
         _positional_constructor_calls(tree, classes)
+    else:
+        from ir import reuse as _reuse
+        _REUSE_SITES, _REUSE_ON = {}, False
+        _reuse.reset()
     fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
     if not fns:
         if library and (_MODCONSTS or classes) and all(kind in {INT, FLT, STR, BYTES} for kind, _ in _MODCONSTS.values()):

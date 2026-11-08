@@ -20,6 +20,7 @@ import re
 from . import ir as I
 from . import effects as E
 from . import rtc
+from . import reuse as _reuse
 from .emit_text import TextEmitter, allocates_str, allocates_bytes
 
 
@@ -419,6 +420,8 @@ _BA = I.T('obj', I.T('bytearray'))
 class Emitter(TextEmitter):
     def __init__(self, fn, pending=(), checked=False, summaries=None, unwind_name=None, listval=None):
         self.fn = fn
+        if _reuse.enabled():
+            _reuse.mark(fn)
         # callees with a by-value list entry `<sym>__irl` (S3b); None: separately linked units, none
         self.listval = frozenset(listval or ())
         self.allow_byval = listval is not None
@@ -1196,6 +1199,10 @@ class Emitter(TextEmitter):
                              % (o[0], lit, len(data)))
         if op == 'obj.init':
             cls = ins.attrs['cls']
+            if ins.attrs.get('reuse'):
+                _reuse.note_used()
+                return self.line(depth, 'ail_obj_reuse(%s, sizeof(ail_obj_%s)); %s = 0; ail_obj_store_%s(&%s, ail_new_%s(%s), 1);'
+                                 % (o[0], cls, o[0], cls, o[0], cls, ', '.join(o[1:])))
             return self.line(depth, 'ail_obj_store_%s(&%s, ail_new_%s(%s), 1);' % (cls, o[0], cls, ', '.join(o[1:])))
         if op == 'obj.copyref':
             return self.line(depth, 'ail_obj_store_%s(&%s, %s, 0);' % (ins.operands[1].type.args[0].name, o[0], o[1]))
