@@ -1,3 +1,27 @@
+## 2026-11-08 -- fdlsp2 re-applied: LSP hover shows compiler-inferred local types (job-rbfdlsp2-11082100)
+
+Re-applied the accepted `job-fdlsp2-11081741` change (`9d53b559`..`FETCH_HEAD`) on this tree. The
+`packaging/ail_lang/lsp.py` hover now maps a `--debug` build's C locals to `int`/`float`/`str`/
+`bytes`/`list`/`dict`, keyed by the Python scope and its `def` line and cached per document version;
+`int64_t` is shown only when the source proves the value is not `bool`, and a mutated list or dict
+literal shows nothing. The `docs/LSP.md`, `lab/lsp/RESULTS.md`, `lab/lsp/hover/` probes,
+`test_ail_lsp_hover.py` and its `tests.d/` registration applied unchanged. The
+`.github/workflows/agent-worker.yml` hunk was already present on this tree, so it was left alone.
+`tools/diff_ids.py` is not present on this tree, so only `tools/update_manifest.py` ran; it
+regenerated the two new-file pins and `--check` passes.
+
+Probes in `/tmp/probes/`, run with `bash ~/tools/cmp.sh <probe> $PWD` (general and default builds):
+`hover_types.py` (int/float/str/bool/comparison/`not`/negative/zero/user call/`len`/`range` loop/
+list and dict reads/str methods/empty list/`sum`-free arithmetic), `hover_mutation.py` (item store,
+`append`, `extend`, alias then mutate, empty list append), `hover_dict_keys.py` (dict-key iteration
+for bool/False/str and `{**base}`) and `hover_values.py` (values through an argument, a list item, a
+dict value and an attribute, then a loop). All four match CPython stdout and exit status in both
+builds. The authoritative hover probe `test_ail_lsp_hover` checks all 45 `expect.json` cases (38
+shown right, 7 deliberately empty) and passes.
+
+Tests on the final commit, `-j 2`: `test_ail_lsp`, `test_ail_lsp_def`, `test_ail_lsp_hover`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` -- 6 modules, 0 failed, 283 s.
+
 ## 2026-11-08 -- wedge2: hybrid-native functions index lists and dicts (job-wedge2-11081603)
 
 `_unsafe_body` now allows a non-slice `Subscript` (slices, attribute stores, list-parameter mutation and
