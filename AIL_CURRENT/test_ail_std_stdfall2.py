@@ -122,6 +122,30 @@ class StdlibStdfall2Tests(unittest.TestCase):
                                      % (name, mode, expected.stderr, ran.stderr))
                     self.assertEqual(ran.stdout, expected.stdout, name + " " + mode)
 
+    def test_deepcopy_set_elements_are_new_objects(self):
+        source = self.dir / "copy_set_elements.py"
+        source.write_text(
+            "import copy\n"
+            "inner = frozenset({1, 2})\n"
+            "s = {inner}\n"
+            "fs = frozenset({frozenset({3, 4})})\n"
+            "ds = copy.deepcopy(s)\n"
+            "df = copy.deepcopy(fs)\n"
+            "print(ds is s, ds == s, s.pop() is ds.pop())\n"
+            "a = sorted(fs)[0]\n"
+            "b = sorted(df)[0]\n"
+            "print(df is fs, df == fs, a is b, a == b)\n")
+        expected = run_cpython(source)
+        for mode in ("default", "forced-general"):
+            with self.subTest(build=mode):
+                built, exe, work = self._build(source, "copy-set-elements-" + mode,
+                                               force=(mode == "forced-general"))
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], cwd=str(work), capture_output=True,
+                                     text=True, timeout=120)
+                self.assertEqual(ran.returncode, expected.returncode, ran.stderr)
+                self.assertEqual(ran.stdout, expected.stdout)
+
     def test_class_copy_is_refused_by_name(self):
         for name in ("copy/03_user_class_hooks.py", "copy/04_user_class_plain.py"):
             with self.subTest(program=name):

@@ -7,9 +7,12 @@ AIL source rewrite of CPython 3.12's copy.py.  The dispatch tables and the
 cannot use a type object as a plain value or as a dict key.  The copy/deepcopy
 messages, the memo protocol and the sharing rules are CPython's for the types
 this compiler builds: None, bool, int, float, str, bytes, bytearray, list,
-tuple (of any length), dict, set and frozenset.  This compiler has no `id`, so
-each memoised object gets a process-unique integer token inside the caller's
-memo dict (with one keep-alive entry), not CPython's `id(x)` key.  The dict is
+tuple (of any length), dict, set and frozenset.  A set or frozenset is walked
+through `sorted(x)`, the order-free walk this compiler allows, so each element
+is deep-copied like CPython's; a set whose elements have no common order is
+refused by name instead of being walked in insertion order.  This compiler has
+no `id`, so each memoised object gets a process-unique integer token inside the
+caller's memo dict (with one keep-alive entry), not CPython's `id(x)` key.  The dict is
 used in place: clearing or reusing it cannot return a stale copy, and existing
 keys are never overwritten.
 
@@ -67,6 +70,14 @@ def _copy_set(x):
 
 def _copy_bytearray(x):
     return bytearray(x)
+
+
+def _ordered_items(x):
+    try:
+        return sorted(x)
+    except TypeError:
+        raise Error("deepcopy of a set or frozenset with elements that have no "
+                    "common order (a set walk is refused; use sorted(x))")
 
 
 class _MemoMark:
@@ -198,7 +209,10 @@ def deepcopy(x, memo=None, _nil=[]):
         return y
 
     if isinstance(x, frozenset):
-        y = x | frozenset()
+        items = []
+        for item in _ordered_items(x):
+            items.append(deepcopy(item, memo))
+        y = frozenset(items)
         memo.put(x, y)
         return y
 
@@ -217,7 +231,12 @@ def deepcopy(x, memo=None, _nil=[]):
             y[deepcopy(key, memo)] = deepcopy(x[key], memo)
         return y
     elif isinstance(x, set):
-        y = x.copy()
+        items = []
+        for item in _ordered_items(x):
+            items.append(deepcopy(item, memo))
+        y = set()
+        for item in items:
+            y.add(item)
         memo.put(x, y)
         return y
     elif isinstance(x, bytearray):

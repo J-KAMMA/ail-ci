@@ -1,9 +1,33 @@
-## 2026-11-08 -- stdfall2c re-applied: `copy` memo uses the caller's dict, `marshal` v4 is a build-time refusal (job-rbstdfall2c-11081827)
+## 2026-11-08 -- stdfall2c review 2: set/frozenset deepcopy copies each element (job-rbstdfall2c-11081827)
+
+Fixes the remaining stdfall2c defect.  `copy.deepcopy` of a `set`/`frozenset` used
+`x.copy()` / `x | frozenset()`, which made a fresh outer container but shared its
+elements: `deepcopy({frozenset({1, 2})})` returned the same inner frozenset, where
+CPython returns a new equal one.  Both branches now walk `sorted(x)` -- the order-free
+set walk this compiler allows -- and call `deepcopy(item, memo)` for every element before
+rebuilding the container.  A set whose elements have no common order (e.g. `{1, "a"}`)
+cannot be walked without revealing insertion order, so it is refused by name with
+`copy.Error: deepcopy of a set or frozenset with elements that have no common order`;
+the module docstring now states this.  The earlier DEVLOG claim that `len(memo)` matches
+CPython was wrong and is corrected: key types and clear/reuse semantics match, the count
+can differ.
+
+Probes (`bash ~/tools/cmp.sh <p> $PWD`, default and `AIL_UNIFIED_FORCE=1`): the reviewer's
+`p11_set_elem` and `p12_frozen_elem` now print `False True` as CPython; six new probes
+(`r_set_elem_arg`, `r_set_elem_list`, `r_set_elem_dict`, `r_set_elem_attr`,
+`r_set_elem_shapes`, `r_set_elem_alias`) cover a set/frozenset through an argument, a list
+item, a dict value and an attribute, empty/one-element/negative/large-int sets, a tuple of
+frozensets and aliasing; all match CPython on both builds.  `r_set_unorderable` is refused
+by name on both builds.  Tests `test_ail_std_stdfall2`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass with `-j 2`.
+
 
 Fixes the stdfall2c review.  `copy.deepcopy(x, memo)` no longer keeps a process-global
 `_memo_links` table: each memoised object gets a process-unique integer token in the caller's
-memo dict plus one keep-alive list (all keys are ints, so `len(memo)` and key types match
-CPython's two-entry growth).  `memo.clear()` followed by reuse no longer returns a stale copy,
+memo dict plus one keep-alive list (all keys are ints; the token scheme needs one int key per
+memoised object, so the key types and the clear/reuse semantics match CPython but the exact
+`len(memo)` can differ, e.g. 4 int keys where CPython has 5).  `memo.clear()` followed by reuse
+no longer returns a stale copy,
 and pre-existing keys such as `{2: 'x', 5: 'y'}` are not overwritten.  Probes
 `q_copy_memo_clear`, `q_copy_memo_keys`, `q_copy_memo_reuse`, `q_copy_memo_nested`, plus
 clear-then-same-object, equal-distinct objects, atomic no-entry and non-int-key-deletion cases
@@ -21,9 +45,9 @@ before 0/18 and after 9/18 (copy 4/6, timeit 5/6, marshal 0/6).  Final tests, `-
 
 Re-applied on top of the current tree.  The accepted change also walks sets in `copy`; this tree
 now refuses any order-revealing set walk by name (`test_ail_setorder`).  Both fixes are kept:
-`_copy_set` uses `x.copy()`, set deepcopy uses `x.copy()`, and frozenset deepcopy uses
-`x | frozenset()` (a fresh object, as in CPython) instead of `for item in x`; `copy/02` prints
-`sorted(s)` rather than `sorted(list(s))`.  The copy/02, memo and marshal-version probes
+`_copy_set` uses `x.copy()`, and set/frozenset deepcopy walk `sorted(x)` and deep-copy each
+element (the first re-apply shared the elements via `x.copy()` / `x | frozenset()`; review 2
+fixed that); `copy/02` prints `sorted(s)` rather than `sorted(list(s))`.  The copy/02, memo and marshal-version probes
 (`q_copy_set`, `q_copy_memo`, `q_marshal_versions`, `q_marshal_default`, `q_timeit_clock`) match
 CPython, or refuse by name, in the default and `AIL_UNIFIED_FORCE=1` builds.
 
