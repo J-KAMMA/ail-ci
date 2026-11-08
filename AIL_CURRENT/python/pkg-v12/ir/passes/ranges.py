@@ -582,6 +582,12 @@ class Analysis(object):
             return True
         return False
 
+    def aug_in_bounds(self, env, ins):
+        """The write of `xs[i] op= v` (lower.py marks it 'aug'): the checked read of the same list and index
+        ran just before it with nothing in between that can resize the list, so the index is in
+        [-len, len); a write whose index is also proven non-negative is in range."""
+        return bool(ins.attrs.get('aug')) and self.bounds(env, ins.operands[1])[0] >= 0
+
     def decide(self, ins, ok):
         if ins.attrs.get('mode') == 'ck' or ins in self.decision:
             self.decision[ins] = 'nsw' if ok else 'ck'
@@ -639,7 +645,8 @@ class Analysis(object):
             if mode in ('ck', 'vck') or ins in self.decision:
                 # a byte store has two checks: the index (vck: already proven by licm's guard) and
                 # the value; with only the index proven it keeps the value check (vck)
-                idx_ok = mode == 'vck' or self.in_bounds(env, ins.operands[0], ins.operands[1], ins)
+                idx_ok = mode == 'vck' or self.in_bounds(env, ins.operands[0], ins.operands[1], ins) \
+                    or self.aug_in_bounds(env, ins)
                 byte = ins.operands[0].type == I.T('span', I.T('u8'))
                 val_ok = True
                 if byte:
@@ -654,7 +661,7 @@ class Analysis(object):
             return
         if op == 'list.set' and self.bce:
             if ins.attrs.get('mode') == 'ck' or ins in self.decision:
-                ok = self.in_bounds(env, ins.operands[0], ins.operands[1], ins)
+                ok = self.in_bounds(env, ins.operands[0], ins.operands[1], ins) or self.aug_in_bounds(env, ins)
                 self.decision[ins] = 'nck' if ok else 'ck'
                 if ok:
                     self.explain.pop(ins, None)
