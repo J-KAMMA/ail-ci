@@ -254,6 +254,51 @@ KEYSORT = '''def main() -> None:
 main()
 '''
 
+FIELD_SORT = '''class T:
+    def __init__(self) -> None:
+        self.w: list[int] = []
+
+    def do(self) -> None:
+        self.w.sort()
+
+    def show(self) -> None:
+        print(self.w[0], self.w[1], self.w[2])
+
+
+def main() -> None:
+    t = T()
+    t.w.append(3)
+    t.w.append(1)
+    t.w.append(2)
+    t.w.sort()
+    t.show()
+    t.w.sort(reverse=True)
+    t.show()
+    t.w.append(2147483648)
+    t.w.append(-2147483649)
+    t.do()
+    print(t.w[0], t.w[1], t.w[2], t.w[3], t.w[4])
+
+
+main()
+'''
+
+WIDE_KEYSORT = '''def main() -> None:
+    src: list[int] = []
+    for v in (4, 1, 3, 2):
+        src.append(v)
+    out = sorted(src, key=lambda v: v * 3000000000 + 5)
+    for v in out:
+        print(v)
+    twos: list[int] = []
+    for v in (9, 2, 2, 7):
+        twos.append(v)
+    q = sorted(twos, key=lambda v: (v % 3, -v))
+    print(q)
+
+main()
+'''
+
 EMPTY = '''def main() -> None:
     xs: list[int] = []
     print(len(xs))
@@ -358,6 +403,26 @@ class NarrowIntTests(unittest.TestCase):
 
     def test_key_sort_equal_keys_are_stable(self):
         self.check('keysort', KEYSORT)
+
+    def test_sort_on_narrowed_field(self):
+        self.check('field_sort', FIELD_SORT)
+
+    def test_key_sort_column_stored_narrow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, 'ksn.py')
+            path.write_text(KEYSORT)
+            dbg = Path(tmp, 'dbg')
+            env = dict(os.environ, AIL_NO_CACHE='1', AIL_NARROW_INT='1', PYTHONHASHSEED='0')
+            built = subprocess.run(
+                [sys.executable, '-B', str(AIL), 'compile', str(path), '-o', str(Path(tmp, 'ksn')),
+                 '--debug-dir', str(dbg)],
+                capture_output=True, text=True, timeout=600, env=env)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            program = (dbg / 'program.c').read_text()
+            self.assertRegex(program, r'ail_ilist v__ail_sk\d+_c\d+ = \{0\};')
+
+    def test_key_sort_column_widens_exactly(self):
+        self.check('wide_keysort', WIDE_KEYSORT)
 
     def test_write_index_text_matches_across_builds(self):
         source = ('def main() -> None:\n    xs: list[int] = []\n    xs.append(1)\n'

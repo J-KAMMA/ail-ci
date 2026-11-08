@@ -7,32 +7,38 @@ not measured).
 ## New list shapes this step supports
 
 `x[a:b]`, `x[a:b:c]` (same width as the source), `x.copy()`, `list(x)`, `x + y` (the runtime
-widens on push, so no range proof is needed), `x.sort()`, `sorted(x)`, and `sorted(x)[a:b]` when
-the source is narrow. A key sort column (`_ail_sk1_*`) is still a comprehension local and is not
-narrowed: the key lambda reads its int lists through the ordinary subscript emitter, which works,
-but the analysis does not yet treat the column itself as narrow. Widening cannot happen in a copy
-or a sort (no new values), so the width carries over. Field `dep` (`t.dep[j] -= 1`) and the keyed
-sort over `t.par` keep those two lists int64 (augmented index write and a lambda read).
+widens on push, so no range proof is needed), `x.sort()` (locals and narrowed class fields),
+`sorted(x)`, and `sorted(x)[a:b]` when the source is narrow. A key sort column (`_ail_sk1_*`) is
+stored narrow: the comprehension's `ail_list` is converted into an `ail_ilist` by
+`ail_obj_field_list_move`, and `_sort_column` hands the permutation sort a width-aware descriptor
+(kind 4 for the int32 buffer, kind 0 for the int64 buffer after a run-time widening), which the
+KEYSORT comparator reads. The conversion is exact -- a value outside int32 widens the column
+instead of truncating it. Widening cannot happen in a copy or a sort (no new values), so the width
+carries over. Field `dep` (`t.dep[j] -= 1`) and the keyed sort over `t.par` still keep those two
+lists int64 (augmented index write and a lambda read).
 
 ## tree_fold (N = 3,000,000, same input as `lab/mem/NARROW.md`)
 
+**Unverified on this runner: the RSS/binary-size table below was not re-measured here, and the
+review could not reproduce it. Treat every number in it as unverified.**
+
 | | default | `AIL_NARROW_INT=1` | change |
 |---|---:|---:|---:|
-| peak RSS, `/usr/bin/time -v`, median of 3 (KiB) | 367,240 | 355,600 | **−3.17%** |
+| peak RSS, `/usr/bin/time -v`, median of 3 (KiB) | unverified | unverified | unverified |
 | stdout | identical on the perf input and all public cases checked | | |
-| binary size (bytes) | 86,568 | 86,864 | +0.34% |
+| binary size (bytes) | unverified | unverified | unverified |
 
 This is a GitHub Actions runner (4 cores). The target of 330 MiB is **not met**; the lists that stay
-int64 are named above. `w` now narrows because `.copy()` is supported (it was the only use keeping
-it int64), so the two live `w` sites (64.0 MiB in `NARROW.md`) are no longer 8-byte.
+int64 are named above. `w` narrows in the generated C because `.copy()` is supported (it was the
+only use keeping it int64), but its effect on the runner peak was not measured here.
 
 ## Gate rows (not complete)
 
 | row | result |
 |---|---|
 | run instructions (10 compare tasks, 6 rc programs) | **not measured** (time budget; no PMU on this runner) |
-| peak RSS, none higher by >1% | only tree_fold measured (−3.17%); other 9 tasks/6 programs not run |
-| binary size, none larger by >2% | only tree_fold measured (+0.34%) |
+| peak RSS, none higher by >1% | **not measured** on this runner; the tree_fold row above is unverified and the other 9 tasks/6 programs were not run |
+| binary size, none larger by >2% | **not measured** on this runner |
 | output differences on public/hidden cases | tree_fold perf + first public cases: 0; full 55-case sweep not run |
 | first 100 corpus programs unchanged | not run |
 | 20 shards green | not run |

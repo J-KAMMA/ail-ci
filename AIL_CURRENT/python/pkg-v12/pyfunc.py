@@ -12812,6 +12812,12 @@ def _sort_column(node, ctx):
                           'nested lists or bytes')
     if t == 'array':
         return '0', c, ctx.alen(name)
+    if name in getattr(ctx, 'narrow_int', ()):
+        # A narrowed key column: kind 4 reads its int32 buffer; if it widened at run time the
+        # same list's int64 buffer is kind 0. Both are read by ail_keycol_cmp (KEYSORT).
+        return ('(%s.wide ? 0 : 4)' % c,
+                '(%s.wide ? (const void *)%s.q : (const void *)%s.p)' % (c, c, c),
+                '%s.n' % c)
     if t == LIST:
         return '0', '%s.p' % c, '%s.n' % c
     if t == FLIST:
@@ -24628,6 +24634,23 @@ def _stmt_inner(node, ctx, ind):
                                   ' ail_srows_clear(&%s); }\n' % (pad, c, c, src, src, src))
                 if kind != _listcomp_kind(v, ctx):
                     raise Unsupported('a comprehension changes the destination list element kind')
+                if (narrowint.enabled() and kind == LIST
+                        and getattr(v, '_ail_sort_columns', None) is not None
+                        and t.id not in getattr(ctx, 'narrow_int', ())):
+                    # An int key column (sortkeys.py). Its element kind is only resolved as LIST
+                    # right here, so it is marked narrow now -- before the function's declarations
+                    # are built -- instead of asking the analysis pass to infer a comprehension's
+                    # kind. Exact: ail_ilist widens on push if a key leaves int32.
+                    if not isinstance(getattr(ctx, 'narrow_int', None), set):
+                        ctx.narrow_int = set(getattr(ctx, 'narrow_int', ()))
+                    ctx.narrow_int.add(t.id)
+                if kind == LIST and t.id in getattr(ctx, 'narrow_int', ()):
+                    # A narrowed destination (a sort key column) is filled from the comprehension's
+                    # private ail_list; the move converts exactly, widening only if a value leaves
+                    # int32 (ail_ilist_from_list), and frees the old buffer.
+                    src = _listcomp_into_temp(v, ctx)
+                    pre = _flush(ctx, pad)
+                    return pre + '%sail_obj_field_list_move(&%s, &%s);\n' % (pad, c, src)
                 src = _listcomp_into_temp(v, ctx)
                 pre = _flush(ctx, pad)
                 # Complete the RHS first, then transfer its private buffer. The old
@@ -42570,7 +42593,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.trowsf = _propagate_row_float(
         fn, ctx.trowsf | (set(ctx.tstride) & ctx.flist), set(ctx.tstride))
     _bind_object_types(fn, ctx)
-    ctx.narrow_int = narrowint.locals(fn, ctx, ctx.classes)
+    ctx.narrow_int = set(narrowint.locals(fn, ctx, ctx.classes))
     ctx.freeable_objs = _mark_freeable_objects(fn, ctx) if ctx.classes else set()
     ctx.borrowed_aliases = _mark_borrowed_aliases(fn, ctx) if ctx.classes else set()
     # The compile-time key range for a set, and therefore its representation -- decided here,

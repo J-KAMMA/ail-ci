@@ -322,6 +322,7 @@ static void ail_ilist_extend_list(ail_ilist *s, const ail_list *src) {
 #define ail_list_clear(L) _Generic((L), ail_ilist*: ail_ilist_clear, default: ail_list_clear)((L))
 #define ail_list_free(L) _Generic((L), ail_ilist*: ail_ilist_free, default: ail_list_free)((L))
 #define ail_list_reverse(L) _Generic((L), ail_ilist*: ail_ilist_reverse, default: ail_list_reverse)((L))
+#define ail_list_sort(L) _Generic((L), ail_ilist*: ail_ilist_sort, default: ail_list_sort)((L))
 #define ail_list_snapshot(D, N) _Generic((D), int32_t*: ail_ilist_snapshot_list, const int32_t*: ail_ilist_snapshot_list, default: ail_list_snapshot)((D), (N))
 #define ail_list_span_len(D, N) _Generic((D), int32_t*: ail_ilist_span_len, const int32_t*: ail_ilist_span_len, default: ail_list_span_len)((D), (N))
 #define ail_list_span_get(D, N, I) _Generic((D), int32_t*: ail_ilist_span_get, const int32_t*: ail_ilist_span_get, default: ail_list_span_get)((D), (N), (I))
@@ -341,12 +342,28 @@ static void ail_ilist_extend_list(ail_ilist *s, const ail_list *src) {
 
 
 def register():
-    if not enabled() or 'NARROWINT' in cruntime.SOURCE:
+    if not enabled():
+        return
+    _extend_keysort()
+    if 'NARROWINT' in cruntime.SOURCE:
         return
     cruntime.SOURCE['NARROWINT'] = RUNTIME
     cruntime.ORDER.append('NARROWINT')
     cruntime.REQUIRES['NARROWINT'] = ['TYPES', 'DIE', 'LIST', 'NUMFIELD']
     cruntime.REQUIRES.setdefault('TYPES', []).append('NARROWINT')
+
+
+def _extend_keysort():
+    """Teach KEYSORT the narrowed key-column kind (4: an int32 `ail_ilist` buffer). Patched in
+    only when narrowing is enabled, so a default build's KEYSORT text is byte-identical to base."""
+    text = cruntime.SOURCE.get('KEYSORT')
+    anchor = '        } else if (c[k].kind == 1) {'
+    if not text or 'kind == 4' in text or anchor not in text:
+        return
+    branch = ('        } else if (c[k].kind == 4) {\n'
+              '            const int32_t *p = (const int32_t *)c[k].p;\n'
+              '            r = (p[a] > p[b]) - (p[a] < p[b]);\n')
+    cruntime.SOURCE['KEYSORT'] = text.replace(anchor, branch + anchor, 1)
 
 
 def _empty_list(node):
