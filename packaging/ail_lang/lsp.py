@@ -559,23 +559,38 @@ _STR_METHODS = {"upper", "lower", "strip", "lstrip", "rstrip", "replace", "join"
 
 
 def _function_returns(tree):
-    """Function name -> return annotation text, for the calls a value may make."""
+    """Function name -> return annotation text, for the calls a value may make.
+
+    A nested or later `def` shadows an earlier one, and the call's scope is not traced here, so a
+    name whose definitions disagree on the annotation is left unknown instead of claiming the
+    first same-named def in the file.
+    """
     result = {}
+    ambiguous = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            result.setdefault(node.name, _annotation(node.returns))
+            text = _annotation(node.returns)
+            if node.name in result and result[node.name] != text:
+                ambiguous.add(node.name)
+            else:
+                result[node.name] = text
+    for name in ambiguous:
+        result.pop(name, None)
     return result
 
 
 def _class_methods(tree):
-    """Class name -> {method name: return annotation text}, for method calls on an instance."""
+    """Class name -> {method name: return annotation text}, for method calls on an instance.
+
+    A duplicate `def` in a class body binds the last one, so the last annotation wins.
+    """
     result = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             methods = result.setdefault(node.name, {})
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    methods.setdefault(item.name, _annotation(item.returns))
+                    methods[item.name] = _annotation(item.returns)
     return result
 
 

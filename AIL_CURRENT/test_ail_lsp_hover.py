@@ -5,6 +5,7 @@ Every case in `lab/lsp/hover/expect.json` is checked against `textDocument/hover
 `oracle` field is the `type(x).__name__` CPython prints at that line (see `oracle.py`). The compiler
 part needs a C compiler; without one the test is skipped.
 """
+import ast
 import json
 import os
 import queue
@@ -87,6 +88,55 @@ class Client:
             self.process.kill()
             self.process.wait()
         self.process.stdout.close()
+
+
+NESTED_SHADOW = """
+def f() -> bool: return True
+def outer() -> None:
+    def f() -> int: return 1
+    x = f(); print(x)
+outer()
+"""
+
+DUPLICATE_METHOD = """
+class C:
+    def __init__(self) -> None: self.n = 0
+    def count(self) -> int: return 1
+    def count(self) -> bool: return True
+def g() -> None:
+    c = C(); x = c.count(); print(x)
+g()
+"""
+
+SAME_NESTED_ANNOTATION = """
+def f() -> int: return 1
+def outer() -> None:
+    def f() -> int: return 2
+    x = f(); print(x)
+outer()
+"""
+
+
+class ReturnResolution(unittest.TestCase):
+    """A call resolves from its own scope, and a duplicate method binds the last definition."""
+
+    def lsp(self):
+        if str(PACKAGING) not in sys.path:
+            sys.path.insert(0, str(PACKAGING))
+        from ail_lang import lsp
+        return lsp
+
+    def test_nested_function_shadowing_is_unknown(self):
+        returns = self.lsp()._function_returns(ast.parse(NESTED_SHADOW))
+        self.assertNotIn("f", returns)
+
+    def test_duplicate_method_uses_last_definition(self):
+        methods = self.lsp()._class_methods(ast.parse(DUPLICATE_METHOD))
+        self.assertEqual(methods["C"]["count"], "bool")
+
+    def test_same_nested_annotation_is_kept(self):
+        returns = self.lsp()._function_returns(ast.parse(SAME_NESTED_ANNOTATION))
+        self.assertEqual(returns["f"], "int")
 
 
 @unittest.skipUnless(CC, "the compiler-inferred types need a C compiler")

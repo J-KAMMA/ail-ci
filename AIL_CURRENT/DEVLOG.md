@@ -1,3 +1,13 @@
+## 2026-11-08 -- LSP hover: nested-function shadowing and duplicate-class-method returns (job-rbfdlsp2-11082156)
+
+Fixes the two hover defects the fdlsp2 review found. `_function_returns` no longer keys every
+same-named `def` in the file to the first annotation: a name whose definitions disagree is left
+unknown, so a nested `def f() -> int` inside a module `def f() -> bool` no longer makes `x = f()`
+hover as `bool`. `_class_methods` now takes the last definition of a duplicate method, matching the
+class body's last binding (`count() -> int` then `count() -> bool` hovers `bool`). Same-annotation
+duplicates still resolve. Regression tests `ReturnResolution` in `test_ail_lsp_hover.py` cover both
+defects and the same-annotation boundary; the existing 45 hover cases still pass. No compiler
+change: the probes' C output is unchanged.
 ## 2026-11-07 -- fclist1 re-applied: element-written list parameters pass the caller's buffer in place (job-rbfclist1-11071012)
 
 Re-applied the accepted `job-fclist1-op1106` change (`8c2c99c1`..`FETCH_HEAD`, 3 commits) on this
