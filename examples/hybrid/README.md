@@ -55,7 +55,7 @@ wall clock milliseconds for the whole program, including process start-up.
 | `collatz.py` | yes | 1500 | 79 | 19.0x |
 | `mandel_rows.py` | yes | 717 | 27 | 26.2x |
 | `prime_count.py` | yes | 912 | 44 | 20.8x |
-| `checksum_text.py` | no | 16.3 | 17.9 | 0.9x |
+| `checksum_text.py` | yes | 16.3 | 17.9 | 0.9x (before obs5; not re-timed) |
 | `sum_squares_list.py` | yes | 123.8 | 127.6 | 1.0x (before obs3; not re-timed) |
 | `fallback_demo.py` | yes | 12.8 | 24.0 | 0.5x |
 
@@ -87,31 +87,15 @@ Both refusals happen before the hybrid lane runs, in files this lane does not ow
 (`packaging/ail_lang/cli.py` and the SDK export), so the examples and the test build from a
 checkout with `python3 AIL_CURRENT/ail_chatgpt.py build --cpython`.
 
-**`%` with a variable divisor is refused.**  The body gate treats `Mod` like division because the
-divisor can be zero.  A constant nonzero divisor is allowed.
+**Fixed in obs5: `%`, `//` and `/` with a variable divisor.**  Accepted when both operands are
+proven int/bool/float; a zero divisor abandons the native call and CPython re-runs it, so the
+ZeroDivisionError is CPython's own.  (`prime_count.py` was written with trial division by
+repeated subtraction while `%` was refused; it is left as it was.)
 
-```python
-def f(a: int, b: int) -> int:
-    return a % b
-```
-
-`build.json` rejects `f` with `"division or power can raise"`.  `prime_count.py` therefore does
-trial division by repeated subtraction.
-
-**`ord` is an unsafe call.**  A single call with no loop may not reach the emitter at all, but a
-loop over a `str` parameter shows the refusal:
-
-```python
-def f(s: str) -> int:
-    h = 0
-    for ch in s:
-        h += ord(ch)
-    return h
-print(f("abc"))
-```
-
-`build.json` rejects `f` with `"a call can raise or have side effects"`.  `checksum_text.py` is
-the full version of this example and runs entirely in CPython.
+**Fixed in obs5: `ord` of one character.**  `ord(x)` raises unless `x` is a str of length one;
+an element of a proven str (`s[i]`, `for ch in s`) always is, so the hybrid now accepts that
+call (`ail_cpython_hybrid._single_char`) and `checksum_text.py`'s `rolling_hash` is accelerated.
+`ord(p)` of a `str` parameter of unknown length stays in CPython.
 
 **Fixed in obs3: a `list[float]` parameter produced no mixed-mode unit.**  `to_c` passes such a
 list as an `ail_flist` struct, which the base mixed mode does not call; the hybrid now builds that

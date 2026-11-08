@@ -1,0 +1,1084 @@
+[
+ {
+  "all_defs": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_fields",
+     "field_chars",
+     "max_field_len",
+     "quote_count"
+    ],
+    "build_rc": 0,
+    "build_s": 4.29,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_fields",
+     "field_chars",
+     "max_field_len",
+     "quote_count"
+    ],
+    "rejected": {
+     "split_lines": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "sum_column": "a call can raise or have side effects"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_fields",
+   "field_chars",
+   "max_field_len",
+   "quote_count",
+   "split_lines",
+   "sum_column"
+  ],
+  "icount": {
+   "cpython": 29938534407,
+   "hand": 16363821271
+  },
+  "module": "csv_parse",
+  "observe_same_output": true,
+  "profile": {
+   "count_fields": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.54366
+   },
+   "field_chars": {
+    "big": {},
+    "calls": 350000,
+    "generator": false,
+    "params": {
+     "line": {
+      "str": 6476
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1040
+    },
+    "self_s": 0.519497
+   },
+   "max_field_len": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.314115
+   },
+   "quote_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.140949
+   },
+   "split_lines": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[str]": 1
+    },
+    "self_s": 0.406738
+   },
+   "sum_column": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "col": {
+      "int": 1
+     },
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.72488
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "field_weight",
+     "is_simple_email",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name",
+     "score_ok",
+     "valid_len"
+    ],
+    "build_rc": 0,
+    "build_s": 3.6,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "field_weight",
+     "is_simple_email",
+     "is_upper_name",
+     "looks_like_version",
+     "normalise_name",
+     "score_ok",
+     "valid_len"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "field_weight",
+   "is_simple_email",
+   "is_upper_name",
+   "looks_like_version",
+   "normalise_name",
+   "score_ok",
+   "valid_len"
+  ],
+  "icount": {
+   "cpython": 29972651630,
+   "hand": 9532678759
+  },
+  "module": "field_valid",
+  "observe_same_output": true,
+  "profile": {
+   "field_weight": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "email": {
+      "str": 11945
+     },
+     "name": {
+      "str": 11945
+     },
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.797513
+   },
+   "is_simple_email": {
+    "big": {},
+    "calls": 1400000,
+    "generator": false,
+    "params": {
+     "addr": {
+      "str": 22883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 1.526896
+   },
+   "is_upper_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.376714
+   },
+   "looks_like_version": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "tag": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.392745
+   },
+   "normalise_name": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "raw": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "str": 1088
+    },
+    "self_s": 0.837589
+   },
+   "score_ok": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "score": {
+      "int": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.248471
+   },
+   "valid_len": {
+    "big": {},
+    "calls": 700000,
+    "generator": false,
+    "params": {
+     "name": {
+      "str": 11945
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1088
+    },
+    "self_s": 0.492935
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "adler32_simple",
+   "crc32_table_free",
+   "djb2",
+   "fnv1a",
+   "fnv1a_64",
+   "sum_bytes",
+   "xor_fold"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "adler32_simple",
+     "crc32_table_free",
+     "djb2",
+     "fnv1a",
+     "fnv1a_64",
+     "sum_bytes",
+     "xor_fold"
+    ],
+    "build_rc": 0,
+    "build_s": 7.48,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "adler32_simple",
+     "crc32_table_free",
+     "djb2",
+     "fnv1a",
+     "fnv1a_64",
+     "sum_bytes",
+     "xor_fold"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "adler32_simple",
+   "crc32_table_free",
+   "djb2",
+   "fnv1a",
+   "fnv1a_64",
+   "sum_bytes",
+   "xor_fold"
+  ],
+  "icount": {
+   "cpython": 28261645798,
+   "hand": 7823207338
+  },
+  "module": "hashing",
+  "observe_same_output": true,
+  "profile": {
+   "adler32_simple": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.340487
+   },
+   "crc32_table_free": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.016023
+   },
+   "djb2": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.200287
+   },
+   "fnv1a": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.380544
+   },
+   "fnv1a_64": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.404579
+   },
+   "sum_bytes": {
+    "big": {},
+    "calls": 48,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 48
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 45
+    },
+    "self_s": 0.180258
+   },
+   "xor_fold": {
+    "big": {},
+    "calls": 24,
+    "generator": false,
+    "params": {
+     "data": {
+      "bytes": 24
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 24
+    },
+    "self_s": 0.08412
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "Parser.__init__",
+   "Parser.parse_array",
+   "Parser.parse_number",
+   "Parser.parse_object",
+   "Parser.parse_string",
+   "Parser.parse_value",
+   "Parser.skip_ws",
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_tokens",
+     "depth_of",
+     "digits_in",
+     "document_bytes"
+    ],
+    "build_rc": 0,
+    "build_s": 6.09,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_tokens",
+     "depth_of",
+     "digits_in",
+     "document_bytes"
+    ],
+    "rejected": {
+     "Parser.__init__": "a decorated, dunder or non-plain-signature method stays in CPython",
+     "Parser.parse_array": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_number": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_object": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_string": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.parse_value": "method: self is stored to or used other than by reading an attribute, stays in CPython",
+     "Parser.skip_ws": "method: self is stored to or used other than by reading an attribute, stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_tokens",
+   "depth_of",
+   "digits_in",
+   "document_bytes"
+  ],
+  "icount": {
+   "cpython": 21206142093,
+   "hand": 17863836964
+  },
+  "module": "json_parse",
+  "observe_same_output": true,
+  "profile": {
+   "Parser": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {},
+    "raised": 0,
+    "returns": {
+     "None": 1
+    },
+    "self_s": 0.0
+   },
+   "Parser.__init__": {
+    "big": {},
+    "calls": 3,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 3
+     },
+     "text": {
+      "str": 3
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 3
+    },
+    "self_s": 0.0
+   },
+   "Parser.parse_array": {
+    "big": {},
+    "calls": 120003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.180428
+   },
+   "Parser.parse_number": {
+    "big": {},
+    "calls": 240000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 4758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.420998
+   },
+   "Parser.parse_object": {
+    "big": {},
+    "calls": 120000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 2883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.132314
+   },
+   "Parser.parse_string": {
+    "big": {},
+    "calls": 1080000,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 1.122661
+   },
+   "Parser.parse_value": {
+    "big": {},
+    "calls": 1080003,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 17883
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1088
+    },
+    "self_s": 0.846005
+   },
+   "Parser.skip_ws": {
+    "big": {},
+    "calls": 4080006,
+    "generator": false,
+    "params": {
+     "self": {
+      "cls:json_parse.Parser": 64758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "None": 1088
+    },
+    "self_s": 1.9406
+   },
+   "count_tokens": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.056133
+   },
+   "depth_of": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.120285
+   },
+   "digits_in": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.048114
+   },
+   "document_bytes": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "text": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_above",
+   "count_terms",
+   "hash_spread",
+   "max_count",
+   "top_indices",
+   "top_score",
+   "total_count"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_above",
+     "count_terms",
+     "hash_spread",
+     "max_count",
+     "total_count"
+    ],
+    "build_rc": 0,
+    "build_s": 5.95,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_above",
+     "count_terms",
+     "hash_spread",
+     "max_count",
+     "total_count"
+    ],
+    "rejected": {
+     "top_indices": "unresolved-return: no return, or contradictory returns stays in CPython",
+     "top_score": "to_c-refused: returning Subscript as a list stays in CPython"
+    },
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_above",
+   "count_terms",
+   "hash_spread",
+   "max_count",
+   "top_indices",
+   "top_score",
+   "total_count"
+  ],
+  "icount": {
+   "cpython": 23439993304,
+   "hand": 4239671541
+  },
+  "module": "sort_rank",
+  "observe_same_output": true,
+  "profile": {
+   "count_above": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     },
+     "threshold": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "count_terms": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "vocab_size": {
+      "int": 1
+     },
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 1
+    },
+    "self_s": 0.75507
+   },
+   "hash_spread": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "buckets": {
+      "int": 1
+     },
+     "vocab_size": {
+      "int": 1
+     },
+     "words": {
+      "list[str]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.840781
+   },
+   "max_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "top_indices": {
+    "big": {},
+    "calls": 2,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 2
+     },
+     "k": {
+      "int": 2
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "list[int]": 2
+    },
+    "self_s": 0.0
+   },
+   "top_score": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     },
+     "k": {
+      "int": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   },
+   "total_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "counts": {
+      "list[int]": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.0
+   }
+  }
+ },
+ {
+  "all_defs": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "configs": {
+   "hand": {
+    "accelerated": [
+     "count_idents",
+     "count_keywords",
+     "digit_count",
+     "is_ident_char",
+     "is_ident_start",
+     "longest_ident",
+     "token_weight"
+    ],
+    "build_rc": 0,
+    "build_s": 6.03,
+    "decisions": null,
+    "detail": "",
+    "match": true,
+    "native_loaded": [
+     "count_idents",
+     "count_keywords",
+     "digit_count",
+     "is_ident_char",
+     "is_ident_start",
+     "longest_ident",
+     "token_weight"
+    ],
+    "rejected": {},
+    "source_same_output": true
+   }
+  },
+  "cpython": {
+   "oracle_match": true,
+   "rc": 0
+  },
+  "functions": [
+   "count_idents",
+   "count_keywords",
+   "digit_count",
+   "is_ident_char",
+   "is_ident_start",
+   "longest_ident",
+   "token_weight"
+  ],
+  "icount": {
+   "cpython": 14081066639,
+   "hand": 933224169
+  },
+  "module": "tokenizer",
+  "observe_same_output": true,
+  "profile": {
+   "count_idents": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.072101
+   },
+   "count_keywords": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "kw": {
+      "str": 1
+     },
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.224315
+   },
+   "digit_count": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.056079
+   },
+   "is_ident_char": {
+    "big": {},
+    "calls": 3760000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 59758
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1056
+    },
+    "self_s": 1.413983
+   },
+   "is_ident_start": {
+    "big": {},
+    "calls": 2840000,
+    "generator": false,
+    "params": {
+     "ch": {
+      "str": 45383
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "bool": 1056
+    },
+    "self_s": 0.925298
+   },
+   "longest_ident": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.112157
+   },
+   "token_weight": {
+    "big": {},
+    "calls": 1,
+    "generator": false,
+    "params": {
+     "src": {
+      "str": 1
+     }
+    },
+    "raised": 0,
+    "returns": {
+     "int": 1
+    },
+    "self_s": 0.120169
+   }
+  }
+ }
+]

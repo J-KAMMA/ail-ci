@@ -397,3 +397,19 @@ original. The elements must be all exact `int` or all `float` (optimistic guess,
 every element has that kind under it), and the proven kinds feed the exact-kind pass and the list
 return proof. Measured (`obs5_task2.json`): `edit_dist` 0.962 -> 0.068 (`levenshtein`); other
 modules unchanged; all outputs byte-identical.
+
+**obs5 task 3 (container parameters).** `list[str]` and `bytes` parameters are read in place
+(no element copy). A `list[str]` becomes the `ail_slist` `to_c` already accepts: an array of
+`ail_str` views of each element's CPython-cached UTF-8 (every element `PyUnicode_CheckExact`,
+the ASCII flag from `PyUnicode_IS_ASCII`, O(1) per element); `bytes` becomes `ail_bytes` pointing at
+the object's own immutable buffer (`PyBytes_CheckExact`, so a `bytearray`/`memoryview`/subclass runs
+the original). Both keep the GIL (D4), are read-only for the clone (the existing mutation check),
+and are seeded from annotations in the hybrid's analysis only (`pymix.ELEM_OF['bytes'] = int`, the
+candidate IR spells the kind 'bytes'). `ord(x)` is accepted when `x` is one character of a proven
+str (`_single_char`: `s[i]`, or a local bound only by such subscripts or `for ch in s`), which
+`count_terms`/`hash_spread`/`djb2` need. Not done: `list[list[int]]` (`to_c` refuses a two-level
+annotation: "one level of rows is recognised, not two"; needs a core change, so `graph_search`
+stays in CPython) and `dict` parameters (no corpus function takes one; `to_c` has no dict
+parameter ABI). Measured (`obs5_task3.json`): `hashing` 1.000 -> 0.277, `sort_rank` 0.995 -> 0.181;
+`tokenizer`, `field_valid`, `json_parse`, `csv_parse` unchanged; all outputs byte-identical.
+`examples/hybrid/checksum_text.py` (`ord` over a str) is now accelerated.

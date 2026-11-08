@@ -35,6 +35,9 @@ if str(_PKG) not in sys.path:
 
 _SCALAR = ('int', 'float', 'bool', 'str')
 _LIST = ('list[int]', 'list[float]')
+# obs5: container parameters read in place (no element copy): a `list[str]` becomes an array of
+# `ail_str` views of the elements' cached UTF-8, `bytes` a pointer to the object's own buffer.
+_VIEW = ('list[str]', 'bytes')
 _MUTATORS = frozenset({
     'append', 'extend', 'insert', 'pop', 'remove', 'clear', 'sort', 'reverse',
     'update', 'add', 'discard', '__setitem__', '__delitem__', 'setdefault',
@@ -260,6 +263,27 @@ def _native_call_ok(node, natives, kinds):
     return all(kinds.kind(a) == k for a, (_p, k) in zip(node.args, params))
 
 
+def _single_char(e, kinds):
+    """A str of exactly one character: a non-slice subscript of a proven str, or a local every
+    binding of which is one (`ch = s[i]`) or a `for` over a proven str."""
+    if isinstance(e, ast.Subscript) and not isinstance(e.slice, ast.Slice):
+        return kinds.kind(e.value) == 'str'
+    if isinstance(e, ast.Name) and e.id in kinds.sources:
+        srcs = kinds.sources[e.id]
+        for tag, value in srcs:
+            if tag == 'iter':
+                if kinds.kind(value) != 'str':
+                    return False
+            elif tag == 'expr':
+                if not (isinstance(value, ast.Subscript) and not isinstance(value.slice, ast.Slice)
+                        and kinds.kind(value.value) == 'str'):
+                    return False
+            else:
+                return False
+        return bool(srcs)
+    return False
+
+
 def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_names=(), ret=None,
                bool_names=(), fresh=(), natives=None, kinds=None):
     """A call this pass can prove cannot raise and has no side effect.  Everything else stays a
@@ -295,6 +319,10 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
     if func.id == 'len' and len(args) == 1:
         return (_provably_str(args[0], str_names) or _provably_list(args[0], list_names)
                 or isinstance(args[0], ast.List))
+    if func.id == 'ord' and len(args) == 1 and kinds is not None and kinds.builtin('ord'):
+        # obs5: ord() raises unless its argument is a str of length one; an element of a str
+        # (`s[i]`, `for ch in s`) always is.
+        return _single_char(args[0], kinds)
     if func.id == 'reversed' and len(args) == 1:
         return _provably_str_seq(args[0], str_names) or _provably_list(args[0], list_names)
     if func.id == 'abs' and len(args) == 1:
@@ -356,7 +384,7 @@ def _unsafe_body(fn, params=(), ret=None, fresh=(), natives=None, kinds=None):
     `reversed`) whose receiver and arguments are provably the right type cannot raise either, so
     both stay eligible.  This is deliberately conservative; a missed speed-up is safe."""
     str_names = {p for p, kind in params if kind == 'str'}
-    list_names = {p for p, kind in params if kind in _LIST} | set(fresh)
+    list_names = {p for p, kind in params if kind in _LIST or kind in _VIEW} | set(fresh)
     num_names = {p for p, kind in params if kind in ('int', 'float', 'bool')}
     int_names = {p for p, kind in params if kind in ('int', 'bool')}
     bool_names = {p for p, kind in params if kind == 'bool'}
@@ -745,6 +773,8 @@ class _Kinds:
             return 'str'
         if k in ('list[int]', 'list[float]', 'list[str]'):
             return k[5:-1]
+        if k == 'bytes':
+            return 'int'
         return None
 
     def kind(self, e):
@@ -779,7 +809,8 @@ class _Kinds:
                 return {'int': 'int', 'bool': 'int', 'float': 'float'}.get(k)
             return 'int' if k in ('int', 'bool') else None
         if isinstance(e, ast.Compare):
-            ok = ('int', 'float', 'bool', 'str', 'list[int]', 'list[float]', 'list[str]', _TOP)
+            ok = ('int', 'float', 'bool', 'str', 'list[int]', 'list[float]', 'list[str]',
+                  'bytes', _TOP)
             if all(self.kind(x) in ok for x in [e.left] + list(e.comparators)):
                 return 'bool'
             return None
@@ -803,6 +834,8 @@ class _Kinds:
                 return 'str'
             if b in ('list[int]', 'list[float]', 'list[str]'):
                 return b[5:-1]
+            if b == 'bytes':
+                return 'int'
             return None
         if isinstance(e, ast.Call):
             if e.keywords or any(isinstance(a, ast.Starred) for a in e.args):
@@ -1622,14 +1655,34 @@ def _ann_kind(node):
         return {'int': pymix.INT, 'float': pymix.FLOAT, 'str': pymix.STR,
                 'bool': pymix.BOOL, '__ail_checked_int__': pymix.INT,
                 '__ail_checked_float__': pymix.FLOAT, '__ail_checked_str__': pymix.STR,
-                '__ail_checked_bool__': pymix.BOOL}.get(node.id)
+                '__ail_checked_bool__': pymix.BOOL, 'bytes': 'bytes'}.get(node.id)
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == 'list':
         item = node.slice
         if isinstance(item, ast.Name) and item.id == 'int':
             return pymix.LIST_INT
         if isinstance(item, ast.Name) and item.id == 'float':
             return pymix.LIST_FLOAT
+        if isinstance(item, ast.Name) and item.id == 'str':
+            return pymix.LIST_STR
     return None
+# obs5: `for b in data` / `data[i]` over a `bytes` parameter is an int (hybrid analysis only), and
+# the candidate's IR signature spells the parameter 'bytes'.
+pymix.ELEM_OF['bytes'] = pymix.INT
+try:
+    import semir as _semir
+    _old_mixed_call_ir = _semir.mixed_call_ir
+    def _mixed_call_ir(source, name, params, ret, is_bool_ret):
+        if 'bytes' not in params.values():
+            return _old_mixed_call_ir(source, name, params, ret, is_bool_ret)
+        import hashlib
+        base = _old_mixed_call_ir(source, name, {p: ('int' if k == 'bytes' else k)
+                                                 for p, k in params.items()}, ret, is_bool_ret)
+        return _semir.MixedCallIR(base.source_sha256, base.name,
+                                  tuple((p, _semir.Scalar('bytes') if params[p] == 'bytes' else n)
+                                        for p, n in base.params), base.ret, base.is_bool_ret)
+    _semir.mixed_call_ir = _mixed_call_ir
+except Exception:
+    pass
 def _fn_init(self, node):
     _old_fn_init(self, node)
     for arg in node.args.args:
@@ -1778,11 +1831,13 @@ def _extra_mix_units(self, source, tree):
         ret = cand['ret']
         if ret not in ('int', 'bool', 'float', 'str', 'list[int]', 'list[float]'):
             continue
-        if not (ret in ('list[int]', 'list[float]') or any(k == 'list[float]' for _, k in params)):
+        if not (ret in ('list[int]', 'list[float]')
+                or any(k in ('list[float]', 'list[str]', 'bytes') for _, k in params)):
             continue
         if ret in ('int', 'bool') and name in big_local:
             continue
-        if any(k not in ('int', 'bool', 'float', 'str', 'list[int]', 'list[float]')
+        if any(k not in ('int', 'bool', 'float', 'str', 'list[int]', 'list[float]', 'list[str]',
+                         'bytes')
                for _, k in params):
             continue
         info = self.functions.get(name)
@@ -2000,13 +2055,13 @@ def _select(src, tree, report, facts, methods=None):
             return None, 'may overflow and has no overflow signal'
         if id_any and (pyname in id_reach or any(k == 'float' for _, k in params) or ret == 'float'):
             return None, 'the program compares numbers with `is`'
-        bad = [k for _, k in params if k not in _SCALAR and k not in _LIST]
+        bad = [k for _, k in params if k not in _SCALAR and k not in _LIST and k not in _VIEW]
         if bad:
             return None, 'parameter kind %s stays in CPython' % bad[0]
         unsafe = _unsafe_body(funcs[pyname], params, ret, fresh, natives, kinds)
         if unsafe:
             return None, unsafe
-        list_params = {p for p, k in params if k in _LIST}
+        list_params = {p for p, k in params if k in _LIST or k in _VIEW}
         if _list_param_mutated(funcs[pyname], list_params, shadowed, natives):
             return None, 'the list parameter is mutated'
         indexes = any(isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice)
@@ -2188,6 +2243,10 @@ def _unit_abi(csrc, mangled, params, ret):
         elif kind == 'list[float]':
             options = ((['const double *' + cn, 'int64_t %s_len' % cn], 'arr'),
                        (['ail_flist ' + cn], 'flist'))
+        elif kind == 'list[str]':
+            options = ((['ail_slist ' + cn], 'slist'),)
+        elif kind == 'bytes':
+            options = ((['ail_bytes ' + cn], 'bytes'),)
         else:
             return None
         for want, tag in options:
@@ -2327,6 +2386,10 @@ def _c_proto(item, symbol=None):
             args.append('ail_flist ' + cn)
         elif kind == 'list[float]':
             args.extend(['const double *' + cn, 'int64_t ' + cn + '_len'])
+        elif kind == 'list[str]':
+            args.append('ail_slist ' + cn)
+        elif kind == 'bytes':
+            args.append('ail_bytes ' + cn)
     if item['ret'] == 'str':
         args.extend(['uint8_t *_out', 'int64_t _cap'])
     elif item['ret'] == 'list[int]':
@@ -2788,6 +2851,8 @@ def _wrapper_source(module, items):
         '',
         'typedef struct { const uint8_t *p; int64_t n; _Bool bytes; } ail_str;',
         'typedef struct { double *p; int64_t n, cap; } ail_flist;',
+        'typedef struct { ail_str *p; int64_t n, cap; } ail_slist;',
+        'typedef struct { const unsigned char *p; int64_t n; } ail_bytes;',
         'static PyObject *AilHybridFallback;',
         'void ail_mix_drain_out(void) { }',
         'static PyObject *ail_hybrid_fallback(void) {',
@@ -2836,7 +2901,7 @@ def _wrapper_source(module, items):
         # keeps the GIL as well.
         # obs4: a unit that reads guarded globals keeps the GIL, so no other thread can rebind a
         # constant or a callee while the native body runs on what it verified.
-        hold = any(kind in _LIST for _p, kind in params) or ret in _LIST \
+        hold = any(kind in _LIST or kind in _VIEW for _p, kind in params) or ret in _LIST \
             or not item.get('loops', True) or _guarded(item)
         begin = [] if hold else ['    Py_BEGIN_ALLOW_THREADS']
         end = [] if hold else ['    Py_END_ALLOW_THREADS']
@@ -2865,7 +2930,7 @@ def _wrapper_source(module, items):
         # earlier list argument already filled; `fallback:` does that.  When there are no buffers
         # the label is not emitted, so keep the direct return in that case.
         bufs = ['b%d' % i for i, (_p, kind) in enumerate(params)
-                if kind in ('list[int]', 'list[float]')]
+                if kind in ('list[int]', 'list[float]', 'list[str]')]
         fail = 'goto fallback' if bufs else 'return NULL'
         for i, (p, kind) in enumerate(params):
             # Declare every list buffer before any conversion loop.  A later loop can `goto
@@ -2875,6 +2940,8 @@ def _wrapper_source(module, items):
                 out.append('    int64_t *b%d = NULL;' % i)
             elif kind == 'list[float]':
                 out.append('    double *b%d = NULL;' % i)
+            elif kind == 'list[str]':
+                out.append('    ail_str *b%d = NULL;' % i)
         call = []
         for i, (p, kind) in enumerate(params):
             o = 'o[%d]' % i
@@ -2935,6 +3002,30 @@ def _wrapper_source(module, items):
                 else:
                     call.append('b%d' % i)
                     call.append('(int64_t)n%d' % i)
+            elif kind == 'list[str]':
+                # obs5: views, not copies.  Every element must be an exact str; its UTF-8 is
+                # CPython's own cached copy (created once per str object if not ASCII) and stays
+                # valid while the list holds the str: the GIL is held and no Python code runs.
+                # The clone never frees or grows a parameter (read-only).
+                out.append('    if (!PyList_CheckExact(%s)) %s;' % (o, fail))
+                out.append('    Py_ssize_t n%d = PyList_GET_SIZE(%s);' % (i, o))
+                out.append('    b%d = n%d ? (ail_str *)PyMem_Malloc((size_t)n%d * sizeof(ail_str)) : NULL;' % (i, i, i))
+                out.append('    if (n%d && !b%d) goto fallback;' % (i, i))
+                out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) {' % (i, i, i, i))
+                out.append('        PyObject *e%d = PyList_GET_ITEM(%s, k%d);' % (i, o, i))
+                out.append('        if (!PyUnicode_CheckExact(e%d)) goto fallback;' % i)
+                out.append('        Py_ssize_t m%d = 0; const char *q%d = PyUnicode_AsUTF8AndSize(e%d, &m%d);' % (i, i, i, i))
+                out.append('        if (!q%d) { PyErr_Clear(); goto fallback; }' % i)
+                out.append('        b%d[k%d].p = (const uint8_t *)q%d; b%d[k%d].n = (int64_t)m%d;' % (i, i, i, i, i, i))
+                out.append('        b%d[k%d].bytes = PyUnicode_IS_ASCII(e%d) ? 1 : 0;' % (i, i, i))
+                out.append('    }')
+                call.append('(ail_slist){b%d, (int64_t)n%d, (int64_t)n%d}' % (i, i, i))
+            elif kind == 'bytes':
+                # obs5: the bytes object's own buffer (immutable; the caller holds a reference).
+                out.append('    if (!PyBytes_CheckExact(%s)) %s;' % (o, fail))
+                out.append('    ail_bytes a%d; a%d.p = (const unsigned char *)PyBytes_AS_STRING(%s); '
+                           'a%d.n = (int64_t)PyBytes_GET_SIZE(%s);' % (i, i, o, i, o))
+                call.append('a%d' % i)
         cargs = ', '.join(call)
         if ret == 'str':
             out.append('    int64_t need;')

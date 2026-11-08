@@ -1,8 +1,8 @@
 """A rolling hash over a str parameter.
 
-This is the example the current prototype refuses: `ord` is a call, and the hybrid body gate
-keeps a call that can raise or have a side effect in CPython.  The program still runs, and its
-output still equals CPython; it just gets no extension for `rolling_hash`.
+Until obs5 the hybrid refused this one: `ord` is a call that can raise.  `ord(ch)` of one
+character of a str cannot, so `rolling_hash` is now accelerated; the output still equals
+CPython.
 """
 import sys
 

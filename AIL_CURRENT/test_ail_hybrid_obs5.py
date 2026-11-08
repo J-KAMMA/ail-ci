@@ -360,6 +360,126 @@ LISTS_NATIVE = ('levenshtein', 'alias_append', 'running', 'prefix', 'pick')
 LISTS_REFUSED = ('grow_while_iter', 'bools', 'escapes')
 
 
+VIEWS = '''
+def count_terms(words: list[str], vocab_size: int) -> list[int]:
+    counts = [0] * vocab_size
+    for w in words:
+        idx = 0
+        h = 0
+        for ch in w:
+            h = (h * 31 + ord(ch)) % vocab_size
+            idx = h
+        counts[idx] += 1
+    return counts
+
+
+def total_len(words: list[str]) -> int:
+    n = 0
+    for w in words:
+        n += len(w)
+    return n
+
+
+def first_chars(words: list[str]) -> int:
+    t = 0
+    i = 0
+    while i < len(words):
+        t += ord(words[i][0])
+        i += 1
+    return t
+
+
+def fnv1a(data: bytes) -> int:
+    h = 2166136261
+    for byte in data:
+        h ^= byte
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def adler(data: bytes) -> int:
+    a = 1
+    b = 0
+    for byte in data:
+        a = (a + byte) % 65521
+        b = (b + a) % 65521
+    return (b << 16) | a
+
+
+def at(data: bytes, i: int) -> int:
+    t = 0
+    k = 0
+    while k < 2:
+        t += data[i]
+        k += 1
+    return t
+
+
+def djb2(text: str) -> int:
+    h = 5381
+    for ch in text:
+        h = ((h * 33) + ord(ch)) & 0x7FFFFFFF
+    return h
+
+
+def ord_param(c: str) -> int:
+    return ord(c)
+'''
+
+VIEWS_RUNNER = r'''
+import views as m
+
+
+def show(label, f, *args):
+    try:
+        r = f(*args)
+        print(label, type(r).__name__, repr(r))
+    except Exception as e:
+        print(label, 'raised', type(e).__name__, str(e))
+
+
+class S(str):
+    pass
+
+
+class L(list):
+    pass
+
+
+words = ['alpha', 'beta', '東京', '', 'x' * 40, 'café', '\U0001f600!']
+show('count', m.count_terms, words, 26)
+show('count_empty', m.count_terms, [], 5)
+show('count_zero', m.count_terms, words, 0)
+show('count_bad', m.count_terms, ['a', 3], 26)
+show('count_sub', m.count_terms, ['a', S('bc')], 26)
+show('count_listsub', m.count_terms, L(['a', 'b']), 26)
+show('count_tuple', m.count_terms, ('a', 'b'), 26)
+show('total_len', m.total_len, words)
+show('first_chars', m.first_chars, words[:3])
+show('first_chars_empty_word', m.first_chars, ['a', ''])
+data = bytes((i * 37 + 11) % 256 for i in range(3000))
+show('fnv1a', m.fnv1a, data)
+show('fnv1a_empty', m.fnv1a, b'')
+show('fnv1a_bytearray', m.fnv1a, bytearray(data[:10]))
+show('fnv1a_memoryview', m.fnv1a, memoryview(data[:10]))
+show('fnv1a_list', m.fnv1a, [1, 2, 3])
+show('adler', m.adler, data)
+for i in (0, 5, -1, -3000, 2999, 3000, -3001, 2 ** 70):
+    show('at %r' % i, m.at, data, i)
+show('djb2', m.djb2, 'the quick brown fox 東京 \U0001f600')
+show('djb2_empty', m.djb2, '')
+show('ord_param', m.ord_param, 'ab')
+words2 = ['w%d' % i for i in range(5000)]
+for _ in range(300):
+    m.count_terms(words2[:50], 7)
+    m.fnv1a(data[:100])
+print('loops-ok')
+'''
+
+VIEWS_NATIVE = ('count_terms', 'total_len', 'first_chars', 'fnv1a', 'adler', 'at', 'djb2')
+VIEWS_REFUSED = ('ord_param',)
+
+
 def run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, timeout=600)
 
@@ -411,6 +531,11 @@ class Runs(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-lists-') as tmp:
             out, report = self.build(tmp, 'lists', LISTS)
             self.compare(tmp, out, LISTS_RUNNER, LISTS_NATIVE, LISTS_REFUSED, report, 'lists')
+
+    def test_str_list_and_bytes_parameters_match_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-hybrid-obs5-views-') as tmp:
+            out, report = self.build(tmp, 'views', VIEWS)
+            self.compare(tmp, out, VIEWS_RUNNER, VIEWS_NATIVE, VIEWS_REFUSED, report, 'views')
 
 
 if __name__ == '__main__':
