@@ -36,7 +36,7 @@ RUNTIME_REFUSED = {
     'attribute': ('class C:\n    def __init__(self):\n        self.g = (x for x in [1, 2])\n\n\n'
                   'print({C().g})\n'),
     'dict_value': 'g = (x for x in [1, 2])\nd = {"k": g}\nprint({d["k"]})\n',
-    'add': 's = set()\ns.add((x for x in [1, 2]))\nprint(s)\n',
+    'add': 's = set()\ns.add((x for x in [1, 2]))\n',
     'membership': 'print((x for x in [1, 2]) in set())\n',
     'subscript': 'd = {}\nd[(x for x in [1, 2])] = 1\nprint(d)\n',
     'hash_name': 'g = (x for x in [1, 2])\nprint(hash(g))\n',
@@ -45,7 +45,7 @@ RUNTIME_REFUSED = {
 }
 
 PLAIN_LIST = 'print({[1, 2]})\n'
-FROZENSET_CONSUMED = 'print(frozenset(x for x in [1, 2, 2]))\n'
+FROZENSET_CONSUMED = 'print(sorted(frozenset(x for x in [1, 2, 2])))\n'
 EATEN = 'print(sum(x * x for x in [1, 2]))\ng = (x for x in [1, 2])\nprint(next(g))\nprint(list(g))\n'
 DICT_VALUE = 'd = {"k": (x for x in [1, 2])}\nprint(len(d), d["k"] is d["k"])\n'
 CONSUMER_KEYS = 'print({tuple(x for x in [1, 2]): 1})\nprint({frozenset(x for x in [1, 2]): 2})\n'

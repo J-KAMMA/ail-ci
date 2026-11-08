@@ -301,7 +301,7 @@ def main() -> None:
     print(total)
     print(sum(x for x in Count(4)))
     print(any(x > 2 for x in Count(3)), all(x > 0 for x in Count(3)))
-    print(set(Count(3)))
+    print(sorted(set(Count(3))))
 
 
 main()
