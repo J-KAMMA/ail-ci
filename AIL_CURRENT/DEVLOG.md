@@ -1,3 +1,21 @@
+## 2026-11-08 -- wedge4 review fix: lifted float fields keep a NaN's identity (job-rbwedge4-11090123)
+
+A lifted method reads its `float` fields into C doubles and boxes every value it hands back
+afresh, so `c.get()` was a different object from `c.f` for a NaN.  CPython's container `in`,
+`==`/`!=` and dict lookup compare identity first, so `c.get() in {c.f}` (and with a `list`,
+`tuple` or `dict`) printed `False` where CPython prints `True`; the previous fix guarded only
+`is`.  When the program can make a NaN or an infinity (`unified.nan_capable`, the standalone
+C117 gate: `float('nan')`, `math.nan`/`inf`, `isnan`), a method that reads or writes a `float`
+field, takes a `float` parameter or returns `float` now stays in CPython with the named reason
+`the program can make a NaN, so a float field would lose its identity`.  Methods that touch no
+float (an `int` field) are still lifted, and a program with only finite floats still accelerates
+(`C.get` native, membership unchanged).  Probes under `/tmp/probes/`: `p15_nan_containers`,
+`p13_nan_set`, `p_nan_param`, `p_nan_write`, `p_nan_listfield`, `p_finite_float`, `p_is_int` --
+all match CPython on the hybrid build; `p_finite_float` keeps `C.get` accelerated and
+`p_is_int` still refuses the `is` program; `bash ~/tools/cmp.sh` default/general builds match or
+refuse by name (`C114`).  Tests on the final commit, `-j 2`: `test_ail_cpython_hybrid`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-11-08 -- wedge4 review fix: method kernels respect numeric `is` identity (job-rbwedge4-11090021)
 
 The hybrid method wrapper recomputed every statically-written field and stored it back

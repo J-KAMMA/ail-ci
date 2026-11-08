@@ -2151,9 +2151,12 @@ def build(source_path, output_dir):
         # its field values just the same, so the guard must cover every lifted method too.
         try:
             import pyboxed2
+            import unified
             _id_reach, id_any = pyboxed2._mix_identity_unsafe(tree)
+            nan_possible = unified.nan_capable(tree)
         except Exception:
             id_any = False
+            nan_possible = False
         if id_any:
             for class_plan in plan.values():
                 for info in class_plan['methods'].values():
@@ -2191,6 +2194,7 @@ def build(source_path, output_dir):
                  if name in unit_names and name not in kernel_owner
                  and name not in field_kernel_owner]
         accelerated = [item['name'] for item in items]
+        field_kinds_by_class = {name: dict(cp['fields']) for name, cp in plan.items()}
         for class_name, class_plan in plan.items():
             for method_name, info in class_plan['methods'].items():
                 if 'reason' in info:
@@ -2198,6 +2202,21 @@ def build(source_path, output_dir):
                 kernel = info['kernel_name']
                 needed = [info['field_kernels'][f].name for f in sorted(info['field_kernels'])]
                 label = '%s.%s' % (class_name, method_name)
+                # A lifted method reads its float fields into C doubles and boxes every value it
+                # hands back afresh.  For a NaN that copy is a different object, and CPython's
+                # container `in` / `==` / dict lookup take `a is b` as equal before comparing, so
+                # membership can change.  The standalone path keeps every float boxed when the
+                # program can make a NaN (C117); the method kernels need the same refusal.
+                if nan_possible:
+                    kinds = field_kinds_by_class[class_name]
+                    float_field = any(kinds.get(f) == 'float' for f in info['reads'] | info['writes'])
+                    pick = chosen.get(kernel)
+                    float_sig = bool(pick and (pick['ret'] == 'float'
+                                               or any(k == 'float' for _, k in pick['params'])))
+                    if float_field or float_sig:
+                        rejected[label] = ('the program can make a NaN, so a float field '
+                                           'would lose its identity')
+                        continue
                 if kernel not in chosen or kernel not in unit_names:
                     rejected[label] = rejected.get(kernel) or (
                         'the typed clone is not wired to the hybrid ABI, stays in CPython')

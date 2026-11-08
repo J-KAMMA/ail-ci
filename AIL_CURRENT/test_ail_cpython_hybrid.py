@@ -488,6 +488,51 @@ print('get', native.__ail_hybrid_method_Counter_get(c))
             self.assertIn(b'native True', direct.stdout)
             self.assertIn(b'direct 7 7 int', direct.stdout)
 
+    def test_nan_float_field_method_stays_in_cpython(self):
+        """A lifted method returning a float field must not lose a NaN's identity.
+
+        The kernel reads the field into a C double and boxes the result afresh, so the value it
+        returns is a different object from `c.f`.  CPython's container membership compares
+        identity first, so `c.get() in {c.f}` is True there and would be False with the lift.
+        A program that can make a NaN keeps such methods in CPython (the standalone C117 rule);
+        a method that does not touch a float is still lifted.
+        """
+        text = '''
+class C:
+    def __init__(self, f: float):
+        self.f = f
+
+    def get(self) -> float:
+        return self.f
+
+class D:
+    def __init__(self, n: int):
+        self.n = n
+
+    def get(self) -> int:
+        return self.n
+
+n = float('nan')
+c = C(n)
+d = {c.f: 'x'}
+print('dict', c.get() in d)
+print('list', c.get() in [c.f])
+print('tuple', c.get() in (c.f,))
+print('set', c.get() in {c.f})
+print('int', D(9).get())
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'nanfield', text)
+            self.assertNotIn('C.get', report['accelerated'], report)
+            self.assertIn('NaN', report['rejected']['C.get'], report)
+            self.assertIn('D.get', report['accelerated'], report)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'nanfield')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+            self.assertIn(b'dict True', got.stdout)
+            self.assertIn(b'set True', got.stdout)
+
     def test_method_dispatch_is_not_bypassed(self):
         """`self.m(...)` keeps CPython's dynamic dispatch under the hybrid.
 
