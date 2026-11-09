@@ -1,3 +1,20 @@
+## 2026-11-09 -- obs4 re-apply verified (continuation; job-rbobs4-11100024)
+
+Continuation of `job-rbobs4-11092249`, whose run ended ERROR with no reviewer verdict. No source
+change was needed: every path in the accepted obs4 delta (diff of `eb8b28cf`..`job-obs4-op1109`,
+`.agent`, `corpus` and `MANIFEST.json` excluded) hashes identically to `FETCH_HEAD` in this tree,
+the four `tests.d` registrations are present, and `tools/update_manifest.py --check` exits 0.
+`tools/diff_ids.py` does not exist on this tree. Re-ran the required modules on HEAD `b249da2`
+(`-j 2`): `test_ail_hybrid_calls`, `test_ail_hybrid_lists`, `test_ail_hybrid_methods`,
+`test_ail_observe`, `test_ail_cpython_hybrid`, `test_ail_examples_hybrid`, `test_ail_files`,
+`test_ail_safetynet` and `test_ail_corpus_findings3` -- 9 modules, 0 failed, 308 s. Probes under
+`/tmp/probes`: four match CPython in both general/default builds (`p_consts`, `p_calls`,
+`p_methods`, `p_edges`); six match CPython through `ail build --cpython` with the expected natives
+(`p_consts` 3, `p_calls` 5, `p_methods` 5, `p_edges` 3, `p_big` 4, `p_rebind` 4 accelerated).
+`p_big` covers the int64-overflow fallback (10^19, 2^63, list sums) and `p_rebind` the guard on
+rebound, retyped, deleted constants and a rebound callee; `_ail_is_native` is true for all five
+call natives and all five `Tree` methods.
+
 ## 2026-11-09 -- obs4 re-applied: module constants, native calls and read-only methods (job-rbobs4-11092249)
 
 Re-applied the accepted `job-obs4-op1109` change on this tree. The tree already carried obs1-obs3
