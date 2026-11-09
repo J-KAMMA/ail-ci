@@ -1,3 +1,33 @@
+## 2026-11-10 -- shparse2 re-applied: whole-module parser and named non-ASCII refusal (job-rbshparse2-11100014)
+
+Re-applied the accepted `job-shparse2-11091931` change (`6db6e7b9..FETCH_HEAD`). The accepted
+`selfhost/src/ailparse.py`, `AIL_CURRENT/test_ail_selfhost_parse.py`, `lab/selfhost/PARSE.md`,
+`selfhost/drv/parse_drv.py`, `selfhost/ref/parse_ref.py` and the `agent-worker.yml` hunk are already
+byte-identical in this tree (`git diff HEAD FETCH_HEAD --` those paths is empty), so there was no
+conflict to resolve and no source edit to make. `tools/update_manifest.py` leaves every pin unchanged
+and `--check` passes; `tools/diff_ids.py` is not present on this tree. No new test module: the change
+extends the registered `test_ail_selfhost_parse`, so `ail_check.py` and `tests.d/` are unchanged. No
+`DIFFERENCES.md` row: this is the self-host parser tool, not a compiler/runtime behaviour change, and
+the accepted change added none.
+
+Behaviour checked on both builds (general and default) with three probes run as
+`bash ~/tools/cmp.sh /tmp/probes/<p>.py $PWD` with `PYTHONPATH`/`AIL_PATH` set to `selfhost/src`:
+
+- `shparse2_parse.py`: 45 whole-module constructs (assignments/chains, `AnnAssign.simple` with and
+  without parentheses, `del` targets, parenthesized `with` items and empty `with`, `try`/`except`/
+  `except*`/`else`/`finally`, full `def`/`class`/decorators/async, imports, `yield`/`yield from`,
+  semicolons, int64 bounds, bytes) dump identically at stage 1 and stage 2; 36 error/named cases
+  agree (`match`, `type` alias, type parameters and non-ASCII identifiers refused by name; 21
+  malformed sources refused as syntax errors; `match = 1`, `type(x)`, `match: int = 1` stay ordinary).
+- `shparse2_channels.py`: the same sources reaching `parse` through an argument, a list item, an
+  alias, an attribute and a dict value, plus int64/float/bytes widths, match on both builds.
+- `shparse2_int64.py`: the documented boundary outside the match — a literal above int64
+  (`x = 9223372036854775808`) parses at stage 1 and stage 2 stops loudly with
+  `OverflowError: integer overflow in int()`, the allowed stop in `PARSE.md`.
+
+Tests on this commit: `test_ail_selfhost_parse`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` with `tools/par_check.py -j 2`.
+
 ## 2026-11-09 -- refuse1: first hybrid refusal for all 519 hot-module defs (job-refuse1-11091608)
 
 Measurement only; no compiler or library source changed. `lab/refuse1/measure.py` builds the same
